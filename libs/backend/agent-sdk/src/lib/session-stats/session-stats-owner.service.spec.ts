@@ -223,6 +223,29 @@ describe('subtractRunBase', () => {
 });
 
 describe('SessionStatsOwnerService', () => {
+  it('bounds a captured turn without a provisional estimate', () => {
+    const contributions: Array<{ coverageStartMs?: number | null; coverageEndMs?: number | null }> = [];
+    const owner = new SessionStatsOwnerService({ recordUsage: (value) => { contributions.push(value); } });
+    const { generation } = owner.startNew(SESSION);
+    owner.beginRun(SESSION, generation, 'run-bound', null);
+    owner.replaceRun(SESSION, generation, 'run-bound', run(1));
+    expect(contributions).toHaveLength(1);
+    expect(contributions[0]?.coverageStartMs).not.toBeNull();
+    expect(contributions[0]?.coverageStartMs).toBeLessThanOrEqual(contributions[0]?.coverageEndMs ?? -1);
+  });
+
+  it('retains the latest measured checkpoint when a turn aborts', () => {
+    const contributions: Array<{ missingReason?: string | null; models: readonly { inputTokens: number | null }[] }> = [];
+    const owner = new SessionStatsOwnerService({ recordUsage: (value) => { contributions.push(value); } });
+    const { generation } = owner.startNew(SESSION);
+    owner.beginRun(SESSION, generation, 'run-aborted', null);
+    owner.publishLive(SESSION, generation, 'run-aborted', [{ model: MODEL, inputTokens: 1, outputTokens: 10, cacheRead: 0, cacheCreation: 0, costUSD: 1 }]);
+    owner.publishLive(SESSION, generation, 'run-aborted', [{ model: MODEL, inputTokens: 2, outputTokens: 10, cacheRead: 0, cacheCreation: 0, costUSD: 1 }]);
+    expect(contributions).toHaveLength(1);
+    owner.markRunIncomplete(SESSION, generation, 'run-aborted');
+    expect(contributions.at(-1)).toMatchObject({ missingReason: 'aborted-before-result', models: [{ inputTokens: 2 }] });
+  });
+
   it('sends an absolute run snapshot when accepted cumulative cost decreases', () => {
     const contributions: unknown[] = [];
     const owner = new SessionStatsOwnerService({ recordUsage: (value) => { contributions.push(value); } });

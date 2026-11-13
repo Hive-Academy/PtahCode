@@ -52,6 +52,7 @@ export const SESSION_USAGE_PRODUCERS = [
   'sdk-owner',
   'codex-checkpoint',
   'cli-lane',
+  'transcript-replay',
 ] as const;
 export type SessionUsageProducer = (typeof SESSION_USAGE_PRODUCERS)[number];
 
@@ -99,10 +100,10 @@ const sessionUsageModelDeltaSchema = z
      * ADAPTER derives; a `null` here is honest missing attribution.
      */
     modelId: Identifier.nullable(),
-    inputTokens: TokenCount,
-    outputTokens: TokenCount,
-    cacheReadTokens: TokenCount,
-    cacheCreationTokens: TokenCount,
+    inputTokens: TokenCount.nullable(),
+    outputTokens: TokenCount.nullable(),
+    cacheReadTokens: TokenCount.nullable(),
+    cacheCreationTokens: TokenCount.nullable(),
     /** This row's own cost in micro-USD, `null` when it has no known price. */
     knownCostMicroUsd: MicroUsd.nullable(),
     costAuthority: CostAuthority,
@@ -159,6 +160,14 @@ export const sessionUsageContributionSchema = z
     runCostSnapshot: z.boolean().optional(),
     workspaceKey: Identifier.nullable().optional(),
     host: Identifier.nullable().optional(),
+    nativeThreadId: Identifier.nullable().optional(),
+    repositoryId: Identifier.nullable().optional(),
+    worktreePath: Identifier.nullable().optional(),
+    source: z.enum(['live', 'replay', 'estimated']).optional(),
+    missingReason: z.enum(['no-usage-event', 'partial-usage', 'invalid-usage', 'aborted-before-result', 'failed-before-result', 'sink-unavailable', 'unmatched-provider-event', 'source-unavailable']).nullable().optional(),
+    billable: z.boolean().optional(),
+    coverageStartMs: TokenCount.nullable().optional(),
+    coverageEndMs: TokenCount.nullable().optional(),
   })
   .strict();
 

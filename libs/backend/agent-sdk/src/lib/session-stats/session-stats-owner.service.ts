@@ -47,6 +47,7 @@
 import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
+import { PLATFORM_TOKENS, type UsageReconciliationTrigger } from '@ptah-extension/platform-core';
 import {
   calculateMessageCost,
   type ModelPricing,
@@ -381,6 +382,9 @@ interface RunState {
    * reads it: the authoritative snapshot never includes an estimate.
    */
   provisional: readonly RunModelUsage[] | null;
+  provisionalStartMs: number | null;
+  turnStartMs: number;
+  lastCheckpointMs: number | null;
 }
 
 /**
@@ -455,9 +459,12 @@ export class SessionStatsOwnerService {
     private readonly usageSink?: SessionUsageSink | null,
     @inject(TOKENS.LOGGER, { isOptional: true })
     private readonly logger?: Logger,
+    @inject(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { isOptional: true })
+    private readonly reconciliationTrigger?: UsageReconciliationTrigger | null,
   ) {}
 
   requestFinalization(sessionId: string): void {
+    this.notifyReconciliation('session-closed', sessionId, 'unknown');
     if (!this.usageSink?.requestFinalization) return;
     try {
       void Promise.resolve(this.usageSink.requestFinalization(sessionId)).catch((error: unknown) => {
@@ -472,6 +479,14 @@ export class SessionStatsOwnerService {
 
   setLiveSessionIdsProvider(provider: () => readonly string[]): void {
     this.usageSink?.setLiveSessionIdsProvider?.(provider);
+  }
+
+  private notifyReconciliation(kind: 'turn-settled' | 'session-closed', sessionId: string, providerId: string): void {
+    try {
+      this.reconciliationTrigger?.enqueue({ kind, sessionId, providerId, occurredAtMs: Date.now() });
+    } catch (error: unknown) {
+      this.logger?.error('[SessionStatsOwner] Reconciliation notification failed', error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   private resumeSession(sessionId: string): void {
@@ -680,6 +695,7 @@ export class SessionStatsOwnerService {
           previous,
           turn,
         );
+        this.notifyReconciliation('turn-settled', sessionId, result.providerId ?? 'unknown');
         break;
       case 'ignored-error':
       case 'rejected-invalid':
@@ -737,13 +753,19 @@ export class SessionStatsOwnerService {
         accepted.providerId ?? null,
         turn.runCostDecreased,
       );
-      const contribution =
-        built === null ? null : parseSessionUsageContribution(built);
+      const contribution = built === null ? null : parseSessionUsageContribution({
+        ...built,
+        coverageStartMs: Math.min(run.provisionalStartMs ?? run.turnStartMs, Date.now()),
+        coverageEndMs: Date.now(),
+      });
       if (contribution !== null) {
         void Promise.resolve(this.usageSink.recordUsage(contribution)).catch((error: unknown) => {
           this.logger?.error('[SessionStatsOwner] Usage capture failed', error instanceof Error ? error : new Error(String(error)));
         });
       }
+      run.provisionalStartMs = null;
+      run.lastCheckpointMs = null;
+      run.turnStartMs = Date.now();
     } catch (error: unknown) {
       this.logger?.error('[SessionStatsOwner] Usage capture failed', error instanceof Error ? error : new Error(String(error)));
     }
@@ -763,6 +785,10 @@ export class SessionStatsOwnerService {
     const state = this.currentState(sessionId, generation);
     if (!state) return null;
     const run = runFor(state, runToken);
+    if (run.provisional !== null && this.usageSink && run.lastCheckpointMs !== null) {
+      // The latest measured estimate must survive a stream that ends without a result.
+      this.writeCheckpoint(sessionId, state, runToken, run);
+    }
     run.turns++;
     if (!run.incomplete) {
       run.incomplete = true;
@@ -812,13 +838,52 @@ export class SessionStatsOwnerService {
     if (!state || state.pending !== null) return null;
     const rows = estimate?.filter(isValidModelUsage) ?? [];
     if (rows.length > 0) {
-      runFor(state, runToken).provisional = rows;
+      const run = runFor(state, runToken);
+      run.provisional = rows;
+      run.provisionalStartMs ??= Date.now();
       this.touch(state);
+      if (this.usageSink && (run.lastCheckpointMs === null || Date.now() - run.lastCheckpointMs >= 5_000)) {
+        this.writeCheckpoint(sessionKey, state, runToken, run);
+      }
       return this.build(sessionKey, state, true);
     }
     return hasEstimate(state)
       ? this.build(sessionKey, state, true)
       : this.publish(sessionKey, state);
+  }
+
+  private writeCheckpoint(sessionKey: string, state: OwnerState, runToken: string, run: RunState): void {
+      if (this.usageSink && run.provisional) {
+        run.lastCheckpointMs = Date.now();
+        const rows = run.provisional;
+        const models: SessionUsageModelDelta[] = rows.map((row) => ({
+          modelId: row.model,
+          inputTokens: row.inputTokens,
+          outputTokens: row.outputTokens,
+          cacheReadTokens: row.cacheRead,
+          cacheCreationTokens: row.cacheCreation,
+          knownCostMicroUsd: row.costUSD === null ? null : usdToMicroUsd(row.costUSD),
+          costAuthority: row.costUSD === null ? 'unpriced' : 'model-priced',
+        }));
+        const contribution = parseSessionUsageContribution({
+          sessionId: sessionKey, producer: 'sdk-owner', runId: runToken,
+          turnId: String(run.turns + 1), eventKey: `${runToken}#${run.turns + 1}`,
+          parentSessionId: null, subagentId: null, providerId: null,
+          occurredAtMs: Date.now(), revision: state.revision, models,
+          totalCostMicroUsd: null, totalCostAuthority: 'unpriced',
+          pricingVersion: null, missingReason: 'aborted-before-result',
+          coverageStartMs: run.provisionalStartMs ?? run.turnStartMs, coverageEndMs: Date.now(),
+        });
+        if (contribution) {
+          try {
+            void Promise.resolve(this.usageSink.recordUsage(contribution)).catch((error: unknown) => {
+              this.logger?.error('[SessionStatsOwner] Usage checkpoint failed', error instanceof Error ? error : new Error(String(error)));
+            });
+          } catch (error: unknown) {
+            this.logger?.error('[SessionStatsOwner] Usage checkpoint failed', error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+      }
   }
 
   /**
@@ -1122,6 +1187,9 @@ function createRun(candidate: SavedCostState | null): RunState {
     rejectionReported: false,
     durationMs: 0,
     provisional: null,
+    provisionalStartMs: null,
+    turnStartMs: Date.now(),
+    lastCheckpointMs: null,
   };
 }
 

@@ -116,9 +116,59 @@ CREATE INDEX IF NOT EXISTS idx_host_run_leases_heartbeat
   ON host_run_leases (heartbeat_at);
 `;
 
+const S0005_USAGE_EVENT_IDENTITY = `
+CREATE TABLE session_usage_turns_new (
+  session_id TEXT NOT NULL, producer TEXT NOT NULL, run_id TEXT NOT NULL,
+  native_thread_id TEXT, turn_id TEXT NOT NULL, model_id TEXT NOT NULL,
+  event_key TEXT NOT NULL, occurred_at_ms INTEGER NOT NULL, provider_id TEXT NOT NULL,
+  input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER,
+  cache_write_tokens INTEGER, known_cost_micro_usd INTEGER,
+  cost_authority TEXT NOT NULL, source TEXT NOT NULL, pricing_version TEXT,
+  revision INTEGER NOT NULL, workspace_key TEXT, host TEXT,
+  repository_id TEXT, worktree_path TEXT, missing_reason TEXT,
+  billable INTEGER NOT NULL DEFAULT 1 CHECK (billable IN (0,1)),
+  coverage_start_ms INTEGER, coverage_end_ms INTEGER,
+  PRIMARY KEY (session_id,event_key,model_id)
+);
+INSERT OR IGNORE INTO session_usage_turns_new
+ (session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,
+  input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,known_cost_micro_usd,
+  cost_authority,source,pricing_version,revision,workspace_key,host)
+SELECT session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,
+  input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,known_cost_micro_usd,
+  cost_authority,source,pricing_version,revision,workspace_key,host
+FROM session_usage_turns
+ORDER BY CASE producer WHEN 'sdk-owner' THEN 0 WHEN 'codex-checkpoint' THEN 1
+  WHEN 'cli-lane' THEN 2 ELSE 3 END, revision DESC, rowid DESC;
+DROP TABLE session_usage_turns;
+ALTER TABLE session_usage_turns_new RENAME TO session_usage_turns;
+CREATE INDEX idx_session_usage_turns_time ON session_usage_turns (occurred_at_ms,provider_id,model_id);
+CREATE INDEX idx_session_usage_turns_session_time ON session_usage_turns (session_id,occurred_at_ms);
+CREATE INDEX idx_session_usage_workspace_time ON session_usage_turns (workspace_key,occurred_at_ms);
+CREATE INDEX idx_session_usage_repository_time ON session_usage_turns (repository_id,occurred_at_ms);
+CREATE INDEX idx_session_usage_billable_session ON session_usage_turns (session_id,billable,occurred_at_ms);
+CREATE INDEX idx_session_usage_native_thread ON session_usage_turns (native_thread_id,occurred_at_ms);
+ALTER TABLE session_stats ADD COLUMN repository_id TEXT;
+ALTER TABLE session_stats ADD COLUMN worktree_path TEXT;
+ALTER TABLE session_stats ADD COLUMN missing_reason TEXT;
+CREATE INDEX idx_session_stats_repository_time ON session_stats (repository_id,last_usage_at_ms);
+`;
+
+const S0006_USAGE_SOURCE_CURSOR = `
+CREATE TABLE usage_source_cursor (
+  source_id TEXT NOT NULL, source_path TEXT NOT NULL, fingerprint TEXT NOT NULL,
+  mtime_ms INTEGER NOT NULL, byte_offset INTEGER NOT NULL CHECK (byte_offset >= 0),
+  last_event_key TEXT, updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (source_id,source_path)
+);
+CREATE INDEX idx_usage_source_cursor_updated ON usage_source_cursor (updated_at_ms);
+`;
+
 export const SESSION_STORE_MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'S0001_sessions', sql: S0001_SESSIONS },
   { version: 2, name: 'S0002_session_stats', sql: S0002_SESSION_STATS },
   { version: 3, name: 'S0003_session_finalization', sql: S0003_SESSION_FINALIZATION },
   { version: 4, name: 'S0004_host_run_leases', sql: S0004_HOST_RUN_LEASES },
+  { version: 5, name: 'S0005_usage_event_identity', sql: S0005_USAGE_EVENT_IDENTITY },
+  { version: 6, name: 'S0006_usage_source_cursor', sql: S0006_USAGE_SOURCE_CURSOR },
 ];

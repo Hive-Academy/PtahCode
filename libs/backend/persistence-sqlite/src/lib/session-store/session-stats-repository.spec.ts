@@ -70,6 +70,78 @@ const contribution: SessionUsageContribution = {
 };
 
 describe('SessionStatsRepository', () => {
+  it('retains a measured checkpoint when no result arrives and replaces it on result', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      const checkpoint = { ...contribution, producer: 'sdk-owner', workspaceKey: '/work/a', eventKey: 'run-a#1', missingReason: 'aborted-before-result', coverageStartMs: 10, coverageEndMs: 20 };
+      await repository.recordUsage(checkpoint);
+      expect((await repository.getSessionStats('session-a', '/work/a'))?.input_tokens).toBe(20);
+      await repository.recordUsage({ ...checkpoint, revision: 2, inputTokens: 25, missingReason: null });
+      expect((await repository.getSessionStats('session-a', '/work/a'))?.input_tokens).toBe(25);
+      expect(store.raw.prepare('SELECT COUNT(*) AS n FROM session_usage_turns').get()).toMatchObject({ n: 1 });
+    } finally {
+      store.close();
+    }
+  });
+  it('upgrades a populated version-4 ledger without changing live keys', () => {
+    const raw = new DatabaseSync(':memory:');
+    try {
+      for (const migration of SESSION_STORE_MIGRATIONS.filter((item) => item.version <= 4)) {
+        if (migration.sql) raw.exec(migration.sql);
+      }
+      raw.prepare(`INSERT INTO session_usage_turns
+        (session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,
+         input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cost_authority,source,revision)
+        VALUES ('s','sdk-owner','r','t','m','legacy-key',1,'anthropic',1,0,0,0,'unpriced','live',1)`).run();
+      for (const migration of SESSION_STORE_MIGRATIONS.filter((item) => item.version > 4)) {
+        if (migration.sql) raw.exec(migration.sql);
+      }
+      expect(raw.prepare('SELECT event_key FROM session_usage_turns').get()).toMatchObject({ event_key: 'legacy-key' });
+      expect(raw.prepare('SELECT COUNT(*) AS n FROM session_usage_turns').get()).toMatchObject({ n: 1 });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('chooses the highest-priority producer when version-4 keys collide', () => {
+    const raw = new DatabaseSync(':memory:');
+    try {
+      for (const migration of SESSION_STORE_MIGRATIONS.filter((item) => item.version <= 4)) {
+        if (migration.sql) raw.exec(migration.sql);
+      }
+      const insert = raw.prepare(`INSERT INTO session_usage_turns
+        (session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,
+         input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cost_authority,source,revision)
+        VALUES ('s',?,'r','t','m','same-key',1,'anthropic',?,0,0,0,'unpriced','live',?)`);
+      insert.run('cli-lane', 10, 9);
+      insert.run('codex-checkpoint', 20, 8);
+      insert.run('sdk-owner', 30, 1);
+      for (const migration of SESSION_STORE_MIGRATIONS.filter((item) => item.version > 4)) {
+        if (migration.sql) raw.exec(migration.sql);
+      }
+      expect(raw.prepare('SELECT producer,input_tokens FROM session_usage_turns').all())
+        .toMatchObject([{ producer: 'sdk-owner', input_tokens: 30 }]);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('keeps unknown token fields distinct from measured zero and excludes nonbillable rows', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      await repository.recordUsage({ ...contribution, producer: 'sdk-owner', workspaceKey: '/work/a', eventKey: 'unknown', inputTokens: null, outputTokens: 0, cacheReadTokens: null, cacheWriteTokens: 0, knownCostMicroUsd: null, source: 'replay', billable: true });
+      await repository.recordUsage({ ...contribution, producer: 'sdk-owner', workspaceKey: '/work/a', eventKey: 'excluded', inputTokens: 50, billable: false });
+      const raw = store.raw.prepare('SELECT input_tokens,output_tokens FROM session_usage_turns WHERE event_key = ?').get('unknown');
+      expect(raw).toMatchObject({ input_tokens: null, output_tokens: 0 });
+      const stats = await repository.getSessionStats('session-a', '/work/a');
+      expect(stats?.input_tokens).toBe(0);
+      expect(stats?.has_unpriced).toBe(1);
+    } finally {
+      store.close();
+    }
+  });
   it('uses the time index for a workspace aggregate on a large temp database', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ptah-usage-plan-'));
     const store = openTestStore(join(dir, 'synthetic.sqlite'));
@@ -477,6 +549,10 @@ describe('SessionStatsRepository', () => {
         .toMatchObject({ known_cost_micro_usd: 150 });
       await repository.recordEvent([{ ...contribution, revision: 1, modelId: 'old-model' }]);
       expect(db.prepare('SELECT model_id FROM session_usage_turns').all()).toMatchObject([{ model_id: 'model-a' }]);
+      await repository.recordEvent([{ ...contribution, revision: 3, modelId: 'model-b', inputTokens: 7 }]);
+      expect(db.prepare('SELECT model_id FROM session_usage_turns').all()).toMatchObject([{ model_id: 'model-b' }]);
+      expect(db.prepare('SELECT input_tokens FROM session_stats WHERE session_id = ?').get('session-a'))
+        .toMatchObject({ input_tokens: 7 });
     } finally {
       store.close();
     }
@@ -490,7 +566,7 @@ describe('SessionStatsRepository', () => {
       expect(await repository.getSessionStats('lane-a', '/work/a')).toMatchObject({ workspace_key: '/work/a', host: 'electron' });
       expect(await repository.getSessionStats('lane-a', '/work/b')).toBeNull();
       expect(await repository.getWorkspaceSessionCount('/work/a', 0, 172_800_000)).toBe(1);
-      expect((await repository.getWorkspaceCoverage('/work/a'))?.first_captured_at_ms).toBeGreaterThan(86_400_000);
+      expect((await repository.getWorkspaceCoverage('/work/a'))?.first_captured_at_ms).toBe(86_400_000);
       expect(await repository.getWorkspaceCoverage('/work/b')).toBeNull();
     } finally {
       store.close();

@@ -208,6 +208,7 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
   }
 
   private toRows(event: LiveUsageContribution): SessionUsageContribution[] {
+    // Preserve the existing unprefixed live identity for in-flight retries.
     const eventKey = JSON.stringify([event.runId, event.eventKey]);
     const attributed = event.models.reduce((sum, model) => {
       const next = sum + (model.knownCostMicroUsd ?? 0);
@@ -218,7 +219,7 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
       sessionId: event.sessionId,
       producer: event.producer,
       runId: event.runId,
-      turnId: event.turnId ?? event.eventKey,
+      turnId: event.turnId ?? '',
       eventKey,
       modelId: model.modelId ?? '__unattributed__',
       providerId: event.providerId ?? 'unknown',
@@ -235,13 +236,20 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
       host: event.host ?? null,
       revision: event.revision,
       runCostSnapshot: event.runCostSnapshot,
+      nativeThreadId: event.nativeThreadId ?? null,
+      repositoryId: event.repositoryId ?? null,
+      worktreePath: event.worktreePath ?? null,
+      missingReason: event.missingReason ?? null,
+      billable: event.billable ?? true,
+      coverageStartMs: event.coverageStartMs ?? null,
+      coverageEndMs: event.coverageEndMs ?? null,
     }));
     if (rows.length === 0) {
       rows.push({
         sessionId: event.sessionId,
         producer: event.producer,
         runId: event.runId,
-        turnId: event.turnId ?? event.eventKey,
+        turnId: event.turnId ?? '',
         eventKey,
         modelId: '__unattributed__',
         providerId: event.providerId ?? 'unknown',
@@ -258,6 +266,13 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         host: event.host ?? null,
         revision: event.revision,
         runCostSnapshot: event.runCostSnapshot,
+        nativeThreadId: event.nativeThreadId ?? null,
+        repositoryId: event.repositoryId ?? null,
+        worktreePath: event.worktreePath ?? null,
+        missingReason: event.missingReason ?? null,
+        billable: event.billable ?? true,
+        coverageStartMs: event.coverageStartMs ?? null,
+        coverageEndMs: event.coverageEndMs ?? null,
       });
     }
     if (
@@ -269,7 +284,7 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         sessionId: event.sessionId,
         producer: event.producer,
         runId: event.runId,
-        turnId: event.turnId ?? event.eventKey,
+        turnId: event.turnId ?? '',
         eventKey,
         modelId: '__session_residual__',
         providerId: event.providerId ?? 'unknown',
@@ -286,6 +301,13 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         host: event.host ?? null,
         revision: event.revision,
         runCostSnapshot: event.runCostSnapshot,
+        nativeThreadId: event.nativeThreadId ?? null,
+        repositoryId: event.repositoryId ?? null,
+        worktreePath: event.worktreePath ?? null,
+        missingReason: event.missingReason ?? null,
+        billable: event.billable ?? true,
+        coverageStartMs: event.coverageStartMs ?? null,
+        coverageEndMs: event.coverageEndMs ?? null,
       });
     }
     return rows;

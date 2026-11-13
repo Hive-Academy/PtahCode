@@ -9,18 +9,25 @@ export const sessionUsageContributionSchema = z.object({
   sessionId: text,
   producer: text,
   runId: text,
-  turnId: text,
+  turnId: z.string(),
   eventKey: text,
   modelId: text,
   providerId: text,
   occurredAtMs: safeInteger,
-  inputTokens: safeInteger,
-  outputTokens: safeInteger,
-  cacheReadTokens: safeInteger,
-  cacheWriteTokens: safeInteger,
+  inputTokens: safeInteger.nullable(),
+  outputTokens: safeInteger.nullable(),
+  cacheReadTokens: safeInteger.nullable(),
+  cacheWriteTokens: safeInteger.nullable(),
   knownCostMicroUsd: safeInteger.nullable(),
   costAuthority: z.enum(['provider-reported', 'model-priced', 'unpriced']),
-  source: z.enum(['live', 'estimated']),
+  source: z.enum(['live', 'replay', 'estimated']),
+  nativeThreadId: text.nullable().optional(),
+  repositoryId: text.nullable().optional(),
+  worktreePath: text.nullable().optional(),
+  missingReason: z.string().nullable().optional(),
+  billable: z.boolean().optional(),
+  coverageStartMs: safeInteger.nullable().optional(),
+  coverageEndMs: safeInteger.nullable().optional(),
   pricingVersion: text.nullable(),
   revision: safeInteger,
   runCostSnapshot: z.boolean().optional(),
@@ -54,6 +61,9 @@ const statsRowSchema = z.object({
   finalize_revision: safeInteger.nullable(),
   finalize_attempts: safeInteger,
   finalize_retry_at_ms: safeInteger,
+  repository_id: z.string().nullable(),
+  worktree_path: z.string().nullable(),
+  missing_reason: z.string().nullable(),
 });
 export type SessionStatsRow = z.infer<typeof statsRowSchema>;
 
@@ -138,15 +148,19 @@ export class SessionStatsRepository {
     try {
       const prior = db.prepare(`SELECT MAX(revision) AS revision,
         MAX(cost_authority = 'provider-reported') AS reported
-        FROM session_usage_turns WHERE session_id = ? AND producer = ? AND event_key = ?`)
-        .get(first.sessionId, first.producer, first.eventKey) as { revision: number | null; reported: number | null };
+        FROM session_usage_turns WHERE session_id = ? AND event_key = ?`)
+        .get(first.sessionId, first.eventKey) as { revision: number | null; reported: number | null };
+      const owner = db.prepare('SELECT producer FROM session_usage_turns WHERE session_id = ? AND event_key = ? LIMIT 1')
+        .get(first.sessionId, first.eventKey) as { producer: string } | undefined;
+      if (owner && owner.producer !== first.producer) throw new Error('Usage key belongs to another producer');
       if (prior.revision !== null && (first.revision < prior.revision ||
-        (first.revision === prior.revision && (prior.reported === 1 || !inputs.some((input) => input.costAuthority === 'provider-reported'))))) {
+        (first.revision === prior.revision && (prior.reported === 1 || !inputs.some((input) => input.costAuthority === 'provider-reported')) &&
+          !(prior.reported !== 1 && first.missingReason === null &&
+            db.prepare(`SELECT 1 FROM session_usage_turns WHERE session_id = ? AND event_key = ?
+              AND missing_reason = 'aborted-before-result' LIMIT 1`).get(first.sessionId, first.eventKey))))) {
         db.exec('COMMIT');
         return;
       }
-      db.prepare('DELETE FROM session_usage_turns WHERE session_id = ? AND producer = ? AND event_key = ?')
-        .run(first.sessionId, first.producer, first.eventKey);
       if (first.runCostSnapshot) {
         if (first.producer !== 'sdk-owner') throw new Error('Only SDK owner can reprice a run');
         db.prepare(`UPDATE session_usage_turns SET known_cost_micro_usd = 0,
@@ -154,12 +168,29 @@ export class SessionStatsRepository {
           WHERE session_id = ? AND producer = ? AND run_id = ?`)
           .run(first.sessionId, first.producer, first.runId);
       }
+      const incomingModels = inputs.map((input) => input.modelId);
+      db.prepare(`DELETE FROM session_usage_turns WHERE session_id = ? AND producer = ?
+        AND event_key = ? AND model_id NOT IN (${incomingModels.map(() => '?').join(',')})`)
+        .run(first.sessionId, first.producer, first.eventKey, ...incomingModels);
       const statement = db.prepare(`INSERT INTO session_usage_turns (
         session_id, producer, run_id, turn_id, model_id, event_key, occurred_at_ms,
         provider_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
         known_cost_micro_usd, cost_authority, source, pricing_version, revision,
-        workspace_key, host
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        workspace_key, host, native_thread_id, repository_id, worktree_path,
+        missing_reason, billable, coverage_start_ms, coverage_end_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id,event_key,model_id) DO UPDATE SET
+        occurred_at_ms=excluded.occurred_at_ms, input_tokens=excluded.input_tokens,
+        output_tokens=excluded.output_tokens, cache_read_tokens=excluded.cache_read_tokens,
+        cache_write_tokens=excluded.cache_write_tokens,
+        known_cost_micro_usd=COALESCE(excluded.known_cost_micro_usd,session_usage_turns.known_cost_micro_usd),
+        cost_authority=excluded.cost_authority, source=excluded.source,
+        pricing_version=excluded.pricing_version, revision=excluded.revision,
+        workspace_key=excluded.workspace_key, host=excluded.host,
+        native_thread_id=excluded.native_thread_id, repository_id=excluded.repository_id,
+        worktree_path=excluded.worktree_path, missing_reason=excluded.missing_reason,
+        billable=excluded.billable, coverage_start_ms=excluded.coverage_start_ms,
+        coverage_end_ms=excluded.coverage_end_ms`);
       for (const input of inputs) {
         statement.run(
           input.sessionId,
@@ -181,23 +212,52 @@ export class SessionStatsRepository {
           input.revision,
           input.workspaceKey ?? null,
           input.host ?? null,
+          input.nativeThreadId ?? null,
+          input.repositoryId ?? null,
+          input.worktreePath ?? null,
+          input.missingReason ?? null,
+          input.billable === false ? 0 : 1,
+          input.coverageStartMs ?? null,
+          input.coverageEndMs ?? null,
         );
+      }
+      if (first.source === 'live' && first.billable !== false && inputs.some((row) => row.inputTokens !== null || row.outputTokens !== null || row.cacheReadTokens !== null || row.cacheWriteTokens !== null)) {
+        db.prepare(`UPDATE session_usage_turns SET billable = 0 WHERE source = 'replay'
+          AND provider_id = ? AND session_id = ? AND (native_thread_id IS ? OR ? IS NULL)
+          AND (? IS NULL OR coverage_start_ms IS NULL OR occurred_at_ms >= ?)
+          AND (? IS NULL OR coverage_end_ms IS NULL OR occurred_at_ms <= ?)`)
+          .run(first.providerId, first.sessionId, first.nativeThreadId ?? null, first.nativeThreadId ?? null,
+            first.coverageStartMs ?? null, first.coverageStartMs ?? null, first.coverageEndMs ?? null, first.coverageEndMs ?? null);
+      }
+      if (first.source === 'replay') {
+        db.prepare(`UPDATE session_usage_turns AS replay SET billable = 0
+          WHERE replay.session_id = ? AND replay.event_key = ? AND replay.source = 'replay'
+          AND EXISTS (SELECT 1 FROM session_usage_turns AS live
+            WHERE live.session_id = replay.session_id AND live.provider_id = replay.provider_id
+            AND live.source = 'live' AND live.billable = 1
+            AND (live.input_tokens IS NOT NULL OR live.output_tokens IS NOT NULL
+              OR live.cache_read_tokens IS NOT NULL OR live.cache_write_tokens IS NOT NULL)
+            AND (live.native_thread_id IS replay.native_thread_id OR live.native_thread_id IS NULL)
+            AND (live.coverage_start_ms IS NULL OR replay.occurred_at_ms >= live.coverage_start_ms)
+            AND (live.coverage_end_ms IS NULL OR replay.occurred_at_ms <= live.coverage_end_ms))`)
+          .run(first.sessionId, first.eventKey);
       }
       db.prepare(
         `INSERT INTO session_stats (
         session_id, host, workspace_key, provider_id, started_at_ms, last_usage_at_ms,
         finalized_at_ms, status, input_tokens, output_tokens, cache_read_tokens,
         cache_write_tokens, known_cost_micro_usd, has_unpriced, source,
-        pricing_version, revision, updated_at_ms)
+        pricing_version, revision, updated_at_ms, repository_id, worktree_path, missing_reason)
       SELECT ?, COALESCE(s.host, MAX(t.host), 'unknown'), COALESCE(s.workspace_key, MAX(t.workspace_key)), ?,
         MIN(t.occurred_at_ms), MAX(t.occurred_at_ms), NULL, 'active',
-        SUM(t.input_tokens), SUM(t.output_tokens), SUM(t.cache_read_tokens),
-        SUM(t.cache_write_tokens), SUM(t.known_cost_micro_usd),
-        MAX(t.known_cost_micro_usd IS NULL),
+        COALESCE(SUM(t.input_tokens),0), COALESCE(SUM(t.output_tokens),0), COALESCE(SUM(t.cache_read_tokens),0),
+        COALESCE(SUM(t.cache_write_tokens),0), SUM(t.known_cost_micro_usd),
+        MAX(t.known_cost_micro_usd IS NULL OR t.input_tokens IS NULL OR t.output_tokens IS NULL OR t.cache_read_tokens IS NULL OR t.cache_write_tokens IS NULL),
         CASE WHEN MAX(t.source = 'live') = 1 THEN 'live' ELSE 'estimated' END,
-        MAX(t.pricing_version), MAX(t.revision), ?
+        MAX(t.pricing_version), MAX(t.revision), ?, MAX(t.repository_id), MAX(t.worktree_path), MAX(t.missing_reason)
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.session_id = ?
+      WHERE t.session_id = ? AND t.billable = 1
+      HAVING COUNT(*) > 0
       ON CONFLICT (session_id) DO UPDATE SET
         host = excluded.host, workspace_key = excluded.workspace_key,
         provider_id = excluded.provider_id, started_at_ms = excluded.started_at_ms,
@@ -217,23 +277,22 @@ export class SessionStatsRepository {
         known_cost_micro_usd = excluded.known_cost_micro_usd,
         has_unpriced = excluded.has_unpriced, source = excluded.source,
         pricing_version = excluded.pricing_version, revision = excluded.revision,
-        updated_at_ms = excluded.updated_at_ms`,
+        updated_at_ms = excluded.updated_at_ms,
+        repository_id = excluded.repository_id, worktree_path = excluded.worktree_path,
+        missing_reason = excluded.missing_reason`,
       ).run(first.sessionId, first.providerId, Date.now(), first.sessionId);
-      statsRowSchema.parse(
-        db
-          .prepare('SELECT * FROM session_stats WHERE session_id = ?')
-          .get(first.sessionId),
-      );
-      const workspaceKey = db.prepare(`SELECT COALESCE(s.workspace_key, MAX(t.workspace_key)) AS workspace_key
+      const stats = db.prepare('SELECT * FROM session_stats WHERE session_id = ?').get(first.sessionId);
+      if (stats !== undefined) statsRowSchema.parse(stats);
+      const workspaceKey = db.prepare(`SELECT COALESCE(s.workspace_key, MAX(t.workspace_key)) AS workspace_key,
+        MIN(t.occurred_at_ms) AS first_at, MAX(t.occurred_at_ms) AS last_at
         FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-        WHERE t.session_id = ?`).get(first.sessionId) as { workspace_key: string | null };
-      if (workspaceKey.workspace_key !== null) {
-        const capturedAtMs = Date.now();
+        WHERE t.session_id = ? AND t.billable = 1`).get(first.sessionId) as { workspace_key: string | null; first_at: number | null; last_at: number | null };
+      if (workspaceKey.workspace_key !== null && workspaceKey.first_at !== null && workspaceKey.last_at !== null) {
         db.prepare(`INSERT INTO session_usage_coverage (workspace_key, first_captured_at_ms, last_captured_at_ms)
           VALUES (?, ?, ?) ON CONFLICT (workspace_key) DO UPDATE SET
           first_captured_at_ms = MIN(first_captured_at_ms, excluded.first_captured_at_ms),
           last_captured_at_ms = MAX(last_captured_at_ms, excluded.last_captured_at_ms)`)
-          .run(workspaceKey.workspace_key, capturedAtMs, capturedAtMs);
+          .run(workspaceKey.workspace_key, workspaceKey.first_at, workspaceKey.last_at);
       }
       db.exec('COMMIT');
     } catch (error: unknown) {
@@ -374,13 +433,13 @@ export class SessionStatsRepository {
     if (until < from) throw new Error('Usage range must be increasing');
     const db = await this.store.ready();
     const rows: unknown[] = db.prepare(`SELECT model_id,
-      SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
-      SUM(cache_read_tokens) AS cache_read_tokens,
-      SUM(cache_write_tokens) AS cache_write_tokens,
+      COALESCE(SUM(input_tokens),0) AS input_tokens, COALESCE(SUM(output_tokens),0) AS output_tokens,
+      COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens,
+      COALESCE(SUM(cache_write_tokens),0) AS cache_write_tokens,
       SUM(known_cost_micro_usd) AS known_cost_micro_usd,
       MAX(known_cost_micro_usd IS NULL) AS has_unpriced
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.session_id = ? AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
+      WHERE t.billable = 1 AND t.session_id = ? AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
       GROUP BY t.model_id ORDER BY t.model_id`).all(id, text.parse(workspaceKey), from, until);
     return rows.map((row) => sessionModelRowSchema.parse(row));
   }
@@ -393,7 +452,7 @@ export class SessionStatsRepository {
     const db = await this.store.ready();
     const row: unknown = db.prepare(`SELECT COUNT(DISTINCT producer || ':' || event_key) AS event_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.session_id = ? AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(id, text.parse(workspaceKey), from, until);
+      WHERE t.billable = 1 AND t.session_id = ? AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(id, text.parse(workspaceKey), from, until);
     return z.object({ event_count: safeInteger }).parse(row).event_count;
   }
 
@@ -412,14 +471,14 @@ export class SessionStatsRepository {
         `SELECT
       strftime('%Y-%m-%d', t.occurred_at_ms / 1000, 'unixepoch') AS day,
       t.provider_id, t.model_id, t.source, t.cost_authority,
-      SUM(t.input_tokens) AS input_tokens, SUM(t.output_tokens) AS output_tokens,
-      SUM(t.cache_read_tokens) AS cache_read_tokens,
-      SUM(t.cache_write_tokens) AS cache_write_tokens,
+      COALESCE(SUM(t.input_tokens),0) AS input_tokens, COALESCE(SUM(t.output_tokens),0) AS output_tokens,
+      COALESCE(SUM(t.cache_read_tokens),0) AS cache_read_tokens,
+      COALESCE(SUM(t.cache_write_tokens),0) AS cache_write_tokens,
       SUM(t.known_cost_micro_usd) AS known_cost_micro_usd,
       MAX(t.known_cost_micro_usd IS NULL) AS has_unpriced,
       COUNT(DISTINCT t.session_id) AS session_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
+      WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
       GROUP BY day, t.provider_id, t.model_id, t.source, t.cost_authority
       ORDER BY day, t.provider_id, t.model_id, t.source, t.cost_authority
       LIMIT 100001`,
@@ -451,21 +510,21 @@ export class SessionStatsRepository {
         `WITH eligible AS (
           SELECT t.*, COALESCE(s.name, t.session_id) AS name FROM session_usage_turns t
           LEFT JOIN sessions s ON s.session_id = t.session_id
-          WHERE COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
+          WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
         ), totals AS (
           SELECT session_id, MAX(name) AS title,
             MAX(occurred_at_ms) AS last_active_ms,
             COUNT(DISTINCT producer || ':' || event_key) AS message_count,
             SUM(known_cost_micro_usd) AS known_cost_micro_usd,
             MAX(known_cost_micro_usd IS NULL) AS has_unpriced,
-            SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
-            SUM(cache_read_tokens) AS cache_read_tokens,
-            SUM(cache_write_tokens) AS cache_write_tokens
+            COALESCE(SUM(input_tokens),0) AS input_tokens, COALESCE(SUM(output_tokens),0) AS output_tokens,
+            COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens,
+            COALESCE(SUM(cache_write_tokens),0) AS cache_write_tokens
           FROM eligible GROUP BY session_id
         ), model_totals AS (
           SELECT session_id, provider_id, model_id,
             SUM(COALESCE(known_cost_micro_usd, 0)) AS known_cost,
-            SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens
+            SUM(COALESCE(input_tokens,0) + COALESCE(output_tokens,0) + COALESCE(cache_read_tokens,0) + COALESCE(cache_write_tokens,0)) AS tokens
           FROM eligible GROUP BY session_id, provider_id, model_id
         ), ranked_models AS (
           SELECT session_id, provider_id, model_id,
@@ -497,7 +556,7 @@ export class SessionStatsRepository {
     const db = await this.store.ready();
     const row: unknown = db.prepare(`SELECT COUNT(DISTINCT t.session_id) AS session_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(scope, from, until);
+      WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(scope, from, until);
     return z.object({ session_count: safeInteger }).parse(row).session_count;
   }
 
@@ -513,7 +572,7 @@ export class SessionStatsRepository {
     const db = await this.store.ready();
     const row: unknown = db.prepare(`SELECT COUNT(DISTINCT t.session_id || ':' || t.producer || ':' || t.event_key) AS message_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(scope, from, until);
+      WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(scope, from, until);
     return z.object({ message_count: safeInteger }).parse(row).message_count;
   }
 }
