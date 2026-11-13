@@ -30,10 +30,23 @@ const STRIPES =
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div [class]="textClass()"><div [class]="rowClass()" data-meter-row><span [class.sr-only]="hideLabel()">{{ label() }}</span><span class="tabular-nums" [class.sr-only]="!showValue()">@if (indeterminate()) { {{ valueText() ?? 'In progress' }} } @else if (valid()) { {{ visibleText() }} } @else { Unavailable }</span></div>
     <div class="overflow-hidden rounded-full bg-[var(--ptah-meter-track,var(--surface-border-strong))]" [class]="trackClass()" [attr.role]="ariaRole()" [attr.aria-label]="ariaRole() ? label() : null" [attr.aria-valuemin]="ranged() ? 0 : null" [attr.aria-valuemax]="ranged() ? max() : null" [attr.aria-valuenow]="ranged() ? ariaNow() : null" [attr.aria-valuetext]="ariaValueText()">
-      @if (indeterminate()) { <div class="h-full w-1/3 animate-pulse rounded-full motion-reduce:animate-none" [class]="fillClass()"></div> } @else if (valid()) { <div class="h-full rounded-full transition-[width] motion-reduce:transition-none" [class]="fillClass()" [style.width.%]="width()" [style.background-image]="stripeImage()"></div> }
+      @if (indeterminate()) { @if (indeterminateStyle() === 'sweep') { <div class="ptah-meter-sweep h-full rounded-full" [class]="fillClass()"></div> } @else { <div class="h-full w-1/3 animate-pulse rounded-full motion-reduce:animate-none" [class]="fillClass()"></div> } } @else if (valid()) { <div class="h-full rounded-full transition-[width] motion-reduce:transition-none" [class]="fillClass()" [style.width.%]="width()" [style.background-image]="stripeImage()"></div> }
       @if (markerPercent() !== null) { <div class="absolute top-0 h-full w-px bg-[var(--ptah-meter-marker,var(--ptah-badge-neutral-ink))]" [style.left]="markerLeft()" aria-hidden="true" data-meter-marker></div> }
     </div>
   </div>`,
+  styles: [`
+    .ptah-meter-sweep { width: 40%; }
+    @media (prefers-reduced-motion: no-preference) {
+      .ptah-meter-sweep { animation: ptah-meter-sweep 1.4s ease-in-out infinite; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .ptah-meter-sweep { width: 100%; opacity: 0.35; }
+    }
+    @keyframes ptah-meter-sweep {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(250%); }
+    }
+  `],
 })
 export class PtahMeterComponent {
   readonly value = input.required<number>();
@@ -43,6 +56,8 @@ export class PtahMeterComponent {
   readonly tone = input<PtahMeterTone>('auto');
   readonly size = input<PtahChartSize>('sm');
   readonly indeterminate = input(false);
+  /** Moving 40% segment, or the original pulse, for indeterminate bars. */
+  readonly indeterminateStyle = input<'pulse' | 'sweep'>('pulse');
   readonly showValue = input(true);
   /** Hide the label visually. It stays in the DOM and as the bar `aria-label`. */
   readonly hideLabel = input(false);

@@ -3,8 +3,8 @@
 /** Meaning of a chart mark. `neutral` is metadata; the other tones carry state. */
 export type PtahChartTone = 'neutral' | 'accent' | 'info' | 'ok' | 'warn' | 'err';
 
-/** `auto`: gold below `NEAR_LIMIT_PERCENT`, warn at or above it, err at or above 100 %. */
-export type PtahMeterTone = PtahChartTone | 'auto';
+/** `gold` stays gold; `auto` switches from gold to warn, then err at 100 %. */
+export type PtahMeterTone = PtahChartTone | 'gold' | 'auto';
 
 /** ARIA role of a determinate meter bar. */
 export type PtahMeterRole = 'meter' | 'progressbar';

@@ -46,6 +46,36 @@ it('uses a fixed tone when one is set', () => {
   expect(el.querySelector('[role="meter"] > div')?.classList.contains('bg-state-run')).toBe(true);
 });
 
+it.each([0, 90, 100, 150])('keeps explicit gold at %i percent', (value) => {
+  const fill = render({ value, tone: 'gold' }).querySelector('[role="meter"] > div') as HTMLElement;
+  expect(fill.classList.contains('bg-[var(--ptah-gold)]')).toBe(true);
+});
+
+describe('indeterminate appearance', () => {
+  it('keeps the original pulse by default', () => {
+    const fill = render({ value: 0, max: 0, indeterminate: true }).querySelector('[role="progressbar"] > div') as HTMLElement;
+    expect(fill.classList.contains('w-1/3')).toBe(true);
+    expect(fill.classList.contains('animate-pulse')).toBe(true);
+    expect(fill.classList.contains('ptah-meter-sweep')).toBe(false);
+  });
+
+  it('offers a 40 percent sweep with a reduced-motion full-width faint state', () => {
+    const el = render({ value: 0, max: 0, indeterminate: true, indeterminateStyle: 'sweep', tone: 'gold' });
+    const bar = el.querySelector('[role="progressbar"]') as HTMLElement;
+    const fill = bar.firstElementChild as HTMLElement;
+    expect(fill.classList.contains('ptah-meter-sweep')).toBe(true);
+    expect(fill.classList.contains('bg-[var(--ptah-gold)]')).toBe(true);
+    expect(fill.classList.contains('animate-pulse')).toBe(false);
+    expect(bar.getAttribute('aria-label')).toBe('Used');
+    expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+    const styles = Array.from(document.querySelectorAll('style')).map((style) => style.textContent).join('\n');
+    expect(styles).toContain('width: 40%');
+    expect(styles).toContain('prefers-reduced-motion: reduce');
+    expect(styles).toContain('width: 100%; opacity: 0.35');
+    expect(styles).toContain('translateX(250%)');
+  });
+});
+
 it('clamps the bar over the max and keeps the real value in text', () => {
   const el = render({ value: 150, unit: '%' });
   const meter = el.querySelector('[role="meter"]') as HTMLElement;

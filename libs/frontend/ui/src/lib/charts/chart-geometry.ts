@@ -1,7 +1,7 @@
 import { NEAR_LIMIT_PERCENT } from '@ptah-extension/shared';
 import { PtahChartTone, PtahMeterTone } from './chart.types';
 
-/** A resolved ink. `gold` is the brand ink of the `auto` tone below the near limit. */
+/** A resolved ink. `gold` is the brand ink, also used by `auto` below the near limit. */
 export type PtahChartInk = PtahChartTone | 'gold';
 
 /** Fill classes. The `auto` inks keep the classes of the original meter. */
@@ -36,7 +36,7 @@ export function percentOf(value: number, max: number): number {
   return isValidRange(value, max) ? (Math.max(0, value) / max) * 100 : 0;
 }
 
-/** The ink of a tone. `auto` follows the near-limit rule of the original meter. */
+/** The ink of a tone. Explicit `gold` stays gold; `auto` follows the near-limit rule. */
 export function resolveInk(tone: PtahMeterTone, percent: number): PtahChartInk {
   if (tone !== 'auto') return tone;
   if (percent >= 100) return 'err';
