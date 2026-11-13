@@ -502,6 +502,7 @@ export class CopilotSdkAdapter implements CliAdapter {
             } : undefined;
             segment.emit({
               type: 'info', content: 'Copilot turn telemetry',
+              ...(usage ? { usage } : {}),
               turnTelemetry: completedTurnTelemetry({
                 ...turnIdentity({ provider: 'copilot', turnId: nativeTurnId,
                   sessionId: capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`,
@@ -532,6 +533,8 @@ export class CopilotSdkAdapter implements CliAdapter {
     );
 
     return {
+      outcomeUsageIsTurnTotal: true,
+      usageScope: 'turn',
       abort: abortController,
       done,
       onOutput: output.subscribe,

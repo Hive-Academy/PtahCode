@@ -807,6 +807,8 @@ export class OpencodeCliAdapter implements CliAdapter {
     const done = startTurn(taskPrompt, options.resumeSessionId);
 
     return {
+      outcomeUsageIsTurnTotal: true,
+      usageScope: 'turn',
       ...(legacyAutoFallback ? { effectivePolicy: {
         nativeDescription: 'legacy opencode run --auto (standalone unavailable)',
       } } : {}),
@@ -975,6 +977,7 @@ export class OpencodeCliAdapter implements CliAdapter {
           } : undefined;
           emitSegment({
             type: 'info', content: 'OpenCode turn telemetry',
+            ...(usage ? { usage } : {}),
             turnTelemetry: completedTurnTelemetry({
               ...turnIdentity({ provider: 'opencode', turnId: state.turnId,
                 sessionId: boundSessionId ?? launch.expectedSessionId ?? `opencode:${child.pid ?? 'unknown'}`,
@@ -1203,7 +1206,7 @@ export class OpencodeCliAdapter implements CliAdapter {
     emitSegment: (segment: CliOutputSegment) => void,
   ): void {
     const part = event.part;
-    if (part?.reason !== 'stop') return;
+    if (!part) return;
 
     const tokens = part.tokens;
     if (
