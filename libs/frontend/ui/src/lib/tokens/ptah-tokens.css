@@ -310,6 +310,8 @@
   /* Track behind the meter fill. Same value the meter used before. */
   --ptah-meter-track: var(--surface-border-strong);
   /* Stripe recipe of the meter `stripes` option: bar width and gap. */
+  /* Inset edge of the track (1 px). Transparent: no edge unless a theme sets one. */
+  --ptah-meter-track-edge: transparent;
   --ptah-meter-stripe-bar: 4px;
   --ptah-meter-stripe-gap: 3px;
 }
@@ -324,6 +326,9 @@
 :root[data-theme='anubis-light'],
 :root[data-theme][data-glass='on'][data-glass-mode='light'] {
   --ptah-meter-track: color-mix(in oklch, oklch(var(--bc)) 6%, transparent);
+  /* A 6% track is 1.12:1 against the surface. A 50% edge measures 3.40 (base-300), 3.48 (base-200)
+     and 3.59 (base-100) against the surface and sits outside the fill, so fill and track read as before. */
+  --ptah-meter-track-edge: color-mix(in oklch, oklch(var(--bc)) 50%, transparent);
 }
 /* ---- end ptah-meter tokens ---- */
 
