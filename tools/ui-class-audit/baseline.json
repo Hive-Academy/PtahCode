@@ -787,10 +787,9 @@
     "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
-    "btn": 5,
-    "btn-ghost": 3,
+    "btn": 2,
     "btn-outline": 2,
-    "btn-xs": 5
+    "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
     "<dynamic>": 1,
