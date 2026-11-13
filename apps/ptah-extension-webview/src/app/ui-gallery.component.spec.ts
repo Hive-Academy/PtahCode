@@ -337,6 +337,19 @@ it('renders each chart owner with tone, size and state examples', () => {
   expect(root.querySelector('section#family-meter')?.textContent).toContain('Unavailable');
   expect(root.querySelector('section#family-ring')?.textContent).toContain('Unavailable');
   expect(root.querySelector('section#family-sparkline')?.textContent).toContain('No trend data');
+  const statSpecimens = [
+    'stat-value-tone', 'stat-appearance', 'stat-media', 'stat-icon-placement',
+    'stat-value-weight', 'stat-value-wrap', 'stat-radius', 'stat-hint-style',
+    'stat-layout', 'stat-title', 'stat-heading-level', 'stat-value-format',
+    'stat-placeholder', 'stat-polarity', 'stat-card-hint', 'stat-card-direction',
+    'stat-card-loading', 'stat-card-error-retry', 'stat-card-icon', 'stat-card-tone',
+  ];
+  const gallery = root.querySelector('[data-testid="stat-new-inputs"]');
+  expect(gallery?.children).toHaveLength(statSpecimens.length);
+  for (const specimen of statSpecimens) {
+    expect(gallery?.querySelector(`[data-testid="${specimen}"]`)).not.toBeNull();
+  }
+  expect(gallery?.querySelector('[data-testid="stat-card-error-retry"] [data-testid="stat-retry"]')).not.toBeNull();
 });
 
 it('scrolls inside its own container and scrolls a section link to its section', () => {
