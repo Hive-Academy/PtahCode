@@ -750,16 +750,10 @@
     "<dynamic>": 2
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-chart.component.ts": {
-    "<dynamic>": 5,
-    "card": 1,
-    "card-bordered": 1
+    "<dynamic>": 5
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-divider.component.ts": {
     "<dynamic>": 4
-  },
-  "libs/frontend/declarative-dashboard/src/lib/components/dashboard-list.component.ts": {
-    "card": 1,
-    "card-bordered": 1
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-progress.component.ts": {
     "<dynamic>": 1
@@ -774,9 +768,7 @@
     "<dynamic>": 1
   },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-table.component.ts": {
-    "<dynamic>": 2,
-    "card": 1,
-    "card-bordered": 1
+    "<dynamic>": 2
   },
   "libs/frontend/declarative-dashboard/src/lib/components/surface-layout.component.ts": {
     "<dynamic>": 2,
