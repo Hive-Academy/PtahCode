@@ -38,7 +38,7 @@ const EVERY_KIND: readonly (readonly [SurfaceComponent, string])[] = [
   [{ id: 'k-section', kind: 'section', title: { text: 'S' }, children: [] }, 'ptah-surface-layout section'],
   [{ id: 'k-stack', kind: 'stack', children: [] }, 'ptah-surface-layout'],
   [{ id: 'k-grid', kind: 'grid', columns: 2, children: [] }, 'ptah-surface-layout'],
-  [{ id: 'k-card', kind: 'card', children: [] }, 'ptah-surface-layout .card'],
+  [{ id: 'k-card', kind: 'card', children: [] }, 'ptah-surface-layout [data-ptah-surface]'],
   [{ id: 'k-accordion', kind: 'accordion', title: { text: 'A' }, children: [] }, 'ptah-surface-layout button[aria-expanded="false"]'],
   [{ id: 'k-text', kind: 'text', label: 'T', path: 'a' }, 'ptah-surface-text-input input'],
   [{ id: 'k-select', kind: 'select', label: 'S', path: 'b', options: [{ value: 'x', label: 'X' }] }, 'ptah-surface-choice-input select'],

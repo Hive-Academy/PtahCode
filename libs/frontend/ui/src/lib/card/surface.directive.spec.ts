@@ -2,7 +2,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import type { PtahCardPadding, PtahCardVariant } from './card.types';
+import type {
+  PtahCardBorder,
+  PtahCardFill,
+  PtahCardPadding,
+  PtahCardShadow,
+  PtahCardTone,
+  PtahCardVariant,
+} from './card.types';
 import { PtahSurfaceDirective } from './surface.directive';
 
 const CSS = readFileSync(join(__dirname, 'ptah-card.css'), 'utf8');
@@ -17,6 +24,11 @@ const CSS = readFileSync(join(__dirname, 'ptah-card.css'), 'utf8');
       data-testid="panel"
       [variant]="variant()"
       [padding]="padding()"
+      [tone]="tone()"
+      [toneBorder]="toneBorder()"
+      [translucent]="translucent()"
+      [shadow]="shadow()"
+      [border]="border()"
     >
       <span>Child</span>
     </section>
@@ -25,6 +37,11 @@ const CSS = readFileSync(join(__dirname, 'ptah-card.css'), 'utf8');
 class HostComponent {
   readonly variant = signal<PtahCardVariant>('card');
   readonly padding = signal<PtahCardPadding>('md');
+  readonly tone = signal<PtahCardTone>('neutral');
+  readonly toneBorder = signal(false);
+  readonly translucent = signal<PtahCardFill>(100);
+  readonly shadow = signal<PtahCardShadow>('none');
+  readonly border = signal<PtahCardBorder>('default');
 }
 
 describe('PtahSurfaceDirective', () => {
@@ -50,7 +67,7 @@ describe('PtahSurfaceDirective', () => {
     expect(plain.getAttribute('tabindex')).toBeNull();
   });
 
-  it.each<PtahCardVariant>(['card', 'subtle', 'inset', 'raised'])(
+  it.each<PtahCardVariant>(['card', 'subtle', 'inset', 'raised', 'surface-1', 'surface-2'])(
     'sets the %s variant',
     (variant) => {
       const { fixture, panel } = setup();
@@ -69,6 +86,25 @@ describe('PtahSurfaceDirective', () => {
       expect(panel.dataset['padding']).toBe(padding);
     },
   );
+
+  it('reflects optional owner looks without adding default attributes or a spine', () => {
+    const { fixture, panel } = setup();
+    for (const name of ['tone', 'toneBorder', 'fill', 'shadow', 'border']) {
+      expect(panel.dataset[name]).toBeUndefined();
+    }
+    fixture.componentInstance.tone.set('info');
+    fixture.componentInstance.toneBorder.set(true);
+    fixture.componentInstance.translucent.set(50);
+    fixture.componentInstance.shadow.set('sm');
+    fixture.componentInstance.border.set('faint');
+    fixture.detectChanges();
+    expect(panel.dataset['tone']).toBe('info');
+    expect(panel.hasAttribute('data-tone-border')).toBe(true);
+    expect(panel.dataset['fill']).toBe('50');
+    expect(panel.dataset['shadow']).toBe('sm');
+    expect(panel.dataset['border']).toBe('faint');
+    expect(panel.querySelector('.ptah-card-spine')).toBeNull();
+  });
 });
 
 describe('ptah-card.css', () => {
@@ -95,6 +131,12 @@ describe('ptah-card.css', () => {
       "[data-variant='subtle']",
       "[data-variant='inset']",
       "[data-variant='raised']",
+      "[data-variant='surface-1']",
+      "[data-variant='surface-2']",
+      "[data-fill='50']",
+      "[data-shadow='sm']",
+      "[data-border='faint']",
+      '[data-tone-border]',
       "[data-padding='none']",
       "[data-padding='sm']",
       "[data-padding='lg']",

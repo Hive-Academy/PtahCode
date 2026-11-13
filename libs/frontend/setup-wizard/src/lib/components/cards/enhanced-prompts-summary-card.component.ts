@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-angular';
 import type { EnhancedPromptsSummary } from '@ptah-extension/shared';
+import { SurfaceCardComponent } from '@ptah-extension/ui';
 
 /**
  * EnhancedPromptsSummaryCardComponent - Shows what guidance sections were generated
@@ -26,11 +27,10 @@ import type { EnhancedPromptsSummary } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-enhanced-prompts-summary-card',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, SurfaceCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="card surface-2">
-      <div class="card-body p-3">
+    <ptah-surface-card variant="surface-2" padding="sm">
         <!-- Header -->
         <div class="flex items-center gap-2 mb-2">
           <lucide-angular
@@ -80,8 +80,7 @@ import type { EnhancedPromptsSummary } from '@ptah-extension/shared';
             {{ generatedCount() }} of {{ sections().length }} sections generated
           </span>
         </div>
-      </div>
-    </div>
+    </ptah-surface-card>
   `,
 })
 export class EnhancedPromptsSummaryCardComponent {

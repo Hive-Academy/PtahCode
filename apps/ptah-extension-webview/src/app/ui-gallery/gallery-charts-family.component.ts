@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { Brain } from 'lucide-angular';
 import {
   PtahChartSize,
   PtahChartTone,
@@ -54,6 +55,29 @@ import { GallerySectionComponent } from './gallery-section.component';
           <ptah-meter [value]="92" [max]="100" label="Stripes warn" tone="warn" [stripes]="true" [marker]="80" />
           <ptah-meter [value]="100" [max]="100" label="Stripes err" tone="err" [stripes]="true" />
           <ptah-meter [value]="45" [max]="100" label="Neutral stripes" tone="neutral" [stripes]="true" />
+        </div>
+        <div class="grid gap-ptah-field sm:grid-cols-2" data-testid="meter-family-new-inputs">
+          <div><span class="text-ptah-caption text-base-content-muted">Gold tone</span>
+            <ptah-meter data-testid="meter-tone-gold" [value]="62" [max]="100" label="Gold tone" tone="gold" />
+          </div>
+          <div><span class="text-ptah-caption text-base-content-muted">Primary tone</span>
+            <ptah-meter data-testid="meter-tone-primary" [value]="62" [max]="100" label="Primary tone" tone="primary" />
+          </div>
+          <div><span class="text-ptah-caption text-base-content-muted">Sweep progress</span>
+            <ptah-meter data-testid="meter-sweep" [value]="0" [max]="100" label="Sweep progress"
+              [indeterminate]="true" indeterminateStyle="sweep" />
+          </div>
+          <div><span class="text-ptah-caption text-base-content-muted">Static fill</span>
+            <ptah-meter data-testid="meter-static-fill" [value]="62" [max]="100" label="Static fill" [animate]="false" />
+          </div>
+          <div><span class="text-ptah-caption text-base-content-muted">Bar only, text available to assistive technology</span>
+            <ptah-meter data-testid="meter-bar-only" [value]="62" [max]="100" label="Bar only"
+              [hideLabel]="true" [showValue]="false" />
+          </div>
+          <div><span id="gallery-meter-external-label" class="text-ptah-caption text-base-content-muted">External meter label</span>
+            <ptah-meter data-testid="meter-external-label" [value]="62" [max]="100"
+              label="External meter label" ariaLabelledby="gallery-meter-external-label" />
+          </div>
         </div>
       </div>
     </ptah-gallery-section>
@@ -172,10 +196,34 @@ import { GallerySectionComponent } from './gallery-section.component';
           <ptah-stat-card label="Connected machines" [value]="3" size="dense" trend="2 online" />
         </div>
       </div>
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="stat-new-inputs">
+        <div data-testid="stat-value-tone"><span>Value tone</span><ptah-stat label="Healthy" [value]="42" valueTone="success" /></div>
+        <div data-testid="stat-appearance"><span>Surface appearance</span><ptah-stat label="Surface" [value]="42" appearance="surface" /></div>
+        <div data-testid="stat-media"><span>Media slot</span><ptah-stat label="With media" [value]="42"><span ptahStatMedia aria-hidden="true">●</span></ptah-stat></div>
+        <div data-testid="stat-icon-placement"><span>Centered icon</span><ptah-stat label="Centered" [value]="42" iconPlacement="center-end"><span ptahStatIcon aria-hidden="true">◆</span></ptah-stat></div>
+        <div data-testid="stat-value-weight"><span>Medium weight</span><ptah-stat label="Medium" [value]="42" valueWeight="medium" /></div>
+        <div data-testid="stat-value-wrap"><span>Wrapped value</span><ptah-stat label="Long value" value="A long descriptive value" valueWrap="break-words" /></div>
+        <div data-testid="stat-radius"><span>Large radius</span><ptah-stat label="Rounded" [value]="42" appearance="surface" radius="2xl" /></div>
+        <div data-testid="stat-hint-style"><span>Description hint</span><ptah-stat label="Hint" [value]="42" hint="Updated now" hintStyle="stat-desc" /></div>
+        <div data-testid="stat-layout"><span>Tile layout</span><ptah-stat label="Code index" [value]="42" layout="tile" size="md" valueTone="secondary"><span ptahStatIcon aria-hidden="true">◆</span></ptah-stat></div>
+        <div data-testid="stat-title"><span>Tooltip title</span><ptah-stat label="Code index" [value]="42" title="Indexed code symbols" /></div>
+        <div data-testid="stat-heading-level"><span>Heading label</span><ptah-stat label="Heading" [value]="42" [headingLevel]="3" /></div>
+        <div data-testid="stat-value-format"><span>Formatted value</span><ptah-stat label="Percent" [value]="0.42" [valueFormat]="percentFormat" /></div>
+        <div data-testid="stat-placeholder"><span>Placeholder</span><ptah-stat label="Missing" value="" placeholder="N/A" /></div>
+        <div data-testid="stat-polarity"><span>Polarity pill</span><ptah-stat label="Increase" [value]="42" delta="+4" polarity="good" /></div>
+        <div data-testid="stat-card-hint"><span>Card hint</span><ptah-stat-card label="Card hint" [value]="42" hint="Updated now" /></div>
+        <div data-testid="stat-card-direction"><span>Card direction</span><ptah-stat-card label="Card direction" [value]="42" direction="up" /></div>
+        <div data-testid="stat-card-loading"><span>Card loading</span><ptah-stat-card label="Loading" [value]="42" [loading]="true" /></div>
+        <div data-testid="stat-card-error-retry"><span>Card error and retry</span><ptah-stat-card label="Unavailable" [value]="42" error="Could not load." /></div>
+        <div data-testid="stat-card-icon"><span>Card icon</span><ptah-stat-card label="With icon" [value]="42" [icon]="brainIcon" /></div>
+        <div data-testid="stat-card-tone"><span>Card icon tone</span><ptah-stat-card label="Primary icon" [value]="42" [icon]="brainIcon" tone="primary" /></div>
+      </div>
     </ptah-gallery-section>
   `,
 })
 export class GalleryChartsFamilyComponent {
+  public readonly brainIcon = Brain;
+  public readonly percentFormat: Intl.NumberFormatOptions = { style: 'percent' };
   public readonly sizes: readonly PtahChartSize[] = ['xs', 'sm', 'md'];
   public readonly chartTones: readonly PtahChartTone[] = ['neutral', 'accent', 'info', 'ok', 'warn', 'err'];
   public readonly meterTones: readonly PtahMeterTone[] = ['auto', ...this.chartTones];
