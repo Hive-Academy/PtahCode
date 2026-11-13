@@ -838,6 +838,17 @@ export class SessionSpawnerService implements ISessionSpawner {
       };
     }
     const { child, caller } = owned;
+    const runtime = this.runtimes.get(child.childSessionId);
+    if (runtime?.capReached && this.isIdleWithoutPendingWork(child)) {
+      const result = await this.succeedChild(child, 'runtime-cap', request.message);
+      if (!result.ok)
+        return {
+          delivered: false,
+          reason: 'session-ended',
+          detail: result.detail,
+        };
+      return this.sent(child, request.mode, 'started-turn');
+    }
     const target = this.activeIdOf(child);
     if (child.terminalStatus || !target || !this.adapter) {
       return {
@@ -1583,8 +1594,10 @@ export class SessionSpawnerService implements ISessionSpawner {
       return;
     }
     runtime.capReached = true;
-    if (this.statusOf(child) === 'idle') {
-      void this.hostSucceed(child, 'runtime-cap');
+    if (this.isIdleWithoutPendingWork(child)) {
+      this.log(
+        `${childSessionId} runtime cap reached while idle; deferring handoff until next message`,
+      );
     } else {
       runtime.handoffGraceTimer = this.armTimer(
         runtime.settings.handoffGraceMinutes * 60_000,
@@ -1842,6 +1855,16 @@ export class SessionSpawnerService implements ISessionSpawner {
     );
   }
 
+  private isIdleWithoutPendingWork(child: SessionChildRecord): boolean {
+    const target = this.activeIdOf(child);
+    return (
+      this.statusOf(child) === 'idle' &&
+      !this.hasRunningLane(child) &&
+      (!target ||
+        (this.adapter?.listQueuedFollowUps?.(target)?.length ?? 0) === 0)
+    );
+  }
+
   /** A Ptah CLI lane the child spawned is still running. */
   private hasRunningLane(child: SessionChildRecord): boolean {
     const ids = new Set(
@@ -2077,6 +2100,10 @@ export class SessionSpawnerService implements ISessionSpawner {
     const runtime = this.runtimes.get(childSessionId);
     if (!child || child.terminalStatus || !runtime || runtime.stopping) return;
     runtime.warnTimer = undefined;
+    if (this.isIdleWithoutPendingWork(child)) {
+      this.log(`${childSessionId} runtime warning skipped: idle without pending work`);
+      return;
+    }
     const target = this.activeIdOf(child);
     if (!target || !this.adapter) {
       this.log(`${childSessionId} runtime warning skipped: no live session`);

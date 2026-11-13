@@ -251,7 +251,23 @@ describe('SessionSpawnerService succession', () => {
     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
   });
 
-  it('replaces an idle child in the same worktree and signals its parent once', async () => {
+  it('skips the warning for an idle child without pending work', async () => {
+    const h = makeHarness({ config: {
+      'agentSessions.maxRuntimeMinutes': 5,
+      'agentSessions.runtimeWarnLeadMinutes': 1,
+    } });
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    h.phases.set(child.childSessionId, 'idle');
+    jest.advanceTimersByTime(4 * 60_000);
+    await flush();
+    expect(h.adapter.sendMessageToSession).not.toHaveBeenCalled();
+    expect(h.logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('runtime warning skipped: idle without pending work'),
+    );
+  });
+
+  it('defers an idle child at the cap and hands the next message to its successor', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxRuntimeMinutes': 5 } });
     const child = await h.startChild();
     h.markRan(child.childSessionId);
@@ -259,8 +275,21 @@ describe('SessionSpawnerService succession', () => {
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
     const predecessor = h.registry.get(child.childSessionId);
+    expect(h.spawner['runtimes'].get(child.childSessionId)?.capReached).toBe(true);
+    expect(predecessor?.terminalStatus).toBeUndefined();
+    expect(h.registry.resolveLatest(child.childSessionId)?.childSessionId).toBe(child.childSessionId);
+    expect(h.notifier.signalSessionChild).not.toHaveBeenCalled();
+
+    const result = await h.spawner.send({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+      message: 'Continue with the parser tests',
+      mode: 'queue',
+    });
+    await flush();
     const successor = h.registry.resolveLatest(child.childSessionId);
-    expect(predecessor?.terminalStatus).toBe('handed-off');
+    expect(result).toEqual({ delivered: true, effect: 'started-turn' });
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
     expect(successor?.childSessionId).not.toBe(child.childSessionId);
     expect(successor).toMatchObject({
       parentSessionId: PARENT,
@@ -269,6 +298,8 @@ describe('SessionSpawnerService succession', () => {
       succeeds: child.childSessionId,
     });
     expect(h.registry.liveCount()).toBe(1);
+    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain('Continue with the parser tests');
+    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain('runtime cap');
     expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
     expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({
       status: 'handed-off',
