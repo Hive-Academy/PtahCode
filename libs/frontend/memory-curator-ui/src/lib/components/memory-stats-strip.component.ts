@@ -16,6 +16,7 @@ export interface MemoryStatCounts {
   readonly codeIndex: number;
 }
 
+// Left raw: the Recall tile uses the theme text-info color, but ptah-stat maps info to the state color.
 @Component({
   selector: 'ptah-memory-stats-strip',
   standalone: true,

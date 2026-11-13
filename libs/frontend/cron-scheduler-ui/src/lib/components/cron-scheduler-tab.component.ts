@@ -89,6 +89,7 @@ function emptyForm(timezone: string): CronJobFormState {
   };
 }
 
+// Left raw: the Next run tile uses the theme text-info color, but ptah-stat maps info to the state color.
 @Component({
   selector: 'ptah-cron-scheduler-tab',
   standalone: true,

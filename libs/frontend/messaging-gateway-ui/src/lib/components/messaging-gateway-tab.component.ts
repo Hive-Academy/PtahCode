@@ -47,6 +47,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
   },
 ];
 
+// Left raw: the Voice tile uses the theme text-info color, but ptah-stat maps info to the state color.
 @Component({
   selector: 'ptah-messaging-gateway-tab',
   standalone: true,
