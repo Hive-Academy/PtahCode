@@ -8,6 +8,7 @@ import {
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 
+// Left raw: the compact tile has the expand toggle, delta, trend pill and select button in the header; ptah-stat cannot host them without a visible change.
 export type StatNode = Extract<DisplayNode, { kind: 'stat' }>;
 let nextStatInstance = 0;
 
