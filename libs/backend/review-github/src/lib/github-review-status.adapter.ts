@@ -52,7 +52,8 @@ export class GithubReviewStatusAdapter implements IReviewStatusPort {
           : Number.isFinite(reset) && reset > 0 ? reset * 1000 : Date.now() + 60_000;
         throw new GitHubReviewError('rate-limit', 'GitHub requests are deferred', new Date(at));
       }
-      if (response.status === 403) throw new GitHubReviewError('permission', 'GitHub bot lacks permission');
+      if (response.status === 403) throw new GitHubReviewError('permission',
+        'GitHub bot token cannot access commit statuses. Grant it the "Commit statuses: Read and write" repository permission');
       if (!response.ok) throw new GitHubReviewError('http', `GitHub returned HTTP ${response.status}`);
       const text = await response.text();
       if (text.length > MAX_BYTES) throw new GitHubReviewError('malformed-response', 'GitHub response is too large');
