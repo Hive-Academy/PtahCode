@@ -68,7 +68,7 @@ import {
   cloneActionModel,
   cloneStatusLabel,
   formatHistoryTimestamp,
-  formatRelative,
+  formatCloneAge,
   formatSuccessRate,
 } from './clone-action-gating';
 
@@ -688,7 +688,7 @@ export class CloneDetailDrawerComponent {
     if (clone.lastEnhancedAt !== null) {
       out.push({
         label: 'Last enhanced',
-        value: formatRelative(clone.lastEnhancedAt),
+        value: formatCloneAge(clone.lastEnhancedAt),
         testId: 'clone-metric-last-enhanced',
       });
     }
