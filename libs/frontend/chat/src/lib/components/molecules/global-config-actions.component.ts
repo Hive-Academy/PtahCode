@@ -39,9 +39,8 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
         type="button"
         ptahIconButton [label]="item.label"
         [attr.data-test]="'config-menu-item-' + (item.testId ?? item.id)"
-        [attr.aria-current]="
-          openConfigurationSurface() === item.id ? 'true' : null
-        "
+        [selected]="openConfigurationSurface() === item.id"
+        selectedAs="current"
         (click)="selectItem(item.id)"
       >
         <lucide-angular [img]="item.icon" class="w-4 h-4" aria-hidden="true" />
