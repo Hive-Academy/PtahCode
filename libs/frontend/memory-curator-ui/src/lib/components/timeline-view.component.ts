@@ -10,7 +10,7 @@ import type { MemoryIndexRow } from '@ptah-extension/shared';
 import { TimelineStateService } from '../services/timeline-state.service';
 
 import { TimelineFiltersComponent } from './timeline-filters.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 /**
  * TimelineViewComponent
@@ -28,7 +28,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
   selector: 'ptah-timeline-view',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, CommonModule, TimelineFiltersComponent],
+  imports: [PtahButtonDirective, PtahSurfaceDirective, CommonModule, TimelineFiltersComponent],
   template: `
     <div class="flex h-full w-full flex-col gap-3">
       <ptah-timeline-filters />
@@ -63,7 +63,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         data-testid="thoth-section-memory-timeline"
       >
         @if (state.loading() && state.rows().length === 0) {
-          <div class="overflow-hidden surface-2 rounded-xl">
+          <div ptahSurface variant="surface-2" padding="none" class="overflow-hidden rounded-xl">
             <div class="divide-y divide-surface-border">
               @for (n of skeletonRows; track n) {
                 <div class="flex flex-col gap-2 px-4 py-3">
@@ -82,7 +82,8 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           </div>
         } @else {
           <ul
-            class="divide-y divide-surface-border overflow-hidden surface-2 rounded-xl"
+            ptahSurface variant="surface-2" padding="none"
+            class="divide-y divide-surface-border overflow-hidden rounded-xl"
           >
             @for (row of state.rows(); track row.id) {
               <li

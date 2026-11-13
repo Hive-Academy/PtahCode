@@ -38,6 +38,7 @@ import {
   PtahIconButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
+  PtahSurfaceDirective,
   PtahTextareaDirective,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
@@ -104,6 +105,7 @@ function emptyForm(timezone: string): CronJobFormState {
     PtahFieldComponent,
     PtahInputDirective,
     PtahSelectDirective,
+    PtahSurfaceDirective,
     PtahTextareaDirective,
     PtahToggleDirective,
   ],
@@ -134,7 +136,8 @@ function emptyForm(timezone: string): CronJobFormState {
     } @else {
       <div class="space-y-6" data-testid="cron-scheduler-section">
         <header
-          class="surface-1 flex flex-wrap items-start justify-between gap-3 rounded-xl p-5"
+          ptahSurface variant="surface-1" padding="lg"
+          class="flex flex-wrap items-start justify-between gap-3 rounded-xl"
         >
           <div class="flex items-start gap-3">
             <span
@@ -224,7 +227,7 @@ function emptyForm(timezone: string): CronJobFormState {
           class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3"
           aria-label="Cron statistics"
         >
-          <div class="stats surface-2 min-w-0 overflow-hidden">
+          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-primary">
                 <lucide-angular
@@ -247,7 +250,7 @@ function emptyForm(timezone: string): CronJobFormState {
             </div>
           </div>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
+          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-success">
                 <lucide-angular
@@ -270,7 +273,7 @@ function emptyForm(timezone: string): CronJobFormState {
             </div>
           </div>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
+          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-base-content-muted">
                 <lucide-angular
@@ -293,7 +296,7 @@ function emptyForm(timezone: string): CronJobFormState {
             </div>
           </div>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
+          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-info">
                 <lucide-angular
@@ -375,7 +378,8 @@ function emptyForm(timezone: string): CronJobFormState {
 
         @if (formOpen()) {
           <section
-            class="surface-1 overflow-hidden rounded-xl p-5"
+            ptahSurface variant="surface-1" padding="lg"
+            class="overflow-hidden rounded-xl"
             aria-label="Job editor"
             data-testid="cron-form"
           >
