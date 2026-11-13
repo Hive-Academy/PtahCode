@@ -88,7 +88,6 @@ function emptyForm(timezone: string): CronJobFormState {
   };
 }
 
-// Left raw: ptah-stat has no value-tone colour input, so adopting it would drop the tone colours.
 @Component({
   selector: 'ptah-cron-scheduler-tab',
   standalone: true,

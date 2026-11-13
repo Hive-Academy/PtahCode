@@ -16,7 +16,6 @@ export interface MemoryStatCounts {
   readonly codeIndex: number;
 }
 
-// Left raw: ptah-stat has no value-tone colour input, so adopting it would drop the tone colours.
 @Component({
   selector: 'ptah-memory-stats-strip',
   standalone: true,

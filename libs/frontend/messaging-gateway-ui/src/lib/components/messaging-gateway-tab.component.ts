@@ -47,7 +47,6 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
   },
 ];
 
-// Left raw: ptah-stat has no value-tone colour input, so adopting it would drop the tone colours.
 @Component({
   selector: 'ptah-messaging-gateway-tab',
   standalone: true,
