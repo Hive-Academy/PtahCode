@@ -25,6 +25,7 @@ const RADIAL_TONE_CLASSES = {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!-- Keep daisyUI radial progress: the owner SVG ring differs in geometry and tone. -->
     <!-- Visible label text; the ring is sized by its content and filled by the renderer-owned --value custom property. -->
     <span class="text-sm text-base-content" data-testid="radial-progress-label">{{ node().label.text }}</span>
     <div [class]="toneClasses()" role="progressbar" aria-valuemin="0" aria-valuemax="100"
