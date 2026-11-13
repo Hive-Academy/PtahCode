@@ -315,6 +315,8 @@ export interface AgentProcessInfo {
    * `filtered` means this executor applied that list to its built-in tools.
    */
   readonly toolProfileAdapter?: import('./phase-contract.types').ToolProfileAdapterResultV1;
+  /** Phase assigned when this lane was spawned. */
+  readonly phaseKind?: import('./phase-contract.types').PhaseKind;
 }
 
 const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;

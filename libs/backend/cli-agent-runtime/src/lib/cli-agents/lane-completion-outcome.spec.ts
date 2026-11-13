@@ -31,18 +31,7 @@ describe('recordLaneUsageOutcome model attribution', () => {
   it('records lane executor and phase dimensions', () => {
     const records: SessionUsageContribution[] = [];
     const sink: SessionUsageSink = { recordUsage: (value) => { records.push(value); } };
-    const toolProfile = { disallowedTools: [], permission: 'allow' as const };
-    const phasedInfo = { ...info, phase: {
-      version: 1, kind: 'implement', text: 'work',
-      toolProfile,
-      definition: {
-        version: 1, kind: 'implement', input: [], deliverable: [],
-        verdict: [], acceptanceStep: [], requiredCapabilities: [],
-        toolProfile,
-        discipline: { method: '', outputContract: '', returnValue: '',
-          refusals: '', escalationProtocol: '' },
-      },
-    } };
+    const phasedInfo: AgentProcessInfo = { ...info, phaseKind: 'implement' };
     recordLaneUsageOutcome(sink, logger, phasedInfo, '2026-11-08T00:01:00.000Z', {
       inputTokens: 1, outputTokens: 1,
     });

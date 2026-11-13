@@ -7,16 +7,9 @@ import type {
   PhaseKind,
   ToolProfileAdapterResultV1,
 } from '@ptah-extension/shared';
-import { PHASE_KINDS } from '@ptah-extension/shared';
-import { z } from 'zod';
-
-const phasedInfoSchema = z.object({
-  phase: z.object({ kind: z.enum(PHASE_KINDS) }),
-});
 
 export function phaseKindFromAgentInfo(info: AgentProcessInfo): PhaseKind | null {
-  const parsed = phasedInfoSchema.safeParse(info);
-  return parsed.success ? parsed.data.phase.kind : null;
+  return info.phaseKind ?? null;
 }
 
 export interface LaneCompletionResultInput {

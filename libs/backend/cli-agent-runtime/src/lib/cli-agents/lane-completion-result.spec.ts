@@ -1,6 +1,16 @@
-import { buildLaneCompletionResult, buildSessionCompletionResult } from './lane-completion-result';
+import { AgentId, type AgentProcessInfo } from '@ptah-extension/shared';
+import { buildLaneCompletionResult, buildSessionCompletionResult, phaseKindFromAgentInfo } from './lane-completion-result';
 
 describe('executor completion result', () => {
+  it('reads the typed phase from a stored lane record', () => {
+    const info: AgentProcessInfo = {
+      agentId: AgentId.create(), cli: 'claude', task: 'task',
+      workingDirectory: '/workspace', status: 'completed',
+      startedAt: '2026-11-08T00:00:00.000Z', phaseKind: 'implement',
+    };
+    expect(phaseKindFromAgentInfo({ ...info })).toBe('implement');
+    expect(phaseKindFromAgentInfo({ ...info, phaseKind: undefined })).toBeNull();
+  });
   it('keeps a phase-free lane verdict and parent signal', () => {
     const result = buildLaneCompletionResult({
       signal: { verdict: 'unverified', deliverables: [] },

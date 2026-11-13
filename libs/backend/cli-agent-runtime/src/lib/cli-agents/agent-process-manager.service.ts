@@ -986,6 +986,7 @@ export class AgentProcessManager {
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
       effectivePolicy: options.effectivePolicy,
+      ...(request.phase ? { phaseKind: request.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
@@ -1273,6 +1274,7 @@ export class AgentProcessManager {
           : {}),
         ...meta.roleStamp,
         ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
+        ...(meta.phase ? { phaseKind: meta.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
       };
       const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
       const effectiveChannel = sdkHandle.getRoleDelivery?.();

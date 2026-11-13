@@ -544,6 +544,11 @@ export class SubagentHookHandler {
           input.session_id,
           parentSessionId,
         );
+        const completion = buildSdkSubagentCompletion({
+          agentId: input.agent_id,
+          agentType: input.agent_type || record?.agentType || null,
+          parentSessionId: resolvedParentSessionId,
+        });
         // Transcript path, parent session and cwd are optional metadata; every
         // stop with an agent id is fanned out.
         try {
@@ -555,6 +560,7 @@ export class SubagentHookHandler {
             agentType: input.agent_type || record?.agentType || null,
             transcriptPath,
             timestamp: Date.now(),
+            completion,
           });
         } catch (notifyError: unknown) {
           this.logger.warn(
@@ -575,28 +581,12 @@ export class SubagentHookHandler {
         }
       }
 
-      const completion = input.agent_id
-        ? buildSdkSubagentCompletion({
-            agentId: input.agent_id,
-            agentType: input.agent_type || record?.agentType || null,
-            parentSessionId: this.resolveParentSessionId(
-              input.session_id,
-              parentSessionId,
-            ),
-          })
-        : null;
       this.logger.debug(
         '[SubagentHookHandler] SubagentStop processed successfully',
         {
           agentId: input.agent_id,
           toolUseId,
           isBackground,
-          ...(completion
-            ? {
-                verdict: completion.verdict,
-                phaseKind: completion.phaseKind,
-              }
-            : {}),
         },
       );
     } catch (error) {

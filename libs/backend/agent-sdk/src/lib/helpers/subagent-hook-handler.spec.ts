@@ -92,6 +92,23 @@ function getStopCallback(
 const VALID_UUID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
 
 describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
+  it('does not publish a completion without an agent id', async () => {
+    const logger = makeLogger();
+    const stopRegistry = new SubagentStopCallbackRegistry(logger);
+    const callback = jest.fn();
+    stopRegistry.register(callback);
+    const handler = new SubagentHookHandler(
+      logger, makeRegistry(null), stopRegistry, new SessionStatsOwnerService(),
+    );
+    const stop = getStopCallback(handler, '/workspace', 'parent-sess-1');
+    await stop({
+      hook_event_name: 'SubagentStop', session_id: 'parent-sess-1',
+      agent_id: '', agent_type: '', stop_hook_active: false,
+    } as HookInput, 'tu-1', {
+      signal: new AbortController().signal,
+    });
+    expect(callback).not.toHaveBeenCalled();
+  });
   it('reports background from registry and unknown when the SDK hook has no record', async () => {
     for (const [record, expected] of [[{ isBackground: true }, true], [null, null]] as const) {
       const logger = makeLogger();
@@ -151,6 +168,9 @@ describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
         agentId: 'agent-xyz',
         agentType: 'backend-developer',
         transcriptPath: `/tmp/transcripts/${VALID_UUID}.jsonl`,
+        completion: expect.objectContaining({
+          executorId: 'sdk-subagent', verdict: 'unverified', phaseKind: null,
+        }),
       }),
     );
   });

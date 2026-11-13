@@ -693,6 +693,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       });
       expect(manager.getStatus(codex.agentId)).toMatchObject({
         toolProfileAdapter: codex.toolProfileAdapter,
+        phaseKind: 'implement',
       });
       expect(mcpCredentials.issue).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -715,6 +716,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         executorId: 'claude',
         toolProfileStatus: 'unfiltered',
       });
+      expect(manager.getStatus(claude.agentId)).toMatchObject({ phaseKind: 'implement' });
       expect(mcpCredentials.issue).not.toHaveBeenCalled();
 
       const open = await manager.spawn({
@@ -724,6 +726,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         phase: phaseDispatch([]),
       });
       expect(open.toolProfileAdapter).toBeUndefined();
+      expect(manager.getStatus(open.agentId)).toMatchObject({ phaseKind: 'implement' });
       expect(manager.getStatus(open.agentId)).not.toHaveProperty(
         'toolProfileAdapter',
       );
@@ -740,6 +743,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         workingDirectory: '/workspace/root',
       });
       expect(plain.toolProfileAdapter).toBeUndefined();
+      expect(manager.getStatus(plain.agentId)).not.toHaveProperty('phaseKind');
       expect(mcpCredentials.issue.mock.calls.at(-1)?.[0]).not.toHaveProperty(
         'phaseKind',
       );
@@ -761,6 +765,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         executorId: 'ptah-cli',
         toolProfileStatus: 'unfiltered',
       });
+      expect(manager.getStatus(ptahCli.agentId)).toMatchObject({ phaseKind: 'implement' });
       const appliedPtahCli = await manager.spawnFromSdkHandle(
         createMockSdkHandle().handle,
         {
