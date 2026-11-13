@@ -5,11 +5,8 @@ import {
   input,
 } from '@angular/core';
 
-import { formatDuration } from '@ptah-extension/ui';
+import { formatDuration, PtahRingComponent } from '@ptah-extension/ui';
 
-import { ProgressRingComponent } from './progress-ring.component';
-
-// Left raw: it wraps ptah-progress-ring, which stays private (no ptah-ring size matches the 56 px value row).
 /** The plan-window reading a plan ring draws. `percent` is 0-100. */
 export interface PlanRingData {
   readonly percent: number;
@@ -36,22 +33,35 @@ export function planRingCaption(ring: PlanRingData): string {
 
 /**
  * PlanRingComponent — the teal plan-usage ring of the vitals rows. A thin
- * wrapper over `ptah-progress-ring` (`size='value'`, percent as centre text).
+ * wrapper over `ptah-ring` (`size='row'`, percent as centre text).
  * Renders nothing when `ring` is null or its percent is not a finite number.
  */
 @Component({
   selector: 'ptah-plan-ring',
   standalone: true,
-  imports: [ProgressRingComponent],
+  imports: [PtahRingComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'contents' },
   template: `
     @if (percent() !== null) {
-      <ptah-progress-ring
-        [value]="fraction()"
+      <ptah-ring
+        style="font-weight: 600"
+        [value]="percent()!"
+        [max]="100"
+        [label]="ariaLabel()"
         [centerText]="centerText()"
-        tone="teal"
-        size="value"
+        size="row"
+        [centerOnly]="true"
+        [semanticRole]="'img'"
+        [stroke]="3.857142857142857"
+        [radius]="16.071428571428573"
+        [trackColor]="'oklch(var(--bc) / 0.12)'"
+        [arcColor]="'oklch(var(--a))'"
+        [hideZeroArc]="true"
+        [fadeArc]="true"
+        [boxSize]="'var(--ptah-stat-value-h, 56px)'"
+        [centerTextSize]="'calc(var(--ptah-stat-value-h, 56px) * 0.25)'"
+        [centerTextColor]="'oklch(var(--bc))'"
         [ariaLabel]="ariaLabel()"
       />
     }
@@ -67,7 +77,6 @@ export class PlanRingComponent {
     return Math.round(Math.min(100, Math.max(0, ring.percent)));
   });
 
-  protected readonly fraction = computed(() => (this.percent() ?? 0) / 100);
   protected readonly centerText = computed(() => `${this.percent() ?? 0}%`);
   protected readonly ariaLabel = computed(() => {
     const ring = this.ring();

@@ -65,7 +65,7 @@ describe('PlanRingComponent', () => {
   it('renders nothing when the ring is null', () => {
     render(null);
 
-    expect(host.querySelector('ptah-progress-ring')).toBeNull();
+    expect(host.querySelector('ptah-ring')).toBeNull();
   });
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
@@ -73,18 +73,22 @@ describe('PlanRingComponent', () => {
     (percent) => {
       render({ percent, label: '5h window', resetsInMs: HOUR });
 
-      expect(host.querySelector('ptah-progress-ring')).toBeNull();
+      expect(host.querySelector('ptah-ring')).toBeNull();
     },
   );
 
-  it('wraps a teal value-size ring with the percent as centre text', () => {
+  it('draws a teal value-size ring with the percent as centre text', () => {
     render({ percent: 38.4, label: '5h window', resetsInMs: 2 * HOUR });
 
-    const ring = host.querySelector('ptah-progress-ring') as HTMLElement;
-    expect(ring.getAttribute('data-tone')).toBe('teal');
-    expect(ring.getAttribute('data-size')).toBe('value');
-    expect(ring.querySelector('.ptah-ring__value')?.textContent).toBe('38%');
-    expect(ring.getAttribute('aria-label')).toBe(
+    const ring = host.querySelector<HTMLElement>('ptah-ring');
+    if (!ring) throw new Error('ptah-ring missing');
+    expect(ring.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 36 36');
+    const circles = ring.querySelectorAll<SVGCircleElement>('circle');
+    expect(circles[1]?.getAttribute('stroke-width')).toBe('3.857142857142857');
+    expect(circles[1]?.getAttribute('stroke-dasharray')).toBe('38 100');
+    expect(circles[1]?.style.color).toBe('oklch(var(--a))');
+    expect(ring.querySelector('span[aria-hidden="true"]')?.textContent).toContain('38%');
+    expect(ring.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
       '38% used. 5h window · resets in 2h',
     );
   });
@@ -93,12 +97,12 @@ describe('PlanRingComponent', () => {
     render({ percent: 50, label: '5h window', resetsInMs: HOUR });
 
     expect(host.textContent).not.toContain('5h window');
-    expect(host.querySelector('.ptah-ring__sub')).toBeNull();
+    expect(host.querySelector('ptah-ring')?.textContent).toBe('50%');
   });
 
   it('clamps the percent to 0-100', () => {
     render({ percent: 140, label: 'Weekly', resetsInMs: null });
 
-    expect(host.querySelector('.ptah-ring__value')?.textContent).toBe('100%');
+    expect(host.querySelector('ptah-ring')?.textContent).toBe('100%');
   });
 });
