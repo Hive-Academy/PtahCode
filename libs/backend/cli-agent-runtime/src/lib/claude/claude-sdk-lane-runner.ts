@@ -222,6 +222,10 @@ export class ClaudeSdkLaneRunner {
       },
       onSegment,
       onStreamEvent,
+      // The stream loop emits one per-turn delta segment for each SDK result.
+      outcomeUsageIsTurnTotal: true,
+      usageScope: 'turn',
+      getObservedNativeThreadId: () => resolvedSessionId ?? undefined,
       onSessionResolved: (callback) => {
         sessionResolvedCallbacks.push(callback);
         if (resolvedSessionId) {
