@@ -105,8 +105,65 @@ describe('PtahRingComponent inputs', () => {
     expect(arc(render({ value: 85, thresholds, tone: 'ok' }))?.classList.contains('text-state-done')).toBe(true);
   });
 
+  it('normalizes reversed and non-finite thresholds', () => {
+    expect(arc(render({ value: 70, thresholds: { warn: 90, danger: 60 } }))?.classList.contains('text-state-err')).toBe(true);
+    expect(arc(render({ value: 85, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-need')).toBe(true);
+    expect(arc(render({ value: 100, thresholds: { warn: Number.NaN, danger: Infinity } }))?.classList.contains('text-state-err')).toBe(true);
+  });
+
+  it('keeps default geometry, track, role and quarter-arc pulse', () => {
+    const el = render({ value: 25 });
+    const circles = el.querySelectorAll('circle');
+    expect(circles[0].getAttribute('stroke-width')).toBe('4');
+    expect(circles[1].getAttribute('stroke-width')).toBe('4');
+    expect(circles[0].getAttribute('r')).toBe('15');
+    expect(circles[0].classList.contains('text-[var(--ptah-ring-track,var(--surface-border-strong))]')).toBe(true);
+    expect(el.querySelector('[role="meter"]')?.getAttribute('aria-label')).toBe('Context');
+    const pending = render({ value: 0, max: 0, indeterminate: true });
+    expect(pending.querySelector('.ring-pulse')).toBeNull();
+    expect(arc(pending)?.getAttribute('stroke-dasharray')).toBe('25 100');
+  });
+
+  it('supports consumer geometry, colors, label and core pulse', () => {
+    const el = render({ value: 50, size: 'row', stroke: 3.86, radius: 16.07, trackColor: 'oklch(var(--bc) / 0.12)', arcColor: 'oklch(var(--a))', semanticRole: 'img', ariaLabel: 'Half used' });
+    expect(el.querySelector('circle')?.getAttribute('stroke-width')).toBe('3.86');
+    expect(arc(el)?.getAttribute('stroke-width')).toBe('3.86');
+    expect(arc(el)?.getAttribute('r')).toBe('16.07');
+    expect(el.querySelector('circle')?.getAttribute('style')).toContain('color:');
+    expect(arc(el)?.getAttribute('style')).toContain('color:');
+    expect(el.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Half used');
+    expect(el.querySelector('[role="img"]')?.hasAttribute('aria-valuenow')).toBe(false);
+    const pending = render({ value: 0, max: 0, indeterminate: true, pulseStyle: 'core' });
+    expect(pending.querySelector('.ring-pulse')).not.toBeNull();
+    expect(arc(pending)).toBeNull();
+  });
+
+  it('allows consumer center colors, font size and hidden zero arc', () => {
+    const el = render({ value: 0, centerText: '0/3', subText: 'ready', centerTextSize: '28px', centerTextColor: 'oklch(var(--bc))', subTextColor: 'oklch(var(--bc) / 0.7)', hideZeroArc: true });
+    expect(arc(el)?.getAttribute('opacity')).toBe('0');
+    const spans = el.querySelectorAll('.absolute span');
+    expect(spans[0].getAttribute('style')).toContain('font-size: 28px');
+    expect(spans[0].getAttribute('style')).toContain('color:');
+    expect(spans[1].getAttribute('style')).toContain('color:');
+    expect(arc(render({ value: 0 }))?.getAttribute('opacity')).toBeNull();
+    expect(render({ value: 25 }).querySelector('.absolute span')?.getAttribute('style')?.trim() ?? '').toBe('');
+  });
+
+  it('allows compact box sizing, subline gap and arc fade without changing defaults', () => {
+    const el = render({ value: 50, size: 'row', boxSize: '52px', subText: 'ready', subTextGap: '4px', fadeArc: true });
+    expect(box(el).getAttribute('style')).toContain('width: 52px');
+    expect(box(el).getAttribute('style')).toContain('height: 52px');
+    expect(el.querySelector('.absolute span:last-child')?.getAttribute('style')).toContain('margin-top: 4px');
+    expect(arc(el)?.classList.contains('fade-arc')).toBe(true);
+    const standard = render({ value: 50, size: 'row', subText: 'ready' });
+    expect(box(standard).getAttribute('style')?.trim() ?? '').toBe('');
+    expect(standard.querySelector('.absolute span:last-child')?.getAttribute('style')?.trim() ?? '').toBe('');
+    expect(arc(standard)?.classList.contains('fade-arc')).toBe(false);
+  });
+
   it.each([
     ['stat', 'h-8'],
+    ['row', 'h-14'],
     ['lg', 'h-[var(--ptah-ring-size-lg,6rem)]'],
     ['xl', 'h-[var(--ptah-ring-size-xl,7rem)]'],
     ['md', 'h-16'],
@@ -116,7 +173,12 @@ describe('PtahRingComponent inputs', () => {
 
   it('shows center text at stat size and hides its sub text', () => {
     const el = render({ value: 25, size: 'stat', centerText: '25', subText: 'pts' });
-    expect(el.querySelector('.absolute')?.classList.contains('text-[0.5rem]')).toBe(true);
+    expect(el.querySelector('.absolute')?.classList.contains('text-[0.625rem]')).toBe(true);
     expect(el.querySelector('.absolute .hidden')?.textContent).toBe('pts');
+  });
+
+  it('omits a percent too wide for stat, but shows a short percent', () => {
+    expect(render({ value: 25, size: 'stat', centerOnly: true }).textContent?.trim()).toBe('');
+    expect(render({ value: 9, size: 'stat', centerOnly: true }).textContent?.trim()).toBe('9%');
   });
 });

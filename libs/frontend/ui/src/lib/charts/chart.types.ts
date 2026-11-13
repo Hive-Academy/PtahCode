@@ -13,7 +13,7 @@ export type PtahMeterRole = 'meter' | 'progressbar';
 export type PtahChartSize = 'xs' | 'sm' | 'md';
 
 /** Footprint of a ring: the chart sizes plus `stat`, `lg` and `xl`. Meter and sparkline keep `PtahChartSize`. */
-export type PtahRingSize = PtahChartSize | 'stat' | 'lg' | 'xl';
+export type PtahRingSize = PtahChartSize | 'stat' | 'row' | 'lg' | 'xl';
 
 /** Percent cut-offs for the ring's automatic warn and danger inks. */
 export interface PtahRingThresholds {
