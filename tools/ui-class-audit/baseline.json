@@ -286,7 +286,7 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/molecules/notifications/session-budget-banner.component.ts": {
-    "<dynamic>": 6
+    "<dynamic>": 3
   },
   "libs/frontend/chat/src/lib/components/molecules/peer-session-send/peer-session-send-dialog.component.ts": {
     "alert": 2,
