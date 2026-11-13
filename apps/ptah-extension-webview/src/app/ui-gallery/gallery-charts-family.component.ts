@@ -97,14 +97,6 @@ import { GallerySectionComponent } from './gallery-section.component';
             <span class="text-ptah-caption text-base-content-muted">size: row (56px)</span>
             <ptah-ring [value]="62" [max]="100" label="Row size" size="row" />
           </div>
-          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-geometry">
-            <span class="text-ptah-caption text-base-content-muted">stroke: 7; radius: 12</span>
-            <ptah-ring [value]="72" [max]="100" label="Thick, compact arc" size="md" [stroke]="7" [radius]="12" />
-          </div>
-          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-colors">
-            <span class="text-ptah-caption text-base-content-muted">trackColor: violet; arcColor: cyan</span>
-            <ptah-ring [value]="72" [max]="100" label="Custom arc colors" size="md" trackColor="#8b5cf6" arcColor="#06b6d4" />
-          </div>
           <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-semantics">
             <span class="text-ptah-caption text-base-content-muted">ariaLabel: Completion image; semanticRole: img</span>
             <ptah-ring [value]="72" [max]="100" label="Completion" size="md" ariaLabel="Completion image" semanticRole="img" />
@@ -114,12 +106,12 @@ import { GallerySectionComponent } from './gallery-section.component';
             <ptah-ring [value]="0" [max]="0" label="Core pulse image" size="md" [indeterminate]="true" pulseStyle="core" indeterminateRole="img" />
           </div>
           <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-center-typography">
-            <span class="text-ptah-caption text-base-content-muted">centerTextSize: 20px; centerTextWeight: semibold; centerTextColor: violet; subTextSize: 10px; subTextWeight: medium; subTextColor: cyan; subTextGap: 4px</span>
-            <ptah-ring [value]="72" [max]="100" label="Custom center typography" size="lg" centerText="72" subText="pts" centerTextSize="20px" centerTextWeight="semibold" centerTextColor="#8b5cf6" subTextSize="10px" subTextWeight="medium" subTextColor="#06b6d4" subTextGap="4px" />
+            <span class="text-ptah-caption text-base-content-muted">centerTextWeight: semibold; subTextWeight: medium</span>
+            <ptah-ring [value]="72" [max]="100" label="Center weights" size="lg" centerText="72" subText="pts" centerTextWeight="semibold" subTextWeight="medium" />
           </div>
-          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-box-size">
-            <span class="text-ptah-caption text-base-content-muted">boxSize: 80px</span>
-            <ptah-ring [value]="72" [max]="100" label="Custom box size" boxSize="80px" />
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-tile-size">
+            <span class="text-ptah-caption text-base-content-muted">size: tile (follows the stat value height)</span>
+            <ptah-ring [value]="72" [max]="100" label="Tile size" size="tile" tone="accent" [centerOnly]="true" centerTextWeight="semibold" />
           </div>
           <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-hide-zero-arc">
             <span class="text-ptah-caption text-base-content-muted">hideZeroArc: true (empty track)</span>

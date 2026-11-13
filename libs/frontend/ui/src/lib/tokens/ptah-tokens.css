@@ -398,6 +398,8 @@
 [data-theme] {
   /* Track behind the ring arc. Same value the ring used before. */
   --ptah-ring-track: var(--surface-border-strong);
+  /* Softer track of the stat tile ring (size `tile`). */
+  --ptah-ring-track-soft: oklch(var(--bc) / 0.12);
   /* Sizes beyond xs, sm and md (24, 40 and 64 px). */
   --ptah-ring-size-lg: 6rem;
   --ptah-ring-size-xl: 7rem;
