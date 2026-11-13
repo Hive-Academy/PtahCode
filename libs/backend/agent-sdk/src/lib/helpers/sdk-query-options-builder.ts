@@ -26,6 +26,7 @@ import {
   type IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
 import { MemoryPromptInjector } from './memory-prompt-injector';
+import { SkillPathRefusalError } from './skill-path-refusal.error';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
 import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
 import {
@@ -1064,7 +1065,11 @@ export function withPhaseDelivery(
   skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[],
 ): Options['systemPrompt'] {
   if (!phase && !skills?.length) return systemPrompt;
-  const preset = systemPrompt as Extract<Options['systemPrompt'], { type: 'preset' }>;
+  if (!systemPrompt || typeof systemPrompt !== 'object' ||
+      Array.isArray(systemPrompt) || systemPrompt.type !== 'preset') {
+    throw new SdkError('Phase delivery requires a preset system prompt.');
+  }
+  const preset = systemPrompt;
   return {
     ...preset,
     append: [preset.append, phase?.text, ...(skills ?? phase?.skills ?? []).map(skill => {
@@ -1073,7 +1078,7 @@ export function withPhaseDelivery(
 
       const candidate = resolve(cwd, skill.path);
       if (!isInsideRoot(candidate, cwd)) {
-        throw new Error('Skill path is outside the session workspace');
+        throw new SkillPathRefusalError();
       }
 
       let realCandidate: string;
@@ -1084,13 +1089,16 @@ export function withPhaseDelivery(
         // file is skipped by design (decision O-6); the phase text still applies.
         return undefined;
       }
+      let realCwd: string;
       try {
-        if (!isInsideRoot(realCandidate, realpathSync(cwd))) {
-          throw new Error('Skill path is outside the session workspace');
-        }
-      } catch (e) {
-        if (e instanceof Error && e.message.includes('outside the session workspace')) throw e;
+        realCwd = realpathSync(cwd);
+      } catch {
+        // degradation-audit: optional-capability - an unresolved workspace
+        // real path skips this optional skill; the phase text still applies.
         return undefined;
+      }
+      if (!isInsideRoot(realCandidate, realCwd)) {
+        throw new SkillPathRefusalError();
       }
       try {
         return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
@@ -1496,9 +1504,15 @@ export class SdkQueryOptionsBuilder {
     );
     const builtinPolicy = resolveClaudeBuiltinPolicy(builtinOptIns);
     // Preserve Claude preset denials and apply the phase profile to every route.
+    if (phase && (!phase.toolProfile || !Array.isArray(phase.toolProfile.disallowedTools))) {
+      throw new SdkError('Phase tool profile requires a disallowedTools array.');
+    }
+    const phaseDisallowedTools = phase
+      ? uniqueNames([...phase.toolProfile.disallowedTools])
+      : undefined;
     const disallowedTools = uniqueNames([
       ...builtinPolicy.disallowedTools,
-      ...(phase?.toolProfile?.disallowedTools ?? []),
+      ...(phaseDisallowedTools ?? []),
     ]);
     // The host env var wins inside the SDK (it inherits `process.env` below);
     // `sdkValue` still follows the setting so clearing the env restores it.
@@ -1628,6 +1642,7 @@ export class SdkQueryOptionsBuilder {
           cwd,
           abortController.signal,
           phase,
+          phaseDisallowedTools,
         ),
         mcpServersOverride,
       ),
@@ -2311,6 +2326,7 @@ export class SdkQueryOptionsBuilder {
     cwd?: string,
     signal?: AbortSignal,
     phase?: import('@ptah-extension/shared').PhaseDispatchV1,
+    phaseDisallowedTools?: readonly string[],
   ): Record<string, McpHttpServerConfig> {
     if (!mcpServerRunning) {
       this.logger.info(
@@ -2351,7 +2367,7 @@ export class SdkQueryOptionsBuilder {
         ...(toolProfile === 'apps' ? { toolProfile: 'apps' as const } : {}),
         ...(phase ? {
           phaseKind: phase.kind,
-          disallowedTools: phase.toolProfile.disallowedTools,
+          disallowedTools: phaseDisallowedTools,
         } : {}),
         capability: 'privileged',
       },
