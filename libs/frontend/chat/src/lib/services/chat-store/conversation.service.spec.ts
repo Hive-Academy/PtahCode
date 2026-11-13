@@ -666,7 +666,6 @@ describe('ConversationService', () => {
 
       expect(rpcCall).toHaveBeenCalledWith('chat:running-agents', {
         sessionId: 'session-inspector',
-        source: 'stop-button',
       });
       expect(rpcCall).toHaveBeenCalledWith('chat:abort', {
         sessionId: 'session-inspector',

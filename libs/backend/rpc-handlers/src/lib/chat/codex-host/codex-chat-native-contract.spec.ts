@@ -1053,7 +1053,7 @@ describe('Native Codex chat contracts end to end', () => {
     }
   });
 
-  it('settles a stop during approval as a user abort and releases the prompt by wire id', async () => {
+  it('settles a stop during approval as a quiet abort and releases the prompt by wire id', async () => {
     const h = codexHarness();
     h.server.interrupt.mockImplementation(async () => {
       h.server.notify(turnCompleted());
@@ -1089,12 +1089,14 @@ describe('Native Codex chat contracts end to end', () => {
       await h.adapter.interruptSession(THREAD);
       await streaming;
 
-      // The turn stream ends with a cancellation, which the broadcaster
-      // classifies as a user abort: no chat:error, no Sentry report.
+      // The turn stream ends with a cancellation: no chat:error, no Sentry
+      // report. The broadcaster cannot see who stopped the turn, so it records
+      // `internal-abort`; only chat:abort with a user source records user-stop.
       expect(isCodexChatAdapterError(observed.error)).toBe(true);
       expect(observed.error).toMatchObject({ code: 'cancelled' });
       expect(h.streamLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('aborted by user'),
+        expect.stringContaining('stream aborted after'),
+        { endCause: 'internal-abort' },
       );
       expect(h.streamLogger.error).not.toHaveBeenCalled();
       expect(h.sentry.captureException).not.toHaveBeenCalled();
