@@ -177,6 +177,8 @@ export class GalleryCardFamilyComponent {
     subtle: 'Quieter plane. Surface-1 fill.',
     inset: 'Nested block. Base-100 fill, 8 px radius.',
     raised: 'Floats over the page. Surface-3 fill and a shadow.',
+    'surface-1': 'Glass plane. Surface-1 fill, surface border and highlight.',
+    'surface-2': 'Raised plane. Surface-2 fill, surface border and highlight.',
     legacy: 'Temporary exception. Old surface-2 look. Not for new use.',
   };
   public readonly activations = signal(0);
