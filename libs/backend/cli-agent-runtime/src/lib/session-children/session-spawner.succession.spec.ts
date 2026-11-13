@@ -13,6 +13,19 @@ const flush = async (): Promise<void> => {
   for (let i = 0; i < 50; i++) await Promise.resolve();
 };
 
+// An idle child without pending work defers its runtime-cap handoff until the
+// next parent message. Succession-mechanics tests send that message after the cap.
+const messageAfterCap = (
+  h: ReturnType<typeof makeHarness>,
+  childSessionId: string,
+): ReturnType<ReturnType<typeof makeHarness>['spawner']['send']> =>
+  h.spawner.send({
+    callerSessionId: PARENT,
+    childSessionId,
+    message: 'Continue after the cap',
+    mode: 'queue',
+  });
+
 describe('SessionSpawnerService succession', () => {
   it('closes only the retired predecessor after stop resolves', async () => {
     const closer = { close: jest.fn().mockResolvedValue({ kind: 'closed' }) };
@@ -31,6 +44,8 @@ describe('SessionSpawnerService succession', () => {
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'idle');
     jest.advanceTimersByTime(5 * 60_000);
+    await flush();
+    void messageAfterCap(h, child.childSessionId);
     await flush();
     const successor = h.registry.resolveLatest(child.childSessionId);
     expect(closer.close).not.toHaveBeenCalled();
@@ -76,6 +91,8 @@ describe('SessionSpawnerService succession', () => {
       h.phases.set(child.childSessionId, 'idle');
       jest.advanceTimersByTime(5 * 60_000);
       await flush();
+      void messageAfterCap(h, child.childSessionId);
+      await flush();
       expect(h.registry.liveCount()).toBe(1);
       expect(closer.close).toHaveBeenCalledTimes(1);
       expect(h.lines.join('\n')).toContain(result.kind);
@@ -99,6 +116,8 @@ describe('SessionSpawnerService succession', () => {
       h.markRan(child.childSessionId);
       h.phases.set(child.childSessionId, 'idle');
       jest.advanceTimersByTime(5 * 60_000);
+      await flush();
+      void messageAfterCap(h, child.childSessionId);
       await flush();
       expect(h.registry.liveCount()).toBe(1);
       expect(h.lines.join('\n')).toContain(
@@ -252,18 +271,20 @@ describe('SessionSpawnerService succession', () => {
   });
 
   it('skips the warning for an idle child without pending work', async () => {
-    const h = makeHarness({ config: {
-      'agentSessions.maxRuntimeMinutes': 5,
-      'agentSessions.runtimeWarnLeadMinutes': 1,
-    } });
+    const h = makeHarness({
+      config: {
+        'agentSessions.maxRuntimeMinutes': 5,
+        'agentSessions.runtimeWarnLeadMinutes': 1,
+      },
+    });
     const child = await h.startChild();
     h.markRan(child.childSessionId);
     h.phases.set(child.childSessionId, 'idle');
     jest.advanceTimersByTime(4 * 60_000);
     await flush();
     expect(h.adapter.sendMessageToSession).not.toHaveBeenCalled();
-    expect(h.logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('runtime warning skipped: idle without pending work'),
+    expect(h.lines.join('\n')).toContain(
+      'runtime warning skipped: idle without pending work',
     );
   });
 
@@ -275,9 +296,13 @@ describe('SessionSpawnerService succession', () => {
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
     const predecessor = h.registry.get(child.childSessionId);
-    expect(h.spawner['runtimes'].get(child.childSessionId)?.capReached).toBe(true);
+    expect(h.spawner['runtimes'].get(child.childSessionId)?.capReached).toBe(
+      true,
+    );
     expect(predecessor?.terminalStatus).toBeUndefined();
-    expect(h.registry.resolveLatest(child.childSessionId)?.childSessionId).toBe(child.childSessionId);
+    expect(h.registry.resolveLatest(child.childSessionId)?.childSessionId).toBe(
+      child.childSessionId,
+    );
     expect(h.notifier.signalSessionChild).not.toHaveBeenCalled();
 
     const result = await h.spawner.send({
@@ -289,7 +314,9 @@ describe('SessionSpawnerService succession', () => {
     await flush();
     const successor = h.registry.resolveLatest(child.childSessionId);
     expect(result).toEqual({ delivered: true, effect: 'started-turn' });
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('handed-off');
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
     expect(successor?.childSessionId).not.toBe(child.childSessionId);
     expect(successor).toMatchObject({
       parentSessionId: PARENT,
@@ -298,8 +325,12 @@ describe('SessionSpawnerService succession', () => {
       succeeds: child.childSessionId,
     });
     expect(h.registry.liveCount()).toBe(1);
-    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain('Continue with the parser tests');
-    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain('runtime cap');
+    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain(
+      'Continue with the parser tests',
+    );
+    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain(
+      'runtime cap',
+    );
     expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
     expect(h.notifier.signalSessionChild.mock.calls[0][1]).toMatchObject({
       status: 'handed-off',
@@ -397,6 +428,8 @@ describe('SessionSpawnerService succession', () => {
     h.phases.set(child.childSessionId, 'idle');
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
+    await messageAfterCap(h, child.childSessionId);
+    await flush();
     const successor = h.registry.resolveLatest(child.childSessionId);
     expect(successor?.successionCount).toBe(1);
     if (!successor) return;
@@ -419,6 +452,9 @@ describe('SessionSpawnerService succession', () => {
     h.phases.set(child.childSessionId, 'idle');
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
+    const result = await messageAfterCap(h, child.childSessionId);
+    await flush();
+    expect(result).toMatchObject({ delivered: false, reason: 'session-ended' });
     expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
       'timed-out',
     );

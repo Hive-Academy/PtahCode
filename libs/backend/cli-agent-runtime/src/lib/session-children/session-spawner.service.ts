@@ -840,7 +840,11 @@ export class SessionSpawnerService implements ISessionSpawner {
     const { child, caller } = owned;
     const runtime = this.runtimes.get(child.childSessionId);
     if (runtime?.capReached && this.isIdleWithoutPendingWork(child)) {
-      const result = await this.succeedChild(child, 'runtime-cap', request.message);
+      const result = await this.hostSucceed(
+        child,
+        'runtime-cap',
+        request.message,
+      );
       if (!result.ok)
         return {
           delivered: false,
@@ -2101,7 +2105,9 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (!child || child.terminalStatus || !runtime || runtime.stopping) return;
     runtime.warnTimer = undefined;
     if (this.isIdleWithoutPendingWork(child)) {
-      this.log(`${childSessionId} runtime warning skipped: idle without pending work`);
+      this.log(
+        `${childSessionId} runtime warning skipped: idle without pending work`,
+      );
       return;
     }
     const target = this.activeIdOf(child);
@@ -2185,8 +2191,9 @@ export class SessionSpawnerService implements ISessionSpawner {
   private async hostSucceed(
     child: SessionChildRecord,
     cause: SessionChildSuccessionCause,
-  ): Promise<void> {
-    const result = await this.succeedChild(child, cause);
+    prompt?: string,
+  ): Promise<SessionChildSuccessionResult> {
+    const result = await this.succeedChild(child, cause, prompt);
     if (
       !result.ok &&
       result.refusal !== 'succession-in-progress' &&
@@ -2194,6 +2201,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     ) {
       this.runtimeSafetyNet(child, result.detail);
     }
+    return result;
   }
 
   /** Called by the child itself from its handoff tool. */
