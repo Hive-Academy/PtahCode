@@ -4,7 +4,7 @@ import type { SurfaceSelection } from '@ptah-extension/shared/mcp-apps-contracts
 import type { SurfaceComponentViewState } from '../surface-view-state';
 import { cellText, nextTableSort, tableRows, type TableNode } from '../table/table-rows';
 import { DashboardPagerComponent } from './dashboard-pager.component';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 interface TableColumn {
   readonly key: string;
@@ -29,10 +29,10 @@ function scalarCell(value: unknown): DashboardTableCell {
 @Component({
   selector: 'ptah-dashboard-table',
   standalone: true,
-  imports: [DashboardPagerComponent, PtahButtonDirective, PtahInputDirective],
+  imports: [DashboardPagerComponent, PtahButtonDirective, PtahInputDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="card card-bordered bg-base-100 p-3 text-base-content" (keydown.escape)="collapse($event)">
+    <section ptahSurface variant="inset" padding="sm" class="flex flex-col text-base-content" (keydown.escape)="collapse($event)">
       <div class="flex items-center justify-between gap-2">
         <h3 class="text-sm font-semibold">{{ title() }}</h3>
         <button #expandButton type="button" ptahButton variant="ghost" size="xs"

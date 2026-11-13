@@ -43,7 +43,7 @@ import type {
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective, PtahCheckboxDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 export const COULD_NOT_LOAD_CLAUDE_BUILTINS =
   'Could not load the Claude Code tool and skill settings.';
@@ -72,12 +72,12 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
 @Component({
   selector: 'ptah-claude-builtins-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     <section
-      class="card bg-base-200 border border-base-300 p-3"
+      ptahSurface padding="sm"
       data-glass-surface="content"
       aria-labelledby="claude-tools-heading"
       [attr.aria-busy]="loadState() === 'loading' ? 'true' : null"

@@ -12,7 +12,7 @@ import type { AnalysisStatus } from '@ptah-extension/shared';
 import { WizardRpcService } from '@ptah-extension/setup-wizard';
 import { AnalysisStepStore } from '../analyze/analysis-step.store';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 export type AnalysisAgeBucket = 'success' | 'warning' | 'error';
 
@@ -39,12 +39,14 @@ export function analysisAge(
 @Component({
   selector: 'ptah-analysis-found-card',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (status(); as result) {
       <section
-        class="mt-5 rounded-xl border border-base-300 bg-base-200 p-4"
+        ptahSurface
+        padding="md"
+        class="mt-5"
         aria-label="Analysis found"
         data-testid="analysis-found-card"
       >
