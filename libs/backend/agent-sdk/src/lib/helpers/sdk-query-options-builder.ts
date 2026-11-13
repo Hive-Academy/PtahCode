@@ -1414,6 +1414,7 @@ export class SdkQueryOptionsBuilder {
       onWorktreeRemoved,
       activityHold,
       this.ptahUiHintEnabled(sessionConfig),
+      phase?.kind,
     );
     // The SDK may auto-allow SendMessage before canUseTool. PreToolUse still
     // runs for auto-allowed tools and can deny a stopped or near-limit target.
@@ -2450,9 +2451,10 @@ export class SdkQueryOptionsBuilder {
     onWorktreeRemoved?: WorktreeRemovedCallback,
     activityHold?: ActivityHold,
     ptahUiHint = false,
+    phaseKind?: import('@ptah-extension/shared').PhaseDispatchV1['kind'],
   ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     // Root tool lifetime, not child registration, owns watchdog protection.
-    const subagentHooks = this.subagentHookHandler.createHooks(cwd, sessionId);
+    const subagentHooks = this.subagentHookHandler.createHooks(cwd, sessionId, phaseKind);
     const compactionHooks = this.compactionHookHandler.createHooks(
       sessionId,
       cwd,

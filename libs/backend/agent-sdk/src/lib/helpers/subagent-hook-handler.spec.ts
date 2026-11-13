@@ -2,7 +2,7 @@ import 'reflect-metadata';
 
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SubagentRegistryService } from '@ptah-extension/vscode-core';
-import type { SubagentRecord } from '@ptah-extension/shared';
+import type { PhaseKind, SubagentRecord } from '@ptah-extension/shared';
 import { SubagentHookHandler } from './subagent-hook-handler';
 import { SessionStatsOwnerService } from '../session-stats/session-stats-owner.service';
 import {
@@ -76,8 +76,9 @@ function getStopCallback(
   handler: SubagentHookHandler,
   workspacePath: string,
   parentSessionId?: string,
+  phaseKind?: PhaseKind,
 ) {
-  const hooks = handler.createHooks(workspacePath, parentSessionId);
+  const hooks = handler.createHooks(workspacePath, parentSessionId, phaseKind);
   const matchers = hooks.SubagentStop;
   expect(matchers).toBeDefined();
   const fn = matchers?.[0]?.hooks?.[0];
@@ -92,6 +93,32 @@ function getStopCallback(
 const VALID_UUID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
 
 describe('SubagentHookHandler — SubagentStopCallbackRegistry fan-out', () => {
+  it('keeps the phase kind on each session stop callback', async () => {
+    const logger = makeLogger();
+    const stopRegistry = new SubagentStopCallbackRegistry(logger);
+    const captured: SubagentStopPayload[] = [];
+    stopRegistry.register((payload) => { captured.push(payload); });
+    const handler = new SubagentHookHandler(
+      logger, makeRegistry(null), stopRegistry, new SessionStatsOwnerService(),
+    );
+    const implementStop = getStopCallback(handler, '/workspace', 'session-1', 'implement');
+    const reviewStop = getStopCallback(handler, '/workspace', 'session-2', 'review');
+    const noPhaseStop = getStopCallback(handler, '/workspace', 'session-3');
+    for (const [stop, sessionId] of [
+      [reviewStop, 'session-2'], [implementStop, 'session-1'], [noPhaseStop, 'session-3'],
+    ] as const) {
+      await stop({
+        hook_event_name: 'SubagentStop', session_id: sessionId,
+        agent_id: 'agent-xyz', agent_type: 'worker', stop_hook_active: false,
+      } as HookInput, 'tu-1', { signal: new AbortController().signal });
+    }
+    expect(captured.map((payload) => payload.completion)).toEqual([
+      expect.objectContaining({ phaseKind: 'review', verdict: 'unverified', executorId: 'sdk-subagent' }),
+      expect.objectContaining({ phaseKind: 'implement', verdict: 'unverified', executorId: 'sdk-subagent' }),
+      expect.objectContaining({ phaseKind: null, verdict: 'unverified', executorId: 'sdk-subagent' }),
+    ]);
+  });
+
   it('does not publish a completion without an agent id', async () => {
     const logger = makeLogger();
     const stopRegistry = new SubagentStopCallbackRegistry(logger);

@@ -47,6 +47,7 @@ import type { SessionStatsOwnerService } from '../session-stats/session-stats-ow
 import type { SubagentBudgetMonitor } from './compaction/subagent-budget-monitor';
 import { createSubagentBudgetHooks } from './compaction/subagent-budget-hooks';
 import { buildSdkSubagentCompletion } from './sdk-subagent-completion';
+import type { PhaseKind } from '@ptah-extension/shared';
 
 /**
  * SubagentHookHandler Service
@@ -129,6 +130,7 @@ export class SubagentHookHandler {
   createHooks(
     workspacePath: string,
     parentSessionId?: string,
+    phaseKind?: PhaseKind,
   ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     const capturedParentSessionId = parentSessionId;
     this.logger.info('[SubagentHookHandler] Creating hooks for workspace', {
@@ -209,6 +211,7 @@ export class SubagentHookHandler {
                 toolUseId,
                 workspacePath,
                 capturedParentSessionId,
+                phaseKind,
               );
             },
           ],
@@ -439,6 +442,7 @@ export class SubagentHookHandler {
     toolUseId: string | undefined,
     workspacePath: string,
     parentSessionId?: string,
+    phaseKind?: PhaseKind,
   ): Promise<HookJSONOutput> {
     try {
       this.logger.debug('[SubagentHookHandler] SubagentStop received', {
@@ -548,6 +552,7 @@ export class SubagentHookHandler {
           agentId: input.agent_id,
           agentType: input.agent_type || record?.agentType || null,
           parentSessionId: resolvedParentSessionId,
+          phaseKind,
         });
         // Transcript path, parent session and cwd are optional metadata; every
         // stop with an agent id is fanned out.

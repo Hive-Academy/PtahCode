@@ -889,12 +889,13 @@ describe('SdkQueryOptionsBuilder.build — activityHold forwarded to subagent ho
   async function buildWithHold(activityHold?: {
     hold: jest.Mock;
     release: jest.Mock;
-  }): Promise<jest.Mock> {
+  }, phase?: PhaseDispatchV1): Promise<jest.Mock> {
     const { builder, createHooksSpy } = makeBuilderWithSubagentSpy();
     const userMessageStream = (async function* () {
       // Intentionally empty.
     })();
     await builder.build({
+      phase,
       userMessageStream,
       abortController: new AbortController(),
       sessionConfig: {
@@ -914,13 +915,18 @@ describe('SdkQueryOptionsBuilder.build — activityHold forwarded to subagent ho
     const createHooksSpy = await buildWithHold(activityHold);
 
     expect(createHooksSpy).toHaveBeenCalledTimes(1);
-    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1');
+    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1', undefined);
   });
 
   it('passes undefined when the caller has no watchdog', async () => {
     const createHooksSpy = await buildWithHold(undefined);
 
-    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1');
+    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1', undefined);
+  });
+
+  it('passes the session phase kind to the subagent hook handler', async () => {
+    const createHooksSpy = await buildWithHold(undefined, phaseFixture());
+    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1', 'implement');
   });
 });
 
