@@ -10,6 +10,7 @@ import { MarkdownModule } from 'ngx-markdown';
 import { SurfaceMarkdownPipe } from '@ptah-extension/markdown';
 import { LucideAngularModule, ChevronDown, Brain } from 'lucide-angular';
 import type { ExecutionNode } from '@ptah-extension/shared';
+import { PtahSurfaceDirective } from '@ptah-extension/ui';
 
 /**
  * ThinkingBlockComponent - Collapsible extended thinking content
@@ -23,9 +24,9 @@ import type { ExecutionNode } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-thinking-block',
   standalone: true,
-  imports: [SurfaceMarkdownPipe, MarkdownModule, LucideAngularModule],
+  imports: [SurfaceMarkdownPipe, MarkdownModule, LucideAngularModule, PtahSurfaceDirective],
   template: `
-    <div class="card card-border my-3 border-base-300 bg-base-200/50 shadow-sm">
+    <div ptahSurface [translucent]="50" shadow="sm" padding="none" class="my-3">
       <!-- Card header (clickable to toggle) -->
       <button
         type="button"
