@@ -847,11 +847,7 @@
     "<dynamic>": 2,
     "alert": 3,
     "alert-error": 3,
-    "alert-sm": 3,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-sm": 1,
-    "btn-xs": 1
+    "alert-sm": 3
   },
   "libs/frontend/marketplace/src/lib/harness/harness-health-badge.component.ts": {
     "<dynamic>": 1,
@@ -885,12 +881,6 @@
     "alert-error": 2,
     "alert-sm": 2
   },
-  "libs/frontend/marketplace/src/lib/pages/connectors/connectors-page.component.html": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-primary": 2,
-    "btn-xs": 2
-  },
   "libs/frontend/marketplace/src/lib/pages/overview/overview-page.component.html": {
     "<dynamic>": 1
   },
@@ -911,9 +901,7 @@
   },
   "libs/frontend/marketplace/src/lib/pages/skills/plugin-config-home-notice.component.ts": {
     "alert": 1,
-    "alert-warning": 1,
-    "btn": 1,
-    "btn-xs": 1
+    "alert-warning": 1
   },
   "libs/frontend/marketplace/src/lib/pages/skills/skill-detail.component.ts": {
     "badge": 1,
@@ -944,16 +932,6 @@
   "libs/frontend/marketplace/src/lib/ui/provider-card-list.component.ts": {
     "<dynamic>": 1,
     "skeleton": 3
-  },
-  "libs/frontend/marketplace/src/lib/ui/provider-filter-select.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/marketplace/src/lib/ui/provider-filters.component.ts": {
-    "btn": 1,
-    "btn-active": 1,
-    "btn-sm": 1
   },
   "libs/frontend/marketplace/src/lib/ui/provider-table.component.ts": {
     "<dynamic>": 1,
