@@ -4,6 +4,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
   selector: 'ptah-gallery-section',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styles: [`section { border-radius: var(--ptah-card-radius); }`],
   template: `<section
     [attr.id]="id()"
     [attr.aria-labelledby]="id() + '-title'"

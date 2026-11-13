@@ -1,5 +1,12 @@
 import { Directive, input } from '@angular/core';
-import { PtahCardPadding, PtahCardVariant } from './card.types';
+import type {
+  PtahCardBorder,
+  PtahCardFill,
+  PtahCardPadding,
+  PtahCardShadow,
+  PtahCardTone,
+  PtahCardVariant,
+} from './card.types';
 
 /**
  * Panel surface owner (TASK_2026_1012_b1dc). Puts the card look on a raw
@@ -21,9 +28,24 @@ import { PtahCardPadding, PtahCardVariant } from './card.types';
     'data-ptah-surface': '',
     '[attr.data-variant]': 'variant()',
     '[attr.data-padding]': 'padding()',
+    '[attr.data-tone]': "tone() === 'neutral' ? null : tone()",
+    '[attr.data-tone-border]': "toneBorder() ? '' : null",
+    '[attr.data-fill]': "translucent() === 50 ? '50' : null",
+    '[attr.data-shadow]': "shadow() === 'sm' ? 'sm' : null",
+    '[attr.data-border]': "border() === 'faint' ? 'faint' : null",
   },
 })
 export class PtahSurfaceDirective {
   readonly variant = input<PtahCardVariant>('card');
   readonly padding = input<PtahCardPadding>('md');
+  /** Tone used by `toneBorder`; the directive never adds a spine. */
+  readonly tone = input<PtahCardTone>('neutral');
+  /** Use the tone color for the border when the tone is not neutral. */
+  readonly toneBorder = input(false);
+  /** Fill opacity: 50 matches `bg-base-200/50`; 100 preserves the default. */
+  readonly translucent = input<PtahCardFill>(100);
+  /** Optional `shadow-sm` look. */
+  readonly shadow = input<PtahCardShadow>('none');
+  /** Faint matches `border-base-content/10`. */
+  readonly border = input<PtahCardBorder>('default');
 }
