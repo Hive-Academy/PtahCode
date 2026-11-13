@@ -21,7 +21,7 @@ const BOX: Readonly<Record<PtahChartSize, string>> = { xs: 'h-4 w-16', sm: 'h-6 
       @if (area()) { <polygon class="opacity-20" [attr.points]="areaPoints()" fill="currentColor" stroke="none" /> }
       <polyline [attr.points]="points()" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
     </svg>
-  } @else { <span class="text-xs text-base-content-muted">No trend data</span> }`,
+  } @else { <span class="text-xs text-base-content-muted" role="img" [attr.aria-label]="label() + ': no trend data'">No trend data</span> }`,
 })
 export class PtahSparklineComponent {
   readonly values = input.required<readonly number[]>();

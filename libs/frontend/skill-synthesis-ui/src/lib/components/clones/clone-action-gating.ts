@@ -205,10 +205,10 @@ export function cloneStatusLabel(clone: CloneSummary): SkillCloneStatus {
 
 /**
  * Relative "x ago" for epoch-ms timestamps; `—` when never or not finite.
- * The text comes from the shared `formatRelative` owner. This wrapper only
+ * The text comes from the shared `formatRelative` owner (imported as `formatRelativeAge`). This wrapper only
  * keeps the null guard and the em dash.
  */
-export function formatRelative(epochMs: number | null): string {
+export function formatCloneAge(epochMs: number | null): string {
   if (epochMs === null || !Number.isFinite(epochMs)) return '—';
   return formatRelativeAge(epochMs, Date.now());
 }
