@@ -33,9 +33,6 @@ const ICON = 'w-3.5 h-3.5 flex-shrink-0';
 /** Per-instance suffix for the advice text id (one banner per chat view). */
 let nextBannerId = 0;
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-
 /**
  * SessionBudgetBannerComponent - the session budget notice.
  *
@@ -107,7 +104,7 @@ const FOCUS =
             @if (autoHandoffQueued()) {
               <button
                 type="button"
-                ptahButton variant="ghost" size="xs" class="{{ focus }}"
+                ptahButton variant="ghost" size="xs"
                 aria-label="Cancel the automatic hand-off"
                 (click)="cancelAutoHandoff.emit()"
                 data-testid="session-budget-auto-cancel"
@@ -117,7 +114,7 @@ const FOCUS =
             }
             <button
               type="button"
-              ptahButton variant="ghost" size="xs" class="{{ focus }}"
+              ptahButton variant="ghost" size="xs"
               [attr.aria-describedby]="bodyId"
               [disabled]="wrapUpSent()"
               (click)="wrapUp.emit()"
@@ -127,7 +124,7 @@ const FOCUS =
             </button>
             <button
               type="button"
-              ptahButton variant="ghost" size="xs" class="{{ focus }}"
+              ptahButton variant="ghost" size="xs"
               [attr.aria-describedby]="bodyId"
               (click)="dismiss.emit()"
               data-testid="session-budget-dismiss"
@@ -165,7 +162,6 @@ export class SessionBudgetBannerComponent {
   readonly cancelAutoHandoff = output<void>();
 
   protected readonly body = BODY;
-  protected readonly focus = FOCUS;
   protected readonly GaugeIcon = Gauge;
   /** Id of the screen-reader advice text that the banner and its actions point to. */
   protected readonly bodyId = `session-budget-body-${nextBannerId++}`;
