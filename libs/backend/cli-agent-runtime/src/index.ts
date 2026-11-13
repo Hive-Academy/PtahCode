@@ -152,3 +152,4 @@ export {
 } from './lib/cli-agents/messaging/parent-session-purge.service';
 export type { AgentDeliveryReceiptEventSink } from './lib/cli-agents/messaging/agent-delivery-receipt-event-sink';
 export { LaneSpawnPolicyError } from './lib/cli-agents/lane-spawn-policy';
+export { CodexRolloutUsageCollector, listCodexRolloutFiles, selectedCodexUsageRoots } from './lib/cli-agents/cli-adapters/codex/codex-rollout-usage.reader';

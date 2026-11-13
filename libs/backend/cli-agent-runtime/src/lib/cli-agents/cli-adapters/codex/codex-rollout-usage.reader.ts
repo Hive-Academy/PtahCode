@@ -20,8 +20,13 @@
 
 import { open, readdir, stat } from 'fs/promises';
 import { join } from 'path';
+import { basename } from 'path';
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { codexHomeDir } from '@ptah-extension/harness-sync';
 import type { AgentUsageDatum } from '@ptah-extension/shared';
+import type { IFileSystemProvider, SessionUsageContribution } from '@ptah-extension/platform-core';
+import type { UsageCollector, UsageSourceCursor } from '@ptah-extension/agent-sdk';
 
 /** What the gate reads from one rollout. */
 export interface CodexRolloutUsage {
@@ -52,6 +57,177 @@ const THREAD_ID_RE = /^[A-Za-z0-9-]+$/;
 
 /** A `YYYY`, `MM` or `DD` directory name. */
 const DATE_DIR_RE = /^\d+$/;
+const ROLLOUT_RE = /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+const MAX_RANGE = 256 * 1024;
+const MAX_PARTIAL_LINE = 1024 * 1024;
+const number = z.number().finite().nonnegative();
+const totalsSchema = z.object({
+  input_tokens: number,
+  cached_input_tokens: number.optional(),
+  output_tokens: number,
+});
+const replayRecordSchema = z.object({
+  type: z.string(),
+  timestamp: z.string().optional(),
+  payload: z.object({
+    type: z.string().optional(),
+    id: z.string().optional(),
+    info: z.object({ total_token_usage: totalsSchema.optional() }).nullable().optional(),
+  }).optional(),
+});
+type Totals = z.infer<typeof totalsSchema>;
+
+/** The one Codex sessions tree selected by the current host environment. */
+export function selectedCodexUsageRoots(): readonly string[] {
+  return [join(codexHomeDir(), 'sessions')];
+}
+
+/** Iterate rollout files by date, newest first, using the same directory rules as the gate. */
+export async function* listCodexRolloutFiles(sessionsDir = selectedCodexUsageRoots()[0]): AsyncGenerator<string> {
+  for (const year of await dateDirsNewestFirst(sessionsDir)) {
+    for (const month of await dateDirsNewestFirst(year)) {
+      for (const day of await dateDirsNewestFirst(month)) {
+        for (const name of (await listDir(day)).sort().reverse()) {
+          if (ROLLOUT_RE.test(name)) yield join(day, name);
+        }
+      }
+    }
+  }
+}
+
+/** Bounded, append-safe replay of Codex's cumulative token_count records. */
+export class CodexRolloutUsageCollector implements UsageCollector {
+  readonly sourceId = 'codex-rollout' as const;
+
+  constructor(private readonly files: Pick<IFileSystemProvider, 'lstat' | 'readFileRangeNoFollow'>) {}
+
+  async collect(file: string, cursor: UsageSourceCursor | null, budgetBytes: number): Promise<{
+    events: readonly SessionUsageContribution[]; next: UsageSourceCursor; more: boolean;
+  }> {
+    const match = ROLLOUT_RE.exec(basename(file));
+    if (!match) throw new Error('Invalid Codex rollout filename');
+    if (!this.files.readFileRangeNoFollow) throw new Error('Bounded range read is unavailable');
+    const threadId = match[1].toLowerCase();
+    const stat = await this.files.lstat(file);
+    const head = await this.files.readFileRangeNoFollow(file, 0, Math.min(4096, Math.max(1, stat.size)));
+    const headEnd = head.bytes.indexOf(10);
+    const fingerprint = createHash('sha256').update(headEnd < 0 ? head.bytes : head.bytes.subarray(0, headEnd)).digest('hex').slice(0, 32);
+    const meta = headEnd < 0 ? null : parseReplayLine(new TextDecoder().decode(head.bytes.subarray(0, headEnd)));
+    const nativeMatch = meta?.type !== 'session_meta' || !meta.payload?.id || meta.payload.id.toLowerCase() === threadId;
+    let offset = cursor?.sourcePath === file && cursor.fingerprint === fingerprint && cursor.byteOffset <= stat.size
+      ? cursor.byteOffset : 0;
+    const originalOffset = offset;
+    const previous = offset > 0 ? await this.previousTotals(file, offset) : null;
+    let totals = previous;
+    const events: SessionUsageContribution[] = [];
+    const decoder = new TextDecoder();
+    const started = Date.now();
+    let readOffset = offset;
+    let pending = new Uint8Array(0);
+    let discardLine = false;
+    let readBytes = 0;
+    const limit = Math.min(Math.max(1, budgetBytes), 1024 * 1024);
+    while (readOffset < stat.size && readBytes < limit && (offset === originalOffset || Date.now() - started < 20)) {
+      const chunk = await this.files.readFileRangeNoFollow(file, readOffset, Math.min(MAX_RANGE, stat.size - readOffset, limit - readBytes));
+      if (chunk.bytes.length === 0) break;
+      readOffset += chunk.bytes.length;
+      readBytes += chunk.bytes.length;
+      const joined = new Uint8Array(pending.length + chunk.bytes.length);
+      joined.set(pending);
+      joined.set(chunk.bytes, pending.length);
+      const baseOffset = offset;
+      let start = 0;
+      for (let i = 0; i < joined.length; i++) {
+        if (joined[i] !== 10) continue;
+        const lineOffset = baseOffset + i + 1;
+        if (!discardLine) {
+          const record = parseReplayLine(decoder.decode(joined.subarray(start, i)));
+          if (record?.type === 'event_msg' && record.payload?.type === 'token_count') {
+            const current = record.payload.info?.total_token_usage;
+            if (current) {
+              const reset = totals !== null && (current.input_tokens < totals.input_tokens ||
+                current.output_tokens < totals.output_tokens ||
+                (current.cached_input_tokens ?? 0) < (totals.cached_input_tokens ?? 0));
+              if (reset) totals = null;
+              const input = current.input_tokens - (totals?.input_tokens ?? 0);
+              const output = current.output_tokens - (totals?.output_tokens ?? 0);
+              const cache = (current.cached_input_tokens ?? 0) - (totals?.cached_input_tokens ?? 0);
+              totals = current;
+              if (input !== 0 || output !== 0 || cache !== 0) {
+                const occurredAt = record.timestamp ? Date.parse(record.timestamp) : NaN;
+                const eventKey = `codex:${threadId}:0:${lineOffset}`;
+                events.push({
+                  sessionId: threadId, producer: 'transcript-replay', runId: threadId,
+                  nativeThreadId: threadId, turnId: null, eventKey,
+                  parentSessionId: null, subagentId: null, providerId: 'codex',
+                  occurredAtMs: Number.isFinite(occurredAt) ? occurredAt : Math.floor(stat.mtime),
+                  revision: lineOffset, models: [{ modelId: null, inputTokens: input,
+                    outputTokens: output, cacheReadTokens: cache, cacheCreationTokens: null,
+                    knownCostMicroUsd: null, costAuthority: 'unpriced' }],
+                  totalCostMicroUsd: null, totalCostAuthority: 'unpriced', pricingVersion: null,
+                  source: 'replay', missingReason: nativeMatch ? null : 'unmatched-provider-event',
+                  billable: nativeMatch,
+                  coverageStartMs: null, coverageEndMs: null,
+                });
+              }
+            }
+          }
+        }
+        discardLine = false;
+        start = i + 1;
+        offset = lineOffset;
+      }
+      pending = joined.slice(start);
+      if (pending.length >= MAX_PARTIAL_LINE) {
+        // degradation-audit: optional-capability - oversized JSONL line has no trustworthy usage.
+        pending = new Uint8Array(0);
+        discardLine = true;
+        offset = readOffset;
+      }
+      if (Date.now() - started >= 20) await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    return { events, next: { sourceId: this.sourceId, sourcePath: file, fingerprint,
+      mtimeMs: Math.floor(stat.mtime), byteOffset: offset, lastEventKey: events.at(-1)?.eventKey ?? cursor?.lastEventKey ?? null },
+      more: offset < stat.size };
+  }
+
+  private async previousTotals(file: string, offset: number): Promise<Totals | null> {
+    if (!this.files.readFileRangeNoFollow) throw new Error('Bounded range read is unavailable');
+    let end = offset;
+    let suffix = new Uint8Array(0);
+    while (end > 0) {
+      const start = Math.max(0, end - MAX_RANGE);
+      const part = await this.files.readFileRangeNoFollow(file, start, end - start);
+      const bytes = new Uint8Array(part.bytes.length + suffix.length);
+      bytes.set(part.bytes);
+      bytes.set(suffix, part.bytes.length);
+      let lineEnd = bytes.length - 1;
+      for (let i = lineEnd - 1; i >= 0; i--) {
+        if (bytes[i] !== 10) continue;
+        const record = parseReplayLine(new TextDecoder().decode(bytes.subarray(i + 1, lineEnd)));
+        const totals = record?.type === 'event_msg' && record.payload?.type === 'token_count'
+          ? record.payload.info?.total_token_usage : null;
+        if (totals) return totals;
+        lineEnd = i;
+      }
+      suffix = bytes.subarray(0, lineEnd).slice();
+      if (suffix.length > MAX_PARTIAL_LINE) suffix = new Uint8Array(0);
+      end = start;
+    }
+    return null;
+  }
+}
+
+function parseReplayLine(line: string): z.infer<typeof replayRecordSchema> | null {
+  try {
+    const raw: unknown = JSON.parse(line);
+    const parsed = replayRecordSchema.safeParse(raw);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    // degradation-audit: optional-capability - malformed or torn JSONL has no trustworthy usage.
+    return null;
+  }
+}
 
 /**
  * Read the last per-request input size of a Codex thread.
