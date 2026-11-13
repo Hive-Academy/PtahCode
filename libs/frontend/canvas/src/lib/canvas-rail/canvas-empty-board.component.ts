@@ -205,7 +205,6 @@ export const LOAD_STEPS_MAX_MS = 12_000;
               <span>Readiness unavailable</span>
               <button ptahButton variant="ghost" size="xs"
                 type="button"
-                class="gap-1"
                 (click)="retryReadiness()"
               >
                 <lucide-angular

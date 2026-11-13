@@ -64,15 +64,15 @@ import type { CommandProviderReadiness, CommandVoiceError, CommandVoiceState } f
         <div class="voice-recovery mt-1 flex flex-wrap items-center gap-2 text-xs" role="status">
           <span>{{ error.message }}</span>
           @if (error.kind === 'mic-denied') {
-            <button type="button" ptahButton variant="ghost" size="md" class="underline" (click)="openVoiceSettings.emit()">Open Voice settings</button>
+            <button type="button" ptahButton variant="ghost" size="md" (click)="openVoiceSettings.emit()">Open Voice settings</button>
           } @else if (error.kind === 'mic-unavailable' || error.kind === 'worklet') {
-            <button type="button" ptahButton size="md" class="underline" (click)="start.emit()">Retry microphone</button>
+            <button type="button" ptahButton size="md" (click)="start.emit()">Retry microphone</button>
           }
         </div>
       } @else if (!provider().transcription || !provider().synthesis) {
         <div class="voice-recovery mt-1 flex flex-wrap items-center gap-2 text-xs" role="status">
           <span>A voice provider is missing.</span>
-          <button type="button" ptahButton variant="ghost" size="md" class="underline" (click)="openVoiceSettings.emit()">Open Voice settings</button>
+          <button type="button" ptahButton variant="ghost" size="md" (click)="openVoiceSettings.emit()">Open Voice settings</button>
         </div>
       }
     </section>
