@@ -1027,16 +1027,21 @@ export class SetupRpcHandlers {
           this.logger.error('[Setup] could not read package.json', error);
           throw error;
         });
-      const packageJson = JSON.parse(packageContents) as {
-        dependencies?: Record<string, string>;
-        devDependencies?: Record<string, string>;
-        optionalDependencies?: Record<string, string>;
-      };
+      const parsedPackage: unknown = JSON.parse(packageContents);
+      const packageJson =
+        parsedPackage && typeof parsedPackage === 'object' && !Array.isArray(parsedPackage)
+          ? (parsedPackage as Record<string, unknown>)
+          : {};
+      const dependencyNames = (value: unknown): string[] =>
+        value && typeof value === 'object' && !Array.isArray(value) &&
+        (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+          ? Object.keys(value)
+          : [];
       const dependencies = [
         ...new Set([
-          ...Object.keys(packageJson.dependencies ?? {}),
-          ...Object.keys(packageJson.devDependencies ?? {}),
-          ...Object.keys(packageJson.optionalDependencies ?? {}),
+          ...dependencyNames(packageJson['dependencies']),
+          ...dependencyNames(packageJson['devDependencies']),
+          ...dependencyNames(packageJson['optionalDependencies']),
         ]),
       ];
       const service = this.resolveService<SkillRecommendationService>(
@@ -1261,8 +1266,19 @@ export class SetupRpcHandlers {
       let failure: { failedSkill: string; reason: string } | undefined;
       const installer = this.container.resolve(SkillsShRpcHandlers);
       for (const skillName of [...new Set(params.skills)]) {
+        const parts = skillName.split('/');
+        if (
+          parts.length !== 3 ||
+          parts.some((part) => !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(part))
+        ) {
+          failure = {
+            failedSkill: skillName,
+            reason: 'Invalid skill name. Expected owner/repo/skill.',
+          };
+          break;
+        }
         try {
-          const [owner, repo, skillId] = skillName.split('/');
+          const [owner, repo, skillId] = parts;
           let verifiedHash: string | undefined;
           let hasScripts = false;
           const result = await installer.install(

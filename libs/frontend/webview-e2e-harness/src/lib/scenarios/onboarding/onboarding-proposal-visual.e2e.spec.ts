@@ -125,12 +125,44 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
         );
         await expect(page.getByTestId('team-builder-start')).toBeVisible();
         await expect(
-          page.getByRole('button', { name: 'Start team builder' }),
+          page.getByRole('button', { name: 'Review skills' }),
         ).toBeVisible();
         await expect(
           page.locator('[aria-label="Progress"]'),
         ).toHaveCount(0);
         await shoot(page, { view: `${size.prefix}team-builder-start`, theme });
+      });
+
+      test(`${size.prefix}team-builder-skill-review`, async ({
+        page,
+        fixtureServer,
+      }) => {
+        await boot(
+          page,
+          fixtureServer.url,
+          theme,
+          size.viewport,
+          TEAM_ROUTE,
+          'empty',
+        );
+        await page
+          .getByRole('textbox', { name: 'What should the team do?' })
+          .fill('Create a backend TypeScript review and release team.');
+        await page.getByRole('button', { name: 'Review skills' }).click();
+        await expect(
+          page.getByRole('heading', { name: 'Skills and project guidance' }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('checkbox', { name: 'Select TypeScript review' }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('checkbox', { name: 'Select Release checks' }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('heading', { name: 'Project guidance' }),
+        ).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Skip skills' })).toBeEnabled();
+        await shoot(page, { view: `${size.prefix}team-builder-skill-review`, theme });
       });
 
       test(`${size.prefix}new-project-launches-chat`, async ({
@@ -174,12 +206,16 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           .getByRole('textbox', { name: 'What should the team do?' })
           .fill('Create a backend TypeScript review and release team.');
         await page
-          .getByRole('button', { name: 'Start team builder' })
+          .getByRole('button', { name: 'Review skills' })
           .click();
+        await expect(
+          page.getByRole('heading', { name: 'Skills and project guidance' }),
+        ).toBeVisible();
+        await page.getByRole('button', { name: 'Skip skills' }).click();
 
         await expect(page.getByTestId('onboarding-shell')).toHaveCount(0);
         await expect(
-          page.getByText('Create a backend TypeScript review and release team.'),
+          page.getByText(/^Create a backend TypeScript review and release team\./),
         ).toBeVisible();
       });
     }

@@ -137,10 +137,6 @@ export function registerAgentGenerationServices(
     { useClass: AgentRecommendationService },
     { lifecycle: Lifecycle.Singleton },
   );
-  // Skill services are now owned and registered by rpc-handlers/skills-sh.
-  // They were moved there in Phase 3 to keep them with the skills.sh RPC surface.
-  // The tokens are defined in rpc-handlers/di/tokens.ts and registration happens
-  // in rpc-handlers/di/register.ts, which is called from the shared RPC registration.
   container.register(
     AGENT_GENERATION_TOKENS.CONTENT_GENERATION_SERVICE,
     { useClass: ContentGenerationService },
@@ -205,10 +201,6 @@ export function registerAgentGenerationServices(
       'WIZARD_WEBVIEW_LIFECYCLE',
       'AGENT_SELECTION_SERVICE',
       'AGENT_RECOMMENDATION_SERVICE',
-      'SKILL_RECOMMENDATION_SERVICE',
-      'SKILL_PROJECT_GUIDANCE_SERVICE',
-      'SKILL_SELECTION_SERVICE',
-      'SKILL_CONSENT_SERVICE',
       'CONTENT_GENERATION_SERVICE',
       'AGENT_FILE_WRITER_SERVICE',
       'AGENT_GENERATION_ORCHESTRATOR',

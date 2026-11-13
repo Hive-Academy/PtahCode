@@ -55,18 +55,31 @@ export class SkillRecommendationService {
       if (keyword.length >= 2 && !proof.has(keyword)) proof.set(keyword, dep);
     }
 
+    const keywords = [...proof.keys()].slice(0, 25);
+    if (proof.size > keywords.length)
+      this.logger.debug('[SkillRecommendation] keyword list cut to 25');
+    const results: SkillShEntry[][] = new Array(keywords.length);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(4, keywords.length) }, async () => {
+        while (next < keywords.length) {
+          const index = next++;
+          const keyword = keywords[index];
+          try {
+            results[index] = await input.search(keyword);
+          } catch (error) {
+            this.logger.warn('[SkillRecommendation] skills.sh search failed', {
+              keyword,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            results[index] = [];
+          }
+        }
+      }),
+    );
     const byKey = new Map<string, SkillRecommendation>();
-    for (const keyword of proof.keys()) {
-      let entries: SkillShEntry[] = [];
-      try {
-        entries = await input.search(keyword);
-      } catch (error) {
-        this.logger.warn('[SkillRecommendation] skills.sh search failed', {
-          keyword,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        continue;
-      }
+    for (const [index, keyword] of keywords.entries()) {
+      const entries = results[index];
       for (const entry of entries) {
         const tokens = new Set([
           ...tokenize(entry.skillId),

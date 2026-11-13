@@ -2,6 +2,19 @@ import { TestBed } from '@angular/core/testing';
 import { TeamBuilderSkillConsentComponent } from './team-builder-skill-consent.component';
 
 describe('TeamBuilderSkillConsentComponent', () => {
+  it('explains hooks when a flagged skill has no listed scripts', () => {
+    const fixture = TestBed.createComponent(TeamBuilderSkillConsentComponent);
+    fixture.componentRef.setInput('open', true);
+    fixture.componentRef.setInput('previews', [{
+      skillName: 'owner/repo/skill', files: ['SKILL.md'], scriptFiles: [],
+      hasScripts: true, contentHash: 'abc123',
+    }]);
+    fixture.componentRef.setInput('approvedIds', new Set());
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      'Also contains hooks or executable files. Review all files.',
+    );
+  });
   it('reopens a native dialog closed during installation', async () => {
     const fixture = TestBed.createComponent(TeamBuilderSkillConsentComponent);
     fixture.componentRef.setInput('open', true);

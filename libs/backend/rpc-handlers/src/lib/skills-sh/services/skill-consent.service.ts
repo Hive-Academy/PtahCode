@@ -16,6 +16,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -28,7 +29,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
-import { Logger, TOKENS } from '@ptah-extension/vscode-core';
+import { Logger, RpcUserError, TOKENS } from '@ptah-extension/vscode-core';
 
 const SCRIPT_EXTENSIONS = new Set([
   '.sh',
@@ -49,6 +50,8 @@ const INSTALL_SCRIPT_KEYS = [
   'prepublish',
 ];
 const MAX_DEPTH = 16;
+const MAX_FILES = 500;
+const MAX_BYTES = 10 * 1024 * 1024;
 
 @injectable()
 export class SkillConsentService {
@@ -71,6 +74,7 @@ export class SkillConsentService {
     try {
       return this.scan(skillPackagePath, 0);
     } catch (error) {
+      // degradation-audit: reported - the scan failure is logged and script detection fails closed.
       this.logger.warn('[SkillConsent] script scan failed', {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -80,7 +84,7 @@ export class SkillConsentService {
 
   /** Content hash over all files, sorted by path, bytes as stored. */
   computeContentHash(skillPackagePath: string): string {
-    const files = this.listFiles(skillPackagePath, 0).sort();
+    const files = this.listFiles(skillPackagePath, 0, { files: 0, bytes: 0 }).sort();
     const hash = createHash('sha256');
     for (const file of files) {
       if (!this.isInsideRoot(file, skillPackagePath))
@@ -134,6 +138,7 @@ export class SkillConsentService {
       const parsed = JSON.parse(readFileSync(this.storePath, 'utf8'));
       return Array.isArray(parsed?.records) ? parsed.records : [];
     } catch (error) {
+      // degradation-audit: reported - the store read failure is logged and no consent is granted.
       this.logger.warn('[SkillConsent] could not read consent store', {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -141,7 +146,11 @@ export class SkillConsentService {
     }
   }
 
-  private listFiles(dir: string, depth: number): string[] {
+  private listFiles(
+    dir: string,
+    depth: number,
+    budget: { files: number; bytes: number },
+  ): string[] {
     if (depth > MAX_DEPTH) throw new Error('depth limit');
     const out: string[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -150,14 +159,23 @@ export class SkillConsentService {
         throw new Error('Skill path escapes root');
       if (entry.isSymbolicLink())
         throw new Error('Skill package contains a symbolic link');
-      if (entry.isDirectory()) out.push(...this.listFiles(full, depth + 1));
-      else out.push(full);
+      if (entry.isDirectory()) out.push(...this.listFiles(full, depth + 1, budget));
+      else {
+        budget.files++;
+        budget.bytes += statSync(full).size;
+        if (budget.files > MAX_FILES || budget.bytes > MAX_BYTES)
+          throw new RpcUserError(
+            'Skill package exceeds the file or size limit.',
+            'INVALID_PARAMS',
+          );
+        out.push(full);
+      }
     }
     return out;
   }
 
   private scan(dir: string, depth: number): boolean {
-    for (const file of this.listFiles(dir, depth)) {
+    for (const file of this.listFiles(dir, depth, { files: 0, bytes: 0 })) {
       const name = file.split(/[\\/]/).pop() as string;
       if (SCRIPT_EXTENSIONS.has(extname(name).toLowerCase())) return true;
       if (readFileSync(file).subarray(0, 2).toString() === '#!') return true;

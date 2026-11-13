@@ -86,7 +86,9 @@
     <button ptahButton variant="ghost" type="button" (click)="back()">
       Back
     </button>
-    <p role="status" aria-live="polite">Launching chat…</p>
+    <p role="status" aria-live="polite">
+      {{ launched() ? 'Chat opened. Use Back to leave this page.' : 'Launching chat…' }}
+    </p>
     @if (state.guidanceNote()) {
     <p role="status" class="text-sm text-base-content-muted">{{ state.guidanceNote() }}</p>
     }

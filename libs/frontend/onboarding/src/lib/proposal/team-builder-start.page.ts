@@ -62,6 +62,7 @@ export class TeamBuilderStartPage {
   readonly intent = this.state.intent;
   readonly touched = signal(false);
   readonly submitted = signal(false);
+  readonly launched = signal(false);
   readonly starting = computed(
     () =>
       this.state.stage() === 'installing' || this.state.stage() === 'launching',
@@ -400,6 +401,7 @@ export class TeamBuilderStartPage {
       if (fromInstall) this.state.stage.set('review');
       return;
     }
+    this.launched.set(false);
     this.requestVersion++;
     this.searchVersion++;
     this.state.loading.set(false);
@@ -435,7 +437,10 @@ export class TeamBuilderStartPage {
           signal: launch.signal,
         },
       );
+      if (this.launch === launch && !this.destroyRef.destroyed)
+        this.launched.set(true);
     } catch (cause) {
+      // degradation-audit: optional-capability - Back cancels this launch without an error.
       if (cause instanceof HarnessChatLaunchCancelledError) return;
       if (this.launch === launch && !this.destroyRef.destroyed) {
         this.actionError.set('Could not start the team builder. Try again.');
@@ -469,6 +474,7 @@ export class TeamBuilderStartPage {
 
   async back(): Promise<void> {
     if (this.state.stage() === 'installing') return;
+    this.launched.set(false);
     this.requestVersion++;
     this.searchVersion++;
     this.launch?.abort();

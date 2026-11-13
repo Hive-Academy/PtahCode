@@ -94,6 +94,20 @@ describe('TeamBuilderStartPage', () => {
 
   afterEach(() => TestBed.resetTestingModule());
 
+  it('shows launch completion and clears it on Back', async () => {
+    const fixture = TestBed.createComponent(TeamBuilderStartPage);
+    const page = fixture.componentInstance;
+    page.intent.set('Build a team');
+    await page.launchChat();
+    fixture.detectChanges();
+    expect(page.launched()).toBe(true);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      'Chat opened. Use Back to leave this page.',
+    );
+    await page.back();
+    expect(page.launched()).toBe(false);
+  });
+
   it('requires an owner decision for weak-practice facts on Continue and Skip', async () => {
     const page = TestBed.runInInjectionContext(
       () => new TeamBuilderStartPage(),

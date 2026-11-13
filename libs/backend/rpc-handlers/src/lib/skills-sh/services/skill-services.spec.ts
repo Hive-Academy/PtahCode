@@ -48,8 +48,29 @@ async function pick(deps: string[]) {
     .map((s) => s.skill.skillId);
 }
 
+it('limits 60 dependency keywords to 25 searches with at most four in flight', async () => {
+  let active = 0;
+  let peak = 0;
+  const searched: string[] = [];
+  await new SkillRecommendationService(logger).recommend({
+    analysis,
+    dependencies: Array.from({ length: 60 }, (_, i) => `dep${i}`),
+    search: async (keyword) => {
+      active++;
+      peak = Math.max(peak, active);
+      searched.push(keyword);
+      await Promise.resolve();
+      active--;
+      return [];
+    },
+  });
+  expect(searched).toHaveLength(25);
+  expect(searched).toEqual(Array.from({ length: 25 }, (_, i) => `dep${i}`));
+  expect(peak).toBeLessThanOrEqual(4);
+});
+
 describe('skill selection NestJS relevance gate', () => {
-  it('negative: real repo dependencies select Angular and Nx, not NestJS', async () => {
+  it('negative: the first 25 real repo dependencies select Angular, not NestJS', async () => {
     const pkg = JSON.parse(
       readFileSync(join(repoRoot, 'package.json'), 'utf8'),
     );
@@ -57,7 +78,6 @@ describe('skill selection NestJS relevance gate', () => {
     expect(deps.some((d) => d.startsWith('@nestjs/'))).toBe(false);
     const ids = await pick(deps);
     expect(ids).toContain('angular-patterns');
-    expect(ids).toContain('nx-workspace');
     expect(ids).not.toContain('nestjs-best-practices');
   });
 
@@ -142,6 +162,14 @@ describe('SkillConsentService', () => {
     expect(
       new SkillConsentService(logger).hasScripts(join(dir(), 'missing')),
     ).toBe(true);
+  });
+
+  it('refuses a package larger than 10 MB', () => {
+    const pkg = dir();
+    writeFileSync(join(pkg, 'large.bin'), Buffer.alloc(10 * 1024 * 1024 + 1));
+    expect(() => new SkillConsentService(logger).computeContentHash(pkg)).toThrow(
+      'Skill package exceeds the file or size limit.',
+    );
   });
 
   it('binds consent to the content hash', () => {

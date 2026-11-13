@@ -59,6 +59,7 @@ export class ProjectGuidanceService {
           await fs.rename(temporary, target);
           result.recordPath = '.ptah/project-guidance.md';
         } finally {
+          // degradation-audit: optional-capability - cleanup is best effort after the record attempt.
           await fs.rm(temporary, { force: true }).catch(() => undefined);
         }
       } catch (error) {
@@ -79,7 +80,10 @@ export class ProjectGuidanceService {
   private async probe(root: string, facts: ProjectGuidance[]): Promise<void> {
     let entries: string[];
     try { entries = await fs.readdir(root); }
-    catch (error) { this.logger.debug('[ProjectGuidance] root probe failed', { error }); return; }
+    catch (error) {
+      // degradation-audit: reported - the root probe failure is logged and guidance remains limited.
+      this.logger.debug('[ProjectGuidance] root probe failed', { error }); return;
+    }
     const find = (patterns: RegExp[]) => entries.find((entry) => patterns.some((pattern) => pattern.test(entry)));
     const add = (category: string, found: string | undefined, absent: ProjectGuidance['label'], yes: string, no: string) => {
       facts.push({ category, label: found ? 'follow' : absent, fact: found ? yes : no, evidence: found ? evidenceName(found) : 'not found' });

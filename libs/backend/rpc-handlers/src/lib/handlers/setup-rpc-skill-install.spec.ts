@@ -263,6 +263,41 @@ describe('wizard skill installation', () => {
     expect(propagate).not.toHaveBeenCalled();
   });
 
+  it.each(['owner/repo', 'owner/repo/skill/extra'])(
+    'refuses invalid name %s before installing or logging it',
+    async (name) => {
+      await expect(method()({ skills: [name], consentRecords: [] })).resolves.toEqual({
+        success: false,
+        installed: [],
+        failedSkill: name,
+        reason: 'Invalid skill name. Expected owner/repo/skill.',
+      });
+      expect(install).not.toHaveBeenCalled();
+      expect(loggerError).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['null', []],
+    ['{"dependencies":"angular","devDependencies":{"jest":"1"}}', ['jest']],
+  ])('ignores non-object package dependency data in %s', async (contents, expected) => {
+    await fs.writeFile(path.join(workspaceRoot, 'package.json'), contents);
+    const recommend = jest.fn().mockResolvedValue([]);
+    const handler = Object.create(SetupRpcHandlers.prototype) as SetupRpcHandlers;
+    Object.assign(handler, {
+      rpcHandler: { registerMethod: (name: string, fn: (params: unknown) => Promise<unknown>) => methods.set(name, fn) },
+      workspaceProvider: { getWorkspaceRoot: () => workspaceRoot },
+      container: { resolve: (token: unknown) =>
+        String(token).includes('SkillRecommendation') ? { recommend } : { select: () => [] } },
+      skillsShApi: { search: jest.fn() },
+      logger: { debug: jest.fn(), error: loggerError },
+    });
+    handler.register();
+    const fn = methods.get('wizard:recommend-skills');
+    await fn?.({ analysis: { projectType: 'test', frameworks: [] } });
+    expect(recommend).toHaveBeenCalledWith(expect.objectContaining({ dependencies: expected }));
+  });
+
   it('reports partial progress and propagates earlier installs when a later skill throws', async () => {
     consent.hasScripts.mockReturnValue(false);
     staged.mockImplementation(async (request, root) => {
