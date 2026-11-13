@@ -318,6 +318,13 @@
 :root[data-theme='light']:not([data-glass='on']) {
   --ptah-meter-track: color-mix(in oklch, oklch(var(--bc)) 16%, transparent);
 }
+/* anubis-light and glass light mode: the gold fill (oklch 58% 0.132 75) measures 2.2 to 2.8:1
+   on the old 14% to 22% tracks over base-300 and base-200. The warn fill (#8f5200) stays above 3:1.
+   A 6% track keeps gold at 3.03 (base-300), 3.26 (base-200) and 3.64 (base-100), warn at 4.3 or more. */
+:root[data-theme='anubis-light'],
+:root[data-theme][data-glass='on'][data-glass-mode='light'] {
+  --ptah-meter-track: color-mix(in oklch, oklch(var(--bc)) 6%, transparent);
+}
 /* ---- end ptah-meter tokens ---- */
 
 /* ---- Card, panel surface and section header (TASK_2026_1012_b1dc,
