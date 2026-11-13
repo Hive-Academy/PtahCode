@@ -82,22 +82,22 @@ ptah-surface-card > [data-interactive] { position: relative; }
   min-width: 0;
 }
 
-ptah-surface-card > [data-interactive] > .ptah-card-body {
+/* Raise explicit interaction and tooltip hosts above the stretched activator.
+   Keep this selector weak so consumer positioning utilities can take precedence.
+   Custom-element hosts need a hook such as data-card-interactive. */
+:where(ptah-surface-card > [data-interactive] > .ptah-card-body :is(
+  button, a[href], input, select, textarea, label, summary, details,
+  [title], [role], [tabindex], [contenteditable], [routerLink], [routerlink],
+  [data-card-ignore], [data-card-interactive]
+)) {
   position: relative;
   z-index: 1;
-  pointer-events: none;
-}
-
-ptah-surface-card > [data-interactive] > .ptah-card-body :is(
-  button, a[href], input, select, textarea, label, summary,
-  [role='button'], [tabindex], [contenteditable], [data-card-ignore]
-) {
-  pointer-events: auto;
 }
 
 ptah-surface-card .ptah-card-activator {
   position: absolute;
   inset: 0;
+  z-index: 0;
   width: 100%;
   height: 100%;
   border: 0;

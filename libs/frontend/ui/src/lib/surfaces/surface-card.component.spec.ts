@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   PtahCardDensity,
   PtahCardPadding,
@@ -31,6 +33,9 @@ import { SurfaceCardComponent } from './surface-card.component';
     <div card-header data-testid="header"><h3 id="card-heading">Header</h3></div>
     <p data-testid="body">Body <button type="button" data-testid="nested">Act</button></p>
     <span data-card-ignore data-testid="ignored">Ignored</span>
+    <span title="More details" data-testid="tooltip">Tooltip</span>
+    <span data-card-interactive data-testid="custom-action"
+      (click)="nestedClicks = nestedClicks + 1">Custom action</span>
     <div card-footer data-testid="footer">Footer</div>
   </ptah-surface-card>`,
 })
@@ -49,6 +54,7 @@ class HostComponent {
   readonly label = signal<string | null>(null);
   readonly labelledby = signal<string | null>(null);
   activations = 0;
+  nestedClicks = 0;
 }
 
 @Component({
@@ -149,7 +155,7 @@ describe('SurfaceCardComponent', () => {
     const order = Array.from(body.children).map((el) =>
       el.getAttribute('data-testid'),
     );
-    expect(order).toEqual(['header', 'body', 'ignored', 'footer']);
+    expect(order).toEqual(['header', 'body', 'ignored', 'tooltip', 'custom-action', 'footer']);
   });
 
   it('shows the spine only when asked, in the tone', () => {
@@ -220,6 +226,24 @@ describe('SurfaceCardComponent', () => {
     by('header').click();
     card().click();
     expect(fixture.componentInstance.activations).toBe(0);
+  });
+
+  it('keeps a nested non-button action independent of activation', () => {
+    const { fixture, by, update } = setup();
+    update((h) => { h.interactive.set(true); h.label.set('Open details'); });
+    by('custom-action').click();
+    expect(fixture.componentInstance.nestedClicks).toBe(1);
+    expect(fixture.componentInstance.activations).toBe(0);
+  });
+
+  it('raises title hosts and interaction hooks above the activator', () => {
+    const css = readFileSync(join(__dirname, '../card/ptah-card.css'), 'utf8');
+    const raisedRule = css.match(/:where\(ptah-surface-card > \[data-interactive\] > \.ptah-card-body :is\(([\s\S]*?)\)\)\s*\{([^}]*)\}/);
+    expect(raisedRule).not.toBeNull();
+    expect(raisedRule?.[1]).toContain('[title]');
+    expect(raisedRule?.[1]).toContain('[data-card-interactive]');
+    expect(raisedRule?.[2]).toContain('position: relative');
+    expect(raisedRule?.[2]).toContain('z-index: 1');
   });
 
   it('shows aria-pressed and the selected state when selectable', () => {

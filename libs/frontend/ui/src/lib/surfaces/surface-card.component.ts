@@ -11,10 +11,10 @@
  *   above the overlay and keep their own click behavior.
  * - Interactive cards require a non-blank accessible name: set `ariaLabel`,
  *   or set `ariaLabelledby` to the id of a visible heading.
- * - The projected body ignores the pointer so a click reaches the overlay,
- *   except nested controls and `[data-card-ignore]`. Body text is not
- *   selectable. A projected element with only a `(click)` handler needs
- *   `[data-card-ignore]` or a role.
+ * - Plain text activates the card. Elements with their own click or hover
+ *   behavior need a semantic hook (such as a button, link, `[title]`, or
+ *   `[role]`) or `[data-card-interactive]` to sit above the overlay.
+ *   Custom-element hosts are not raised automatically.
  * - `selectable` adds `aria-pressed` and a selected ring in the tone color.
  * - `disabled` stops activation and dims the card.
  *
