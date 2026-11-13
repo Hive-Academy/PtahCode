@@ -67,10 +67,13 @@ ptah-surface-card { display: block; }
 ptah-surface-card > .ptah-card {
   display: flex;
   flex-direction: column;
+  position: relative;
   transition-property: background-color, border-color, box-shadow;
   transition-duration: var(--ptah-duration-fast);
   transition-timing-function: var(--ptah-ease-standard);
 }
+
+ptah-surface-card > [data-interactive] { position: relative; }
 
 .ptah-card > .ptah-card-body {
   display: flex;
@@ -78,6 +81,32 @@ ptah-surface-card > .ptah-card {
   gap: var(--_gap);
   min-width: 0;
 }
+
+ptah-surface-card > [data-interactive] > .ptah-card-body {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+ptah-surface-card > [data-interactive] > .ptah-card-body :is(
+  button, a[href], input, select, textarea, label, summary,
+  [role='button'], [tabindex], [contenteditable], [data-card-ignore]
+) {
+  pointer-events: auto;
+}
+
+ptah-surface-card .ptah-card-activator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: inherit;
+}
+
+ptah-surface-card .ptah-card-activator:focus-visible { outline: none; }
 
 /* Spine: a colored edge at the start of the card. */
 .ptah-card[data-spine] {
@@ -87,6 +116,7 @@ ptah-surface-card > .ptah-card {
 }
 .ptah-card > .ptah-card-spine {
   position: absolute;
+  pointer-events: none;
   inset-block: 0;
   inset-inline-start: 0;
   width: var(--ptah-card-spine-width);
@@ -99,7 +129,7 @@ ptah-surface-card > .ptah-card {
   background-color: color-mix(in oklch, var(--_bg), var(--ptah-card-hover-tint) var(--ptah-card-hover-mix));
   border-color: var(--ptah-card-hover-border);
 }
-.ptah-card[data-interactive]:not([data-disabled]):is(:focus-visible, [data-state='focus'], [data-state='focus'] > *) {
+.ptah-card[data-interactive]:not([data-disabled]):is(:has(.ptah-card-activator:focus-visible), [data-state='focus'], [data-state='focus'] > *) {
   outline: var(--ptah-focus-ring-width) solid var(--ptah-card-focus-color);
   outline-offset: var(--ptah-focus-ring-offset);
 }

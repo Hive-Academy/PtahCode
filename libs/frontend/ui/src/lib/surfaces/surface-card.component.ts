@@ -6,10 +6,15 @@
  * recipe as the `ptahSurface` directive), so a token change applies to each
  * card. The behavior comes from `ptah-native-card`:
  *
- * - `interactive` (or `clickable`) makes the card a `role="button"` target
- *   (mouse, Enter and Space) that emits `activated`.
- * - A click inside a nested control (`button`, `a[href]`, `input`, ...) or
- *   inside `[data-card-ignore]` does not activate the card.
+ * - `interactive`, `clickable`, or `selectable` adds a native button overlay
+ *   that emits `activated` on click, Enter, or Space. Projected controls stay
+ *   above the overlay and keep their own click behavior.
+ * - Interactive cards require a non-blank accessible name: set `ariaLabel`,
+ *   or set `ariaLabelledby` to the id of a visible heading.
+ * - The projected body ignores the pointer so a click reaches the overlay,
+ *   except nested controls and `[data-card-ignore]`. Body text is not
+ *   selectable. A projected element with only a `(click)` handler needs
+ *   `[data-card-ignore]` or a role.
  * - `selectable` adds `aria-pressed` and a selected ring in the tone color.
  * - `disabled` stops activation and dims the card.
  *
@@ -27,7 +32,7 @@
  *   ariaLabel="Open details for deep-research"
  *   (activated)="openDetail()"
  * >
- *   <div card-header>...</div>
+ *   <div card-header>Deep research</div>
  *   <p>Body content</p>
  *   <div card-footer><button (click)="enhance()">Enhance</button></div>
  * </ptah-surface-card>
@@ -46,13 +51,6 @@ import type {
   PtahCardTone,
   PtahCardVariant,
 } from '../card/card.types';
-
-/**
- * Descendants that own their own click semantics. A click on (or inside) one
- * of them never activates the card.
- */
-const NESTED_INTERACTIVE_SELECTOR =
-  'button, a[href], input, select, textarea, label, summary, [data-card-ignore]';
 
 @Component({
   selector: 'ptah-surface-card',
@@ -74,14 +72,19 @@ const NESTED_INTERACTIVE_SELECTOR =
       [attr.data-interactive]="isInteractive() ? '' : null"
       [attr.data-selected]="selectable() && selected() ? '' : null"
       [attr.data-disabled]="disabled() ? '' : null"
-      [attr.role]="isInteractive() ? 'button' : null"
-      [attr.tabindex]="isInteractive() && !disabled() ? 0 : null"
-      [attr.aria-pressed]="selectable() ? selected() : null"
-      [attr.aria-disabled]="disabled() ? 'true' : null"
-      [attr.aria-label]="ariaLabel()"
-      (click)="onClick($event)"
-      (keydown)="onKeydown($event)"
     >
+      @if (isInteractive()) {
+        <button
+          type="button"
+          class="ptah-card-activator"
+          data-testid="surface-card-activator"
+          [attr.aria-label]="activationLabel()"
+          [attr.aria-labelledby]="activationLabelledby()"
+          [attr.aria-pressed]="selectable() ? selected() : null"
+          [disabled]="disabled()"
+          (click)="activate()"
+        ></button>
+      }
       @if (spine()) {
         <span class="ptah-card-spine" data-testid="surface-card-spine" aria-hidden="true"></span>
       }
@@ -124,20 +127,29 @@ export class SurfaceCardComponent {
   /** Stops activation and dims the card. */
   readonly disabled = input<boolean>(false);
 
-  /** Accessible name of the activation target. Required when interactive. */
+  /** Non-blank accessible name of the activation button. Required when interactive unless `ariaLabelledby` is set. */
   readonly ariaLabel = input<string | null>(null);
+
+  /** Id of a visible heading that names the activation button when `ariaLabel` is blank. */
+  readonly ariaLabelledby = input<string | null>(null);
 
   /** Old input. 2 shows the `raised` variant when `variant` is `card`. */
   readonly elevation = input<1 | 2>(1);
 
   /**
-   * Emitted on a real activation: a click on the card surface, or Enter or
-   * Space while the card itself has focus. Not emitted for a nested control.
+   * Emitted when the activation button is clicked or triggered with Enter or
+   * Space. Projected controls do not emit this output.
    */
   readonly activated = output<void>();
 
   protected readonly isInteractive = computed(
     () => this.interactive() || this.clickable() || this.selectable(),
+  );
+
+  protected readonly activationLabel = computed(() => this.ariaLabel()?.trim() || null);
+
+  protected readonly activationLabelledby = computed(() =>
+    this.activationLabel() ? null : this.ariaLabelledby()?.trim() || null,
   );
 
   /**
@@ -158,34 +170,8 @@ export class SurfaceCardComponent {
     () => this.padding() ?? (this.density() === 'compact' ? 'sm' : 'md'),
   );
 
-  protected onClick(event: MouseEvent): void {
-    if (!this.isInteractive() || this.disabled()) return;
-    if (this.isNestedInteractive(event)) return;
+  protected activate(): void {
+    if (this.disabled()) return;
     this.activated.emit();
-  }
-
-  protected onKeydown(event: KeyboardEvent): void {
-    if (!this.isInteractive() || this.disabled()) return;
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    // A key press inside a nested control belongs to that control.
-    if (event.target !== event.currentTarget) return;
-    event.preventDefault();
-    this.activated.emit();
-  }
-
-  /**
-   * True when the event started on a descendant with its own click
-   * semantics. The search stops at the card root, so the root's own
-   * `role="button"` never matches.
-   */
-  private isNestedInteractive(event: MouseEvent): boolean {
-    const target = event.target;
-    if (!(target instanceof Element)) return false;
-    if (target === event.currentTarget) return false;
-    const match = target.closest(NESTED_INTERACTIVE_SELECTOR);
-    if (match === null) return false;
-    return (
-      event.currentTarget instanceof Node && event.currentTarget.contains(match)
-    );
   }
 }

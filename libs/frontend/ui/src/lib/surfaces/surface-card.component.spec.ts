@@ -25,9 +25,10 @@ import { SurfaceCardComponent } from './surface-card.component';
     [disabled]="disabled()"
     [elevation]="elevation()"
     [ariaLabel]="label()"
+    [ariaLabelledby]="labelledby()"
     (activated)="activations = activations + 1"
   >
-    <div card-header data-testid="header">Header</div>
+    <div card-header data-testid="header"><h3 id="card-heading">Header</h3></div>
     <p data-testid="body">Body <button type="button" data-testid="nested">Act</button></p>
     <span data-card-ignore data-testid="ignored">Ignored</span>
     <div card-footer data-testid="footer">Footer</div>
@@ -46,6 +47,7 @@ class HostComponent {
   readonly disabled = signal(false);
   readonly elevation = signal<1 | 2>(1);
   readonly label = signal<string | null>(null);
+  readonly labelledby = signal<string | null>(null);
   activations = 0;
 }
 
@@ -164,64 +166,69 @@ describe('SurfaceCardComponent', () => {
   });
 
   it('does not activate when it is not interactive', () => {
-    const { fixture, card } = setup();
+    const { fixture, card, by } = setup();
+    expect(by('surface-card-activator')).toBeNull();
     card().click();
     expect(fixture.componentInstance.activations).toBe(0);
   });
 
   it('is a named button target when interactive', () => {
-    const { fixture, card, update } = setup();
+    const { fixture, card, by, update } = setup();
     update((h) => {
       h.interactive.set(true);
       h.label.set('Open details');
     });
-    expect(card().getAttribute('role')).toBe('button');
-    expect(card().getAttribute('tabindex')).toBe('0');
-    expect(card().getAttribute('aria-label')).toBe('Open details');
+    const activator = by('surface-card-activator') as HTMLButtonElement;
+    expect(activator.tagName).toBe('BUTTON');
+    expect(activator.type).toBe('button');
+    expect(activator.getAttribute('aria-label')).toBe('Open details');
+    expect(card().getAttribute('role')).toBeNull();
+    expect(card().getAttribute('tabindex')).toBeNull();
     expect(card().hasAttribute('data-interactive')).toBe(true);
-    card().click();
+    activator.click();
     expect(fixture.componentInstance.activations).toBe(1);
   });
 
   it('accepts clickable as the same as interactive', () => {
-    const { fixture, card, update } = setup();
-    update((h) => h.clickable.set(true));
-    expect(card().getAttribute('role')).toBe('button');
-    card().click();
+    const { fixture, by, update } = setup();
+    update((h) => { h.clickable.set(true); h.label.set('Clickable card'); });
+    expect(by('surface-card-activator').getAttribute('aria-label')).toBe('Clickable card');
+    by('surface-card-activator').click();
     expect(fixture.componentInstance.activations).toBe(1);
   });
 
-  it('activates on Enter and Space on the card only', () => {
+  it('activates once per click of the native button', () => {
     const { fixture, card, by, update } = setup();
-    update((h) => h.interactive.set(true));
+    update((h) => { h.interactive.set(true); h.label.set('Open details'); });
+    const activator = by('surface-card-activator');
     for (const key of ['Enter', ' ']) {
-      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
-      card().dispatchEvent(event);
-      expect(event.defaultPrevented).toBe(true);
+      activator.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      // jsdom does not synthesize the native click after a keyboard event.
+      activator.click();
     }
     card().dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
     by('nested').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(fixture.componentInstance.activations).toBe(2);
   });
 
-  it('ignores clicks on nested controls and [data-card-ignore]', () => {
-    const { fixture, by, update } = setup();
-    update((h) => h.interactive.set(true));
+  it('keeps nested controls independent of the activator', () => {
+    const { fixture, by, card, update } = setup();
+    update((h) => { h.interactive.set(true); h.label.set('Open details'); });
     by('nested').click();
     by('ignored').click();
     expect(fixture.componentInstance.activations).toBe(0);
     by('header').click();
-    expect(fixture.componentInstance.activations).toBe(1);
+    card().click();
+    expect(fixture.componentInstance.activations).toBe(0);
   });
 
   it('shows aria-pressed and the selected state when selectable', () => {
-    const { card, update } = setup();
-    update((h) => h.selectable.set(true));
-    expect(card().getAttribute('role')).toBe('button');
-    expect(card().getAttribute('aria-pressed')).toBe('false');
+    const { card, by, update } = setup();
+    update((h) => { h.selectable.set(true); h.label.set('Select card'); });
+    expect(by('surface-card-activator').getAttribute('aria-pressed')).toBe('false');
     expect(card().hasAttribute('data-selected')).toBe(false);
     update((h) => h.selected.set(true));
-    expect(card().getAttribute('aria-pressed')).toBe('true');
+    expect(by('surface-card-activator').getAttribute('aria-pressed')).toBe('true');
     expect(card().hasAttribute('data-selected')).toBe(true);
   });
 
@@ -229,21 +236,34 @@ describe('SurfaceCardComponent', () => {
     const { card, update } = setup();
     update((h) => h.selected.set(true));
     expect(card().hasAttribute('data-selected')).toBe(false);
-    expect(card().getAttribute('aria-pressed')).toBeNull();
+    expect(card().querySelector('button.ptah-card-activator')).toBeNull();
   });
 
-  it('stops activation and removes the tab stop when disabled', () => {
-    const { fixture, card, update } = setup();
+  it('stops activation with native disabled state', () => {
+    const { fixture, card, by, update } = setup();
     update((h) => {
       h.interactive.set(true);
+      h.label.set('Disabled card');
       h.disabled.set(true);
     });
-    expect(card().getAttribute('aria-disabled')).toBe('true');
+    const activator = by('surface-card-activator') as HTMLButtonElement;
+    expect(activator.disabled).toBe(true);
     expect(card().getAttribute('tabindex')).toBeNull();
     expect(card().hasAttribute('data-disabled')).toBe(true);
-    card().click();
-    card().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    activator.click();
+    activator.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(fixture.componentInstance.activations).toBe(0);
+  });
+
+  it('uses a heading id when ariaLabel is blank', () => {
+    const { by, update } = setup();
+    update((h) => {
+      h.interactive.set(true);
+      h.label.set('  ');
+      h.labelledby.set('card-heading');
+    });
+    expect(by('surface-card-activator').getAttribute('aria-label')).toBeNull();
+    expect(by('surface-card-activator').getAttribute('aria-labelledby')).toBe('card-heading');
   });
 
   it('keeps the old consumer markup working', () => {
