@@ -6,10 +6,17 @@
  * recipe as the `ptahSurface` directive), so a token change applies to each
  * card. The behavior comes from `ptah-native-card`:
  *
- * - `interactive` (or `clickable`) makes the card a `role="button"` target
- *   (mouse, Enter and Space) that emits `activated`.
- * - A click inside a nested control (`button`, `a[href]`, `input`, ...) or
- *   inside `[data-card-ignore]` does not activate the card.
+ * - `interactive`, `clickable`, or `selectable` adds a native button overlay
+ *   for keyboard, focus and assistive technology. One click listener on the
+ *   card root emits `activated` for a click, Enter, or Space. A click inside a
+ *   real nested control (button, link, input, label, interactive role,
+ *   `[data-card-ignore]`, `[data-card-interactive]`) does not activate.
+ * - Interactive cards require a non-blank accessible name: set `ariaLabel`,
+ *   or set `ariaLabelledby` to the id of a visible heading.
+ * - Plain text activates the card. Elements with their own click or hover
+ *   behavior need a semantic hook (such as a button, link, `[title]`, or
+ *   `[role]`) or `[data-card-interactive]` to sit above the overlay.
+ *   Custom-element hosts are not raised automatically.
  * - `selectable` adds `aria-pressed` and a selected ring in the tone color.
  * - `disabled` stops activation and dims the card.
  *
@@ -27,7 +34,7 @@
  *   ariaLabel="Open details for deep-research"
  *   (activated)="openDetail()"
  * >
- *   <div card-header>...</div>
+ *   <div card-header>Deep research</div>
  *   <p>Body content</p>
  *   <div card-footer><button (click)="enhance()">Enhance</button></div>
  * </ptah-surface-card>
@@ -50,12 +57,31 @@ import type {
   PtahCardVariant,
 } from '../card/card.types';
 
-/**
- * Descendants that own their own click semantics. A click on (or inside) one
- * of them never activates the card.
- */
-const NESTED_INTERACTIVE_SELECTOR =
-  'button, a[href], input, select, textarea, label, summary, [data-card-ignore]';
+const NESTED_CONTROL_SELECTOR =
+  'button, a[href], input, select, textarea, label, summary, [contenteditable], ' +
+  '[data-card-ignore], [data-card-interactive]';
+
+const INTERACTIVE_ROLES = new Set([
+  'button',
+  'link',
+  'checkbox',
+  'switch',
+  'menuitem',
+  'menuitemcheckbox',
+  'menuitemradio',
+  'tab',
+  'option',
+  'radio',
+  'combobox',
+  'textbox',
+  'slider',
+]);
+
+function isNestedControl(el: Element): boolean {
+  if (el.matches(NESTED_CONTROL_SELECTOR)) return true;
+  const role = el.getAttribute('role');
+  return role !== null && INTERACTIVE_ROLES.has(role.trim().toLowerCase());
+}
 
 @Component({
   selector: 'ptah-surface-card',
@@ -81,14 +107,19 @@ const NESTED_INTERACTIVE_SELECTOR =
       [attr.data-interactive]="isInteractive() ? '' : null"
       [attr.data-selected]="selectable() && selected() ? '' : null"
       [attr.data-disabled]="disabled() ? '' : null"
-      [attr.role]="isInteractive() ? 'button' : null"
-      [attr.tabindex]="isInteractive() && !disabled() ? 0 : null"
-      [attr.aria-pressed]="selectable() ? selected() : null"
-      [attr.aria-disabled]="disabled() ? 'true' : null"
-      [attr.aria-label]="ariaLabel()"
-      (click)="onClick($event)"
-      (keydown)="onKeydown($event)"
+      (click)="onCardClick($event)"
     >
+      @if (isInteractive()) {
+        <button
+          type="button"
+          class="ptah-card-activator"
+          data-testid="surface-card-activator"
+          [attr.aria-label]="activationLabel()"
+          [attr.aria-labelledby]="activationLabelledby()"
+          [attr.aria-pressed]="selectable() ? selected() : null"
+          [disabled]="disabled()"
+        ></button>
+      }
       @if (spine()) {
         <span class="ptah-card-spine" data-testid="surface-card-spine" aria-hidden="true"></span>
       }
@@ -143,20 +174,29 @@ export class SurfaceCardComponent {
   /** Stops activation and dims the card. */
   readonly disabled = input<boolean>(false);
 
-  /** Accessible name of the activation target. Required when interactive. */
+  /** Non-blank accessible name of the activation button. Required when interactive unless `ariaLabelledby` is set. */
   readonly ariaLabel = input<string | null>(null);
+
+  /** Id of a visible heading that names the activation button when `ariaLabel` is blank. */
+  readonly ariaLabelledby = input<string | null>(null);
 
   /** Old input. 2 shows the `raised` variant when `variant` is `card`. */
   readonly elevation = input<1 | 2>(1);
 
   /**
-   * Emitted on a real activation: a click on the card surface, or Enter or
-   * Space while the card itself has focus. Not emitted for a nested control.
+   * Emitted when the activation button is clicked or triggered with Enter or
+   * Space. Projected controls do not emit this output.
    */
   readonly activated = output<void>();
 
   protected readonly isInteractive = computed(
     () => this.interactive() || this.clickable() || this.selectable(),
+  );
+
+  protected readonly activationLabel = computed(() => this.ariaLabel()?.trim() || null);
+
+  protected readonly activationLabelledby = computed(() =>
+    this.activationLabel() ? null : this.ariaLabelledby()?.trim() || null,
   );
 
   /**
@@ -177,34 +217,21 @@ export class SurfaceCardComponent {
     () => this.padding() ?? (this.density() === 'compact' ? 'sm' : 'md'),
   );
 
-  protected onClick(event: MouseEvent): void {
-    if (!this.isInteractive() || this.disabled()) return;
-    if (this.isNestedInteractive(event)) return;
-    this.activated.emit();
-  }
-
-  protected onKeydown(event: KeyboardEvent): void {
-    if (!this.isInteractive() || this.disabled()) return;
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    // A key press inside a nested control belongs to that control.
-    if (event.target !== event.currentTarget) return;
-    event.preventDefault();
-    this.activated.emit();
-  }
-
   /**
-   * True when the event started on a descendant with its own click
-   * semantics. The search stops at the card root, so the root's own
-   * `role="button"` never matches.
+   * One click listener on the card root. The native activator keeps keyboard,
+   * focus and assistive technology; its click bubbles here, so Enter and Space
+   * emit once. A click on a real nested control does not activate the card.
    */
-  private isNestedInteractive(event: MouseEvent): boolean {
+  protected onCardClick(event: Event): void {
+    if (!this.isInteractive() || this.disabled()) return;
+    const card = event.currentTarget as HTMLElement | null;
     const target = event.target;
-    if (!(target instanceof Element)) return false;
-    if (target === event.currentTarget) return false;
-    const match = target.closest(NESTED_INTERACTIVE_SELECTOR);
-    if (match === null) return false;
-    return (
-      event.currentTarget instanceof Node && event.currentTarget.contains(match)
-    );
+    if (!card || !(target instanceof Element)) return;
+    if (!target.classList.contains('ptah-card-activator')) {
+      for (let el: Element | null = target; el && el !== card; el = el.parentElement) {
+        if (isNestedControl(el)) return;
+      }
+    }
+    this.activated.emit();
   }
 }

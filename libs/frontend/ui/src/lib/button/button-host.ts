@@ -26,8 +26,6 @@ export const BUTTON_HOST = {
   '[attr.data-selected]': "selected() ? '' : null",
   '[class.opacity-60]': 'busy()',
   '[class.cursor-wait]': 'busy()',
-  '[attr.aria-disabled]': "busy() ? 'true' : null",
-  '[attr.aria-busy]': "busy() ? 'true' : null",
   '[attr.type]': 'hostType()',
 };
 /**
@@ -64,6 +62,28 @@ export function blockBusyActivation(busy: () => boolean): void {
     element.removeEventListener('auxclick', block, true);
   });
 }
+/** Preserve consumer ARIA values across the owner's busy state. */
+export function syncBusyAria(busy: () => boolean): void {
+  const element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  const renderer = inject(Renderer2);
+  const previous = new Map<string, string | null>();
+  effect(() => {
+    for (const name of ['aria-disabled', 'aria-busy']) {
+      if (busy()) {
+        if (!previous.has(name)) previous.set(name, element.getAttribute(name));
+        renderer.setAttribute(element, name, 'true');
+      } else if (previous.has(name)) {
+        const value = previous.get(name);
+        if (element.getAttribute(name) === 'true') {
+          if (value === null || value === undefined)
+            renderer.removeAttribute(element, name);
+          else renderer.setAttribute(element, name, value);
+        }
+        previous.delete(name);
+      }
+    }
+  });
+}
 /**
  * Writes `aria-pressed` or `aria-current` from `selected` and `selectedAs`.
  * It is not a host binding: a host binding writes null when `selected` is not set and
@@ -76,13 +96,17 @@ export function syncSelectedAria(
 ): void {
   const element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   const renderer = inject(Renderer2);
-  const written = new Set<string>();
+  const written = new Map<string, string>();
   const apply = (name: string, value: string | null) => {
     if (value !== null) {
       renderer.setAttribute(element, name, value);
-      written.add(name);
-    } else if (written.delete(name)) {
-      renderer.removeAttribute(element, name);
+      written.set(name, value);
+    } else {
+      const owned = written.get(name);
+      if (owned !== undefined && element.getAttribute(name) === owned) {
+        renderer.removeAttribute(element, name);
+      }
+      written.delete(name);
     }
   };
   effect(() => {
