@@ -14,12 +14,13 @@ import {
 } from 'lucide-angular';
 
 import type { MemoryWire } from '@ptah-extension/shared';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-memory-entry-list',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, LucideAngularModule],
+  imports: [CommonModule, LucideAngularModule, PtahIconButtonDirective],
   template: `
     <section
       aria-label="Memory entries"
@@ -99,6 +100,7 @@ import type { MemoryWire } from '@ptah-extension/shared';
               <div
                 class="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
               >
+                <!-- Pin and Unpin stay raw: the icon owner has no muted tone without a danger hover. -->
                 @if (entry.pinned) {
                   <button
                     type="button"
@@ -131,9 +133,13 @@ import type { MemoryWire } from '@ptah-extension/shared';
                 <button
                   type="button"
                   data-testid="memory-entry-forget"
-                  class="btn btn-ghost btn-xs btn-square text-base-content-muted hover:text-error"
+                  ptahIconButton
+                  variant="ghost"
+                  size="xs"
+                  density="compact"
+                  tone="muted-danger"
+                  [label]="'Forget entry ' + entry.id"
                   (click)="forget.emit(entry.id)"
-                  [attr.aria-label]="'Forget entry ' + entry.id"
                 >
                   <lucide-angular
                     [img]="Trash2Icon"

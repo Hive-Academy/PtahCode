@@ -673,17 +673,10 @@
     "input-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
-    "<dynamic>": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-detail-drawer.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "<dynamic>": 2
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts": {
     "alert": 1,
@@ -1042,10 +1035,10 @@
     "alert-error": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-entry-list.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-square": 3,
-    "btn-xs": 3,
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-square": 2,
+    "btn-xs": 2,
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {

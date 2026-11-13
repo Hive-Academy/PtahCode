@@ -219,7 +219,12 @@ import {
           </button>
           <button
             type="button"
-            class="btn btn-ghost btn-sm ml-auto text-error transition-colors duration-150"
+            ptahButton
+            variant="ghost"
+            size="sm"
+            density="compact"
+            tone="danger"
+            class="ml-auto transition-colors duration-150"
             data-testid="cron-drawer-delete"
             (click)="removed.emit()"
           >
