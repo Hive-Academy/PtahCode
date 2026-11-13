@@ -13,7 +13,18 @@ export type PtahCardVariant =
   | 'subtle'
   | 'inset'
   | 'raised'
+  | 'surface-1'
+  | 'surface-2'
   | 'legacy';
+
+/** Optional fill mix: `50` matches `bg-base-200/50`; `100` keeps the default. */
+export type PtahCardFill = 50 | 100;
+
+/** Optional small shadow, or the variant's normal shadow. */
+export type PtahCardShadow = 'none' | 'sm';
+
+/** Faint matches `border-base-content/10`; default keeps the card border. */
+export type PtahCardBorder = 'default' | 'faint';
 
 /** none: 0. sm: 12 px. md: 16 px (default). lg: 20 px. */
 export type PtahCardPadding = 'none' | 'sm' | 'md' | 'lg';

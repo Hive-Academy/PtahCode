@@ -41,8 +41,11 @@ import {
   output,
 } from '@angular/core';
 import type {
+  PtahCardBorder,
   PtahCardDensity,
+  PtahCardFill,
   PtahCardPadding,
+  PtahCardShadow,
   PtahCardTone,
   PtahCardVariant,
 } from '../card/card.types';
@@ -70,6 +73,10 @@ const NESTED_INTERACTIVE_SELECTOR =
       [attr.data-variant]="effectiveVariant()"
       [attr.data-padding]="effectivePadding()"
       [attr.data-tone]="tone()"
+      [attr.data-tone-border]="toneBorder() ? '' : null"
+      [attr.data-fill]="translucent() === 50 ? '50' : null"
+      [attr.data-shadow]="shadow() === 'sm' ? 'sm' : null"
+      [attr.data-border]="border() === 'faint' ? 'faint' : null"
       [attr.data-spine]="spine() ? '' : null"
       [attr.data-interactive]="isInteractive() ? '' : null"
       [attr.data-selected]="selectable() && selected() ? '' : null"
@@ -105,6 +112,18 @@ export class SurfaceCardComponent {
 
   /** Color of the status spine and of the selected ring. */
   readonly tone = input<PtahCardTone>('neutral');
+
+  /** Use the tone color for the border when the tone is not neutral. */
+  readonly toneBorder = input(false);
+
+  /** Fill opacity: 50 matches `bg-base-200/50`; 100 preserves the default. */
+  readonly translucent = input<PtahCardFill>(100);
+
+  /** Optional `shadow-sm` look. */
+  readonly shadow = input<PtahCardShadow>('none');
+
+  /** Faint matches `border-base-content/10`. */
+  readonly border = input<PtahCardBorder>('default');
 
   /** Show the colored spine at the start edge. */
   readonly spine = input<boolean>(false);

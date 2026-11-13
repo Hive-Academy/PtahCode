@@ -1,8 +1,11 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type {
+  PtahCardBorder,
   PtahCardDensity,
+  PtahCardFill,
   PtahCardPadding,
+  PtahCardShadow,
   PtahCardTone,
   PtahCardVariant,
 } from '../card/card.types';
@@ -17,6 +20,10 @@ import { SurfaceCardComponent } from './surface-card.component';
     [padding]="padding()"
     [density]="density()"
     [tone]="tone()"
+    [toneBorder]="toneBorder()"
+    [translucent]="translucent()"
+    [shadow]="shadow()"
+    [border]="border()"
     [spine]="spine()"
     [interactive]="interactive()"
     [clickable]="clickable()"
@@ -38,6 +45,10 @@ class HostComponent {
   readonly padding = signal<PtahCardPadding | null>(null);
   readonly density = signal<PtahCardDensity>('comfortable');
   readonly tone = signal<PtahCardTone>('neutral');
+  readonly toneBorder = signal(false);
+  readonly translucent = signal<PtahCardFill>(100);
+  readonly shadow = signal<PtahCardShadow>('none');
+  readonly border = signal<PtahCardBorder>('default');
   readonly spine = signal(false);
   readonly interactive = signal(false);
   readonly clickable = signal(false);
@@ -86,7 +97,7 @@ describe('SurfaceCardComponent', () => {
     expect(card().hasAttribute('data-interactive')).toBe(false);
   });
 
-  it.each<PtahCardVariant>(['card', 'subtle', 'inset', 'raised'])(
+  it.each<PtahCardVariant>(['card', 'subtle', 'inset', 'raised', 'surface-1', 'surface-2'])(
     'sets the %s variant',
     (variant) => {
       const { card, update } = setup();
@@ -118,6 +129,25 @@ describe('SurfaceCardComponent', () => {
     expect(card().dataset['variant']).toBe('raised');
     update((h) => h.variant.set('inset'));
     expect(card().dataset['variant']).toBe('inset');
+  });
+
+  it('reflects opt-in border, fill and shadow looks', () => {
+    const { card, update } = setup();
+    for (const name of ['toneBorder', 'fill', 'shadow', 'border']) {
+      expect(card().dataset[name]).toBeUndefined();
+    }
+    update((h) => {
+      h.tone.set('warning');
+      h.toneBorder.set(true);
+      h.translucent.set(50);
+      h.shadow.set('sm');
+      h.border.set('faint');
+    });
+    expect(card().dataset['tone']).toBe('warning');
+    expect(card().hasAttribute('data-tone-border')).toBe(true);
+    expect(card().dataset['fill']).toBe('50');
+    expect(card().dataset['shadow']).toBe('sm');
+    expect(card().dataset['border']).toBe('faint');
   });
 
   it('has no look utility class on a non-legacy card', () => {
