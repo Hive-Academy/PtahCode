@@ -74,7 +74,7 @@ const FOCUS =
         <button
           type="submit"
           ptahButton variant="primary" size="sm"
-          class="min-h-8 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          class="min-h-8"
           [ptahBusyDisabled]="pending() || empty()"
           data-testid="add-account-submit"
         >
