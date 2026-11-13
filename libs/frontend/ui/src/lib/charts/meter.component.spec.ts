@@ -263,13 +263,13 @@ describe('marker and stripes', () => {
   it('draws an aria-hidden marker at the percent without changing the value', () => {
     const el = render({ value: 30, marker: 80 });
     const tick = el.querySelector('[data-meter-marker]') as HTMLElement;
-    expect(tick.style.left).toBe('calc(80% - 0.8px)');
+    expect(tick.style.left).toBe('calc(80% - 1.6px)');
     expect(tick.getAttribute('aria-hidden')).toBe('true');
     expect(el.querySelector('[role="meter"]')?.getAttribute('aria-valuenow')).toBe('30');
   });
 
   it('clamps the marker and hides it for non-finite input or invalid data', () => {
-    expect((render({ value: 30, marker: 150 }).querySelector('[data-meter-marker]') as HTMLElement).style.left).toBe('calc(100% - 1px)');
+    expect((render({ value: 30, marker: 150 }).querySelector('[data-meter-marker]') as HTMLElement).style.left).toBe('calc(100% - 2px)');
     expect(render({ value: 30, marker: Number.NaN }).querySelector('[data-meter-marker]')).toBeNull();
     expect(render({ value: 30, max: 0, marker: 50 }).querySelector('[data-meter-marker]')).toBeNull();
   });

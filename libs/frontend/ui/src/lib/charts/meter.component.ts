@@ -31,7 +31,7 @@ const STRIPES =
   template: `<div [class]="textClass()"><div [class]="rowClass()" data-meter-row><span [class.sr-only]="hideLabel()">{{ label() }}</span><span class="tabular-nums" [class.sr-only]="!showValue()">@if (indeterminate()) { {{ valueText() ?? 'In progress' }} } @else if (valid()) { {{ visibleText() }} } @else { Unavailable }</span></div>
     <div class="overflow-hidden rounded-full bg-[var(--ptah-meter-track,var(--surface-border-strong))] shadow-[inset_0_0_0_0.0625rem_var(--ptah-meter-track-edge,transparent)]" [class]="trackClass()" [attr.role]="ariaRole()" [attr.aria-label]="ariaRole() && !ariaLabelledby() ? label() : null" [attr.aria-labelledby]="ariaRole() ? ariaLabelledby() : null" [attr.aria-valuemin]="ranged() ? 0 : null" [attr.aria-valuemax]="ranged() ? max() : null" [attr.aria-valuenow]="ranged() ? ariaNow() : null" [attr.aria-valuetext]="ariaValueText()">
       @if (indeterminate()) { @if (indeterminateStyle() === 'sweep') { <div class="ptah-meter-sweep h-full rounded-full" [class]="fillClass()"></div> } @else { <div class="h-full w-1/3 animate-pulse rounded-full motion-reduce:animate-none" [class]="fillClass()"></div> } } @else if (valid()) { <div class="h-full rounded-full" [class]="determinateFillClass()" [style.width.%]="width()" [style.background-image]="stripeImage()"></div> }
-      @if (markerPercent() !== null) { <div class="absolute top-0 h-full w-px bg-[var(--ptah-meter-marker,var(--ptah-badge-neutral-ink))]" [style.left]="markerLeft()" aria-hidden="true" data-meter-marker></div> }
+      @if (markerPercent() !== null) { <div class="absolute top-0 h-full w-0.5 bg-[var(--ptah-meter-marker,var(--ptah-badge-neutral-ink))]" [style.left]="markerLeft()" aria-hidden="true" data-meter-marker></div> }
     </div>
   </div>`,
   styles: [`
@@ -106,7 +106,7 @@ export class PtahMeterComponent {
   /** Left edge of the tick: the tick stays inside the clipped track at 100%. */
   readonly markerLeft = computed(() => {
     const m = this.markerPercent();
-    return m === null ? null : `calc(${m}% - ${m / 100}px)`;
+    return m === null ? null : `calc(${m}% - ${m / 50}px)`;
   });
   /** Diagonal stripes in the tone ink (`currentColor`) over the track color. */
   readonly stripeImage = computed(() => (this.stripes() ? STRIPES : null));
