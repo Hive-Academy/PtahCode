@@ -20,12 +20,12 @@ const RADIAL_TONE_CLASSES = {
   error: 'radial-progress text-error',
 } as const;
 
+// Left raw: it uses daisyUI radial progress, whose geometry and tone differ from the ptah-ring SVG.
 @Component({
   selector: 'ptah-dashboard-radial-progress',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <!-- Keep daisyUI radial progress: the owner SVG ring differs in geometry and tone. -->
     <!-- Visible label text; the ring is sized by its content and filled by the renderer-owned --value custom property. -->
     <span class="text-sm text-base-content" data-testid="radial-progress-label">{{ node().label.text }}</span>
     <div [class]="toneClasses()" role="progressbar" aria-valuemin="0" aria-valuemax="100"

@@ -18,12 +18,12 @@ const PROGRESS_TONE_CLASSES = {
   error: 'progress progress-error',
 } as const;
 
+// Left raw: it uses native progress with the daisyUI track and fill, which differ visibly from ptah-meter.
 @Component({
   selector: 'ptah-dashboard-progress',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <!-- Keep native progress: the owner track and fill differ visibly from daisyUI progress. -->
     <!-- Visible label text, the native progress bar, then the unrounded percentage. The value is renderer-owned. -->
     <span class="text-sm text-base-content" data-testid="progress-label">{{ node().label.text }}</span>
     <progress [class]="toneClasses()" [value]="node().value" max="100"

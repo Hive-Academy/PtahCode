@@ -92,6 +92,7 @@ const FALLBACK_RECAP_HEIGHT = 180;
  *
  * Uses size container queries on the body host to adapt progressively across tile sizes.
  */
+// Left raw: this compact todo bar uses native progress with the daisyUI success track at a fixed width.
 @Component({
   selector: 'ptah-compact-session-activity',
   standalone: true,
@@ -828,7 +829,6 @@ const FALLBACK_RECAP_HEIGHT = 180;
           >
             @if (todo?.kind === 'known') {
               <span>☑ {{ todo.done }}/{{ todo.total }}</span>
-              <!-- Keep native progress: this compact todo bar uses the daisyUI success track at a fixed width. -->
               <progress
                 class="progress progress-success w-8"
                 [value]="todo.done"
