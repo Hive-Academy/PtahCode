@@ -51,11 +51,11 @@
   border-color: var(--surface-border, var(--ptah-card-border));
 }
 .ptah-card[data-variant='surface-1'] {
-  --_bg: var(--surface-1, oklch(var(--b2)));
+  --_bg: var(--ptah-card-bg-surface-1);
   --_shadow: var(--ptah-card-shadow-highlight);
 }
 .ptah-card[data-variant='surface-2'] {
-  --_bg: var(--surface-2, oklch(var(--b2)));
+  --_bg: var(--ptah-card-bg-surface-2);
   --_shadow: var(--ptah-card-shadow-highlight), var(--elev-shadow);
 }
 
@@ -67,7 +67,7 @@
   --_shadow: var(--ptah-card-shadow-sm);
 }
 .ptah-card[data-border='faint'] {
-  border-color: color-mix(in oklch, oklch(var(--bc)) 10%, transparent);
+  border-color: var(--ptah-card-border-faint);
 }
 .ptah-card[data-tone-border][data-tone]:not([data-tone='neutral']) {
   border-color: var(--_tone);
