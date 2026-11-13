@@ -20,6 +20,12 @@ interface ButtonStateSample {
   standalone: true,
   imports: [PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styles: [`
+    :host .surface-2.rounded-ptah-surface,
+    :host .surface-1.rounded-ptah-control {
+      border-radius: var(--ptah-card-radius);
+    }
+  `],
   template: `<div
     class="surface-2 flex flex-col gap-ptah-field rounded-ptah-surface border border-surface-border p-ptah-surface"
   >
