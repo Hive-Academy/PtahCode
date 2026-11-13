@@ -41,6 +41,8 @@ let nextCaptionId = 0;
  * injected optionally; without one the cell falls back to the row layout
  * with the default 56 px value height.
  */
+// Left raw: a three-row grid cell with a fixed-height projected value row and a stacked subgrid.
+// ptah-stat has a media slot but no fixed value row and no subgrid.
 @Component({
   selector: 'ptah-stat-cell',
   standalone: true,

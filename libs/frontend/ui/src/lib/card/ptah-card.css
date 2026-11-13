@@ -40,8 +40,37 @@
 
 /* Glass on: the rim and lift of a bordered box (same as the glass layer
    gives a raw border-base-300 box today). Raised keeps its own shadow. */
-:root[data-glass='on'] .ptah-card:not([data-variant='raised']) {
+:root[data-glass='on'] .ptah-card:not([data-variant='raised']):not([data-variant='surface-1']):not([data-variant='surface-2']):not([data-shadow='sm']) {
   --_shadow: var(--ptah-card-shadow-glass);
+}
+
+/* Match the webview surface helpers' fill, border and inset highlight. */
+.ptah-card[data-variant='surface-1'],
+.ptah-card[data-variant='surface-2'] {
+  border-width: var(--ptah-card-border-width);
+  border-color: var(--surface-border, var(--ptah-card-border));
+}
+.ptah-card[data-variant='surface-1'] {
+  --_bg: var(--ptah-card-bg-surface-1);
+  --_shadow: var(--ptah-card-shadow-highlight);
+}
+.ptah-card[data-variant='surface-2'] {
+  --_bg: var(--ptah-card-bg-surface-2);
+  --_shadow: var(--ptah-card-shadow-highlight), var(--elev-shadow);
+}
+
+/* Optional looks are absent from the default rendered card. */
+.ptah-card[data-fill='50'] {
+  background-color: color-mix(in oklch, var(--_bg) 50%, transparent);
+}
+.ptah-card[data-shadow='sm'] {
+  --_shadow: var(--ptah-card-shadow-sm);
+}
+.ptah-card[data-border='faint'] {
+  border-color: var(--ptah-card-border-faint);
+}
+.ptah-card[data-tone-border][data-tone]:not([data-tone='neutral']) {
+  border-color: var(--_tone);
 }
 
 /* Padding */
@@ -67,10 +96,13 @@ ptah-surface-card { display: block; }
 ptah-surface-card > .ptah-card {
   display: flex;
   flex-direction: column;
+  position: relative;
   transition-property: background-color, border-color, box-shadow;
   transition-duration: var(--ptah-duration-fast);
   transition-timing-function: var(--ptah-ease-standard);
 }
+
+ptah-surface-card > [data-interactive] { position: relative; }
 
 .ptah-card > .ptah-card-body {
   display: flex;
@@ -78,6 +110,32 @@ ptah-surface-card > .ptah-card {
   gap: var(--_gap);
   min-width: 0;
 }
+
+/* Raise explicit interaction and tooltip hosts above the stretched activator.
+   Keep this selector weak so consumer positioning utilities can take precedence.
+   Custom-element hosts need a hook such as data-card-interactive. */
+:where(ptah-surface-card > [data-interactive] > .ptah-card-body :is(
+  button, a[href], input, select, textarea, label, summary, details,
+  [title], [role], [tabindex], [contenteditable], [routerLink], [routerlink],
+  [data-card-ignore], [data-card-interactive]
+)) {
+  position: relative;
+  z-index: 1;
+}
+
+ptah-surface-card .ptah-card-activator {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: inherit;
+}
+
+ptah-surface-card .ptah-card-activator:focus-visible { outline: none; }
 
 /* Spine: a colored edge at the start of the card. */
 .ptah-card[data-spine] {
@@ -87,6 +145,7 @@ ptah-surface-card > .ptah-card {
 }
 .ptah-card > .ptah-card-spine {
   position: absolute;
+  pointer-events: none;
   inset-block: 0;
   inset-inline-start: 0;
   width: var(--ptah-card-spine-width);
@@ -99,7 +158,7 @@ ptah-surface-card > .ptah-card {
   background-color: color-mix(in oklch, var(--_bg), var(--ptah-card-hover-tint) var(--ptah-card-hover-mix));
   border-color: var(--ptah-card-hover-border);
 }
-.ptah-card[data-interactive]:not([data-disabled]):is(:focus-visible, [data-state='focus'], [data-state='focus'] > *) {
+.ptah-card[data-interactive]:not([data-disabled]):is(:has(.ptah-card-activator:focus-visible), [data-state='focus'], [data-state='focus'] > *) {
   outline: var(--ptah-focus-ring-width) solid var(--ptah-card-focus-color);
   outline-offset: var(--ptah-focus-ring-offset);
 }

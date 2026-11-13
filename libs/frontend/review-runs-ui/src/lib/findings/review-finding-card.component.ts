@@ -5,6 +5,7 @@ import type { FindingTriage, ReviewFindingView } from './review-finding-view';
 @Component({
   selector: 'ptah-review-finding-card', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PtahBadgeDirective, PtahButtonDirective, PtahFieldComponent, PtahStatusBadgeComponent, PtahTextareaDirective],
+  // Keep surface-1: glass mode uses --glass-scrim-text, --glass-frame and --glass-content-shadow; subtle uses tile fill and line.
   template: `
     <article class="surface-1 rounded-lg border border-base-300 p-4 space-y-3" [attr.aria-label]="view().title">
       <div class="flex flex-wrap items-center gap-2 text-xs">

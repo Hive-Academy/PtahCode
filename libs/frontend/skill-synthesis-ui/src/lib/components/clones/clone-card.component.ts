@@ -59,7 +59,7 @@ import {
   KEEP_MINE_EXPLANATION,
   cloneActionModel,
   cloneStatusLabel,
-  formatRelative,
+  formatCloneAge,
   formatSuccessRate,
 } from './clone-action-gating';
 import type { AgentSyncChip, AgentSyncChipState } from './agent-sync-chips';
@@ -594,7 +594,7 @@ export class CloneCardComponent {
     if (c.lastEnhancedAt !== null) {
       out.push({
         label: 'Last enhanced',
-        value: formatRelative(c.lastEnhancedAt),
+        value: formatCloneAge(c.lastEnhancedAt),
         testId: 'clone-metric-last-enhanced',
       });
     }
