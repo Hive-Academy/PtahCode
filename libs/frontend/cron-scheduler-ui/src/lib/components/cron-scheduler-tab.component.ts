@@ -39,6 +39,7 @@ import {
   PtahIconButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
+  PtahSurfaceDirective,
   PtahTextareaDirective,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
@@ -107,6 +108,7 @@ function emptyForm(timezone: string): CronJobFormState {
     PtahFieldComponent,
     PtahInputDirective,
     PtahSelectDirective,
+    PtahSurfaceDirective,
     PtahTextareaDirective,
     PtahToggleDirective,
   ],
@@ -137,7 +139,8 @@ function emptyForm(timezone: string): CronJobFormState {
     } @else {
       <div class="space-y-6" data-testid="cron-scheduler-section">
         <header
-          class="surface-1 flex flex-wrap items-start justify-between gap-3 rounded-xl p-5"
+          ptahSurface variant="surface-1" padding="lg"
+          class="flex flex-wrap items-start justify-between gap-3 rounded-xl"
         >
           <div class="flex items-start gap-3">
             <span
@@ -322,7 +325,8 @@ function emptyForm(timezone: string): CronJobFormState {
 
         @if (formOpen()) {
           <section
-            class="surface-1 overflow-hidden rounded-xl p-5"
+            ptahSurface variant="surface-1" padding="lg"
+            class="overflow-hidden rounded-xl"
             aria-label="Job editor"
             data-testid="cron-form"
           >

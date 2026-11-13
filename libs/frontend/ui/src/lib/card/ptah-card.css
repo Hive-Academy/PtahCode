@@ -59,6 +59,13 @@
   --_shadow: var(--ptah-card-shadow-highlight), var(--elev-shadow);
 }
 
+/* Match the structural surface reading plane in glass mode. */
+:root[data-glass='on'] .ptah-card:is([data-variant='surface-1'], [data-variant='surface-2']):not([data-glass-surface], [role='menu'], .dropdown-content, .modal-box, .navbar) {
+  background-color: var(--glass-scrim-text);
+  border-color: var(--glass-frame, var(--glass-line));
+  box-shadow: var(--glass-content-shadow, inset 0 var(--ptah-border-width) 0 var(--glass-glint), var(--glass-shadow));
+}
+
 /* Optional looks are absent from the default rendered card. */
 .ptah-card[data-fill='50'] {
   background-color: color-mix(in oklch, var(--_bg) 50%, transparent);

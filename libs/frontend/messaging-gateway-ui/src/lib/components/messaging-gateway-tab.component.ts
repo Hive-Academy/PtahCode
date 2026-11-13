@@ -24,7 +24,11 @@ import {
   type PlatformCardConfig,
 } from './gateway-platform-pane.component';
 import { GatewaySetupGuideComponent } from './gateway-setup-guide.component';
-import { PtahButtonDirective, PtahStatComponent } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahStatComponent,
+  PtahSurfaceDirective,
+} from '@ptah-extension/ui';
 
 const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
   {
@@ -59,6 +63,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
     GatewaySetupGuideComponent,
     PtahButtonDirective,
     PtahStatComponent,
+    PtahSurfaceDirective,
   ],
   template: `
     @if (!isElectron) {
@@ -86,7 +91,8 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
     } @else {
       <div class="space-y-6" data-testid="messaging-gateway-section">
         <header
-          class="surface-1 flex flex-wrap items-start justify-between gap-3 rounded-2xl p-5"
+          ptahSurface variant="surface-1" padding="lg"
+          class="flex flex-wrap items-start justify-between gap-3 rounded-2xl"
         >
           <div class="flex items-start gap-3">
             <span
@@ -236,7 +242,8 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
         </div>
 
         <section
-          class="surface-1 overflow-hidden rounded-2xl"
+          ptahSurface variant="surface-1" padding="none"
+          class="overflow-hidden rounded-2xl"
           aria-label="Platform configuration"
         >
           <div
