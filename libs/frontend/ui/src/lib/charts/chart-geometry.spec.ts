@@ -15,6 +15,20 @@ describe('chart geometry', () => {
     expect(percentOf(5, 0)).toBe(0);
   });
 
+  it('keeps the percent finite when finite inputs overflow division or scaling', () => {
+    expect(percentOf(1e308, 1e-320)).toBe(Number.MAX_VALUE);
+    expect(percentOf(Number.MAX_VALUE, 1)).toBe(Number.MAX_VALUE);
+  });
+
+  it('returns zero for invalid or negative ranges', () => {
+    expect(percentOf(Number.POSITIVE_INFINITY, 10)).toBe(0);
+    expect(percentOf(Number.NaN, 10)).toBe(0);
+    expect(percentOf(5, Number.POSITIVE_INFINITY)).toBe(0);
+    expect(percentOf(5, Number.NaN)).toBe(0);
+    expect(percentOf(-5, 1e-320)).toBe(0);
+    expect(percentOf(5, 0)).toBe(0);
+  });
+
   it('resolves the auto tone with the near-limit rule', () => {
     expect(resolveInk('auto', NEAR_LIMIT_PERCENT - 1)).toBe('gold');
     expect(resolveInk('auto', NEAR_LIMIT_PERCENT)).toBe('warn');
