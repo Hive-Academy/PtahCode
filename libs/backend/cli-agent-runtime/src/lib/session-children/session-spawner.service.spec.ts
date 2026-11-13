@@ -2197,7 +2197,7 @@ describe('SessionSpawnerService — snapshot outcome & endCause privacy (Defect 
     expect(snap.outcome).toMatchObject({
       kind: 'completed',
       cause: 'user-stop',
-      reason: 'stopped by the user (stop button or tab closed)',
+      reason: 'stopped by the user (Stop button or /clear)',
     });
     expect('endCause' in snap).toBe(false);
   });

@@ -185,7 +185,9 @@ export class AppsSessionService {
 
   public constructor() {
     this.focusTarget.register(this.sessionId);
-    inject(DestroyRef).onDestroy(() => this.focusTarget.unregister(this.sessionId));
+    inject(DestroyRef).onDestroy(() =>
+      this.focusTarget.unregister(this.sessionId),
+    );
     effect(() => {
       const key = this.workspaceKey();
       const previous = this.previousWorkspaceKey;
@@ -363,7 +365,7 @@ export class AppsSessionService {
     const sessionId =
       this.claims.sessionFor(conversation.surfaceId) ?? slice.startedSessionId;
     if (sessionId === null) return;
-    const failure = await abortAppsSession(this.rpc, sessionId);
+    const failure = await abortAppsSession(this.rpc, sessionId, 'apps-stop');
     if (failure !== null) {
       this.failTurn(key, conversation.routingId, 'chat:abort', failure);
       return;
@@ -390,7 +392,7 @@ export class AppsSessionService {
     const conversation = slice.conversation;
     const sessionId = this.runningSessionOf(slice);
     if (conversation !== null && sessionId !== null) {
-      const failure = await abortAppsSession(this.rpc, sessionId);
+      const failure = await abortAppsSession(this.rpc, sessionId, 'apps-reset');
       if (failure !== null) {
         console.warn(`${LOG_PREFIX} chat:abort failed; conversation kept`);
         this.patchOwned(key, conversation.routingId, (current) => ({

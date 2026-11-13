@@ -60,6 +60,12 @@ describe('childOutcomeOf (TASK_2026_932)', () => {
     // Review m1: a host exit interrupts the child even when dispose marked it stopped.
     ['stopped', 'host-shutdown', 'interrupted', 'host exit or restart'],
     ['stopped', 'workspace-close', 'interrupted', 'workspace closed'],
+    [
+      'stopped',
+      'internal-abort',
+      'interrupted',
+      'an internal abort ended the session; this was not a user stop',
+    ],
     ['timed-out', 'runtime-cap', 'timed-out', 'runtime cap reached'],
     ['failed', 'provider-error', 'failed', 'provider error'],
     ['failed', 'first-turn-not-started', 'failed', 'first turn did not start'],
@@ -75,6 +81,8 @@ describe('childOutcomeOf (TASK_2026_932)', () => {
   it.each([
     ['user-stop', true, 'completed'],
     ['user-stop', false, 'stopped'],
+    ['tab-close', true, 'completed'],
+    ['tab-close', false, 'stopped'],
     ['parent-stop', true, 'completed'],
     ['parent-stop', false, 'stopped'],
   ] as const)(
@@ -101,7 +109,7 @@ describe('childOutcomeOf (TASK_2026_932)', () => {
       }),
     ).toEqual({
       kind: 'stopped',
-      reason: 'stopped by the user (stop button or tab closed)',
+      reason: 'stopped by the user (Stop button or /clear)',
       cause: 'user-stop',
       endedAt: ENDED_AT,
     });
@@ -115,16 +123,24 @@ describe('childOutcomeOf (TASK_2026_932)', () => {
     ['compaction-abort', 'context compaction did not finish'],
     ['config-reinit', 'configuration reloaded'],
     ['unknown', 'the session ended for an unknown reason'],
-  ])('maps ended + %s to interrupted even after a delivered turn', (endCause, reason) => {
-    expect(
-      childOutcomeOf({
-        terminalStatus: 'ended',
+  ])(
+    'maps ended + %s to interrupted even after a delivered turn',
+    (endCause, reason) => {
+      expect(
+        childOutcomeOf({
+          terminalStatus: 'ended',
+          endedAt: ENDED_AT,
+          endCause,
+          lastCompletion: { delivered: true },
+        }),
+      ).toEqual({
+        kind: 'interrupted',
+        reason,
+        cause: endCause,
         endedAt: ENDED_AT,
-        endCause,
-        lastCompletion: { delivered: true },
-      }),
-    ).toEqual({ kind: 'interrupted', reason, cause: endCause, endedAt: ENDED_AT });
-  });
+      });
+    },
+  );
 
   it('maps ended with no recorded cause to unknown and never guesses from text', () => {
     expect(
@@ -148,6 +164,10 @@ describe('childOutcomeOf (TASK_2026_932)', () => {
         endReason: 'stopped-by-parent',
         endedAt: ENDED_AT,
       }),
-    ).toEqual({ kind: 'stopped', reason: 'stopped-by-parent', endedAt: ENDED_AT });
+    ).toEqual({
+      kind: 'stopped',
+      reason: 'stopped-by-parent',
+      endedAt: ENDED_AT,
+    });
   });
 });

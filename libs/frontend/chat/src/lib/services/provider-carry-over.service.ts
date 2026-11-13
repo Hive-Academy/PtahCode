@@ -530,7 +530,9 @@ export class ProviderCarryOverService implements OnDestroy {
     };
     try {
       // degradation-audit: reported — `warn` logs a failed abort of a skipped carry-over session.
-      this.rpc.call('chat:abort', { sessionId }).catch(warn);
+      this.rpc
+        .call('chat:abort', { sessionId, source: 'carry-over' })
+        .catch(warn);
     } catch (error) {
       warn(error);
     }

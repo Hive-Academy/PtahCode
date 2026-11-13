@@ -297,6 +297,7 @@ export class CommandCenterSessionCoordinator {
     try {
       const result = await this.rpc.call('chat:abort', {
         sessionId: SessionId.from(sessionId),
+        source: 'command-center',
       });
       if (!result.success) this.fail('Could not stop the session.');
     } catch {

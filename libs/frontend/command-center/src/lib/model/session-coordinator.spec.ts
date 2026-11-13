@@ -313,7 +313,10 @@ describe('CommandCenterSessionCoordinator', () => {
     coordinator.startVoice();
     store.updateLevels(0.4, 0.6);
     await coordinator.stop();
-    expect(rpc.call).toHaveBeenCalledWith('chat:abort', { sessionId: sdkId });
+    expect(rpc.call).toHaveBeenCalledWith('chat:abort', {
+      sessionId: sdkId,
+      source: 'command-center',
+    });
     expect(lock.isHeld(rootId)).toBe(false);
     expect(store.voiceState()).toBe('stopped');
     expect([store.inputLevel(), store.outputLevel()]).toEqual([0, 0]);

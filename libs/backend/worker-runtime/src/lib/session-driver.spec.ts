@@ -197,7 +197,7 @@ it('keeps the slot of a start whose session never resolved, then aborts it when 
   expect(handleMessage).toHaveBeenCalledWith(
     expect.objectContaining({
       method: 'chat:abort',
-      params: { sessionId: 's1' },
+      params: { sessionId: 's1', source: 'worker' },
     }),
   );
   expect(onAbandoned).toHaveBeenCalledWith('s1');
@@ -229,7 +229,7 @@ it('aborts an admitted start whose log cannot open before freeing the slot', asy
   expect(handleMessage).toHaveBeenCalledWith(
     expect.objectContaining({
       method: 'chat:abort',
-      params: { sessionId: 's1' },
+      params: { sessionId: 's1', source: 'worker' },
     }),
   );
   expect(onAbandoned).toHaveBeenCalledWith('s1');

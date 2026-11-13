@@ -9,7 +9,13 @@
  * Part of ChatStore refactoring (Facade pattern) - ChatStore delegates here.
  */
 
-import { DestroyRef, Injectable, inject, signal, Injector } from '@angular/core';
+import {
+  DestroyRef,
+  Injectable,
+  inject,
+  signal,
+  Injector,
+} from '@angular/core';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import { SessionId } from '@ptah-extension/shared';
 import type { SendMessageOptions, TabState } from '@ptah-extension/chat-types';
@@ -37,10 +43,13 @@ export class ConversationService {
   private readonly logger = inject(LoggingService);
   private readonly _isStopping = signal(false);
   readonly isStopping = this._isStopping.asReadonly();
-  private readonly stopRequests = new Map<string, {
-    readonly owner: symbol;
-    readonly outcome: Promise<boolean>;
-  }>();
+  private readonly stopRequests = new Map<
+    string,
+    {
+      readonly owner: symbol;
+      readonly outcome: Promise<boolean>;
+    }
+  >();
   private readonly _isAutoSending = signal(false);
   readonly isAutoSending = this._isAutoSending.asReadonly();
   /**
@@ -72,7 +81,9 @@ export class ConversationService {
 
   private activeAbortTarget(): AbortTarget | null {
     const tab = this.tabManager.activeTab();
-    return tab?.claudeSessionId ? { tabId: tab.id, sessionId: tab.claudeSessionId } : null;
+    return tab?.claudeSessionId
+      ? { tabId: tab.id, sessionId: tab.claudeSessionId }
+      : null;
   }
 
   private tabForTarget(target: AbortTarget): TabState | null {
@@ -141,12 +152,15 @@ export class ConversationService {
 
     const owner = Symbol('stop owner');
     this._isStopping.set(true);
-    const outcome = (confirm ? this.confirmAndAbort(target) : this.abortCurrentMessageFor(target))
-      .finally(() => {
-        if (this.stopRequests.get(key)?.owner !== owner) return;
-        this.stopRequests.delete(key);
-        this._isStopping.set(this.stopRequests.size > 0);
-      });
+    const outcome = (
+      confirm
+        ? this.confirmAndAbort(target)
+        : this.abortCurrentMessageFor(target)
+    ).finally(() => {
+      if (this.stopRequests.get(key)?.owner !== owner) return;
+      this.stopRequests.delete(key);
+      this._isStopping.set(this.stopRequests.size > 0);
+    });
     this.stopRequests.set(key, { owner, outcome });
     return outcome;
   }
@@ -177,13 +191,22 @@ export class ConversationService {
       try {
         result = await this.claudeRpcService.call('chat:abort', {
           sessionId,
+          source: 'stop-button',
         });
       } catch (error: unknown) {
         // Transport failure: the request may never have reached the backend,
         // so no ordered turn_state will ever arrive for this session, and a
         // later Stop on this same turn must be able to retry the RPC.
-        this.logger.error('ConversationService', 'chat:abort RPC failed', error);
-        this.followUps.restoreAfterStop(tabId, this.followUps.endStop(sessionId), heldTexts);
+        this.logger.error(
+          'ConversationService',
+          'chat:abort RPC failed',
+          error,
+        );
+        this.followUps.restoreAfterStop(
+          tabId,
+          this.followUps.endStop(sessionId),
+          heldTexts,
+        );
         this._lastAbortedTurnKey.set(null);
         this.idleAbortedTabLocally(target);
         return false;
@@ -194,13 +217,21 @@ export class ConversationService {
       const pushedWithdrawals = this.followUps.endStop(sessionId);
       this.followUps.restoreAfterStop(
         tabId,
-        result.data?.withdrawn ?? (!result.success ? pushedWithdrawals : undefined),
+        result.data?.withdrawn ??
+          (!result.success ? pushedWithdrawals : undefined),
         heldTexts,
       );
       if (result.success) {
-        this.messageFinalization.clearPendingPromptsForSession(tabId, sessionId);
+        this.messageFinalization.clearPendingPromptsForSession(
+          tabId,
+          sessionId,
+        );
       } else {
-        this.logger.error('ConversationService', 'Failed to abort chat', result.error);
+        this.logger.error(
+          'ConversationService',
+          'Failed to abort chat',
+          result.error,
+        );
         // The backend had no live stream to interrupt (e.g. the session left
         // the SDK registry), so nothing will emit the terminal turn_state.
         // The abort did not take effect, so a retry must reach the backend.
@@ -227,7 +258,11 @@ export class ConversationService {
       }
       return result.success;
     } catch (error) {
-      this.logger.error('ConversationService', 'Failed to abort message', error);
+      this.logger.error(
+        'ConversationService',
+        'Failed to abort message',
+        error,
+      );
       return false;
     }
   }
@@ -261,10 +296,15 @@ export class ConversationService {
    */
   async abortWithConfirmation(): Promise<boolean> {
     const target = this.activeAbortTarget();
-    return target ? this.abortWithConfirmationFor(target.tabId, target.sessionId) : false;
+    return target
+      ? this.abortWithConfirmationFor(target.tabId, target.sessionId)
+      : false;
   }
 
-  async abortWithConfirmationFor(tabId: string, sessionId: SessionId): Promise<boolean> {
+  async abortWithConfirmationFor(
+    tabId: string,
+    sessionId: SessionId,
+  ): Promise<boolean> {
     const target: AbortTarget = { tabId, sessionId };
     return this.stopTarget(target, true);
   }
@@ -283,7 +323,11 @@ export class ConversationService {
         agentCount = agents.length;
         agentTypes = agents.map((a) => a.agentType).join(', ');
       } catch (rpcError) {
-        this.logger.warn('ConversationService', 'Running agents query failed', rpcError);
+        this.logger.warn(
+          'ConversationService',
+          'Running agents query failed',
+          rpcError,
+        );
         return this.abortCurrentMessageFor(target);
       }
 
@@ -305,7 +349,11 @@ export class ConversationService {
       }
       return false;
     } catch (error) {
-      this.logger.error('ConversationService', 'Abort confirmation failed', error);
+      this.logger.error(
+        'ConversationService',
+        'Abort confirmation failed',
+        error,
+      );
       return this.abortCurrentMessageFor(target);
     }
   }
