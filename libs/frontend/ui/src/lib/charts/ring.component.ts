@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { NEAR_LIMIT_PERCENT } from '@ptah-extension/shared';
 import { CHART_TEXT, isValidRange, percentOf, resolveInk } from './chart-geometry';
-import { PtahMeterTone, PtahRingSize } from './chart.types';
+import { PtahMeterTone, PtahRingSize, PtahRingThresholds } from './chart.types';
 
 const BOX: Readonly<Record<PtahRingSize, string>> = {
   xs: 'h-6 w-6',
+  stat: 'h-8 w-8',
   sm: 'h-10 w-10',
   md: 'h-16 w-16',
   lg: 'h-[var(--ptah-ring-size-lg,6rem)] w-[var(--ptah-ring-size-lg,6rem)]',
@@ -11,14 +13,16 @@ const BOX: Readonly<Record<PtahRingSize, string>> = {
 };
 const CENTER: Readonly<Record<PtahRingSize, string>> = {
   xs: 'hidden',
+  stat: 'text-[0.5rem]',
   sm: 'text-[0.625rem]',
   md: 'text-sm',
   lg: 'text-[length:var(--ptah-ring-center-lg,1.125rem)]',
   xl: 'text-[length:var(--ptah-ring-center-xl,1.375rem)]',
 };
-/** Sub text is too small for xs and sm. */
+/** Sub text is too small for xs, stat and sm. */
 const SUB: Readonly<Record<PtahRingSize, string>> = {
   xs: 'hidden',
+  stat: 'hidden',
   sm: 'hidden',
   md: 'text-[0.5rem]',
   lg: 'text-[0.625rem]',
@@ -31,13 +35,14 @@ const SUB: Readonly<Record<PtahRingSize, string>> = {
  * text beside the ring, and `showValue` adds the percent in the center.
  *
  * `bare` renders the SVG only: no text, `aria-hidden="true"`, no role.
+ * `centerOnly` hides the side text while keeping the ring role and center text.
  * `centerText` replaces the center percent. `subText` is a small second line
  * below it, in the center. It shows at md and larger. Custom text is also the
  * `aria-valuetext` of a ranged ring. `valueText` replaces the side text and
  * `aria-valuetext`. `indeterminate` is a pulsing `progressbar` without
  * `aria-valuenow`.
  *
- * Sizes are a named scale. `xs`, `sm` and `md` are 24, 40 and 64 px. `lg` and
+ * Sizes are a named scale. `xs`, `stat`, `sm` and `md` are 24, 32, 40 and 64 px. `lg` and
  * `xl` read `--ptah-ring-size-*` (96 and 112 px). The SVG geometry is a fixed
  * viewBox and scales with the box.
  *
@@ -53,14 +58,14 @@ const SUB: Readonly<Record<PtahRingSize, string>> = {
         @if (indeterminate()) { <circle class="animate-pulse motion-reduce:animate-none" [class]="inkClass()" cx="18" cy="18" r="15" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="25 100" /> }
         @else if (valid()) { <circle class="transition-[stroke-dasharray] motion-reduce:transition-none" [class]="inkClass()" cx="18" cy="18" r="15" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" pathLength="100" [attr.stroke-dasharray]="arc() + ' 100'" /> }
       </svg>
-      @if (!bare() && showValue() && (centerLabel() !== null || subText())) {
+      @if (!bare() && (showValue() || centerOnly()) && (centerLabel() !== null || subText())) {
         <span class="absolute inset-0 flex flex-col items-center justify-center tabular-nums" [class.leading-none]="!!subText()" [class]="centerClass()" aria-hidden="true">
           @if (centerLabel() !== null) { <span>{{ centerLabel() }}</span> }
           @if (subText()) { <span [class]="subClass()">{{ subText() }}</span> }
         </span>
       }
     </span>
-    @if (!bare()) {
+    @if (!bare() && !centerOnly()) {
       <span class="flex flex-col"><span>{{ label() }}</span><span class="tabular-nums">@if (indeterminate()) { {{ valueText() ?? 'In progress' }} } @else if (valid()) { {{ visibleText() }} } @else { Unavailable }</span></span>
     }
   </div>`,
@@ -73,6 +78,8 @@ export class PtahRingComponent {
   readonly tone = input<PtahMeterTone>('auto');
   readonly size = input<PtahRingSize>('sm');
   readonly showValue = input(true);
+  /** Keep the center text and semantics, but omit the side label and value. */
+  readonly centerOnly = input(false);
   /** Ring only: no text, `aria-hidden`, no role. For decorative rings. */
   readonly bare = input(false);
   /** Replaces the center percent. */
@@ -83,6 +90,8 @@ export class PtahRingComponent {
   readonly indeterminate = input(false);
   /** Replaces the side value text and `aria-valuetext` when set. */
   readonly valueText = input<string | undefined>(undefined);
+  /** Automatic ink cut-offs in percent; explicit tones ignore them. */
+  readonly thresholds = input<PtahRingThresholds>({ warn: NEAR_LIMIT_PERCENT, danger: 100 });
 
   readonly valid = computed(() => isValidRange(this.value(), this.max()));
   readonly ranged = computed(() => !this.bare() && this.valid() && !this.indeterminate());
@@ -113,7 +122,13 @@ export class PtahRingComponent {
     if (!this.ranged()) return null;
     return this.valueText() ?? this.customCenter() ?? (this.outOfRange() ? this.defaultText() : null);
   });
-  readonly inkClass = computed(() => CHART_TEXT[resolveInk(this.tone(), this.indeterminate() ? 0 : this.percent())]);
+  readonly inkClass = computed(() => {
+    const tone = this.tone();
+    const percent = this.indeterminate() ? 0 : this.percent();
+    if (tone !== 'auto') return CHART_TEXT[resolveInk(tone, percent)];
+    const { warn, danger } = this.thresholds();
+    return CHART_TEXT[percent >= danger ? 'err' : percent >= warn ? 'warn' : 'gold'];
+  });
   readonly boxClass = computed(() => BOX[this.size()]);
   readonly centerClass = computed(() => CENTER[this.size()]);
   readonly subClass = computed(() => SUB[this.size()]);

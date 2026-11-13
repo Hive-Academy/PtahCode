@@ -80,6 +80,7 @@ import { GallerySectionComponent } from './gallery-section.component';
           <ptah-ring [value]="62" [max]="100" label="Center text" centerText="3/5" size="md" />
           <ptah-ring [value]="62" [max]="100" label="Sub text" centerText="62" subText="pts" size="lg" />
           <ptah-ring [value]="0" [max]="0" label="Indeterminate" [indeterminate]="true" valueText="Indexing" size="md" />
+          <ptah-ring data-testid="ring-family-pulse" [value]="0" [max]="0" label="Pulse" [indeterminate]="true" [centerOnly]="true" size="stat" />
           <ptah-ring [value]="62" [max]="100" label="Large" size="lg" />
           <ptah-ring [value]="62" [max]="100" label="Extra large" size="xl" />
         </div>
