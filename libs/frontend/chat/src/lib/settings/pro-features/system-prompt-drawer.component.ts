@@ -214,7 +214,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
           <div class="space-y-2">
             <button
               type="button"
-              class="btn btn-ghost btn-xs gap-1.5 w-full justify-start text-base-content"
+              ptahButton variant="ghost" size="xs" density="compact" align="start" class="gap-1.5 w-full text-base-content"
               (click)="togglePromptPreview()"
               aria-label="Toggle Prompt Preview"
               data-testid="system-prompt-preview-toggle"
