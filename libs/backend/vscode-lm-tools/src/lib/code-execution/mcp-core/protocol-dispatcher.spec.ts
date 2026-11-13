@@ -9260,6 +9260,7 @@ describe('protocol-handlers › caller capability', () => {
     expect(names).toContain('ptah_task_check');
     expect(names).not.toContain('execute_code');
     expect(names).not.toContain('ptah_task_create');
+    expect(names).not.toContain('execute_code');
     expect(names).not.toContain('ptah_browser_status');
   });
 
@@ -9452,6 +9453,18 @@ describe('protocol-handlers › phase tool profile', () => {
     });
   });
 
+  it('refuses execute_code through the same phase credential', async () => {
+    const response = await handleMCPRequest(
+      makeRequest({ id: 12, method: 'tools/call', _callerAgentId: 'lane-a',
+        _callerBinding: phaseBinding,
+        params: { name: 'execute_code', arguments: { code: 'ptah.tasks.create({})' } } }),
+      buildDeps(),
+    );
+    expect(response.error).toEqual({
+      code: MCP_CALLER_FORBIDDEN_CODE, message: MCP_TOOL_DENIED_MESSAGE,
+    });
+  });
+
   it('still dispatches a tool the phase profile does not name', async () => {
     const response = await handleMCPRequest(
       makeRequest({
@@ -9467,7 +9480,7 @@ describe('protocol-handlers › phase tool profile', () => {
     expect(response.result).toMatchObject({ isError: true });
   });
 
-  it('does not hide tools when the phase denial list is missing or empty', async () => {
+  it('leaves an absent phase and an empty phase list unfiltered, and fails closed on malformed lists', async () => {
     const open = await listed({ _callerAgentId: 'lane-a' });
     const empty = await listed({
       _callerAgentId: 'lane-a',
@@ -9487,8 +9500,12 @@ describe('protocol-handlers › phase tool profile', () => {
       },
     });
     expect(empty).toEqual(open);
-    expect(blank).toEqual(open);
-    expect(session).toEqual(open);
+    expect(blank).not.toContain('execute_code');
+    expect(blank).not.toContain('ptah_task_create');
+    expect(session).not.toContain('execute_code');
+    expect(session).not.toContain('ptah_task_create');
+    expect(empty).toContain('execute_code');
+    expect(open).toContain('execute_code');
     expect(open).toContain('ptah_browser_navigate');
     expect(open).toContain('ptah_task_create');
   });

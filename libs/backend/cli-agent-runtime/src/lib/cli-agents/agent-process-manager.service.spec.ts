@@ -689,7 +689,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       });
       expect(codex.toolProfileAdapter).toEqual({
         executorId: 'codex',
-        toolProfileStatus: 'unfiltered',
+        toolProfileStatus: 'filtered',
       });
       expect(manager.getStatus(codex.agentId)).toMatchObject({
         toolProfileAdapter: codex.toolProfileAdapter,
@@ -713,7 +713,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       });
       expect(claude.toolProfileAdapter).toEqual({
         executorId: 'claude',
-        toolProfileStatus: 'filtered',
+        toolProfileStatus: 'unfiltered',
       });
       expect(mcpCredentials.issue).not.toHaveBeenCalled();
 
@@ -727,6 +727,12 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(manager.getStatus(open.agentId)).not.toHaveProperty(
         'toolProfileAdapter',
       );
+      const deniedPi = await manager.spawn({
+        task: 'Pi denied', cli: 'pi', workingDirectory: '/workspace/root', phase: denied,
+      });
+      expect(deniedPi.toolProfileAdapter).toEqual({
+        executorId: 'pi', toolProfileStatus: 'unfiltered',
+      });
 
       const plain = await manager.spawn({
         task: 'D',
@@ -754,6 +760,16 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(ptahCli.toolProfileAdapter).toEqual({
         executorId: 'ptah-cli',
         toolProfileStatus: 'unfiltered',
+      });
+      const appliedPtahCli = await manager.spawnFromSdkHandle(
+        createMockSdkHandle().handle,
+        {
+          task: 'F', cli: 'ptah-cli', workingDirectory: '/workspace/root',
+          expectsMcp: true, mcpPort: 51820, phase: denied, toolProfileApplied: true,
+        },
+      );
+      expect(appliedPtahCli.toolProfileAdapter).toEqual({
+        executorId: 'ptah-cli', toolProfileStatus: 'filtered',
       });
     });
 

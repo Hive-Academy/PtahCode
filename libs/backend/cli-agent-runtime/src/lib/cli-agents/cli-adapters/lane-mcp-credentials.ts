@@ -4,6 +4,7 @@ import type {
   PhaseDispatchV1,
   ToolProfileAdapterResultV1,
 } from '@ptah-extension/shared';
+import { PHASE_KINDS } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 
 export const LANE_MCP_TTL_MS = 4 * 60 * 60 * 1000;
@@ -19,20 +20,22 @@ export type LaneMcpPhaseInput =
       readonly disallowedTools?: readonly string[];
     };
 
-/** Claude is the only lane whose built-in tools take `disallowedTools`. */
-const BUILTIN_TOOL_PROFILE_ADAPTERS = new Set<string>(['claude']);
+const phaseInputSchema = z.object({
+  kind: z.enum(PHASE_KINDS),
+  toolProfile: z.object({ disallowedTools: z.array(z.string().trim().min(1)) }).optional(),
+  disallowedTools: z.array(z.string().trim().min(1)).optional(),
+});
 
-function phaseDenials(phase: LaneMcpPhaseInput): readonly string[] {
-  if ('toolProfile' in phase) return phase.toolProfile.disallowedTools;
+export class LaneMcpPhaseError extends Error {
+  constructor() { super('Invalid lane MCP phase profile'); this.name = 'LaneMcpPhaseError'; }
+}
+
+function phaseDenials(phase: z.infer<typeof phaseInputSchema>): readonly string[] {
+  if (phase.toolProfile) return phase.toolProfile.disallowedTools;
   return phase.disallowedTools ?? [];
 }
 
-/**
- * One result for a spawn whose phase names at least one tool. Claude records
- * `filtered` because its SDK options deny those names. Every other executor
- * records `unfiltered`: Ptah MCP follows the credential, and that CLI has no
- * built-in deny channel.
- */
+/** Record a filtered result only after the adapter confirms enforcement. */
 export function laneToolProfileAdapterResult(
   executorId: string,
   phase:
@@ -42,6 +45,7 @@ export function laneToolProfileAdapterResult(
         };
       }
     | undefined,
+  applied = false,
 ): ToolProfileAdapterResultV1 | undefined {
   const listed = phase?.toolProfile?.disallowedTools;
   if (!Array.isArray(listed) || listed.length === 0) return undefined;
@@ -52,9 +56,7 @@ export function laneToolProfileAdapterResult(
   if (names.length === 0) return undefined;
   return {
     executorId,
-    toolProfileStatus: BUILTIN_TOOL_PROFILE_ADAPTERS.has(executorId)
-      ? 'filtered'
-      : 'unfiltered',
+    toolProfileStatus: applied ? 'filtered' : 'unfiltered',
   };
 }
 
@@ -67,6 +69,9 @@ export function issueLaneMcpToken(
   capability: 'privileged' | 'lane-report' = 'privileged',
   phase?: LaneMcpPhaseInput,
 ): string | undefined {
+  const parsedPhase = phase === undefined ? undefined : phaseInputSchema.safeParse(phase);
+  if (parsedPhase && !parsedPhase.success) throw new LaneMcpPhaseError();
+  const phaseBinding = parsedPhase?.data;
   if (!credentials || !agentId || !workingDirectory) {
     logger.warn('[Lane MCP] Credentials unavailable; omitting ptah MCP server');
     return undefined;
@@ -82,10 +87,10 @@ export function issueLaneMcpToken(
             agentId,
             workspaceRoot: workingDirectory,
             capability,
-            ...(phase
+            ...(phaseBinding
               ? {
-                  phaseKind: phase.kind,
-                  disallowedTools: phaseDenials(phase),
+                  phaseKind: phaseBinding.kind,
+                  disallowedTools: [...phaseDenials(phaseBinding)],
                 }
               : {}),
           },

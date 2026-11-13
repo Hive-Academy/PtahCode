@@ -1,22 +1,25 @@
 import type { McpCallerBinding } from '@ptah-extension/platform-core';
+import { z } from 'zod';
+
+const denialList = z.array(z.string().trim().min(1));
 
 /**
  * Names the phase profile removes.
  *
- * Reads only the authenticated binding (the HTTP gate copies it from the
- * credential; a request body cannot set it). Blank and non-string entries
- * are dropped. Missing, non-array, or empty means this caller is unfiltered.
+ * Reads only the authenticated binding. A malformed list on a present phase
+ * is handled as a denial by both list and call paths.
  */
 export function phaseDisallowedTools(
   binding: McpCallerBinding | undefined,
 ): readonly string[] | undefined {
-  const listed = binding?.disallowedTools;
-  if (!Array.isArray(listed) || listed.length === 0) return undefined;
-  const names = listed.filter(
-    (name): name is string =>
-      typeof name === 'string' && name.trim().length > 0,
-  );
-  return names.length === 0 ? undefined : names;
+  if (binding?.phaseKind === undefined) return undefined;
+  const parsed = denialList.safeParse(binding.disallowedTools);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function malformedPhase(binding: McpCallerBinding | undefined): boolean {
+  return binding?.phaseKind !== undefined &&
+    !denialList.safeParse(binding.disallowedTools).success;
 }
 
 /** True when the phase profile bound to this credential hides `name`. */
@@ -24,8 +27,10 @@ export function isPhaseToolDenied(
   name: string,
   binding: McpCallerBinding | undefined,
 ): boolean {
+  if (malformedPhase(binding)) return name === 'execute_code' || name.startsWith('ptah_');
   const denied = phaseDisallowedTools(binding);
-  return denied !== undefined && denied.includes(name);
+  return denied !== undefined && (denied.includes(name) ||
+    (name === 'execute_code' && denied.some((tool) => tool.startsWith('ptah_'))));
 }
 
 /**
@@ -36,8 +41,5 @@ export function applyPhaseToolFilter<T extends { readonly name: string }>(
   tools: readonly T[],
   binding: McpCallerBinding | undefined,
 ): T[] {
-  const denied = phaseDisallowedTools(binding);
-  if (denied === undefined) return tools.slice();
-  const blocked = new Set(denied);
-  return tools.filter((tool) => !blocked.has(tool.name));
+  return tools.filter((tool) => !isPhaseToolDenied(tool.name, binding));
 }

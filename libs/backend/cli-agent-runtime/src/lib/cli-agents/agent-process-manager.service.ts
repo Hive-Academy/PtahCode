@@ -957,11 +957,6 @@ export class AgentProcessManager {
     const roleStamp: AgentRoleStamp | undefined = roleDefinition
       ? { role: roleDefinition.name, roleDelivery: 'preamble', roleChannel }
       : undefined;
-    const toolProfileAdapter = laneToolProfileAdapterResult(
-      cli,
-      request.phase,
-    );
-
     const info: AgentProcessInfo & LaneAccountBindingFields = {
       ...options.accountReference,
       agentId,
@@ -991,7 +986,6 @@ export class AgentProcessManager {
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
       effectivePolicy: options.effectivePolicy,
-      ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
@@ -1043,6 +1037,7 @@ export class AgentProcessManager {
     let admittedReference = options.accountReference;
     let admittedSdkSessionId: string | undefined;
     let sdkHandle: SdkHandle;
+    let issuedMcpToken: string | undefined;
     try {
       const mcpToken =
         mcpPort &&
@@ -1061,6 +1056,7 @@ export class AgentProcessManager {
               request.phase,
             )
           : undefined;
+      issuedMcpToken = mcpToken || undefined;
       sdkHandle = await runSdk({
         ...options.accountReference,
         // Claude adapter field (`ClaudeCliCommandOptions`); set for Claude only.
@@ -1114,6 +1110,7 @@ export class AgentProcessManager {
         role: roleDefinition,
         laneBudgets,
         instructionFileStore: this.instructionFiles,
+        ...(request.phase ? { phase: request.phase } : {}),
       });
     } catch (error: unknown) {
       // The spawn failure is the error the caller needs; the cleanup behind
@@ -1132,7 +1129,14 @@ export class AgentProcessManager {
     // back to the task prompt the role stays on developer instructions, and
     // Pi reports its shared channel here too (4332578858).
     const effectiveChannel = sdkHandle.getRoleDelivery?.() ?? roleChannel;
+    const toolProfileAdapter = laneToolProfileAdapterResult(
+      cli, request.phase,
+      cli === 'claude'
+        ? 'toolProfileApplied' in sdkHandle && sdkHandle.toolProfileApplied === true
+        : Boolean(issuedMcpToken),
+    );
     const boundInfo = { ...scopedInfo, ...admittedReference,
+      ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
       ...(sdkHandle.effectivePolicy ? { effectivePolicy: sdkHandle.effectivePolicy } : {}),
     };
     const effectiveInfo = roleStamp
@@ -1213,6 +1217,7 @@ export class AgentProcessManager {
       accountReference?: LaneAccountReference;
       potentialCapabilities?: CliAdapterManifest;
       effectivePolicy?: EffectiveLanePolicy;
+      toolProfileApplied?: boolean;
       /** Phase handoff. A non-empty denial list is recorded on the spawn result. */
       phase?: SpawnAgentRequest['phase'];
     },
@@ -1232,6 +1237,7 @@ export class AgentProcessManager {
       const toolProfileAdapter = laneToolProfileAdapterResult(
         meta.cli,
         meta.phase,
+        meta.toolProfileApplied === true,
       );
 
       const info: AgentProcessInfo = {

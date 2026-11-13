@@ -22,12 +22,12 @@ describe('mcp caller phase filter', () => {
     { name: 'ptah_browser_navigate' },
     { name: 'ptah_browser_screenshot' },
     { name: 'ptah_task_create' },
+    { name: 'execute_code' },
   ];
 
   it('drops blank names and treats an empty list as unfiltered', () => {
     expect(phaseDisallowedTools(undefined)).toBeUndefined();
-    expect(phaseDisallowedTools(binding(undefined))).toBeUndefined();
-    expect(phaseDisallowedTools(binding([]))).toBeUndefined();
+    expect(phaseDisallowedTools(binding([]))).toEqual([]);
     expect(phaseDisallowedTools(binding(['', '  ']))).toBeUndefined();
     expect(phaseDisallowedTools(binding(['ptah_task_create']))).toEqual([
       'ptah_task_create',
@@ -46,6 +46,7 @@ describe('mcp caller phase filter', () => {
     expect(isPhaseToolDenied('ptah_task_create', binding(['ptah_task_create']))).toBe(
       true,
     );
+    expect(isPhaseToolDenied('execute_code', binding(['ptah_task_create']))).toBe(true);
     expect(
       isPhaseToolDenied('ptah_browser_screenshot', binding(['ptah_task_create'])),
     ).toBe(false);
@@ -53,11 +54,18 @@ describe('mcp caller phase filter', () => {
 
   it('keeps browser tools callable for a visual-review profile that denies none', () => {
     const visualReview = binding([], 'visual-review');
-    expect(phaseDisallowedTools(visualReview)).toBeUndefined();
+    expect(phaseDisallowedTools(visualReview)).toEqual([]);
     expect(applyPhaseToolFilter(tools, visualReview).map((tool) => tool.name)).toEqual(
       tools.map((tool) => tool.name),
     );
     expect(isPhaseToolDenied('ptah_browser_navigate', visualReview)).toBe(false);
     expect(isPhaseToolDenied('ptah_browser_screenshot', visualReview)).toBe(false);
+  });
+
+  it('fails closed for a malformed present phase and leaves an absent phase alone', () => {
+    const malformed = binding(['  ']);
+    expect(applyPhaseToolFilter(tools, malformed)).toEqual([]);
+    expect(isPhaseToolDenied('execute_code', malformed)).toBe(true);
+    expect(applyPhaseToolFilter(tools, undefined)).toEqual(tools);
   });
 });

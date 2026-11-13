@@ -164,10 +164,12 @@ interface PtahCliRegistryLike {
       permission?: SpawnAgentRequest['permission'];
       network?: SpawnAgentRequest['network'];
       parentLevel?: SpawnAgentRequest['parentLevel'];
+      phase?: SpawnAgentRequest['phase'];
     },
   ): Promise<
     | { handle: SdkHandle; agentName: string; setAgentId: (id: string) => void;
-        potentialCapabilities?: CliAdapterManifest; effectivePolicy?: EffectiveLanePolicy }
+        potentialCapabilities?: CliAdapterManifest; effectivePolicy?: EffectiveLanePolicy;
+        toolProfileApplied?: boolean }
     | SpawnAgentFailure
   >;
 }
@@ -475,6 +477,7 @@ export function buildAgentNamespace(
             permission: request.permission,
             network: request.network,
             parentLevel,
+            ...(request.phase ? { phase: request.phase } : {}),
           },
         );
         if ('status' in result) {
@@ -503,6 +506,9 @@ export function buildAgentNamespace(
             ptahCliId: request.ptahCliId,
             potentialCapabilities: result.potentialCapabilities,
             effectivePolicy: result.effectivePolicy,
+            ...(request.phase
+              ? { toolProfileApplied: result.toolProfileApplied }
+              : {}),
             mcpPort: registry.getMcpPort?.(),
             // A registry that cannot say its port cannot say MCP was expected.
             expectsMcp: registry.getMcpPort !== undefined,
@@ -515,6 +521,7 @@ export function buildAgentNamespace(
               ? { originalTask: prepared.originalTask }
               : {}),
             agentId,
+            ...(request.phase ? { phase: request.phase } : {}),
             ...(roleDefinition
               ? {
                   roleStamp: {

@@ -2,6 +2,7 @@ import type { IMcpCallerCredentials } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   issueLaneMcpToken,
+  LaneMcpPhaseError,
   laneMcpAuthUrl,
   laneToolProfileAdapterResult,
   LANE_MCP_TTL_MS,
@@ -115,6 +116,20 @@ describe('issueLaneMcpToken phase profile', () => {
       disallowedTools: ['ptah_browser_navigate'],
     });
   });
+
+  it('rejects malformed phase before issuing and copies the caller list', () => {
+    const issue = jest.fn().mockReturnValue(token);
+    const credentials = { issue, revokeSubject: jest.fn() } satisfies IMcpCallerCredentials;
+    expect(() => issueLaneMcpToken(credentials, logger, 'lane-1', '/work', 'privileged', {
+      kind: 'review', disallowedTools: ['   '],
+    })).toThrow(LaneMcpPhaseError);
+    expect(issue).not.toHaveBeenCalled();
+    const names = ['ptah_task_create'];
+    issueLaneMcpToken(credentials, logger, 'lane-1', '/work', 'privileged', {
+      kind: 'review', disallowedTools: names,
+    });
+    expect(issue.mock.calls[0]?.[0].disallowedTools).not.toBe(names);
+  });
 });
 
 describe('laneToolProfileAdapterResult', () => {
@@ -122,13 +137,14 @@ describe('laneToolProfileAdapterResult', () => {
     toolProfile: { disallowedTools },
   });
 
-  it('records filtered only for claude and unfiltered for the other executors', () => {
+  it('records filtered only when the adapter confirms enforcement', () => {
     const denied = phase(['ptah_task_create']);
-    expect(laneToolProfileAdapterResult('claude', denied)).toEqual({
+    expect(laneToolProfileAdapterResult('claude', denied, true)).toEqual({
       executorId: 'claude',
       toolProfileStatus: 'filtered',
     });
     for (const executorId of [
+      'claude',
       'codex',
       'grok',
       'antigravity',
