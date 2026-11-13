@@ -38,6 +38,7 @@ function checkWord(ready: boolean | null): string {
  * state is not carried by the arc alone. The parent hides the component when
  * all checks are ready; this component does not hide itself.
  */
+// Left raw: it wraps ptah-progress-ring, which stays raw (112 px box and pulse placement).
 @Component({
   selector: 'ptah-readiness-ring',
   standalone: true,
