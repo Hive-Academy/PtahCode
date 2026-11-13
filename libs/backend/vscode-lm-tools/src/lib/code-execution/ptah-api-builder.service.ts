@@ -877,6 +877,7 @@ export class PtahAPIBuilder {
         return buildRouteNamespace({
           agent: builtAgent,
           container: this.container,
+          hasIDECapabilities: this.ideCapabilities !== undefined,
         });
       }),
       git: this.buildNamespaceSafe('git', () =>

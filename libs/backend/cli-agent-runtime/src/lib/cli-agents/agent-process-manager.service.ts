@@ -9,6 +9,7 @@
  * - Cross-platform process termination (SIGTERM/taskkill)
  */
 import { randomUUID } from 'node:crypto';
+import { laneMcpTokenCapability } from './lane-mcp-token-rule';
 import { injectable, inject } from 'tsyringe';
 import { EventEmitter } from 'eventemitter3';
 import type {
@@ -1040,20 +1041,16 @@ export class AgentProcessManager {
     let sdkHandle: SdkHandle;
     let issuedMcpToken: string | undefined;
     try {
+      const laneMcpCapability = laneMcpTokenCapability(cli);
       const mcpToken =
         mcpPort &&
-        (cli === 'codex' ||
-          cli === 'cursor' ||
-          cli === 'copilot' ||
-          cli === 'opencode' ||
-          cli === 'grok' ||
-          cli === 'antigravity')
+        laneMcpCapability
           ? issueLaneMcpToken(
               this.mcpCredentials,
               this.logger,
               agentId,
               workingDirectory,
-              cli === 'antigravity' ? 'lane-report' : 'privileged',
+              laneMcpCapability,
               request.phase,
             )
           : undefined;

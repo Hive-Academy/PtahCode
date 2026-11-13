@@ -22,6 +22,7 @@ import {
 import type { AgentNamespace } from '../types';
 import { composeEffectiveToolList, type EffectiveToolListDependencies } from '../mcp-core/effective-tool-list';
 import type { CliDetectionResult as CandidateRow } from '@ptah-extension/shared';
+import { laneMcpTokenCapability } from '@ptah-extension/cli-agent-runtime';
 
 /** F9. The skill treats this sentence as "tool not listed". */
 export const ROUTING_UNAVAILABLE_MESSAGE =
@@ -52,6 +53,7 @@ export interface RouteNamespace {
 
 export interface RouteNamespaceDependencies {
   readonly agent: Pick<AgentNamespace, 'list' | 'limits' | 'listRoles'>;
+  readonly hasIDECapabilities?: boolean;
   /** Read on every call. Absent or unregistered → F9, and no agent I/O. */
   readonly container: RouteServiceLocator | undefined;
 }
@@ -112,9 +114,11 @@ export function buildRouteCandidateSource(
     roles: () => agent.listRoles(),
 
     tools: async (candidate, phase) => {
+      const capability = candidate.kind === 'lane'
+        ? laneMcpTokenCapability(candidate.cli)
+        : 'privileged';
+      if (capability === null) return [];
       if (candidate.kind === 'lane') {
-        // The runtime issues lane MCP tokens only to these six CLI adapters.
-        if (!['codex', 'cursor', 'copilot', 'opencode', 'grok', 'antigravity'].includes(candidate.cli)) return [];
         const row = rowsById.get(candidate.id);
         if (row?.manifest?.mcp.state === 'unsupported') return [];
         if (row?.manifest?.mcp.state !== 'supported') return null;
@@ -125,9 +129,9 @@ export function buildRouteCandidateSource(
       return composeEffectiveToolList(
         candidate.kind === 'subagent' ? { kind: 'session' } : { kind: 'agent' },
         'coding',
-        candidate.kind === 'lane' && candidate.cli === 'antigravity' ? 'lane-report' : 'privileged',
+        capability,
         { kind: candidate.kind === 'subagent' ? 'session' : 'agent',
-          capability: candidate.kind === 'lane' && candidate.cli === 'antigravity' ? 'lane-report' : 'privileged',
+          capability,
           phaseKind: phase.kind,
           disallowedTools: phase.toolProfile?.disallowedTools ?? [],
         },
@@ -151,7 +155,9 @@ export function buildRouteNamespace(
           if (!deps.container?.isRegistered(token, true)) return null;
           const setting = deps.container.resolve<Pick<HostRoutingSetting, 'disabledMcpNamespaces'>>(token);
           const disabledMcpNamespaces = setting.disabledMcpNamespaces();
-          return disabledMcpNamespaces === null ? null : { hasIDECapabilities: false, disabledMcpNamespaces };
+          return disabledMcpNamespaces === null || deps.hasIDECapabilities === undefined
+            ? null
+            : { hasIDECapabilities: deps.hasIDECapabilities, disabledMcpNamespaces };
         }),
         context,
       );

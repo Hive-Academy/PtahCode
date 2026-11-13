@@ -49,7 +49,7 @@ import {
   type ScopeCheckService,
   type ScopeConversation,
 } from '@ptah-extension/lane-routing';
-import { buildRouteCandidateSource } from '@ptah-extension/vscode-lm-tools';
+import { buildRouteCandidateSource, IDE_CAPABILITIES_TOKEN } from '@ptah-extension/vscode-lm-tools';
 import type { CliDetectionResult } from '@ptah-extension/shared';
 import { loggableErrorName } from '@ptah-extension/shared';
 import {
@@ -160,6 +160,8 @@ export class HostRoutingCoordinator {
       isOptional: true,
     })
     sessionIds?: SessionIdRegistry,
+    @inject(IDE_CAPABILITIES_TOKEN, { isOptional: true })
+    private readonly ideCapabilities?: object,
   ) {
     const settingChanges = setting.onDidChange(() => this.onSettingChanged());
     this.releases.push(() => settingChanges.dispose());
@@ -531,7 +533,7 @@ export class HostRoutingCoordinator {
         this.apiBuilder.build().agent,
         () => {
           const disabledMcpNamespaces = this.setting.disabledMcpNamespaces?.() ?? null;
-          return disabledMcpNamespaces === null ? null : { hasIDECapabilities: false, disabledMcpNamespaces };
+          return disabledMcpNamespaces === null ? null : { hasIDECapabilities: this.ideCapabilities !== undefined, disabledMcpNamespaces };
         },
       );
     } catch (error: unknown) {
