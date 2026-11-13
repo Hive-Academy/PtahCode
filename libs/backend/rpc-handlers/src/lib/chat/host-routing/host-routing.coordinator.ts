@@ -37,7 +37,6 @@ import {
   type SessionIdResolvedPayload,
 } from '@ptah-extension/agent-sdk';
 import {
-  BUILTIN_SUBAGENT_ROLES,
   LANE_ROUTING_TOKENS,
   buildPreflightScopeSummary,
   type DecisionModelConfig,
@@ -685,7 +684,6 @@ async function availableSubagents(
 ): Promise<readonly string[]> {
   const roles = await source.roles();
   return [...new Set(roles)]
-    .filter((role) => BUILTIN_SUBAGENT_ROLES.has(role))
     .slice(0, MAX_CANDIDATE_LABELS);
 }
 

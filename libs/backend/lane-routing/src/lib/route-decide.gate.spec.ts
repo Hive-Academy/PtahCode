@@ -29,7 +29,6 @@ import { FAMILY_PROFILE_MODEL } from './matrix/matrix.types';
 import { EMPTY_OUTCOME_FIGURES } from './matrix/outcome-figures';
 import type { RouteMatrix } from './pipeline/gather';
 import { systemOneClientOptions } from './pipeline/model-refine';
-import { BUILTIN_SUBAGENT_ROLES } from './pipeline/phase-plan';
 import {
   emptyRotationState,
   type RotationState,
@@ -189,6 +188,7 @@ function answersFor(
 function harness(options: {
   readonly selection?: unknown;
   readonly rows?: readonly CliDetectionResult[];
+  readonly roles?: readonly string[];
   readonly limits?: ReadonlyMap<string, LaneLimitState> | null;
   readonly listing?: LaneModelListing;
   readonly structured?: StructuredDecisionCompleter;
@@ -211,7 +211,7 @@ function harness(options: {
     rows,
     limits: async () =>
       options.limits === undefined ? new Map() : options.limits,
-    roles: async () => [],
+    roles: async () => options.roles ?? [],
   };
   const service = new RouteDecideService({
     rotationSetting: { isEnabled: () => options.rotate ?? true },
@@ -274,28 +274,27 @@ describe('gate phase policy roster', () => {
     expect(result.roster[0]).toMatchObject({ status: 'chosen', executor: { id: 'codex' }, taskKind: 'plan' });
   });
 
-  it.each(['batch', 'completion'] as const)('leaves %s to the orchestrator with no lane', async (kind) => {
+  it.each(['batch', 'completion'] as const)('uses the phase subagent with no lane for %s', async (kind) => {
     const run = harness({ rows: [], rotate: false, selection: { kind: 'unset' } });
     const result = await run.service.decide({ ...implement(), phases: [{ id: kind, kind }] }, run.source);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
-    expect(result.roster[0]).toMatchObject({ status: 'unavailable', executor: 'unavailable', exclusionReason: 'no-eligible-candidate' });
-    expect(result.roster[0].reason).toContain('No executor; the orchestrator does this phase');
+    expect(result.roster[0]).toMatchObject({ status: 'chosen', executor: { kind: 'subagent', id: `subagent:${kind}` } });
     expect(result.roster[0].reason).not.toContain('-Infinity');
   });
 
   it('preserves exclusion detail when a batch lane is unavailable', async () => {
     const run = harness({ rows: [lane('codex')], limits: new Map<string, LaneLimitState>([['codex', 'at-limit']]), rotate: false, selection: { kind: 'unset' } });
-    const result = await run.service.decide({ ...implement(), phases: [{ id: 'batch', kind: 'batch' }] }, run.source);
+    // An unlisted legacy role gives no subagent candidate, so no executor is eligible.
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'batch', kind: 'batch', role: 'unlisted-role' }] }, run.source);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     const entry = result.roster[0];
     expect(entry).toMatchObject({ status: 'unavailable', exclusionReason: 'no-eligible-candidate' });
     expect(entry.reason).toContain('candidate codex excluded by at-limit');
-    expect(entry.reason).toContain('No executor; the orchestrator does this phase');
   });
 
   it.each(['batch', 'completion'] as const)('accepts an explicit role for %s', async (kind) => {
-    const run = harness({ rows: [], rotate: false, selection: { kind: 'unset' } });
-    const role = [...BUILTIN_SUBAGENT_ROLES][0];
+    const run = harness({ rows: [], roles: ['legacy-role'], rotate: false, selection: { kind: 'unset' } });
+    const role = 'legacy-role';
     const result = await run.service.decide({ ...implement(), phases: [{ id: kind, kind, role }] }, run.source);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     expect(result.roster[0]).toMatchObject({ status: 'chosen', taskKind: 'plan' });
@@ -349,12 +348,12 @@ describe('gate phase policy roster', () => {
     const result = await run.service.decide({
       ...implement(),
       phases: [{ id: 'build', kind: 'implement', shape: 'mechanical', weight: 2000 }],
-      pins: [{ phaseId: 'build', executor: 'subagent:backend-developer', model: 'sonnet' }],
+      pins: [{ phaseId: 'build', executor: 'subagent:implement', model: 'sonnet' }],
     }, run.source);
     expect(GateResultSchema.safeParse(result).success).toBe(true);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     expect(result.roster[0]).toMatchObject({
-      status: 'chosen', source: 'pin', executor: { id: 'subagent:backend-developer' },
+      status: 'chosen', source: 'pin', executor: { id: 'subagent:implement' },
       model: 'sonnet', tier: 'sonnet', effort: 'low', provenance: 'tier',
     });
     expect(result.roster[0].reason).toMatch(/; policy R4; tier sonnet, effort low, shape mechanical, weight 2000$/);
@@ -709,7 +708,7 @@ describe('route decide gate', () => {
     ).toBeNull();
   });
 
-  it('chooses the built-in subagent when every lane is at limit', async () => {
+  it('chooses the phase subagent when every lane is at limit', async () => {
     const limits = new Map<string, LaneLimitState>([
       ['codex', 'at-limit'],
       ['grok', 'at-limit'],
@@ -722,7 +721,7 @@ describe('route decide gate', () => {
     expect(entry).toMatchObject({
       status: 'chosen',
       source: 'ranking',
-      executor: { kind: 'subagent', id: 'subagent:backend-developer' },
+      executor: { kind: 'subagent', id: 'subagent:implement' },
     });
     if (entry?.status === 'chosen')
       expect(entry.reason).toContain('only eligible candidate');
@@ -977,7 +976,7 @@ describe('route decide gate', () => {
     const entry = result.stage === 'gate-0.1' ? result.roster[0] : undefined;
     expect(entry).toMatchObject({
       status: 'chosen',
-      executor: { kind: 'subagent', id: 'subagent:backend-developer' },
+      executor: { kind: 'subagent', id: 'subagent:implement' },
     });
   });
 });

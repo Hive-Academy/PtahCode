@@ -1,6 +1,6 @@
 import { toSubagentCandidate } from '../ranking/candidate.types';
 import type { PhasePlan } from './phase-plan';
-import { BUILTIN_SUBAGENT_ROLES, laneQuestion } from './phase-plan';
+import { laneQuestion } from './phase-plan';
 import { isSendable, resolvePhase } from './phase-resolve';
 import { TASK_TYPES } from '@ptah-extension/shared';
 import type { GatheredCall } from './gather';
@@ -24,11 +24,6 @@ function plan(scores: readonly number[]): PhasePlan {
 it('returns no decision options for an empty ranked list', () => {
   expect(laneQuestion(plan([]))).toMatchObject({ primaryCount: 0, options: [] });
   expect(isSendable(plan([]))).toBe(false);
-});
-
-it('preserves the built-in alias set', () => {
-  expect(BUILTIN_SUBAGENT_ROLES.size).toBe(9);
-  expect([...BUILTIN_SUBAGENT_ROLES].every((role) => role.length > 0)).toBe(true);
 });
 
 it('offers only the five-point band to the decision model', () => {
@@ -135,7 +130,7 @@ it('scores a subagent with the policy tier and keeps a lane configured model', (
     installed: true, disabled: false, limitState: 'unknown' as const,
   };
   const gathered: GatheredCall = {
-    lanes: [lane], roles: [], rotation: { version: 1, entries: [] },
+    lanes: [lane], roles: ['legacy-role'], rotation: { version: 1, entries: [] },
     rotationUnavailable: false, missing: [], detailReasons: [],
     models: new Map([['codex', { models: [], configuredModel: { id: 'configured-lane-model', provenance: 'configured' as const } }]]),
     matrix: {
@@ -148,13 +143,13 @@ it('scores a subagent with the policy tier and keeps a lane configured model', (
   const args: GateArgs = {
     stage: 'gate-0.1', request: 'Implement a small change', taskType: TASK_TYPES[0], depth: 'Full',
     phases: [
-      { id: 'small', kind: 'implement', shape: 'mechanical', weight: 3999 },
-      { id: 'missing', kind: 'implement', shape: 'logic', weight: 8000 },
-      { id: 'pinned', kind: 'implement', shape: 'mechanical', weight: 3999 },
+      { id: 'small', kind: 'implement', role: 'legacy-role', shape: 'mechanical', weight: 3999 },
+      { id: 'missing', kind: 'implement', role: 'legacy-role', shape: 'logic', weight: 8000 },
+      { id: 'pinned', kind: 'implement', role: 'legacy-role', shape: 'mechanical', weight: 3999 },
     ],
     pins: [
       { phaseId: 'missing', executor: 'absent' },
-      { phaseId: 'pinned', executor: 'subagent:backend-developer', model: 'haiku' },
+      { phaseId: 'pinned', executor: 'subagent:legacy-role', model: 'haiku' },
     ],
   };
   const { plans } = planRoutePhases(args.phases, args, gathered, gathered.rotation, false, [], () => undefined);
@@ -174,7 +169,7 @@ interface SubagentPhaseHints {
 
 function subagentPlan(hints: SubagentPhaseHints, pinModel?: string): PhasePlan {
   const gathered: GatheredCall = {
-    lanes: [], roles: [], rotation: { version: 1, entries: [] },
+    lanes: [], roles: ['legacy-role'], rotation: { version: 1, entries: [] },
     rotationUnavailable: false, missing: [], detailReasons: [], models: new Map(),
     matrix: {
       reasons: [], outcomeFigures: () => null,
@@ -187,12 +182,12 @@ function subagentPlan(hints: SubagentPhaseHints, pinModel?: string): PhasePlan {
   const args: GateArgs = {
     stage: 'gate-0.1', request: 'Implement a small change',
     taskType: TASK_TYPES[0], depth: 'Full',
-    phases: [{ id: 'small', kind: 'implement',
+    phases: [{ id: 'small', kind: 'implement', role: 'legacy-role',
       ...(hints.shape === undefined ? {} : { shape: hints.shape }),
       ...(hints.weight === undefined ? {} : { weight: hints.weight }),
     }],
     ...(pinModel === undefined ? {} : {
-      pins: [{ phaseId: 'small', executor: 'subagent:backend-developer', model: pinModel }],
+      pins: [{ phaseId: 'small', executor: 'subagent:legacy-role', model: pinModel }],
     }),
   };
   return planRoutePhases(

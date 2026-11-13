@@ -39,24 +39,6 @@ import { AUTOMATIC_MATRIX_MODEL } from '../matrix/local-derivation';
 
 const LANE_INSTRUCTIONS = 'Choose the executor for this phase. Each score already includes past outcomes; pastOutcomes lists the delivered and failed run counts behind it. No entry means no verified runs were available for that executor in the outcome window.';
 
-/** Built-in subagent role for a phase kind (part A, Assumption A4). */
-const DEFAULT_ROLE: Readonly<Partial<Record<PhaseKind, string>>> = {
-  plan: 'project-manager',
-  architecture: 'software-architect',
-  implement: 'backend-developer',
-  review: 'code-logic-reviewer',
-  'document-review': 'code-logic-reviewer',
-  research: 'researcher-expert',
-  tests: 'senior-tester',
-  docs: 'technical-content-writer',
-  'visual-review': 'visual-reviewer',
-  design: 'ui-ux-designer',
-};
-
-export const BUILTIN_SUBAGENT_ROLES: ReadonlySet<string> = new Set(
-  Object.values(DEFAULT_ROLE),
-);
-
 export type GateArgs = Extract<RouteDecideArgs, { stage: 'gate-0.1' }>;
 
 type GatePhase = GateArgs['phases'][number];
@@ -312,11 +294,11 @@ function candidatesFor(
   phase: GatePhase,
   gathered: GatheredCall,
 ): RoutingCandidate[] {
-  const role = phase.role ?? DEFAULT_ROLE[phase.kind];
   const candidates: RoutingCandidate[] = [...gathered.lanes];
-  if (role === undefined) return candidates;
-  if (BUILTIN_SUBAGENT_ROLES.has(role) || gathered.roles.includes(role)) {
-    candidates.push(toSubagentCandidate(role));
+  if (phase.role === undefined) {
+    candidates.push(toSubagentCandidate(phase.kind));
+  } else if (gathered.roles.includes(phase.role)) {
+    candidates.push(toSubagentCandidate(phase.role));
   }
   return candidates;
 }
