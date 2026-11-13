@@ -147,6 +147,36 @@
   padding-inline: 0;
 }
 
+/* Raw compact footprints. Default density keeps the approved size scale. */
+.btn[data-ptah-button][data-density='compact'].btn-xs:is(.btn, #ptah-button) {
+  height: 20px;
+  min-height: 20px;
+  padding-inline: 4px;
+  font-size: 11px;
+}
+
+.btn[data-ptah-button][data-density='compact'].btn-sm:is(.btn, #ptah-button) {
+  height: 28px;
+  min-height: 28px;
+  padding-inline: 8px;
+}
+
+.btn[data-ptah-button][data-density='compact'].btn-xs.btn-square:is(.btn, #ptah-button) {
+  width: 20px;
+  min-width: 20px;
+  padding-inline: 0;
+}
+
+.btn[data-ptah-button][data-density='compact'].btn-sm.btn-square:is(.btn, #ptah-button) {
+  width: 28px;
+  min-width: 28px;
+  padding-inline: 0;
+}
+
+.btn[data-ptah-button].btn-link[data-no-padding]:is(.btn, #ptah-button) {
+  padding-inline: 0;
+}
+
 /* Variant 1: primary (the one main action of a surface) */
 .btn[data-ptah-button].btn-primary:is(.btn, #ptah-button) {
   background-color: var(--ptah-btn-primary-bg);
