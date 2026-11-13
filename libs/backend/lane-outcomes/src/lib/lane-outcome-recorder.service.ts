@@ -9,6 +9,7 @@ import {
   type LaneTaskKindClassificationInput,
   type LaneTaskKindClassifier,
   type OutcomeExecutorKind,
+  type PhaseKind,
 } from '@ptah-extension/shared';
 import type {
   SdkAdapterSubagentEndedEvent,
@@ -51,7 +52,10 @@ export type LaneCompletionOutcomeInput = Omit<
   | 'sessionEvidenceClass'
 > & {
   executorKind: Exclude<LaneOutcomeRecord['executorKind'], 'subagent'>;
-} & Pick<LaneFailureClassificationInput, 'status' | 'failureKind' | 'exitCode'>;
+} & Pick<LaneFailureClassificationInput, 'status' | 'failureKind' | 'exitCode'> & {
+  /** Phase kind for classification. Never stored on the row. */
+  readonly phaseKind?: PhaseKind | null;
+};
 
 /**
  * Transient lane-completion input that never reaches a row, the journal or a
@@ -166,10 +170,10 @@ export class LaneOutcomeRecorder {
     input: LaneCompletionOutcomeInput,
     transient: LaneCompletionTransient = {},
   ): void {
-    const { status, failureKind, exitCode, ...facts } = input;
+    const { status, failureKind, exitCode, phaseKind, ...facts } = input;
     const row: LaneOutcomeRecord = {
       ...facts,
-      ...resolveTaskKind(input.taskKind, input.role),
+      ...resolveTaskKind(input.taskKind, phaseKind ?? null, input.role),
       subagentSessionId: null,
       parentSessionId: input.parentSessionId ?? null,
       workspaceRoot: input.workspaceRoot?.trim() || null,
@@ -500,7 +504,7 @@ export class LaneOutcomeRecorder {
       parentSessionId: facts.parentSessionId,
       workspaceRoot: facts.workspaceRoot,
       role,
-      ...resolveTaskKind(null, role),
+      ...resolveTaskKind(null, null, role),
     };
     if (!LaneOutcomeRowSchema.safeParse(row).success) {
       this.logger.warn('Invalid subagent outcome', { agentId: facts.agentId });

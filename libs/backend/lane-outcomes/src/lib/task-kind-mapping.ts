@@ -1,6 +1,7 @@
 import type {
   OutcomeTaskKind,
   OutcomeTaskKindSource,
+  PhaseKind,
 } from '@ptah-extension/shared';
 
 /**
@@ -59,14 +60,21 @@ export interface ResolvedTaskKind {
 }
 
 /**
- * The row's task kind before any classification: explicit, then mapped from
- * the role, then unclassified. Classification happens after insert.
+ * The row's task kind before any classification: explicit task kind, then
+ * the phase kind, then the legacy role alias, then unclassified.
+ * Classification happens after insert. A phase kind is also still readable
+ * through {@link taskKindForRole} when a caller only has the old alias.
  */
 export function resolveTaskKind(
   explicit: OutcomeTaskKind | null,
+  phaseKind: PhaseKind | null,
   role: string | null,
 ): ResolvedTaskKind {
   if (explicit) return { taskKind: explicit, taskKindSource: 'explicit' };
+  if (phaseKind) {
+    const fromPhase = taskKindForRole(phaseKind);
+    if (fromPhase) return { taskKind: fromPhase, taskKindSource: 'mapped' };
+  }
   const mapped = taskKindForRole(role);
   if (mapped) return { taskKind: mapped, taskKindSource: 'mapped' };
   return { taskKind: null, taskKindSource: 'unclassified' };

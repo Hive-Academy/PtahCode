@@ -16,8 +16,10 @@ import type {
   AgentSessionOpenedPayload,
   ChildSettingSource,
   EffortLevel,
+  ExecutorCompletionResultV1,
   LaneCompletionRefusalReason,
   LaneCompletionVerdict,
+  PhaseKind,
   SessionChildOutcome,
   PhaseDispatchV1,
   PhaseSkillV1,
@@ -380,6 +382,10 @@ export interface SessionChildCompletionSubject {
   readonly startedAt: string;
   readonly reportsDelivered: number;
   readonly lastRecap?: string;
+  /** Set when the child was started with a phase. Absent leaves today's envelope. */
+  readonly phaseKind?: PhaseKind;
+  /** Copied from the phase tool profile. An empty list records no adapter result. */
+  readonly phaseDisallowedTools?: readonly string[];
 }
 
 /** One settled turn of a child. */
@@ -397,6 +403,8 @@ export interface SessionChildCompletionEnvelope {
   readonly turn: number;
   readonly verdict: LaneCompletionVerdict;
   readonly text: string;
+  /** Present when this host built the envelope. Older held rows omit it. */
+  readonly completion?: ExecutorCompletionResultV1;
 }
 
 /** Why a child completion was not delivered (the lane refusal reasons, unchanged). */

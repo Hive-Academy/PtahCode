@@ -46,6 +46,7 @@ import { SubagentStopCallbackRegistry } from './subagent-stop-callback-registry'
 import type { SessionStatsOwnerService } from '../session-stats/session-stats-owner.service';
 import type { SubagentBudgetMonitor } from './compaction/subagent-budget-monitor';
 import { createSubagentBudgetHooks } from './compaction/subagent-budget-hooks';
+import { buildSdkSubagentCompletion } from './sdk-subagent-completion';
 
 /**
  * SubagentHookHandler Service
@@ -574,12 +575,28 @@ export class SubagentHookHandler {
         }
       }
 
+      const completion = input.agent_id
+        ? buildSdkSubagentCompletion({
+            agentId: input.agent_id,
+            agentType: input.agent_type || record?.agentType || null,
+            parentSessionId: this.resolveParentSessionId(
+              input.session_id,
+              parentSessionId,
+            ),
+          })
+        : null;
       this.logger.debug(
         '[SubagentHookHandler] SubagentStop processed successfully',
         {
           agentId: input.agent_id,
           toolUseId,
           isBackground,
+          ...(completion
+            ? {
+                verdict: completion.verdict,
+                phaseKind: completion.phaseKind,
+              }
+            : {}),
         },
       );
     } catch (error) {

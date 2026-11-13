@@ -51,6 +51,11 @@ import {
   type HeldReport,
 } from './agent-report-coalescer';
 import { buildLaneCompletionEnvelope } from './lane-completion-envelope';
+import {
+  buildLaneCompletionResult,
+  buildSessionCompletionResult,
+  phaseKindFromAgentInfo,
+} from './lane-completion-result';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { readReviewDeliverables } from './review-deliverable.reader';
 import type {
@@ -307,13 +312,22 @@ export function buildSessionChildCompletionEnvelope(
   if (recap) lines.push(`Last message: ${recap}`);
   lines.push(sessionChildNextAction(verdict));
 
+  const text = `<agent-lane-completed ${attrs}>\n${lines.join(
+    '\n',
+  )}\n</agent-lane-completed>`;
   return {
     childSessionId: subject.childSessionId,
     turn: settle.turn,
     verdict,
-    text: `<agent-lane-completed ${attrs}>\n${lines.join(
-      '\n',
-    )}\n</agent-lane-completed>`,
+    text,
+    completion: buildSessionCompletionResult({
+      executorId: 'session',
+      phaseKind: subject.phaseKind ?? null,
+      deliverableCheck: deliverables,
+      verdict,
+      parentSignal: text,
+      disallowedTools: subject.phaseDisallowedTools,
+    }),
   };
 }
 
@@ -478,6 +492,13 @@ export class LaneCompletionNotifier {
       completionSignal = signal;
       completionBody = this.completionEnvelope(signal, info);
     }
+    const completion = buildLaneCompletionResult({
+      signal: completionSignal,
+      executorId: info.cli,
+      phaseKind: phaseKindFromAgentInfo(info),
+      parentSignal: completionBody,
+      toolProfileAdapter: info.toolProfileAdapter ?? null,
+    });
     if (firstSignal)
       enqueueLaneCompletionOutcome(
         this.outcomeRecorder,
@@ -513,21 +534,27 @@ export class LaneCompletionNotifier {
     ) {
       queueReviewCapture();
       if (firstSignal) this.remember(key);
-      return this.refuse('no-parent-recorded', signal, {
-        detail: info.parentSessionId
-          ? 'the parent session recorded at spawn never resolved to a real session id'
-          : 'the lane was spawned without a parent session',
-      });
+      return {
+        ...this.refuse('no-parent-recorded', signal, {
+          detail: info.parentSessionId
+            ? 'the parent session recorded at spawn never resolved to a real session id'
+            : 'the lane was spawned without a parent session',
+        }),
+        completion,
+      };
     }
 
     if (!this.agentAdapter) {
       queueReviewCapture();
       if (firstSignal) this.remember(key);
-      return this.refuse('chat-runtime-unavailable', signal, {
-        detail:
-          'no agent adapter is registered in this host, so no chat session ' +
-          'can be driven',
-      });
+      return {
+        ...this.refuse('chat-runtime-unavailable', signal, {
+          detail:
+            'no agent adapter is registered in this host, so no chat session ' +
+            'can be driven',
+        }),
+        completion,
+      };
     }
 
     if (this.parentDelivery) {
@@ -565,14 +592,18 @@ export class LaneCompletionNotifier {
           checkpoint === 'durable' || !('refused' in saved)
             ? completionSignal
             : signal,
+        completion,
       };
     }
 
     if (!activeParentSessionId) {
       queueReviewCapture();
-      return this.refuse('parent-session-not-active', signal, {
-        parentSessionId: SessionId.from(parentSessionId),
-      });
+      return {
+        ...this.refuse('parent-session-not-active', signal, {
+          parentSessionId: SessionId.from(parentSessionId),
+        }),
+        completion,
+      };
     }
 
     try {
@@ -589,10 +620,13 @@ export class LaneCompletionNotifier {
       );
     } catch (_error: unknown) {
       queueReviewCapture();
-      return this.refuse('delivery-failed', signal, {
-        parentSessionId,
-        detail: 'parent-send-failed',
-      });
+      return {
+        ...this.refuse('delivery-failed', signal, {
+          parentSessionId,
+          detail: 'parent-send-failed',
+        }),
+        completion,
+      };
     }
 
     queueReviewCapture();
@@ -606,7 +640,7 @@ export class LaneCompletionNotifier {
       deliverables: signal.deliverables.length,
     });
 
-    return { delivered: true, parentSessionId, signal };
+    return { delivered: true, parentSessionId, signal, completion };
   }
 
   private async releaseStandalone(
@@ -1172,15 +1206,18 @@ export class LaneCompletionNotifier {
    * A review lane's run is captured only when it delivered: a failed run or
    * one whose deliverables are missing, empty or stale left no review of its
    * own, and a file from an earlier run must not count again under this run.
-   * Review kind is the row's own rule (explicit, then mapped from the role).
+   * Review kind is explicit task kind, then phase kind, then the role alias.
    */
   private static capturesReview(
     info: AgentProcessInfo,
     signal: LaneCompletionSignal,
   ): boolean {
     return (
-      resolveTaskKind(info.taskKind ?? null, info.role ?? null).taskKind ===
-        'review' &&
+      resolveTaskKind(
+        info.taskKind ?? null,
+        phaseKindFromAgentInfo(info),
+        info.role ?? null,
+      ).taskKind === 'review' &&
       signal.verdict !== 'failed' &&
       signal.verdict !== 'no-deliverable' &&
       signal.deliverables.length > 0

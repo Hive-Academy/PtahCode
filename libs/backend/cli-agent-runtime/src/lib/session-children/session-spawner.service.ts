@@ -716,6 +716,12 @@ export class SessionSpawnerService implements ISessionSpawner {
       reportsDelivered: 0,
       reportsRefused: 0,
       task,
+      ...(request.phase
+        ? {
+            phaseKind: request.phase.kind,
+            phaseDisallowedTools: [...request.phase.toolProfile.disallowedTools],
+          }
+        : {}),
     };
 
     const runtime: ChildRuntime = {
@@ -1758,6 +1764,10 @@ export class SessionSpawnerService implements ISessionSpawner {
           startedAt: child.startedAt,
           reportsDelivered: child.reportsDelivered,
           ...(child.lastRecap ? { lastRecap: child.lastRecap } : {}),
+          ...(child.phaseKind ? { phaseKind: child.phaseKind } : {}),
+          ...(child.phaseDisallowedTools
+            ? { phaseDisallowedTools: child.phaseDisallowedTools }
+            : {}),
         },
         { turn, status, completedAt: new Date(timestampMs).toISOString() },
       );
@@ -1989,6 +1999,8 @@ export class SessionSpawnerService implements ISessionSpawner {
     delete snapshot['terminalStatus'];
     delete snapshot['endCause'];
     delete snapshot['heldCompletion'];
+    delete snapshot['phaseKind'];
+    delete snapshot['phaseDisallowedTools'];
     const held = record.heldCompletion;
     const latest =
       record.terminalStatus === 'handed-off'
@@ -2357,6 +2369,10 @@ export class SessionSpawnerService implements ISessionSpawner {
       reportsDelivered: 0,
       reportsRefused: 0,
       task: child.task,
+      ...(child.phaseKind ? { phaseKind: child.phaseKind } : {}),
+      ...(child.phaseDisallowedTools
+        ? { phaseDisallowedTools: child.phaseDisallowedTools }
+        : {}),
     };
     const nextRuntime: ChildRuntime = {
       worktree: runtime.worktree,

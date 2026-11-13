@@ -11,6 +11,7 @@
  */
 import { resolve } from 'node:path';
 import { injectable } from 'tsyringe';
+import type { PhaseKind } from '@ptah-extension/shared';
 import type {
   SessionChildCompletionEnvelope,
   SessionChildSnapshot,
@@ -37,6 +38,10 @@ export interface SessionChildRecord extends Omit<
 > {
   /** The task as given to {@link ISessionSpawner.start} (without the contract). */
   readonly task: string;
+  /** Phase kind from start. Kept off the public snapshot. */
+  readonly phaseKind?: PhaseKind;
+  /** Phase tool denials from start. Kept off the public snapshot. */
+  readonly phaseDisallowedTools?: readonly string[];
   /** Set once by {@link SessionChildRegistry.markEnded}; never cleared. */
   readonly terminalStatus?: SessionChildTerminalStatus;
   /**
