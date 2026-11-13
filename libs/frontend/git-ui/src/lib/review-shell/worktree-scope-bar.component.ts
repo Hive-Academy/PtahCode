@@ -7,9 +7,6 @@ import {
 } from '@angular/core';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[oklch(var(--s))]';
-
 /** The last path segment of a folder, for a label with no branch to show. */
 export function worktreeFolderName(path: string): string {
   return (
@@ -52,7 +49,6 @@ export function worktreeFolderName(path: string): string {
         ptahButton
         variant="ghost"
         size="xs"
-        class="{{ focusRing }}"
         data-testid="worktree-scope-back"
         (click)="back.emit()"
       >
@@ -64,7 +60,6 @@ export function worktreeFolderName(path: string): string {
           ptahButton
           variant="ghost"
           size="xs"
-          class="{{ focusRing }}"
           data-testid="worktree-scope-open"
           [title]="'Open ' + root() + ' as a workspace folder'"
           (click)="openAsWorkspace.emit()"
@@ -88,8 +83,6 @@ export class WorktreeScopeBarComponent {
   readonly back = output<void>();
   /** Open the worktree as a workspace folder. */
   readonly openAsWorkspace = output<void>();
-
-  protected readonly focusRing = FOCUS_RING;
 
   protected readonly worktreeLabel = computed(
     () => this.branch() || worktreeFolderName(this.root()),

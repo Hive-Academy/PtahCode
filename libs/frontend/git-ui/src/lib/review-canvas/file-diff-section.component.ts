@@ -175,9 +175,6 @@ function formatSize(bytes: number): string | null {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[oklch(var(--s))]';
-
 /**
  * Both sides exist and are identical text (a file reverted to its base, say).
  * Driven by the resolved refs, never by empty text: an empty tracked file is
@@ -355,7 +352,6 @@ function splitLines(text: string): string[] {
                 ptahButton
                 variant="ghost"
                 size="xs"
-                class="{{ focusRing }}"
                 data-testid="comment-cancel"
                 (click)="closeComposer()"
               >
@@ -412,7 +408,6 @@ function splitLines(text: string): string[] {
                 ptahButton
                 variant="ghost"
                 size="xs"
-                class="{{ focusRing }}"
                 data-testid="file-read-retry"
                 (click)="retry()"
               >
@@ -432,7 +427,6 @@ function splitLines(text: string): string[] {
                   ptahButton
                   variant="ghost"
                   size="xs"
-                  class="{{ focusRing }}"
                   data-testid="file-stale-retry"
                   (click)="retry()"
                 >
@@ -526,7 +520,6 @@ export class FileDiffSectionComponent {
   /** The header's toggle or Delete asked to collapse (or expand) this file. */
   readonly collapsedChange = output<boolean>();
 
-  protected readonly focusRing = FOCUS_RING;
   protected readonly bodyId = `file-section-body-${nextBodyId++}`;
   protected readonly readFailedMessage = 'Git could not read this file.';
   protected readonly staleMessage =
