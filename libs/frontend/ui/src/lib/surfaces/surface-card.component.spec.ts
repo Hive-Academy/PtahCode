@@ -225,7 +225,77 @@ describe('SurfaceCardComponent', () => {
     expect(fixture.componentInstance.activations).toBe(0);
     by('header').click();
     card().click();
-    expect(fixture.componentInstance.activations).toBe(0);
+    expect(fixture.componentInstance.activations).toBe(2);
+  });
+
+  describe('mouse activation', () => {
+    function interactive() {
+      const ctx = setup();
+      ctx.update((h) => { h.interactive.set(true); h.label.set('Open details'); });
+      return ctx;
+    }
+
+    function appendBody(root: HTMLElement, html: string): HTMLElement {
+      const host = document.createElement('div');
+      host.innerHTML = html;
+      root.querySelector('[data-testid="surface-card-body"]')?.appendChild(host);
+      return host;
+    }
+
+    it('emits once for a click on a child with a title', () => {
+      const { fixture, by } = interactive();
+      by('tooltip').click();
+      expect(fixture.componentInstance.activations).toBe(1);
+    });
+
+    it('emits once for a click on a role="img" child', () => {
+      const { fixture, root } = interactive();
+      const host = appendBody(root, '<span role="img" aria-label="icon">i</span>');
+      (host.firstElementChild as HTMLElement).click();
+      expect(fixture.componentInstance.activations).toBe(1);
+    });
+
+    it('emits once for plain text inside a role="list" wrapper', () => {
+      const { fixture, root } = interactive();
+      const host = appendBody(root, '<div role="list"><div role="listitem"><span>text</span></div></div>');
+      (host.querySelector('span') as HTMLElement).click();
+      expect(fixture.componentInstance.activations).toBe(1);
+    });
+
+    it('emits 0 for a nested button, link and interactive role', () => {
+      const { fixture, by, root } = interactive();
+      by('nested').click();
+      const host = appendBody(root, '<a href="#x"><i>l</i></a><div role="tab"><b>t</b></div>');
+      (host.querySelector('i') as HTMLElement).click();
+      (host.querySelector('b') as HTMLElement).click();
+      expect(fixture.componentInstance.activations).toBe(0);
+    });
+
+    it('emits once for Enter and once for Space on the activator', () => {
+      const { fixture, by } = interactive();
+      const activator = by('surface-card-activator');
+      // jsdom does not synthesize the native click after a keyboard event.
+      activator.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      activator.click();
+      expect(fixture.componentInstance.activations).toBe(1);
+      activator.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      activator.click();
+      expect(fixture.componentInstance.activations).toBe(2);
+    });
+
+    it('emits exactly once for a click on the activator', () => {
+      const { fixture, by } = interactive();
+      by('surface-card-activator').click();
+      expect(fixture.componentInstance.activations).toBe(1);
+    });
+
+    it('emits 0 when disabled', () => {
+      const { fixture, by, update } = interactive();
+      update((h) => h.disabled.set(true));
+      by('tooltip').click();
+      by('surface-card-activator').click();
+      expect(fixture.componentInstance.activations).toBe(0);
+    });
   });
 
   it('keeps a nested non-button action independent of activation', () => {
