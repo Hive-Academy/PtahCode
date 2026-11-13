@@ -270,6 +270,8 @@ describe('CursorCliAdapter', () => {
       currentRun?.end();
       await handle.done;
       expect(segments.filter((segment) => segment.turnTelemetry)).toHaveLength(1);
+      expect(handle).toMatchObject({ outcomeUsageIsTurnTotal: true, usageScope: 'turn' });
+      expect(handle.getObservedNativeThreadId?.()).toBe('agent-abc');
       expect(segments.find((segment) => segment.turnTelemetry)?.turnTelemetry).toMatchObject({ status: 'reported', usage: { turnId: 'run-1', modelId: 'cursor/unknown', inputTokens: 12, outputTokens: 3 } });
     });
 

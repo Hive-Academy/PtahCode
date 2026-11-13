@@ -647,6 +647,9 @@ export class PiCliAdapter implements CliAdapter {
           : message;
         return { done: runTurn(turnMessage, capturedSessionId, turnPath) };
       },
+      outcomeUsageIsTurnTotal: true,
+      usageScope: 'turn',
+      getObservedNativeThreadId: () => capturedSessionId,
     };
   }
 

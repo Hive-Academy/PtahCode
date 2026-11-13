@@ -209,6 +209,8 @@ describe('createAcpSessionHandle — first turn', () => {
       modelId: 'grok-billed', inputTokens: 12, outputTokens: 4,
     } });
     expect(telemetry[0].usage).toMatchObject({ inputTokens: 12, outputTokens: 4 });
+    expect(h.handle).toMatchObject({ outcomeUsageIsTurnTotal: true, usageScope: 'turn' });
+    expect(h.handle.getObservedNativeThreadId?.()).toBe('sess-1');
   });
 
   it('reconciles usage_update metadata when the prompt response omits usage', async () => {

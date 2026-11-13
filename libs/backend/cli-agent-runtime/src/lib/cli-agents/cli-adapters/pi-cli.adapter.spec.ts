@@ -200,6 +200,7 @@ describe('PiCliAdapter (RPC mode)', () => {
     expect(telemetry).toHaveLength(1);
     expect(telemetry[0].turnTelemetry).toMatchObject({ status: 'reported', usage: { inputTokens: 15, outputTokens: 6, modelId: 'provider/model' } });
     expect(telemetry[0].usage).toMatchObject({ inputTokens: 15, outputTokens: 6 });
+    expect(handle).toMatchObject({ outcomeUsageIsTurnTotal: true, usageScope: 'turn' });
   });
 
   it('uses turn_end as fallback and marks a turn with no usage event unavailable', async () => {
