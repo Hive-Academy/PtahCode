@@ -13,11 +13,11 @@
           (keydown)="onMenuKeydown($event)">
           @if (sessionId()) {
             <button type="button" role="menuitem" data-inspector-menu-action="rename"
-              ptahButton variant="ghost" size="sm" density="compact" align="start" class="w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content"
+              ptahButton variant="ghost" size="sm" density="compact" align="start" class="w-full"
               (click)="select('rename', true)">Rename</button>
             @if (organizer.available()) {
               <button type="button" role="menuitem" data-inspector-menu-action="organize"
-                ptahButton variant="ghost" size="sm" density="compact" align="start" class="w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content"
+                ptahButton variant="ghost" size="sm" density="compact" align="start" class="w-full"
                 (click)="select('organize', true)">Organize</button>
             }
           }

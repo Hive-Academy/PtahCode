@@ -94,7 +94,7 @@ import {
               variant="primary"
               size="xs"
               [busy]="isApplying()"
-              class="gap-1 px-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              class="gap-1 px-2.5"
               [disabled]="isApplyDisabled()"
               (click)="onApplyClick()"
               data-testid="harness-proposal-apply"
