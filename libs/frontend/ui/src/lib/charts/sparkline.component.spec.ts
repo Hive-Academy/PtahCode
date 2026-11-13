@@ -42,4 +42,9 @@ describe('PtahSparklineComponent', () => {
     expect(el.querySelector('svg')).toBeNull();
     expect(el.textContent).toContain('No trend data');
   });
+
+  it('names the label in the empty-state accessible text', () => {
+    const el = render({ values: [] });
+    expect(el.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Cost: no trend data');
+  });
 });

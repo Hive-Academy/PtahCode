@@ -31,9 +31,10 @@ export function isValidRange(value: number, max: number): boolean {
   return Number.isFinite(value) && Number.isFinite(max) && max > 0;
 }
 
-/** Percent of the max, with negative values clamped to 0. Not clamped at 100. */
+/** Percent of the max, clamped to [0, Number.MAX_VALUE], not to 100. */
 export function percentOf(value: number, max: number): number {
-  return isValidRange(value, max) ? (Math.max(0, value) / max) * 100 : 0;
+  if (!isValidRange(value, max)) return 0;
+  return Math.min((Math.max(0, value) / max) * 100, Number.MAX_VALUE);
 }
 
 /** The ink of a tone. `auto` follows the near-limit rule of the original meter. */
