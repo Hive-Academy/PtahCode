@@ -1,16 +1,16 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import type { Lens, ReviewFinding, Severity } from '@ptah-extension/review-contracts';
-import { PtahButtonDirective, PtahFieldControlDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldControlDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 import { ReviewFindingCardComponent } from './review-finding-card.component';
 import { ReviewFindingsStore } from './review-findings.store';
 import { filterAndSortFindings, openTriage, summarizeFindings, toFindingViews, type SortField, type TriageState } from './review-finding-view';
 
 @Component({
   selector: 'ptah-review-findings-panel', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReviewFindingCardComponent, PtahButtonDirective, PtahFieldControlDirective],
+  imports: [ReviewFindingCardComponent, PtahButtonDirective, PtahFieldControlDirective, PtahSurfaceDirective],
   template: `
     <section aria-label="Findings" class="space-y-4">
-      <div class="rounded-lg border border-base-300 bg-base-200 p-3 text-sm">
+      <div ptahSurface padding="sm" class="text-sm">
         <p class="font-medium">{{ summary().total }} findings</p>
         <p>Critical {{ summary().severity.Critical }} · Major {{ summary().severity.Major }} · Minor {{ summary().severity.Minor }} · Nitpick {{ summary().severity.Nitpick }}</p>
         <p>Open {{ summary().states.open }} · Accepted {{ summary().states.accepted }} · Dismissed {{ summary().states.dismissed }}</p>
