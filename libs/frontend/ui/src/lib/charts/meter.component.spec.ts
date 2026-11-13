@@ -186,3 +186,34 @@ describe('marker and stripes', () => {
     expect(fill.style.backgroundImage).toContain('repeating-linear-gradient');
   });
 });
+
+describe('label row', () => {
+  const row = (el: HTMLElement) => el.querySelector('[data-meter-row]') as HTMLElement;
+
+  it('removes the visual row and mb-1 when label and value are both hidden', () => {
+    const el = render({ value: 10, hideLabel: true, showValue: false });
+    expect(row(el).classList.contains('mb-1')).toBe(false);
+    expect(row(el).classList.contains('flex')).toBe(false);
+    expect(row(el).classList.contains('sr-only')).toBe(true);
+    expect(el.querySelector('.mb-1')).toBeNull();
+    expect(el.querySelector('[role="meter"]')?.getAttribute('aria-label')).toBe('Used');
+    expect(el.textContent).toContain('Used');
+  });
+
+  it('keeps the accessible name when the bar is indeterminate and bare', () => {
+    const el = render({ value: 0, max: 0, indeterminate: true, hideLabel: true, showValue: false });
+    expect(el.querySelector('.mb-1')).toBeNull();
+    expect(el.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('Used');
+  });
+
+  it.each([
+    [{}],
+    [{ hideLabel: true }],
+    [{ showValue: false }],
+  ])('keeps the visual row for %j', (extra) => {
+    const el = render({ value: 10, ...extra });
+    expect(row(el).classList.contains('mb-1')).toBe(true);
+    expect(row(el).classList.contains('flex')).toBe(true);
+    expect(row(el).classList.contains('sr-only')).toBe(false);
+  });
+});

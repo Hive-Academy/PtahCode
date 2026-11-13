@@ -28,7 +28,7 @@ const STRIPES =
 @Component({
   selector: 'ptah-meter', standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<div [class]="textClass()"><div class="mb-1 flex justify-between gap-2"><span [class.sr-only]="hideLabel()">{{ label() }}</span><span class="tabular-nums" [class.sr-only]="!showValue()">@if (indeterminate()) { {{ valueText() ?? 'In progress' }} } @else if (valid()) { {{ visibleText() }} } @else { Unavailable }</span></div>
+  template: `<div [class]="textClass()"><div [class]="rowClass()" data-meter-row><span [class.sr-only]="hideLabel()">{{ label() }}</span><span class="tabular-nums" [class.sr-only]="!showValue()">@if (indeterminate()) { {{ valueText() ?? 'In progress' }} } @else if (valid()) { {{ visibleText() }} } @else { Unavailable }</span></div>
     <div class="overflow-hidden rounded-full bg-[var(--ptah-meter-track,var(--surface-border-strong))]" [class]="trackClass()" [attr.role]="ariaRole()" [attr.aria-label]="ariaRole() ? label() : null" [attr.aria-valuemin]="ranged() ? 0 : null" [attr.aria-valuemax]="ranged() ? max() : null" [attr.aria-valuenow]="ranged() ? ariaNow() : null" [attr.aria-valuetext]="ariaValueText()">
       @if (indeterminate()) { <div class="h-full w-1/3 animate-pulse rounded-full motion-reduce:animate-none" [class]="fillClass()"></div> } @else if (valid()) { <div class="h-full rounded-full transition-[width] motion-reduce:transition-none" [class]="fillClass()" [style.width.%]="width()" [style.background-image]="stripeImage()"></div> }
       @if (markerPercent() !== null) { <div class="absolute top-0 h-full w-px bg-[var(--ptah-meter-marker,var(--ptah-badge-neutral-ink))]" [style.left]="markerLeft()" aria-hidden="true" data-meter-marker></div> }
@@ -92,4 +92,8 @@ export class PtahMeterComponent {
     this.markerPercent() === null ? TRACK_H[this.size()] : `relative ${TRACK_H[this.size()]}`,
   );
   readonly textClass = computed(() => TEXT[this.size()]);
+  /** Label and value both hidden: the row is visually removed (no height, no margin), text stays for AT. */
+  readonly rowClass = computed(() =>
+    this.hideLabel() && !this.showValue() ? 'sr-only' : 'mb-1 flex justify-between gap-2',
+  );
 }
