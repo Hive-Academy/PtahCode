@@ -8,6 +8,7 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import {
   NativeCardComponent,
   PtahBadgeDirective,
+  formatDuration,
   type NativeCardTone,
 } from '@ptah-extension/ui';
 import type { ScorecardInvocationRow } from '@ptah-extension/shared';
@@ -243,7 +244,7 @@ function buildScorecardMetrics(
   if (row.durationMs !== null) {
     out.push({
       label: 'Duration',
-      value: formatDuration(row.durationMs),
+      value: formatDuration(row.durationMs, 'decimal'),
       testId: 'scorecard-metric-duration',
     });
   }
@@ -258,8 +259,3 @@ function totalTokens(row: ScorecardDetailRow): number | null {
   return (inputTokens ?? 0) + (outputTokens ?? 0);
 }
 
-function formatDuration(durationMs: number): string {
-  const seconds = durationMs / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
-}

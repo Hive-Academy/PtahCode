@@ -4,17 +4,23 @@ import {
   inject,
   input,
 } from '@angular/core';
-import { SetupFieldDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  SetupFieldDirective,
+  PtahButtonDirective,
+  PtahSurfaceDirective,
+} from '@ptah-extension/ui';
 import { OnboardingWorkspaceStore } from './onboarding-workspace.store';
 
 @Component({
   selector: 'ptah-workspace-header',
   standalone: true,
-  imports: [SetupFieldDirective, PtahButtonDirective],
+  imports: [SetupFieldDirective, PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
-      class="rounded-xl border border-base-300 bg-base-200 p-3 text-sm"
+      ptahSurface
+      padding="sm"
+      class="text-sm"
       aria-label="Workspace folder"
       data-testid="workspace-header"
     >
