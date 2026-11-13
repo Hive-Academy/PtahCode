@@ -209,9 +209,7 @@
     "btn-xs": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/thinking-block.component.ts": {
-    "card": 1,
-    "card-body": 1,
-    "card-border": 1
+    "card-body": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/tool-execution/tool-call-header.component.ts": {
     "badge": 1,
@@ -286,9 +284,6 @@
   },
   "libs/frontend/chat/src/lib/components/molecules/mcp-status-chip.component.ts": {
     "<dynamic>": 2
-  },
-  "libs/frontend/chat/src/lib/components/molecules/notifications/install-scope-migration-notice.component.ts": {
-    "card": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/notifications/session-budget-banner.component.ts": {
     "<dynamic>": 6
