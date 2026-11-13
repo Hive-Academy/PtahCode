@@ -84,3 +84,42 @@ Audit log for Phase 3 implementation. Parent program task: TASK_2026_977_0876.
 | B11 | (pending) | (pending) | planned |
 
 **Code-logic review assignment rule:** If B2-B5 are Claude Api, review must be codex or other family.
+
+### B7b consent preview binding
+
+Install fetches each skill once. The installer hashes the staged bytes and asks the wizard to check consent before any skill moves into the root. The submitted hash must match the staged skill hash, and script skills need a submitted record or stored consent for those bytes. Nothing is active before this check, and a failed check leaves an existing copy in place. No server-held preview record is needed because the checked bytes are the bytes that move into the root.
+
+### B7c review notes (decisions)
+
+1. **Skill without scripts and without a consent record is not bound to a preview hash.** Accepted. A submitted hash must match the staged bytes. Only skills with scripts need a consent record or stored consent. A script skill with no record fails closed. A skill without scripts runs no code, and the user sees its text in the preview.
+2. **Two installs of the same slug can race (no install lock).** Accepted as a residual risk. The race can not publish bytes that failed the hash check, because each install verifies its own staged copy before it moves. A lock is future work if parallel installs of one slug become possible in the UI. The UI keeps one install at a time.
+3. **This B7b section was not in commit `e96e2fc72`.** It goes into the docs commit. Its text matches the code.
+
+### Owner decision and stored analysis (B8 fix 3)
+
+- **Owner decision scope.** The review stage shows `ownerDecisionPrompt` and two radio choices (match the repository, raise the standard), with no default. A choice is required when facts with label `tolerate` or `do_not_copy` exist. The choice goes into the chat intent through `team-builder-guidance-brief.ts` (pure function, guidance block capped at 500 bytes per label, under 2 KB). No new RPC and no file persistence.
+- **Stored analysis.** The page reads the newest analysis from `wizard:list-analyses` and `wizard:load-analysis`. If none exists, it shows "No stored project analysis. Guidance is limited." and still calls `wizard:get-project-guidance` with project type only.
+- **Frameworks line is parsed from text (accepted).** The saved analysis exposes the project profile as phase text, not as a typed field. The page reads a `Frameworks:` line and sends an empty list when the line is absent. This is acceptable: the skill recommendations come from `wizard:recommend-skills`, which detects the stack from the workspace and does not use this list. A missing list only makes the guidance facts less specific, and the page says so. A typed field in the analysis contract is future work.
+
+### B11 guidance facts and owner decision record
+
+- **Design (coordinator decision, not confirmed by the user).** The host derives the facts from
+  workspace probes: lint, formatter, test setup, TypeScript `strict`, CI workflow. The probes read
+  files at the root level only. They start no process and use no network.
+- **No new RPC method.** `wizard:get-project-guidance` gains the optional field `ownerDecision`
+  (`match` or `raise`). When it is present, the host writes `.ptah/project-guidance.md` (temporary
+  file, then rename) and returns the optional `recordPath`. This replaces "no file persistence" in
+  the B8 fix 3 section above.
+- **A record failure does not stop the launch.** The page shows an inline note. The host logs the
+  error and returns the facts without `recordPath`.
+- **Schema defaults are not facts.** The handler forwards only the analysis fields that the caller
+  supplied.
+- **Escape during install.** The consent dialog opens again when the native dialog closes while
+  the stage is `installing`. The install itself has no cancel path.
+
+### Review 3 notes that stay open (backend, Minor)
+
+1. The staged tree can change between the hash check and the move into the root. The window is
+   in-process and short. A fix needs a lock on the staging directory. Future work.
+2. A DI resolve failure can return raw error text to the client. Future work: map it to
+   `RpcUserError` with fixed text.
