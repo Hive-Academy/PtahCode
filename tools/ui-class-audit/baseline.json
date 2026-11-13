@@ -1174,10 +1174,6 @@
   "libs/frontend/setup-wizard/src/lib/components/analysis-transcript.component.ts": {
     "skeleton": 6
   },
-  "libs/frontend/setup-wizard/src/lib/components/cards/enhanced-prompts-summary-card.component.ts": {
-    "card": 1,
-    "card-body": 1
-  },
   "libs/frontend/setup-wizard/src/lib/components/community-packs-panel.component.ts": {
     "alert": 1,
     "alert-error": 1
