@@ -82,7 +82,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
               size="sm"
               density="compact"
               [selected]="mode() === option"
-              class="gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              class="gap-1.5"
               [attr.data-testid]="'tasks-view-mode-' + option"
               [title]="modeTitle(option)"
               (click)="modeChange.emit(option)"
@@ -100,7 +100,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         <button
           type="button"
           ptahButton
-          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           aria-haspopup="dialog"
           [attr.aria-expanded]="paletteOpen()"
           data-testid="tasks-palette-trigger"
@@ -211,7 +210,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           type="button"
           ptahButton
           variant="primary"
-          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="tasks-create-trigger"
           [disabled]="!canWrite()"
           (click)="createTask.emit()"
