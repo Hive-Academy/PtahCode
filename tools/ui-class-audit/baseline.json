@@ -843,11 +843,6 @@
     "alert": 1,
     "alert-warning": 1
   },
-  "libs/frontend/marketplace/src/lib/external-installed-row.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
-  },
   "libs/frontend/marketplace/src/lib/external-marketplaces.component.ts": {
     "<dynamic>": 2,
     "alert": 3,
@@ -857,12 +852,6 @@
     "btn-ghost": 2,
     "btn-sm": 1,
     "btn-xs": 1
-  },
-  "libs/frontend/marketplace/src/lib/external-plugin-row.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-primary": 1,
-    "btn-sm": 2
   },
   "libs/frontend/marketplace/src/lib/harness/harness-health-badge.component.ts": {
     "<dynamic>": 1,
@@ -894,10 +883,7 @@
     "<dynamic>": 3,
     "alert": 2,
     "alert-error": 2,
-    "alert-sm": 2,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "alert-sm": 2
   },
   "libs/frontend/marketplace/src/lib/pages/connectors/connectors-page.component.html": {
     "btn": 2,
@@ -921,9 +907,6 @@
   "libs/frontend/marketplace/src/lib/pages/skills/installed-skills-page.component.ts": {
     "badge": 1,
     "badge-sm": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "skeleton": 3
   },
   "libs/frontend/marketplace/src/lib/pages/skills/plugin-config-home-notice.component.ts": {
@@ -943,11 +926,6 @@
     "alert-error": 2,
     "alert-sm": 3,
     "alert-warning": 1,
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-primary": 2,
-    "btn-sm": 1,
-    "btn-xs": 2,
     "skeleton": 2
   },
   "libs/frontend/marketplace/src/lib/ui/capability-toggle.component.ts": {
