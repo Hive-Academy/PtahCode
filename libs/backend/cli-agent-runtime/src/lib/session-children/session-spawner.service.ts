@@ -2339,6 +2339,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     };
     runtime.succeeding = true;
     let adopted: string[] = [];
+    let stoppedMidSuccession = false;
     try {
       this.registry.succeed(
         child.childSessionId,
@@ -2355,6 +2356,15 @@ export class SessionSpawnerService implements ISessionSpawner {
         nextRuntime,
         successor.worktreePath,
       );
+      // A parent stop can run during the awaited retain. It ends the successor
+      // and releases its runtime, so the host must not start it afterwards.
+      if (
+        nextRuntime.stopping ||
+        this.runtimes.get(successorId) !== nextRuntime
+      ) {
+        stoppedMidSuccession = true;
+        throw new Error('successor was stopped before it started');
+      }
       adopted = this.agents.adoptLanes(
         [child.childSessionId, child.sdkSessionId].filter(
           (id): id is string => !!id,
@@ -2449,8 +2459,14 @@ export class SessionSpawnerService implements ISessionSpawner {
       this.agents.settleLaneAdoption(adopted, 'reverted');
       nextRuntime.releasePolicy?.();
       if (nextRuntime.mcpRoot) await this.releaseMcpRoot(nextRuntime.mcpRoot);
-      this.runtimes.delete(successorId);
-      this.registry.revertSuccession(child.childSessionId, successorId);
+      if (stoppedMidSuccession) {
+        // The parent stopped the successor: keep that stop. The predecessor
+        // stays handed off and is retired, never made live again.
+        this.retirePredecessor(child.childSessionId);
+      } else {
+        this.runtimes.delete(successorId);
+        this.registry.revertSuccession(child.childSessionId, successorId);
+      }
       this.log(
         `${child.childSessionId} successor start failed: ${errorMessage(error)}`,
       );
