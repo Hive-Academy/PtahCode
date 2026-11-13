@@ -123,3 +123,13 @@ Install fetches each skill once. The installer hashes the staged bytes and asks 
    in-process and short. A fix needs a lock on the staging directory. Future work.
 2. A DI resolve failure can return raw error text to the client. Future work: map it to
    `RpcUserError` with fixed text.
+
+### Final review notes (decisions)
+
+- **The record is rebuilt at launch (F2, accepted).** The host probes the workspace again when it
+  writes `.ptah/project-guidance.md`. The record can differ from the facts that the owner saw if
+  a file changed between the review and the launch. The host does not accept facts from the
+  client, because client text is untrusted. The record has the date of the write.
+- **Prettier reflow (F6a, accepted).** The commit hook formats each staged file. The reflowed
+  lines have no change of behavior.
+- **Pull request.** #1160 was closed and its commits are not on the branch. #1185 replaces it.

@@ -1,6 +1,6 @@
 # Status: Phase 3 of program TASK_2026_977_0876
 
-Task `TASK_2026_1162_56c1`, branch `feat/setup-stack-skills`, draft pull request #1160.
+Task `TASK_2026_1162_56c1`, branch `feat/setup-stack-skills`, draft pull request #1185 (#1160 is closed and its commits are not on the branch).
 Updated: 2026-11-13.
 
 | Batch | Content | State |
