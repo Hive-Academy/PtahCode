@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_1165_2766
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix false user-stop end of child sessions
 depends_on: []
-created: "2026-11-13T00:33:17.743Z"
-updated: "2026-11-13T00:33:17.743Z"
-description: "Child sessions end with cause user-stop although the user did not stop them; find the trigger and record honest causes."
+created: '2026-11-13T00:33:17.743Z'
+updated: '2026-11-13T06:11:29.574Z'
+description: >-
+  Child sessions end with cause user-stop although the user did not stop them;
+  find the trigger and record honest causes.
 estimate: M
 relates_to:
   - TASK_2026_965_4895
