@@ -40,10 +40,15 @@ describe('chat-rpc.schema', () => {
     { prompt: 'x', images: [{}] },
     { prompt: 'x', images: 'data' },
   ])('rejects malformed queued content before dispatch: %p', (payload) => {
-    expect(ChatContinueParamsSchema.safeParse({
-      tabId: VALID_TAB_UUID, sessionId: VALID_SESSION_UUID,
-      clientMessageId: VALID_TAB_UUID, queueIntent: 'next-turn', ...payload,
-    }).success).toBe(false);
+    expect(
+      ChatContinueParamsSchema.safeParse({
+        tabId: VALID_TAB_UUID,
+        sessionId: VALID_SESSION_UUID,
+        clientMessageId: VALID_TAB_UUID,
+        queueIntent: 'next-turn',
+        ...payload,
+      }).success,
+    ).toBe(false);
   });
   describe('ChatCarryOverParamsSchema requestId (TASK_2026_865 R1)', () => {
     const base = {
@@ -347,6 +352,16 @@ describe('chat-rpc.schema', () => {
   });
 
   describe('ChatAbortParamsSchema', () => {
+    it('accepts a known source and rejects an unknown source', () => {
+      const valid = {
+        sessionId: '00000000-0000-4000-8000-000000000001',
+        source: 'tab-close',
+      };
+      expect(ChatAbortParamsSchema.parse(valid).source).toBe('tab-close');
+      expect(() =>
+        ChatAbortParamsSchema.parse({ ...valid, source: 'other' }),
+      ).toThrow(ZodError);
+    });
     it('accepts a payload with a valid sessionId UUID', () => {
       const parsed = ChatAbortParamsSchema.parse({
         sessionId: VALID_SESSION_UUID,

@@ -25,9 +25,10 @@ const ABORT_FAILED = 'Failed to stop the agent.';
 export async function abortAppsSession(
   rpc: ClaudeRpcService,
   sessionId: SessionId,
+  source: 'apps-stop' | 'apps-reset',
 ): Promise<string | null> {
   try {
-    const result = await rpc.call('chat:abort', { sessionId });
+    const result = await rpc.call('chat:abort', { sessionId, source });
     if (!result.success || result.data?.success === false)
       return result.data?.error ?? result.error ?? ABORT_FAILED;
     return null;
@@ -48,6 +49,6 @@ export async function abortUnownedAppsStart(
   console.warn(
     '[AppsSessionService] start completed after ownership was released; aborting',
   );
-  if ((await abortAppsSession(rpc, sessionId)) !== null)
+  if ((await abortAppsSession(rpc, sessionId, 'apps-reset')) !== null)
     console.warn('[AppsSessionService] unowned start abort failed');
 }

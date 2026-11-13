@@ -9,6 +9,8 @@ import type { FlatStreamEventUnion } from './execution';
 /** Causes passed through host-neutral adapter methods. */
 export type SessionEndCause =
   | 'user-stop'
+  | 'tab-close'
+  | 'internal-abort'
   | 'parent-stop'
   | 'stream-exit'
   | 'provider-error'

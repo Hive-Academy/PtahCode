@@ -18,6 +18,7 @@
  */
 
 import { CodexChatOptionError } from '../codex-host/codex-chat-profile-options';
+import { endCauseForAbortSource } from './abort-end-cause';
 import { injectable, inject } from 'tsyringe';
 import { isAbsolute, resolve } from 'node:path';
 import {
@@ -455,7 +456,8 @@ export class ChatSessionService {
     @inject(CHAT_TOKENS.SESSION_DRIVER_LOCK_COORDINATOR)
     private readonly driverLock: ChatSessionDriverLock,
     @inject(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, { isOptional: true })
-    private readonly fileSystemProvider: IFileSystemProvider | undefined = undefined,
+    private readonly fileSystemProvider:
+      IFileSystemProvider | undefined = undefined,
     /**
      * Backend-owned follow-up queue (TASK_2026_884). Registered by
      * `registerChatServices` on every host; optional so a host or spec
@@ -1322,9 +1324,16 @@ export class ChatSessionService {
         inheritedSource: true,
       });
       if (account || !this.childModelCatalog) return [];
-      const profile = await this.workspaceProviderProfileResolver.resolveProviderProfileForWorkspace(input.workspaceRoot, '');
-      const native = profile && !profile.authEnv.ANTHROPIC_BASE_URL &&
-        !profile.authEnv.ANTHROPIC_API_KEY && !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
+      const profile =
+        await this.workspaceProviderProfileResolver.resolveProviderProfileForWorkspace(
+          input.workspaceRoot,
+          '',
+        );
+      const native =
+        profile &&
+        !profile.authEnv.ANTHROPIC_BASE_URL &&
+        !profile.authEnv.ANTHROPIC_API_KEY &&
+        !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
       const models = native
         ? await this.childModelCatalog.getNativeClaudeModels()
         : profile
@@ -1333,9 +1342,12 @@ export class ChatSessionService {
       return models.map((item) => item.value);
     } catch (error: unknown) {
       // degradation-audit: reported - routing is optional; an empty catalog keeps the host default model.
-      this.logger.warn('[ChatSessionService] Child model catalog unavailable for routing', {
-        name: error instanceof Error ? error.name : typeof error,
-      });
+      this.logger.warn(
+        '[ChatSessionService] Child model catalog unavailable for routing',
+        {
+          name: error instanceof Error ? error.name : typeof error,
+        },
+      );
       return [];
     }
   }
@@ -1347,7 +1359,12 @@ export class ChatSessionService {
     readonly parentSessionId: string;
   }): Promise<
     | { readonly accepted: true; readonly resolvedModel: string }
-    | { readonly accepted: false; readonly code: 'invalid-model' | 'model-catalog-unavailable'; readonly message: string; readonly acceptedModels?: readonly string[] }
+    | {
+        readonly accepted: false;
+        readonly code: 'invalid-model' | 'model-catalog-unavailable';
+        readonly message: string;
+        readonly acceptedModels?: readonly string[];
+      }
   > {
     // Set once a workspace provider profile is in use: from then on, logs and
     // child-facing errors must not carry provider-supplied text.
@@ -1359,18 +1376,36 @@ export class ChatSessionService {
         inheritedSource: true,
       });
       if (account) {
-        this.logger.warn('[ChatSessionService] Named account model catalog unavailable before admission');
-        return { accepted: false, code: 'model-catalog-unavailable', message: 'the model catalog of a named account cannot be read without a launch; omit model to start the child with the account default (effort is still accepted)' };
+        this.logger.warn(
+          '[ChatSessionService] Named account model catalog unavailable before admission',
+        );
+        return {
+          accepted: false,
+          code: 'model-catalog-unavailable',
+          message:
+            'the model catalog of a named account cannot be read without a launch; omit model to start the child with the account default (effort is still accepted)',
+        };
       }
       if (!this.childModelCatalog) {
-        this.logger.warn('[ChatSessionService] Model catalog service unavailable');
-        return { accepted: false, code: 'model-catalog-unavailable', message: 'the host has no model catalog service' };
+        this.logger.warn(
+          '[ChatSessionService] Model catalog service unavailable',
+        );
+        return {
+          accepted: false,
+          code: 'model-catalog-unavailable',
+          message: 'the host has no model catalog service',
+        };
       }
-      const profile = await this.workspaceProviderProfileResolver.resolveProviderProfileForWorkspace(
-        input.workspaceRoot, input.model,
-      );
-      const native = profile && !profile.authEnv.ANTHROPIC_BASE_URL &&
-        !profile.authEnv.ANTHROPIC_API_KEY && !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
+      const profile =
+        await this.workspaceProviderProfileResolver.resolveProviderProfileForWorkspace(
+          input.workspaceRoot,
+          input.model,
+        );
+      const native =
+        profile &&
+        !profile.authEnv.ANTHROPIC_BASE_URL &&
+        !profile.authEnv.ANTHROPIC_API_KEY &&
+        !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
       profileProbe = Boolean(profile) && !native;
       const models = native
         ? await this.childModelCatalog.getNativeClaudeModels()
@@ -1378,22 +1413,51 @@ export class ChatSessionService {
           ? await this.childModelCatalog.getModelsForProviderProfile(profile)
           : await this.childModelCatalog.getSupportedModels();
       if (models.length === 0) {
-        this.logger.warn('[ChatSessionService] Provider returned an empty model catalog');
-        return { accepted: false, code: 'model-catalog-unavailable', message: 'the provider returned an empty model catalog' };
+        this.logger.warn(
+          '[ChatSessionService] Provider returned an empty model catalog',
+        );
+        return {
+          accepted: false,
+          code: 'model-catalog-unavailable',
+          message: 'the provider returned an empty model catalog',
+        };
       }
       const acceptedModels = models.map((item) => item.value);
-      const resolvedModel = this.childModelCatalog.resolveModelId(input.model, profile?.authEnv, profileProbe);
+      const resolvedModel = this.childModelCatalog.resolveModelId(
+        input.model,
+        profile?.authEnv,
+        profileProbe,
+      );
       if (!acceptedModels.includes(resolvedModel)) {
-        return { accepted: false, code: 'invalid-model', message: `model "${input.model}" is unavailable for this provider.`, acceptedModels };
+        return {
+          accepted: false,
+          code: 'invalid-model',
+          message: `model "${input.model}" is unavailable for this provider.`,
+          acceptedModels,
+        };
       }
       return { accepted: true, resolvedModel };
     } catch (error: unknown) {
       if (profileProbe) {
-        this.logger.error('[ChatSessionService] Child model catalog unavailable', new Error('workspace provider profile model catalog failed'));
-        return { accepted: false, code: 'model-catalog-unavailable', message: 'the model catalog of the workspace provider is unavailable' };
+        this.logger.error(
+          '[ChatSessionService] Child model catalog unavailable',
+          new Error('workspace provider profile model catalog failed'),
+        );
+        return {
+          accepted: false,
+          code: 'model-catalog-unavailable',
+          message: 'the model catalog of the workspace provider is unavailable',
+        };
       }
-      this.logger.error('[ChatSessionService] Child model catalog unavailable', error instanceof Error ? error : new Error(String(error)));
-      return { accepted: false, code: 'model-catalog-unavailable', message: error instanceof Error ? error.message : String(error) };
+      this.logger.error(
+        '[ChatSessionService] Child model catalog unavailable',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return {
+        accepted: false,
+        code: 'model-catalog-unavailable',
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
@@ -1418,8 +1482,15 @@ export class ChatSessionService {
   ): Promise<
     ChatStartResult | NonNullable<ReturnType<typeof mainSessionAccountFailure>>
   > {
-    const { tabId, workspaceRoot, worktreePath, prompt, sessionName, model, effort } =
-      params;
+    const {
+      tabId,
+      workspaceRoot,
+      worktreePath,
+      prompt,
+      sessionName,
+      model,
+      effort,
+    } = params;
     try {
       const refused = this.authorizeAgentSessionPaths(
         tabId,
@@ -1458,7 +1529,10 @@ export class ChatSessionService {
         pluginConfigAncestorRoots,
         prompt,
         name: sessionName,
-        options: model || effort ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } : undefined,
+        options:
+          model || effort
+            ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+            : undefined,
         mcpServerRunning,
         mcpServersOverride: undefined,
         permissionLevel,
@@ -1810,17 +1884,34 @@ export class ChatSessionService {
     params: ChatContinueParams & MainSessionAccountSelection,
   ): Promise<ChatContinueResult> {
     const admissionDeadline = namedAdmissionDeadline();
-    const stopGeneration = params.queueIntent === 'next-turn'
-      ? this.followUpQueue?.stopGeneration(params.sessionId) : undefined;
+    const stopGeneration =
+      params.queueIntent === 'next-turn'
+        ? this.followUpQueue?.stopGeneration(params.sessionId)
+        : undefined;
     let driveAttempt: string | undefined;
     let followUpAdmissionStarted = false;
     let followUpAccepted = false;
     let followUpRefusalCode: RpcUserErrorCode | undefined;
     try {
       if (params.queueIntent === 'next-turn' && params.clientMessageId) {
-        const previous = this.followUpQueue?.acceptedRetry(params.sessionId, params.tabId, params.clientMessageId, params.prompt);
-        if (previous) return { success: true, sessionId: params.sessionId, queueState: previous };
-        this.followUpQueue?.beginAdmission(params.sessionId, params.tabId, params.clientMessageId, params.prompt);
+        const previous = this.followUpQueue?.acceptedRetry(
+          params.sessionId,
+          params.tabId,
+          params.clientMessageId,
+          params.prompt,
+        );
+        if (previous)
+          return {
+            success: true,
+            sessionId: params.sessionId,
+            queueState: previous,
+          };
+        this.followUpQueue?.beginAdmission(
+          params.sessionId,
+          params.tabId,
+          params.clientMessageId,
+          params.prompt,
+        );
         followUpAdmissionStarted = this.followUpQueue !== undefined;
       }
       const { prompt, sessionId, tabId, name } = params;
@@ -1829,14 +1920,29 @@ export class ChatSessionService {
         tabId,
         sessionName: name,
       });
-      if (followUpAdmissionStarted && params.clientMessageId &&
-          (this.ptahCli.hasSession(params.sessionId) || this.ptahCli.hasSession(params.tabId))) {
-        this.followUpQueue?.commitAdmission(params.sessionId, params.clientMessageId);
+      if (
+        followUpAdmissionStarted &&
+        params.clientMessageId &&
+        (this.ptahCli.hasSession(params.sessionId) ||
+          this.ptahCli.hasSession(params.tabId))
+      ) {
+        this.followUpQueue?.commitAdmission(
+          params.sessionId,
+          params.clientMessageId,
+        );
       }
       const ptahCliResult = await this.ptahCli.handleContinue(params);
       if (ptahCliResult.error !== '__NOT_PTAH_CLI__') {
-        if (ptahCliResult.success && followUpAdmissionStarted && params.clientMessageId) {
-          this.followUpQueue?.acceptResumed(sessionId, tabId, params.clientMessageId);
+        if (
+          ptahCliResult.success &&
+          followUpAdmissionStarted &&
+          params.clientMessageId
+        ) {
+          this.followUpQueue?.acceptResumed(
+            sessionId,
+            tabId,
+            params.clientMessageId,
+          );
           followUpAccepted = true;
         }
         return ptahCliResult;
@@ -1847,7 +1953,10 @@ export class ChatSessionService {
         params.queueIntent === 'next-turn' &&
         params.clientMessageId !== undefined &&
         this.followUpQueue
-          ? { queue: this.followUpQueue, clientMessageId: params.clientMessageId }
+          ? {
+              queue: this.followUpQueue,
+              clientMessageId: params.clientMessageId,
+            }
           : undefined;
       if (followUp) {
         // A slash command may end or replace the session, so it is never held
@@ -1995,9 +2104,18 @@ export class ChatSessionService {
         if (followUp) {
           if (followUp.queue.isAbandoned(sessionId, followUp.clientMessageId)) {
             followUpRefusalCode = 'SESSION_CHANGED';
-            return { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The follow-up could not be confirmed.' };
+            return {
+              success: false,
+              sessionId,
+              errorCode: 'SESSION_CHANGED',
+              error: 'The follow-up could not be confirmed.',
+            };
           }
-          followUp.queue.acceptResumed(sessionId, tabId, followUp.clientMessageId);
+          followUp.queue.acceptResumed(
+            sessionId,
+            tabId,
+            followUp.clientMessageId,
+          );
           followUpAccepted = true;
         }
         // The resumed turn carried the user's prompt without the injected
@@ -2063,14 +2181,27 @@ export class ChatSessionService {
             true;
         // Bound before the send: the adapter may report `queued` from inside
         // `sendMessageToSession`, and that push must already find its tab.
-        if (followUp && stopGeneration !== followUp.queue.stopGeneration(sessionId)) {
+        if (
+          followUp &&
+          stopGeneration !== followUp.queue.stopGeneration(sessionId)
+        ) {
           followUpRefusalCode = 'SESSION_CHANGED';
-          return { success: false, sessionId, cancelled: true, error: 'Follow-up withdrawn by Stop.' };
+          return {
+            success: false,
+            sessionId,
+            cancelled: true,
+            error: 'Follow-up withdrawn by Stop.',
+          };
         }
         if (followUp) {
           if (followUp.queue.liveIdentity(sessionId) !== followUpIdentity) {
             followUpRefusalCode = 'SESSION_CHANGED';
-            return { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The session changed during follow-up admission.' };
+            return {
+              success: false,
+              sessionId,
+              errorCode: 'SESSION_CHANGED',
+              error: 'The session changed during follow-up admission.',
+            };
           }
           // Another tab may take the stream during admission. The follow-up
           // belongs to the session: a tab still bound to it stays accepted.
@@ -2078,7 +2209,12 @@ export class ChatSessionService {
         }
         if (followUp?.queue.isAbandoned(sessionId, followUp.clientMessageId)) {
           followUpRefusalCode = 'SESSION_CHANGED';
-          return { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The follow-up could not be confirmed.' };
+          return {
+            success: false,
+            sessionId,
+            errorCode: 'SESSION_CHANGED',
+            error: 'The follow-up could not be confirmed.',
+          };
         }
         followUp?.queue.bind(sessionId, tabId, followUp.clientMessageId);
         // The adapter can retain the item as soon as this call begins.
@@ -2091,12 +2227,16 @@ export class ChatSessionService {
             effort: params.effort,
           });
         }
-        const submission = this.sdkAdapter.sendMessageToSession(sessionId, enhancedPrompt, {
-          files,
-          images,
-          clientMessageId: params.clientMessageId,
-          ...(followUp ? { queueIntent: 'next-turn' as const } : {}),
-        });
+        const submission = this.sdkAdapter.sendMessageToSession(
+          sessionId,
+          enhancedPrompt,
+          {
+            files,
+            images,
+            clientMessageId: params.clientMessageId,
+            ...(followUp ? { queueIntent: 'next-turn' as const } : {}),
+          },
+        );
         if (followUp) followUp.queue.trackSubmission(sessionId, submission);
         await submission;
         sent = true;
@@ -2137,15 +2277,32 @@ export class ChatSessionService {
         !this.streamBroadcaster.isStreaming(sessionId as string) &&
         !this.streamBroadcaster.isStreaming(tabId)
       ) {
-        return { success: true, sessionId, settled: true, ...admittedQueueState };
+        return {
+          success: true,
+          sessionId,
+          settled: true,
+          ...admittedQueueState,
+        };
       }
-      return { success: true, sessionId, enqueued: true, ...admittedQueueState };
+      return {
+        success: true,
+        sessionId,
+        enqueued: true,
+        ...admittedQueueState,
+      };
     } catch (error) {
       await this.driverLock.abandonDrive(params.sessionId, driveAttempt);
       if (error instanceof RpcUserError) followUpRefusalCode = error.errorCode;
-      if (error instanceof Error && error.message.includes('FOLLOW_UP_ID_CONFLICT')) {
+      if (
+        error instanceof Error &&
+        error.message.includes('FOLLOW_UP_ID_CONFLICT')
+      ) {
         followUpRefusalCode = 'FOLLOW_UP_ID_CONFLICT';
-        return { success: false, error: 'clientMessageId conflicts with an earlier follow-up.', errorCode: 'FOLLOW_UP_ID_CONFLICT' };
+        return {
+          success: false,
+          error: 'clientMessageId conflicts with an earlier follow-up.',
+          errorCode: 'FOLLOW_UP_ID_CONFLICT',
+        };
       }
       const codexFailure = this.codexFailure(error);
       if (codexFailure) {
@@ -2182,10 +2339,17 @@ export class ChatSessionService {
       };
     } finally {
       if (followUpAdmissionStarted && params.clientMessageId) {
-        if (!followUpAccepted) this.followUpQueue?.rejectAdmission(
-          params.sessionId, params.tabId, params.clientMessageId, followUpRefusalCode,
+        if (!followUpAccepted)
+          this.followUpQueue?.rejectAdmission(
+            params.sessionId,
+            params.tabId,
+            params.clientMessageId,
+            followUpRefusalCode,
+          );
+        this.followUpQueue?.endAdmission(
+          params.sessionId,
+          params.clientMessageId,
         );
-        this.followUpQueue?.endAdmission(params.sessionId, params.clientMessageId);
       }
       await this.driverLock.settleDrive(params.sessionId, driveAttempt);
     }
@@ -2221,13 +2385,22 @@ export class ChatSessionService {
         } catch (error: unknown) {
           // degradation-audit: reported - logged here; an unreadable folder is
           // refused like a missing one, but marked retryable (it may recover).
-          const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
-          unreadable = code !== 'ENOENT' && code !== 'ENOTDIR' &&
-            code !== 'FileNotFound' && code !== 'NotADirectory';
-          this.logger.warn('[ChatSessionService] could not check the saved working directory', {
-            sessionId,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          const code =
+            error instanceof Error
+              ? (error as NodeJS.ErrnoException).code
+              : undefined;
+          unreadable =
+            code !== 'ENOENT' &&
+            code !== 'ENOTDIR' &&
+            code !== 'FileNotFound' &&
+            code !== 'NotADirectory';
+          this.logger.warn(
+            '[ChatSessionService] could not check the saved working directory',
+            {
+              sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          );
         }
         if (!present) {
           return {
@@ -2351,7 +2524,8 @@ export class ChatSessionService {
       // The session may be live under an earlier tab id (its tab was closed
       // and the user opened it again). This tab now queues its follow-ups.
       // This tab shows the session now, so it may queue follow-ups for it.
-      if (params.tabId) this.followUpQueue?.noteTabSession(sessionId, params.tabId);
+      if (params.tabId)
+        this.followUpQueue?.noteTabSession(sessionId, params.tabId);
       if (params.adoptFollowUps === true && params.tabId) {
         this.followUpQueue?.adoptTab(sessionId, params.tabId);
       }
@@ -2498,7 +2672,12 @@ export class ChatSessionService {
     let withdrawn: (QueuedFollowUpSnapshot & { readonly tabId: string })[] = [];
     try {
       const { sessionId } = params;
-      this.logger.debug('RPC: chat:abort called', { sessionId });
+      const cause = endCauseForAbortSource(params.source);
+      this.logger.info('[RPC] chat:abort', {
+        sessionId,
+        source: params.source ?? 'unspecified',
+        cause,
+      });
       this.followUpQueue?.advanceStopGeneration(sessionId);
       const customAbortResult = await this.ptahCli.handleAbort(params);
       if (customAbortResult.error !== '__NOT_PTAH_CLI__') {
@@ -2514,7 +2693,7 @@ export class ChatSessionService {
       // to the composer, FIFO.
       withdrawn =
         (await this.followUpQueue?.withdrawAllForStop(sessionId)) ?? [];
-      await this.sdkAdapter.interruptSession(sessionId, 'user-stop');
+      await this.sdkAdapter.interruptSession(sessionId, cause);
       // A user interrupt skips the Stop hook, so end the turn here (D9).
       this.turnAttribution?.onTurnAborted(sessionId);
 
@@ -2956,12 +3135,24 @@ export class ChatSessionService {
             }),
       };
       await this.driverLock.assertDriveHeld(sessionId, tabId);
-      if (options.deliversFollowUp && params.clientMessageId &&
-          this.followUpQueue?.isAbandoned(sessionId, params.clientMessageId)) {
-        return { error: { success: false, sessionId, errorCode: 'SESSION_CHANGED', error: 'The follow-up could not be confirmed.' } };
+      if (
+        options.deliversFollowUp &&
+        params.clientMessageId &&
+        this.followUpQueue?.isAbandoned(sessionId, params.clientMessageId)
+      ) {
+        return {
+          error: {
+            success: false,
+            sessionId,
+            errorCode: 'SESSION_CHANGED',
+            error: 'The follow-up could not be confirmed.',
+          },
+        };
       }
-      const nativeId = options.deliversFollowUp && execution.runtime === 'codex-app-server'
-        ? params.clientMessageId : undefined;
+      const nativeId =
+        options.deliversFollowUp && execution.runtime === 'codex-app-server'
+          ? params.clientMessageId
+          : undefined;
       if (nativeId) this.followUpQueue?.commitAdmission(sessionId, nativeId);
       let nativeSucceeded = false;
       let stream: Awaited<ReturnType<IAgentAdapter['resumeSession']>>;
@@ -2975,8 +3166,15 @@ export class ChatSessionService {
         nativeSucceeded = true;
       } finally {
         if (nativeId) {
-          if (nativeSucceeded) this.followUpQueue?.acceptResumed(sessionId, tabId, nativeId);
-          else this.followUpQueue?.rejectAdmission(sessionId, tabId, nativeId, 'SESSION_CHANGED');
+          if (nativeSucceeded)
+            this.followUpQueue?.acceptResumed(sessionId, tabId, nativeId);
+          else
+            this.followUpQueue?.rejectAdmission(
+              sessionId,
+              tabId,
+              nativeId,
+              'SESSION_CHANGED',
+            );
         }
       }
       if (execution.runtime === 'codex-app-server') {

@@ -37,6 +37,7 @@ import {
 import type { ChatContinueResult } from '@ptah-extension/shared';
 import {
   ABORT_REASON_SUPERSEDED,
+  ABORT_REASON_TAB_RESET,
   ConversationRegistry,
   deriveSessionTitle,
   TabId,
@@ -54,10 +55,7 @@ import {
 } from '@ptah-extension/chat-streaming';
 import { MessageValidationService } from './message-validation.service';
 import { UltracodeStateService } from './ultracode-state.service';
-import type {
-  SendMessageOptions,
-  TabState,
-} from '@ptah-extension/chat-types';
+import type { SendMessageOptions, TabState } from '@ptah-extension/chat-types';
 import {
   CARRY_OVER_BUSY_TEXT,
   ProviderCarryOverService,
@@ -391,9 +389,7 @@ export class MessageSenderService {
    * restored session) is sent as it is. The backend resolves tier names.
    * An override or the global selection must be offered by the loaded list.
    */
-  private modelForTab(
-    tab: TabState | null | undefined,
-  ): string | undefined {
+  private modelForTab(tab: TabState | null | undefined): string | undefined {
     const { model, origin } = resolveTabModel(
       tab,
       this.modelState.currentModel(),
@@ -451,7 +447,13 @@ export class MessageSenderService {
         // session id), so the tab id still ends that turn's process.
         const sessionId = tab?.claudeSessionId ?? (tabId as SessionId);
         this.claudeRpcService
-          .call('chat:abort', { sessionId })
+          .call('chat:abort', {
+            sessionId,
+            source:
+              signal.reason === ABORT_REASON_TAB_RESET
+                ? 'tab-reset'
+                : 'tab-close',
+          })
           .catch((error) => {
             console.warn(
               '[MessageSender] chat:abort dispatch failed on tab close',
@@ -687,7 +689,10 @@ export class MessageSenderService {
 
       if (result.data?.cancelled === true) {
         if (consumedPreamble) {
-          this.tabManager.setFirstMessagePreamble(activeTabId, consumedPreamble);
+          this.tabManager.setFirstMessagePreamble(
+            activeTabId,
+            consumedPreamble,
+          );
         }
         this.tabManager.markLoaded(activeTabId);
         this.tabManager.markTabIdle(activeTabId);
@@ -994,7 +999,10 @@ export class MessageSenderService {
         result.data?.settled === true &&
         (result.errorCode ?? result.data.errorCode) === 'CODEX_RUNTIME_FAILED'
       ) {
-        this.streamingHandler.removeUserPromptBoundary(activeTabId, userMessage.id);
+        this.streamingHandler.removeUserPromptBoundary(
+          activeTabId,
+          userMessage.id,
+        );
         // CHAT_ERROR already owns the terminal state and error message.
         return {
           success: false,
@@ -1004,7 +1012,11 @@ export class MessageSenderService {
       const authFailed = this.handleAuthRequired(
         result,
         resolvedWorkspacePath
-          ? { sessionId, tabId: activeTabId, workspacePath: resolvedWorkspacePath }
+          ? {
+              sessionId,
+              tabId: activeTabId,
+              workspacePath: resolvedWorkspacePath,
+            }
           : undefined,
       );
       if (!result.success || authFailed || result.data?.success === false) {
@@ -1032,7 +1044,10 @@ export class MessageSenderService {
         return { success: true };
       }
       if (result.data?.enqueued !== true) {
-        this.streamingHandler.retirePendingPrompt?.(activeTabId, userMessage.id);
+        this.streamingHandler.retirePendingPrompt?.(
+          activeTabId,
+          userMessage.id,
+        );
       }
       this.sessionManager.setStatus('streaming');
       this.tabManager.markStreaming(activeTabId);

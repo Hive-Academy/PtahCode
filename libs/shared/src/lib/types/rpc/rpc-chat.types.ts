@@ -255,7 +255,8 @@ export interface ChatQueuedListParams {
 export interface ChatQueuedListResult {
   readonly items: QueuedFollowUpSnapshot[];
   /** Receipt for the requested client id, including a turn already delivered. */
-  readonly receipt?: 'queued' | 'delivered' | 'steered' | 'pending' | 'rejected';
+  readonly receipt?:
+    'queued' | 'delivered' | 'steered' | 'pending' | 'rejected';
   readonly receiptErrorCode?: RpcUserErrorCode;
   readonly receiptCommitted?: boolean;
 }
@@ -300,10 +301,29 @@ export interface ChatQueuedMessageStateEvent {
   readonly reason?: string;
 }
 
+/**
+ * What sent a `chat:abort` (TASK_2026_1165). The host maps the source to the
+ * recorded session end cause. Only a real Stop action maps to `user-stop`.
+ */
+export const CHAT_ABORT_SOURCES = [
+  'stop-button',
+  'tab-close',
+  'tab-reset',
+  'carry-over',
+  'workspace-remove',
+  'apps-stop',
+  'apps-reset',
+  'command-center',
+  'worker',
+] as const;
+export type ChatAbortSource = (typeof CHAT_ABORT_SOURCES)[number];
+
 /** Parameters for chat:abort RPC method */
 export interface ChatAbortParams {
   /** Session ID to abort */
   sessionId: SessionId;
+  /** Caller of the abort. A missing source records `internal-abort`. */
+  source?: ChatAbortSource;
 }
 
 /** Response from chat:abort RPC method */
@@ -617,10 +637,7 @@ export interface CarryOverResolutionTags {
 
 /** Reason a chat:carry-over RPC request did not start a session. */
 export type ChatCarryOverFailureReason =
-  | 'NOT_ELIGIBLE'
-  | 'IN_FLIGHT'
-  | 'HISTORY_UNREADABLE'
-  | 'START_FAILED';
+  'NOT_ELIGIBLE' | 'IN_FLIGHT' | 'HISTORY_UNREADABLE' | 'START_FAILED';
 
 /** Response from chat:carry-over RPC method. */
 export type ChatCarryOverResult =

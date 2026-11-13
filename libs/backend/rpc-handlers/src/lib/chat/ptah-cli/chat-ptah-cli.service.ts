@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { endCauseForAbortSource } from '../session/abort-end-cause';
 import { injectable, inject } from 'tsyringe';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { claudeProjectDir } from '@ptah-extension/shared';
@@ -293,7 +294,10 @@ export class ChatPtahCliService {
       ptahCliAgentId: entry.agentId,
     });
 
-    this.agentAdapter.endSession(sessionId, 'user-stop');
+    this.agentAdapter.endSession(
+      sessionId,
+      endCauseForAbortSource(params.source),
+    );
 
     this.ptahCliSessions.delete(sessionId as string);
     await this.ptahCliRegistry.releaseProfile(entry.leaseKey);

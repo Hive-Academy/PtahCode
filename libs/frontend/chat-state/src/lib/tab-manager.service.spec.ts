@@ -24,7 +24,7 @@ import {
   MODEL_REFRESH_CONTROL,
   type ModelRefreshControl,
 } from './model-refresh-control';
-import { TabManagerService } from './tab-manager.service';
+import { ABORT_REASON_TAB_RESET, TabManagerService } from './tab-manager.service';
 import { TabWorkspacePartitionService } from './tab-workspace-partition.service';
 
 describe('TabManagerService — abort streaming on tab close (Wave E2)', () => {
@@ -329,6 +329,16 @@ describe('TabManagerService — abort streaming on tab close (Wave E2)', () => {
     expect(service.abortStreamingForTab(tabId)).toBe(true);
     expect(signal.aborted).toBe(true);
     expect(service.getAbortSignal(tabId)).toBeUndefined();
+  });
+
+  it('resetTabToFresh aborts a live controller with the tab-reset reason', () => {
+    const tabId = service.createTab('reset');
+    const signal = service.createAbortController(tabId);
+
+    service.resetTabToFresh(tabId);
+
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason).toBe(ABORT_REASON_TAB_RESET);
   });
 
   it('abortStreamingForTab returns false on a second call for the same tab', () => {

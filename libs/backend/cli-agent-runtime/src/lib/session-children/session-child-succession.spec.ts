@@ -88,7 +88,14 @@ describe('session child succession helpers', () => {
     },
   );
 
-  it.each(['user-stop', 'parent-stop', 'workspace-close', 'host-shutdown'])(
+  it.each([
+    'user-stop',
+    'tab-close',
+    'internal-abort',
+    'parent-stop',
+    'workspace-close',
+    'host-shutdown',
+  ])(
     'keeps %s as a stop', (cause) => expect(routeSessionEndCause(cause)).toBe('stop'),
   );
   it.each(['stream-exit', 'provider-error', 'config-reinit', 'compaction-abort', 'unknown'])(

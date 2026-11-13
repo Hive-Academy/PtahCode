@@ -503,7 +503,7 @@ describe('provider carry-over relink (real tab manager, router, handler, lifecyc
       expect(showInfo).not.toHaveBeenCalled();
       expect(tabOf(tabId)?.claudeSessionId).toBe(OTHER);
       expect(callsOf('chat:abort')).toEqual([
-        ['chat:abort', { sessionId: NEW }],
+        ['chat:abort', { sessionId: NEW, source: 'carry-over' }],
       ]);
       expect(carryOver.isPending(tabId)).toBe(false);
       expect(chatStoreLoadSessions).toHaveBeenCalledTimes(1);
@@ -586,7 +586,7 @@ describe('provider carry-over relink (real tab manager, router, handler, lifecyc
     expect(tabOf(tabId)?.claudeSessionId).toBe(OLD);
     expect(carryOver.isPending(tabId)).toBe(true);
     expect(callsOf('chat:abort').map((c) => c[1])).toEqual([
-      { sessionId: STRAY },
+      { sessionId: STRAY, source: 'carry-over' },
     ]);
 
     handler.handleMessage({

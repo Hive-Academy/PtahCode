@@ -45,6 +45,7 @@ import {
 import { SessionAgentRosterService } from './session-agents/session-agent-roster.service';
 import { UltracodeStateService } from './ultracode-state.service';
 import {
+  ABORT_REASON_TAB_RESET,
   ABORT_REASON_SUPERSEDED,
   TabManagerService,
 } from '@ptah-extension/chat-state';
@@ -1301,13 +1302,13 @@ describe('MessageSenderService', () => {
   // yet; the backend registers that turn's record under the tab id, so the tab
   // id must be sent instead of nothing (otherwise the process leaks).
   describe('abort listener (tab close)', () => {
-    function wireAndAbort(tabId: string): void {
+    function wireAndAbort(tabId: string, reason?: string): void {
       const controller = new AbortController();
       tabManager.createAbortController.mockReturnValueOnce(controller.signal);
       (
         service as unknown as { wireAbortDispatch(id: string): AbortSignal }
       ).wireAbortDispatch(tabId);
-      controller.abort();
+      controller.abort(reason);
     }
 
     beforeEach(() => {
@@ -1322,7 +1323,7 @@ describe('MessageSenderService', () => {
 
       const aborts = rpcCall.mock.calls.filter((c) => c[0] === 'chat:abort');
       expect(aborts).toHaveLength(1);
-      expect(aborts[0][1]).toEqual({ sessionId: tabId });
+      expect(aborts[0][1]).toEqual({ sessionId: tabId, source: 'tab-close' });
     });
 
     it('with a bound session id it still sends the session id', () => {
@@ -1332,7 +1333,17 @@ describe('MessageSenderService', () => {
 
       const aborts = rpcCall.mock.calls.filter((c) => c[0] === 'chat:abort');
       expect(aborts).toHaveLength(1);
-      expect(aborts[0][1]).toEqual({ sessionId: 'sess-X' });
+      expect(aborts[0][1]).toEqual({ sessionId: 'sess-X', source: 'tab-close' });
+    });
+
+    it('marks a reset abort as tab-reset', () => {
+      tabsSignal.set([makeTab({ id: 'tab-1', claudeSessionId: 'sess-X' })]);
+
+      wireAndAbort('tab-1', ABORT_REASON_TAB_RESET);
+
+      const aborts = rpcCall.mock.calls.filter((c) => c[0] === 'chat:abort');
+      expect(aborts).toHaveLength(1);
+      expect(aborts[0][1]).toEqual({ sessionId: 'sess-X', source: 'tab-reset' });
     });
   });
 

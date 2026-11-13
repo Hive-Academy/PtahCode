@@ -583,7 +583,7 @@ export class SessionDriver {
   private async chatAbort(sessionId: string): Promise<boolean> {
     const result = await this.rpc.call(
       'chat:abort',
-      { sessionId: sessionId as SessionId },
+      { sessionId: sessionId as SessionId, source: 'worker' },
       IN_PROCESS_SPECS['chat:abort'] as unknown as RpcSpec<
         RpcMethodResult<'chat:abort'>
       >,

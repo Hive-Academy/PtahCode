@@ -163,7 +163,7 @@ export class ChatStreamBroadcaster {
     let endCause:
       | 'stream-exit'
       | 'provider-error'
-      | 'user-stop'
+      | 'internal-abort'
       | 'compaction-abort'
       | 'no-activity-timeout' = 'stream-exit';
     let recordReplaced = false;
@@ -369,12 +369,13 @@ export class ChatStreamBroadcaster {
         : lowerMessage.includes('no stream activity')
           ? 'no-activity-timeout'
           : isUserAbort
-            ? 'user-stop'
+            ? 'internal-abort'
             : 'provider-error';
 
       if (isUserAbort) {
         this.logger.info(
-          `[RPC] Session ${sessionId} aborted by user after ${eventCount} events`,
+          `[RPC] Session ${sessionId} stream aborted after ${eventCount} events`,
+          { endCause },
         );
       } else {
         this.logger.error(
@@ -514,10 +515,13 @@ export class ChatStreamBroadcaster {
         this.turnState.clear(sessionId);
         if (sessionConfirmedEnded) {
           try {
-            await this.webviewManager.broadcastMessage(MESSAGE_TYPES.CHAT_SESSION_ENDED, {
-              tabId,
-              sessionId: turnSessionId,
-            });
+            await this.webviewManager.broadcastMessage(
+              MESSAGE_TYPES.CHAT_SESSION_ENDED,
+              {
+                tabId,
+                sessionId: turnSessionId,
+              },
+            );
           } catch (error: unknown) {
             this.logger.warn(
               `[RPC] Failed to broadcast session end for ${turnSessionId}`,
