@@ -24,7 +24,7 @@ import {
   type PlatformCardConfig,
 } from './gateway-platform-pane.component';
 import { GatewaySetupGuideComponent } from './gateway-setup-guide.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
   {
@@ -57,6 +57,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
     GatewayPlatformPaneComponent,
     GatewaySetupGuideComponent,
     PtahButtonDirective,
+    PtahSurfaceDirective,
   ],
   template: `
     @if (!isElectron) {
@@ -84,7 +85,8 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
     } @else {
       <div class="space-y-6" data-testid="messaging-gateway-section">
         <header
-          class="surface-1 flex flex-wrap items-start justify-between gap-3 rounded-2xl p-5"
+          ptahSurface variant="surface-1" padding="lg"
+          class="flex flex-wrap items-start justify-between gap-3 rounded-2xl"
         >
           <div class="flex items-start gap-3">
             <span
@@ -203,7 +205,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
           class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3"
           aria-label="Gateway statistics"
         >
-          <div class="stats surface-2 min-w-0 overflow-hidden rounded-2xl">
+          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden rounded-2xl">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-success">
                 <lucide-angular
@@ -221,7 +223,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
             </div>
           </div>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden rounded-2xl">
+          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden rounded-2xl">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-warning">
                 <lucide-angular
@@ -239,7 +241,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
             </div>
           </div>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden rounded-2xl">
+          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden rounded-2xl">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-primary">
                 <lucide-angular
@@ -257,7 +259,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
             </div>
           </div>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden rounded-2xl">
+          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden rounded-2xl">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-info">
                 <lucide-angular
@@ -275,7 +277,8 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
         </div>
 
         <section
-          class="surface-1 overflow-hidden rounded-2xl"
+          ptahSurface variant="surface-1" padding="none"
+          class="overflow-hidden rounded-2xl"
           aria-label="Platform configuration"
         >
           <div
