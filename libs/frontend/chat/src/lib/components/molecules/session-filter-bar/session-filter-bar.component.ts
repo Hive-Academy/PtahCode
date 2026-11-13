@@ -119,6 +119,7 @@ function keepDraftUntilTrimmedChange(
           data-testid="session-filter-text"
         />
         @if (text()) {
+          <!-- Keep raw: this clear control is a 24 px circle; compact icon sizes are 20 or 28 px squares. -->
           <button
             type="button"
             class="btn btn-ghost btn-xs btn-circle absolute right-1 top-1 w-6 h-6 min-h-6 p-0"

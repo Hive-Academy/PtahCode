@@ -173,6 +173,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
                 Regenerate replaces your current project system prompt with fresh guidance tailored to your project. This may take up to 2 minutes.
               </p>
               <div class="flex flex-wrap gap-2">
+                <!-- Keep raw: the error-colored outline border and neutral text differ from the owner's outline recipe. -->
                 <button
                   type="button"
                   class="btn btn-outline btn-xs border-error text-base-content"
