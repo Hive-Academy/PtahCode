@@ -100,7 +100,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
               ptahButton
               variant="ghost"
               type="button"
-              class="underline"
               (click)="analyzeFirst()"
             >
               Analyze first

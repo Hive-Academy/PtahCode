@@ -92,6 +92,7 @@ const FALLBACK_RECAP_HEIGHT = 180;
  *
  * Uses size container queries on the body host to adapt progressively across tile sizes.
  */
+// Left raw: this compact todo bar uses native progress with the daisyUI success track at a fixed width.
 @Component({
   selector: 'ptah-compact-session-activity',
   standalone: true,

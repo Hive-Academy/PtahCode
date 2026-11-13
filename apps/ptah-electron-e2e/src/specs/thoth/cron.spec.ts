@@ -46,7 +46,7 @@ test.describe('Thoth — Cron tab', () => {
     await expect(
       page.locator('[data-testid="cron-empty-state"]'),
     ).toBeVisible();
-    await expect(page.locator('[data-testid="cron-stat-total"]')).toHaveText(
+    await expect(page.locator('[data-testid="cron-stat-total"] .tabular-nums')).toHaveText(
       '0',
     );
   });
@@ -63,13 +63,13 @@ test.describe('Thoth — Cron tab', () => {
     const page = ui.page;
 
     await expect(page.locator('[data-testid="cron-job-card"]')).toHaveCount(2);
-    await expect(page.locator('[data-testid="cron-stat-total"]')).toHaveText(
+    await expect(page.locator('[data-testid="cron-stat-total"] .tabular-nums')).toHaveText(
       '2',
     );
-    await expect(page.locator('[data-testid="cron-stat-enabled"]')).toHaveText(
+    await expect(page.locator('[data-testid="cron-stat-enabled"] .tabular-nums')).toHaveText(
       '1',
     );
-    await expect(page.locator('[data-testid="cron-stat-disabled"]')).toHaveText(
+    await expect(page.locator('[data-testid="cron-stat-disabled"] .tabular-nums')).toHaveText(
       '1',
     );
   });
@@ -106,7 +106,7 @@ test.describe('Thoth — Cron tab', () => {
 
     await expect(page.locator('[data-testid="cron-form"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="cron-job-card"]')).toHaveCount(1);
-    await expect(page.locator('[data-testid="cron-stat-total"]')).toHaveText(
+    await expect(page.locator('[data-testid="cron-stat-total"] .tabular-nums')).toHaveText(
       '1',
     );
   });

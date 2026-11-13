@@ -159,6 +159,23 @@ describe('MessagingGatewayTabComponent (shell)', () => {
     expect(grid.classList.contains('grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))]')).toBe(true);
     expect(grid.className).not.toContain('xl:grid-cols-');
     expect(grid.children).toHaveLength(4);
+    for (const [id, label, tone] of [
+      ['gateway-stat-running', 'Adapters running', 'text-success'],
+      ['gateway-stat-pending', 'Pending approvals', 'text-warning'],
+      ['gateway-stat-approved', 'Approved senders', 'text-primary'],
+    ]) {
+      const stat = grid.querySelector(`ptah-stat[data-testid="${id}"]`);
+      expect(stat?.textContent).toContain(label);
+      expect(stat?.querySelector('.tabular-nums')?.textContent?.trim()).toBe('0');
+      expect(stat?.querySelector('.tabular-nums')?.classList.contains(tone)).toBe(true);
+      expect(stat?.getAttribute('title')).toBeNull();
+    }
+    const voice = grid.querySelector('[data-testid="gateway-stat-voice"]');
+    expect(voice?.textContent).toContain('Voice');
+    expect(voice?.textContent).toContain('Off');
+    expect(voice?.querySelector('.stat-value')?.classList.contains('text-info')).toBe(true);
+    expect(voice?.querySelector('.stat-value')?.textContent?.trim()).toBe('Off');
+    expect(voice?.getAttribute('title')).toBeNull();
   });
 
   describe('VS Code parity', () => {

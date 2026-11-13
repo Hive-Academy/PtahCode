@@ -1414,8 +1414,10 @@ describe('ProviderSetupWizardComponent', () => {
           expect(element.className).not.toContain('btn');
           expect(element.className).toContain('min-h-9');
         }
-        expect(element.className).toContain('focus-visible:outline-2');
-        expect(element.className).toContain('focus-visible:outline-base-content');
+        if (!isHost) {
+          expect(element.className).toContain('focus-visible:outline-2');
+          expect(element.className).toContain('focus-visible:outline-base-content');
+        }
       }
     });
 

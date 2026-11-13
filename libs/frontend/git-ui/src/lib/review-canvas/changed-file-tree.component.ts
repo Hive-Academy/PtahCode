@@ -299,7 +299,7 @@ function selectionOf(file: TreeFile): ChangedFileSelection {
                         ptahIconButton
                         label="Dismiss error"
                         size="xs"
-                        class="shrink-0 {{ focusRing }}"
+                        class="shrink-0"
                         [tabIndex]="actionTabIndex(row)"
                         (click)="dismissRowError(row)"
                       >

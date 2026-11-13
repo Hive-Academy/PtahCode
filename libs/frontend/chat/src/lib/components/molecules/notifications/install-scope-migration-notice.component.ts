@@ -13,7 +13,7 @@ import type {
   InstallMigrationOnDiskEntry,
 } from '@ptah-extension/shared';
 
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 /** Which button dismissed the notice. */
 export type InstallScopeMigrationNoticeAction = 'open-marketplace' | 'got-it';
 
@@ -55,12 +55,13 @@ function plural(count: number, one: string, many: string): string {
 @Component({
   selector: 'ptah-install-scope-migration-notice',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (visibleNotice(); as notice) {
       <section
-        class="card bg-base-200 border border-info p-3 mt-2 text-xs"
+        ptahSurface tone="info" [toneBorder]="true" padding="sm"
+        class="mt-2 text-xs"
         role="region"
         [attr.aria-labelledby]="headingId"
         [attr.aria-busy]="busy() ? 'true' : null"

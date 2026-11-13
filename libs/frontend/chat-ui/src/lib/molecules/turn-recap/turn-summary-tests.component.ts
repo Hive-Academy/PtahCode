@@ -35,6 +35,7 @@ const TONE_CLASS: Readonly<Record<TurnSummaryTestTone, string>> = {
  * five failure lines and a native `<details>` "Full command". Outcome is text,
  * never colour alone; colour rides along through the AA-measured overrides.
  */
+// Left raw: this pass share uses native progress with the daisyUI success track beside a separate percentage.
 @Component({
   selector: 'ptah-turn-summary-tests',
   standalone: true,

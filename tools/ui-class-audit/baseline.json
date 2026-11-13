@@ -27,20 +27,15 @@
     "btn": 1,
     "btn-primary": 1
   },
-  "libs/frontend/canvas/src/lib/canvas-rail/canvas-focus-header.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3
-  },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-inspector-dock.component.ts": {
     "skeleton": 6
   },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-rail-card.component.ts": {
     "<dynamic>": 1,
-    "btn": 11,
-    "btn-ghost": 11,
+    "btn": 6,
+    "btn-ghost": 6,
     "btn-primary": 1,
-    "btn-sm": 9,
+    "btn-sm": 4,
     "btn-xs": 2
   },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-rail.component.ts": {
@@ -214,9 +209,7 @@
     "btn-xs": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/thinking-block.component.ts": {
-    "card": 1,
-    "card-body": 1,
-    "card-border": 1
+    "card-body": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/tool-execution/tool-call-header.component.ts": {
     "badge": 1,
@@ -292,9 +285,6 @@
   "libs/frontend/chat/src/lib/components/molecules/mcp-status-chip.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/chat/src/lib/components/molecules/notifications/install-scope-migration-notice.component.ts": {
-    "card": 1
-  },
   "libs/frontend/chat/src/lib/components/molecules/notifications/session-budget-banner.component.ts": {
     "<dynamic>": 6
   },
@@ -356,9 +346,9 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-sm": 3,
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-sm": 1,
     "btn-square": 1,
     "btn-xs": 1
   },
@@ -382,9 +372,8 @@
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
     "btn-square": 1,
     "btn-xs": 1
   },
@@ -396,11 +385,6 @@
     "btn-primary": 1,
     "btn-square": 1,
     "btn-xs": 6
-  },
-  "libs/frontend/chat/src/lib/components/templates/chat-view.component.html": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
   },
   "libs/frontend/chat/src/lib/settings/advanced-settings.component.ts": {
     "<dynamic>": 1,
@@ -482,10 +466,9 @@
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-outline": 1,
-    "btn-xs": 2
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/vscode-lm-config.component.ts": {
     "badge": 3,
@@ -603,9 +586,6 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-provider-card.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3,
     "card-body": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {
@@ -688,17 +668,10 @@
     "input-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
-    "<dynamic>": 1,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
+    "<dynamic>": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-detail-drawer.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
+    "<dynamic>": 2
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts": {
     "alert": 1,
@@ -776,10 +749,9 @@
     "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
-    "btn": 5,
-    "btn-ghost": 3,
+    "btn": 2,
     "btn-outline": 2,
-    "btn-xs": 5
+    "btn-xs": 2
   },
   "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
     "<dynamic>": 1,
@@ -1058,10 +1030,10 @@
     "alert-error": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-entry-list.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-square": 3,
-    "btn-xs": 3,
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-square": 2,
+    "btn-xs": 2,
     "skeleton": 3
   },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {
@@ -1173,10 +1145,6 @@
   },
   "libs/frontend/setup-wizard/src/lib/components/analysis-transcript.component.ts": {
     "skeleton": 6
-  },
-  "libs/frontend/setup-wizard/src/lib/components/cards/enhanced-prompts-summary-card.component.ts": {
-    "card": 1,
-    "card-body": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/community-packs-panel.component.ts": {
     "alert": 1,

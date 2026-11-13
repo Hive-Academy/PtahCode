@@ -24,7 +24,11 @@ import {
   type PlatformCardConfig,
 } from './gateway-platform-pane.component';
 import { GatewaySetupGuideComponent } from './gateway-setup-guide.component';
-import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahStatComponent,
+  PtahSurfaceDirective,
+} from '@ptah-extension/ui';
 
 const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
   {
@@ -47,6 +51,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
   },
 ];
 
+// Left raw: the Voice tile uses the theme text-info color, but ptah-stat maps info to the state color.
 @Component({
   selector: 'ptah-messaging-gateway-tab',
   standalone: true,
@@ -57,6 +62,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
     GatewayPlatformPaneComponent,
     GatewaySetupGuideComponent,
     PtahButtonDirective,
+    PtahStatComponent,
     PtahSurfaceDirective,
   ],
   template: `
@@ -205,61 +211,20 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
           class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3"
           aria-label="Gateway statistics"
         >
-          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden rounded-2xl">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-success">
-                <lucide-angular
-                  [img]="RadioTowerIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div class="stat-title min-w-0 whitespace-normal text-base-content-muted">
-                Adapters running
-              </div>
-              <div class="stat-value text-2xl text-success">
-                {{ runningCount() }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="2xl" label="Adapters running" [value]="runningCount()" valueTone="success" data-testid="gateway-stat-running">
+            <lucide-angular ptahStatIcon [img]="RadioTowerIcon" class="w-6 h-6 text-success" aria-hidden="true" />
+          </ptah-stat>
 
-          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden rounded-2xl">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-warning">
-                <lucide-angular
-                  [img]="UserPlusIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div class="stat-title min-w-0 whitespace-normal text-base-content-muted">
-                Pending approvals
-              </div>
-              <div class="stat-value text-2xl text-warning">
-                {{ pendingCount() }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="2xl" label="Pending approvals" [value]="pendingCount()" valueTone="warning" data-testid="gateway-stat-pending">
+            <lucide-angular ptahStatIcon [img]="UserPlusIcon" class="w-6 h-6 text-warning" aria-hidden="true" />
+          </ptah-stat>
 
-          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden rounded-2xl">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-primary">
-                <lucide-angular
-                  [img]="UserCheckIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div class="stat-title min-w-0 whitespace-normal text-base-content-muted">
-                Approved senders
-              </div>
-              <div class="stat-value text-2xl text-primary">
-                {{ approvedCount() }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="2xl" label="Approved senders" [value]="approvedCount()" valueTone="primary" data-testid="gateway-stat-approved">
+            <lucide-angular ptahStatIcon [img]="UserCheckIcon" class="w-6 h-6 text-primary" aria-hidden="true" />
+          </ptah-stat>
 
-          <div ptahSurface variant="surface-2" padding="none" class="stats min-w-0 overflow-hidden rounded-2xl">
+          <!-- Raw tile: ptah-stat info maps to state-run, which differs from theme text-info. -->
+          <div data-testid="gateway-stat-voice" class="stats surface-2 min-w-0 overflow-hidden rounded-2xl">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-info">
                 <lucide-angular

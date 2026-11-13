@@ -8,6 +8,7 @@ export type StatusCardTone = 'run' | 'need' | 'err' | 'done' | 'idle';
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
+    <!-- Left raw: 22px radius and a 4px status border differ from the card owner look. -->
     <section class="status-card relative overflow-hidden rounded-[22px] border border-base-300 bg-base-200 p-4 pl-5"
              data-glass-surface="content" [attr.data-tone]="tone()" [attr.aria-label]="label()">
       @if (busy()) {
