@@ -51,6 +51,33 @@ it.each([0, 90, 100, 150])('keeps explicit gold at %i percent', (value) => {
   expect(fill.classList.contains('bg-[var(--ptah-gold)]')).toBe(true);
 });
 
+describe('opt-in bar appearance', () => {
+  it('keeps the width transition by default', () => {
+    const fill = render({ value: 30 }).querySelector('[role="meter"] > div') as HTMLElement;
+    expect(fill.classList.contains('transition-[width]')).toBe(true);
+    expect(fill.classList.contains('motion-reduce:transition-none')).toBe(true);
+  });
+
+  it('removes the width transition when animate is false', () => {
+    const fill = render({ value: 30, animate: false }).querySelector('[role="meter"] > div') as HTMLElement;
+    expect(fill.classList.contains('transition-[width]')).toBe(false);
+    expect(fill.classList.contains('motion-reduce:transition-none')).toBe(false);
+    expect(fill.style.width).toBe('30%');
+  });
+
+  it('uses primary fill and primary stripe ink when requested', () => {
+    const fill = render({ value: 30, tone: 'primary' }).querySelector('[role="meter"] > div') as HTMLElement;
+    const striped = render({ value: 30, tone: 'primary', stripes: true }).querySelector('[role="meter"] > div') as HTMLElement;
+    expect(fill.classList.contains('bg-primary')).toBe(true);
+    expect(striped.classList.contains('text-primary')).toBe(true);
+  });
+
+  it('uses primary on the indeterminate fill too', () => {
+    const fill = render({ value: 0, max: 0, indeterminate: true, tone: 'primary' }).querySelector('[role="progressbar"] > div') as HTMLElement;
+    expect(fill.classList.contains('bg-primary')).toBe(true);
+  });
+});
+
 describe('indeterminate appearance', () => {
   it('keeps the original pulse by default', () => {
     const fill = render({ value: 0, max: 0, indeterminate: true }).querySelector('[role="progressbar"] > div') as HTMLElement;
@@ -91,6 +118,42 @@ it('hides the value visually but keeps it for assistive tech', () => {
 });
 
 describe('meter hideLabel, valueText and role', () => {
+  it('uses aria-label by default without aria-labelledby', () => {
+    const bar = render({ value: 10 }).querySelector('[role="meter"]') as HTMLElement;
+    expect(bar.getAttribute('aria-label')).toBe('Used');
+    expect(bar.hasAttribute('aria-labelledby')).toBe(false);
+  });
+
+  it('links an external label to the inner progressbar', () => {
+    const el = render({ value: 10, barRole: 'progressbar', ariaLabelledby: 'outside-label' });
+    const bar = el.querySelector('[role="progressbar"]') as HTMLElement;
+    expect(bar.getAttribute('aria-labelledby')).toBe('outside-label');
+    expect(bar.hasAttribute('aria-label')).toBe(false);
+    expect(el.hasAttribute('role')).toBe(false);
+  });
+
+  it('links an external label to an indeterminate bar', () => {
+    const bar = render({ value: 0, max: 0, indeterminate: true, ariaLabelledby: 'outside-label' }).querySelector('[role="progressbar"]') as HTMLElement;
+    expect(bar.getAttribute('aria-labelledby')).toBe('outside-label');
+    expect(bar.hasAttribute('aria-label')).toBe(false);
+  });
+
+  it('accepts placement classes and a track color override on the host', () => {
+    @Component({
+      standalone: true,
+      imports: [PtahMeterComponent],
+      template: '<ptah-meter class="mt-auto shrink-0" style="--ptah-meter-track: red" [value]="10" [max]="100" label="Used" />',
+    })
+    class HostComponent {}
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    const host = fixture.nativeElement.querySelector('ptah-meter') as HTMLElement;
+    expect(host.classList.contains('mt-auto')).toBe(true);
+    expect(host.classList.contains('shrink-0')).toBe(true);
+    expect(host.style.getPropertyValue('--ptah-meter-track').trim()).toBe('red');
+    expect(host.querySelector('[role="meter"]')?.classList.contains('bg-[var(--ptah-meter-track,var(--surface-border-strong))]')).toBe(true);
+  });
+
   it('hides the label visually and keeps it in the DOM and aria-label', () => {
     const el = render({ value: 10, hideLabel: true });
     const label = el.querySelector('span') as HTMLElement;

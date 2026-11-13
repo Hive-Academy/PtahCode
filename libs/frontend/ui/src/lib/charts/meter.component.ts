@@ -29,8 +29,8 @@ const STRIPES =
   selector: 'ptah-meter', standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div [class]="textClass()"><div [class]="rowClass()" data-meter-row><span [class.sr-only]="hideLabel()">{{ label() }}</span><span class="tabular-nums" [class.sr-only]="!showValue()">@if (indeterminate()) { {{ valueText() ?? 'In progress' }} } @else if (valid()) { {{ visibleText() }} } @else { Unavailable }</span></div>
-    <div class="overflow-hidden rounded-full bg-[var(--ptah-meter-track,var(--surface-border-strong))]" [class]="trackClass()" [attr.role]="ariaRole()" [attr.aria-label]="ariaRole() ? label() : null" [attr.aria-valuemin]="ranged() ? 0 : null" [attr.aria-valuemax]="ranged() ? max() : null" [attr.aria-valuenow]="ranged() ? ariaNow() : null" [attr.aria-valuetext]="ariaValueText()">
-      @if (indeterminate()) { @if (indeterminateStyle() === 'sweep') { <div class="ptah-meter-sweep h-full rounded-full" [class]="fillClass()"></div> } @else { <div class="h-full w-1/3 animate-pulse rounded-full motion-reduce:animate-none" [class]="fillClass()"></div> } } @else if (valid()) { <div class="h-full rounded-full transition-[width] motion-reduce:transition-none" [class]="fillClass()" [style.width.%]="width()" [style.background-image]="stripeImage()"></div> }
+    <div class="overflow-hidden rounded-full bg-[var(--ptah-meter-track,var(--surface-border-strong))]" [class]="trackClass()" [attr.role]="ariaRole()" [attr.aria-label]="ariaRole() && !ariaLabelledby() ? label() : null" [attr.aria-labelledby]="ariaRole() ? ariaLabelledby() : null" [attr.aria-valuemin]="ranged() ? 0 : null" [attr.aria-valuemax]="ranged() ? max() : null" [attr.aria-valuenow]="ranged() ? ariaNow() : null" [attr.aria-valuetext]="ariaValueText()">
+      @if (indeterminate()) { @if (indeterminateStyle() === 'sweep') { <div class="ptah-meter-sweep h-full rounded-full" [class]="fillClass()"></div> } @else { <div class="h-full w-1/3 animate-pulse rounded-full motion-reduce:animate-none" [class]="fillClass()"></div> } } @else if (valid()) { <div class="h-full rounded-full" [class]="determinateFillClass()" [style.width.%]="width()" [style.background-image]="stripeImage()"></div> }
       @if (markerPercent() !== null) { <div class="absolute top-0 h-full w-px bg-[var(--ptah-meter-marker,var(--ptah-badge-neutral-ink))]" [style.left]="markerLeft()" aria-hidden="true" data-meter-marker></div> }
     </div>
   </div>`,
@@ -56,6 +56,8 @@ export class PtahMeterComponent {
   readonly tone = input<PtahMeterTone>('auto');
   readonly size = input<PtahChartSize>('sm');
   readonly indeterminate = input(false);
+  /** Disable the determinate fill's width transition when matching a static bar. */
+  readonly animate = input(true);
   /** Moving 40% segment, or the original pulse, for indeterminate bars. */
   readonly indeterminateStyle = input<'pulse' | 'sweep'>('pulse');
   readonly showValue = input(true);
@@ -65,6 +67,8 @@ export class PtahMeterComponent {
   readonly valueText = input<string | undefined>(undefined);
   /** ARIA role of the inner bar when determinate. Indeterminate is always `progressbar`. */
   readonly barRole = input<PtahMeterRole>('meter');
+  /** ID of an external element naming the inner bar; overrides its aria-label. */
+  readonly ariaLabelledby = input<string | null>(null);
   /** Percent 0..100 of a thin tick on the track (for example a near-limit mark). Decoration only. */
   readonly marker = input<number | undefined>(undefined);
   /** Draws the fill as diagonal stripes in the tone ink over the track color. */
@@ -95,6 +99,9 @@ export class PtahMeterComponent {
   private readonly ink = computed(() => resolveInk(this.tone(), this.indeterminate() ? 0 : this.percent()));
   readonly fillClass = computed(() =>
     this.stripes() ? CHART_TEXT[this.ink()] : CHART_BG[this.ink()],
+  );
+  readonly determinateFillClass = computed(() =>
+    this.animate() ? `${this.fillClass()} transition-[width] motion-reduce:transition-none` : this.fillClass(),
   );
   /** Left edge of the tick: the tick stays inside the clipped track at 100%. */
   readonly markerLeft = computed(() => {
