@@ -14,15 +14,97 @@
  * 3-minute waits.
  */
 
-import { NoActivityWatchdog } from './no-activity-watchdog';
+import {
+  BACKGROUND_TASK_QUIET_TIMEOUT_MS,
+  NoActivityWatchdog,
+} from './no-activity-watchdog';
 import { COMPACTION_MAX_DWELL_MS } from './compaction/compaction-state.types';
 import type {
   HookEvent,
   HookInput,
+  SDKAssistantMessage,
   SDKMessage,
+  SDKTaskNotificationMessage,
+  SDKTaskProgressMessage,
+  SDKTaskStartedMessage,
+  SDKTaskUpdatedMessage,
 } from '../types/sdk-types/claude-sdk.types';
 
 const WINDOW = 180_000;
+
+/** Typed SDK message builders for the background task specs. */
+const ENVELOPE = { uuid: '0-0-0-0-0', session_id: 's-1' } as const;
+
+function taskStarted(
+  taskId: string,
+  toolUseId: string,
+  extra: Partial<SDKTaskStartedMessage> = {},
+): SDKTaskStartedMessage {
+  return {
+    type: 'system',
+    subtype: 'task_started',
+    task_id: taskId,
+    tool_use_id: toolUseId,
+    description: 'background task',
+    ...ENVELOPE,
+    ...extra,
+  };
+}
+
+function taskUpdated(
+  taskId: string,
+  patch: SDKTaskUpdatedMessage['patch'],
+  runId?: string,
+): SDKTaskUpdatedMessage {
+  return {
+    type: 'system',
+    subtype: 'task_updated',
+    task_id: taskId,
+    patch,
+    ...(runId !== undefined && { run_id: runId }),
+    ...ENVELOPE,
+  };
+}
+
+function taskProgress(taskId: string, runId?: string): SDKTaskProgressMessage {
+  return {
+    type: 'system',
+    subtype: 'task_progress',
+    task_id: taskId,
+    description: 'background task',
+    usage: { total_tokens: 1, tool_uses: 1, duration_ms: 1 },
+    ...(runId !== undefined && { run_id: runId }),
+    ...ENVELOPE,
+  };
+}
+
+function taskNotification(
+  taskId: string,
+  status: SDKTaskNotificationMessage['status'],
+  runId?: string,
+): SDKTaskNotificationMessage {
+  return {
+    type: 'system',
+    subtype: 'task_notification',
+    task_id: taskId,
+    status,
+    output_file: 'out.txt',
+    summary: 'done',
+    ...(runId !== undefined && { run_id: runId }),
+    ...ENVELOPE,
+  };
+}
+
+/** A text-only assistant message; `parentToolUseId` null means a root message. */
+function assistantMessage(parentToolUseId: string | null): SDKAssistantMessage {
+  const message: Partial<SDKAssistantMessage['message']> = { content: [] };
+  return {
+    type: 'assistant',
+    message: message as SDKAssistantMessage['message'],
+    parent_tool_use_id: parentToolUseId,
+    ...ENVELOPE,
+  };
+}
 
 describe('NoActivityWatchdog', () => {
   beforeEach(() => {
@@ -247,7 +329,8 @@ describe('NoActivityWatchdog', () => {
       input: Record<string, unknown>,
     ): Promise<void> {
       const event = input['hook_event_name'] as HookEvent;
-      await wd.lifecycleHooks()[event]?.[0]?.hooks?.[0]?.(
+      const hooks = wd.lifecycleHooks();
+      await hooks[event]?.[0]?.hooks?.[0]?.(
         input as unknown as HookInput,
         undefined,
         { signal },
@@ -406,7 +489,11 @@ describe('NoActivityWatchdog', () => {
 
       wd.observe({
         type: 'assistant',
-        message: { content: [{ type: 'tool_use', id: 'tool-2', name: 'Bash', input: {} }] },
+        message: {
+          content: [
+            { type: 'tool_use', id: 'tool-2', name: 'Bash', input: {} },
+          ],
+        },
       } as unknown as SDKMessage);
       jest.advanceTimersByTime(WINDOW * 3);
       expect(onOverdue).toHaveBeenCalledTimes(3);
@@ -416,7 +503,11 @@ describe('NoActivityWatchdog', () => {
 
       wd.observe({
         type: 'user',
-        message: { content: [{ type: 'tool_result', tool_use_id: 'tool-2', content: 'done' }] },
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'tool-2', content: 'done' },
+          ],
+        },
       } as unknown as SDKMessage);
       jest.advanceTimersByTime(WINDOW);
       expect(onTimeout).toHaveBeenCalledWith('no-activity');
@@ -430,12 +521,253 @@ describe('NoActivityWatchdog', () => {
       wd.hold();
       wd.observe({
         type: 'assistant',
-        message: { content: [{ type: 'tool_use', id: 'late', name: 'Bash', input: {} }] },
+        message: {
+          content: [{ type: 'tool_use', id: 'late', name: 'Bash', input: {} }],
+        },
       } as unknown as SDKMessage);
       wd.beginTurn();
       wd.release();
       jest.advanceTimersByTime(WINDOW);
       expect(onTimeout).toHaveBeenCalledWith('no-activity');
+    });
+
+    describe('background SDK tasks', () => {
+      async function startBackgroundTask(
+        wd: NoActivityWatchdog,
+        toolId: string,
+        taskId: string,
+        extra: Partial<SDKTaskStartedMessage> = {},
+      ): Promise<void> {
+        await fireHook(wd, {
+          hook_event_name: 'PreToolUse',
+          tool_use_id: toolId,
+          tool_name: 'Task',
+        });
+        wd.observe(
+          taskStarted(taskId, toolId, { is_backgrounded: false, ...extra }),
+        );
+        wd.observe(
+          taskUpdated(taskId, { is_backgrounded: true }, extra.run_id),
+        );
+      }
+
+      it('reproduces a root abort while a background task is active', async () => {
+        const onTimeout = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a');
+        await startBackgroundTask(wd, 'tool-b', 'task-b');
+        jest.advanceTimersByTime(60_000);
+        wd.observe(taskProgress('task-b'));
+        jest.advanceTimersByTime(30_000);
+        wd.observe(taskNotification('task-a', 'completed'));
+        jest.advanceTimersByTime(30_000);
+        wd.observe(assistantMessage('tool-b'));
+        jest.advanceTimersByTime(30_000);
+        wd.observe(taskUpdated('task-b', { status: 'running' }));
+        jest.advanceTimersByTime(31_000);
+        expect(onTimeout).not.toHaveBeenCalled();
+      });
+
+      it('progress, updates and correlated child messages keep a backgrounded root turn alive past 180 s', async () => {
+        const onTimeout = jest.fn();
+        const onOverdue = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue);
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a');
+
+        // 400 s of child activity only, each gap well inside the quiet bound.
+        jest.advanceTimersByTime(150_000);
+        wd.observe(taskProgress('task-a'));
+        jest.advanceTimersByTime(150_000);
+        wd.observe(taskUpdated('task-a', { status: 'running' }));
+        jest.advanceTimersByTime(150_000);
+        wd.observe(assistantMessage('tool-a'));
+        jest.advanceTimersByTime(250_000);
+
+        expect(onTimeout).not.toHaveBeenCalled();
+        expect(onOverdue).toHaveBeenLastCalledWith(['background task']);
+        expect(wd.firedCause).toBeNull();
+      });
+
+      it('a terminal notification restores a full normal window', async () => {
+        const onTimeout = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a');
+        jest.advanceTimersByTime(400_000);
+        expect(onTimeout).not.toHaveBeenCalled();
+
+        wd.observe(taskNotification('task-a', 'completed'));
+        jest.advanceTimersByTime(WINDOW - 1);
+        expect(onTimeout).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      });
+
+      it('a stale run_id does not close or refresh a newer run', async () => {
+        const onTimeout = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a', { run_id: 'run-2' });
+
+        jest.advanceTimersByTime(100_000);
+        wd.observe(taskNotification('task-a', 'completed', 'run-1'));
+        wd.observe(taskUpdated('task-a', { status: 'killed' }, 'run-1'));
+        jest.advanceTimersByTime(300_000);
+        // Still accounted: the stale terminal events did not close run-2.
+        expect(onTimeout).not.toHaveBeenCalled();
+
+        // Stale progress does not refresh it: the quiet bound counts from 0 s.
+        wd.observe(taskProgress('task-a', 'run-1'));
+        jest.advanceTimersByTime(199_999);
+        expect(onTimeout).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+      });
+
+      it('a matching run_id notification closes the run', async () => {
+        const onTimeout = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a', { run_id: 'run-2' });
+        jest.advanceTimersByTime(100_000);
+        wd.observe(taskNotification('task-a', 'failed', 'run-2'));
+        jest.advanceTimersByTime(WINDOW);
+        expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      });
+
+      it('a dead background task times out exactly once with no-activity at 600 s quiet', async () => {
+        const onTimeout = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a');
+
+        jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS - 1);
+        expect(onTimeout).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onTimeout).toHaveBeenCalledWith('no-activity');
+        expect(wd.firedCause).toBe('no-activity');
+
+        jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS * 2);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+      });
+
+      it('unknown task and unrelated child traffic cannot keep a dead task alive', async () => {
+        const onTimeout = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a');
+
+        for (let i = 0; i < 5; i += 1) {
+          jest.advanceTimersByTime(100_000);
+          wd.observe(taskProgress('task-unknown'));
+          wd.observe(taskUpdated('task-unknown', { status: 'running' }));
+          wd.observe(assistantMessage('tool-unknown'));
+        }
+        jest.advanceTimersByTime(99_999);
+        expect(onTimeout).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      });
+
+      it('ambient and skip_transcript tasks get no background extension', async () => {
+        for (const extra of [{ ambient: true }, { skip_transcript: true }]) {
+          const onTimeout = jest.fn();
+          const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+          wd.start();
+          await startBackgroundTask(wd, 'tool-a', 'task-a', extra);
+
+          jest.advanceTimersByTime(100_000);
+          wd.observe(taskProgress('task-a'));
+          wd.observe(assistantMessage('tool-a'));
+          // Today's rule: 180 s after the last root kick (the backgrounding).
+          jest.advanceTimersByTime(WINDOW - 100_000);
+          expect(onTimeout).toHaveBeenCalledTimes(1);
+          expect(onTimeout).toHaveBeenCalledWith('no-activity');
+          wd.stop();
+        }
+      });
+
+      it('a root assistant message during a silent background task never times out earlier than 180 s after it', async () => {
+        const onTimeout = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a');
+
+        jest.advanceTimersByTime(590_000);
+        wd.observe(assistantMessage(null));
+        // The quiet bound passed at 600 s, but the root kick at 590 s owns
+        // a full normal window.
+        jest.advanceTimersByTime(WINDOW - 1);
+        expect(onTimeout).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      });
+
+      it('a root tool during a silent background task keeps the normal uncapped tool rule', async () => {
+        const onTimeout = jest.fn();
+        const onOverdue = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue);
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a');
+
+        jest.advanceTimersByTime(500_000);
+        await fireHook(wd, {
+          hook_event_name: 'PreToolUse',
+          tool_use_id: 'tool-bash',
+          tool_name: 'Bash',
+        });
+        jest.advanceTimersByTime(WINDOW * 3);
+        expect(onOverdue).toHaveBeenLastCalledWith(['Bash']);
+        expect(onTimeout).not.toHaveBeenCalled();
+
+        await fireHook(wd, {
+          hook_event_name: 'PostToolUse',
+          tool_use_id: 'tool-bash',
+          tool_name: 'Bash',
+        });
+        jest.advanceTimersByTime(WINDOW - 1);
+        expect(onTimeout).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      });
+
+      it('endTurn clears the records: a task that outlives its turn cannot affect the next turn', async () => {
+        const onTimeout = jest.fn();
+        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+        wd.start();
+        await startBackgroundTask(wd, 'tool-a', 'task-a');
+        wd.observe(assistantMessage(null));
+        wd.endTurn();
+        // Idle between turns, as the executor holds the watchdog.
+        wd.hold();
+        jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS * 2);
+        wd.beginTurn();
+        wd.release();
+        expect(onTimeout).not.toHaveBeenCalled();
+
+        // Root activity keeps the new turn alive past the old quiet bound.
+        for (let i = 0; i < 4; i += 1) {
+          jest.advanceTimersByTime(WINDOW - 1);
+          wd.observe(assistantMessage(null));
+        }
+        expect(onTimeout).not.toHaveBeenCalled();
+
+        // The old task's traffic no longer extends the deadline.
+        jest.advanceTimersByTime(100_000);
+        wd.observe(taskProgress('task-a'));
+        wd.observe(assistantMessage('tool-a'));
+        jest.advanceTimersByTime(WINDOW - 100_000 - 1);
+        expect(onTimeout).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      });
     });
   });
 });
