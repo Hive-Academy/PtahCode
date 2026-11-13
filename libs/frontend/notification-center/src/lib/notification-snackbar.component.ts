@@ -33,6 +33,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             (click)="$event.stopPropagation(); openNotifications.emit()">+{{ overflow() }} more</button>
         }
         @for (item of visible(); track item.key) {
+          <!-- Left raw: overlay glass plane with surface-3 fill and its own elevation; the owner would change the look. -->
           <section data-glass-surface="overlay" class="snackbar-card surface-3 relative rounded-xl border border-[color:var(--surface-border)] shadow-[var(--elev-shadow-raised)] p-1.5 pl-2.5 text-base-content hover:bg-[color:var(--surface-highlight)]"
             [attr.aria-label]="kindLabel(item) + ' for ' + sessionName(item) + ' in ' + workspaceName(item)"
             [attr.aria-describedby]="item.permissionPreview ? 'snackbar-preview-' + item.key + '-' + item.generation : null"
