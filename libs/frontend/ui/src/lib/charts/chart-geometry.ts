@@ -2,11 +2,12 @@ import { NEAR_LIMIT_PERCENT } from '@ptah-extension/shared';
 import { PtahChartTone, PtahMeterTone } from './chart.types';
 
 /** A resolved ink. `gold` is the brand ink, also used by `auto` below the near limit. */
-export type PtahChartInk = PtahChartTone | 'gold';
+export type PtahChartInk = PtahChartTone | 'gold' | 'primary';
 
 /** Fill classes. The `auto` inks keep the classes of the original meter. */
 export const CHART_BG: Readonly<Record<PtahChartInk, string>> = {
   gold: 'bg-[var(--ptah-gold)]',
+  primary: 'bg-primary',
   neutral: 'bg-[var(--ptah-badge-neutral-ink)]',
   accent: 'bg-[var(--ptah-badge-accent-ink)]',
   info: 'bg-state-run',
@@ -18,6 +19,7 @@ export const CHART_BG: Readonly<Record<PtahChartInk, string>> = {
 /** Text classes, for SVG marks that paint with `currentColor`. */
 export const CHART_TEXT: Readonly<Record<PtahChartInk, string>> = {
   gold: 'text-[var(--ptah-gold)]',
+  primary: 'text-primary',
   neutral: 'text-[var(--ptah-badge-neutral-ink)]',
   accent: 'text-[var(--ptah-badge-accent-ink)]',
   info: 'text-state-run',

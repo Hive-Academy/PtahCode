@@ -4,7 +4,7 @@
 export type PtahChartTone = 'neutral' | 'accent' | 'info' | 'ok' | 'warn' | 'err';
 
 /** `gold` stays gold; `auto` switches from gold to warn, then err at 100 %. */
-export type PtahMeterTone = PtahChartTone | 'gold' | 'auto';
+export type PtahMeterTone = PtahChartTone | 'gold' | 'primary' | 'auto';
 
 /** ARIA role of a determinate meter bar. */
 export type PtahMeterRole = 'meter' | 'progressbar';
