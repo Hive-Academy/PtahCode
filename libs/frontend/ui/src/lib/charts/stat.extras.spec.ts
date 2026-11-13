@@ -21,6 +21,13 @@ class HostComponent {}
 @Component({
   standalone: true,
   imports: [PtahStatComponent],
+  template: `<ptah-stat label="Runs" [value]="3" iconPlacement="center-end"><svg ptahStatIcon></svg></ptah-stat>`,
+})
+class CenterIconHost {}
+
+@Component({
+  standalone: true,
+  imports: [PtahStatComponent],
   template: `<ptah-stat label="Ring" [value]="3" appearance="surface"><i class="media" ptahStatMedia></i></ptah-stat>`,
 })
 class MediaHost {}
@@ -58,6 +65,51 @@ describe('PtahStatComponent consumer parity inputs', () => {
     for (const c of ['surface-2', 'rounded-xl', 'p-4', 'min-w-0', 'overflow-hidden']) {
       expect(el.classList.contains(c)).toBe(true);
     }
+    expect(el.classList.contains('rounded-2xl')).toBe(false);
+  });
+
+  it('uses a 2xl radius only when requested for a surface', () => {
+    const { el } = make({ appearance: 'surface', radius: '2xl' });
+    expect(el.classList.contains('rounded-2xl')).toBe(true);
+    expect(el.classList.contains('rounded-xl')).toBe(false);
+    expect(make({ radius: '2xl' }).el.classList.contains('rounded-2xl')).toBe(false);
+  });
+
+  it('allows a square surface for cron statistics', () => {
+    const { el } = make({ appearance: 'surface', radius: 'none' });
+    expect(el.classList.contains('surface-2')).toBe(true);
+    expect(el.classList.contains('rounded-xl')).toBe(false);
+    expect(el.classList.contains('rounded-2xl')).toBe(false);
+  });
+
+  it('keeps the icon at top end and the existing row gap by default', () => {
+    const f = TestBed.createComponent(HostComponent);
+    f.detectChanges();
+    const el = f.nativeElement.querySelector('ptah-stat') as HTMLElement;
+    expect(el.hasAttribute('data-icon-placement')).toBe(false);
+    expect(el.firstElementChild?.classList.contains('gap-0.5')).toBe(true);
+    expect(el.querySelector('[ptahStatIcon]')).not.toBeNull();
+  });
+
+  it('places the projected icon at center end when requested', () => {
+    const f = TestBed.createComponent(CenterIconHost);
+    f.detectChanges();
+    const el = f.nativeElement.querySelector('ptah-stat') as HTMLElement;
+    expect(el.getAttribute('data-icon-placement')).toBe('center-end');
+    expect(el.firstElementChild?.classList.contains('gap-0')).toBe(true);
+    expect(el.querySelector('[ptahStatIcon]')).not.toBeNull();
+  });
+
+  it('uses medium weight and word wrapping only when requested', () => {
+    const defaultValue = valueEl(make({}).el);
+    expect(defaultValue.classList.contains('font-semibold')).toBe(true);
+    expect(defaultValue.classList.contains('font-medium')).toBe(false);
+    expect(defaultValue.classList.contains('break-words')).toBe(false);
+    const value = valueEl(make({ valueWeight: 'medium', valueWrap: 'break-words' }).el);
+    expect(value.classList.contains('font-medium')).toBe(true);
+    expect(value.classList.contains('font-semibold')).toBe(false);
+    expect(value.classList.contains('break-words')).toBe(true);
+    expect(value.classList.contains('min-w-0')).toBe(true);
   });
 
   it('projects the media slot before the value', () => {
@@ -68,7 +120,18 @@ describe('PtahStatComponent consumer parity inputs', () => {
   });
 
   it('shows the hint as the caption line', () => {
-    expect(make({ hint: 'in 2 hours' }).el.textContent).toContain('in 2 hours');
+    const { el } = make({ hint: 'in 2 hours' });
+    const hint = [...el.querySelectorAll('span')].find((span) => span.textContent === 'in 2 hours') as HTMLElement;
+    expect(hint.classList.contains('text-xs')).toBe(true);
+    expect(hint.classList.contains('text-base-content-muted')).toBe(true);
+    expect(hint.classList.contains('stat-desc')).toBe(false);
+  });
+
+  it('uses stat-desc styling for an opted-in hint', () => {
+    const { el } = make({ hint: 'in 2 hours', hintStyle: 'stat-desc' });
+    const hint = [...el.querySelectorAll('span')].find((span) => span.textContent === 'in 2 hours') as HTMLElement;
+    expect(hint.classList.contains('stat-desc')).toBe(true);
+    expect(hint.classList.contains('text-base-content-muted')).toBe(true);
   });
 });
 

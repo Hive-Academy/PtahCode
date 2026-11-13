@@ -4,6 +4,11 @@ import { CHART_TEXT } from './chart-geometry';
 import { PtahChartSize, PtahChartTone, PtahStatTrend } from './chart.types';
 
 export type PtahStatAppearance = 'card' | 'plain' | 'surface';
+export type PtahStatIconPlacement = 'top-end' | 'center-end';
+export type PtahStatValueWeight = 'semibold' | 'medium';
+export type PtahStatValueWrap = 'none' | 'break-words';
+export type PtahStatRadius = 'none' | 'xl' | '2xl';
+export type PtahStatHintStyle = 'default' | 'stat-desc';
 /** Colour for the value text. `PtahChartTone` uses state tokens. The rest use the theme colours. */
 export type PtahStatValueTone =
   | PtahChartTone
@@ -50,10 +55,12 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
   host: {
     '[attr.data-appearance]': 'appearance()',
     '[class.surface-2]': "appearance() === 'surface'",
-    '[class.rounded-xl]': "appearance() === 'surface'",
+    '[class.rounded-xl]': "appearance() === 'surface' && radius() === 'xl'",
+    '[class.rounded-2xl]': "appearance() === 'surface' && radius() === '2xl'",
     '[class.p-4]': "appearance() === 'surface'",
     '[class.min-w-0]': "appearance() === 'surface'",
     '[class.overflow-hidden]': "appearance() === 'surface'",
+    '[attr.data-icon-placement]': "iconPlacement() === 'center-end' ? 'center-end' : null",
   },
   styles: `
     :host { display: block; }
@@ -66,8 +73,12 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
     :host { position: relative; }
     :host ::ng-deep [ptahStatIcon] { position: absolute; top: 0.5rem; right: 0.5rem; }
     :host ::ng-deep [ptahStatIcon] + span { padding-right: 1.75rem; }
+    :host([data-icon-placement='center-end']) ::ng-deep [ptahStatIcon] {
+      top: 50%; right: 1rem; transform: translateY(-50%);
+    }
+    :host([data-icon-placement='center-end']) > div { padding-right: 2rem; }
   `,
-  template: `<div class="flex flex-col gap-0.5" [attr.aria-busy]="loading() && !error() ? 'true' : null">
+  template: `<div [class]="iconPlacement() === 'center-end' ? 'flex flex-col gap-0' : 'flex flex-col gap-0.5'" [attr.aria-busy]="loading() && !error() ? 'true' : null">
     <ng-content select="[ptahStatIcon]" />
     @switch (headingLevel()) {
       @case (2) { <h2 class="text-xs text-base-content-muted">{{ label() }}</h2> }
@@ -91,7 +102,7 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
     } @else {
     <span class="flex items-baseline gap-2">
       <ng-content select="[ptahStatMedia]" />
-      <span class="font-semibold tabular-nums" [class]="valueClass()">{{ display() }}</span>
+      <span class="tabular-nums" [class]="valueClass()">{{ display() }}</span>
       @if (unit() && hasValue()) { <span class="-ml-1 text-xs text-base-content-muted" data-testid="stat-unit">{{ unit() }}</span> }
       @if (polarity(); as p) {
         @if (delta() || trend()) {
@@ -109,7 +120,7 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
         </span>
       }
     </span>
-    @if (hint()) { <span class="text-xs text-base-content-muted">{{ hint() }}</span> }
+    @if (hint()) { <span class="text-xs text-base-content-muted" [class.stat-desc]="hintStyle() === 'stat-desc'">{{ hint() }}</span> }
     <ng-content />
     }
   </div>`,
@@ -122,6 +133,11 @@ export class PtahStatComponent {
   readonly tone = input<PtahChartTone>('neutral');
   readonly hint = input<string | undefined>(undefined);
   readonly size = input<PtahChartSize>('sm');
+  readonly iconPlacement = input<PtahStatIconPlacement>('top-end');
+  readonly valueWeight = input<PtahStatValueWeight>('semibold');
+  readonly valueWrap = input<PtahStatValueWrap>('none');
+  readonly radius = input<PtahStatRadius>('xl');
+  readonly hintStyle = input<PtahStatHintStyle>('default');
   /**
    * `card` (default) draws a small card around the stat. `plain` draws none.
    * `surface` uses the `surface-2` class with `rounded-xl` and `p-4`, as the
@@ -184,7 +200,9 @@ export class PtahStatComponent {
   readonly valueClass = computed(() => {
     const t = this.valueTone();
     const color = t === undefined ? '' : isThemeTone(t) ? VALUE_TONE[t] : CHART_TEXT[t];
-    return color ? `${VALUE_TEXT[this.size()]} ${color}` : VALUE_TEXT[this.size()];
+    const weight = this.valueWeight() === 'medium' ? 'font-medium' : 'font-semibold';
+    const wrap = this.valueWrap() === 'break-words' ? 'min-w-0 break-words' : '';
+    return [weight, VALUE_TEXT[this.size()], color, wrap].filter(Boolean).join(' ');
   });
   readonly toneClass = computed(() => CHART_TEXT[this.tone()]);
 
