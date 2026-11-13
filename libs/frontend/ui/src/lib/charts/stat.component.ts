@@ -9,6 +9,7 @@ export type PtahStatValueWeight = 'semibold' | 'medium';
 export type PtahStatValueWrap = 'none' | 'break-words';
 export type PtahStatRadius = 'none' | 'xl' | '2xl';
 export type PtahStatHintStyle = 'default' | 'stat-desc';
+export type PtahStatLayout = 'default' | 'tile';
 /** Colour for the value text. `PtahChartTone` uses state tokens. The rest use the theme colours. */
 export type PtahStatValueTone =
   | PtahChartTone
@@ -54,13 +55,15 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '[attr.data-appearance]': 'appearance()',
-    '[class.surface-2]': "appearance() === 'surface'",
-    '[class.rounded-xl]': "appearance() === 'surface' && radius() === 'xl'",
-    '[class.rounded-2xl]': "appearance() === 'surface' && radius() === '2xl'",
-    '[class.p-4]': "appearance() === 'surface'",
-    '[class.min-w-0]': "appearance() === 'surface'",
-    '[class.overflow-hidden]': "appearance() === 'surface'",
+    '[class.rounded-xl]': "(appearance() === 'surface' || layout() === 'tile') && radius() === 'xl'",
     '[attr.data-icon-placement]': "iconPlacement() === 'center-end' ? 'center-end' : null",
+    '[attr.data-layout]': "layout() === 'tile' ? 'tile' : null",
+    '[attr.title]': 'title()',
+    '[class.surface-2]': "appearance() === 'surface' || layout() === 'tile'",
+    '[class.rounded-2xl]': "(appearance() === 'surface' || layout() === 'tile') && radius() === '2xl'",
+    '[class.p-4]': "appearance() === 'surface' || layout() === 'tile'",
+    '[class.min-w-0]': "appearance() === 'surface' || layout() === 'tile'",
+    '[class.overflow-hidden]': "appearance() === 'surface' || layout() === 'tile'",
   },
   styles: `
     :host { display: block; }
@@ -70,23 +73,31 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
       border-radius: var(--ptah-stat-radius);
       background-color: var(--ptah-stat-bg);
     }
+    :host([data-layout='tile']) { border: 0; background-color: var(--surface-2); }
+    :host([data-layout='tile']) > div > .stat-title,
+    :host([data-layout='tile']) > div > .stat-value,
+    :host([data-layout='tile']) > div > .stat-desc { grid-column: 1; min-width: 0; }
     :host { position: relative; }
     :host ::ng-deep [ptahStatIcon] { position: absolute; top: 0.5rem; right: 0.5rem; }
-    :host ::ng-deep [ptahStatIcon] + span { padding-right: 1.75rem; }
+    :host > div > span.contents + span { padding-right: 1.75rem; }
     :host([data-icon-placement='center-end']) ::ng-deep [ptahStatIcon] {
       top: 50%; right: 1rem; transform: translateY(-50%);
     }
     :host([data-icon-placement='center-end']) > div { padding-right: 2rem; }
+    :host([data-layout='tile']) .stat-figure {
+      grid-column: 2; grid-row: 1 / span 3; align-self: center; justify-self: end;
+    }
+    :host([data-layout='tile']) ::ng-deep [ptahStatIcon] { position: static; transform: none; }
   `,
-  template: `<div [class]="iconPlacement() === 'center-end' ? 'flex flex-col gap-0' : 'flex flex-col gap-0.5'" [attr.aria-busy]="loading() && !error() ? 'true' : null">
-    <ng-content select="[ptahStatIcon]" />
+  template: `<div [class]="layout() === 'tile' ? 'grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto_auto] min-w-0' : iconPlacement() === 'center-end' ? 'flex flex-col gap-0' : 'flex flex-col gap-0.5'" [attr.aria-busy]="loading() && !error() ? 'true' : null">
+    <span [class.contents]="layout() !== 'tile'" [class.stat-figure]="layout() === 'tile'"><ng-content select="[ptahStatIcon]" /></span>
     @switch (headingLevel()) {
-      @case (2) { <h2 class="text-xs text-base-content-muted">{{ label() }}</h2> }
-      @case (3) { <h3 class="text-xs text-base-content-muted">{{ label() }}</h3> }
-      @case (4) { <h4 class="text-xs text-base-content-muted">{{ label() }}</h4> }
-      @case (5) { <h5 class="text-xs text-base-content-muted">{{ label() }}</h5> }
-      @case (6) { <h6 class="text-xs text-base-content-muted">{{ label() }}</h6> }
-      @default { <span class="text-xs text-base-content-muted">{{ label() }}</span> }
+      @case (2) { <h2 class="text-xs text-base-content-muted" [class.stat-title]="layout() === 'tile'">{{ label() }}</h2> }
+      @case (3) { <h3 class="text-xs text-base-content-muted" [class.stat-title]="layout() === 'tile'">{{ label() }}</h3> }
+      @case (4) { <h4 class="text-xs text-base-content-muted" [class.stat-title]="layout() === 'tile'">{{ label() }}</h4> }
+      @case (5) { <h5 class="text-xs text-base-content-muted" [class.stat-title]="layout() === 'tile'">{{ label() }}</h5> }
+      @case (6) { <h6 class="text-xs text-base-content-muted" [class.stat-title]="layout() === 'tile'">{{ label() }}</h6> }
+      @default { <span class="text-xs text-base-content-muted" [class.stat-title]="layout() === 'tile'">{{ label() }}</span> }
     }
     @if (error()) {
       <span class="flex flex-col items-start gap-1" role="alert" data-testid="stat-error">
@@ -100,7 +111,7 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
         <span class="skeleton h-7 w-16 rounded" aria-hidden="true"></span>
       </span>
     } @else {
-    <span class="flex items-baseline gap-2">
+    <span class="flex items-baseline gap-2" [class.stat-value]="layout() === 'tile'">
       <ng-content select="[ptahStatMedia]" />
       <span class="tabular-nums" [class]="valueClass()">{{ display() }}</span>
       @if (unit() && hasValue()) { <span class="-ml-1 text-xs text-base-content-muted" data-testid="stat-unit">{{ unit() }}</span> }
@@ -120,7 +131,7 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
         </span>
       }
     </span>
-    @if (hint()) { <span class="text-xs text-base-content-muted" [class.stat-desc]="hintStyle() === 'stat-desc'">{{ hint() }}</span> }
+    @if (hint()) { <span class="text-xs text-base-content-muted" [class.stat-desc]="hintStyle() === 'stat-desc' || layout() === 'tile'">{{ hint() }}</span> }
     <ng-content />
     }
   </div>`,
@@ -138,6 +149,8 @@ export class PtahStatComponent {
   readonly valueWrap = input<PtahStatValueWrap>('none');
   readonly radius = input<PtahStatRadius>('xl');
   readonly hintStyle = input<PtahStatHintStyle>('default');
+  readonly layout = input<PtahStatLayout>('default');
+  readonly title = input<string | undefined>(undefined);
   /**
    * `card` (default) draws a small card around the stat. `plain` draws none.
    * `surface` uses the `surface-2` class with `rounded-xl` and `p-4`, as the
@@ -200,9 +213,11 @@ export class PtahStatComponent {
   readonly valueClass = computed(() => {
     const t = this.valueTone();
     const color = t === undefined ? '' : isThemeTone(t) ? VALUE_TONE[t] : CHART_TEXT[t];
-    const weight = this.valueWeight() === 'medium' ? 'font-medium' : 'font-semibold';
+    const tileText = this.layout() === 'tile' && this.valueWrap() === 'break-words';
+    const weight = tileText || this.valueWeight() === 'medium' ? 'font-medium' : 'font-semibold';
     const wrap = this.valueWrap() === 'break-words' ? 'min-w-0 break-words' : '';
-    return [weight, VALUE_TEXT[this.size()], color, wrap].filter(Boolean).join(' ');
+    const size = tileText ? 'text-sm' : this.layout() === 'tile' ? 'text-2xl' : VALUE_TEXT[this.size()];
+    return [weight, size, color, wrap].filter(Boolean).join(' ');
   });
   readonly toneClass = computed(() => CHART_TEXT[this.tone()]);
 

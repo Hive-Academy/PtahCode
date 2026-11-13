@@ -32,7 +32,42 @@ class CenterIconHost {}
 })
 class MediaHost {}
 
+@Component({
+  standalone: true,
+  imports: [PtahStatComponent],
+  template: `<ptah-stat label="Code index" [value]="42" layout="tile" title="Indexed code symbols" hint="Updated now" size="md"><svg ptahStatIcon></svg></ptah-stat>`,
+})
+class TileHost {}
+
 describe('PtahStatComponent consumer parity inputs', () => {
+  it('uses the tile grid with figure, title, value and description', () => {
+    const fixture = TestBed.createComponent(TileHost);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    const stat = el.querySelector<HTMLElement>('ptah-stat');
+    expect(stat?.dataset['layout']).toBe('tile');
+    expect(stat?.classList).toContain('p-4');
+    expect(stat?.classList).toContain('surface-2');
+    expect(stat?.querySelector('[ptahStatIcon]')).not.toBeNull();
+    expect(stat?.querySelector('.stat-title')?.textContent).toBe('Code index');
+    expect(stat?.querySelector('.stat-value .text-2xl')?.textContent).toBe('42');
+    expect(stat?.querySelector('.stat-desc')?.textContent).toBe('Updated now');
+  });
+
+  it('forwards the tooltip title to the host and keeps default layout', () => {
+    const { el } = make({ title: 'Metric details' });
+    expect(el.getAttribute('title')).toBe('Metric details');
+    expect(el.dataset['layout']).toBeUndefined();
+    expect(el.querySelector('.stat-title')).toBeNull();
+  });
+
+  it('uses small wrapped medium text for tile descriptions', () => {
+    const { el } = make({ layout: 'tile', value: 'Next Tuesday at noon', valueWrap: 'break-words' });
+    const value = el.querySelector('.tabular-nums');
+    expect(value?.classList).toContain('text-sm');
+    expect(value?.classList).toContain('font-medium');
+    expect(value?.classList).toContain('break-words');
+  });
   const valueEl = (el: HTMLElement) => el.querySelector('.tabular-nums') as HTMLElement;
 
   it('keeps the value colour and the card appearance by default', () => {
