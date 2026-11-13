@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PHASE_KINDS, TASK_TYPES } from '@ptah-extension/shared';
+import { MACHINE_CAPABILITIES } from '../ranking/capability';
 
 export { PHASE_KINDS } from '@ptah-extension/shared';
 
@@ -21,6 +22,8 @@ const PhaseSchema = z
     id: z.string().min(1).max(64),
     kind: z.enum(PHASE_KINDS),
     role: z.string().min(1).max(64).optional(),
+    requiredCapabilities: z.array(z.enum(MACHINE_CAPABILITIES)).max(MACHINE_CAPABILITIES.length).optional(),
+    toolProfile: z.object({ disallowedTools: z.array(z.string().trim().min(1)).max(256) }).strict().optional(),
     reviews: z.array(z.string().max(200)).max(64).optional(),
     shape: PhaseShapeSchema.optional(),
     weight: z.number().int().min(0).max(200000).optional(),

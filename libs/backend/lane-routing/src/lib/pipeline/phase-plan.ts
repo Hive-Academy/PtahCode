@@ -20,6 +20,7 @@ import { resolvePhase } from './phase-resolve';
 import {
   isSystemCliLane,
   toSubagentCandidate,
+  toPhaseSubagentCandidate,
   type RoutingCandidate,
 } from '../ranking/candidate.types';
 import {
@@ -34,7 +35,7 @@ import { score, type CandidateScore } from '../ranking/score';
 import { spread, type SpreadResult } from '../ranking/spread';
 import type { FallbackCause } from '../reasons/compile-reasons';
 import { policyForPhase, type PhasePolicy } from './tier-effort-policy';
-import { LANE_MODEL_ALTERNATES_CAP } from '../routing-constants';
+import { LANE_MODEL_ALTERNATES_CAP, SCORE_MAX } from '../routing-constants';
 import { AUTOMATIC_MATRIX_MODEL } from '../matrix/local-derivation';
 
 const LANE_INSTRUCTIONS = 'Choose the executor for this phase. Each score already includes past outcomes; pastOutcomes lists the delivered and failed run counts behind it. No entry means no verified runs were available for that executor in the outcome window.';
@@ -120,6 +121,7 @@ export function planRoutePhases(
   knownExecutors: readonly KnownPhaseExecutor[],
   remember: (candidates: readonly RoutingCandidate[]) => void,
   rotate = true,
+  toolNamesByPhase?: ReadonlyMap<string, ReadonlyMap<string, readonly string[] | null>>,
 ): { readonly plans: PhasePlan[]; readonly cursor: GatheredCall['rotation'] } {
   const plans: PhasePlan[] = [];
   let cursor = rotation;
@@ -135,6 +137,7 @@ export function planRoutePhases(
         pin?.executor,
         deferReviewerFamily,
         knownExecutors,
+        toolNamesByPhase?.get(phase.id),
       ),
     );
     const taskKind = taskKindFor(phase.kind);
@@ -169,7 +172,10 @@ export function planRoutePhases(
       taskKind,
       candidates: scored.map((row) => ({
         candidate: row.candidate,
-        score: row.scored.score,
+        score: !constraint.pinAccepted &&
+          (phase.kind === 'visual-review' || phase.kind === 'design') &&
+          row.candidate.kind === 'subagent'
+          ? SCORE_MAX : row.scored.score,
       })),
       ...(args.preferences !== undefined
         ? { preferences: args.preferences }
@@ -290,13 +296,13 @@ export function implementersOf(
   return known;
 }
 
-function candidatesFor(
+export function candidatesFor(
   phase: GatePhase,
   gathered: GatheredCall,
 ): RoutingCandidate[] {
   const candidates: RoutingCandidate[] = [...gathered.lanes];
   if (phase.role === undefined) {
-    candidates.push(toSubagentCandidate(phase.kind));
+    candidates.push(toPhaseSubagentCandidate(phase.kind));
   } else if (gathered.roles.includes(phase.role)) {
     candidates.push(toSubagentCandidate(phase.role));
   }
@@ -309,14 +315,17 @@ function constraintInput(
   executor: string | undefined,
   deferReviewerFamily: boolean,
   knownExecutors: readonly KnownPhaseExecutor[],
+  toolNames?: ReadonlyMap<string, readonly string[] | null>,
 ): ConstrainPhaseInput {
   return {
     phase: {
       id: phase.id,
       kind: phase.kind,
+      ...(phase.requiredCapabilities !== undefined ? { requiredCapabilities: phase.requiredCapabilities } : {}),
       ...(phase.reviews !== undefined ? { reviews: phase.reviews } : {}),
     },
     candidates,
+    toolNames,
     ...(executor !== undefined ? { pin: { executor } } : {}),
     ...(deferReviewerFamily
       ? { deferReviewerFamily: true }

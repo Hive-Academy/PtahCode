@@ -17,8 +17,11 @@ import {
   type RouteDecideArgs,
   type RouteDecideResult,
   type RouteDecideService,
+  type HostRoutingSetting,
 } from '@ptah-extension/lane-routing';
 import type { AgentNamespace } from '../types';
+import { composeEffectiveToolList, type EffectiveToolListDependencies } from '../mcp-core/effective-tool-list';
+import type { CliDetectionResult as CandidateRow } from '@ptah-extension/shared';
 
 /** F9. The skill treats this sentence as "tool not listed". */
 export const ROUTING_UNAVAILABLE_MESSAGE =
@@ -81,9 +84,16 @@ function limitKey(row: Pick<CliDetectionResult, 'cli' | 'ptahCliId'>): string {
 
 export function buildRouteCandidateSource(
   agent: RouteAgent,
+  readListDeps?: () => EffectiveToolListDependencies | null,
 ): RouteCandidateSource {
+  const rowsById = new Map<string, CandidateRow>();
   return {
-    rows: () => agent.list(),
+    rows: async () => {
+      const rows = await agent.list();
+      rowsById.clear();
+      for (const row of rows) rowsById.set(limitKey(row), row);
+      return rows;
+    },
 
     limits: async (rows) => {
       const lookup = agent.limits;
@@ -100,6 +110,30 @@ export function buildRouteCandidateSource(
     // A rejection stays a rejection. Gather records "roles unavailable"
     // and still offers built-in roles. Swallowing it as [] would hide that.
     roles: () => agent.listRoles(),
+
+    tools: async (candidate, phase) => {
+      if (candidate.kind === 'lane') {
+        // The runtime issues lane MCP tokens only to these six CLI adapters.
+        if (!['codex', 'cursor', 'copilot', 'opencode', 'grok', 'antigravity'].includes(candidate.cli)) return [];
+        const row = rowsById.get(candidate.id);
+        if (row?.manifest?.mcp.state === 'unsupported') return [];
+        if (row?.manifest?.mcp.state !== 'supported') return null;
+      }
+      // An absent host config cannot prove the list matches tools/list.
+      const effectiveListDeps = readListDeps?.();
+      if (effectiveListDeps == null) return null;
+      return composeEffectiveToolList(
+        candidate.kind === 'subagent' ? { kind: 'session' } : { kind: 'agent' },
+        'coding',
+        candidate.kind === 'lane' && candidate.cli === 'antigravity' ? 'lane-report' : 'privileged',
+        { kind: candidate.kind === 'subagent' ? 'session' : 'agent',
+          capability: candidate.kind === 'lane' && candidate.cli === 'antigravity' ? 'lane-report' : 'privileged',
+          phaseKind: phase.kind,
+          disallowedTools: phase.toolProfile?.disallowedTools ?? [],
+        },
+        effectiveListDeps,
+      ).map((tool) => tool.name);
+    },
   };
 }
 
@@ -112,7 +146,13 @@ export function buildRouteNamespace(
       if (!service) throw new RoutingUnavailableError();
       return service.decide(
         args,
-        buildRouteCandidateSource(deps.agent),
+        buildRouteCandidateSource(deps.agent, () => {
+          const token = LANE_ROUTING_TOKENS.HOST_ROUTING_SETTING;
+          if (!deps.container?.isRegistered(token, true)) return null;
+          const setting = deps.container.resolve<Pick<HostRoutingSetting, 'disabledMcpNamespaces'>>(token);
+          const disabledMcpNamespaces = setting.disabledMcpNamespaces();
+          return disabledMcpNamespaces === null ? null : { hasIDECapabilities: false, disabledMcpNamespaces };
+        }),
         context,
       );
     },

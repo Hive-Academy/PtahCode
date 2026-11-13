@@ -181,7 +181,8 @@ function executorOf(candidate: RoutingCandidate): ChosenExecutor {
       kind: 'subagent',
       id: candidate.id,
       family: candidate.family,
-      role: candidate.role,
+      ...(candidate.role !== undefined ? { role: candidate.role } : {}),
+      ...(candidate.phaseKind !== undefined ? { phaseKind: candidate.phaseKind } : {}),
     };
   }
   return {
@@ -327,7 +328,11 @@ function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
     fallbackCause: null,
     reason: orchestratorPhase
       ? `${reason}; No executor; the orchestrator does this phase${plan.constraint.excluded.length ? ` (excluded: ${plan.constraint.excluded.map(item => `${item.candidate}:${item.rule}`).join(', ')})` : ''}`
-      : reason,
+      : plan.constraint.exclusionReason === 'missing-capability' ||
+          plan.constraint.pinRule === 'missing-capability' ||
+          plan.constraint.pinRule === 'capability-unknown'
+        ? `${reason}; missing capability: ${plan.constraint.excluded.find(item => item.capability)?.capability ?? 'browser'}`
+        : reason,
   };
 }
 

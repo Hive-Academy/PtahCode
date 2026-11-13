@@ -141,7 +141,7 @@ export class HostRoutingCoordinator {
     private readonly setting: Pick<
       HostRoutingSetting,
       'isEnabled' | 'onDidChange' | 'getConfigurationGeneration'
-    >,
+    > & Partial<Pick<HostRoutingSetting, 'disabledMcpNamespaces'>>,
     @inject(LANE_ROUTING_TOKENS.SCOPE_CHECK_SERVICE)
     private readonly scopeCheck: ScopeCheck,
     @inject(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE)
@@ -529,6 +529,10 @@ export class HostRoutingCoordinator {
     try {
       this.candidateSource = buildRouteCandidateSource(
         this.apiBuilder.build().agent,
+        () => {
+          const disabledMcpNamespaces = this.setting.disabledMcpNamespaces?.() ?? null;
+          return disabledMcpNamespaces === null ? null : { hasIDECapabilities: false, disabledMcpNamespaces };
+        },
       );
     } catch (error: unknown) {
       this.reportFailure(null, 'candidates', error);

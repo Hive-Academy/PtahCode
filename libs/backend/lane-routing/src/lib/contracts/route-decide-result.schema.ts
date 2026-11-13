@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   OUTCOME_TASK_KINDS,
   TASK_TYPES,
+  PHASE_KINDS,
   type OutcomeRoutingSource,
 } from '@ptah-extension/shared';
 import type { LaneModelEntry } from '../lane-model-listing.port';
@@ -26,7 +27,8 @@ export const EXCLUSION_RULES = [
   'at-limit',
   'disabled',
   'not-installed',
-  'never-on-a-lane',
+  'missing-capability',
+  'capability-unknown',
   'reviewer-family',
   'pruned',
   'not-listed',
@@ -66,17 +68,20 @@ const ExcludedSchema = z
     phaseId: z.string(),
     candidate: z.string(),
     rule: z.enum(EXCLUSION_RULES),
+    capability: z.literal('browser').optional(),
   })
   .strict();
 
 /** A lane is spawned by `cli` or `ptahCliId`; a subagent by its `role`. */
 const ChosenExecutorSchema = z
   .object({
-    kind: z.enum(['lane', 'subagent']),
+    kind: z.enum(['lane', 'subagent', 'child-session']),
     id: z.string().refine((id) => id !== 'unavailable'),
     cli: z.string().optional(),
     ptahCliId: z.string().optional(),
     role: z.string().optional(),
+    phaseKind: z.enum(PHASE_KINDS).optional(),
+    sessionId: z.string().optional(),
     family: z.string(),
   })
   .strict()
@@ -92,12 +97,15 @@ const ChosenExecutorSchema = z
         message: 'a lane executor needs cli or ptahCliId',
       });
     }
-    if (executor.kind === 'subagent' && executor.role === undefined) {
+    if (executor.kind === 'subagent' && executor.role === undefined && executor.phaseKind === undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['role'],
-        message: 'a subagent executor needs its role',
+        message: 'a subagent executor needs a role or phase kind',
       });
+    }
+    if (executor.kind === 'child-session' && executor.sessionId === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['sessionId'], message: 'a child session needs its session id' });
     }
   });
 
@@ -142,12 +150,14 @@ export const UnavailableEntrySchema = z
       'no-eligible-candidate',
       'reviewer-family',
       'pin-unavailable',
+      'missing-capability',
     ]),
     excludedBy: z.array(
       z
         .object({
           candidate: z.string(),
           rule: z.enum(EXCLUSION_RULES),
+          capability: z.literal('browser').optional(),
         })
         .strict(),
     ),

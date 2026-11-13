@@ -16,6 +16,7 @@ import {
   ROUTING_UNAVAILABLE_MESSAGE,
   RoutingUnavailableError,
   buildRouteNamespace,
+  buildRouteCandidateSource,
   resolveRouteDecideService,
   type RouteServiceLocator,
 } from './route-namespace.builder';
@@ -134,6 +135,31 @@ function agent(
     ...overrides,
   };
 }
+
+describe('route candidate effective tools', () => {
+  const phase = { kind: 'visual-review', toolProfile: { disallowedTools: [] } };
+  const sdk = { kind: 'subagent' as const, id: 'subagent:visual-review',
+    phaseKind: 'visual-review' as const, family: 'claude' as const };
+
+  it('uses the same composed browser names and applies phase denials', async () => {
+    const source = buildRouteCandidateSource(agent(), () => ({
+      hasIDECapabilities: false, disabledMcpNamespaces: [],
+    }));
+    const names = await source.tools?.(sdk, phase);
+    expect(names).toContain('ptah_browser_navigate');
+    expect(await source.tools?.(sdk, {
+      ...phase, toolProfile: { disallowedTools: ['ptah_browser_navigate'] },
+    })).not.toContain('ptah_browser_navigate');
+  });
+
+  it('keeps unknown host config unknown and a tokenless lane empty', async () => {
+    const source = buildRouteCandidateSource(agent());
+    expect(await source.tools?.(sdk, phase)).toBeNull();
+    expect(await source.tools?.({ kind: 'lane', id: 'pi', cli: 'pi',
+      family: 'pi', installed: true, disabled: false, limitState: 'unknown',
+    }, phase)).toEqual([]);
+  });
+});
 
 describe('resolveRouteDecideService', () => {
   it('returns undefined when the container is missing', () => {

@@ -229,6 +229,7 @@ import {
   type McpCallerKind,
 } from './mcp-caller';
 import { isToolPermitted } from './mcp-caller-policy';
+import { composeEffectiveToolList, buildToolDefinitions } from './effective-tool-list';
 import {
   MCP_CALLER_FORBIDDEN_CODE,
   MCP_TOOL_DENIED_MESSAGE,
@@ -542,11 +543,8 @@ function handleToolsList(
 ): MCPResponse {
   const profile = resolveMcpToolProfile(request);
   const capability = requestCapability(request);
-  const tools = applyPhaseToolFilter(
-    buildToolSet(resolveMcpCaller(request), profile, deps).filter((tool) =>
-      isToolPermitted(tool.name, capability),
-    ),
-    request._callerBinding,
+  const tools = composeEffectiveToolList(
+    resolveMcpCaller(request), profile, capability, request._callerBinding, deps,
   );
 
   markEagerTools(tools, deps, profile);
@@ -557,154 +555,6 @@ function handleToolsList(
     id: request.id,
     result: { tools },
   };
-}
-
-/**
- * The ordered tool list for one caller — the single composition point for
- * per-caller tool sets.
- *
- * The profile keys the per-caller set: coding drops the Apps-only tools.
- * Every caller kind receives a byte-stable list within its profile, keeping
- * the order produced by buildToolDefinitions for prompt-cache stability.
- */
-function buildToolSet(
-  caller: McpCaller,
-  profile: McpToolProfile,
-  deps: Pick<
-    ProtocolHandlerDependencies,
-    'hasIDECapabilities' | 'disabledMcpNamespaces'
-  >,
-): MCPToolDefinition[] {
-  const all = buildToolDefinitions(deps);
-  return profile === 'apps'
-    ? all
-    : all.filter((tool) => !APPS_ONLY_TOOL_NAMES.has(tool.name));
-}
-
-/** The tool definitions this host lists, after namespace and capability gating. */
-function buildToolDefinitions(
-  deps: Pick<
-    ProtocolHandlerDependencies,
-    'hasIDECapabilities' | 'disabledMcpNamespaces'
-  >,
-): MCPToolDefinition[] {
-  const disabled = new Set(deps.disabledMcpNamespaces ?? []);
-
-  return [
-    buildWorkspaceAnalyzeTool(),
-    buildSearchFilesTool(),
-    buildGetDiagnosticsTool(),
-    buildCountTokensTool(),
-    buildWebSearchTool(),
-    buildExecuteCodeTool(),
-    buildApprovalPromptTool(),
-    // Always-on: deliberately NOT wrapped in a `disabled.has(...)` guard.
-    buildTaskCreateTool(),
-    buildTaskUpdateTool(),
-    buildTaskGetTool(),
-    buildTaskListTool(),
-    buildTaskCheckTool(),
-    // Always-on beside the task tools (TASK_2026_580, D12): an agent that
-    // cannot rely on it would leave its session unlinked from the task.
-    buildSessionLinkTaskTool(),
-    // Always-on (TASK_2026_655): the budget banner's handoff action relies on
-    // it, so the `agent` toggle must not remove it.
-    buildSessionHandoffTool(),
-    ...lifecycleTools.map((tool) => tool.definition),
-    // Always-on (TASK_2026_646): staffing one request stays listed when the
-    // `agent` toggle is off. Not eager — see ALWAYS_EAGER_TOOLS.
-    buildRouteDecideTool(),
-    // Listed on every tools/list, not eager (TASK_2026_646): markEagerTools
-    // leaves it deferred, the same way as execute_code.
-    buildOutcomeReportTool(),
-    // Listed only under the apps profile (TASK_2026_595), filtered in buildToolSet.
-    buildDashboardProposeSpecTool(),
-    buildSurfaceUpdateTool(),
-    buildSurfaceGetStateTool(),
-    buildArtifactPublishTool(),
-    ...(deps.hasIDECapabilities === true && !disabled.has('ide')
-      ? [
-          buildLspReferencesTool(),
-          buildLspDefinitionsTool(),
-          buildGetDirtyFilesTool(),
-        ]
-      : []),
-    ...(!disabled.has('agent')
-      ? [
-          buildAgentSpawnTool(),
-          buildAgentStatusTool(),
-          buildAgentReadTool(),
-          buildAgentMessageTool(),
-          buildAgentMessageStatusTool(),
-          buildAgentMessageControlTool(),
-          buildAgentMessageAckTool(),
-          buildAgentReportTool(),
-          buildAgentStopTool(),
-          buildAgentListTool(),
-          // Child chat sessions (TASK_2026_584): the same group, so the one
-          // `agent` toggle governs every way to start delegated work.
-          buildSessionStartTool(),
-          buildSessionSendTool(),
-          buildSessionStatusTool(),
-          buildSessionReadTool(),
-          buildSessionStopTool(),
-          buildSessionClearFinishedTool(),
-          // Blocking waits (TASK_2026_597, D13): one call instead of a
-          // ptah_agent_status loop, and an Nx check that blocks until it ends.
-          // Both are orchestration steps, so the `agent` toggle governs them.
-          buildAgentWaitTool(),
-          buildRunCheckTool({ transport: 'http' }),
-          buildRunCheckWaitTool(),
-        ]
-      : []),
-    ...(!disabled.has('git')
-      ? [
-          buildWorktreeListTool(),
-          buildWorktreeAddTool(),
-          buildWorktreeRemoveTool(),
-        ]
-      : []),
-    ...(!disabled.has('json') ? [buildJsonValidateTool()] : []),
-    ...(!disabled.has('browser')
-      ? [
-          buildBrowserNavigateTool(),
-          buildBrowserScreenshotTool(),
-          buildBrowserEvaluateTool(),
-          buildBrowserClickTool(),
-          buildBrowserTypeTool(),
-          buildBrowserContentTool(),
-          buildBrowserNetworkTool(),
-          buildBrowserCloseTool(),
-          buildBrowserStatusTool(),
-          buildBrowserRecordStartTool(),
-          buildBrowserRecordStopTool(),
-        ]
-      : []),
-    ...(!disabled.has('harness')
-      ? [
-          buildHarnessSearchSkillsTool(),
-          buildHarnessCreateSkillTool(),
-          buildHarnessSearchMcpRegistryTool(),
-          buildHarnessListInstalledMcpTool(),
-          buildHarnessInstallMcpTool(),
-          buildHarnessProposeConfigTool(),
-        ]
-      : []),
-    ...(!disabled.has('code')
-      ? [
-          buildAstAnalyzeTool(),
-          buildContextEnrichFileTool(),
-          buildGetDependentsTool(),
-          buildGetDependenciesTool(),
-          buildGetSymbolIndexTool(),
-          buildCodeSearchSymbolsTool(),
-          buildCodeReindexTool(),
-          buildMemorySearchTool(),
-          buildRelevanceRankFilesTool(),
-          buildProjectDetectMonorepoTool(),
-        ]
-      : []),
-  ];
 }
 
 /**

@@ -56,6 +56,7 @@ export const ROSTER_EXCLUSION_REASONS = [
   'no-eligible-candidate',
   'reviewer-family',
   'pin-unavailable',
+  'missing-capability',
 ] as const;
 
 export type RosterExclusionReason = (typeof ROSTER_EXCLUSION_REASONS)[number];
