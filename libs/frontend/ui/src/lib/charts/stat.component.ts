@@ -16,7 +16,9 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
  * Stat owner (TASK_2026_976_2421). A label, a value as text, and an optional
  * delta. The trend glyph is hidden from assistive tech and a visually hidden
  * word ("up", "down", "flat") carries it, so color is never the only cue.
- * An empty or non-finite value shows `Unavailable`.
+ * An empty or non-finite value shows `Unavailable` (see `placeholder`).
+ * A test hook: put `data-testid` on the `ptah-stat` host element. This is the
+ * supported hook. The inner markup is not a stable contract.
  */
 @Component({
   selector: 'ptah-stat', standalone: true,
@@ -37,10 +39,17 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
   `,
   template: `<div class="flex flex-col gap-0.5" [attr.aria-busy]="loading() && !error() ? 'true' : null">
     <ng-content select="[ptahStatIcon]" />
-    <span class="text-xs text-base-content-muted">{{ label() }}</span>
-    @if (error(); as message) {
+    @switch (headingLevel()) {
+      @case (2) { <h2 class="text-xs text-base-content-muted">{{ label() }}</h2> }
+      @case (3) { <h3 class="text-xs text-base-content-muted">{{ label() }}</h3> }
+      @case (4) { <h4 class="text-xs text-base-content-muted">{{ label() }}</h4> }
+      @case (5) { <h5 class="text-xs text-base-content-muted">{{ label() }}</h5> }
+      @case (6) { <h6 class="text-xs text-base-content-muted">{{ label() }}</h6> }
+      @default { <span class="text-xs text-base-content-muted">{{ label() }}</span> }
+    }
+    @if (error()) {
       <span class="flex flex-col items-start gap-1" role="alert" data-testid="stat-error">
-        <span class="text-xs text-state-err">{{ message }}</span>
+        <span class="text-xs text-state-err">{{ errorCopy() }}</span>
         <button type="button" ptahButton variant="ghost" size="xs" [attr.aria-label]="'Retry ' + label()"
           data-testid="stat-retry" (click)="retry.emit()">Retry</button>
       </span>
@@ -89,8 +98,26 @@ export class PtahStatComponent {
   readonly unit = input<string | undefined>(undefined);
   /** Draws a skeleton in place of the value. */
   readonly loading = input<boolean>(false);
-  /** Error message. Replaces the value and shows a Retry button. */
+  /**
+   * Safe presentation copy only (for example "Could not load."). The stat shows
+   * this text and nothing else. Never pass a raw Error, a message from a
+   * server, or a stack or file path: log those elsewhere. A value that is not
+   * a string shows generic copy. The text replaces the value and shows a Retry
+   * button.
+   */
   readonly error = input<string | undefined>(undefined);
+  /**
+   * Heading level (2 to 6) for the label. By default the label is a `span`.
+   * When set, the label is the matching heading element with the same classes.
+   */
+  readonly headingLevel = input<2 | 3 | 4 | 5 | 6 | undefined>(undefined);
+  /**
+   * Formats the value. Pass a function, or `Intl.NumberFormat` options that
+   * apply to numeric values. By default the value shows as `String(value)`.
+   */
+  readonly valueFormat = input<((value: string | number) => string) | Intl.NumberFormatOptions | undefined>(undefined);
+  /** Text shown when the value is unavailable. */
+  readonly placeholder = input<string>('Unavailable');
   /** Polarity of the change. When set, the delta and trend show as a pill. */
   readonly polarity = input<PtahStatPolarity | undefined>(undefined);
   /** The user pressed Retry in the error state. */
@@ -100,7 +127,19 @@ export class PtahStatComponent {
     const v = this.value();
     return typeof v === 'number' ? Number.isFinite(v) : v.trim() !== '';
   });
-  readonly display = computed(() => (this.hasValue() ? String(this.value()) : 'Unavailable'));
+  readonly display = computed(() => {
+    if (!this.hasValue()) return this.placeholder();
+    const v = this.value();
+    const fmt = this.valueFormat();
+    if (typeof fmt === 'function') return fmt(v);
+    if (fmt && typeof v === 'number') return new Intl.NumberFormat(undefined, fmt).format(v);
+    return String(v);
+  });
+  /** The error text to show. Only a string passes. Any other value gives generic copy. */
+  readonly errorCopy = computed(() => {
+    const e: unknown = this.error();
+    return typeof e === 'string' ? e : 'Something went wrong.';
+  });
   readonly pillClass = computed(() => CHART_TEXT[POLARITY_TONE[this.polarity() ?? 'neutral']]);
   readonly valueClass = computed(() => VALUE_TEXT[this.size()]);
   readonly toneClass = computed(() => CHART_TEXT[this.tone()]);

@@ -85,6 +85,51 @@ describe('PtahStatComponent extras', () => {
     expect(pill.querySelector('.sr-only')?.textContent).toBe(`, ${polarity}`);
   });
 
+  it('keeps the label a span by default', () => {
+    const { el } = make({});
+    expect(el.querySelector('h2,h3,h4,h5,h6')).toBeNull();
+    expect(el.querySelector('span.text-xs')?.textContent).toBe('Sessions');
+  });
+
+  it.each([2, 3, 4, 5, 6])('renders the label as h%s with the same classes', (level) => {
+    const { el } = make({ headingLevel: level });
+    const h = el.querySelector(`h${level}`) as HTMLElement;
+    expect(h.textContent).toBe('Sessions');
+    expect(h.classList.contains('text-xs')).toBe(true);
+    expect(h.classList.contains('text-base-content-muted')).toBe(true);
+  });
+
+  it('formats the value with a function', () => {
+    expect(make({ valueFormat: (v: string | number) => `${v}!` }).el.textContent).toContain('7!');
+  });
+
+  it('formats a number with Intl options', () => {
+    expect(make({ value: 0.5, valueFormat: { style: 'percent' } }).el.textContent).toContain('50%');
+  });
+
+  it('uses a custom placeholder and keeps the default', () => {
+    expect(make({ value: '', placeholder: 'N/A' }).el.textContent).toContain('N/A');
+    expect(make({ value: '' }).el.textContent).toContain('Unavailable');
+  });
+
+  it('shows only the passed copy, never a raw Error or its stack', () => {
+    const err = new Error('boom at C:/src/app.ts:1');
+    const { el } = make({ error: err });
+    const alert = el.querySelector('[role="alert"]') as HTMLElement;
+    expect(alert.textContent).not.toContain('boom');
+    expect(alert.textContent).not.toContain('app.ts');
+    const copy = make({ error: 'Could not load.' }).el.querySelector('[role="alert"] .text-state-err');
+    expect(copy?.textContent).toBe('Could not load.');
+  });
+
+  it('supports data-testid on the host as the test hook', () => {
+    const { fixture } = make({});
+    const host = fixture.nativeElement as HTMLElement;
+    host.setAttribute('data-testid', 'sessions-stat');
+    expect(host.matches('[data-testid="sessions-stat"]')).toBe(true);
+    expect(host.querySelector('[data-testid="sessions-stat"]')).toBeNull();
+  });
+
   it('draws no pill when polarity is set without a delta or trend', () => {
     expect(make({ polarity: 'good' }).el.querySelector('[data-testid="stat-pill"]')).toBeNull();
   });

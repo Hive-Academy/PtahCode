@@ -9,6 +9,24 @@ import { PtahStatCardComponent } from './stat-card.component';
   >`,
 })
 class Host {}
+@Component({
+  standalone: true,
+  imports: [PtahStatCardComponent],
+  template: `<ptah-stat-card label="Runs" [value]="1" hint="From hint" trend="From alias" direction="up" />`,
+})
+class HintHost {}
+describe('PtahStatCardComponent hint', () => {
+  it('shows the hint over the deprecated trend alias and forwards the direction', async () => {
+    await TestBed.configureTestingModule({ imports: [HintHost] }).compileComponents();
+    const f = TestBed.createComponent(HintHost);
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.textContent).toContain('From hint');
+    expect(el.textContent).not.toContain('From alias');
+    expect(el.textContent).toContain('up');
+    expect(el.querySelector('[aria-hidden="true"]')?.textContent).toBe('▲');
+  });
+});
 describe('PtahStatCardComponent', () => {
   it('renders required metrics and projected actions through the stat owner', async () => {
     await TestBed.configureTestingModule({
