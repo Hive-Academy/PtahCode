@@ -58,10 +58,12 @@ export interface WizardSearchSkillsResponse {
 }
 export interface WizardGetProjectGuidanceParams {
   analysis: DeepProjectAnalysis;
+  ownerDecision?: 'match' | 'raise';
 }
 export interface WizardGetProjectGuidanceResponse {
   facts: ProjectGuidance[];
   ownerDecisionPrompt: string;
+  recordPath?: string;
 }
 export interface WizardPreviewSkillsForConsentParams {
   skills: string[];
@@ -83,6 +85,8 @@ export interface WizardInstallSkillsWithConsentParams {
 export interface WizardInstallSkillsWithConsentResponse {
   success: boolean;
   installed: string[];
+  failedSkill?: string;
+  reason?: string;
 }
 import type { CliLaneDefaults } from './cli-lane-defaults.types';
 import type { CodexSandboxMode } from './advanced-settings.types';

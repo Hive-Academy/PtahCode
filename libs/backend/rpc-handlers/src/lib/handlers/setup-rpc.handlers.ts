@@ -1075,15 +1075,25 @@ export class SetupRpcHandlers {
       WizardGetProjectGuidanceParams,
       WizardGetProjectGuidanceResponse
     >('wizard:get-project-guidance', async (rawParams) => {
-      const { analysis } = this.parse(
-        WizardGetProjectGuidanceParamsSchema,
+      const { analysis, ownerDecision } = this.parse(
+        WizardGetProjectGuidanceParamsSchema.extend({
+          ownerDecision: z.enum(['match', 'raise']).optional(),
+        }),
         rawParams,
       );
       const service = this.resolveService<ProjectGuidanceService>(
         SKILL_PROJECT_GUIDANCE_SERVICE,
         'ProjectGuidanceService',
       );
-      return service.getGuidance(normalizeAgentOutput(analysis));
+      const supplied = rawParams?.analysis;
+      const source = supplied && typeof supplied === 'object' ? supplied as unknown as Record<string, unknown> : {};
+      const normalized = normalizeAgentOutput(analysis);
+      return service.getGuidance({
+        frameworks: Object.hasOwn(source, 'frameworks') ? normalized.frameworks : [],
+        ...(Object.hasOwn(source, 'architecturePatterns') ? { architecturePatterns: normalized.architecturePatterns } : {}),
+        ...(Object.hasOwn(source, 'codeConventions') && source['codeConventions'] && typeof source['codeConventions'] === 'object' && Object.keys(source['codeConventions']).length > 0 ? { codeConventions: normalized.codeConventions } : {}),
+        ...(Object.hasOwn(source, 'existingIssues') ? { existingIssues: normalized.existingIssues } : {}),
+      }, this.workspaceProvider.getWorkspaceRoot() ?? undefined, ownerDecision);
     });
   }
 

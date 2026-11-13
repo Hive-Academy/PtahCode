@@ -96,8 +96,8 @@ describe('SkillSelectionService', () => {
 });
 
 describe('ProjectGuidanceService', () => {
-  it('returns labeled facts and owner decision text', () => {
-    const r = new ProjectGuidanceService(logger).getGuidance({
+  it('returns labeled facts and owner decision text', async () => {
+    const r = await new ProjectGuidanceService(logger).getGuidance({
       frameworks: ['angular'],
     });
     expect(r.facts[0].label).toBe('follow');
