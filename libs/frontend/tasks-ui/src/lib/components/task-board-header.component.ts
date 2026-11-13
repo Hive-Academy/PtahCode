@@ -25,10 +25,6 @@ import {
 } from '../services/task-view-mode.service';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
-/** Shared focus ring from the design spec's token map. */
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-
 /**
  * TaskBoardHeaderComponent
  *
@@ -81,8 +77,12 @@ const FOCUS =
           @for (option of viewModes; track option) {
             <button
               type="button"
-              [class]="modeButtonClass(option)"
-              [attr.aria-pressed]="mode() === option"
+              ptahButton
+              variant="ghost"
+              size="sm"
+              density="compact"
+              [selected]="mode() === option"
+              class="gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
               [attr.data-testid]="'tasks-view-mode-' + option"
               [title]="modeTitle(option)"
               (click)="modeChange.emit(option)"
@@ -120,6 +120,7 @@ const FOCUS =
           class="dropdown dropdown-end"
           data-testid="tasks-maintenance-menu"
         >
+          <!-- Keep raw: ptahButton only supports button and anchor hosts; this summary controls the native details menu. -->
           <summary
             class="btn btn-ghost btn-sm gap-1.5 border border-surface-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             aria-label="Manage tasks: reindex, registry, tidy finished, excluded folders"
@@ -266,12 +267,6 @@ export class TaskBoardHeaderComponent {
     return mode === 'kanban'
       ? 'Kanban — six status columns of cards'
       : 'List — one scrolling table, grouped by status';
-  }
-
-  /** Active mode reads from `aria-pressed` and the selected surface. */
-  protected modeButtonClass(mode: TaskViewMode): string {
-    const active = this.mode() === mode ? ' bg-surface-3' : '';
-    return `btn btn-ghost btn-sm gap-1.5 ${FOCUS}${active}`;
   }
 
   /** Escape closes an open Manage menu and returns focus to its summary. */

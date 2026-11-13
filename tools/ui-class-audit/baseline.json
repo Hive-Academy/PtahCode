@@ -376,12 +376,6 @@
   "libs/frontend/chat/src/lib/components/organisms/transcript/chat-transcript.component.html": {
     "skeleton": 3
   },
-  "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/components/templates/app-shell.component.html": {
     "btn": 6,
     "btn-active": 3,
@@ -1314,7 +1308,6 @@
     "btn-sm": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/task-board-header.component.ts": {
-    "<dynamic>": 1,
     "btn": 1,
     "btn-ghost": 1,
     "btn-sm": 1
