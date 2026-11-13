@@ -59,3 +59,4 @@ export {
 export type { TaskEndTransitionDetector } from './lib/trigger/task-end-transition-detector';
 export type { TaskEndRunWorker } from './lib/worker/task-end-run-worker';
 export type { TaskEndRunReader } from './lib/read/task-end-run.reader';
+export { RepositoryIdentityResolver } from './lib/trigger/repository-identity';

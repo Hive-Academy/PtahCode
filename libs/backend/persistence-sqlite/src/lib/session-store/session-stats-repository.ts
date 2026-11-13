@@ -116,6 +116,23 @@ const coverageRowSchema = z.object({
 });
 export type SessionUsageCoverage = z.infer<typeof coverageRowSchema>;
 
+export interface UnresolvedRepositoryUsageRow {
+  rowId: number;
+  sessionId: string;
+  workspacePath: string | null;
+}
+
+export interface RepositoryUsageTotals {
+  repositoryId: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  knownCostMicroUsd: number | null;
+  hasUnknownTokens: boolean;
+  worktreePaths: string[];
+}
+
 /** One SQLite transaction per accepted contribution. Duplicate and older revisions are ignored. */
 export class SessionStatsRepository {
   constructor(
@@ -124,6 +141,70 @@ export class SessionStatsRepository {
     },
     private readonly logger?: Pick<Logger, 'error'>,
   ) {}
+
+  /** Scan by row ID so an unresolved path is not retried in the same pass. */
+  async getUnresolvedRepositoryUsagePage(afterRowId: number, limit = 200): Promise<UnresolvedRepositoryUsageRow[]> {
+    const db = await this.store.ready();
+    const rows: unknown[] = db.prepare(`SELECT t.rowid AS rowId, t.session_id AS sessionId,
+      COALESCE(t.worktree_path, s.workspace_path, t.workspace_key, s.workspace_key) AS workspacePath
+      FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
+      WHERE t.repository_id IS NULL AND t.rowid > ? ORDER BY t.rowid LIMIT ?`)
+      .all(safeInteger.parse(afterRowId), safeInteger.parse(limit));
+    return rows.map((row) => z.object({ rowId: safeInteger, sessionId: text, workspacePath: text.nullable() }).parse(row));
+  }
+
+  async setRepositoryUsageIdentity(rows: readonly { rowId: number; repositoryId: string; worktreePath: string }[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    const db = await this.store.ready();
+    let updated = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const updateTurn = db.prepare(`UPDATE session_usage_turns SET repository_id = ?, worktree_path = ?
+        WHERE rowid = ? AND repository_id IS NULL`);
+      const updateStats = db.prepare(`UPDATE session_stats SET repository_id = ?, worktree_path = ?
+        WHERE session_id = (SELECT session_id FROM session_usage_turns WHERE rowid = ?)
+        AND repository_id IS NULL`);
+      for (const row of rows) {
+        const repositoryId = text.parse(row.repositoryId);
+        const worktreePath = text.parse(row.worktreePath);
+        const rowId = safeInteger.parse(row.rowId);
+        updated += updateTurn.run(repositoryId, worktreePath, rowId).changes;
+        updateStats.run(repositoryId, worktreePath, rowId);
+      }
+      db.exec('COMMIT');
+      return updated;
+    } catch (error: unknown) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  async getRepositoryUsageTotals(repositoryId: string, fromMs: number, untilMs: number): Promise<RepositoryUsageTotals> {
+    const db = await this.store.ready();
+    const scope = text.parse(repositoryId);
+    const from = safeInteger.parse(fromMs);
+    const until = safeInteger.parse(untilMs);
+    if (until <= from) throw new Error('Usage range must be increasing');
+    const row: unknown = db.prepare(`SELECT COALESCE(SUM(input_tokens),0) AS inputTokens,
+      COALESCE(SUM(output_tokens),0) AS outputTokens,
+      COALESCE(SUM(cache_read_tokens),0) AS cacheReadTokens,
+      COALESCE(SUM(cache_write_tokens),0) AS cacheWriteTokens,
+      SUM(known_cost_micro_usd) AS knownCostMicroUsd,
+      COALESCE(MAX(input_tokens IS NULL OR output_tokens IS NULL OR cache_read_tokens IS NULL OR cache_write_tokens IS NULL),0) AS hasUnknownTokens
+      FROM session_usage_turns WHERE repository_id = ? AND billable = 1
+      AND occurred_at_ms >= ? AND occurred_at_ms < ?`).get(scope, from, until);
+    const totals = z.object({ inputTokens: safeInteger, outputTokens: safeInteger,
+      cacheReadTokens: safeInteger, cacheWriteTokens: safeInteger,
+      knownCostMicroUsd: safeInteger.nullable(), hasUnknownTokens: z.number().int().min(0).max(1) }).parse(row);
+    const paths: unknown[] = db.prepare(`SELECT DISTINCT worktree_path AS path FROM session_usage_turns
+      WHERE repository_id = ? AND billable = 1 AND worktree_path IS NOT NULL
+      AND occurred_at_ms >= ? AND occurred_at_ms < ? ORDER BY worktree_path`).all(scope, from, until);
+    return { repositoryId: scope, inputTokens: totals.inputTokens, outputTokens: totals.outputTokens,
+      cacheReadTokens: totals.cacheReadTokens, cacheWriteTokens: totals.cacheWriteTokens,
+      knownCostMicroUsd: totals.knownCostMicroUsd, hasUnknownTokens: totals.hasUnknownTokens === 1,
+      worktreePaths: paths.map((path) => z.object({ path: text }).parse(path).path) };
+  }
+
 
   async recordUsage(value: SessionUsageContribution): Promise<void> {
     await this.recordEvent([value]);
@@ -483,7 +564,7 @@ export class SessionStatsRepository {
       COALESCE(SUM(t.cache_read_tokens),0) AS cache_read_tokens,
       COALESCE(SUM(t.cache_write_tokens),0) AS cache_write_tokens,
       SUM(t.known_cost_micro_usd) AS known_cost_micro_usd,
-      MAX(t.known_cost_micro_usd IS NULL) AS has_unpriced,
+      MAX(t.known_cost_micro_usd IS NULL OR t.input_tokens IS NULL OR t.output_tokens IS NULL OR t.cache_read_tokens IS NULL OR t.cache_write_tokens IS NULL) AS has_unpriced,
       COUNT(DISTINCT t.session_id) AS session_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
       WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
@@ -524,7 +605,7 @@ export class SessionStatsRepository {
             MAX(occurred_at_ms) AS last_active_ms,
             COUNT(DISTINCT producer || ':' || event_key) AS message_count,
             SUM(known_cost_micro_usd) AS known_cost_micro_usd,
-            MAX(known_cost_micro_usd IS NULL) AS has_unpriced,
+             MAX(known_cost_micro_usd IS NULL OR input_tokens IS NULL OR output_tokens IS NULL OR cache_read_tokens IS NULL OR cache_write_tokens IS NULL) AS has_unpriced,
             COALESCE(SUM(input_tokens),0) AS input_tokens, COALESCE(SUM(output_tokens),0) AS output_tokens,
             COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens,
             COALESCE(SUM(cache_write_tokens),0) AS cache_write_tokens
