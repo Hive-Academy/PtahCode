@@ -335,6 +335,29 @@ it('renders each chart owner with tone, size and state examples', () => {
     expect(root.querySelector(`nav a[href="#${id}"]`)).not.toBeNull();
   }
   expect(root.querySelector('section#family-meter')?.textContent).toContain('Unavailable');
+  const meterSection = root.querySelector('section#family-meter');
+  expect(meterSection?.querySelectorAll('ptah-meter')).toHaveLength(45);
+  const newMeters = meterSection?.querySelector('[data-testid="meter-family-new-inputs"]');
+  expect(newMeters?.querySelectorAll('ptah-meter')).toHaveLength(6);
+  for (const [id, label] of [
+    ['meter-tone-gold', 'Gold tone'],
+    ['meter-tone-primary', 'Primary tone'],
+    ['meter-sweep', 'Sweep progress'],
+    ['meter-static-fill', 'Static fill'],
+    ['meter-bar-only', 'Bar only, text available to assistive technology'],
+    ['meter-external-label', 'External meter label'],
+  ]) {
+    const specimen = newMeters?.querySelector(`[data-testid="${id}"]`);
+    expect(specimen).not.toBeNull();
+    expect(specimen?.parentElement?.textContent).toContain(label);
+  }
+  expect(newMeters?.querySelector('[data-testid="meter-sweep"] .ptah-meter-sweep')).not.toBeNull();
+  expect(newMeters?.querySelector('[data-testid="meter-static-fill"] [style*="width"]')?.classList)
+    .not.toContain('transition-[width]');
+  expect(newMeters?.querySelector('[data-testid="meter-bar-only"] [data-meter-row]')?.classList)
+    .toContain('sr-only');
+  expect(newMeters?.querySelector('[data-testid="meter-external-label"] [aria-labelledby]')
+    ?.getAttribute('aria-labelledby')).toBe('gallery-meter-external-label');
   expect(root.querySelector('section#family-ring')?.textContent).toContain('Unavailable');
   expect(root.querySelector('section#family-sparkline')?.textContent).toContain('No trend data');
 });
