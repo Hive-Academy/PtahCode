@@ -62,6 +62,8 @@ let nextStatCardId = 0;
  * />
  * ```
  */
+// Left raw: it takes a state input (loading, error, ready) and emits retryRequested.
+// ptah-stat-card takes loading and error flags and emits retry, so adoption needs an API change.
 @Component({
   selector: 'ptah-stat-card',
   standalone: true,

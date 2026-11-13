@@ -29,6 +29,8 @@ describe('planRingCaption', () => {
 
   it.each([
     [30 * 1000, 'resets in <1m'],
+    [59 * 1000, 'resets in <1m'],
+    [61 * 1000, 'resets in 1m'],
     [14 * MINUTE, 'resets in 14m'],
     [14 * MINUTE + 30 * 1000, 'resets in 14m'],
     [3 * HOUR, 'resets in 3h'],

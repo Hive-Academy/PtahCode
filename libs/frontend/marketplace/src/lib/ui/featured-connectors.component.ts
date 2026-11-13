@@ -18,6 +18,7 @@ import {
   CatalogCardSkeletonComponent,
   CatalogGridComponent,
   PtahButtonDirective,
+  PtahSurfaceDirective,
 } from '@ptah-extension/ui';
 
 import type {
@@ -115,6 +116,7 @@ let instanceCounter = 0;
   standalone: true,
   imports: [
     PtahButtonDirective,
+    PtahSurfaceDirective,
     LucideAngularModule,
     BrandMarkComponent,
     CatalogCardComponent,
@@ -197,7 +199,8 @@ let instanceCounter = 0;
         @default {
           @if (cards().length === 0) {
             <div
-              class="flex flex-wrap items-center gap-3 rounded-xl border border-base-300 bg-base-200 p-4 text-sm text-base-content-muted"
+              ptahSurface padding="md"
+              class="flex flex-wrap items-center gap-3 text-sm text-base-content-muted"
               data-testid="featured-connectors-empty"
             >
               <span class="min-w-0 flex-1">
