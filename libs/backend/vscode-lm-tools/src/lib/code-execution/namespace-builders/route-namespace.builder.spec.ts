@@ -140,6 +140,25 @@ describe('route candidate effective tools', () => {
   const phase = { kind: 'visual-review', toolProfile: { disallowedTools: [] } };
   const sdk = { kind: 'subagent' as const, id: 'subagent:visual-review',
     phaseKind: 'visual-review' as const, family: 'claude' as const };
+  const child = { kind: 'child-session' as const, id: 'child-session' as const, family: 'claude' as const };
+
+  it('offers a child only when the caller may start one and uses session tools', async () => {
+    const eligible = jest.fn(() => ({ ok: true as const }));
+    const source = buildRouteCandidateSource(agent(), () => ({
+      hasIDECapabilities: false, disabledMcpNamespaces: [],
+    }), { canStart: eligible });
+    expect(source.childSessionEligible?.()).toBe(true);
+    expect(eligible).toHaveBeenCalledTimes(1);
+    expect(await source.tools?.(child, phase)).toContain('ptah_browser_navigate');
+    expect(await source.tools?.(child, { ...phase, toolProfile: { disallowedTools: ['ptah_browser_navigate'] } }))
+      .not.toContain('ptah_browser_navigate');
+    expect(await buildRouteCandidateSource(agent()).tools?.(child, phase)).toBeNull();
+    expect(buildRouteCandidateSource(agent()).childSessionEligible?.()).toBe(false);
+    expect(buildRouteCandidateSource(agent(), undefined, { canStart: () => ({ ok: false, code: 'depth-exceeded', reason: 'child' }) })
+      .childSessionEligible?.()).toBe(false);
+    expect(buildRouteCandidateSource(agent(), undefined, { canStart: () => ({ ok: false, code: 'mcp-unavailable', reason: 'offline' }) })
+      .childSessionEligible?.()).toBe(false);
+  });
 
   it('uses the same composed browser names and applies phase denials', async () => {
     const source = buildRouteCandidateSource(agent(), () => ({

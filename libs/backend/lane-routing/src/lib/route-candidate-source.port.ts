@@ -3,6 +3,8 @@ import type { RoutingCandidate } from './ranking/candidate.types';
 
 /** Host adapter that reads the current candidate rows, limits, and subagent roles. */
 export interface RouteCandidateSource {
+  /** Read at route time. True means this caller may start a new child. */
+  childSessionEligible?(): boolean;
   rows(): Promise<readonly CliDetectionResult[]>;
   limits(
     rows: readonly CliDetectionResult[],

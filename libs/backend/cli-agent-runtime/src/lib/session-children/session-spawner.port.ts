@@ -170,6 +170,11 @@ export type SessionSpawnRefusalCode =
   | 'worktree-outside-workspace'
   | 'session-start-failed';
 
+/** Read-only checks shared with start before request-specific checks. */
+export type SessionChildEligibility =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: SessionSpawnRefusalCode; readonly reason: string };
+
 export type SessionChildRollbackStepName =
   | 'remove-worktree'
   | 'delete-branch'
@@ -430,6 +435,7 @@ export type SessionChildCompletionDelivery =
     };
 
 export interface ISessionSpawner {
+  canStart(callerSessionId: string | undefined): SessionChildEligibility;
   start(request: SessionChildStartRequest): Promise<SessionChildStartResult>;
   /** Replace a live child with a successor in its existing worktree. */
   succeed(

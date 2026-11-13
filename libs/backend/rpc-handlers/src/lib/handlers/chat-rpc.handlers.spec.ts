@@ -606,6 +606,7 @@ describe('ChatRpcHandlers (Wave C7e thin facade)', () => {
       sessions: readonly AgentSessionOpenedPayload[],
     ): Mocked<ISessionSpawner> {
       return {
+        canStart: jest.fn().mockReturnValue({ ok: true }),
         listUiDescriptors: jest.fn().mockReturnValue(sessions),
       } as unknown as Mocked<ISessionSpawner>;
     }
@@ -701,6 +702,7 @@ describe('ChatRpcHandlers (Wave C7e thin facade)', () => {
     it('uses errorSource ChatRpcHandlers.registerChatAgentSessions when the spawner throws', async () => {
       const boom = new Error('registry exploded');
       const spawner = {
+        canStart: jest.fn().mockReturnValue({ ok: true }),
         listUiDescriptors: jest.fn().mockImplementation(() => {
           throw boom;
         }),

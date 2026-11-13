@@ -45,6 +45,7 @@ export interface LaneModelFacts {
 }
 
 export interface GatheredCall {
+  readonly childSessionEligible?: boolean;
   readonly lanes: readonly LaneCandidate[];
   readonly roles: readonly string[];
   readonly matrix: CapabilityMatrixSnapshot;
@@ -93,6 +94,7 @@ export async function gatherRouteCall(input: {
     ...(rotation.reason !== null ? (['rotation-store'] as const) : []),
   ]);
   return {
+    childSessionEligible: input.source.childSessionEligible?.() ?? false,
     lanes,
     roles: roles.roles,
     matrix,

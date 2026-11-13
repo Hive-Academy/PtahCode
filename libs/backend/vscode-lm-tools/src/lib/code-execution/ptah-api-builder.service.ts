@@ -876,6 +876,10 @@ export class PtahAPIBuilder {
         }
         return buildRouteNamespace({
           agent: builtAgent,
+          childSession: {
+            canStart: () => this.resolveSessionSpawner()?.canStart(getCallerSessionId()) ??
+              { ok: false, code: 'chat-runtime-unavailable', reason: 'session spawner unavailable' },
+          },
           container: this.container,
           hasIDECapabilities: this.ideCapabilities !== undefined,
         });

@@ -122,6 +122,7 @@ import type {
   SessionChildClearSkipReason,
   SessionChildCompletionDelivery,
   SessionChildCompletionEnvelope,
+  SessionChildEligibility,
   SessionChildLookupRefusal,
   SessionChildQuery,
   SessionChildReadResult,
@@ -207,6 +208,14 @@ interface StartGuardPass {
   readonly host: IChildChatSessionHost;
   readonly settings: SessionChildSettings;
   readonly reservation: SessionChildReservation;
+}
+
+interface StartEligibilityPass {
+  readonly ok: true;
+  readonly caller: SessionId;
+  readonly callerSdkId: string | undefined;
+  readonly adapter: IAgentAdapter;
+  readonly host: IChildChatSessionHost;
 }
 
 @injectable()
@@ -327,46 +336,49 @@ export class SessionSpawnerService implements ISessionSpawner {
     }
   }
 
+  canStart(callerSessionId: string | undefined): SessionChildEligibility {
+    const eligibility = this.checkStartEligibility(callerSessionId);
+    if (!eligibility.ok) return eligibility;
+    const settings = readSessionChildSettings(this.workspace);
+    if (settings.maxConcurrent > 0 && this.registry.liveCount() >= settings.maxConcurrent) {
+      return { ok: false, code: 'cap-reached', reason: `${settings.maxConcurrent} child sessions are already live in this host (agentSessions.maxConcurrent)` };
+    }
+    return { ok: true };
+  }
+
+  /** Shared, read-only checks. Request-specific branch and slot checks follow in start. */
+  private checkStartEligibility(callerSessionId: string | undefined): StartEligibilityPass | Extract<SessionChildEligibility, { ok: false }> {
+    if (this.disposed) {
+      return { ok: false, code: 'chat-runtime-unavailable', reason: 'the host is shutting down' };
+    }
+    const host = this.lookupHost();
+    const adapter = this.adapter;
+    if (!host || !adapter) {
+      return { ok: false, code: 'chat-runtime-unavailable', reason: 'this host has no chat runtime to start a child session in' };
+    }
+    const caller = SessionId.safeParse(callerSessionId?.trim());
+    if (!caller || !adapter.isSessionActive(caller)) {
+      return { ok: false, code: 'unattributed-caller', reason: 'ptah_session_start must be called from a live chat session; this ' +
+        'caller has no live session id' };
+    }
+    const callerSdkId = this.sdkIdOf(caller);
+    if (this.registry.isChild(caller) || this.registry.isChild(callerSdkId)) {
+      return { ok: false, code: 'depth-exceeded', reason: 'a child session cannot start child sessions (depth is limited to 1)' };
+    }
+    if ((this.mcpStatus?.getPort() ?? null) === null) {
+      return { ok: false, code: 'mcp-unavailable', reason: 'the Ptah MCP server is not running in this host, so a child could ' +
+        'not report back or be steered' };
+    }
+    return { ok: true, caller, callerSdkId, adapter, host };
+  }
+
   /** The synchronous guards, in order; the slot is reserved last. */
   private guardStart(
     request: SessionChildStartRequest,
   ): StartGuardPass | SessionChildStartResult {
-    const callerSessionId = request.callerSessionId;
-    if (this.disposed) {
-      return this.refuseStart(
-        'chat-runtime-unavailable',
-        'the host is shutting down',
-      );
-    }
-    const host = this.lookupHost();
-    if (!host || !this.adapter) {
-      return this.refuseStart(
-        'chat-runtime-unavailable',
-        'this host has no chat runtime to start a child session in',
-      );
-    }
-    const caller = SessionId.safeParse(callerSessionId?.trim());
-    if (!caller || !this.adapter.isSessionActive(caller)) {
-      return this.refuseStart(
-        'unattributed-caller',
-        'ptah_session_start must be called from a live chat session; this ' +
-          'caller has no live session id',
-      );
-    }
-    const callerSdkId = this.sdkIdOf(caller);
-    if (this.registry.isChild(caller) || this.registry.isChild(callerSdkId)) {
-      return this.refuseStart(
-        'depth-exceeded',
-        'a child session cannot start child sessions (depth is limited to 1)',
-      );
-    }
-    if ((this.mcpStatus?.getPort() ?? null) === null) {
-      return this.refuseStart(
-        'mcp-unavailable',
-        'the Ptah MCP server is not running in this host, so a child could ' +
-          'not report back or be steered',
-      );
-    }
+    const eligibility = this.checkStartEligibility(request.callerSessionId);
+    if (!eligibility.ok) return this.refuseStart(eligibility.code, eligibility.reason);
+    const { caller, callerSdkId, adapter, host } = eligibility;
     const existing = this.existingStart(
       [caller, callerSdkId],
       request.branch?.trim() ?? '',
@@ -415,7 +427,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       ok: true,
       caller,
       permissionLevel: this.lifecycle.find(caller)?.permissionLevel,
-      adapter: this.adapter,
+      adapter,
       host,
       settings,
       reservation,

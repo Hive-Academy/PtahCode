@@ -22,7 +22,7 @@ import {
 import type { AgentNamespace } from '../types';
 import { composeEffectiveToolList, type EffectiveToolListDependencies } from '../mcp-core/effective-tool-list';
 import type { CliDetectionResult as CandidateRow } from '@ptah-extension/shared';
-import { laneMcpTokenCapability } from '@ptah-extension/cli-agent-runtime';
+import { laneMcpTokenCapability, type SessionChildEligibility } from '@ptah-extension/cli-agent-runtime';
 
 /** F9. The skill treats this sentence as "tool not listed". */
 export const ROUTING_UNAVAILABLE_MESSAGE =
@@ -53,6 +53,8 @@ export interface RouteNamespace {
 
 export interface RouteNamespaceDependencies {
   readonly agent: Pick<AgentNamespace, 'list' | 'limits' | 'listRoles'>;
+  /** Lazy caller-bound child eligibility; absent hosts offer no child session. */
+  readonly childSession?: { canStart(): SessionChildEligibility };
   readonly hasIDECapabilities?: boolean;
   /** Read on every call. Absent or unregistered → F9, and no agent I/O. */
   readonly container: RouteServiceLocator | undefined;
@@ -87,9 +89,11 @@ function limitKey(row: Pick<CliDetectionResult, 'cli' | 'ptahCliId'>): string {
 export function buildRouteCandidateSource(
   agent: RouteAgent,
   readListDeps?: () => EffectiveToolListDependencies | null,
+  childSession?: { canStart(): SessionChildEligibility },
 ): RouteCandidateSource {
   const rowsById = new Map<string, CandidateRow>();
   return {
+    childSessionEligible: () => childSession?.canStart().ok === true,
     rows: async () => {
       const rows = await agent.list();
       rowsById.clear();
@@ -127,10 +131,10 @@ export function buildRouteCandidateSource(
       const effectiveListDeps = readListDeps?.();
       if (effectiveListDeps == null) return null;
       return composeEffectiveToolList(
-        candidate.kind === 'subagent' ? { kind: 'session' } : { kind: 'agent' },
+        candidate.kind === 'lane' ? { kind: 'agent' } : { kind: 'session' },
         'coding',
         capability,
-        { kind: candidate.kind === 'subagent' ? 'session' : 'agent',
+        { kind: candidate.kind === 'lane' ? 'agent' : 'session',
           capability,
           phaseKind: phase.kind,
           disallowedTools: phase.toolProfile?.disallowedTools ?? [],
@@ -158,7 +162,7 @@ export function buildRouteNamespace(
           return disabledMcpNamespaces === null || deps.hasIDECapabilities === undefined
             ? null
             : { hasIDECapabilities: deps.hasIDECapabilities, disabledMcpNamespaces };
-        }),
+        }, deps.childSession),
         context,
       );
     },

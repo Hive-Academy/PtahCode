@@ -176,6 +176,9 @@ function choiceFlags(
 }
 
 function executorOf(candidate: RoutingCandidate): ChosenExecutor {
+  if (candidate.kind === 'child-session') {
+    return { kind: 'child-session', id: candidate.id, family: candidate.family };
+  }
   if (candidate.kind === 'subagent') {
     return {
       kind: 'subagent',

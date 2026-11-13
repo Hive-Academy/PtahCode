@@ -4,7 +4,26 @@ import { laneQuestion } from './phase-plan';
 import { isSendable, resolvePhase } from './phase-resolve';
 import { TASK_TYPES } from '@ptah-extension/shared';
 import type { GatheredCall } from './gather';
-import { planRoutePhases, type GateArgs } from './phase-plan';
+import { candidatesFor, planRoutePhases, type GateArgs } from './phase-plan';
+
+it('offers the new child session kind only when its caller is eligible', () => {
+  const gathered: GatheredCall = {
+    lanes: [], roles: [], childSessionEligible: true,
+    rotation: { version: 1, entries: [] }, rotationUnavailable: false,
+    models: new Map(), missing: [], detailReasons: [],
+    matrix: {
+      reasons: [], outcomeFigures: () => null,
+      resolve: (family, model, taskKind) => ({
+        family, model, taskKind, score: 50, cell: { kind: 'unknown' as const },
+        profileModel: '*', noProfile: true,
+      }),
+    },
+  };
+  const phase = { id: 'build', kind: 'implement' } as GateArgs['phases'][number];
+  expect(candidatesFor(phase, gathered).map((candidate) => candidate.id)).toContain('child-session');
+  expect(candidatesFor(phase, { ...gathered, childSessionEligible: false }).map((candidate) => candidate.id))
+    .not.toContain('child-session');
+});
 import { policyForPhase } from './tier-effort-policy';
 
 function plan(scores: readonly number[]): PhasePlan {

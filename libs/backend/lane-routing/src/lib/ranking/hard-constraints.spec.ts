@@ -9,6 +9,7 @@ import {
 import {
   toLaneCandidate,
   toSubagentCandidate,
+  type ChildSessionCandidate,
   type LaneCandidate,
   type RoutingCandidate,
 } from './candidate.types';
@@ -100,6 +101,29 @@ function ids(result: PhaseConstraintResult): readonly string[] {
 }
 
 describe('constrainPhase requirement 3.2', () => {
+  it('accepts an eligible child pin and refuses incapable or missing child pins', () => {
+    const child: ChildSessionCandidate = {
+      kind: 'child-session',
+      id: 'child-session',
+      family: SUBAGENT_FAMILY,
+    };
+    const input: ConstrainPhaseInput = {
+      phase: { id: 'look', kind: 'visual-review' },
+      candidates: [child],
+      pin: { executor: 'child-session' },
+      toolNames: new Map([['child-session', ['ptah_browser_navigate']]]),
+    };
+    expect(ids(constrainPhase(input))).toEqual(['child-session']);
+    expect(constrainPhase({ ...input, toolNames: new Map([['child-session', []]]) })).toMatchObject({
+      status: 'unavailable', exclusionReason: 'pin-unavailable', pinRule: 'missing-capability',
+    });
+    expect(constrainPhase({ ...input, toolNames: new Map([['child-session', null]]) })).toMatchObject({
+      status: 'unavailable', exclusionReason: 'pin-unavailable', pinRule: 'capability-unknown',
+    });
+    expect(constrainPhase({ ...input, candidates: [] })).toMatchObject({
+      status: 'unavailable', exclusionReason: 'pin-unavailable', pinRule: 'not-listed',
+    });
+  });
   it('routes visual review to a capable lane and excludes one without browser tools', () => {
     const result = constrainPhase({
       phase: { id: 'look', kind: 'visual-review' },

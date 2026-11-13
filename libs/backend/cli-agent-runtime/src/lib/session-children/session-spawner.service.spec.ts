@@ -572,6 +572,30 @@ afterEach(() => {
 });
 
 describe('SessionSpawnerService.start — guards in order', () => {
+  it('does not reserve a slot when checking an eligible caller', () => {
+    const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
+    expect(h.spawner.canStart(PARENT)).toEqual({ ok: true });
+    const reservation = h.registry.reserveSlot(1);
+    expect(reservation).not.toBeNull();
+    if (reservation !== null) h.registry.release(reservation);
+  });
+  it('shares read-only eligibility refusals with start', async () => {
+    const cases = [
+      { name: 'no host', setup: (h: ReturnType<typeof makeHarness>) => h.build({ host: null }), caller: PARENT, code: 'chat-runtime-unavailable' },
+      { name: 'unattributed', setup: (h: ReturnType<typeof makeHarness>) => h.spawner, caller: undefined, code: 'unattributed-caller' },
+      { name: 'MCP unavailable', setup: (h: ReturnType<typeof makeHarness>) => h.build({ mcpStatus: { getPort: () => null } }), caller: PARENT, code: 'mcp-unavailable' },
+    ] as const;
+    for (const entry of cases) {
+      const h = makeHarness();
+      const spawner = entry.setup(h);
+      const before = h.registry.liveCount();
+      expect(spawner.canStart(entry.caller)).toMatchObject({ ok: false, code: entry.code });
+      expect(h.registry.liveCount()).toBe(before);
+      expect(h.provisioner.create).not.toHaveBeenCalled();
+      expect(await spawner.start(h.request({ callerSessionId: entry.caller }))).toMatchObject({ ok: false, refusal: entry.code });
+      spawner.dispose();
+    }
+  });
   it('passes the parent permission level captured before worktree provisioning', async () => {
     const h = makeHarness();
     h.provisioner.create.mockImplementationOnce(
@@ -702,6 +726,7 @@ describe('SessionSpawnerService.start — guards in order', () => {
   it('refuses a child calling start as depth-exceeded', async () => {
     const h = makeHarness();
     const child = await h.startChild();
+    expect(h.spawner.canStart(child.childSessionId)).toMatchObject({ ok: false, code: 'depth-exceeded' });
 
     const result = await h.spawner.start(
       h.request({
@@ -716,6 +741,7 @@ describe('SessionSpawnerService.start — guards in order', () => {
   it('refuses mcp-unavailable when the server has no port, before reserving', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     h.mcpStatus.getPort.mockReturnValue(null);
+    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'mcp-unavailable' });
 
     const result = await h.spawner.start(h.request());
 
@@ -734,6 +760,14 @@ describe('SessionSpawnerService.start — guards in order', () => {
     expect(first.ok).toBe(true);
     expect(second).toMatchObject({ ok: false, refusal: 'cap-reached' });
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a full cap without reserving another slot', async () => {
+    const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
+    await h.startChild();
+    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'cap-reached' });
+    expect(h.registry.liveCount()).toBe(1);
+    expect(h.registry.reserveSlot(1)).toBeNull();
   });
 
   it('starts more than five live children with the default unlimited setting', async () => {
@@ -2240,6 +2274,8 @@ describe('SessionSpawnerService.dispose', () => {
 
     h.spawner.dispose();
     h.spawner.dispose();
+
+    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'chat-runtime-unavailable', reason: 'the host is shutting down' });
 
     expect(h.idResolved.size + h.sessionEnd.size).toBe(listenersBefore - 2);
     expect(h.permissionListeners.size).toBe(0);

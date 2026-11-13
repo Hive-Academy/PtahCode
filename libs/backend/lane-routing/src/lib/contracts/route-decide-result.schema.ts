@@ -81,7 +81,6 @@ const ChosenExecutorSchema = z
     ptahCliId: z.string().optional(),
     role: z.string().optional(),
     phaseKind: z.enum(PHASE_KINDS).optional(),
-    sessionId: z.string().optional(),
     family: z.string(),
   })
   .strict()
@@ -104,8 +103,8 @@ const ChosenExecutorSchema = z
         message: 'a subagent executor needs a role or phase kind',
       });
     }
-    if (executor.kind === 'child-session' && executor.sessionId === undefined) {
-      ctx.addIssue({ code: 'custom', path: ['sessionId'], message: 'a child session needs its session id' });
+    if (executor.kind === 'child-session' && executor.id !== 'child-session') {
+      ctx.addIssue({ code: 'custom', path: ['id'], message: 'a new child session has kind identity' });
     }
   });
 

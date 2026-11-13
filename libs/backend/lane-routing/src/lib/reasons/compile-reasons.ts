@@ -98,7 +98,7 @@ export const MISSING_INPUT_REASON: Readonly<Record<MissingInput, string>> = {
 };
 
 export interface ChosenExecutor {
-  readonly kind: 'lane' | 'subagent';
+  readonly kind: 'lane' | 'subagent' | 'child-session';
   readonly id: string;
   readonly family: string;
   readonly cli?: string;

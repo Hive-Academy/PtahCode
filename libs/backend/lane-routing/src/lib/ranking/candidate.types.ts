@@ -39,7 +39,14 @@ export interface SubagentCandidate {
   readonly family: typeof SUBAGENT_FAMILY;
 }
 
-export type RoutingCandidate = LaneCandidate | SubagentCandidate;
+/** An eligible new child session; no session id exists until start succeeds. */
+export interface ChildSessionCandidate {
+  readonly kind: 'child-session';
+  readonly id: 'child-session';
+  readonly family: typeof SUBAGENT_FAMILY;
+}
+
+export type RoutingCandidate = LaneCandidate | SubagentCandidate | ChildSessionCandidate;
 
 /**
  * A system CLI lane has one default model and takes a per-call model id.

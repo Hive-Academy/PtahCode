@@ -4,6 +4,7 @@
  */
 import {
   LANE_DEFAULT_MODEL,
+  SUBAGENT_FAMILY,
   type LaneLimitState,
   type OutcomeTaskKind,
 } from '@ptah-extension/shared';
@@ -301,6 +302,9 @@ export function candidatesFor(
   gathered: GatheredCall,
 ): RoutingCandidate[] {
   const candidates: RoutingCandidate[] = [...gathered.lanes];
+  if (gathered.childSessionEligible) {
+    candidates.push({ kind: 'child-session', id: 'child-session', family: SUBAGENT_FAMILY });
+  }
   if (phase.role === undefined) {
     candidates.push(toPhaseSubagentCandidate(phase.kind));
   } else if (gathered.roles.includes(phase.role)) {
@@ -343,7 +347,7 @@ function scoreCandidate(
   const facts =
     candidate.kind === 'lane' ? gathered.models.get(candidate.id) : undefined;
   const configuredModel =
-    candidate.kind === 'subagent'
+    candidate.kind !== 'lane'
       ? { id: tier, provenance: 'tier' as const }
       : facts?.configuredModel;
   const scored = score(
