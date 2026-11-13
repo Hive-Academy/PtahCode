@@ -4,6 +4,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { CommandProviderReadiness, CommandVoiceError, CommandVoiceState } from '../model/command-center.store';
 
 /** Controls for the page-owned voice loop; all actions are explicit user intents. */
+// Left raw: the level bars are six or five separate vertical marks, but ptah-meter draws one continuous track.
 @Component({
   selector: 'ptah-command-voice-hud',
   standalone: true,

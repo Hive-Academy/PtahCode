@@ -4,7 +4,7 @@ import { chartGeometry, type ChartPoint } from '../charts/chart-geometry';
 import type { SurfaceComponentViewState } from '../surface-view-state';
 import { pageSlice } from '../table/table-rows';
 import type { DisplayNode } from '../view-model/view-model.types';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 export type ChartNode = Extract<DisplayNode, { kind: 'line-chart' | 'bar-chart' }>;
 
@@ -15,10 +15,10 @@ const SERIES_FILLS = ['fill-primary', 'fill-secondary', 'fill-accent', 'fill-inf
 @Component({
   selector: 'ptah-dashboard-chart',
   standalone: true,
-  imports: [PtahButtonDirective],
+  imports: [PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="card card-bordered bg-base-100 p-4 text-base-content" (keydown.escape)="collapse($event)">
+    <section ptahSurface variant="inset" padding="md" class="flex flex-col text-base-content" (keydown.escape)="collapse($event)">
       <h3 class="font-semibold">{{ node().title?.text ?? 'Chart' }}</h3>
       @if (node().description; as description) { <p>{{ description.text }}</p> }
       @if (node().data; as data) {
