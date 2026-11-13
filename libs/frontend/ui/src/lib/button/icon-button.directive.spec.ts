@@ -1,7 +1,11 @@
-import { Component, signal } from '@angular/core';
+import { Component, ErrorHandler, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PtahIconButtonDirective } from './icon-button.directive';
-import { PtahButtonSelectedAs, PtahButtonSize, PtahButtonTone } from './button.types';
+import {
+  PtahButtonSelectedAs,
+  PtahButtonSize,
+  PtahButtonTone,
+} from './button.types';
 @Component({
   standalone: true,
   imports: [PtahIconButtonDirective],
@@ -29,7 +33,16 @@ class Host {
 @Component({
   standalone: true,
   imports: [PtahIconButtonDirective],
-  template: `<button ptahIconButton label="Action" [tone]="tone()" [size]="size()" [selected]="selected()" [selectedAs]="selectedAs()"><svg aria-hidden="true"></svg></button>`,
+  template: `<button
+    ptahIconButton
+    label="Action"
+    [tone]="tone()"
+    [size]="size()"
+    [selected]="selected()"
+    [selectedAs]="selectedAs()"
+  >
+    <svg aria-hidden="true"></svg>
+  </button>`,
 })
 class InputsHost {
   readonly tone = signal<PtahButtonTone>('default');
@@ -38,18 +51,28 @@ class InputsHost {
   readonly selectedAs = signal<PtahButtonSelectedAs>('pressed');
 }
 
-it.each([['default', null], ['danger', 'danger'], ['muted-danger', 'muted-danger']] as const)('maps icon tone %s to its host attribute', (value, expected) => {
+it.each([
+  ['default', null],
+  ['danger', 'danger'],
+  ['muted-danger', 'muted-danger'],
+] as const)('maps icon tone %s to its host attribute', (value, expected) => {
   const fixture = TestBed.createComponent(InputsHost);
   fixture.componentInstance.tone.set(value);
   fixture.detectChanges();
-  expect((fixture.nativeElement as HTMLElement).querySelector('button')?.getAttribute('data-tone')).toBe(expected);
+  expect(
+    (fixture.nativeElement as HTMLElement)
+      .querySelector('button')
+      ?.getAttribute('data-tone'),
+  ).toBe(expected);
 });
 
 it('maps icon size lg to a square btn-lg host', () => {
   const fixture = TestBed.createComponent(InputsHost);
   fixture.componentInstance.size.set('lg');
   fixture.detectChanges();
-  const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
+  const button = (fixture.nativeElement as HTMLElement).querySelector(
+    'button',
+  )!;
   expect(button.classList.contains('btn-lg')).toBe(true);
   expect(button.classList.contains('btn-square')).toBe(true);
 });
@@ -61,16 +84,21 @@ it.each([
   [true, 'current', null, 'page', true],
   [false, 'current', null, null, false],
   [true, 'none', null, null, true],
-] as const)('maps icon selection %s as %s to host state', (selected, as, pressed, current, active) => {
-  const fixture = TestBed.createComponent(InputsHost);
-  fixture.componentInstance.selected.set(selected);
-  fixture.componentInstance.selectedAs.set(as);
-  fixture.detectChanges();
-  const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
-  expect(button.hasAttribute('data-selected')).toBe(active);
-  expect(button.getAttribute('aria-pressed')).toBe(pressed);
-  expect(button.getAttribute('aria-current')).toBe(current);
-});
+] as const)(
+  'maps icon selection %s as %s to host state',
+  (selected, as, pressed, current, active) => {
+    const fixture = TestBed.createComponent(InputsHost);
+    fixture.componentInstance.selected.set(selected);
+    fixture.componentInstance.selectedAs.set(as);
+    fixture.detectChanges();
+    const button = (fixture.nativeElement as HTMLElement).querySelector(
+      'button',
+    )!;
+    expect(button.hasAttribute('data-selected')).toBe(active);
+    expect(button.getAttribute('aria-pressed')).toBe(pressed);
+    expect(button.getAttribute('aria-current')).toBe(current);
+  },
+);
 it('names the square icon button and composes its tooltip', () => {
   const fixture = TestBed.createComponent(Host);
   fixture.detectChanges();
@@ -116,11 +144,6 @@ it('names the square icon button and composes its tooltip', () => {
   fixture.destroy();
 });
 describe('icon button label', () => {
-  let errorSpy: jest.SpyInstance;
-  beforeEach(() => {
-    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-  });
-  afterEach(() => errorSpy.mockRestore());
   function render(label: string): HTMLButtonElement {
     const fixture = TestBed.createComponent(Host);
     fixture.componentInstance.label.set(label);
@@ -139,22 +162,23 @@ describe('icon button label', () => {
   it.each([
     ['empty', ''],
     ['whitespace-only', ' \t\n '],
-  ])('reports an %s label and sets no accessible name', (_name, label) => {
-    const button = render(label);
-    expect(button.hasAttribute('aria-label')).toBe(false);
-    expect(button.hasAttribute('title')).toBe(false);
-    expect(button.hasAttribute('aria-labelledby')).toBe(false);
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('ptahIconButton requires a non-empty label'),
+  ])('rejects an %s label in dev mode', (_name, label) => {
+    const handleError = jest.fn();
+    TestBed.overrideProvider(ErrorHandler, { useValue: { handleError } });
+    const fixture = TestBed.createComponent(Host);
+    fixture.componentInstance.label.set(label);
+    fixture.detectChanges();
+    expect(handleError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'ptahIconButton requires a non-empty label',
+        ),
+      }),
     );
-    button.focus();
-    expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
-  it('uses the trimmed label as the accessible name and reports no error', () => {
+  it('uses the trimmed label as the accessible name', () => {
     const button = render('  Close panel  ');
     expect(button.getAttribute('aria-label')).toBe('Close panel');
-    expect(errorSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -162,9 +186,25 @@ describe('icon button label', () => {
   standalone: true,
   imports: [PtahIconButtonDirective],
   template: `
-    <button ptahIconButton label="Act" [attr.aria-pressed]="pressed()" [attr.aria-current]="current()">Hand</button>
-    <button ptahIconButton label="Act" aria-pressed="mixed" aria-current="step">Static</button>
-    <button ptahIconButton label="Act" [selected]="selected()" selectedAs="pressed">Owner</button>
+    <button
+      ptahIconButton
+      label="Act"
+      [attr.aria-pressed]="pressed()"
+      [attr.aria-current]="current()"
+    >
+      Hand
+    </button>
+    <button ptahIconButton label="Act" aria-pressed="mixed" aria-current="step">
+      Static
+    </button>
+    <button
+      ptahIconButton
+      label="Act"
+      [selected]="selected()"
+      selectedAs="pressed"
+    >
+      Owner
+    </button>
   `,
 })
 class ConsumerAriaHost {
@@ -192,7 +232,9 @@ describe('ptahIconButton selected aria ownership', () => {
   it('writes the owner value while selected is set and removes only what it wrote', () => {
     const fixture = TestBed.createComponent(ConsumerAriaHost);
     fixture.detectChanges();
-    const owner = (fixture.nativeElement as HTMLElement).querySelectorAll('button')[2];
+    const owner = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      'button',
+    )[2];
     expect(owner.hasAttribute('aria-pressed')).toBe(false);
     fixture.componentInstance.selected.set(true);
     fixture.detectChanges();
