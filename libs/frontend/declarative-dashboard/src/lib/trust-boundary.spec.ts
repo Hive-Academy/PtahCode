@@ -98,8 +98,8 @@ describe('trust boundary: producer text renders literally', () => {
     expect(texts(element, 'header p')).toEqual([markup]);
     expect(texts(element, 'section > h3')).toEqual([markup]);
     expect(texts(element, 'section > p')).toEqual([markup]);
-    expect(texts(element, '.card > h3')).toEqual([markup]);
-    expect(texts(element, '.card > p')).toEqual([markup]);
+    expect(texts(element, '[data-ptah-surface] > h3')).toEqual([markup]);
+    expect(texts(element, '[data-ptah-surface] > p')).toEqual([markup]);
     // Text and select labels, the radio legend and the checkbox label span.
     expect(texts(element, 'label[for^="ptah-surface-text"], label[for^="ptah-surface-choice"]:not([for*="option"])'))
       .toEqual([markup, markup, markup]);
