@@ -5,6 +5,7 @@ import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
+  PtahSurfaceDirective,
 } from '@ptah-extension/ui';
 import type { CliLaneDefaults, CliType } from '@ptah-extension/shared';
 import { cliModelDisplay, type SystemCliMatrixRow } from './cli-matrix-rows';
@@ -32,10 +33,11 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
     PtahButtonDirective,
     PtahBadgeDirective,
     PtahCheckboxDirective,
+    PtahSurfaceDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrl: './cli-provider-card.component.css',
-  template: `<article class="provider-card rounded-lg border border-base-content/10 bg-base-100 text-base-content"
+  template: `<article ptahSurface variant="inset" border="faint" padding="none" class="provider-card rounded-lg text-base-content"
       data-glass-surface="tile" [attr.data-testid]="'cli-provider-card-' + row().id">
     <header class="flex min-w-0 items-center gap-2 border-b border-base-content/10 px-3 py-2">
       <ptah-provider-mark [providerId]="row().cli" fallback="Terminal" size="sm" />
