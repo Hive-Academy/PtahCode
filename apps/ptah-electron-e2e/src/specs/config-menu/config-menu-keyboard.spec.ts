@@ -20,7 +20,7 @@ test.describe('Global configuration actions — keyboard operation', () => {
     await expect(
       page.locator('ptah-app-shell ptah-onboarding-home'),
     ).toBeVisible();
-    await expect(setupHub).toHaveAttribute('aria-current', 'page');
+    await expect(setupHub).toHaveAttribute('aria-current', 'true');
     await expect(
       page.locator('[data-test="config-menu-item-thoth"]'),
     ).not.toHaveAttribute('aria-current', 'page');
