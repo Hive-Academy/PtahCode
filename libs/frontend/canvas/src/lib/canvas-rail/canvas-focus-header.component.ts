@@ -1,4 +1,4 @@
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -20,7 +20,7 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
 @Component({
   selector: 'ptah-canvas-focus-header',
   standalone: true,
-  imports: [PtahIconButtonDirective, LucideAngularModule],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:pointerdown)': 'onDocumentPointerDown($event)' },
   template: `
@@ -49,7 +49,8 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
             type="button"
             role="menuitem"
             data-action="swap-panes"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            ptahButton variant="ghost" size="sm" density="compact" align="start"
+            class="flex-nowrap whitespace-nowrap font-normal"
             (click)="choose(swapPanesRequested)"
           >
             Swap panes
@@ -58,7 +59,8 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
             type="button"
             role="menuitem"
             data-action="close-pane"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            ptahButton variant="ghost" size="sm" density="compact" align="start"
+            class="flex-nowrap whitespace-nowrap font-normal"
             (click)="choose(closePaneRequested)"
           >
             Close pane
@@ -67,7 +69,8 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
             type="button"
             role="menuitem"
             data-action="close-split"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            ptahButton variant="ghost" size="sm" density="compact" align="start"
+            class="flex-nowrap whitespace-nowrap font-normal"
             (click)="choose(closeSplitRequested)"
           >
             Close split

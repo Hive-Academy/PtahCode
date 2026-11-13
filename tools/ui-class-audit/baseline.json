@@ -27,20 +27,15 @@
     "btn": 1,
     "btn-primary": 1
   },
-  "libs/frontend/canvas/src/lib/canvas-rail/canvas-focus-header.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 3
-  },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-inspector-dock.component.ts": {
     "skeleton": 6
   },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-rail-card.component.ts": {
     "<dynamic>": 1,
-    "btn": 11,
-    "btn-ghost": 11,
+    "btn": 6,
+    "btn-ghost": 6,
     "btn-primary": 1,
-    "btn-sm": 9,
+    "btn-sm": 4,
     "btn-xs": 2
   },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-rail.component.ts": {

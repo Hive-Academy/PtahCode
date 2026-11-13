@@ -355,7 +355,8 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
                 type="button"
                 role="menuitem"
                 data-action="move-up"
-                class="btn btn-ghost btn-sm justify-start font-normal"
+                ptahButton variant="ghost" size="sm" density="compact" align="start"
+                class="font-normal"
                 [class.opacity-60]="!canMoveUp()"
                 [attr.aria-disabled]="canMoveUp() ? null : 'true'"
                 [attr.aria-label]="canMoveUp() ? 'Move up' : 'Move up, first in group'"
@@ -368,7 +369,8 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
                 type="button"
                 role="menuitem"
                 data-action="move-down"
-                class="btn btn-ghost btn-sm justify-start font-normal"
+                ptahButton variant="ghost" size="sm" density="compact" align="start"
+                class="font-normal"
                 [class.opacity-60]="!canMoveDown()"
                 [attr.aria-disabled]="canMoveDown() ? null : 'true'"
                 [attr.aria-label]="canMoveDown() ? 'Move down' : 'Move down, last in group'"
@@ -383,7 +385,8 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
               type="button"
               role="menuitem"
               data-action="toggle-view"
-              class="btn btn-ghost btn-sm justify-start font-normal"
+              ptahButton variant="ghost" size="sm" density="compact" align="start"
+              class="font-normal"
               (click)="toggleView()"
             >
               {{ tab()?.viewMode === 'compact' ? 'Switch to full view' : 'Switch to compact view' }}
@@ -397,7 +400,8 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
                 type="button"
                 role="menuitem"
                 data-action="stop"
-                class="btn btn-ghost btn-sm justify-start font-normal"
+                ptahButton variant="ghost" size="sm" density="compact" align="start"
+                class="font-normal"
                 (click)="stop()"
               >
                 Stop session
@@ -408,7 +412,8 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
               type="button"
               role="menuitem"
               data-action="close-session"
-              class="btn btn-ghost btn-sm justify-start font-normal"
+              ptahButton variant="ghost" size="sm" density="compact" align="start"
+              class="font-normal"
               (click)="closeSession($event)"
             >
               Close session
