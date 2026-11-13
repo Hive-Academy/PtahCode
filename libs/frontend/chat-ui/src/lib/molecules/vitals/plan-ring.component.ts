@@ -45,23 +45,17 @@ export function planRingCaption(ring: PlanRingData): string {
   template: `
     @if (percent() !== null) {
       <ptah-ring
-        style="font-weight: 600"
         [value]="percent()!"
         [max]="100"
         [label]="ariaLabel()"
         [centerText]="centerText()"
-        size="row"
+        size="tile"
+        tone="accent"
+        centerTextWeight="semibold"
         [centerOnly]="true"
         [semanticRole]="'img'"
-        [stroke]="3.857142857142857"
-        [radius]="16.071428571428573"
-        [trackColor]="'oklch(var(--bc) / 0.12)'"
-        [arcColor]="'oklch(var(--a))'"
         [hideZeroArc]="true"
         [fadeArc]="true"
-        [boxSize]="'var(--ptah-stat-value-h, 56px)'"
-        [centerTextSize]="'calc(var(--ptah-stat-value-h, 56px) * 0.25)'"
-        [centerTextColor]="'oklch(var(--bc))'"
         [ariaLabel]="ariaLabel()"
       />
     }

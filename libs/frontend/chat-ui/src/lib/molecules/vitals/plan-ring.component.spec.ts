@@ -86,7 +86,7 @@ describe('PlanRingComponent', () => {
     const circles = ring.querySelectorAll<SVGCircleElement>('circle');
     expect(circles[1]?.getAttribute('stroke-width')).toBe('3.857142857142857');
     expect(circles[1]?.getAttribute('stroke-dasharray')).toBe('38 100');
-    expect(circles[1]?.style.color).toBe('oklch(var(--a))');
+    expect(circles[1]?.classList.contains('text-[var(--ptah-badge-accent-ink)]')).toBe(true);
     expect(ring.querySelector('span[aria-hidden="true"]')?.textContent).toContain('38%');
     expect(ring.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
       '38% used. 5h window · resets in 2h',
