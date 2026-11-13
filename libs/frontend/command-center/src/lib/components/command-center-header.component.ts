@@ -19,7 +19,7 @@ import { AudioLines, CircleGauge, LucideAngularModule, Moon, Settings, Sparkles,
       <div class="flex min-w-0 flex-wrap items-center gap-1">
         @if (micError()) {
           <span role="alert" class="text-xs text-error">Microphone access blocked</span>
-          <button type="button" ptahButton variant="ghost" class="underline" (click)="voiceSettings.emit()">Open Voice settings</button>
+          <button type="button" ptahButton variant="ghost" (click)="voiceSettings.emit()">Open Voice settings</button>
         }
         <button type="button" ptahButton class="max-w-full" [attr.aria-label]="voiceAriaStatus()" [title]="voiceAriaStatus()" (click)="voiceSettings.emit()">
           <lucide-angular [img]="audioIcon" class="size-4" aria-hidden="true" />
