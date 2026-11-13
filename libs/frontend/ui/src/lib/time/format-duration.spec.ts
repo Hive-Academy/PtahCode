@@ -24,6 +24,15 @@ describe('formatDuration', () => {
     expect(formatDuration(ms, 'compact')).toBe(text);
   });
 
+  it('decimal gives one decimal below 60 s, then whole minutes and seconds', () => {
+    expect(formatDuration(4_200, 'decimal')).toBe('4.2s');
+    expect(formatDuration(0, 'decimal')).toBe('0.0s');
+    expect(formatDuration(59_940, 'decimal')).toBe('59.9s');
+    expect(formatDuration(60_000, 'decimal')).toBe('1m 0s');
+    expect(formatDuration(125_400, 'decimal')).toBe('2m 5s');
+    expect(formatDuration(Number.NaN, 'decimal')).toBe('--');
+  });
+
   it('uses compact by default', () => {
     expect(formatDuration(45_000)).toBe('45s');
   });
