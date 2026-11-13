@@ -9,6 +9,7 @@ it.each<PtahPanelState>(['loading', 'empty', 'error', 'partial', 'no-permission'
   fixture.detectChanges();
   const region = fixture.nativeElement.querySelector(state === 'partial' ? '[role="status"]' : 'section') as HTMLElement;
   expect(region.getAttribute('aria-busy')).toBe(state === 'loading' ? 'true' : null);
+  expect(region.classList.contains('rounded-[var(--ptah-card-radius)]')).toBe(true);
   expect(region.textContent).toContain('Status');
   if (state !== 'partial') expect(region.classList.contains('min-h-32')).toBe(true);
   if (state === 'loading') {

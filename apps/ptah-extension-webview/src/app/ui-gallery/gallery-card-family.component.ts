@@ -53,7 +53,14 @@ import { GallerySectionComponent } from './gallery-section.component';
       <div class="grid gap-ptah-field sm:grid-cols-2 lg:grid-cols-4">
         @for (padding of paddings; track padding) {
           <ptah-surface-card [padding]="padding">
-            <span class="text-ptah-label text-base-content">padding {{ padding }}</span>
+            @if (padding === 'none') {
+              <div style="padding: var(--ptah-card-padding-md)">
+                <span class="text-ptah-label text-base-content">padding none</span>
+                <p class="text-ptah-hint text-base-content-muted">Content supplies its own spacing.</p>
+              </div>
+            } @else {
+              <span class="text-ptah-label text-base-content">padding {{ padding }}</span>
+            }
           </ptah-surface-card>
         }
       </div>
@@ -100,13 +107,17 @@ import { GallerySectionComponent } from './gallery-section.component';
           <p class="text-ptah-hint text-base-content-muted">Body text below the header slot.</p>
         </ptah-surface-card>
         <ptah-surface-card>
+          <span class="text-ptah-label text-base-content">With footer</span>
           <p class="text-ptah-hint text-base-content-muted">Body text above the footer slot.</p>
           <div card-footer class="flex justify-end gap-ptah-controls">
             <button ptahButton type="button" size="xs" variant="ghost">Cancel</button>
             <button ptahButton type="button" size="xs" variant="secondary">Save</button>
           </div>
         </ptah-surface-card>
-        <ptah-surface-card data-testid="card-family-empty" />
+        <ptah-surface-card>
+          <span class="text-ptah-label text-base-content">Body only</span>
+          <p class="text-ptah-hint text-base-content-muted">A simple card without header or footer slots.</p>
+        </ptah-surface-card>
       </div>
     </div>
 
@@ -133,6 +144,20 @@ import { GallerySectionComponent } from './gallery-section.component';
             <span class="text-ptah-label text-base-content">div ptahSurface {{ variant }} sm</span>
           </div>
         }
+      </div>
+      <div data-testid="card-family-options" class="grid gap-ptah-field sm:grid-cols-2 lg:grid-cols-4">
+        <div ptahSurface tone="info" [toneBorder]="true" padding="sm">
+          <span class="text-ptah-label text-base-content">tone info with toneBorder</span>
+        </div>
+        <div ptahSurface [translucent]="50" shadow="sm" padding="sm">
+          <span class="text-ptah-label text-base-content">translucent 50 with shadow sm</span>
+        </div>
+        <div ptahSurface border="faint" padding="sm">
+          <span class="text-ptah-label text-base-content">border faint</span>
+        </div>
+        <div ptahSurface padding="sm">
+          <span class="text-ptah-label text-base-content">defaults (no option)</span>
+        </div>
       </div>
       <section ptahSurface padding="md">
         <span class="text-ptah-label text-base-content">Outer panel</span>
@@ -177,6 +202,8 @@ export class GalleryCardFamilyComponent {
     subtle: 'Quieter plane. Surface-1 fill.',
     inset: 'Nested block. Base-100 fill, 8 px radius.',
     raised: 'Floats over the page. Surface-3 fill and a shadow.',
+    'surface-1': 'Glass plane. Surface-1 fill, surface border and highlight.',
+    'surface-2': 'Raised plane. Surface-2 fill, surface border and highlight.',
     legacy: 'Temporary exception. Old surface-2 look. Not for new use.',
   };
   public readonly activations = signal(0);
