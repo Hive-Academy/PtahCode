@@ -96,5 +96,22 @@ describe('CronSchedulerTabComponent', () => {
     expect(grid.classList.contains('grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))]')).toBe(true);
     expect(grid.className).not.toContain('xl:grid-cols-');
     expect(grid.children).toHaveLength(4);
+    for (const [id, label, tone] of [
+      ['cron-stat-total', 'Jobs', 'text-primary'],
+      ['cron-stat-enabled', 'Enabled', 'text-success'],
+      ['cron-stat-disabled', 'Disabled', 'text-base-content-muted'],
+    ]) {
+      const stat = grid.querySelector(`ptah-stat[data-testid="${id}"]`);
+      expect(stat?.textContent).toContain(label);
+      expect(stat?.querySelector('.tabular-nums')?.textContent?.trim()).toBe('0');
+      expect(stat?.querySelector('.tabular-nums')?.classList.contains(tone)).toBe(true);
+      expect(stat?.getAttribute('title')).toBeNull();
+    }
+    const nextRun = grid.querySelector('[data-testid="cron-stat-next-run"]');
+    expect(nextRun?.textContent).toContain('Next run');
+    expect(nextRun?.querySelector('.stat-value')?.classList.contains('text-info')).toBe(true);
+    expect(nextRun?.querySelector('.stat-value')?.textContent?.trim()).toBe('—');
+    expect(nextRun?.querySelector('.stat-desc')).toBeNull();
+    expect(nextRun?.getAttribute('title')).toBeNull();
   });
 });

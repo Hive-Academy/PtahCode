@@ -68,17 +68,17 @@ test.describe('Thoth — Memory tab', () => {
 
     const page = ui.page;
 
-    await expect(page.locator('[data-testid="memory-stat-core"]')).toHaveText(
+    await expect(page.locator('[data-testid="memory-stat-core"] .tabular-nums')).toHaveText(
       '3',
     );
     await expect(page.locator('[data-testid="memory-stat-recall"]')).toHaveText(
       '5',
     );
     await expect(
-      page.locator('[data-testid="memory-stat-archival"]'),
+      page.locator('[data-testid="memory-stat-archival"] .tabular-nums'),
     ).toHaveText('2');
     await expect(
-      page.locator('[data-testid="memory-stat-code-index"]'),
+      page.locator('[data-testid="memory-stat-code-index"] .tabular-nums'),
     ).toHaveText('120');
 
     await expect(page.locator('[data-testid="memory-entry-row"]')).toHaveCount(

@@ -34,6 +34,7 @@ import { CronJobCardComponent } from './cron-job-card.component';
 import { CronJobDetailDrawerComponent } from './cron-job-detail-drawer.component';
 import {
   PtahButtonDirective,
+  PtahStatComponent,
   PtahFieldComponent,
   PtahIconButtonDirective,
   PtahInputDirective,
@@ -88,6 +89,7 @@ function emptyForm(timezone: string): CronJobFormState {
   };
 }
 
+// Left raw: the Next run tile uses the theme text-info color, but ptah-stat maps info to the state color.
 @Component({
   selector: 'ptah-cron-scheduler-tab',
   standalone: true,
@@ -100,6 +102,7 @@ function emptyForm(timezone: string): CronJobFormState {
     CronJobCardComponent,
     CronJobDetailDrawerComponent,
     PtahButtonDirective,
+    PtahStatComponent,
     PtahIconButtonDirective,
     PtahFieldComponent,
     PtahInputDirective,
@@ -224,76 +227,20 @@ function emptyForm(timezone: string): CronJobFormState {
           class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3"
           aria-label="Cron statistics"
         >
-          <div class="stats surface-2 min-w-0 overflow-hidden">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-primary">
-                <lucide-angular
-                  [img]="CalendarClockIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div
-                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
-              >
-                Jobs
-              </div>
-              <div
-                class="stat-value text-2xl text-primary"
-                data-testid="cron-stat-total"
-              >
-                {{ stats().total }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="none" label="Jobs" [value]="stats().total" valueTone="primary" data-testid="cron-stat-total">
+            <lucide-angular ptahStatIcon [img]="CalendarClockIcon" class="w-6 h-6 text-primary" aria-hidden="true" />
+          </ptah-stat>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-success">
-                <lucide-angular
-                  [img]="CirclePlayIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div
-                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
-              >
-                Enabled
-              </div>
-              <div
-                class="stat-value text-2xl text-success"
-                data-testid="cron-stat-enabled"
-              >
-                {{ stats().enabled }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="none" label="Enabled" [value]="stats().enabled" valueTone="success" data-testid="cron-stat-enabled">
+            <lucide-angular ptahStatIcon [img]="CirclePlayIcon" class="w-6 h-6 text-success" aria-hidden="true" />
+          </ptah-stat>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-base-content-muted">
-                <lucide-angular
-                  [img]="CirclePauseIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div
-                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
-              >
-                Disabled
-              </div>
-              <div
-                class="stat-value text-2xl text-base-content-muted"
-                data-testid="cron-stat-disabled"
-              >
-                {{ stats().disabled }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="none" label="Disabled" [value]="stats().disabled" valueTone="muted" data-testid="cron-stat-disabled">
+            <lucide-angular ptahStatIcon [img]="CirclePauseIcon" class="w-6 h-6 text-base-content-muted" aria-hidden="true" />
+          </ptah-stat>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
+          <!-- Raw tile: ptah-stat info maps to state-run, which differs from theme text-info. -->
+          <div data-testid="cron-stat-next-run" class="stats surface-2 min-w-0 overflow-hidden">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-info">
                 <lucide-angular
