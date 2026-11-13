@@ -499,7 +499,63 @@ describe('UiGalleryComponent', () => {
     ).not.toBeNull();
   });
 
-  it('scrolls inside its own container and scrolls a section link to its section', () => {
+    it('renders every new ring input as a labelled specimen', () => {
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: Router, useValue: { navigateByUrl: jest.fn() } },
+        { provide: ThemeService, useValue: createThemeServiceStub() },
+      ],
+    });
+    const fixture = TestBed.createComponent(UiGalleryComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const section = root.querySelector('section#family-ring');
+    const samples = section?.querySelector('[data-testid="ring-new-inputs"]');
+    expect(section?.querySelectorAll('ptah-ring')).toHaveLength(44);
+    const specimens: readonly [string, readonly string[]][] = [
+      ['thresholds', ['thresholds']],
+      ['size-stat', ['size: stat']],
+      ['size-row', ['size: row']],
+      ['semantics', ['ariaLabel', 'semanticRole']],
+      ['core-pulse', ['pulseStyle', 'indeterminateRole']],
+      ['center-typography', ['centerTextWeight', 'subTextWeight']],
+      ['tile-size', ['size: tile']],
+      ['hide-zero-arc', ['hideZeroArc']],
+      ['fade-arc', ['fadeArc']],
+      ['center-only', ['centerOnly']],
+    ];
+    expect(samples?.querySelectorAll('ptah-ring')).toHaveLength(
+      specimens.length,
+    );
+    for (const [id, labels] of specimens) {
+      const specimen = samples?.querySelector(
+        `[data-testid="ring-input-${id}"]`,
+      );
+      expect(specimen?.querySelectorAll('ptah-ring')).toHaveLength(1);
+      for (const label of labels) expect(specimen?.textContent).toContain(label);
+    }
+    expect(
+      samples
+        ?.querySelector('[data-testid="ring-input-semantics"] [role="img"]')
+        ?.getAttribute('aria-label'),
+    ).toBe('Completion image');
+    expect(
+      samples?.querySelector(
+        '[data-testid="ring-input-core-pulse"] [role="img"] .ring-pulse',
+      ),
+    ).not.toBeNull();
+    expect(
+      samples
+        ?.querySelector('[data-testid="ring-input-hide-zero-arc"] circle:last-child')
+        ?.getAttribute('opacity'),
+    ).toBe('0');
+    expect(
+      samples?.querySelector('[data-testid="ring-input-fade-arc"] circle:last-child')
+        ?.classList,
+    ).toContain('fade-arc');
+  });
+
+it('scrolls inside its own container and scrolls a section link to its section', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: Router, useValue: { navigateByUrl: jest.fn() } },

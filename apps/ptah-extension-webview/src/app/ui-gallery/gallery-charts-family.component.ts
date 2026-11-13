@@ -104,8 +104,51 @@ import { GallerySectionComponent } from './gallery-section.component';
           <ptah-ring [value]="62" [max]="100" label="Center text" centerText="3/5" size="md" />
           <ptah-ring [value]="62" [max]="100" label="Sub text" centerText="62" subText="pts" size="lg" />
           <ptah-ring [value]="0" [max]="0" label="Indeterminate" [indeterminate]="true" valueText="Indexing" size="md" />
+          <ptah-ring data-testid="ring-family-pulse" [value]="0" [max]="0" label="Pulse" [indeterminate]="true" [centerOnly]="true" size="stat" />
           <ptah-ring [value]="62" [max]="100" label="Large" size="lg" />
           <ptah-ring [value]="62" [max]="100" label="Extra large" size="xl" />
+        </div>
+        <div data-testid="ring-new-inputs" class="grid gap-ptah-field sm:grid-cols-2">
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-thresholds">
+            <span class="text-ptah-caption text-base-content-muted">thresholds: warn 50%, danger 80%</span>
+            <ptah-ring [value]="60" [max]="100" label="Custom warn threshold" [thresholds]="{ warn: 50, danger: 80 }" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-size-stat">
+            <span class="text-ptah-caption text-base-content-muted">size: stat (32px)</span>
+            <ptah-ring [value]="8" [max]="100" label="Stat size" size="stat" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-size-row">
+            <span class="text-ptah-caption text-base-content-muted">size: row (56px)</span>
+            <ptah-ring [value]="62" [max]="100" label="Row size" size="row" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-semantics">
+            <span class="text-ptah-caption text-base-content-muted">ariaLabel: Completion image; semanticRole: img</span>
+            <ptah-ring [value]="72" [max]="100" label="Completion" size="md" ariaLabel="Completion image" semanticRole="img" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-core-pulse">
+            <span class="text-ptah-caption text-base-content-muted">pulseStyle: core; indeterminateRole: img</span>
+            <ptah-ring [value]="0" [max]="0" label="Core pulse image" size="md" [indeterminate]="true" pulseStyle="core" indeterminateRole="img" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-center-typography">
+            <span class="text-ptah-caption text-base-content-muted">centerTextWeight: semibold; subTextWeight: medium</span>
+            <ptah-ring [value]="72" [max]="100" label="Center weights" size="lg" centerText="72" subText="pts" centerTextWeight="semibold" subTextWeight="medium" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-tile-size">
+            <span class="text-ptah-caption text-base-content-muted">size: tile (follows the stat value height)</span>
+            <ptah-ring [value]="72" [max]="100" label="Tile size" size="tile" tone="accent" [centerOnly]="true" centerTextWeight="semibold" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-hide-zero-arc">
+            <span class="text-ptah-caption text-base-content-muted">hideZeroArc: true (empty track)</span>
+            <ptah-ring [value]="0" [max]="100" label="Hidden zero arc" size="md" [hideZeroArc]="true" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-fade-arc">
+            <span class="text-ptah-caption text-base-content-muted">fadeArc: true</span>
+            <ptah-ring [value]="72" [max]="100" label="Fading arc" size="md" [fadeArc]="true" />
+          </div>
+          <div class="flex flex-col items-start gap-ptah-inline" data-testid="ring-input-center-only">
+            <span class="text-ptah-caption text-base-content-muted">centerOnly: true (no side text)</span>
+            <ptah-ring [value]="72" [max]="100" label="Center only" size="md" [centerOnly]="true" />
+          </div>
         </div>
       </div>
     </ptah-gallery-section>
