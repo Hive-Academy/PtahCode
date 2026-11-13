@@ -82,6 +82,8 @@ function knownDone(step: StagedStep, total: number | null): number | null {
  * make the live region re-read the list; the determinate bar carries the
  * same numbers as its value. A `detail` aside stays readable.
  */
+// Left raw: the fill is scaled with scaleX, so its end cap squeezes at partial progress.
+// ptah-meter keeps round end caps, so adoption would change the look.
 @Component({
   selector: 'ptah-staged-steps',
   standalone: true,

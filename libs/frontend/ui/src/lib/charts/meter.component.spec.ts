@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PtahMeterComponent } from './meter.component';
@@ -95,8 +97,8 @@ describe('indeterminate appearance', () => {
     expect(fill.classList.contains('animate-pulse')).toBe(false);
     expect(bar.getAttribute('aria-label')).toBe('Used');
     expect(bar.hasAttribute('aria-valuenow')).toBe(false);
-    // Read the compiled component styles: injected <style> tags depend on test order.
-    const styles = (PtahMeterComponent.ɵcmp.styles ?? []).join('\n');
+    // Read the component source: the Jest preset strips component styles.
+    const styles = readFileSync(join(__dirname, 'meter.component.ts'), 'utf8');
     expect(styles).toContain('width: 40%');
     expect(styles).toContain('prefers-reduced-motion: reduce');
     expect(styles).toContain('width: 100%; opacity: 0.35');
