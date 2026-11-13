@@ -892,6 +892,48 @@ describe('SessionSpawnerService succession', () => {
     return { h, child };
   };
 
+  it('does not start a successor that a parent stop ended during the MCP root retain', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    let releaseRetain: (value: { registered: boolean }) => void = () =>
+      undefined;
+    h.registrar.retainRoot.mockImplementationOnce(
+      () =>
+        new Promise<{ registered: boolean }>((resolve) => {
+          releaseRetain = resolve;
+        }),
+    );
+    const starts = (h.host.startChildSession as jest.Mock).mock.calls.length;
+    const pending = h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
+    await flush();
+    const successorId = h.registry.get(child.childSessionId)?.succeededBy;
+    expect(successorId).toBeDefined();
+    const stopped = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+      followHandoff: true,
+    });
+    expect(stopped.ok).toBe(true);
+    releaseRetain({ registered: true });
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    expect((h.host.startChildSession as jest.Mock).mock.calls.length).toBe(
+      starts,
+    );
+    // The stop stays a stop: the predecessor is not made live again.
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
+    expect(h.registry.get(successorId as string)?.terminalStatus).toBe(
+      'stopped',
+    );
+  });
+
   it('recovers a child whose session ended during a failed handoff', async () => {
     const { h, child } = await endDuringFailedHandoff('provider-error');
     expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
