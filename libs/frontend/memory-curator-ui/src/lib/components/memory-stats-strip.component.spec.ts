@@ -30,7 +30,9 @@ describe('MemoryStatsStripComponent', () => {
       expect(stat?.textContent).toContain(label);
       expect(stat?.querySelector('.tabular-nums')?.textContent?.trim()).toBe(value);
       expect(stat?.querySelector('.tabular-nums')?.classList.contains(tone)).toBe(true);
-      expect(stat?.getAttribute('title')).toBeNull();
+      if (id !== 'memory-stat-code-index') {
+        expect(stat?.getAttribute('title')).toBeNull();
+      }
     }
     const code = grid.querySelector('[data-testid="memory-stat-code-index"]');
     expect(code?.getAttribute('title')).toBe('Indexed code symbols (functions, classes, methods) — shown separately from curated memory');
