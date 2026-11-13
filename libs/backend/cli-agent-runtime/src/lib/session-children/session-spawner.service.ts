@@ -305,6 +305,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       idResolved.register((payload) => this.onSessionIdResolved(payload)),
       sessionEnd.register((payload) => this.onSessionEnd(payload)),
       permissions.onPromptLifecycle((event) => this.onPromptLifecycle(event)),
+      turnState.onGeneratingChange(() => this.onGeneratingChange()),
     );
   }
 
@@ -1585,11 +1586,15 @@ export class SessionSpawnerService implements ISessionSpawner {
     runtime.runtimeTimer = undefined;
     if (runtime.succeeding) {
       runtime.capReached = true;
-      runtime.handoffGraceTimer = this.armTimer(
-        runtime.settings.handoffGraceMinutes * 60_000,
-        () => {
-          void this.onHandoffGraceExpired(childSessionId);
-        },
+      this.armHandoffGrace(runtime, childSessionId);
+      return;
+    }
+    // An idle child is not ended or replaced for idle wall time. New work
+    // (a parent message or a turn start) applies the cap and the succession limit.
+    if (this.isIdleWithoutPendingWork(child)) {
+      runtime.capReached = true;
+      this.log(
+        `${childSessionId} runtime cap reached while idle; deferring handoff until next message`,
       );
       return;
     }
@@ -1598,17 +1603,33 @@ export class SessionSpawnerService implements ISessionSpawner {
       return;
     }
     runtime.capReached = true;
-    if (this.isIdleWithoutPendingWork(child)) {
+    this.armHandoffGrace(runtime, childSessionId);
+  }
+
+  private armHandoffGrace(runtime: ChildRuntime, childSessionId: string): void {
+    runtime.handoffGraceTimer = this.armTimer(
+      runtime.settings.handoffGraceMinutes * 60_000,
+      () => {
+        void this.onHandoffGraceExpired(childSessionId);
+      },
+    );
+  }
+
+  /**
+   * A turn that starts in the child tab after a deferred cap gets the normal
+   * handoff grace, so that it cannot run without a bound.
+   */
+  private onGeneratingChange(): void {
+    for (const [childSessionId, runtime] of this.runtimes) {
+      if (!runtime.capReached || runtime.handoffGraceTimer) continue;
+      if (runtime.succeeding || runtime.stopping) continue;
+      const child = this.registry.get(childSessionId);
+      if (!child || child.terminalStatus) continue;
+      if (this.phaseOf(child) !== 'generating') continue;
       this.log(
-        `${childSessionId} runtime cap reached while idle; deferring handoff until next message`,
+        `${childSessionId} turn started after the deferred runtime cap; handoff grace armed`,
       );
-    } else {
-      runtime.handoffGraceTimer = this.armTimer(
-        runtime.settings.handoffGraceMinutes * 60_000,
-        () => {
-          void this.onHandoffGraceExpired(childSessionId);
-        },
-      );
+      this.armHandoffGrace(runtime, childSessionId);
     }
   }
 

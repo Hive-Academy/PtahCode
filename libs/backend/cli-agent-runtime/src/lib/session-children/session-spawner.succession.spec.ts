@@ -398,7 +398,25 @@ describe('SessionSpawnerService succession', () => {
     );
   });
 
-  it('uses the safety net when no succession is allowed', async () => {
+  it('uses the safety net at the cap for a busy child when no succession is allowed', async () => {
+    const h = makeHarness({
+      config: {
+        'agentSessions.maxRuntimeMinutes': 5,
+        'agentSessions.maxSuccessions': 0,
+      },
+    });
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    h.phases.set(child.childSessionId, 'generating');
+    jest.advanceTimersByTime(5 * 60_000);
+    await flush();
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'timed-out',
+    );
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers the succession limit for an idle child until the next message', async () => {
     const h = makeHarness({
       config: {
         'agentSessions.maxRuntimeMinutes': 5,
@@ -410,10 +428,57 @@ describe('SessionSpawnerService succession', () => {
     h.phases.set(child.childSessionId, 'idle');
     jest.advanceTimersByTime(5 * 60_000);
     await flush();
+    expect(
+      h.registry.get(child.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
+    expect(h.spawner['runtimes'].get(child.childSessionId)?.capReached).toBe(
+      true,
+    );
+    const result = await messageAfterCap(h, child.childSessionId);
+    await flush();
+    expect(result).toMatchObject({ delivered: false, reason: 'session-ended' });
     expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
       'timed-out',
     );
+    expect(h.registry.get(child.childSessionId)?.endReason).toContain(
+      'max successions reached',
+    );
+    expect(h.adapter.sendMessageToSession).not.toHaveBeenCalled();
     expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('arms the handoff grace when a direct tab turn starts after a deferred cap', async () => {
+    const h = makeHarness({
+      config: {
+        'agentSessions.maxRuntimeMinutes': 5,
+        'agentSessions.handoffGraceMinutes': 1,
+      },
+    });
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    h.phases.set(child.childSessionId, 'idle');
+    jest.advanceTimersByTime(5 * 60_000);
+    await flush();
+    expect(
+      h.spawner['runtimes'].get(child.childSessionId)?.handoffGraceTimer,
+    ).toBeUndefined();
+    // The user types in the child tab. The turn never ends.
+    h.startGenerating(child.childSessionId);
+    expect(h.lines.join('\n')).toContain(
+      'turn started after the deferred runtime cap; handoff grace armed',
+    );
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(
+      child.childSessionId,
+      'parent-stop',
+    );
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
+    expect(h.host.startChildSession.mock.calls[1][0].prompt).toContain(
+      'interrupted mid-step',
+    );
   });
 
   it('applies the chain limit to the successor', async () => {
@@ -435,6 +500,11 @@ describe('SessionSpawnerService succession', () => {
     if (!successor) return;
     h.phases.set(successor.childSessionId, 'idle');
     jest.advanceTimersByTime(5 * 60_000);
+    await flush();
+    expect(
+      h.registry.get(successor.childSessionId)?.terminalStatus,
+    ).toBeUndefined();
+    await messageAfterCap(h, successor.childSessionId);
     await flush();
     expect(h.registry.get(successor.childSessionId)?.terminalStatus).toBe(
       'timed-out',
