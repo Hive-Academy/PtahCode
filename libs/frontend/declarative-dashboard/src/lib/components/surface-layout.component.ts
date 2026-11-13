@@ -13,7 +13,7 @@ import {
 import { SURFACE_LIMITS, type SurfaceAction } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import type { SurfaceActionInvoke, SurfaceActionUiState } from '../surface-interaction';
 import type { LayoutNode, SurfaceNode } from '../view-model/view-model.types';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 /**
  * Children are rendered by the host's template, never by a component imported
@@ -129,7 +129,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
 @Component({
   selector: 'ptah-surface-layout',
   standalone: true,
-  imports: [NgTemplateOutlet, PtahButtonDirective],
+  imports: [NgTemplateOutlet, PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES],
   template: `
@@ -164,7 +164,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
     </ng-template>
     <ng-template #collapsible>
       <!-- The header button toggles the body; Escape inside collapses it and refocuses the button (R4.6, R9.1). -->
-      <section class="card card-bordered bg-base-100 flex min-w-0 flex-col text-base-content" [attr.data-kind]="node().kind"
+      <section ptahSurface variant="inset" padding="none" class="flex min-w-0 flex-col text-base-content" [attr.data-kind]="node().kind"
         (keydown.escape)="collapse($event)">
         <h3 class="m-0">
           <button #collapseToggle type="button" class="dp-toggle flex w-full items-center gap-2 rounded-[inherit] px-3 py-2 text-left"
@@ -209,7 +209,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
         }
       }
       @case ('card') {
-        <div class="card card-bordered bg-base-100 flex flex-col gap-3 p-4 text-base-content">
+        <div ptahSurface variant="inset" padding="md" class="flex flex-col gap-3 text-base-content">
           @if (title(); as title) { <h3 class="text-sm font-semibold">{{ title }}</h3> }
           @if (description(); as description) { <p class="text-sm text-base-content-muted">{{ description }}</p> }
           @if (layoutWidth() === 'container') {

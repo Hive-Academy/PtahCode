@@ -20,7 +20,11 @@ import type {
   NeedsAttentionTarget,
 } from '../data/attention';
 import { marketplaceRouteLink } from '../shell/marketplace-route-url';
-import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahSurfaceDirective,
+} from '@ptah-extension/ui';
 
 /**
  * Router commands for an item's "Review" link.
@@ -74,12 +78,18 @@ let nextNeedsAttentionId = 0;
 @Component({
   selector: 'ptah-needs-attention',
   standalone: true,
-  imports: [PtahBadgeDirective, PtahButtonDirective, LucideAngularModule, RouterLink],
+  imports: [
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahSurfaceDirective,
+    LucideAngularModule,
+    RouterLink,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     <section
-      class="rounded-xl border border-base-300 bg-base-200"
+      ptahSurface padding="none"
       [attr.aria-labelledby]="headingId"
       [attr.aria-busy]="state() === 'loading'"
       data-testid="needs-attention"
