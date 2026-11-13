@@ -828,6 +828,7 @@ const FALLBACK_RECAP_HEIGHT = 180;
           >
             @if (todo?.kind === 'known') {
               <span>☑ {{ todo.done }}/{{ todo.total }}</span>
+              <!-- Keep native progress: this compact todo bar uses the daisyUI success track at a fixed width. -->
               <progress
                 class="progress progress-success w-8"
                 [value]="todo.done"

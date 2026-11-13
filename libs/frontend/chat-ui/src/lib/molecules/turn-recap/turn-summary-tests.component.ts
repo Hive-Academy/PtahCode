@@ -54,6 +54,7 @@ const TONE_CLASS: Readonly<Record<TurnSummaryTestTone, string>> = {
   template: `
     @let tests = card();
       <div class="mb-2 flex min-w-0 items-center gap-2">
+        <!-- Keep native progress: this pass share uses the daisyUI success track beside a separate percentage. -->
         <progress
           class="progress progress-success h-1.5 min-w-0 flex-1"
           [value]="tests.summary.passed"
