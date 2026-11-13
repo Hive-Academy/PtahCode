@@ -5,7 +5,7 @@ import { SURFACE_PAGE_SIZE, type SurfaceComponentViewState } from '../surface-vi
 import { pageSlice } from '../table/table-rows';
 import type { DisplayNode } from '../view-model/view-model.types';
 import { DashboardPagerComponent } from './dashboard-pager.component';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahInputDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 export type ListNode = Extract<DisplayNode, { kind: 'list' }>;
 interface ListItem {
@@ -26,10 +26,10 @@ function plainText(value: unknown): string | undefined {
 @Component({
   selector: 'ptah-dashboard-list',
   standalone: true,
-  imports: [NgTemplateOutlet, DashboardPagerComponent, PtahButtonDirective, PtahInputDirective],
+  imports: [NgTemplateOutlet, DashboardPagerComponent, PtahButtonDirective, PtahInputDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="card card-bordered bg-base-100 p-3 text-base-content" (keydown.escape)="collapse($event)">
+    <section ptahSurface variant="inset" padding="sm" class="flex flex-col text-base-content" (keydown.escape)="collapse($event)">
       <div class="flex items-center justify-between gap-2">
         <h3 class="text-sm font-semibold">{{ title() }}</h3>
         <button #expandButton type="button" ptahButton variant="ghost" size="xs"

@@ -24,6 +24,15 @@ describe('formatDuration', () => {
     expect(formatDuration(ms, 'compact')).toBe(text);
   });
 
+  it('decimal gives one decimal below 60 s, then whole minutes and seconds', () => {
+    expect(formatDuration(4_200, 'decimal')).toBe('4.2s');
+    expect(formatDuration(0, 'decimal')).toBe('0.0s');
+    expect(formatDuration(59_940, 'decimal')).toBe('59.9s');
+    expect(formatDuration(60_000, 'decimal')).toBe('1m 0s');
+    expect(formatDuration(125_400, 'decimal')).toBe('2m 5s');
+    expect(formatDuration(Number.NaN, 'decimal')).toBe('--');
+  });
+
   it('uses compact by default', () => {
     expect(formatDuration(45_000)).toBe('45s');
   });
@@ -34,10 +43,17 @@ describe('formatDuration', () => {
     expect(formatDuration(Number.NaN)).toBe('--');
   });
 
+  it('shows Infinity and -Infinity as --', () => {
+    expect(formatDuration(Number.POSITIVE_INFINITY)).toBe('--');
+    expect(formatDuration(Number.NEGATIVE_INFINITY, 'clock')).toBe('--');
+  });
+
   it('gives an ISO duration for a datetime attribute', () => {
     expect(toIsoDuration(75_400)).toBe('PT75S');
     expect(toIsoDuration(-1)).toBe('PT0S');
     expect(toIsoDuration(Number.NaN)).toBeNull();
+    expect(toIsoDuration(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(toIsoDuration(Number.NEGATIVE_INFINITY)).toBeNull();
   });
 });
 
@@ -49,5 +65,7 @@ describe('splitDuration', () => {
   it('gives zeros for a negative value and null for NaN', () => {
     expect(splitDuration(-5)).toEqual({ days: 0, hours: 0, minutes: 0, seconds: 0 });
     expect(splitDuration(Number.NaN)).toBeNull();
+    expect(splitDuration(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(splitDuration(Number.NEGATIVE_INFINITY)).toBeNull();
   });
 });
