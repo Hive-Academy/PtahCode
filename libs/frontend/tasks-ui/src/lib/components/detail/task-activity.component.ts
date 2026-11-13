@@ -281,7 +281,7 @@ function toSessionRow(session: TaskLinkedSession): SessionRow {
                   type="button"
                   ptahButton
                   variant="ghost"
-                  class="shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                  class="shrink-0"
                   [attr.aria-label]="'Open session ' + session.displayName"
                   [title]="'Open session ' + session.displayName"
                   data-testid="task-detail-session-open"
