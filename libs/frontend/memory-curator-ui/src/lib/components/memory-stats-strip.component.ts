@@ -33,7 +33,7 @@ export interface MemoryStatCounts {
           </ptah-stat>
 
           <!-- Raw tile: ptah-stat info maps to state-run, which differs from theme text-info. -->
-          <div data-testid="memory-stat-recall" class="surface-2 min-w-0 overflow-hidden rounded-xl">
+          <div data-testid="memory-stat-recall-tile" class="surface-2 min-w-0 overflow-hidden rounded-xl">
         <div class="stat min-w-0 overflow-hidden p-4">
           <div class="stat-figure text-info">
             <lucide-angular
@@ -44,6 +44,7 @@ export interface MemoryStatCounts {
           </div>
           <div class="stat-title min-w-0 whitespace-normal text-base-content-muted">Recall</div>
           <div
+            data-testid="memory-stat-recall"
             class="stat-value text-2xl text-info tabular-nums"
           >
             {{ c.recall }}

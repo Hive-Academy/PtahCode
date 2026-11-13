@@ -36,7 +36,7 @@ describe('MemoryStatsStripComponent', () => {
     }
     const code = grid.querySelector('[data-testid="memory-stat-code-index"]');
     expect(code?.getAttribute('title')).toBe('Indexed code symbols (functions, classes, methods) — shown separately from curated memory');
-    const recall = grid.querySelector('[data-testid="memory-stat-recall"]');
+    const recall = grid.querySelector('[data-testid="memory-stat-recall-tile"]');
     expect(recall?.textContent).toContain('Recall');
     expect(recall?.textContent).toContain('2');
     expect(recall?.querySelector('.stat-value')?.classList.contains('text-info')).toBe(true);
