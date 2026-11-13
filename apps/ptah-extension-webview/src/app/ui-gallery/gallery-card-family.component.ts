@@ -53,7 +53,14 @@ import { GallerySectionComponent } from './gallery-section.component';
       <div class="grid gap-ptah-field sm:grid-cols-2 lg:grid-cols-4">
         @for (padding of paddings; track padding) {
           <ptah-surface-card [padding]="padding">
-            <span class="text-ptah-label text-base-content">padding {{ padding }}</span>
+            @if (padding === 'none') {
+              <div style="padding: var(--ptah-card-padding-md)">
+                <span class="text-ptah-label text-base-content">padding none</span>
+                <p class="text-ptah-hint text-base-content-muted">Content supplies its own spacing.</p>
+              </div>
+            } @else {
+              <span class="text-ptah-label text-base-content">padding {{ padding }}</span>
+            }
           </ptah-surface-card>
         }
       </div>
@@ -100,13 +107,17 @@ import { GallerySectionComponent } from './gallery-section.component';
           <p class="text-ptah-hint text-base-content-muted">Body text below the header slot.</p>
         </ptah-surface-card>
         <ptah-surface-card>
+          <span class="text-ptah-label text-base-content">With footer</span>
           <p class="text-ptah-hint text-base-content-muted">Body text above the footer slot.</p>
           <div card-footer class="flex justify-end gap-ptah-controls">
             <button ptahButton type="button" size="xs" variant="ghost">Cancel</button>
             <button ptahButton type="button" size="xs" variant="secondary">Save</button>
           </div>
         </ptah-surface-card>
-        <ptah-surface-card data-testid="card-family-empty" />
+        <ptah-surface-card>
+          <span class="text-ptah-label text-base-content">Body only</span>
+          <p class="text-ptah-hint text-base-content-muted">A simple card without header or footer slots.</p>
+        </ptah-surface-card>
       </div>
     </div>
 
