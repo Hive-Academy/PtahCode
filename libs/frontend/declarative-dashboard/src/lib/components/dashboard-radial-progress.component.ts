@@ -20,6 +20,7 @@ const RADIAL_TONE_CLASSES = {
   error: 'radial-progress text-error',
 } as const;
 
+// Left raw: it uses daisyUI radial progress, whose geometry and tone differ from the ptah-ring SVG.
 @Component({
   selector: 'ptah-dashboard-radial-progress',
   standalone: true,
