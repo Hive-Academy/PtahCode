@@ -56,6 +56,29 @@ import { GallerySectionComponent } from './gallery-section.component';
           <ptah-meter [value]="100" [max]="100" label="Stripes err" tone="err" [stripes]="true" />
           <ptah-meter [value]="45" [max]="100" label="Neutral stripes" tone="neutral" [stripes]="true" />
         </div>
+        <div class="grid gap-ptah-field sm:grid-cols-2" data-testid="meter-family-new-inputs">
+          <div><span class="text-ptah-caption text-base-content-muted">Gold tone</span>
+            <ptah-meter data-testid="meter-tone-gold" [value]="62" [max]="100" label="Gold tone" tone="gold" />
+          </div>
+          <div><span class="text-ptah-caption text-base-content-muted">Primary tone</span>
+            <ptah-meter data-testid="meter-tone-primary" [value]="62" [max]="100" label="Primary tone" tone="primary" />
+          </div>
+          <div><span class="text-ptah-caption text-base-content-muted">Sweep progress</span>
+            <ptah-meter data-testid="meter-sweep" [value]="0" [max]="100" label="Sweep progress"
+              [indeterminate]="true" indeterminateStyle="sweep" />
+          </div>
+          <div><span class="text-ptah-caption text-base-content-muted">Static fill</span>
+            <ptah-meter data-testid="meter-static-fill" [value]="62" [max]="100" label="Static fill" [animate]="false" />
+          </div>
+          <div><span class="text-ptah-caption text-base-content-muted">Bar only, text available to assistive technology</span>
+            <ptah-meter data-testid="meter-bar-only" [value]="62" [max]="100" label="Bar only"
+              [hideLabel]="true" [showValue]="false" />
+          </div>
+          <div><span id="gallery-meter-external-label" class="text-ptah-caption text-base-content-muted">External meter label</span>
+            <ptah-meter data-testid="meter-external-label" [value]="62" [max]="100"
+              label="External meter label" ariaLabelledby="gallery-meter-external-label" />
+          </div>
+        </div>
       </div>
     </ptah-gallery-section>
 
