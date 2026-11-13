@@ -18,6 +18,60 @@ function make(inputs: Record<string, unknown>) {
 })
 class HostComponent {}
 
+@Component({
+  standalone: true,
+  imports: [PtahStatComponent],
+  template: `<ptah-stat label="Ring" [value]="3" appearance="surface"><i class="media" ptahStatMedia></i></ptah-stat>`,
+})
+class MediaHost {}
+
+describe('PtahStatComponent consumer parity inputs', () => {
+  const valueEl = (el: HTMLElement) => el.querySelector('.tabular-nums') as HTMLElement;
+
+  it('keeps the value colour and the card appearance by default', () => {
+    const { el } = make({});
+    expect([...valueEl(el).classList].sort()).toEqual(['font-semibold', 'tabular-nums', 'text-lg']);
+    expect(el.getAttribute('data-appearance')).toBe('card');
+    expect(el.classList.contains('surface-2')).toBe(false);
+  });
+
+  it.each([
+    ['primary', 'text-primary'],
+    ['success', 'text-success'],
+    ['error', 'text-error'],
+    ['muted', 'text-base-content-muted'],
+    ['ok', 'text-state-done'],
+    ['secondary', 'text-secondary'],
+    ['warning', 'text-warning'],
+    ['info', 'text-state-run'],
+    ['warn', 'text-state-need'],
+    ['err', 'text-state-err'],
+    ['neutral', 'text-[var(--ptah-badge-neutral-ink)]'],
+    ['accent', 'text-[var(--ptah-badge-accent-ink)]'],
+  ])('colours the value with valueTone %s', (tone, cls) => {
+    expect(valueEl(make({ valueTone: tone }).el).classList.contains(cls)).toBe(true);
+  });
+
+  it('draws the surface appearance with the surface-2 classes and no card padding rule', () => {
+    const { el } = make({ appearance: 'surface' });
+    expect(el.getAttribute('data-appearance')).toBe('surface');
+    for (const c of ['surface-2', 'rounded-xl', 'p-4', 'min-w-0', 'overflow-hidden']) {
+      expect(el.classList.contains(c)).toBe(true);
+    }
+  });
+
+  it('projects the media slot before the value', () => {
+    const f = TestBed.createComponent(MediaHost);
+    f.detectChanges();
+    const media = f.nativeElement.querySelector('.media') as HTMLElement;
+    expect(media.nextElementSibling?.classList.contains('tabular-nums')).toBe(true);
+  });
+
+  it('shows the hint as the caption line', () => {
+    expect(make({ hint: 'in 2 hours' }).el.textContent).toContain('in 2 hours');
+  });
+});
+
 describe('PtahStatComponent extras', () => {
   it('keeps the default DOM when no extra input is set', () => {
     const { el } = make({});

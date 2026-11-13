@@ -1,6 +1,19 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { LucideAngularModule, type LucideIconData } from 'lucide-angular';
 import { PtahStatComponent } from '../charts/stat.component';
 import type { PtahChartSize, PtahStatTrend } from '../charts/chart.types';
+
+/** Colour of the corner icon. */
+export type PtahStatCardTone = 'primary' | 'secondary' | 'info' | 'success' | 'warning' | 'error' | 'neutral';
+const TONE_ICON: Readonly<Record<PtahStatCardTone, string>> = {
+  primary: 'text-primary',
+  secondary: 'text-secondary',
+  info: 'text-info',
+  success: 'text-success',
+  warning: 'text-warning',
+  error: 'text-error',
+  neutral: 'text-base-content-muted',
+};
 
 const SIZE: Readonly<Record<'default' | 'dense', PtahChartSize>> = { default: 'md', dense: 'sm' };
 
@@ -8,11 +21,19 @@ const SIZE: Readonly<Record<'default' | 'dense', PtahChartSize>> = { default: 'm
 @Component({
   selector: 'ptah-stat-card',
   standalone: true,
-  imports: [PtahStatComponent],
+  imports: [PtahStatComponent, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<ptah-stat appearance="card" [label]="label()" [value]="value()" [hint]="effectiveHint()"
-    [trend]="direction()" [size]="statSize()">
-    <span ptahStatIcon><ng-content select="[actions]" /></span>
+    [trend]="direction()" [size]="statSize()"
+    [loading]="loading()" [error]="error()" (retry)="retry.emit()">
+    <span ptahStatIcon>
+      @if (icon(); as glyph) {
+        <span class="inline-flex shrink-0" [class]="toneClass()" aria-hidden="true" data-testid="stat-card-icon">
+          <lucide-angular [img]="glyph" class="h-5 w-5" />
+        </span>
+      }
+      <ng-content select="[actions]" />
+    </span>
     <ng-content />
   </ptah-stat>`,
 })
@@ -30,6 +51,18 @@ export class PtahStatCardComponent {
   readonly direction = input<PtahStatTrend | undefined>(undefined);
   readonly size = input<'default' | 'dense'>('default');
 
+  /** Draws a skeleton in place of the value. */
+  readonly loading = input<boolean>(false);
+  /** Safe presentation copy only. Shows an alert and a Retry button. See `ptah-stat`. */
+  readonly error = input<string | undefined>(undefined);
+  /** Decorative icon in the corner. */
+  readonly icon = input<LucideIconData | null>(null);
+  /** Colour of the icon. */
+  readonly tone = input<PtahStatCardTone>('neutral');
+  /** The user pressed Retry in the error state. */
+  readonly retry = output<void>();
+
+  protected readonly toneClass = computed(() => TONE_ICON[this.tone()]);
   protected readonly effectiveHint = computed(() => this.hint() ?? this.trend() ?? undefined);
   protected readonly statSize = computed(() => SIZE[this.size()]);
 }

@@ -3,7 +3,30 @@ import { PtahButtonDirective } from '../button/button.directive';
 import { CHART_TEXT } from './chart-geometry';
 import { PtahChartSize, PtahChartTone, PtahStatTrend } from './chart.types';
 
-export type PtahStatAppearance = 'card' | 'plain';
+export type PtahStatAppearance = 'card' | 'plain' | 'surface';
+/** Colour for the value text. `PtahChartTone` uses state tokens. The rest use the theme colours. */
+export type PtahStatValueTone =
+  | PtahChartTone
+  | 'primary'
+  | 'secondary'
+  | 'success'
+  | 'warning'
+  | 'error'
+  | 'muted';
+
+/** Whole class names, so Tailwind can see them. */
+const VALUE_TONE: Readonly<Record<'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'muted', string>> = {
+  primary: 'text-primary',
+  secondary: 'text-secondary',
+  success: 'text-success',
+  warning: 'text-warning',
+  error: 'text-error',
+  muted: 'text-base-content-muted',
+};
+type ThemeValueTone = keyof typeof VALUE_TONE;
+function isThemeTone(t: PtahStatValueTone): t is ThemeValueTone {
+  return t in VALUE_TONE;
+}
 /** Whether a change is good, bad or neutral for the user. Maps to a tone. */
 export type PtahStatPolarity = 'good' | 'bad' | 'neutral';
 
@@ -24,7 +47,14 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
   selector: 'ptah-stat', standalone: true,
   imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '[attr.data-appearance]': 'appearance()' },
+  host: {
+    '[attr.data-appearance]': 'appearance()',
+    '[class.surface-2]': "appearance() === 'surface'",
+    '[class.rounded-xl]': "appearance() === 'surface'",
+    '[class.p-4]': "appearance() === 'surface'",
+    '[class.min-w-0]': "appearance() === 'surface'",
+    '[class.overflow-hidden]': "appearance() === 'surface'",
+  },
   styles: `
     :host { display: block; }
     :host([data-appearance='card']) {
@@ -60,6 +90,7 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
       </span>
     } @else {
     <span class="flex items-baseline gap-2">
+      <ng-content select="[ptahStatMedia]" />
       <span class="font-semibold tabular-nums" [class]="valueClass()">{{ display() }}</span>
       @if (unit() && hasValue()) { <span class="-ml-1 text-xs text-base-content-muted" data-testid="stat-unit">{{ unit() }}</span> }
       @if (polarity(); as p) {
@@ -91,7 +122,11 @@ export class PtahStatComponent {
   readonly tone = input<PtahChartTone>('neutral');
   readonly hint = input<string | undefined>(undefined);
   readonly size = input<PtahChartSize>('sm');
-  /** `card` (default) draws a small card around the stat. `plain` draws none. */
+  /**
+   * `card` (default) draws a small card around the stat. `plain` draws none.
+   * `surface` uses the `surface-2` class with `rounded-xl` and `p-4`, as the
+   * stat tiles of the settings pages do.
+   */
   readonly appearance = input<PtahStatAppearance>('card');
 
   /** Text after the value ("ms"). Shown only when the value is available. */
@@ -116,6 +151,11 @@ export class PtahStatComponent {
    * apply to numeric values. By default the value shows as `String(value)`.
    */
   readonly valueFormat = input<((value: string | number) => string) | Intl.NumberFormatOptions | undefined>(undefined);
+  /**
+   * Colour of the value text. By default the value keeps the body colour.
+   * A media element (a ring or a chart) goes in the `[ptahStatMedia]` slot, before the value.
+   */
+  readonly valueTone = input<PtahStatValueTone | undefined>(undefined);
   /** Text shown when the value is unavailable. */
   readonly placeholder = input<string>('Unavailable');
   /** Polarity of the change. When set, the delta and trend show as a pill. */
@@ -141,7 +181,11 @@ export class PtahStatComponent {
     return typeof e === 'string' ? e : 'Something went wrong.';
   });
   readonly pillClass = computed(() => CHART_TEXT[POLARITY_TONE[this.polarity() ?? 'neutral']]);
-  readonly valueClass = computed(() => VALUE_TEXT[this.size()]);
+  readonly valueClass = computed(() => {
+    const t = this.valueTone();
+    const color = t === undefined ? '' : isThemeTone(t) ? VALUE_TONE[t] : CHART_TEXT[t];
+    return color ? `${VALUE_TEXT[this.size()]} ${color}` : VALUE_TEXT[this.size()];
+  });
   readonly toneClass = computed(() => CHART_TEXT[this.tone()]);
 
   glyph(trend: PtahStatTrend): string {
