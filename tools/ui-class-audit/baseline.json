@@ -471,7 +471,6 @@
     "badge-outline": 4,
     "badge-warning": 1,
     "badge-xs": 4,
-    "card": 1,
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/settings/pro-features/mcp-port-config.component.ts": {
