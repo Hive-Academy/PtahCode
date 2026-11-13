@@ -10,10 +10,10 @@ const pad = (n: number): string => String(n).padStart(2, '0');
 /**
  * 'clock': "0:05", "12:34", "1:02:03" (h:mm:ss, m:ss below 1 h).
  * 'compact': "45s", "5m 3s", "1h 2m", "2d 3h" (a zero second unit is left out).
- * Negative -> 0. NaN -> "--". Default 'compact'.
+ * Negative -> 0. NaN, Infinity and -Infinity -> "--". Default 'compact'.
  */
 export function formatDuration(ms: number, style: DurationStyle = 'compact'): string {
-  if (Number.isNaN(ms)) return '--';
+  if (!Number.isFinite(ms)) return '--';
   const total = Math.floor(Math.max(0, ms) / SECOND);
   if (style === 'clock') {
     const h = Math.floor(total / 3600);
@@ -40,9 +40,9 @@ export interface DurationParts {
   readonly seconds: number;
 }
 
-/** Splits a duration into whole d/h/m/s. Negative -> all 0. NaN -> null. */
+/** Splits a duration into whole d/h/m/s. Negative -> all 0. NaN, Infinity and -Infinity -> null. */
 export function splitDuration(ms: number): DurationParts | null {
-  if (Number.isNaN(ms)) return null;
+  if (!Number.isFinite(ms)) return null;
   const total = Math.floor(Math.max(0, ms) / SECOND);
   return {
     days: Math.floor(total / 86_400),
@@ -52,8 +52,8 @@ export function splitDuration(ms: number): DurationParts | null {
   };
 }
 
-/** ISO 8601 duration ("PT75S") for a `<time datetime>`. Negative -> PT0S. NaN -> null. */
+/** ISO 8601 duration ("PT75S") for a `<time datetime>`. Negative -> PT0S. NaN, Infinity and -Infinity -> null. */
 export function toIsoDuration(ms: number): string | null {
-  if (Number.isNaN(ms)) return null;
+  if (!Number.isFinite(ms)) return null;
   return `PT${Math.floor(Math.max(0, ms) / SECOND)}S`;
 }
