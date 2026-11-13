@@ -18,6 +18,7 @@ const PROGRESS_TONE_CLASSES = {
   error: 'progress progress-error',
 } as const;
 
+// Left raw: it uses native progress with the daisyUI track and fill, which differ visibly from ptah-meter.
 @Component({
   selector: 'ptah-dashboard-progress',
   standalone: true,

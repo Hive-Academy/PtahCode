@@ -310,8 +310,25 @@
   /* Track behind the meter fill. Same value the meter used before. */
   --ptah-meter-track: var(--surface-border-strong);
   /* Stripe recipe of the meter `stripes` option: bar width and gap. */
+  /* Inset edge of the track (1 px). Transparent: no edge unless a theme sets one. */
+  --ptah-meter-track-edge: transparent;
   --ptah-meter-stripe-bar: 4px;
   --ptah-meter-stripe-gap: 3px;
+}
+/* Stock light theme, no glass: a 16% track keeps the ok and warn fills at 3:1 or more
+   against the track on the page, card and panel surfaces. Glass mode keeps its 14% track. */
+:root[data-theme='light']:not([data-glass='on']) {
+  --ptah-meter-track: color-mix(in oklch, oklch(var(--bc)) 16%, transparent);
+}
+/* anubis-light and glass light mode: the gold fill (oklch 58% 0.132 75) measures 2.2 to 2.8:1
+   on the old 14% to 22% tracks over base-300 and base-200. The warn fill (#8f5200) stays above 3:1.
+   A 6% track keeps gold at 3.03 (base-300), 3.26 (base-200) and 3.64 (base-100), warn at 4.3 or more. */
+:root[data-theme='anubis-light'],
+:root[data-theme][data-glass='on'][data-glass-mode='light'] {
+  --ptah-meter-track: color-mix(in oklch, oklch(var(--bc)) 6%, transparent);
+  /* A 6% track is 1.12:1 against the surface. A 50% edge measures 3.40 (base-300), 3.48 (base-200)
+     and 3.59 (base-100) against the surface and sits outside the fill, so fill and track read as before. */
+  --ptah-meter-track-edge: color-mix(in oklch, oklch(var(--bc)) 50%, transparent);
 }
 /* ---- end ptah-meter tokens ---- */
 
@@ -327,10 +344,16 @@
   --ptah-card-bg-inset: var(--glass-fill-tile, oklch(var(--b1)));
   --ptah-card-bg-raised: var(--surface-3);
   --ptah-card-border: oklch(var(--b3));
+  --ptah-card-border-faint: color-mix(in oklch, oklch(var(--bc)) 10%, transparent);
+  --ptah-card-bg-surface-1: var(--surface-1, oklch(var(--b2)));
+  --ptah-card-bg-surface-2: var(--surface-2, oklch(var(--b2)));
   /* Glass on: the line color that the glass layer gives to border-base-300. */
   --ptah-card-border-glass: var(--glass-line, oklch(var(--b3)));
   --ptah-card-border-width: var(--ptah-border-width);
   --ptah-card-radius: 0.75rem;
+  /* Inset highlight and small shadow of the surface variants and shadow=sm. */
+  --ptah-card-shadow-highlight: inset 0 var(--ptah-border-width) 0 var(--surface-highlight);
+  --ptah-card-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --ptah-card-radius-inset: 0.5rem;
   --ptah-card-padding-sm: var(--ptah-space-3);
   --ptah-card-padding-md: var(--ptah-space-4);
