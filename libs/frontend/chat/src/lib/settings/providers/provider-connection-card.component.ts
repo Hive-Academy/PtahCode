@@ -94,7 +94,7 @@ interface InlineAction {
               </span>
             }
             @if (usedByCount() !== null) {
-              <span class="min-w-0 max-w-full break-words text-xs text-base-content-muted" data-testid="used-by-segment">
+              <span class="min-w-0 max-w-full truncate text-xs text-base-content-muted" data-testid="used-by-segment">
                 <span data-testid="used-by-count">Used by {{ usedByCount() }}</span>
                 @if (usedByLabels().length) {
                   <span aria-hidden="true"> · </span>

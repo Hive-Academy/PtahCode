@@ -175,9 +175,8 @@ describe('ProviderConnectionCardComponent', () => {
       const usedFor = query(fixture, 'used-for');
       expect(usedFor?.textContent?.trim()).toBe('Used for: Main agent, Memory curator');
       expect(usedFor?.getAttribute('title')).toBe('Main agent, Memory curator');
-      // "Used by N · Used for: …" is one segment that wraps, so no glyph is cut at a narrow card width.
-      expect(query(fixture, 'used-by-segment')?.className).toContain('break-words');
-      expect(query(fixture, 'used-by-segment')?.className).not.toMatch(/truncate|line-clamp|text-ellipsis/);
+      // "Used by N · Used for: …" is one truncating segment, so the sub-line wraps to at most two lines (80 px card gate).
+      expect(query(fixture, 'used-by-segment')?.className).toContain('truncate');
       expect(query(fixture, 'used-by-segment')?.contains(usedFor ?? null)).toBe(true);
       expect(query(fixture, 'used-by-count')?.textContent?.trim()).toBe('Used by 2');
       expect(query(createComponent({ ...KIMI_CODE, usedByCount: 0 }), 'used-for')).toBeNull();
