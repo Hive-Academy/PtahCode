@@ -20,12 +20,13 @@ import { Router } from '@angular/router';
 import { LucideAngularModule, FolderOpen, FolderPlus, X } from 'lucide-angular';
 import { ElectronLayoutService, VSCodeService } from '@ptah-extension/core';
 import { SessionLivenessRegistry } from '@ptah-extension/chat-state';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { McpServersCardComponent } from '../molecules/mcp-servers-card.component';
 
 @Component({
   selector: 'ptah-workspace-sidebar',
   standalone: true,
-  imports: [LucideAngularModule, McpServersCardComponent],
+  imports: [LucideAngularModule, McpServersCardComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     :host {
@@ -114,7 +115,7 @@ import { McpServersCardComponent } from '../molecules/mcp-servers-card.component
       <!-- Add folder button -->
       <div class="mt-auto px-3 py-3 border-t border-surface-border">
         <button
-          class="btn btn-ghost btn-sm w-full gap-2 text-base-content-muted hover:text-base-content justify-start"
+          ptahButton variant="ghost" size="sm" density="compact" align="start" class="w-full gap-2 text-base-content-muted hover:text-base-content"
           (click)="layout.addFolder()"
           aria-label="Add workspace folder"
         >
@@ -129,7 +130,7 @@ import { McpServersCardComponent } from '../molecules/mcp-servers-card.component
         <!-- Dev instance only (electron:serve): link to the design-system gallery. -->
         <div class="px-3 pb-3">
           <button
-            class="btn btn-ghost btn-sm w-full justify-start"
+            ptahButton variant="ghost" size="sm" density="compact" align="start" class="w-full"
             data-testid="workspace-sidebar-ui-gallery-link"
             (click)="openUiGallery()"
           >

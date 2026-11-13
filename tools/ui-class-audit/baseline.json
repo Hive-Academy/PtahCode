@@ -356,9 +356,9 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 4,
-    "btn-ghost": 4,
-    "btn-sm": 3,
+    "btn": 2,
+    "btn-ghost": 2,
+    "btn-sm": 1,
     "btn-square": 1,
     "btn-xs": 1
   },
@@ -382,9 +382,8 @@
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/components/organisms/workspace-sidebar.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-sm": 2,
+    "btn": 1,
+    "btn-ghost": 1,
     "btn-square": 1,
     "btn-xs": 1
   },
@@ -396,11 +395,6 @@
     "btn-primary": 1,
     "btn-square": 1,
     "btn-xs": 6
-  },
-  "libs/frontend/chat/src/lib/components/templates/chat-view.component.html": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
   },
   "libs/frontend/chat/src/lib/settings/advanced-settings.component.ts": {
     "<dynamic>": 1,
@@ -482,10 +476,9 @@
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts": {
-    "btn": 2,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-outline": 1,
-    "btn-xs": 2
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/vscode-lm-config.component.ts": {
     "badge": 3,
@@ -603,9 +596,6 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-provider-card.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3,
     "card-body": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {
