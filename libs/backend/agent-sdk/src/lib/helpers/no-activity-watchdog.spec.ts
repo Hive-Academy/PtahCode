@@ -692,6 +692,27 @@ describe('NoActivityWatchdog', () => {
         }
       });
 
+      it('the end of an excluded background task does not reset the deadline', async () => {
+        const ends = [
+          () => taskNotification('task-a', 'completed'),
+          () => taskUpdated('task-a', { status: 'completed' }),
+        ];
+        for (const end of ends) {
+          const onTimeout = jest.fn();
+          const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
+          wd.start();
+          await startBackgroundTask(wd, 'tool-a', 'task-a', { ambient: true });
+
+          jest.advanceTimersByTime(170_000);
+          wd.observe(end());
+          // The deadline stays 180 s after the backgrounding, not after the end.
+          jest.advanceTimersByTime(WINDOW - 170_000);
+          expect(onTimeout).toHaveBeenCalledTimes(1);
+          expect(onTimeout).toHaveBeenCalledWith('no-activity');
+          wd.stop();
+        }
+      });
+
       it('a root assistant message during a silent background task never times out earlier than 180 s after it', async () => {
         const onTimeout = jest.fn();
         const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());

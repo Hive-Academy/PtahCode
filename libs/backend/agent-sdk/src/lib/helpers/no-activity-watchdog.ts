@@ -217,7 +217,7 @@ export class NoActivityWatchdog {
       const released = toolId !== undefined && this.tools.delete(toolId);
       this.tasks.delete(message.task_id);
       // A terminal notification restores a full normal window.
-      if (released || record?.background) this.kick();
+      if (released || (record?.background && record.keepsAlive)) this.kick();
       return true;
     }
     if (message.subtype === 'task_progress') {
@@ -294,7 +294,7 @@ export class NoActivityWatchdog {
     const wasWaiting = this.tools.delete(record.toolUseId);
     if (terminal) {
       this.tasks.delete(message.task_id);
-      if (wasWaiting || record.background) this.kick();
+      if (wasWaiting || (record.background && record.keepsAlive)) this.kick();
       return;
     }
     // Backgrounded: the root tool is released but the task stays accounted.
