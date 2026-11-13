@@ -116,6 +116,7 @@ function knownDone(step: StagedStep, total: number | null): number | null {
               <span class="ptah-staged-steps__label">{{ step.label }}</span>
               <span class="sr-only">, {{ step.word }}</span>
               @if (step.state === 'active') {
+                <!-- Keep these bars: the owner has a different accent and indeterminate sweep. -->
                 @if (step.fraction !== null) {
                   <div
                     class="ptah-staged-steps__bar"

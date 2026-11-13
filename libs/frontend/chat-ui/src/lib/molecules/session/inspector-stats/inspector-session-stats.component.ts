@@ -84,6 +84,7 @@ let nextSessionId = 0;
             <p class="mt-0.5 min-h-4 text-[10.5px] text-base-content-muted">&nbsp;</p>
           }
           @if (s.context.known && s.context.percent !== null) {
+            <!-- Keep this bar: the owner changes the gold fill at high percentages. -->
             <div
               class="mt-auto h-1 shrink-0 rounded-full bg-[var(--surface-border-strong)]"
               role="progressbar"
@@ -142,6 +143,7 @@ let nextSessionId = 0;
             <p class="text-[10.5px] text-base-content-muted">all agents</p>
           }
           @if (s.budget?.measure === 'tokens' && s.budget?.percent !== null) {
+            <!-- Keep this bar: the owner cannot keep normal-stage gold at every percentage. -->
             <div
               role="progressbar"
               aria-label="Session token budget"
@@ -203,6 +205,7 @@ let nextSessionId = 0;
             <p class="text-[10.5px] text-base-content-muted">this session</p>
           }
           @if (s.budget?.measure === 'cost' && s.budget?.percent !== null) {
+            <!-- Keep this bar: the owner cannot keep normal-stage gold at every percentage. -->
             <div
               role="progressbar"
               aria-label="Session cost budget"

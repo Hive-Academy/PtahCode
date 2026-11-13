@@ -23,6 +23,7 @@ const PROGRESS_TONE_CLASSES = {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!-- Keep native progress: the owner track and fill differ visibly from daisyUI progress. -->
     <!-- Visible label text, the native progress bar, then the unrounded percentage. The value is renderer-owned. -->
     <span class="text-sm text-base-content" data-testid="progress-label">{{ node().label.text }}</span>
     <progress [class]="toneClasses()" [value]="node().value" max="100"
