@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ModelStateService, WallClockService } from '@ptah-extension/core';
+import type { SessionBudgetState } from '@ptah-extension/shared';
 import type { SessionStatsInputs } from '../session-stats-view';
 import { InspectorSessionStatsComponent } from './inspector-session-stats.component';
 
@@ -158,9 +159,46 @@ describe(InspectorSessionStatsComponent.name, () => {
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
-    const bar = root.querySelector('[data-testid="inspector-stats-grid"] [role="progressbar"]');
-    expect(bar?.previousElementSibling?.textContent).toContain('2 compactions');
-    expect(bar?.nextElementSibling).toBeNull();
+    const meter = root.querySelector('[data-testid="inspector-stats-grid"] ptah-meter');
+    expect(meter?.previousElementSibling?.textContent).toContain('2 compactions');
+    expect(meter?.nextElementSibling).toBeNull();
+    const bar = meter?.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute('aria-valuenow')).toBe('40');
+    expect(bar?.getAttribute('aria-valuetext')).toBe('40% of the context window, 80.0k tokens used');
+    expect(bar?.getAttribute('aria-labelledby')).toBeTruthy();
+    expect(bar?.hasAttribute('aria-label')).toBe(false);
+    expect(bar?.firstElementChild?.classList.contains('bg-[var(--ptah-gold)]')).toBe(true);
+  });
+
+  it.each([
+    ['tokens', 'tighten', 'bg-state-need', '42% of the 10.0k token budget'],
+    ['cost', 'limit', 'bg-state-err', '42% of the $10 cost budget'],
+    ['tokens', 'normal', 'bg-[var(--ptah-gold)]', '42% of the 10.0k token budget'],
+  ] as const)('keeps the %s budget bar values and %s tone', (measure, stage, fillClass, valueText) => {
+    TestBed.configureTestingModule({
+      imports: [InspectorSessionStatsComponent],
+      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
+    });
+    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
+    const budget: SessionBudgetState = {
+      sessionId: 's', stage, unit: measure, measure, used: measure === 'cost' ? 4.2 : 4200,
+      limit: measure === 'cost' ? 10 : 10_000,
+      percent: 42, lowerBound: false, revision: null, compactions: 0, autoHandoff: false,
+    };
+    fixture.componentRef.setInput('stats', {
+      sessionId: 's', snapshot: null, cache: null, liveModelStats: null,
+      compactionCount: 0, limits: null, budget,
+      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
+      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
+    } satisfies SessionStatsInputs);
+    fixture.detectChanges();
+    const meter = (fixture.nativeElement as HTMLElement).querySelector('ptah-meter');
+    const bar = meter?.querySelector('[role="progressbar"]');
+    expect(meter?.classList.contains('mt-auto')).toBe(true);
+    expect(bar?.getAttribute('aria-label')).toBe(`Session ${measure === 'tokens' ? 'token' : 'cost'} budget`);
+    expect(bar?.getAttribute('aria-valuenow')).toBe('42');
+    expect(bar?.getAttribute('aria-valuetext')).toBe(valueText);
+    expect(bar?.firstElementChild?.classList.contains(fillClass)).toBe(true);
   });
 
   it('opens the Context details from its dotted label, under the totals row', () => {
