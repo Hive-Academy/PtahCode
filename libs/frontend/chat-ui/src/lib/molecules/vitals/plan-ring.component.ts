@@ -33,7 +33,7 @@ export function planRingCaption(ring: PlanRingData): string {
 
 /**
  * PlanRingComponent — the teal plan-usage ring of the vitals rows. A thin
- * wrapper over `ptah-ring` (`size='row'`, percent as centre text).
+ * wrapper over `ptah-ring` (`size='tile'`, percent as centre text).
  * Renders nothing when `ring` is null or its percent is not a finite number.
  */
 @Component({
