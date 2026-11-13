@@ -95,7 +95,8 @@ describe('indeterminate appearance', () => {
     expect(fill.classList.contains('animate-pulse')).toBe(false);
     expect(bar.getAttribute('aria-label')).toBe('Used');
     expect(bar.hasAttribute('aria-valuenow')).toBe(false);
-    const styles = Array.from(document.querySelectorAll('style')).map((style) => style.textContent).join('\n');
+    // Read the compiled component styles: injected <style> tags depend on test order.
+    const styles = (PtahMeterComponent.ɵcmp.styles ?? []).join('\n');
     expect(styles).toContain('width: 40%');
     expect(styles).toContain('prefers-reduced-motion: reduce');
     expect(styles).toContain('width: 100%; opacity: 0.35');
