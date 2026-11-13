@@ -14,7 +14,7 @@ import { PlatformTokenFormComponent } from './platform-token-form.component';
 import { AllowListEditorComponent } from './allow-list-editor.component';
 import { DiscordIntegrationKitComponent } from './discord-integration-kit.component';
 import { PlatformBindingsPanelComponent } from './platform-bindings-panel.component';
-import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 export interface PlatformCardConfig {
   readonly id: GatewayPlatformId;
@@ -33,7 +33,6 @@ export interface PlatformCardConfig {
     DiscordIntegrationKitComponent,
     PlatformBindingsPanelComponent,
     PtahButtonDirective,
-    PtahSurfaceDirective,
   ],
   template: `
     <div
@@ -57,7 +56,7 @@ export interface PlatformCardConfig {
               Save a bot token to start the {{ config().label }} adapter.
             </p>
           </div>
-          <div ptahSurface variant="surface-2" class="max-w-2xl space-y-4 rounded-lg">
+          <div class="surface-2 max-w-2xl space-y-4 rounded-lg p-4">
             <ptah-platform-token-form
               [platform]="config().id"
               [label]="config().label"
@@ -98,7 +97,7 @@ export interface PlatformCardConfig {
               Control who can reach this adapter and approve pairing requests.
             </p>
           </div>
-          <div ptahSurface variant="surface-2" class="max-w-2xl space-y-4 rounded-lg">
+          <div class="surface-2 max-w-2xl space-y-4 rounded-lg p-4">
             <ptah-allow-list-editor
               [platform]="config().id"
               [label]="config().label"
@@ -121,7 +120,7 @@ export interface PlatformCardConfig {
                 servers.
               </p>
             </div>
-            <div ptahSurface variant="surface-2" class="max-w-2xl rounded-lg">
+            <div class="surface-2 max-w-2xl rounded-lg p-4">
               <ptah-discord-integration-kit />
             </div>
           </section>
