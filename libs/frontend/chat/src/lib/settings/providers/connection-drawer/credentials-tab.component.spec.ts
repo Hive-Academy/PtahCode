@@ -143,7 +143,7 @@ describe('CredentialsTabComponent', () => {
       expect(text?.querySelector('lucide-angular')?.getAttribute('class')).toContain('text-warning');
       const retry = query<HTMLButtonElement>('credentials-key-unreadable-retry');
       expect(retry?.textContent?.trim()).toBe('Retry');
-      expect(retry?.className).toContain('focus-visible:outline-base-content');
+      expect(retry?.hasAttribute('data-no-padding')).toBe(true);
       expect(query('credentials-key-mask')).toBeNull();
       // The user may overwrite an unreadable key.
       expect(query('credentials-replace')?.textContent?.trim()).toBe('Replace');
