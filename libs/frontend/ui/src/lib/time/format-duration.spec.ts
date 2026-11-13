@@ -34,10 +34,17 @@ describe('formatDuration', () => {
     expect(formatDuration(Number.NaN)).toBe('--');
   });
 
+  it('shows Infinity and -Infinity as --', () => {
+    expect(formatDuration(Number.POSITIVE_INFINITY)).toBe('--');
+    expect(formatDuration(Number.NEGATIVE_INFINITY, 'clock')).toBe('--');
+  });
+
   it('gives an ISO duration for a datetime attribute', () => {
     expect(toIsoDuration(75_400)).toBe('PT75S');
     expect(toIsoDuration(-1)).toBe('PT0S');
     expect(toIsoDuration(Number.NaN)).toBeNull();
+    expect(toIsoDuration(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(toIsoDuration(Number.NEGATIVE_INFINITY)).toBeNull();
   });
 });
 
@@ -49,5 +56,7 @@ describe('splitDuration', () => {
   it('gives zeros for a negative value and null for NaN', () => {
     expect(splitDuration(-5)).toEqual({ days: 0, hours: 0, minutes: 0, seconds: 0 });
     expect(splitDuration(Number.NaN)).toBeNull();
+    expect(splitDuration(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(splitDuration(Number.NEGATIVE_INFINITY)).toBeNull();
   });
 });
