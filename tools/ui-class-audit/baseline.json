@@ -927,19 +927,6 @@
     "btn-success": 1,
     "btn-xs": 1
   },
-  "libs/frontend/notification-center/src/lib/notification-center.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-primary": 1,
-    "btn-sm": 2,
-    "btn-square": 1
-  },
-  "libs/frontend/notification-center/src/lib/notification-snackbar.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-primary": 1,
-    "btn-sm": 1
-  },
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },

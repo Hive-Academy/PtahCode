@@ -56,8 +56,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
               } @else if (item.actions.length) {
               <div class="flex shrink-0 items-center gap-1">
                 @for (action of item.actions; track action.id) {
-                   <button type="button" class="btn btn-sm min-h-7 h-7 px-2 disabled:opacity-100 disabled:bg-base-200 disabled:text-base-content-muted disabled:border-[color:var(--surface-border)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                    [class.btn-primary]="isPrimary(item, action.id)" [class.btn-ghost]="!isPrimary(item, action.id)"
+                   <button type="button" ptahButton [variant]="isPrimary(item, action.id) ? 'primary' : 'ghost'" size="sm" class="min-h-7 h-7 px-2 disabled:opacity-100 disabled:bg-base-200 disabled:text-base-content-muted disabled:border-[color:var(--surface-border)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                      [disabled]="!!actionReason(item, action.id) || pending().has(item.key) || stale().has(item.key + ':' + item.generation)"
                     [attr.title]="actionReason(item, action.id)"
                     [attr.aria-describedby]="actionReason(item, action.id) ? 'snackbar-reason-' + item.key + '-' + action.id : pending().has(item.key) ? 'snackbar-pending-' + item.key : null"
