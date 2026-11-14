@@ -1,9 +1,13 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DOCUMENT,
+  DestroyRef,
   ElementRef,
+  Injector,
   afterNextRender,
   computed,
+  effect,
   inject,
   input,
   output,
@@ -15,77 +19,63 @@ import {
   PROVIDER_ACCOUNT_LABEL_MAX_LENGTH,
   type ProviderAccountSummary,
 } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
-import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
+import { PtahEditableSectionComponent, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import { ACCOUNT_COPY, validateAccountName } from './account-presentation';
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-
 /**
- * Inline Add form of the Accounts tab (design-spec-p6 "Add (A6)", plan P6 component 8). It asks for a name only: no
+ * Inline Add form of the Accounts tab (design-spec-p6 "Add (A6)", plan P6 component 8), composed from
+ * `ptah-editable-section` "New account" in edit mode from the start (pattern-spec 6.1). It asks for a name only: no
  * credential, directory or sign-in, and no helper copy. Submit emits the trimmed name; the parent writes it,
  * announces the outcome and destroys the form on success or Cancel, so each open starts empty.
  *
  * An invalid or duplicate name on submit is announced as an alert toast (P6-A9: the form's own synchronous result)
- * and focus stays in the input. While the Add write is pending the controls are `ptahBusyDisabled`, so focus never
- * drops to the body and nothing is moved programmatically (B-2).
+ * and focus stays in the input. While the Add write is pending the pattern disables its fields (`saving`). If focus
+ * fell to the body because of that, it goes back to the input when the write ends and the form stays (B-2). Cancel
+ * and Escape with a typed name ask the pattern's discard confirmation first (pattern-spec 6.3).
  */
 @Component({
   selector: 'ptah-add-account-form',
   standalone: true,
-  imports: [PtahButtonDirective, SettingsBusyDisabledDirective],
+  imports: [PtahEditableSectionComponent, PtahFieldComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <form
-      class="space-y-3 rounded-box border border-base-content/15 bg-base-100 px-4 py-3 text-sm text-base-content"
-      [attr.aria-busy]="pending() ? 'true' : null"
-      (submit)="$event.preventDefault(); submit()"
-      (keydown.escape)="escape($event)"
+    <ptah-editable-section
+      heading="New account"
+      [level]="4"
+      editing
+      [dirty]="!empty()"
+      [saving]="pending()"
+      [saveLabel]="pending() ? 'Adding…' : 'Add'"
+      cancelLabel="Cancel"
+      (save)="submit()"
+      (cancelEdit)="cancel()"
+      (keydown.escape)="keepEscape($event)"
       data-testid="add-account-form"
     >
-      <div class="space-y-1">
-        <label for="add-account-name" class="block font-semibold">Account name</label>
+      <ptah-field edit label="Account name" appearance="stacked">
         <input
           #name
+          ptahInput
           id="add-account-name"
           type="text"
-          [class]="field"
+          class="w-full"
           [value]="label()"
           (input)="edit($event)"
-          [ptahBusyDisabled]="pending()"
           autocomplete="off"
           [attr.maxlength]="maxLength"
-          [attr.aria-invalid]="invalid() ? 'true' : null"
+          [invalid]="invalid()"
           data-testid="add-account-name"
         />
-      </div>
-      <div class="flex flex-wrap justify-end gap-2">
-        <button
-          type="button"
-          ptahButton
-          [busy]="pending()"
-          (click)="cancel()"
-          data-testid="add-account-cancel"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          ptahButton variant="primary" size="sm"
-          class="min-h-8"
-          [ptahBusyDisabled]="pending() || empty()"
-          data-testid="add-account-submit"
-        >
-          {{ pending() ? 'Adding…' : 'Add' }}
-        </button>
-      </div>
-    </form>
+      </ptah-field>
+    </ptah-editable-section>
   `,
 })
 export class AddAccountFormComponent {
   private readonly feedback = inject(SettingsSaveFeedbackService);
+  private readonly document = inject(DOCUMENT);
+  private readonly injector = inject(Injector);
+  private destroyed = false;
 
   /** Named accounts of the held host snapshot, for the uniqueness rule. */
   readonly accounts = input.required<readonly ProviderAccountSummary[]>();
@@ -98,8 +88,6 @@ export class AddAccountFormComponent {
   readonly cancelled = output<void>();
 
   protected readonly maxLength = PROVIDER_ACCOUNT_LABEL_MAX_LENGTH;
-  protected readonly field = `input input-bordered input-sm w-full text-sm text-base-content aria-[invalid=true]:border-2 aria-[invalid=true]:border-state-err ${FOCUS}`;
-
   protected readonly label = signal('');
   protected readonly empty = computed(() => this.label().trim().length === 0);
   /** The last submit was refused by validation and the value was not edited since. */
@@ -108,7 +96,25 @@ export class AddAccountFormComponent {
   private readonly nameEl = viewChild.required<ElementRef<HTMLInputElement>>('name');
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => (this.destroyed = true));
     afterNextRender(() => this.nameEl().nativeElement.focus());
+    // B-2: the disabled fieldset of a pending write can drop focus to the body. When the write ends and the form
+    // stays (a refusal), the input takes focus back only if focus is still on the body.
+    let wasPending = false;
+    effect(() => {
+      const pending = this.pending();
+      const ended = wasPending && !pending;
+      wasPending = pending;
+      if (!ended) return;
+      afterNextRender(
+        () => {
+          const active = this.document.activeElement;
+          if (this.destroyed || (active !== null && active !== this.document.body)) return;
+          this.nameEl().nativeElement.focus();
+        },
+        { injector: this.injector },
+      );
+    });
   }
 
   protected edit(event: Event): void {
@@ -141,10 +147,8 @@ export class AddAccountFormComponent {
     if (!this.pending()) this.cancelled.emit();
   }
 
-  /** Escape closes only this form, never the drawer around it. */
-  protected escape(event: Event): void {
-    event.preventDefault();
+  /** Escape closes only this form, never the drawer around it. The section handles the Escape itself. */
+  protected keepEscape(event: Event): void {
     event.stopPropagation();
-    this.cancel();
   }
 }

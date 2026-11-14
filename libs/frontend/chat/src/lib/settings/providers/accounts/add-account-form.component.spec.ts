@@ -45,6 +45,28 @@ class Host {
   }
 }
 
+/** A browser moves focus to the body when it disables the focused field; jsdom does not, so a spec drops it. */
+function dropFocusToBody(): void {
+  const probe = document.createElement('button');
+  document.body.appendChild(probe);
+  probe.focus();
+  probe.remove();
+}
+
+/** jsdom has no HTMLDialogElement methods. The stub reflects the `open` attribute. */
+beforeAll(() => {
+  if (!HTMLDialogElement.prototype.showModal) {
+    HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    } as HTMLDialogElement['showModal'];
+  }
+  if (!HTMLDialogElement.prototype.close) {
+    HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    } as HTMLDialogElement['close'];
+  }
+});
+
 describe('AddAccountFormComponent', () => {
   let fixture: ComponentFixture<Host>;
   let host: Host;
@@ -53,9 +75,10 @@ describe('AddAccountFormComponent', () => {
   const q = <T extends HTMLElement = HTMLElement>(id: string) =>
     el().querySelector(`[data-testid="${id}"]`) as T | null;
   const input = () => q<HTMLInputElement>('add-account-name') as HTMLInputElement;
-  const submit = () => q<HTMLButtonElement>('add-account-submit') as HTMLButtonElement;
-  const cancelButton = () => q<HTMLButtonElement>('add-account-cancel') as HTMLButtonElement;
-  const form = () => q<HTMLFormElement>('add-account-form') as HTMLFormElement;
+  const submit = () => el().querySelector('[data-ptah-editable-save]') as HTMLButtonElement;
+  const cancelButton = () => el().querySelector('[data-ptah-editable-cancel]') as HTMLButtonElement;
+  const form = () => el().querySelector('[data-testid="add-account-form"] form') as HTMLFormElement;
+  const fieldset = () => el().querySelector('[data-ptah-editable-fields]') as HTMLFieldSetElement;
   const type = (value: string) => {
     input().value = value;
     input().dispatchEvent(new Event('input'));
@@ -84,20 +107,30 @@ describe('AddAccountFormComponent', () => {
     (fixture.nativeElement as HTMLElement).remove();
   });
 
-  it('starts empty with focus on the labelled input and a read-as-disabled Add', () => {
+  it('is the editable section "New account", in edit mode at once, with focus on the labelled input', () => {
+    const heading = el().querySelector('[data-testid="add-account-form"] h4');
+    expect(heading?.textContent?.trim()).toBe('New account');
+    expect(form()).not.toBeNull();
+    // Edit mode from the start: no Edit button.
+    expect(el().querySelector('[data-ptah-editable-edit]')).toBeNull();
     expect(input().value).toBe('');
     expect(document.activeElement).toBe(input());
+    expect(input().closest('ptah-field')).not.toBeNull();
+    expect(input().hasAttribute('ptahInput')).toBe(true);
     expect(el().querySelector('label[for="add-account-name"]')?.textContent?.trim()).toBe('Account name');
     expect(input().getAttribute('maxlength')).toBe(String(PROVIDER_ACCOUNT_LABEL_MAX_LENGTH));
     expect(submit().textContent?.trim()).toBe('Add');
-    expect(submit().disabled).toBe(false);
-    expect(submit().getAttribute('aria-disabled')).toBe('true');
+    expect(submit().type).toBe('submit');
+    expect(submit().disabled).toBe(true);
     expect(cancelButton().textContent?.trim()).toBe('Cancel');
   });
 
-  it('has no helper copy and no inline status or alert line', () => {
+  it('has no helper copy and no alert line; the only live region is the pattern dirty indicator', () => {
     expect(el().textContent).not.toContain('Only you see this name');
-    expect(el().querySelector('[role="status"], [role="alert"], [aria-live]')).toBeNull();
+    expect(el().querySelector('[role="alert"]')).toBeNull();
+    const live = Array.from(el().querySelectorAll('[role="status"], [aria-live]'));
+    expect(live.every((node) => node.hasAttribute('data-ptah-form-actions-status'))).toBe(true);
+    expect(live.every((node) => node.textContent?.trim() === '')).toBe(true);
   });
 
   it('enables Add once the field is not blank', () => {
@@ -125,7 +158,7 @@ describe('AddAccountFormComponent', () => {
     expect(input().value).toBe(' work ');
     expect(input().getAttribute('aria-invalid')).toBe('true');
     type('Work 2');
-    expect(input().hasAttribute('aria-invalid')).toBe(false);
+    expect(input().getAttribute('aria-invalid')).not.toBe('true');
   });
 
   it('announces the reserved ambient name as taken', () => {
@@ -148,44 +181,53 @@ describe('AddAccountFormComponent', () => {
     expect(announce).not.toHaveBeenCalled();
   });
 
-  it('while pending shows Adding…, keeps every control focusable but busy, and keeps focus', () => {
+  it('while pending is the pattern saving state: Adding…, busy Add, disabled fields and Cancel, one submit', () => {
     type('Personal');
-    input().focus();
     send();
     expect(submit().textContent?.trim()).toBe('Adding…');
-    expect(submit().disabled).toBe(false);
-    expect(submit().getAttribute('aria-disabled')).toBe('true');
-    expect(input().disabled).toBe(false);
-    expect(input().readOnly).toBe(true);
-    expect(cancelButton().getAttribute('aria-disabled')).toBe('true');
+    expect(submit().getAttribute('aria-busy')).toBe('true');
+    expect(fieldset().disabled).toBe(true);
+    expect(cancelButton().disabled).toBe(true);
     expect(form().getAttribute('aria-busy')).toBe('true');
-    expect(document.activeElement).toBe(input());
     send();
     expect(host.submitted).toEqual(['Personal']);
   });
 
-  it('keeps the value and focus after the parent ends the write without closing the form (B-2)', () => {
+  it('keeps the value and focus after the parent ends the write without closing the form (B-2)', async () => {
     type('Personal');
     input().focus();
     send();
     host.pending.set(false);
     fixture.detectChanges();
+    await fixture.whenStable();
     expect(input().value).toBe('Personal');
     expect(document.activeElement).toBe(input());
     expect(isDisabledControl(submit())).toBe(false);
   });
 
-  it('does not take focus back when the user moved it during the write (B-2)', () => {
+  it('gives focus back to the input when the pending fields dropped it to the body (B-2)', async () => {
+    type('Personal');
+    send();
+    dropFocusToBody();
+    expect(document.activeElement).toBe(document.body);
+    host.pending.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(input());
+  });
+
+  it('does not take focus back when the user moved it during the write (B-2)', async () => {
     type('Personal');
     send();
     const elsewhere = q<HTMLButtonElement>('elsewhere') as HTMLButtonElement;
     elsewhere.focus();
     host.pending.set(false);
     fixture.detectChanges();
+    await fixture.whenStable();
     expect(document.activeElement).toBe(elsewhere);
   });
 
-  it('Escape and Cancel emit cancelled; Escape does not reach the drawer', () => {
+  it('Escape and Cancel on an empty name emit cancelled; Escape does not reach the drawer', () => {
     const outer = jest.fn();
     document.addEventListener('keydown', outer);
     const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
@@ -204,6 +246,24 @@ describe('AddAccountFormComponent', () => {
     expect(host.cancelled).toBe(2);
   });
 
+  it('Cancel with a typed name confirms first; Keep editing stays, Discard emits cancelled', () => {
+    type('Personal');
+    cancelButton().click();
+    fixture.detectChanges();
+    expect(host.cancelled).toBe(0);
+    (el().querySelector('[data-ptah-editable-keep]') as HTMLButtonElement | null)?.click();
+    fixture.detectChanges();
+    expect(host.cancelled).toBe(0);
+    expect(el().querySelector('[data-ptah-editable-discard]')).toBeNull();
+    expect(input().value).toBe('Personal');
+
+    cancelButton().click();
+    fixture.detectChanges();
+    (el().querySelector('[data-ptah-editable-discard]') as HTMLButtonElement | null)?.click();
+    fixture.detectChanges();
+    expect(host.cancelled).toBe(1);
+  });
+
   it('ignores Escape and Cancel while pending', () => {
     type('Personal');
     send();
@@ -211,5 +271,6 @@ describe('AddAccountFormComponent', () => {
     cancelButton().click();
     fixture.detectChanges();
     expect(host.cancelled).toBe(0);
+    expect(el().querySelector('[data-ptah-editable-discard]')).toBeNull();
   });
 });

@@ -25,9 +25,21 @@ import {
   type ProviderAccountState,
   type ProviderAccountSummary,
 } from '@ptah-extension/shared';
-import { NativeModalComponent } from '@ptah-extension/ui';
+import {
+  NativeModalComponent,
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahDescriptionListComponent,
+  PtahEditableSectionComponent,
+  PtahEditTemplateDirective,
+  PtahFieldComponent,
+  PtahFormActionsComponent,
+  PtahFormSectionComponent,
+  PtahIconButtonDirective,
+  PtahInputDirective,
+  type PtahDescriptionItem,
+} from '@ptah-extension/ui';
 import { AlertTriangle, Copy, Lock, LucideAngularModule } from 'lucide-angular';
-import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import {
@@ -63,25 +75,50 @@ const STATE_DOT: Readonly<Record<ProviderAccountState, string>> = {
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 
+const HEADER_ROW_CLASS = 'flex w-full min-w-0 items-start gap-[var(--ptah-gap-heading)]';
+/** The attention bar of the header row (failed, disconnected). Spacing from tokens only. */
+const ATTENTION_CLASS = 'border-l-4 border-l-state-err pl-[var(--ptah-gap-heading)]';
+
 const LOCK_REASON_ID = 'account-detail-lock-reason';
 
 /**
- * Account detail, one flat panel (TASK_2026_719 plan P6 component 7, design-spec-p6 "Detail").
+ * Account detail, one flat panel (TASK_2026_719 plan P6 component 7, design-spec-p6 "Detail"), composed from the
+ * pattern layer (TASK_2026_1177_9109 pattern-spec 6.1/6.2): `ptah-form-section` "Sign-in" (commands through
+ * `ptah-form-actions`), `ptah-editable-section` "Details" (facts in view mode, the Name field in edit mode) and
+ * `ptah-form-section` "Danger zone".
  *
  * Presentational: it renders one authoritative `ProviderAccountSummary` and emits intents; the parent (Accounts tab)
- * writes them, announces every host outcome and owns B-2 focus after a write. This panel announces only its own
- * synchronous results (copy, rename validation) through `SettingsSaveFeedbackService.announce` (P6-A9). It has no
- * live line and no helper sentences: the state word, badges, `title` and `sr-only` text carry the meaning (D52-D54).
- * Busy controls use `ptahBusyDisabled`, so focus never drops to `body`. Names and scripts are text bindings only.
+ * writes them, announces every host outcome and owns B-2 focus after a write. This panel announces only the copy
+ * result through `SettingsSaveFeedbackService.announce` (P6-A9); a rename validation error shows as the alert of the
+ * Details section. Busy controls use `ptahBusyDisabled`, so focus never drops to `body`. Names and scripts are text
+ * bindings only.
  */
 @Component({
   selector: 'ptah-account-detail-view',
   standalone: true,
-  imports: [NativeModalComponent, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, SettingsBusyDisabledDirective],
+  imports: [
+    NativeModalComponent,
+    LucideAngularModule,
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahDescriptionListComponent,
+    PtahEditableSectionComponent,
+    PtahEditTemplateDirective,
+    PtahFieldComponent,
+    PtahFormActionsComponent,
+    PtahFormSectionComponent,
+    PtahIconButtonDirective,
+    PtahInputDirective,
+    SettingsBusyDisabledDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-6 text-sm text-base-content" data-testid="account-detail" (focusin)="noteFocus($event)">
-      <div class="space-y-3">
+    <div
+      class="flex flex-col gap-[var(--ptah-gap-group)] text-sm text-base-content"
+      data-testid="account-detail"
+      (focusin)="noteFocus($event)"
+    >
+      <div class="flex flex-col items-start gap-[var(--ptah-gap-heading)]">
         <button
           type="button"
           ptahButton
@@ -91,17 +128,12 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         >
           <span aria-hidden="true">←</span> Accounts
         </button>
-        <div
-          class="flex min-w-0 items-start gap-3"
-          [class.border-l-4]="attention()"
-          [class.border-l-state-err]="attention()"
-          [class.pl-3]="attention()"
-        >
+        <div [class]="headerRowClass()">
           <span
             class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-base-300 font-bold"
             aria-hidden="true"
           >{{ initial() }}</span>
-          <div class="min-w-0 flex-1 space-y-1">
+          <div class="flex min-w-0 flex-1 flex-col gap-[var(--ptah-gap-label)]">
             <h3
               #heading
               tabindex="-1"
@@ -109,15 +141,15 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
               [attr.title]="account().label"
               data-testid="account-detail-heading"
             >{{ account().label }}</h3>
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="flex items-center" data-testid="account-detail-state">
+            <div class="flex flex-wrap items-center gap-[var(--ptah-gap-inline)]">
+              <span class="flex items-center gap-[var(--ptah-gap-label)]" data-testid="account-detail-state">
                 @if (account().state === 'pending') {
                   <span
-                    class="mr-1.5 inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none"
+                    class="inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none"
                     aria-hidden="true"
                   ></span>
                 } @else {
-                  <span [class]="'mr-1.5 inline-block h-2 w-2 shrink-0 rounded-full ' + stateDot()" aria-hidden="true"></span>
+                  <span [class]="'inline-block h-2 w-2 shrink-0 rounded-full ' + stateDot()" aria-hidden="true"></span>
                 }
                 <span>{{ stateWord() }}</span>
               </span>
@@ -126,7 +158,8 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
               }
               @if (resumeUnavailable()) {
                 <span
-                  ptahBadge class="gap-1"
+                  ptahBadge
+                  class="gap-[var(--ptah-gap-label)]"
                   [attr.title]="copy.resumeUnavailable"
                   data-testid="account-detail-resume-unavailable"
                 >
@@ -140,8 +173,14 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         </div>
       </div>
 
-      <div class="space-y-3">
-        <div class="flex flex-wrap gap-2">
+      <ptah-form-section
+        heading="Sign-in"
+        description="Connect this account to Claude."
+        level="4"
+        divider
+        data-testid="account-detail-sign-in-section"
+      >
+        <ptah-form-actions label="Sign-in actions">
           @switch (account().state) {
             @case ('signed-in') {
               <button type="button" [class]="'btn btn-outline btn-error btn-sm min-h-8 ' + focusRing" [ptahBusyDisabled]="busyNow()" (click)="act('sign-out')" data-testid="account-detail-sign-out">Sign out</button>
@@ -166,15 +205,19 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
               data-testid="account-detail-terminal-toggle"
             >Use terminal</button>
           }
-        </div>
+        </ptah-form-actions>
         @if (fallbackShown(); as f) {
           @if (terminalOpen()) {
-            <div id="account-detail-terminal" class="flex items-start gap-2" data-testid="account-detail-fallback">
+            <div
+              id="account-detail-terminal"
+              class="flex items-start gap-[var(--ptah-gap-controls)]"
+              data-testid="account-detail-fallback"
+            >
               <pre
                 tabindex="0"
                 aria-label="Sign-in script"
                 data-pending-control
-                [class]="'max-h-40 min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-box border border-base-content/15 bg-base-100 p-2 font-mono text-xs text-base-content ' + focusRing"
+                [class]="'max-h-40 min-w-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-box border border-base-content/15 bg-base-100 p-[var(--ptah-gap-controls)] font-mono text-xs text-base-content ' + focusRing"
                 data-testid="account-detail-fallback-script"
               >{{ f.script }}</pre>
               <button
@@ -191,49 +234,59 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
             </div>
           }
         }
-      </div>
+      </ptah-form-section>
 
-      <form class="space-y-2" (submit)="$event.preventDefault(); submitRename()">
-        <label for="account-detail-name" class="flex items-center gap-1 font-semibold">
-          Name
-          @if (pending()) {
-            <span class="inline-flex" [attr.title]="copy.signInLocked" data-testid="account-detail-locked">
-              <lucide-angular [img]="LockIcon" class="h-3.5 w-3.5 text-base-content-muted" aria-hidden="true" />
-            </span>
-          }
-        </label>
-        <div class="flex flex-wrap items-center gap-2">
-          <input
-            ptahInput
-            #nameInput
-            id="account-detail-name"
-            type="text"
-            [class]="'min-h-8 min-w-0 flex-1 text-sm text-base-content ' + focusRing"
-            [value]="draftLabel()"
-            (input)="onDraft($event)"
-            autocomplete="off"
-            [attr.maxlength]="maxLength"
-            [ptahBusyDisabled]="locked()"
-            [attr.aria-describedby]="pending() ? lockReasonId : null"
-            data-testid="account-detail-rename-input"
-          />
-          @if (edited()) {
-            <button type="submit" ptahButton variant="primary" [busy]="busyNow()" [disabled]="pending()" data-testid="account-detail-rename-submit">Save</button>
-          }
-        </div>
-      </form>
+      <ptah-editable-section
+        heading="Details"
+        description="The name shows in the account list."
+        level="4"
+        data-testid="account-detail-details"
+        [editing]="editing()"
+        [dirty]="edited()"
+        [saving]="renaming()"
+        [error]="renameError()"
+        [disabled]="locked()"
+        [disabledReason]="pending() ? copy.signInLocked : null"
+        (edit)="startEdit()"
+        (save)="submitRename()"
+        (cancelEdit)="stopEdit()"
+      >
+        @if (pending()) {
+          <span status class="inline-flex" [attr.title]="copy.signInLocked" data-testid="account-detail-locked">
+            <lucide-angular [img]="LockIcon" class="h-3.5 w-3.5 text-base-content-muted" aria-hidden="true" />
+          </span>
+        }
+        <ptah-description-list view ariaLabel="Account details" [items]="facts()" data-testid="account-detail-facts" />
+        <ng-template ptahEditTemplate>
+          <ptah-field label="Name">
+            <input
+              ptahInput
+              id="account-detail-name"
+              type="text"
+              [value]="draftLabel()"
+              (input)="onDraft($event)"
+              autocomplete="off"
+              [attr.maxlength]="maxLength"
+              [ptahBusyDisabled]="locked()"
+              [attr.aria-describedby]="pending() ? lockReasonId : null"
+              data-testid="account-detail-rename-input"
+            />
+          </ptah-field>
+        </ng-template>
+      </ptah-editable-section>
 
-      <div>
+      <ptah-form-section heading="Danger zone" level="4" data-testid="account-detail-danger-zone">
         <button
+          footer
           #removeButton
           type="button"
-          [class]="'btn btn-outline btn-error btn-sm min-h-8 ' + focusRing"
+          [class]="'btn btn-outline btn-error btn-sm min-h-8 self-start ' + focusRing"
           [ptahBusyDisabled]="locked()"
           [attr.aria-describedby]="pending() ? lockReasonId : null"
           (click)="askRemove()"
           data-testid="account-detail-remove"
         >Remove account</button>
-      </div>
+      </ptah-form-section>
 
       @if (pending()) {
         <span [id]="lockReasonId" class="sr-only">{{ copy.signInLocked }}</span>
@@ -246,7 +299,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         (closed)="cancelRemove()"
       >
         <h3 modal-header id="account-detail-remove-title" class="text-sm font-bold text-base-content">Remove {{ account().label }}?</h3>
-        <div modal-footer class="mt-4 flex justify-end gap-2">
+        <div modal-footer class="mt-[var(--ptah-gap-group)] flex justify-end gap-[var(--ptah-gap-controls)]">
           <button #removeCancel type="button" ptahButton (click)="cancelRemove()" data-testid="account-detail-remove-cancel">Cancel</button>
           <button type="button" ptahButton variant="danger" [busy]="busyNow()" [disabled]="pending()" (click)="confirmRemove()" data-testid="account-detail-remove-confirm">Remove</button>
         </div>
@@ -290,6 +343,10 @@ export class AccountDetailViewComponent {
   protected readonly LockIcon = Lock;
 
   protected readonly draftLabel = signal('');
+  /** The Details section is in edit mode (pattern-spec 6.3: rename is an explicit edit mode). */
+  protected readonly editing = signal(false);
+  /** The local rename validation error, shown as the alert of the Details section. */
+  protected readonly renameError = signal<string | null>(null);
   protected readonly confirmingRemove = signal(false);
   protected readonly terminalOpen = signal(false);
 
@@ -299,11 +356,14 @@ export class AccountDetailViewComponent {
 
   private readonly committedLabel = computed(() => this.account().label);
   protected readonly busyNow = computed(() => this.busy() !== null);
+  protected readonly renaming = computed(() => this.busy() === 'rename');
   protected readonly pending = computed(() => this.account().state === 'pending');
   /** A pending sign-in holds name and removal; any action in flight holds everything. */
   protected readonly locked = computed(() => this.busyNow() || this.pending());
   protected readonly initial = computed(() => accountInitial(this.account().label));
-  protected readonly attention = computed(() => ATTENTION_STATES.has(this.account().state));
+  protected readonly headerRowClass = computed(() =>
+    ATTENTION_STATES.has(this.account().state) ? `${HEADER_ROW_CLASS} ${ATTENTION_CLASS}` : HEADER_ROW_CLASS,
+  );
   protected readonly stateDot = computed(() => STATE_DOT[this.account().state]);
   protected readonly stateWord = computed(() =>
     this.pending()
@@ -313,6 +373,12 @@ export class AccountDetailViewComponent {
   protected readonly resumeUnavailable = computed(
     () => this.account().activeRunCount > 0 && this.account().state !== 'signed-in',
   );
+  /** The view-mode facts of the Details section. */
+  protected readonly facts = computed<readonly PtahDescriptionItem[]>(() => [
+    { key: 'name', term: 'Name', value: this.account().label, truncate: true },
+    { key: 'state', term: 'Status', value: this.stateWord() },
+    { key: 'runs', term: 'Active runs', value: this.account().activeRunCount },
+  ]);
   /** The script exists only for this account's pending `sign-in` operation (the service drops it otherwise). */
   protected readonly fallbackShown = computed(() => {
     const fallback = this.fallback();
@@ -323,7 +389,7 @@ export class AccountDetailViewComponent {
       ? fallback
       : null;
   });
-  /** `Save` appears only once the name differs from the committed one (a case-only change counts). */
+  /** Save is enabled only once the name differs from the committed one (a case-only change counts). */
   protected readonly edited = computed(() => {
     const draft = this.draftLabel().trim();
     return draft.length > 0 && draft !== this.account().label;
@@ -349,22 +415,22 @@ export class AccountDetailViewComponent {
         if (before?.profileId === profileId && before.pending && !pending) this.repairPendingFocus();
       });
     });
-    // A different account starts closed and with its committed name; focus goes to the heading.
+    // A different account starts closed, in view mode and with its committed name; focus goes to the heading.
     effect(() => {
       const account = this.account();
       untracked(() => {
         if (account.profileId === this.shownProfileId) return;
         this.shownProfileId = account.profileId;
-        this.draftLabel.set(account.label);
+        this.resetDraft(account.label);
         this.confirmingRemove.set(false);
         this.terminalOpen.set(false);
         afterNextRender(() => this.heading().nativeElement.focus(), { injector: this.injector });
       });
     });
-    // A committed rename resets the field; an unrelated snapshot does not touch the draft.
+    // A committed rename resets the field and closes edit mode; an unrelated snapshot does not touch the draft.
     effect(() => {
       const label = this.committedLabel();
-      untracked(() => this.draftLabel.set(label));
+      untracked(() => this.resetDraft(label));
     });
     // The disclosure closes with its script (sign-in finished, cancelled or failed).
     effect(() => {
@@ -392,21 +458,37 @@ export class AccountDetailViewComponent {
   }
 
   protected onDraft(event: Event): void {
-    if (event.target instanceof HTMLInputElement) this.draftLabel.set(event.target.value);
+    if (!(event.target instanceof HTMLInputElement)) return;
+    this.draftLabel.set(event.target.value);
+    this.renameError.set(null);
   }
 
-  /** The value is re-read and re-validated at submit; an invalid name is announced as an alert (P6-A9, D60). */
+  /** Edit opens with the committed name. A pending sign-in or an action in flight keeps the view mode. */
+  protected startEdit(): void {
+    if (this.locked()) return;
+    this.draftLabel.set(this.account().label);
+    this.renameError.set(null);
+    this.editing.set(true);
+  }
+
+  /** Cancel, Escape or Discard (the section confirms a dirty draft first). */
+  protected stopEdit(): void {
+    this.resetDraft(this.account().label);
+  }
+
+  /** The value is re-read and re-validated at submit; an invalid name shows as the section alert (D60). */
   protected submitRename(): void {
     if (this.locked() || !this.edited()) return;
     const check = validateAccountName(this.draftLabel(), this.accounts(), this.account().profileId);
     if (!check.ok) {
       if (check.message !== null) {
-        const message =
-          check.message === PROVIDER_ACCOUNT_DUPLICATE_LABEL_SUMMARY ? ACCOUNT_COPY.nameTaken : check.message;
-        this.feedback.announce(message, 'alert');
+        this.renameError.set(
+          check.message === PROVIDER_ACCOUNT_DUPLICATE_LABEL_SUMMARY ? ACCOUNT_COPY.nameTaken : check.message,
+        );
       }
       return;
     }
+    this.renameError.set(null);
     this.rename.emit({ profileId: this.account().profileId, label: check.label });
   }
 
@@ -432,6 +514,12 @@ export class AccountDetailViewComponent {
 
   protected noteFocus(event: FocusEvent): void {
     this.lastFocus = event.target instanceof Element ? event.target : null;
+  }
+
+  private resetDraft(label: string): void {
+    this.draftLabel.set(label);
+    this.renameError.set(null);
+    this.editing.set(false);
   }
 
   /**
