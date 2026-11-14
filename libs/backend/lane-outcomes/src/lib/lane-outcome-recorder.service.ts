@@ -9,6 +9,8 @@ import {
   type LaneTaskKindClassificationInput,
   type LaneTaskKindClassifier,
   type OutcomeExecutorKind,
+  type PhaseKind,
+  phaseKindForRole,
 } from '@ptah-extension/shared';
 import type {
   SdkAdapterSubagentEndedEvent,
@@ -49,9 +51,16 @@ export type LaneCompletionOutcomeInput = Omit<
   | 'telemetryJoin'
   | 'skillsLoaded'
   | 'sessionEvidenceClass'
+  | 'phaseKind'
 > & {
   executorKind: Exclude<LaneOutcomeRecord['executorKind'], 'subagent'>;
-} & Pick<LaneFailureClassificationInput, 'status' | 'failureKind' | 'exitCode'>;
+} & Pick<LaneFailureClassificationInput, 'status' | 'failureKind' | 'exitCode'> & {
+  /**
+   * Phase kind of the lane. It resolves the task kind and is stored on the
+   * row (`phase_kind`, migration 0075) as the phase grade key.
+   */
+  readonly phaseKind?: PhaseKind | null;
+};
 
 /**
  * Transient lane-completion input that never reaches a row, the journal or a
@@ -183,10 +192,11 @@ export class LaneOutcomeRecorder {
     input: LaneCompletionOutcomeInput,
     transient: LaneCompletionTransient = {},
   ): void {
-    const { status, failureKind, exitCode, ...facts } = input;
+    const { status, failureKind, exitCode, phaseKind, ...facts } = input;
     const row: LaneOutcomeRecord = {
       ...facts,
-      ...resolveTaskKind(input.taskKind, input.role),
+      ...resolveTaskKind(input.taskKind, phaseKind ?? null, input.role),
+      phaseKind: phaseKind ?? null,
       subagentSessionId: null,
       parentSessionId: input.parentSessionId ?? null,
       workspaceRoot: input.workspaceRoot?.trim() || null,
@@ -517,7 +527,10 @@ export class LaneOutcomeRecorder {
       parentSessionId: facts.parentSessionId,
       workspaceRoot: facts.workspaceRoot,
       role,
-      ...resolveTaskKind(null, role),
+      ...resolveTaskKind(null, null, role),
+      // A built-in role slug maps to its phase kind (ROLE_PHASE_ALIASES), so the
+      // run is graded as a phase. A user-written agent name keeps a null phase.
+      phaseKind: role ? phaseKindForRole(role) : null,
     };
     if (!LaneOutcomeRowSchema.safeParse(row).success) {
       this.logger.warn('Invalid subagent outcome', { agentId: facts.agentId });

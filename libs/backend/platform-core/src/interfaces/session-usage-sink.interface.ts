@@ -1,3 +1,7 @@
+import type { PhaseKind } from '@ptah-extension/shared';
+
+export type UsageExecutorType = 'sdk-subagent' | 'session' | 'lane';
+
 export type UsageScope = 'message' | 'turn' | 'cumulative';
 
 export type UsageMissingReason =
@@ -23,6 +27,8 @@ export interface SessionUsageModelDelta {
 
 /** Stable identity and accepted usage from one producer event. */
 export interface SessionUsageContribution {
+  phaseKind?: PhaseKind | null;
+  executorType?: UsageExecutorType | null;
   sessionId: string;
   producer: 'sdk-owner' | 'codex-checkpoint' | 'cli-lane' | 'transcript-replay';
   runId: string;

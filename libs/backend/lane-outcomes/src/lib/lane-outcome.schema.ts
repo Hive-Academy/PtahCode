@@ -4,6 +4,7 @@ import {
   OUTCOME_ROUTING_SOURCES,
   OUTCOME_TASK_KIND_SOURCES,
   OUTCOME_TASK_KINDS,
+  PHASE_KINDS,
 } from '@ptah-extension/shared';
 
 export const OutcomeTargetSchema = z.union([
@@ -52,6 +53,8 @@ export const LaneOutcomeRowSchema = z.object({
   role: z.string().nullable(),
   taskKind: z.enum(OUTCOME_TASK_KINDS).nullable(),
   taskKindSource: z.enum(OUTCOME_TASK_KIND_SOURCES).nullable().default(null),
+  /** Null for rows before migration 0075 and for lanes without a phase. */
+  phaseKind: z.enum(PHASE_KINDS).nullable().default(null),
   taskId: z.string().nullable(),
   verdict: z.enum(['delivered', 'no-deliverable', 'unverified', 'failed']),
   failureClass: z.enum(LANE_FAILURE_CLASSES).nullable(),

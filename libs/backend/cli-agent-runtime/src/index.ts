@@ -1,4 +1,5 @@
 export * from './lib/cli-agents';
+export { laneMcpTokenCapability } from './lib/cli-agents/lane-mcp-token-rule';
 export { AgentSpawnEnvironment } from './lib/cli-agents/agent-spawn-environment.service';
 export { codexLaneSandboxMode, resolveCliLanePolicy } from './lib/cli-agents/cli-lane-policy-resolver';
 export type { IAgentSpawnTrustedRoots } from './lib/cli-agents/agent-spawn-environment.service';
@@ -12,6 +13,7 @@ export * from './lib/mcp-directory';
 export * from './lib/skills-directory';
 export * from './lib/roles';
 export * from './lib/session-children';
+export type { SessionChildEligibility } from './lib/session-children/session-spawner.port';
 export {
   CapabilityToggleStore,
   CapabilityToggleStoreError,

@@ -571,11 +571,14 @@ function addGradeTables(db: BetterSqliteDb, agents: readonly string[]): void {
   const schema = sql?.match(/CREATE TABLE skill_task_grades \([\s\S]*?CREATE INDEX idx_skill_task_grades_run ON skill_task_grades\(run_id\);/)?.[0];
   if (!schema) throw new Error('Migration 0056 grade schema unavailable');
   db.exec(schema);
+  // Migration 0075 grade keys.
+  db.exec(`ALTER TABLE skill_task_grades ADD COLUMN phase_kind TEXT;
+    ALTER TABLE skill_task_grades ADD COLUMN executor_kind TEXT;`);
   db.exec(`CREATE TABLE skill_registry (slug TEXT, kind TEXT);
     CREATE TABLE session_task_links (workspace_root TEXT, session_id TEXT, task_id TEXT);
     CREATE TABLE lane_outcome_records (
-      run_id TEXT, subagent_session_id TEXT, final_review TEXT, task_id TEXT,
-      workspace_root TEXT, role TEXT, executor_kind TEXT
+      run_id TEXT, subagent_session_id TEXT, parent_session_id TEXT, final_review TEXT, task_id TEXT,
+      workspace_root TEXT, role TEXT, executor_kind TEXT, phase_kind TEXT
     );`);
   for (const slug of agents) db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run(slug, 'agent');
 }
@@ -778,6 +781,28 @@ describe('SpecHarvesterService — two workspaces sharing a task id (R7)', () =>
       WHERE workspace_root = ? AND reconciled_at IS NULL`).get(workspaceRoot) as { n: number };
     return row.n;
   }
+
+  maybe('grades a phase lane added after harvest and upgrades a marker missing attributionDigest once', async () => {
+    const dir = await writeReviewedSpec(join(rootA, '.ptah', 'specs'), TASK, 'APPROVED');
+    expect(await svc.harvestTask(rootA, TASK)).toMatchObject({ outcome: 'harvested' });
+    expect(await svc.harvestTask(rootA, TASK)).toMatchObject({ outcome: 'already-harvested' });
+
+    db.prepare(`INSERT INTO lane_outcome_records
+      (run_id, task_id, workspace_root, executor_kind, phase_kind, final_review)
+      VALUES (?, ?, ?, ?, ?, ?)`).run('late-phase', TASK, rootA, 'cli', 'tests', 'approved');
+    expect(await svc.harvestTask(rootA, TASK)).toMatchObject({ outcome: 'harvested' });
+    expect(db.prepare(`SELECT subject_kind, subject_slug, verdict FROM skill_task_grades
+      WHERE task_id = ? AND attribution_key = ?`).get(TASK, 'run:late-phase'))
+      .toMatchObject({ subject_kind: 'phase', subject_slug: 'tests', verdict: 'pass' });
+    expect(await svc.harvestTask(rootA, TASK)).toMatchObject({ outcome: 'already-harvested' });
+
+    const markerPath = join(dir, HARVEST_MARKER_FILE);
+    const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>;
+    delete marker['attributionDigest'];
+    await writeFile(markerPath, JSON.stringify(marker), 'utf8');
+    expect(await svc.harvestTask(rootA, TASK)).toMatchObject({ outcome: 'harvested' });
+    expect(await svc.harvestTask(rootA, TASK)).toMatchObject({ outcome: 'already-harvested' });
+  });
 
   maybe('upgrades v2 markers and keeps each workspace to its own grades and events', async () => {
     let at = 1;

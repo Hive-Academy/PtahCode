@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
@@ -7,11 +8,18 @@ import {
   type SqliteConnectionService,
   type SqliteDatabase,
 } from '@ptah-extension/persistence-sqlite';
+import { PHASE_KINDS, ROLE_PHASE_ALIASES, type PhaseKind } from '@ptah-extension/shared';
 import type { SkillRegistryKind } from './skill-registry.store';
+
+/**
+ * Subject kind of a grade. `phase` grades (migration 0075) key on the phase
+ * kind of a lane row of any executor kind; the slug is the phase kind.
+ */
+export type GradeSubjectKind = SkillRegistryKind | 'phase';
 
 export interface SkillTaskGrade {
   readonly taskId: string;
-  readonly subjectKind: SkillRegistryKind;
+  readonly subjectKind: GradeSubjectKind;
   readonly subjectSlug: string;
   readonly attributionKey: string;
   readonly runId: string | null;
@@ -22,6 +30,21 @@ export interface SkillTaskGrade {
   readonly workspaceRoot: string | null;
   readonly gradedAt: number;
   readonly findingsRef: string | null;
+  /** Phase kind of the graded lane row (0075). Null or absent on legacy rows. */
+  readonly phaseKind?: PhaseKind | null;
+  /** Executor kind of the graded lane row (0075). Null or absent on legacy rows. */
+  readonly executorKind?: string | null;
+}
+
+/**
+ * One phase scorecard input row. `legacy` rows are role grades whose slug is in
+ * `ROLE_PHASE_ALIASES`; they are read through the alias and never rewritten.
+ */
+export interface PhaseGradeAggregate extends SkillTaskGradeAggregate {
+  readonly phaseKind: PhaseKind;
+  readonly legacy: boolean;
+  /** The role slugs whose legacy grades were read through the alias. */
+  readonly aliasedRoles: readonly string[];
 }
 
 export interface SkillTaskGradeAggregate {
@@ -31,15 +54,23 @@ export interface SkillTaskGradeAggregate {
 }
 
 export interface GradeAttribution {
-  readonly kind: SkillRegistryKind;
+  readonly kind: GradeSubjectKind;
   readonly slug: string;
   readonly runId: string | null;
   readonly sessionId: string | null;
   readonly attributionKey: string;
   readonly finalReview: 'approved' | 'rejected' | null;
+  readonly phaseKind: PhaseKind | null;
+  readonly executorKind: string | null;
 }
 
-const KindSchema = z.enum(['skill', 'agent', 'command']);
+const KindSchema = z.enum(['skill', 'agent', 'command', 'phase']);
+/** An unknown stored phase kind reads as null; it never fails the row. */
+const PhaseKindColumnSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((value): PhaseKind | null => toPhaseKind(value ?? null));
 const AttributionRowSchema = z.object({
   kind: KindSchema,
   slug: z.string(),
@@ -48,8 +79,30 @@ const AttributionRowSchema = z.object({
   attribution_key: z.string(),
   final_review: z.enum(['approved', 'rejected']).nullable(),
   workspace_root: z.string().nullable(),
+  phase_kind: PhaseKindColumnSchema,
+  executor_kind: z.string().nullable().optional().transform((value) => value ?? null),
 });
 type RawAttribution = z.infer<typeof AttributionRowSchema>;
+const PhaseAttributionRowSchema = AttributionRowSchema.extend({
+  fallback_session_id: z.string().nullable(),
+});
+const SessionLinkRowSchema = z.object({
+  workspace_root: z.string().nullable(),
+  session_id: z.string(),
+  task_id: z.string().nullable(),
+});
+
+function toPhaseKind(value: string | null): PhaseKind | null {
+  return PHASE_KINDS.find((kind) => kind === value) ?? null;
+}
+
+/** Role slugs that read as legacy rows of one phase kind. */
+export function rolesForPhase(phaseKind: PhaseKind): string[] {
+  return Object.entries(ROLE_PHASE_ALIASES)
+    .filter(([, phase]) => phase === phaseKind)
+    .map(([role]) => role)
+    .sort();
+}
 
 export function groupGradeAttributions(rows: readonly RawAttribution[]): GradeAttribution[] {
   const grouped = new Map<string, RawAttribution | null>();
@@ -64,6 +117,7 @@ export function groupGradeAttributions(rows: readonly RawAttribution[]): GradeAt
   return [...grouped.values()].filter((row): row is RawAttribution => row !== null).map((row) => ({
     kind: row.kind, slug: row.slug, runId: row.run_id, sessionId: row.session_id,
     attributionKey: row.attribution_key, finalReview: row.final_review,
+    phaseKind: row.phase_kind, executorKind: row.executor_kind,
   }));
 }
 
@@ -86,6 +140,8 @@ const GradeRowSchema = z.object({
   workspace_root: z.string().nullable(),
   graded_at: z.number(),
   findings_ref: z.string().nullable(),
+  phase_kind: PhaseKindColumnSchema,
+  executor_kind: z.string().nullable().optional().transform((value) => value ?? null),
 });
 
 @injectable()
@@ -118,10 +174,13 @@ export class SkillTaskGradeStore {
   upsert(grade: SkillTaskGrade): boolean {
     const result = this.db.prepare(`INSERT INTO skill_task_grades (
       task_id, subject_kind, subject_slug, attribution_key, run_id, verdict,
-      source_file, source_digest, evidence_source, workspace_root, graded_at, findings_ref
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      source_file, source_digest, evidence_source, workspace_root, graded_at, findings_ref,
+      phase_kind, executor_kind
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(task_id, subject_kind, subject_slug, attribution_key) DO UPDATE SET
       run_id = excluded.run_id,
+      phase_kind = excluded.phase_kind,
+      executor_kind = excluded.executor_kind,
       verdict = excluded.verdict,
       source_file = excluded.source_file,
       source_digest = excluded.source_digest,
@@ -134,12 +193,21 @@ export class SkillTaskGradeStore {
       grade.taskId, grade.subjectKind, grade.subjectSlug, grade.attributionKey,
       grade.runId, grade.verdict, grade.sourceFile, grade.sourceDigest,
       grade.evidenceSource, grade.workspaceRoot === null ? null : normalizeWorkspaceRoot(grade.workspaceRoot),
-      grade.gradedAt, grade.findingsRef,
+      grade.gradedAt, grade.findingsRef, grade.phaseKind ?? null, grade.executorKind ?? null,
     );
     return result.changes > 0;
   }
 
-  /** Only exact task or uniquely linked session facts are eligible. */
+  /**
+   * Only exact task or uniquely linked session facts are eligible.
+   *
+   * Three sources: skill invocation events (skill, agent or command), role lane
+   * rows (`executor_kind = 'subagent'` with a registered agent role) and phase
+   * lane rows (any executor kind with a `phase_kind`; subject kind `phase`, slug
+   * = the phase kind). One lane row can give a role and a phase attribution. Both
+   * are written as separate subjects; the phase scorecard reads only one of them
+   * (see `getPhaseAggregates`), so the row is never counted twice in one total.
+   */
   findAttributions(taskId: string, workspaceRoot: string): GradeAttribution[] {
     const normalizedRoot = normalizeWorkspaceRoot(workspaceRoot);
     const rows = this.db.prepare(`SELECT
@@ -147,7 +215,7 @@ export class SkillTaskGradeStore {
            WHEN e.source = 'slash-command' THEN 'command' ELSE 'skill' END AS kind,
       e.skill_slug AS slug, e.run_id, e.session_id,
       CASE WHEN e.run_id IS NOT NULL THEN 'run:' || e.run_id ELSE 'event:' || e.id END AS attribution_key,
-      l.final_review, e.workspace_root
+      l.final_review, e.workspace_root, l.phase_kind, l.executor_kind
       FROM skill_invocation_events e
       LEFT JOIN lane_outcome_records l ON l.run_id = e.run_id
       WHERE e.source IN ('subagent', 'tool-use', 'slash-command')
@@ -166,7 +234,7 @@ export class SkillTaskGradeStore {
       .filter((row) => row.workspace_root !== null && normalizeWorkspaceRoot(row.workspace_root) === normalizedRoot);
     const laneRows = this.db.prepare(`SELECT 'agent' AS kind, role AS slug,
       run_id, subagent_session_id AS session_id, 'run:' || run_id AS attribution_key,
-      final_review, workspace_root FROM lane_outcome_records
+      final_review, workspace_root, phase_kind, executor_kind FROM lane_outcome_records
       WHERE task_id = ? AND role IS NOT NULL AND role <> ''
         AND EXISTS (SELECT 1 FROM skill_registry registry
           WHERE registry.slug = lane_outcome_records.role AND registry.kind = 'agent')
@@ -175,7 +243,48 @@ export class SkillTaskGradeStore {
     for (const row of laneRows) {
       if (!rows.some((event) => event.kind === row.kind && event.slug === row.slug && event.run_id === row.run_id)) rows.push(row);
     }
+    // Phase rows: every executor kind. An unknown phase kind reads as null and is dropped.
+    // A taskless row is attributed through its parent session link, matched in code so
+    // both workspace roots go through normalizeWorkspaceRoot.
+    const linkedSessions = this.sessionsLinkedOnlyTo(taskId, normalizedRoot);
+    const phaseRows = this.db.prepare(`SELECT 'phase' AS kind, phase_kind AS slug,
+      run_id, subagent_session_id AS session_id, 'run:' || run_id AS attribution_key,
+      final_review, workspace_root, phase_kind, executor_kind,
+      CASE WHEN task_id IS NULL THEN parent_session_id ELSE NULL END AS fallback_session_id
+      FROM lane_outcome_records
+      WHERE (task_id = ? OR (task_id IS NULL AND parent_session_id IS NOT NULL
+        AND parent_session_id IN (SELECT session_id FROM session_task_links WHERE task_id = ?)))
+        AND phase_kind IS NOT NULL AND phase_kind <> ''`).all(taskId, taskId)
+      .map((row) => this.parseRow(PhaseAttributionRowSchema, row))
+      .filter((row) => row.phase_kind !== null
+        && row.workspace_root !== null && normalizeWorkspaceRoot(row.workspace_root) === normalizedRoot
+        && (row.fallback_session_id === null || linkedSessions.has(row.fallback_session_id)));
+    rows.push(...phaseRows);
     return groupGradeAttributions(rows);
+  }
+
+  /**
+   * Session ids whose task links in this workspace name only `taskId`. Roots are
+   * compared after normalizeWorkspaceRoot, so spelling differences still match.
+   */
+  private sessionsLinkedOnlyTo(taskId: string, normalizedRoot: string): Set<string> {
+    const links = this.db.prepare(`SELECT workspace_root, session_id, task_id FROM session_task_links
+      WHERE session_id IN (SELECT session_id FROM session_task_links WHERE task_id = ?)`).all(taskId)
+      .map((row) => this.parseRow(SessionLinkRowSchema, row))
+      .filter((row) => row.workspace_root !== null && normalizeWorkspaceRoot(row.workspace_root) === normalizedRoot);
+    const linked = new Set(links.filter((row) => row.task_id === taskId).map((row) => row.session_id));
+    for (const row of links) if (row.task_id !== null && row.task_id !== taskId) linked.delete(row.session_id);
+    return linked;
+  }
+
+  /** Digest the facts that can change a task's grades, independent of query order. */
+  attributionFingerprint(taskId: string, workspaceRoot: string): string {
+    const rows = this.findAttributions(taskId, workspaceRoot).map((row) => JSON.stringify([
+      row.kind, row.slug, row.attributionKey, row.runId, row.sessionId,
+      row.finalReview, row.phaseKind, row.executorKind,
+    ]));
+    rows.sort();
+    return createHash('sha256').update(JSON.stringify(rows)).digest('hex');
   }
 
   removeAbsent(taskId: string, workspaceRoot: string, keys: readonly string[]): number {
@@ -195,7 +304,7 @@ export class SkillTaskGradeStore {
   }
 
   /** True when a grade exists for the task and slug; scoped to one workspace when a root is given. */
-  hasGradeForTask(taskId: string, slug: string, kind?: SkillRegistryKind, workspaceRoot?: string): boolean {
+  hasGradeForTask(taskId: string, slug: string, kind?: GradeSubjectKind, workspaceRoot?: string): boolean {
     const root = workspaceRoot === undefined ? null : normalizeWorkspaceRoot(workspaceRoot);
     const row = this.db.prepare(`SELECT 1 FROM skill_task_grades
       WHERE task_id = ? AND subject_slug = ? AND (? IS NULL OR subject_kind = ?)
@@ -204,7 +313,56 @@ export class SkillTaskGradeStore {
     return row !== undefined;
   }
 
-  getAggregates(kind: SkillRegistryKind, slugs: readonly string[], workspaceRoot: string | null): Map<string, SkillTaskGradeAggregate> {
+  /**
+   * Phase scorecard inputs for one workspace. For each phase kind it returns one
+   * current row (`subject_kind = 'phase'`) and, when legacy grades exist, one
+   * legacy row: role grades whose slug maps to the phase in `ROLE_PHASE_ALIASES`.
+   * A role grade is excluded when its run has a phase grade, including a
+   * subagent run stored with either raw or prefixed agent ID. Paired raw and
+   * prefixed agent grades count once in legacy totals; stored rows are unchanged.
+   */
+  getPhaseAggregates(workspaceRoot: string | null): PhaseGradeAggregate[] {
+    if (!workspaceRoot) return [];
+    const normalizedRoot = normalizeWorkspaceRoot(workspaceRoot);
+    const current = this.db.prepare(`SELECT COUNT(*) AS graded,
+      COALESCE(SUM(CASE WHEN verdict = 'pass' THEN 1 ELSE 0 END), 0) AS passed
+      FROM skill_task_grades INDEXED BY idx_skill_task_grades_subject
+      WHERE subject_kind = 'phase' AND subject_slug = ? AND workspace_root = ?`);
+    const legacy = this.db.prepare(`SELECT COUNT(*) AS graded,
+      COALESCE(SUM(CASE WHEN g.verdict = 'pass' THEN 1 ELSE 0 END), 0) AS passed
+      FROM skill_task_grades g INDEXED BY idx_skill_task_grades_subject
+      WHERE g.subject_kind = 'agent' AND g.subject_slug = ? AND g.workspace_root = ?
+        AND NOT EXISTS (SELECT 1 FROM skill_task_grades p
+          WHERE p.subject_kind = 'phase' AND p.task_id = g.task_id
+            AND p.workspace_root = g.workspace_root
+            AND (p.attribution_key = g.attribution_key OR
+              (g.attribution_key LIKE 'run:%' AND g.attribution_key NOT LIKE 'run:subagent:%'
+                AND p.attribution_key = 'run:subagent:' || substr(g.attribution_key, 5))))
+        AND NOT EXISTS (SELECT 1 FROM skill_task_grades g2
+          WHERE g.attribution_key LIKE 'run:%' AND g.attribution_key NOT LIKE 'run:subagent:%'
+            AND g2.subject_kind = 'agent' AND g2.task_id = g.task_id
+            AND g2.workspace_root = g.workspace_root AND g2.subject_slug = g.subject_slug
+            AND g2.attribution_key = 'run:subagent:' || substr(g.attribution_key, 5))`);
+    const result: PhaseGradeAggregate[] = [];
+    for (const phaseKind of PHASE_KINDS) {
+      const row = this.parseRow(AggregateRowSchema, current.get(phaseKind, normalizedRoot));
+      result.push(toPhaseAggregate(phaseKind, false, [], row.graded, row.passed));
+      let graded = 0;
+      let passed = 0;
+      const aliasedRoles: string[] = [];
+      for (const role of rolesForPhase(phaseKind)) {
+        const roleRow = this.parseRow(AggregateRowSchema, legacy.get(role, normalizedRoot));
+        if (roleRow.graded === 0) continue;
+        aliasedRoles.push(role);
+        graded += roleRow.graded;
+        passed += roleRow.passed;
+      }
+      if (graded > 0) result.push(toPhaseAggregate(phaseKind, true, aliasedRoles, graded, passed));
+    }
+    return result;
+  }
+
+  getAggregates(kind: GradeSubjectKind, slugs: readonly string[], workspaceRoot: string | null): Map<string, SkillTaskGradeAggregate> {
     const result = new Map<string, SkillTaskGradeAggregate>();
     const normalizedRoot = workspaceRoot ? normalizeWorkspaceRoot(workspaceRoot) : null;
     const stmt = this.db.prepare(`SELECT COUNT(*) AS graded,
@@ -222,7 +380,7 @@ export class SkillTaskGradeStore {
     return result;
   }
 
-  listRecent(kind: SkillRegistryKind, slug: string, limit: number, workspaceRoot: string | null): SkillTaskGrade[] {
+  listRecent(kind: GradeSubjectKind, slug: string, limit: number, workspaceRoot: string | null): SkillTaskGrade[] {
     const normalizedRoot = workspaceRoot ? normalizeWorkspaceRoot(workspaceRoot) : null;
     const rows = this.db.prepare(`SELECT * FROM skill_task_grades
       INDEXED BY idx_skill_task_grades_subject
@@ -242,6 +400,18 @@ export class SkillTaskGradeStore {
       workspaceRoot: row.workspace_root,
       gradedAt: row.graded_at,
       findingsRef: row.findings_ref,
+      phaseKind: row.phase_kind,
+      executorKind: row.executor_kind,
     }));
   }
+}
+
+function toPhaseAggregate(
+  phaseKind: PhaseKind,
+  legacy: boolean,
+  aliasedRoles: readonly string[],
+  graded: number,
+  passed: number,
+): PhaseGradeAggregate {
+  return { phaseKind, legacy, aliasedRoles, graded, passed, successRate: graded > 0 ? passed / graded : null };
 }

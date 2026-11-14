@@ -537,6 +537,12 @@ describe('route-decide results, P1-C4 cross-field rules', () => {
     ).toBe(true);
   });
 
+  it('accepts a new child session kind without an invented session id', () => {
+    const executor = { kind: 'child-session', id: 'child-session', family: 'claude' };
+    expect(GateResultSchema.safeParse(gateOf([{ ...chosen, executor }])).success).toBe(true);
+    expect(GateResultSchema.safeParse(gateOf([{ ...chosen, executor: { ...executor, sessionId: 'invented' } }])).success).toBe(false);
+  });
+
   it.each(['taskType', 'depth'] as const)(
     'rejects a null %s answer whose source is model',
     (field) => {

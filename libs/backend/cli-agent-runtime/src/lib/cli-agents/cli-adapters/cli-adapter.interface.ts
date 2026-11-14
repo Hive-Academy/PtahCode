@@ -185,6 +185,11 @@ export interface SdkHandle extends LaneAccountBindingFields {
   readonly effectivePolicy?: import('@ptah-extension/shared').EffectiveLanePolicy;
   /** Provider configured for a Ptah CLI handle at spawn. */
   readonly providerId?: string;
+  /**
+   * True only when the adapter confirmed that the phase denials reach both
+   * the Ptah MCP server and the SDK `disallowedTools` option.
+   */
+  readonly toolProfileApplied?: boolean;
   /** Effective policy channel after adapter fallback selection. */
   readonly getLanePolicyDelivery?: () => AgentRoleChannel;
   /**

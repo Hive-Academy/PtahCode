@@ -7,12 +7,14 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import {
   SessionStatsRepository,
   type SessionUsageContribution,
+  usageExecutorTypeSchema,
+  usagePhaseKindSchema,
 } from './session-stats-repository';
 
 const safeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const identifier = z.string().min(1);
 const authority = z.enum(['provider-reported', 'model-priced', 'unpriced']);
-const liveContributionSchema: z.ZodType<LiveUsageContribution> = z
+const liveContributionSchema = z
   .object({
     sessionId: identifier,
     producer: z.enum(['sdk-owner', 'codex-checkpoint', 'cli-lane', 'transcript-replay']),
@@ -54,6 +56,8 @@ const liveContributionSchema: z.ZodType<LiveUsageContribution> = z
     billable: z.boolean().optional(),
     coverageStartMs: safeInteger.nullable().optional(),
     coverageEndMs: safeInteger.nullable().optional(),
+    phaseKind: usagePhaseKindSchema.nullable().optional(),
+    executorType: usageExecutorTypeSchema.nullable().optional(),
   })
   .strict();
 
@@ -243,6 +247,8 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
       pricingVersion: event.pricingVersion,
       workspaceKey: event.workspaceKey ?? null,
       host: event.host ?? null,
+      phaseKind: event.phaseKind ?? null,
+      executorType: event.executorType ?? null,
       revision: event.revision,
       runCostSnapshot: event.runCostSnapshot,
       nativeThreadId: event.nativeThreadId ?? null,
@@ -273,6 +279,8 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         pricingVersion: event.pricingVersion,
         workspaceKey: event.workspaceKey ?? null,
         host: event.host ?? null,
+        phaseKind: event.phaseKind ?? null,
+        executorType: event.executorType ?? null,
         revision: event.revision,
         runCostSnapshot: event.runCostSnapshot,
         nativeThreadId: event.nativeThreadId ?? null,
@@ -308,6 +316,8 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         pricingVersion: event.pricingVersion,
         workspaceKey: event.workspaceKey ?? null,
         host: event.host ?? null,
+        phaseKind: event.phaseKind ?? null,
+        executorType: event.executorType ?? null,
         revision: event.revision,
         runCostSnapshot: event.runCostSnapshot,
         nativeThreadId: event.nativeThreadId ?? null,

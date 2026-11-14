@@ -2984,7 +2984,7 @@ describe('Codex metadata identity', () => {
       cacheSemanticsAmbiguous: false, lastExceedsTotal: false, diagnostics: [],
     });
     await store.updateCodexUsageCheckpoint(threadId, owner.serialize());
-    const contributions: Array<{ eventKey: string; totalCostMicroUsd: number | null }> = [];
+    const contributions: Array<{ eventKey: string; totalCostMicroUsd: number | null; executorType?: string | null }> = [];
     const reloaded = new SessionMetadataStore(
       storage, asLogger(createMockLogger()), undefined, undefined, undefined,
       { recordUsage: (value) => { contributions.push(value); } },
@@ -3000,6 +3000,7 @@ describe('Codex metadata identity', () => {
     await reloaded.updateCodexUsageCheckpoint(threadId, owner.serialize());
     expect((await reloaded.get(threadId))?.totalCost).toBe(0.0001);
     expect(contributions.at(-1)).toMatchObject({
+      executorType: 'session',
       eventKey: expect.stringContaining('#price#100'),
       totalCostMicroUsd: 100,
     });

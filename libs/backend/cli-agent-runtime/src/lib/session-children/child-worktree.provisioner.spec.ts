@@ -82,6 +82,39 @@ beforeEach(() => {
 });
 
 describe('ChildWorktreeProvisioner.create', () => {
+  it('verifies an attached branch and never rolls its worktree back', async () => {
+    scriptGit({
+      'symbolic-ref --quiet --short HEAD': [
+        { exitCode: 0, stdout: `${BRANCH}\n` },
+      ],
+      'rev-parse --verify HEAD': [{ exitCode: 0, stdout: `${SHA}\n` }],
+    });
+    const { provisioner } = makeProvisioner();
+    const attached = await provisioner.attach(ROOT, BRANCH, WORKTREE);
+    expect(attached).toMatchObject({
+      ok: true,
+      worktree: { branch: BRANCH, owned: false },
+    });
+    if (!attached.ok) return;
+    expect(await provisioner.rollback(attached.worktree)).toEqual([]);
+    expect(gitCalls()).not.toContain(
+      expect.stringContaining('worktree remove'),
+    );
+  });
+
+  it('refuses an attached worktree checked out on another branch', async () => {
+    scriptGit({
+      'symbolic-ref --quiet --short HEAD': [
+        { exitCode: 0, stdout: 'feat/unrelated\n' },
+      ],
+    });
+    const { provisioner } = makeProvisioner();
+    expect(await provisioner.attach(ROOT, BRANCH, WORKTREE)).toMatchObject({
+      ok: false,
+      refusal: 'branch-exists',
+    });
+    expect(gitCalls()).not.toContain(expect.stringContaining('worktree remove'));
+  });
   it('runs the six steps as argument arrays and returns the worktree', async () => {
     scriptGit(structuredClone(HAPPY));
     const { provisioner } = makeProvisioner();
@@ -95,6 +128,7 @@ describe('ChildWorktreeProvisioner.create', () => {
         branch: BRANCH,
         worktreePath: WORKTREE,
         baseSha: SHA,
+        owned: true,
       },
     });
     expect(gitCalls()).toEqual([

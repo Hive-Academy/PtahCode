@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1009_f898
-status: in_review
+status: done
 type: REFACTORING
 title: Define the phase contract and merge the orchestration skill copies
 depends_on: []

@@ -454,6 +454,7 @@ export type {
   UsageMissingReason,
   UsageReconciliationTrigger,
   RepositoryIdentityResolver,
+  UsageExecutorType,
 } from './interfaces/session-usage-sink.interface';
 export type {
   ISessionDriverLock,
@@ -480,3 +481,4 @@ export type {
   ListedControlLock,
   ControlReleaseResult,
 } from './session-driver-lock/control-endpoint';
+export { resolveWorkspaceSkillPath, SkillPathRefusalError } from './lib/resolve-workspace-skill-path';

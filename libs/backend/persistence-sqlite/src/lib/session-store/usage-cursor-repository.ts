@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { SessionUsageContribution as CollectedUsage } from '@ptah-extension/platform-core';
 import type { SqliteDatabase } from '../sqlite-connection.service';
-import { SessionStatsRepository, type SessionUsageContribution as UsageRow } from './session-stats-repository';
+import { SessionStatsRepository, type SessionUsageContribution as UsageRow, usagePhaseKindSchema, usageExecutorTypeSchema } from './session-stats-repository';
 
 export interface UsageSourceCursor {
   sourceId: string;
@@ -34,6 +34,8 @@ const modelSchema = z.object({
   costAuthority: z.enum(['provider-reported', 'model-priced', 'unpriced']),
 });
 const replaySchema = z.object({
+  phaseKind: usagePhaseKindSchema.nullable().optional(),
+  executorType: usageExecutorTypeSchema.nullable().optional(),
   sessionId: nonempty, producer: z.literal('transcript-replay'), runId: nonempty,
   nativeThreadId: nonempty.nullable().optional(), turnId: nonempty.nullable(),
   eventKey: nonempty, providerId: nonempty.nullable(), occurredAtMs: safeInteger,
@@ -66,6 +68,7 @@ function toRows(event: CollectedUsage): UsageRow[] {
     costAuthority: model.costAuthority, source: 'replay', pricingVersion: parsed.pricingVersion,
     workspaceKey: parsed.workspaceKey ?? null, repositoryId: parsed.repositoryId ?? null,
     worktreePath: parsed.worktreePath ?? null, host: parsed.host ?? null,
+    phaseKind: parsed.phaseKind ?? null, executorType: parsed.executorType ?? null,
     missingReason: parsed.missingReason ?? null, billable: parsed.billable ?? true,
     coverageStartMs: parsed.coverageStartMs ?? null, coverageEndMs: parsed.coverageEndMs ?? null,
   }));

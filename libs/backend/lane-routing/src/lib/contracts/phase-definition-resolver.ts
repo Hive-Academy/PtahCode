@@ -1,6 +1,7 @@
 import matter from 'gray-matter';
 import { z } from 'zod';
-import { PHASE_KINDS, type PhaseDefinitionV1, type PhaseKind } from '@ptah-extension/shared';
+import { PhaseDispatchSchema, renderPhaseDiscipline } from '@ptah-extension/shared/schemas';
+import { PHASE_KINDS, PHASE_CONTRACT_VERSION, type PhaseDefinitionV1, type PhaseDispatchV1, type PhaseKind, type PhaseSkillV1 } from '@ptah-extension/shared';
 
 const MATTER_OPTIONS = { language: 'yaml' } as const;
 const list = z.array(z.string().trim().min(1)).min(1);
@@ -101,9 +102,39 @@ export function resolvePhaseDefinition(
   if (metadata.data.kind !== kind) throw new PhaseDefinitionError('KIND_MISMATCH', kind);
   const discipline = sectionsFor(kind, parsed.content);
   const definition: PhaseDefinitionV1 = { ...metadata.data, discipline };
-  const text = headings
-    .filter(([heading]) => heading !== 'Reviewer stance' || discipline.reviewerStance)
-    .map(([heading, key]) => `## ${heading}\n${discipline[key]}`)
-    .join('\n\n');
+  const text = renderDiscipline(discipline);
   return { text, toolProfile: definition.toolProfile, definition };
+}
+
+function renderDiscipline(discipline: PhaseDefinitionV1['discipline']): string {
+  return renderPhaseDiscipline(discipline);
+}
+
+/** Validate a handoff before any executor is started. */
+export function parsePhaseDispatch(payload: unknown): PhaseDispatchV1 {
+  const result = PhaseDispatchSchema.safeParse(payload);
+  if (!result.success) {
+    const rawKind = typeof payload === 'object' && payload !== null && 'kind' in payload
+      ? payload.kind : undefined;
+    const kind = z.enum(PHASE_KINDS).safeParse(rawKind).data ?? 'batch';
+    throw new PhaseDefinitionError('INVALID_SCHEMA', kind);
+  }
+  return result.data;
+}
+
+/** Existing callers may continue using resolvePhaseDefinition without skills. */
+export function resolvePhaseDispatch(
+  kind: PhaseKind,
+  readDefinition: (kind: PhaseKind) => string,
+  skills?: readonly PhaseSkillV1[],
+): PhaseDispatchV1 {
+  const resolved = resolvePhaseDefinition(kind, readDefinition);
+  return parsePhaseDispatch({
+    version: PHASE_CONTRACT_VERSION,
+    kind,
+    text: resolved.text,
+    definition: resolved.definition,
+    toolProfile: resolved.toolProfile,
+    ...(skills === undefined ? {} : { skills }),
+  });
 }

@@ -22,6 +22,7 @@ import { GalleryChartsFamilyComponent } from './ui-gallery/gallery-charts-family
 import { GalleryStatExtrasComponent } from './ui-gallery/gallery-stat-extras.component';
 import { GalleryComponentsComponent } from './ui-gallery/gallery-components.component';
 import { GalleryFormControlsFamilyComponent } from './ui-gallery/gallery-form-controls-family.component';
+import { GalleryPatternsFamilyComponent } from './ui-gallery/gallery-patterns-family.component';
 import { GalleryTokensShapeComponent } from './ui-gallery/gallery-tokens-shape.component';
 import { GalleryTokensSpacingComponent } from './ui-gallery/gallery-tokens-spacing.component';
 import { GalleryTokensTypeComponent } from './ui-gallery/gallery-tokens-type.component';
@@ -44,6 +45,7 @@ interface GallerySectionLink {
     GalleryTokensShapeComponent,
     GalleryButtonFamilyComponent,
     GalleryFormControlsFamilyComponent,
+    GalleryPatternsFamilyComponent,
     GalleryBadgeFamilyComponent,
     GalleryCardFamilyComponent,
     GalleryTimersFamilyComponent,
@@ -117,6 +119,7 @@ interface GallerySectionLink {
       <ptah-gallery-tokens-shape />
       <ptah-gallery-button-family />
       <ptah-gallery-form-controls-family />
+      <ptah-gallery-patterns-family />
       <ptah-gallery-badge-family />
       <ptah-gallery-card-family />
       <ptah-gallery-timers-family />
@@ -154,6 +157,9 @@ export class UiGalleryComponent {
     { id: 'tokens-shape', label: 'Shape, elevation, motion and state' },
     { id: 'family-button', label: 'Button family' },
     { id: 'family-form-controls', label: 'Form controls family' },
+    { id: 'patterns-form-section', label: 'Form section pattern' },
+    { id: 'patterns-description-list', label: 'Description list pattern' },
+    { id: 'patterns-form-actions', label: 'Form actions pattern' },
     { id: 'family-badge', label: 'Badge and status family' },
     { id: 'family-card', label: 'Card and surface family' },
     { id: 'timer-running', label: 'Timer: running' },

@@ -9,6 +9,7 @@
  * - Cross-platform process termination (SIGTERM/taskkill)
  */
 import { randomUUID } from 'node:crypto';
+import { laneMcpTokenCapability } from './lane-mcp-token-rule';
 import { injectable, inject } from 'tsyringe';
 import { EventEmitter } from 'eventemitter3';
 import type {
@@ -53,7 +54,10 @@ import {
   PLATFORM_TOKENS,
   type IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
-import { issueLaneMcpToken } from './cli-adapters/lane-mcp-credentials';
+import {
+  issueLaneMcpToken,
+  laneToolProfileAdapterResult,
+} from './cli-adapters/lane-mcp-credentials';
 import {
   claudeModelFamily,
   SDK_TOKENS,
@@ -958,7 +962,6 @@ export class AgentProcessManager {
     const roleStamp: AgentRoleStamp | undefined = roleDefinition
       ? { role: roleDefinition.name, roleDelivery: 'preamble', roleChannel }
       : undefined;
-
     const info: AgentProcessInfo & LaneAccountBindingFields = {
       ...options.accountReference,
       agentId,
@@ -988,6 +991,7 @@ export class AgentProcessManager {
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
       effectivePolicy: options.effectivePolicy,
+      ...(request.phase ? { phaseKind: request.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
@@ -1039,23 +1043,22 @@ export class AgentProcessManager {
     let admittedReference = options.accountReference;
     let admittedSdkSessionId: string | undefined;
     let sdkHandle: SdkHandle;
+    let issuedMcpToken: string | undefined;
     try {
+      const laneMcpCapability = laneMcpTokenCapability(cli);
       const mcpToken =
         mcpPort &&
-        (cli === 'codex' ||
-          cli === 'cursor' ||
-          cli === 'copilot' ||
-          cli === 'opencode' ||
-          cli === 'grok' ||
-          cli === 'antigravity')
+        laneMcpCapability
           ? issueLaneMcpToken(
               this.mcpCredentials,
               this.logger,
               agentId,
               workingDirectory,
-              cli === 'antigravity' ? 'lane-report' : 'privileged',
+              laneMcpCapability,
+              request.phase,
             )
           : undefined;
+      issuedMcpToken = mcpToken || undefined;
       sdkHandle = await runSdk({
         ...options.accountReference,
         // Claude adapter field (`ClaudeCliCommandOptions`); set for Claude only.
@@ -1109,6 +1112,7 @@ export class AgentProcessManager {
         role: roleDefinition,
         laneBudgets,
         instructionFileStore: this.instructionFiles,
+        ...(request.phase ? { phase: request.phase } : {}),
       });
     } catch (error: unknown) {
       // The spawn failure is the error the caller needs; the cleanup behind
@@ -1127,7 +1131,14 @@ export class AgentProcessManager {
     // back to the task prompt the role stays on developer instructions, and
     // Pi reports its shared channel here too (4332578858).
     const effectiveChannel = sdkHandle.getRoleDelivery?.() ?? roleChannel;
+    const toolProfileAdapter = laneToolProfileAdapterResult(
+      cli, request.phase,
+      cli === 'claude'
+        ? 'toolProfileApplied' in sdkHandle && sdkHandle.toolProfileApplied === true
+        : Boolean(issuedMcpToken),
+    );
     const boundInfo = { ...scopedInfo, ...admittedReference,
+      ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
       ...(sdkHandle.effectivePolicy ? { effectivePolicy: sdkHandle.effectivePolicy } : {}),
     };
     const effectiveInfo = roleStamp
@@ -1208,6 +1219,9 @@ export class AgentProcessManager {
       accountReference?: LaneAccountReference;
       potentialCapabilities?: CliAdapterManifest;
       effectivePolicy?: EffectiveLanePolicy;
+      toolProfileApplied?: boolean;
+      /** Phase handoff. A non-empty denial list is recorded on the spawn result. */
+      phase?: SpawnAgentRequest['phase'];
     },
   ): Promise<SpawnAgentResult> {
     await this.reserveSpawnSlot();
@@ -1221,6 +1235,11 @@ export class AgentProcessManager {
       const previous = previousResumeRecord(this.agents.values(),
         meta.cli,
         meta.resumeSessionId,
+      );
+      const toolProfileAdapter = laneToolProfileAdapterResult(
+        meta.cli,
+        meta.phase,
+        meta.toolProfileApplied === true,
       );
 
       const info: AgentProcessInfo = {
@@ -1255,6 +1274,8 @@ export class AgentProcessManager {
           ? { originalTask: meta.originalTask }
           : {}),
         ...meta.roleStamp,
+        ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
+        ...(meta.phase ? { phaseKind: meta.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
       };
       const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
       const effectiveChannel = sdkHandle.getRoleDelivery?.();
@@ -1573,6 +1594,9 @@ export class AgentProcessManager {
       ptahCliName: info.ptahCliName,
       ptahCliId: info.ptahCliId,
       ...roleStampOf(info),
+      ...(info.toolProfileAdapter
+        ? { toolProfileAdapter: info.toolProfileAdapter }
+        : {}),
     };
 
     this.events.emit('agent:spawned', tracked.info);

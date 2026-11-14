@@ -11,7 +11,10 @@ import { join } from 'node:path';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { AuthEnv, EffectiveCapabilitySet } from '@ptah-extension/shared';
-import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
+import type {
+  IMcpCallerCredentials,
+  IWorkspaceProvider,
+} from '@ptah-extension/platform-core';
 
 // `<home>/.claude` is resolved with `os.homedir()`, which a `HOME` override
 // in a Jest sandbox does not reach; the specs point it at a fixture here.
@@ -82,6 +85,10 @@ function settingsWorkspace(
 
 function buildService(
   workspace?: Pick<IWorkspaceProvider, 'getConfiguration'>,
+  mcp?: {
+    readonly status?: { getPort(): number | null };
+    readonly credentials?: IMcpCallerCredentials;
+  },
 ): PtahCliSpawnOptions {
   const ctor = PtahCliSpawnOptions as unknown as new (
     ...args: unknown[]
@@ -92,9 +99,10 @@ function buildService(
     { createHooks: jest.fn().mockReturnValue({}) },
     { getConfig: jest.fn().mockReturnValue({ enabled: false }) },
     { getProjectGuidanceContent: jest.fn().mockResolvedValue(undefined) },
-    undefined,
+    mcp?.status,
     undefined,
     workspace,
+    mcp?.credentials,
   );
 }
 
@@ -508,5 +516,47 @@ describe('PtahCliSpawnOptions — account-synced skills (TASK_2026_853 Phase B)'
     writeFileSync(join(dir, 'manifest.json'), '{ not json');
     const assembly = await assembleWith();
     expect(assembly.capabilityFlags.deniedSkillNames).toEqual(DEFAULT_SKILLS);
+  });
+});
+
+describe('PtahCliSpawnOptions — phase credential', () => {
+  it('passes the phase into the lane credential and omits it when absent', async () => {
+    const issue = jest.fn().mockReturnValue('c'.repeat(43));
+    const credentials = {
+      issue,
+      revokeSubject: jest.fn(),
+    } satisfies IMcpCallerCredentials;
+    const service = buildService(settingsWorkspace(() => undefined), {
+      status: { getPort: () => 51820 },
+      credentials,
+    });
+    await service.assembleSpawnOptions(
+      AUTH_ENV,
+      CWD,
+      'opus',
+      undefined,
+      'lane-1',
+    );
+    expect(issue.mock.calls[0]?.[0]).not.toHaveProperty('phaseKind');
+    expect(issue.mock.calls[0]?.[0]).not.toHaveProperty('disallowedTools');
+
+    await service.assembleSpawnOptions(
+      AUTH_ENV,
+      CWD,
+      'opus',
+      undefined,
+      'lane-1',
+      undefined,
+      undefined,
+      undefined,
+      {
+        kind: 'visual-review',
+        disallowedTools: [],
+      },
+    );
+    expect(issue.mock.calls[1]?.[0]).toMatchObject({
+      phaseKind: 'visual-review',
+      disallowedTools: [],
+    });
   });
 });

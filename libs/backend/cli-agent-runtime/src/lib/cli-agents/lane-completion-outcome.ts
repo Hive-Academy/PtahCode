@@ -15,6 +15,7 @@ import {
 } from '@ptah-extension/agent-sdk';
 import type { UsageMissingReason, UsageReconciliationTrigger } from '@ptah-extension/platform-core';
 import { classifyLaneFailureClass } from './limits/lane-failure-class';
+import { phaseKindFromAgentInfo } from './lane-completion-result';
 
 let recorderUnavailableWarned = false;
 
@@ -61,6 +62,7 @@ export function enqueueLaneCompletionOutcome(
       model: info.model ?? LANE_DEFAULT_MODEL,
       role: info.role ?? null,
       taskKind: info.taskKind ?? null,
+      phaseKind: phaseKindFromAgentInfo(info),
       taskId: info.taskFolder ? basename(info.taskFolder) : null,
       verdict: signal.verdict,
       failureClass: classifyLaneFailureClass({
@@ -150,9 +152,12 @@ export function recordLaneUsageOutcome(
     // arrives, so a value that does not parse means the parent never
     // resolved one — the same rule the notifier's signal path follows.
     const parentSessionId = SessionId.safeParse(info.parentSessionId?.trim());
+    const phaseKind = phaseKindFromAgentInfo(info);
     const built: SessionUsageContribution = {
       // The lane's own durable identity: its native session id when the CLI
       // reported one, else the lane id.
+      executorType: 'lane',
+      ...(phaseKind ? { phaseKind } : {}),
       sessionId: info.cliSessionId ?? runId,
       producer: 'cli-lane',
       runId,

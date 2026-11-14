@@ -8,6 +8,7 @@ import { inject, injectable } from 'tsyringe';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import type {
   AgentScorecard,
+  PhaseScorecard,
   ScorecardInvocationRow,
   SkillSynthesisGetScorecardDetailResult,
 } from '@ptah-extension/shared';
@@ -70,6 +71,30 @@ export class SkillScorecardService {
       invocationCount: contextRow.invocationCount,
       successRate: total > 0 ? succeeded / total : null,
     };
+  }
+
+  /**
+   * Phase scorecards for one workspace (migration 0075). Each phase kind gives
+   * one `source: 'phase'` row. Old role grades whose slug is in
+   * `ROLE_PHASE_ALIASES` give a separate `source: 'role-alias'` row with
+   * `legacy: true`. The two rows are not summed. Store failure returns [].
+   */
+  getPhaseScorecards(workspaceRoot: string | null): PhaseScorecard[] {
+    try {
+      return this.grades.getPhaseAggregates(workspaceRoot ?? null).map((row) => ({
+        phaseKind: row.phaseKind,
+        source: row.legacy ? 'role-alias' : 'phase',
+        legacy: row.legacy,
+        aliasedRoles: [...row.aliasedRoles],
+        gradedCount: row.graded,
+        passedCount: row.passed,
+        gradedSuccessRate: row.successRate,
+      }));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn('[skill-synthesis] getPhaseScorecards failed', { error: message });
+      return [];
+    }
   }
 
   /**

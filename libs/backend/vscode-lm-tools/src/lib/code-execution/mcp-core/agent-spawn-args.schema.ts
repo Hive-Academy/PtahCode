@@ -5,7 +5,7 @@ import {
   type ProviderAccountSelection,
   type SystemCliType,
 } from '@ptah-extension/shared';
-import { ProviderAccountSelectionSchema } from '@ptah-extension/shared/schemas';
+import { ProviderAccountSelectionSchema, PhaseDispatchSchema } from '@ptah-extension/shared/schemas';
 
 export const MAX_TASK_LENGTH = 100 * 1024;
 
@@ -91,6 +91,10 @@ export const AgentSpawnArgsSchema = z
     modelTier: z.enum(['opus', 'sonnet', 'haiku']).optional(),
     resume_session_id: z.string().optional(),
     role: z.string().min(1).max(100).optional(),
+    /** Rendered, host-resolved phase handoff (B1 contract). */
+    phase: PhaseDispatchSchema.optional(),
+    /** Optional host-resolved skills when no phase is selected. */
+    skills: z.array(z.object({ name: z.string().min(1), path: z.string().min(1).optional(), text: z.string().min(1).optional() }).strict().refine(skill => !!skill.path || !!skill.text)).optional(),
     // Free string, not an enum: each CLI accepts its own scale, and the lane
     // spawn policy ignores a value its CLI does not take (R2.3 step 1).
     effort: z.string().min(1).max(MAX_EFFORT_LENGTH).optional(),

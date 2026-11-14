@@ -310,6 +310,13 @@ export interface AgentProcessInfo {
    * on the outcome record.
    */
   readonly routingSource?: Exclude<OutcomeRoutingSource, 'not-routed'>;
+  /**
+   * Set when the spawn carried a phase with a non-empty denial list.
+   * `filtered` means this executor applied that list to its built-in tools.
+   */
+  readonly toolProfileAdapter?: import('./phase-contract.types').ToolProfileAdapterResultV1;
+  /** Phase assigned when this lane was spawned. */
+  readonly phaseKind?: import('./phase-contract.types').PhaseKind;
 }
 
 const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;
@@ -367,6 +374,10 @@ export interface LaneRequestContext {
 }
 
 export interface SpawnAgentRequest {
+  /** Validated phase handoff for lane delivery. */
+  readonly phase?: import('./phase-contract.types').PhaseDispatchV1;
+  /** Host-resolved skills, including standalone skills without a phase. */
+  readonly skills?: readonly import('./phase-contract.types').PhaseSkillV1[];
   /** Task description for the CLI agent */
   readonly task: string;
   /** Which CLI to use (auto-detected if omitted) */
@@ -479,6 +490,8 @@ export interface AgentOutput {
 }
 
 export interface SpawnAgentResult {
+  /** Resolved skill text was included in the spawn prompt. */
+  readonly skillDelivery?: 'inline';
   readonly agentId: AgentId;
   readonly cli: CliType;
   readonly status: AgentStatus;
@@ -497,6 +510,8 @@ export interface SpawnAgentResult {
   readonly roleChannel?: AgentRoleChannel;
   /** Set only on a spawn that asked to resume a session: whether it was resumed or started fresh, and why. */
   readonly resumeDecision?: AgentResumeOutcome;
+  /** Same field as {@link AgentProcessInfo.toolProfileAdapter}, on the spawn return. */
+  readonly toolProfileAdapter?: import('./phase-contract.types').ToolProfileAdapterResultV1;
 }
 
 export * from './agent-messaging.types';

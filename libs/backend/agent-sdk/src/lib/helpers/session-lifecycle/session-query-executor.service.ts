@@ -1474,6 +1474,8 @@ export class SessionQueryExecutor {
    */
   async executeQuery(config: ExecuteQueryConfig): Promise<ExecuteQueryResult> {
     const {
+      phase,
+      skills,
       sessionId,
       sessionConfig,
       resumeSessionId,
@@ -1807,6 +1809,8 @@ export class SessionQueryExecutor {
           : (PERMISSION_MODE_MAP[currentLevel] as
               'default' | 'acceptEdits' | 'plan');
       const buildOptions = this.queryOptionsBuilder.build({
+        phase,
+        skills,
         ...(named
           ? { accountRoute: named.route, accountLaunch: named.certifiedLaunch }
           : {}),
@@ -1915,6 +1919,7 @@ export class SessionQueryExecutor {
 
       return {
         sdkQuery,
+        ...(queryOptions.toolProfileApplied ? { toolProfileApplied: true as const } : {}),
         initialModel,
         abortController,
         activityWatchdog,

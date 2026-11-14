@@ -29,7 +29,6 @@ import { FAMILY_PROFILE_MODEL } from './matrix/matrix.types';
 import { EMPTY_OUTCOME_FIGURES } from './matrix/outcome-figures';
 import type { RouteMatrix } from './pipeline/gather';
 import { systemOneClientOptions } from './pipeline/model-refine';
-import { BUILTIN_SUBAGENT_ROLES } from './pipeline/phase-plan';
 import {
   emptyRotationState,
   type RotationState,
@@ -189,6 +188,7 @@ function answersFor(
 function harness(options: {
   readonly selection?: unknown;
   readonly rows?: readonly CliDetectionResult[];
+  readonly roles?: readonly string[];
   readonly limits?: ReadonlyMap<string, LaneLimitState> | null;
   readonly listing?: LaneModelListing;
   readonly structured?: StructuredDecisionCompleter;
@@ -202,16 +202,20 @@ function harness(options: {
   readonly rotate?: boolean;
   readonly matrix?: RouteMatrix;
   readonly logger?: LaneRoutingLogger;
+  readonly tools?: RouteCandidateSource['tools'];
 }) {
   const calls: DecisionPayload[] = [];
   const seen: SystemOneClientOptions[] = [];
   const rotation = options.rotation ?? memoryRotation();
   const rows = jest.fn(async () => options.rows ?? [...THREE]);
+  const tools = jest.fn(options.tools ?? (async (candidate) => candidate.kind === 'subagent'
+    ? ['ptah_browser_navigate'] : []));
   const source: RouteCandidateSource = {
     rows,
     limits: async () =>
       options.limits === undefined ? new Map() : options.limits,
-    roles: async () => [],
+    roles: async () => options.roles ?? [],
+    tools,
   };
   const service = new RouteDecideService({
     rotationSetting: { isEnabled: () => options.rotate ?? true },
@@ -253,7 +257,7 @@ function harness(options: {
       },
     },
   });
-  return { service, source, calls, seen, rows, rotation };
+  return { service, source, calls, seen, rows, rotation, tools };
 }
 
 function implement(id = 'build') {
@@ -267,6 +271,31 @@ function implement(id = 'build') {
 }
 
 describe('gate phase policy roster', () => {
+  it('selects a capable visual review lane when the SDK list is unknown', async () => {
+    const run = harness({
+      rows: [lane('codex')], rotate: false, selection: { kind: 'unset' },
+      tools: async (candidate) => candidate.kind === 'lane' ? ['ptah_browser_navigate'] : null,
+    });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'look', kind: 'visual-review' }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'chosen', executor: { kind: 'lane', id: 'codex' } });
+  });
+
+  it('reports missing browser capability when no candidate has one', async () => {
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [] });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'look', kind: 'visual-review' }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'unavailable', exclusionReason: 'missing-capability' });
+    expect(result.roster[0].reason).toContain('browser');
+  });
+
+  it('does not read candidate tools on pre-flight or a capability-free phase', async () => {
+    const run = harness({ rotate: false, selection: { kind: 'unset' } });
+    await run.service.decide({ stage: 'pre-flight', request: 'ship the change' }, run.source);
+    await run.service.decide(implement(), run.source);
+    expect(run.tools).not.toHaveBeenCalled();
+  });
+
   it.each(['batch', 'completion'] as const)('routes %s to an eligible lane', async (kind) => {
     const run = harness({ rotate: false, selection: { kind: 'unset' } });
     const result = await run.service.decide({ ...implement(), phases: [{ id: kind, kind }] }, run.source);
@@ -274,28 +303,27 @@ describe('gate phase policy roster', () => {
     expect(result.roster[0]).toMatchObject({ status: 'chosen', executor: { id: 'codex' }, taskKind: 'plan' });
   });
 
-  it.each(['batch', 'completion'] as const)('leaves %s to the orchestrator with no lane', async (kind) => {
+  it.each(['batch', 'completion'] as const)('uses the phase subagent with no lane for %s', async (kind) => {
     const run = harness({ rows: [], rotate: false, selection: { kind: 'unset' } });
     const result = await run.service.decide({ ...implement(), phases: [{ id: kind, kind }] }, run.source);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
-    expect(result.roster[0]).toMatchObject({ status: 'unavailable', executor: 'unavailable', exclusionReason: 'no-eligible-candidate' });
-    expect(result.roster[0].reason).toContain('No executor; the orchestrator does this phase');
+    expect(result.roster[0]).toMatchObject({ status: 'chosen', executor: { kind: 'subagent', id: `subagent:${kind}`, phaseKind: kind } });
     expect(result.roster[0].reason).not.toContain('-Infinity');
   });
 
   it('preserves exclusion detail when a batch lane is unavailable', async () => {
     const run = harness({ rows: [lane('codex')], limits: new Map<string, LaneLimitState>([['codex', 'at-limit']]), rotate: false, selection: { kind: 'unset' } });
-    const result = await run.service.decide({ ...implement(), phases: [{ id: 'batch', kind: 'batch' }] }, run.source);
+    // An unlisted legacy role gives no subagent candidate, so no executor is eligible.
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'batch', kind: 'batch', role: 'unlisted-role' }] }, run.source);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     const entry = result.roster[0];
     expect(entry).toMatchObject({ status: 'unavailable', exclusionReason: 'no-eligible-candidate' });
     expect(entry.reason).toContain('candidate codex excluded by at-limit');
-    expect(entry.reason).toContain('No executor; the orchestrator does this phase');
   });
 
   it.each(['batch', 'completion'] as const)('accepts an explicit role for %s', async (kind) => {
-    const run = harness({ rows: [], rotate: false, selection: { kind: 'unset' } });
-    const role = [...BUILTIN_SUBAGENT_ROLES][0];
+    const run = harness({ rows: [], roles: ['legacy-role'], rotate: false, selection: { kind: 'unset' } });
+    const role = 'legacy-role';
     const result = await run.service.decide({ ...implement(), phases: [{ id: kind, kind, role }] }, run.source);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     expect(result.roster[0]).toMatchObject({ status: 'chosen', taskKind: 'plan' });
@@ -349,12 +377,12 @@ describe('gate phase policy roster', () => {
     const result = await run.service.decide({
       ...implement(),
       phases: [{ id: 'build', kind: 'implement', shape: 'mechanical', weight: 2000 }],
-      pins: [{ phaseId: 'build', executor: 'subagent:backend-developer', model: 'sonnet' }],
+      pins: [{ phaseId: 'build', executor: 'subagent:implement', model: 'sonnet' }],
     }, run.source);
     expect(GateResultSchema.safeParse(result).success).toBe(true);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     expect(result.roster[0]).toMatchObject({
-      status: 'chosen', source: 'pin', executor: { id: 'subagent:backend-developer' },
+      status: 'chosen', source: 'pin', executor: { id: 'subagent:implement' },
       model: 'sonnet', tier: 'sonnet', effort: 'low', provenance: 'tier',
     });
     expect(result.roster[0].reason).toMatch(/; policy R4; tier sonnet, effort low, shape mechanical, weight 2000$/);
@@ -709,7 +737,7 @@ describe('route decide gate', () => {
     ).toBeNull();
   });
 
-  it('chooses the built-in subagent when every lane is at limit', async () => {
+  it('chooses the phase subagent when every lane is at limit', async () => {
     const limits = new Map<string, LaneLimitState>([
       ['codex', 'at-limit'],
       ['grok', 'at-limit'],
@@ -722,7 +750,7 @@ describe('route decide gate', () => {
     expect(entry).toMatchObject({
       status: 'chosen',
       source: 'ranking',
-      executor: { kind: 'subagent', id: 'subagent:backend-developer' },
+      executor: { kind: 'subagent', id: 'subagent:implement' },
     });
     if (entry?.status === 'chosen')
       expect(entry.reason).toContain('only eligible candidate');
@@ -977,7 +1005,7 @@ describe('route decide gate', () => {
     const entry = result.stage === 'gate-0.1' ? result.roster[0] : undefined;
     expect(entry).toMatchObject({
       status: 'chosen',
-      executor: { kind: 'subagent', id: 'subagent:backend-developer' },
+      executor: { kind: 'subagent', id: 'subagent:implement' },
     });
   });
 });

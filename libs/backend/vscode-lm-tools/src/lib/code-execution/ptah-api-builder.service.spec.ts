@@ -156,6 +156,9 @@ jest.mock('@ptah-extension/workspace-intelligence', () => ({
   ContextEnrichmentService: class ContextEnrichmentServiceStub {},
   DependencyGraphService: class DependencyGraphServiceStub {},
   CODE_SYMBOL_INDEXER: Symbol.for('workspace-intelligence:CODE_SYMBOL_INDEXER'),
+  // The route namespace builder loads the MCP tool descriptions, which read
+  // the language registry at module load.
+  supportedLanguagesFor: (): readonly string[] => [],
 }));
 
 /**

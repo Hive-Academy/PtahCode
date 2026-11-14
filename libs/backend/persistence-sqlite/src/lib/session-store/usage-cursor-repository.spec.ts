@@ -13,7 +13,7 @@ function sqlValue(value: unknown): string | number | null {
   throw new Error('Unexpected SQL parameter');
 }
 
-function openStore(maxVersion = 6) {
+function openStore(maxVersion = 7) {
   const raw = new DatabaseSync(':memory:');
   for (const migration of SESSION_STORE_MIGRATIONS.filter((item) => item.version <= maxVersion))
     if (migration.sql) raw.exec(migration.sql);
@@ -78,7 +78,7 @@ describe('SqliteUsageCursorRepository', () => {
       expect(await cursors.loadDiscoveryIndex()).toBe(0);
     } finally { raw.close(); }
   });
-  it('upgrades a populated version-4 ledger once and skips S0005/S0006 on rerun', async () => {
+  it('upgrades a populated version-4 ledger once and skips S0005/S0006/S0007 on rerun', async () => {
     const { raw, db } = openStore(4);
     try {
       raw.exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
@@ -96,7 +96,7 @@ describe('SqliteUsageCursorRepository', () => {
       logger.debug = jest.fn();
       const runner = new SqliteMigrationRunner(db as SqliteDatabase, logger);
       expect((await runner.applyAll(SESSION_STORE_MIGRATIONS, { vecExtensionLoaded: false })).appliedVersions)
-        .toEqual([5, 6]);
+        .toEqual([5, 6, 7]);
       expect((await runner.applyAll(SESSION_STORE_MIGRATIONS, { vecExtensionLoaded: false })).appliedVersions)
         .toEqual([]);
       expect(raw.prepare('SELECT COUNT(*) AS count FROM session_usage_turns').get()).toMatchObject({ count: 1 });

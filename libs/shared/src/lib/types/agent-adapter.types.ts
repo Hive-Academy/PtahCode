@@ -251,6 +251,8 @@ export interface AgentSessionStartConfig extends AISessionConfig {
  * Extended session config used by resumeSession.
  */
 export interface AgentSessionResumeConfig extends AISessionConfig {
+  /** Host-confirmed child identity, used to refuse a missing phase record. */
+  knownSessionChild?: boolean;
   /**
    * Ptah surface that opened the session. Absent means 'chat'; selects the
    * native Codex gate and execution profile for that consumer. Claude adapters
@@ -342,13 +344,13 @@ export interface IAgentAdapter extends IAIProvider, FollowUpQueueOperations {
    */
   startChatSession(
     config: AgentSessionStartConfig,
-  ): Promise<AsyncIterable<FlatStreamEventUnion>>;
+  ): Promise<AsyncIterable<FlatStreamEventUnion> & { readonly toolProfileApplied?: true }>;
 
   /** Resume an existing session by its real SDK UUID. */
   resumeSession(
     sessionId: SessionId,
     config?: AgentSessionResumeConfig,
-  ): Promise<AsyncIterable<FlatStreamEventUnion>>;
+  ): Promise<AsyncIterable<FlatStreamEventUnion> & { readonly toolProfileApplied?: true }>;
 
   /** Whether a session is currently active in memory. */
   isSessionActive(sessionId: SessionId): boolean;

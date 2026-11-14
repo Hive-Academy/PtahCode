@@ -116,7 +116,12 @@ CREATE INDEX IF NOT EXISTS idx_host_run_leases_heartbeat
   ON host_run_leases (heartbeat_at);
 `;
 
-const S0005_USAGE_EVENT_IDENTITY = `
+const S0005_USAGE_DIMENSIONS = `
+ALTER TABLE session_usage_turns ADD COLUMN phase_kind TEXT;
+ALTER TABLE session_usage_turns ADD COLUMN executor_type TEXT;
+`;
+
+const S0006_USAGE_COVERAGE = `
 CREATE TABLE session_usage_turns_new (
   session_id TEXT NOT NULL, producer TEXT NOT NULL, run_id TEXT NOT NULL,
   native_thread_id TEXT, turn_id TEXT NOT NULL, model_id TEXT NOT NULL,
@@ -125,7 +130,7 @@ CREATE TABLE session_usage_turns_new (
   cache_write_tokens INTEGER, known_cost_micro_usd INTEGER,
   cost_authority TEXT NOT NULL, source TEXT NOT NULL, pricing_version TEXT,
   revision INTEGER NOT NULL, workspace_key TEXT, host TEXT,
-  repository_id TEXT, worktree_path TEXT, missing_reason TEXT,
+  phase_kind TEXT, executor_type TEXT, repository_id TEXT, worktree_path TEXT, missing_reason TEXT,
   billable INTEGER NOT NULL DEFAULT 1 CHECK (billable IN (0,1)),
   coverage_start_ms INTEGER, coverage_end_ms INTEGER,
   PRIMARY KEY (session_id,event_key,model_id)
@@ -133,10 +138,10 @@ CREATE TABLE session_usage_turns_new (
 INSERT OR IGNORE INTO session_usage_turns_new
  (session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,
   input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,known_cost_micro_usd,
-  cost_authority,source,pricing_version,revision,workspace_key,host)
+  cost_authority,source,pricing_version,revision,workspace_key,host,phase_kind,executor_type)
  SELECT t.session_id,t.producer,t.run_id,t.turn_id,t.model_id,t.event_key,t.occurred_at_ms,t.provider_id,
    t.input_tokens,t.output_tokens,t.cache_read_tokens,t.cache_write_tokens,t.known_cost_micro_usd,
-   t.cost_authority,t.source,t.pricing_version,t.revision,t.workspace_key,t.host
+   t.cost_authority,t.source,t.pricing_version,t.revision,t.workspace_key,t.host,t.phase_kind,t.executor_type
  FROM session_usage_turns AS t
  WHERE t.producer = (SELECT owner.producer FROM session_usage_turns AS owner
    WHERE owner.session_id = t.session_id AND owner.event_key = t.event_key
@@ -168,7 +173,7 @@ UPDATE session_stats SET
 CREATE INDEX idx_session_stats_repository_time ON session_stats (repository_id,last_usage_at_ms);
 `;
 
-const S0006_USAGE_SOURCE_CURSOR = `
+const S0007_USAGE_SOURCE_CURSOR = `
 CREATE TABLE usage_source_cursor (
   source_id TEXT NOT NULL, source_path TEXT NOT NULL, fingerprint TEXT NOT NULL,
   mtime_ms INTEGER NOT NULL, byte_offset INTEGER NOT NULL CHECK (byte_offset >= 0),
@@ -183,6 +188,7 @@ export const SESSION_STORE_MIGRATIONS: readonly Migration[] = [
   { version: 2, name: 'S0002_session_stats', sql: S0002_SESSION_STATS },
   { version: 3, name: 'S0003_session_finalization', sql: S0003_SESSION_FINALIZATION },
   { version: 4, name: 'S0004_host_run_leases', sql: S0004_HOST_RUN_LEASES },
-  { version: 5, name: 'S0005_usage_event_identity', sql: S0005_USAGE_EVENT_IDENTITY },
-  { version: 6, name: 'S0006_usage_source_cursor', sql: S0006_USAGE_SOURCE_CURSOR },
+  { version: 5, name: 'S0005_usage_dimensions', sql: S0005_USAGE_DIMENSIONS },
+  { version: 6, name: 'S0006_usage_coverage', sql: S0006_USAGE_COVERAGE },
+  { version: 7, name: 'S0007_usage_source_cursor', sql: S0007_USAGE_SOURCE_CURSOR },
 ];
