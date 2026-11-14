@@ -1998,7 +1998,12 @@ describe('CLI lane callback level override', () => {
     ['WebFetch', { url: 'https://example.com' }, 'deny'],
     ['mcp__other__write', { value: 1 }, 'deny'],
     ['SomeUnknownTool', {}, 'deny'],
+    ['mcp__ptah__ptah_agent_spawn', { task: 'write files' }, 'deny'],
+    ['mcp__ptah__execute_code', { code: 'ptah.help()' }, 'deny'],
+    ['mcp__ptah__ptah_git_worktree_add', { branch: 'x' }, 'deny'],
+    ['mcp__ptah__ptah_web_search', { query: 'x' }, 'deny'],
     ['mcp__ptah__ptah_agent_report', { message: 'BLOCKED: plan mode' }, 'allow'],
+    ['mcp__ptah__ptah_search_files', { pattern: '*.ts' }, 'allow'],
   ] as const)('decides %s for a plan-level lane without an approval prompt', async (toolName, input, behavior) => {
     const { handler, sent } = makeHandler();
     const result = await handler.createCallback(

@@ -48,6 +48,7 @@ import {
 } from './permission/ask-user-question.service';
 import { ExitPlanModeService } from './permission/exit-plan-mode.service';
 import { evaluateUnattendedBash } from './permission/unattended-bash-policy';
+import { isPlanLaneAllowedPtahTool } from './permission/plan-lane-tool-policy';
 import type {
   UnattendedSessionPolicy,
   UnattendedSessionPolicyRegistry,
@@ -825,10 +826,11 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
 
   /**
    * The decision table for a CLI lane in Plan mode. Read-only tools, subagent
-   * tools and questions keep their normal path (`undefined`). Ptah MCP tools
+   * tools and questions keep their normal path (`undefined`). The reporting
+   * tool and read-only Ptah tools (an explicit list, `plan-lane-tool-policy`)
    * are allowed, so the lane can still report "BLOCKED: plan mode". Every
-   * other tool is refused at once, so no lane call waits on an approval
-   * prompt that nobody watches.
+   * other tool, including Ptah tools that write or act, is refused at once,
+   * so no lane call waits on an approval prompt that nobody watches.
    */
   private decidePlanLaneToolCall(
     toolName: string,
@@ -841,9 +843,9 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     ) {
       return undefined;
     }
-    if (toolName.startsWith(PTAH_MCP_TOOL_PREFIX)) {
+    if (isPlanLaneAllowedPtahTool(toolName)) {
       this.logger.debug(
-        `[SdkPermissionHandler] Plan mode: allowed lane Ptah tool: ${toolName}`,
+        `[SdkPermissionHandler] Plan mode: allowed read-only lane Ptah tool: ${toolName}`,
       );
       return { behavior: 'allow' as const, updatedInput: input };
     }
