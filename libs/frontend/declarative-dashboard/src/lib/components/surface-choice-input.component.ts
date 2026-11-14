@@ -51,7 +51,7 @@ function isOption(value: unknown): value is SurfaceInputOption {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (node().kind === 'select') {
-      <div class="flex flex-col gap-[var(--ptah-gap-heading)] text-base-content">
+      <div class="flex flex-col gap-[var(--ptah-space-1)] text-base-content">
         <ptah-field [label]="node().label" [required]="required()" [error]="errorText() ?? null" appearance="stacked">
         <select #selectControl [id]="controlId" ptahSelect size="sm" class="w-full" [invalid]="hasError()"
           [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"

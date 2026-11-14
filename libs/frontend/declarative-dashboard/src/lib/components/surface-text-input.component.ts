@@ -66,7 +66,7 @@ let nextTextInputInstance = 0;
   imports: [PtahFieldComponent, PtahInputDirective, PtahTextareaDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex flex-col gap-[var(--ptah-gap-heading)] text-base-content">
+    <div class="flex flex-col gap-[var(--ptah-space-1)] text-base-content">
       @if (multiline()) {
         <ptah-field [label]="node().label" [required]="required()" [hint]="description() ?? null"
           [error]="errorText() ?? null" appearance="stacked">
