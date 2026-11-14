@@ -179,6 +179,17 @@ describe('LaneOutcomeRecorder', () => {
     });
   });
 
+  it('stores the phase kind of a built-in role on the subagent row', async () => {
+    const { store, recorder, pipeline } = harness();
+    recorder.recordSubagentStop(stopPayload({ agentId: 'agent-a', agentType: 'Senior-Tester' }));
+    recorder.recordSubagentStop(stopPayload({ agentId: 'agent-b', agentType: 'my-own-agent' }));
+    recorder.recordSubagentStop(stopPayload({ agentId: 'agent-c', agentType: '' }));
+    await pipeline.flush();
+    expect(await store.get('subagent:agent-a')).toMatchObject({ role: 'Senior-Tester', phaseKind: 'tests' });
+    expect(await store.get('subagent:agent-b')).toMatchObject({ role: 'my-own-agent', phaseKind: null });
+    expect(await store.get('subagent:agent-c')).toMatchObject({ role: null, phaseKind: null });
+  });
+
   it('classifies one new failed row, updates once, and never stores classification inputs', async () => {
     const classify = jest.fn().mockResolvedValue('crash');
     const { store, recorder, pipeline } = harness({ classify });

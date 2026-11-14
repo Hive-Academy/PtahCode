@@ -10,6 +10,7 @@ import {
   type LaneTaskKindClassifier,
   type OutcomeExecutorKind,
   type PhaseKind,
+  phaseKindForRole,
 } from '@ptah-extension/shared';
 import type {
   SdkAdapterSubagentEndedEvent,
@@ -510,6 +511,9 @@ export class LaneOutcomeRecorder {
       workspaceRoot: facts.workspaceRoot,
       role,
       ...resolveTaskKind(null, null, role),
+      // A built-in role slug maps to its phase kind (ROLE_PHASE_ALIASES), so the
+      // run is graded as a phase. A user-written agent name keeps a null phase.
+      phaseKind: role ? phaseKindForRole(role) : null,
     };
     if (!LaneOutcomeRowSchema.safeParse(row).success) {
       this.logger.warn('Invalid subagent outcome', { agentId: facts.agentId });
