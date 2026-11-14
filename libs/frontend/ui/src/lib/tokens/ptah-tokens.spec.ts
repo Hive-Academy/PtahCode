@@ -82,6 +82,7 @@ const TOKEN_NAMES: readonly string[] = [
     'btn-ghost-bg-active',
     'btn-ghost-fg',
     'btn-danger-bg',
+    'btn-danger-shade',
     'btn-danger-bg-hover',
     'btn-danger-bg-active',
     'btn-danger-fg',

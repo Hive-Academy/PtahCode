@@ -35,7 +35,10 @@ const BASE_LAYERS = ['b1', 'b2', 'b3'] as const;
 
 type ThemeSource = Record<string, string>;
 
-const customThemes: Record<string, ThemeSource> = Object.assign({}, ...TAILWIND_CONFIG.daisyui.themes);
+const customThemes: Record<string, ThemeSource> = Object.assign(
+  {},
+  ...TAILWIND_CONFIG.daisyui.themes,
+);
 
 const isDark = (color: unknown): boolean =>
   wcagContrast(color, 'black') < wcagContrast(color, 'white');
@@ -142,6 +145,53 @@ describe('file-status badge (text-base-content on bg-base-300)', () => {
   });
 });
 
+describe('ptahButton danger token wiring', () => {
+  const UI_LIB = join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    '..',
+    'libs',
+    'frontend',
+    'ui',
+    'src',
+    'lib',
+  );
+  const TOKENS_CSS = readFileSync(
+    join(UI_LIB, 'tokens', 'ptah-tokens.css'),
+    'utf8',
+  );
+  const BUTTON_CSS = readFileSync(
+    join(UI_LIB, 'button', 'ptah-button.css'),
+    'utf8',
+  );
+
+  it('paints the danger ink from --ptah-btn-danger-fg in the rest, hover and active states', () => {
+    // The three state rules set a fill; the busy spinner rule sets a border only.
+    const rules = (
+      BUTTON_CSS.match(/\.btn\[data-ptah-button\]\.btn-error[^{]*\{[^}]*\}/g) ??
+      []
+    ).filter((rule) => rule.includes('background-color'));
+
+    expect(rules).toHaveLength(3);
+    for (const rule of rules) {
+      expect(rule).toContain('color: var(--ptah-btn-danger-fg);');
+    }
+  });
+
+  it.each(['hover', 'active'])(
+    'moves the %s fill toward --ptah-btn-danger-shade',
+    (state) => {
+      const pattern = new RegExp(
+        `--ptah-btn-danger-bg-${state}:\\s*color-mix\\([^;]*var\\(--ptah-btn-danger-shade\\)`,
+      );
+
+      expect(TOKENS_CSS).toMatch(pattern);
+    },
+  );
+});
+
 describe('anubis ink overrides', () => {
   describe.each(ANUBIS_THEMES)('theme "%s"', (theme) => {
     const source = customThemes[theme];
@@ -176,6 +226,32 @@ describe('anubis ink overrides', () => {
         AA_NORMAL,
       );
     });
+
+    // ptahButton danger (ptah-button.css) paints --ptah-btn-danger-fg with
+    // id-level specificity, so `.err-solid-text` never reaches it. The theme
+    // sets the token; the fills in the hover and active states move toward
+    // --ptah-btn-danger-shade (ptah-tokens.css: 90% and 82% of the error fill).
+    it.each([
+      ['rest', 1],
+      ['hover', 0.9],
+      ['active', 0.82],
+    ] as const)(
+      `ptahButton danger ink clears ${AA_NORMAL}:1 on the %s fill`,
+      (_state, share) => {
+        const ink = parsed(
+          blockProperty(`[data-theme='${theme}']`, '--ptah-btn-danger-fg'),
+        );
+        const shade = parsed(
+          blockProperty(`[data-theme='${theme}']`, '--ptah-btn-danger-shade'),
+        );
+        const fill =
+          share === 1
+            ? parsed(source['error'])
+            : interpolate([shade, parsed(source['error'])], 'oklch')(share);
+
+        expect(wcagContrast(ink, fill)).toBeGreaterThanOrEqual(AA_NORMAL);
+      },
+    );
 
     it.each(['b1', 'b3'] as const)(
       `.diff-add-text clears ${AA_NORMAL}:1 on %s`,

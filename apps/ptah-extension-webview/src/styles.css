@@ -2416,9 +2416,18 @@ ANUBIS SEMANTIC INK OVERRIDES (TASK_2026_576, design-spec §0)
  */
 [data-theme='anubis'] {
   --ptah-error-ink: #f87171;
+  /* ptahButton danger: `.btn[data-ptah-button].btn-error` (ptah-button.css) has
+     id-level specificity and paints `--ptah-btn-danger-fg`, so `.err-solid-text`
+     below cannot reach it. The ink here is the same measured ink. The fills move
+     toward black, so hover and active keep the ink at >= 4.5:1. */
+  --ptah-btn-danger-fg: #ffffff;
+  --ptah-btn-danger-shade: #000000;
 }
 [data-theme='anubis-light'] {
   --ptah-error-ink: oklch(45% 0.22 20);
+  /* The fills move toward white, because the ink is dark in this theme. */
+  --ptah-btn-danger-fg: #131317;
+  --ptah-btn-danger-shade: #ffffff;
 }
 
 [data-theme='anubis'] .text-error {
