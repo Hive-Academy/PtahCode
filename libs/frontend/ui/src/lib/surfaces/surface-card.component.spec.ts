@@ -41,8 +41,10 @@ import { SurfaceCardComponent } from './surface-card.component';
     <p data-testid="body">Body <button type="button" data-testid="nested">Act</button></p>
     <span data-card-ignore data-testid="ignored">Ignored</span>
     <span title="More details" data-testid="tooltip">Tooltip</span>
-    <span data-card-interactive data-testid="custom-action"
-      (click)="nestedClicks = nestedClicks + 1">Custom action</span>
+    <span data-card-interactive data-testid="custom-action" role="button" tabindex="0"
+      (click)="nestedClicks = nestedClicks + 1"
+      (keydown.enter)="nestedClicks = nestedClicks + 1"
+      (keydown.space)="nestedClicks = nestedClicks + 1">Custom action</span>
     <div card-footer data-testid="footer">Footer</div>
   </ptah-surface-card>`,
 })

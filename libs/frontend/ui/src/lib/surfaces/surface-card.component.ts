@@ -107,7 +107,10 @@ function isNestedControl(el: Element): boolean {
       [attr.data-interactive]="isInteractive() ? '' : null"
       [attr.data-selected]="selectable() && selected() ? '' : null"
       [attr.data-disabled]="disabled() ? '' : null"
+      [tabindex]="isInteractive() ? 0 : -1"
       (click)="onCardClick($event)"
+      (keydown.enter)="onCardClick($event)"
+      (keydown.space)="onCardClick($event)"
     >
       @if (isInteractive()) {
         <button
