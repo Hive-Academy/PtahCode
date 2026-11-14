@@ -986,7 +986,10 @@ export class AgentProcessManager {
       taskKind: request.taskKind,
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
+      // Flat policy, not the `translateLaneSpawnPolicy` wrapper: the
+      // formatter and `SystemCliLaneResumer` read `permission` directly.
       effectivePolicy: options.effectivePolicy?.requested,
+      requestedPolicy: options.requestedPolicy,
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);

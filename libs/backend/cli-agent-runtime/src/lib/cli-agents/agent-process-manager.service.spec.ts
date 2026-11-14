@@ -147,6 +147,7 @@ import type {
   CliDetectionResult,
   CliOutputSegment,
   CliSessionReference,
+  EffectiveLanePolicy,
   QuotaOwnerRef,
 } from '@ptah-extension/shared';
 
@@ -1346,62 +1347,173 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   });
 
   describe('permission routing (TASK_2026_1172, R1.1)', () => {
-    it('stores the requested permission for Claude spawn', async () => {
-      setTimeout(() => sdkControls.resolve(0), 10);
-      const result = await manager.spawn({
-        task: 'Task',
-        cli: 'claude',
+    // Permission parts of the real adapter manifests
+    // (`claude-cli.adapter.ts`, `codex-app-server-lane.adapter.ts`).
+    const CLAUDE_POLICY_MANIFEST: Pick<
+      CliAdapterManifest,
+      'permissionModes' | 'networkModes'
+    > = {
+      permissionModes: {
+        plan: { state: 'supported', nativeMode: 'plan', networkModes: ['allow'] },
+        ask: { state: 'supported', nativeMode: 'default', networkModes: ['allow'] },
+        'auto-edit': { state: 'supported', nativeMode: 'acceptEdits', networkModes: ['allow'] },
+        yolo: { state: 'supported', nativeMode: 'bypassPermissions', networkModes: ['allow'] },
+      },
+      networkModes: {
+        allow: { state: 'supported' },
+        deny: { state: 'unsupported', reason: 'no network sandbox' },
+      },
+    };
+    const CODEX_POLICY_MANIFEST: Pick<
+      CliAdapterManifest,
+      'permissionModes' | 'networkModes'
+    > = {
+      permissionModes: {
+        plan: { state: 'supported', nativeMode: 'read-only', networkModes: ['deny'] },
+        ask: { state: 'unsupported', reason: 'no approval route', networkModes: [] },
+        'auto-edit': { state: 'supported', nativeMode: 'workspace-write', networkModes: ['allow', 'deny'] },
+        yolo: { state: 'supported', nativeMode: 'danger-full-access', networkModes: ['allow'] },
+      },
+      networkModes: {
+        allow: { state: 'supported' },
+        deny: { state: 'supported' },
+      },
+    };
+
+    function useAdapter(name: 'claude' | 'codex'): void {
+      const base = sdkAdapter.capabilities();
+      Object.assign(sdkAdapter, {
+        name,
+        capabilities: jest.fn().mockReturnValue({
+          ...base,
+          ...(name === 'claude' ? CLAUDE_POLICY_MANIFEST : CODEX_POLICY_MANIFEST),
+        }),
+      });
+    }
+
+    function lastRunSdkCall(): { permission?: string; network?: string; permissionSource?: string } {
+      const calls = (sdkAdapter.runSdk as jest.Mock).mock.calls;
+      return calls[calls.length - 1][0];
+    }
+
+    /** The stored record and the spawn result carry the same flat policy. */
+    function expectFlatPolicy(
+      result: { agentId: AgentProcessInfo['agentId']; effectivePolicy?: EffectiveLanePolicy },
+      expected: EffectiveLanePolicy,
+    ): void {
+      const stored = manager.getStatus(result.agentId) as AgentProcessInfo;
+      for (const policy of [result.effectivePolicy, stored.effectivePolicy]) {
+        expect(policy).toMatchObject(expected);
+        expect(policy).not.toHaveProperty('requested');
+      }
+    }
+
+    it.each([
+      ['claude', 'ask', undefined],
+      ['claude', 'plan', undefined],
+      ['claude', 'auto-edit', undefined],
+      ['codex', 'auto-edit', 'deny'],
+      ['codex', 'plan', 'deny'],
+    ] as const)(
+      'stores %s spawn %s as requested -> effective with the same flat value',
+      async (cli, permission, network) => {
+        useAdapter(cli);
+        const result = await manager.spawn({
+          task: 'Task',
+          cli,
+          workingDirectory: '/workspace/root',
+          permission,
+          ...(network ? { network } : {}),
+        });
+
+        expectFlatPolicy(result, { permission, permissionSource: 'spawn' });
+        expect(result.requestedPolicy).toEqual({ permission, network });
+        expect(
+          (manager.getStatus(result.agentId) as AgentProcessInfo).requestedPolicy,
+        ).toEqual({ permission, network });
+        expect(lastRunSdkCall()).toMatchObject({ permission, permissionSource: 'spawn' });
+      },
+    );
+
+    it.each([
+      ['claude', 'ask', undefined],
+      ['codex', 'auto-edit', 'deny'],
+    ] as const)(
+      'keeps %s %s when the stored snapshot is resumed',
+      async (cli, permission, network) => {
+        useAdapter(cli);
+        const first = await manager.spawn({
+          task: 'Initial task',
+          cli,
+          workingDirectory: '/workspace/root',
+          permission,
+          ...(network ? { network } : {}),
+        });
+        const snapshot = (manager.getStatus(first.agentId) as AgentProcessInfo)
+          .effectivePolicy;
+
+        const resumed = await manager.spawn({
+          task: 'Resume task',
+          cli,
+          workingDirectory: '/workspace/root',
+          resumeSessionId: `thread-${cli}`,
+          permission: snapshot?.permission,
+          network: snapshot?.network,
+          resumePolicy: snapshot,
+        });
+
+        expectFlatPolicy(resumed, { permission, permissionSource: 'spawn' });
+        expect(lastRunSdkCall()).toMatchObject({ permission, permissionSource: 'spawn' });
+      },
+    );
+
+    it('still caps a resumed Codex snapshot to plan under a parent plan', async () => {
+      useAdapter('codex');
+      const resumed = await manager.spawn({
+        task: 'Resume task',
+        cli: 'codex',
         workingDirectory: '/workspace/root',
-        permission: 'ask',
+        resumeSessionId: 'thread-capped',
+        parentLevel: 'plan',
+        resumePolicy: {
+          permission: 'auto-edit',
+          network: 'allow',
+          permissionSource: 'spawn',
+          networkSource: 'spawn',
+        },
       });
 
-      expect(result.effectivePolicy?.permission).toBe('ask');
+      expectFlatPolicy(resumed, {
+        permission: 'plan',
+        network: 'deny',
+        permissionSource: 'parent-plan',
+        networkSource: 'parent-plan',
+      });
+      expect(lastRunSdkCall()).toMatchObject({ permission: 'plan', network: 'deny' });
     });
 
-    it('stores the requested permission for Codex spawn', async () => {
-      setTimeout(() => sdkControls.resolve(0), 10);
+    it('lets an SDK-handle effectivePolicy replace the stored policy', async () => {
+      useAdapter('codex');
+      const handlePolicy: EffectiveLanePolicy = {
+        permission: 'plan',
+        network: 'deny',
+        permissionSource: 'spawn',
+        networkSource: 'spawn',
+      };
+      Object.assign(sdkControls.handle, { effectivePolicy: handlePolicy });
+
       const result = await manager.spawn({
         task: 'Task',
         cli: 'codex',
         workingDirectory: '/workspace/root',
         permission: 'auto-edit',
+        network: 'deny',
       });
 
-      expect(result.effectivePolicy?.permission).toBe('auto-edit');
-    });
-
-    it('stores the requested permission for spawn with plan mode', async () => {
-      setTimeout(() => sdkControls.resolve(0), 10);
-      const result = await manager.spawn({
-        task: 'Task',
-        cli: 'claude',
-        workingDirectory: '/workspace/root',
-        permission: 'plan',
-      });
-
-      expect(result.effectivePolicy?.permission).toBe('plan');
-    });
-
-    it('preserves the stored permission on resume', async () => {
-      setTimeout(() => sdkControls.resolve(0), 10);
-      const firstSpawn = await manager.spawn({
-        task: 'Initial task',
-        cli: 'claude',
-        workingDirectory: '/workspace/root',
-        permission: 'ask',
-      });
-      const cliSessionId = firstSpawn.cliSessionId ?? 'fallback-session';
-
-      setTimeout(() => {
-        sdkControls.resolve(0);
-      }, 10);
-      const resumed = await manager.spawn({
-        task: 'Resume task',
-        resumeSessionId: cliSessionId,
-        workingDirectory: '/workspace/root',
-      });
-
-      expect(resumed.effectivePolicy?.permission).toBe('ask');
+      expect(result.effectivePolicy).toEqual(handlePolicy);
+      expect(
+        (manager.getStatus(result.agentId) as AgentProcessInfo).effectivePolicy,
+      ).toEqual(handlePolicy);
     });
   });
 
