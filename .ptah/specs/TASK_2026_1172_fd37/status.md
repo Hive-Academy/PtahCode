@@ -98,3 +98,17 @@ A successor child session resumed from HANDOFF.md. It sent the A/B decision requ
 `ptah_agent_report`. The result was `parent-session-not-active`. State is unchanged: HEAD
 `f6d530082` is on `fix/lane-permission-routing-v3`, PR #1266 stays a draft, and no production
 change was made. Items 2, 3 and 4 wait for the decision. Recommendation: A.
+
+## 2026-11-14 — third successor session; decision asked again, report NOT delivered
+
+A third successor child session sent the A/B decision request again with `ptah_agent_report`.
+The result was `parent-session-not-active`. HEAD `f4d20749e` is on
+`fix/lane-permission-routing-v3`. PR #1266 stays a draft. No production change was made.
+
+CI: the docs-only commit `f4d20749e` started no CI, Electron E2E or MCP Bench run (path
+filters). Only one check ran, and it passed. Thus the mcp-bench `host-launcher.spec.ts`
+guard-mode failure on `f6d530082` has no new run to confirm or clear it. The branch does not
+touch mcp-bench. The next code push (the fix of option A) gives a new CI run.
+
+**Decision still needed:** (A) or (B), as above. Recommendation: A. Send the answer to this
+child session with `ptah_session_send`.
