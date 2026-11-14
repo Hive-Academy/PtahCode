@@ -986,7 +986,7 @@ export class AgentProcessManager {
       taskKind: request.taskKind,
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
-      effectivePolicy: options.effectivePolicy,
+      effectivePolicy: options.effectivePolicy?.requested,
       ...(request.phase ? { phaseKind: request.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
     };
 
