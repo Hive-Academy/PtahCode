@@ -126,15 +126,18 @@
   --ptah-btn-selected-border: var(--ptah-control-edge-strong);
   --ptah-btn-selected-fg: oklch(var(--bc));
   --ptah-btn-danger-bg: oklch(var(--er));
+  /* Colour that the hover and active fills move toward. A theme overrides it
+     when the stock move toward base-content lowers the ink contrast. */
+  --ptah-btn-danger-shade: oklch(var(--bc));
   --ptah-btn-danger-bg-hover: color-mix(
     in oklch,
     oklch(var(--er)) 90%,
-    oklch(var(--bc))
+    var(--ptah-btn-danger-shade)
   );
   --ptah-btn-danger-bg-active: color-mix(
     in oklch,
     oklch(var(--er)) 82%,
-    oklch(var(--bc))
+    var(--ptah-btn-danger-shade)
   );
   --ptah-btn-danger-fg: oklch(var(--erc));
   --ptah-btn-link-fg: var(--ptah-link, oklch(var(--p)));

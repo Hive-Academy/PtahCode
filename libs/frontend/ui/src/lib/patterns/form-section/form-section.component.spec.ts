@@ -122,7 +122,23 @@ describe('PtahFormSectionComponent', () => {
     expect(alert.tagName.toLowerCase()).toBe('ptah-alert');
     expect(alert.querySelector('.alert-error[role="alert"]')).not.toBeNull();
     expect(alert.textContent?.trim()).toBe('Save failed');
-    expect(fields().firstElementChild).toBe(alert);
+    const body = q('[data-testid="form-section-body"]') as HTMLElement;
+    expect(body.firstElementChild).toBe(alert);
+    expect(alert.nextElementSibling).toBe(fields());
+  });
+
+  it('keeps the error alert outside the inert wrapper when disabled', () => {
+    host.disabled.set(true);
+    host.error.set('Save failed');
+    fixture.detectChanges();
+    const alert = q('[data-testid="form-section-error"]') as HTMLElement;
+    expect(alert).not.toBeNull();
+    expect(alert.closest('[inert]')).toBeNull();
+    expect(fields().contains(alert)).toBe(false);
+    expect(fields().hasAttribute('inert')).toBe(true);
+    expect(alert.className).not.toContain('opacity');
+    const ids = section().getAttribute('aria-describedby')?.split(' ') ?? [];
+    expect(ids).toContain(alert.id);
   });
 
   it('makes only the fields column inert when disabled', () => {
