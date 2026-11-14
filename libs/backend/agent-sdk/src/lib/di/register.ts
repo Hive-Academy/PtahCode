@@ -215,7 +215,11 @@ function createIdleCompactionService(
     ),
     events,
     workspace,
-    { scheduler: createUnrefScheduler(), now: () => Date.now(), cacheTtlMs: overrides.idleCacheTtlMs },
+    {
+      scheduler: createUnrefScheduler(),
+      now: () => Date.now(),
+      cacheTtlMs: overrides.idleCacheTtlMs,
+    },
     c.resolve<SessionStatsOwnerService>(SDK_TOKENS.SDK_SESSION_STATS_OWNER),
   );
 }
@@ -240,9 +244,16 @@ function createIdleCompactionService(
 export function registerSdkServices(
   container: DependencyContainer,
   logger: Logger,
-  options: { readonly devHost?: boolean; readonly env?: NodeJS.ProcessEnv } = {},
+  options: {
+    readonly devHost?: boolean;
+    readonly env?: NodeJS.ProcessEnv;
+  } = {},
 ): void {
-  const overrides = readDevOverrides(options.devHost === true, options.env ?? process.env, logger);
+  const overrides = readDevOverrides(
+    options.devHost === true,
+    options.env ?? process.env,
+    logger,
+  );
   logger.info('[AgentSDK] Registering SDK services...');
   registerCodexChatServices(container);
   // Product hosts do not consume model-dispatch provenance. Benchmark record
@@ -314,15 +325,24 @@ export function registerSdkServices(
   );
 
   container.register(SDK_TOKENS.SESSION_HISTORY_ROUTER, {
-    useFactory: instanceCachingFactory((c) =>
-      new SessionHistoryRouter(
-        () => c.resolve<SessionMetadataStore>(SDK_TOKENS.SDK_SESSION_METADATA_STORE),
-        () => c.resolve<SessionHistoryReaderService>(SDK_TOKENS.SDK_SESSION_HISTORY_READER),
-        () =>
-          c.isRegistered(SDK_TOKENS.NATIVE_SESSION_HISTORY_PORT, true)
-            ? c.resolve<NativeSessionHistoryPort | null>(SDK_TOKENS.NATIVE_SESSION_HISTORY_PORT)
-            : undefined,
-      ),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new SessionHistoryRouter(
+          () =>
+            c.resolve<SessionMetadataStore>(
+              SDK_TOKENS.SDK_SESSION_METADATA_STORE,
+            ),
+          () =>
+            c.resolve<SessionHistoryReaderService>(
+              SDK_TOKENS.SDK_SESSION_HISTORY_READER,
+            ),
+          () =>
+            c.isRegistered(SDK_TOKENS.NATIVE_SESSION_HISTORY_PORT, true)
+              ? c.resolve<NativeSessionHistoryPort | null>(
+                  SDK_TOKENS.NATIVE_SESSION_HISTORY_PORT,
+                )
+              : undefined,
+        ),
     ),
   });
 
@@ -574,10 +594,16 @@ export function registerSdkServices(
     { lifecycle: Lifecycle.Singleton },
   );
 
-  container.register(
-    SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER,
-    { useFactory: instanceCachingFactory((c) => new CompactionConfigProvider(c.resolve(TOKENS.CONFIG_MANAGER), logger, overrides.idleMinTokens)) },
-  );
+  container.register(SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER, {
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new CompactionConfigProvider(
+          c.resolve(TOKENS.CONFIG_MANAGER),
+          logger,
+          overrides.idleMinTokens,
+        ),
+    ),
+  });
 
   // A factory rather than `useClass`: `SDK_CODE_OUTLINER` is optional and is
   // bound by the hosts, not here. It is looked up when the capper is first
@@ -959,9 +985,14 @@ export function registerSdkServices(
   // Session budget (TASK_2026_597 N7), advisory only. The service injects its
   // provider by class token. Before the adapter, which injects the service.
   container.register(SessionBudgetConfigProvider, {
-    useFactory: instanceCachingFactory((c) => new SessionBudgetConfigProvider(
-      c.resolve(TOKENS.CONFIG_MANAGER), logger, overrides.sessionBudgetTokens,
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new SessionBudgetConfigProvider(
+          c.resolve(TOKENS.CONFIG_MANAGER),
+          logger,
+          overrides.sessionBudgetTokens,
+        ),
+    ),
   });
   container.registerSingleton(SessionRotationAdvisor);
   // The lifecycle manager reads the budget at turn-end and the budget applies
@@ -1135,6 +1166,14 @@ export function registerCodexChatServices(
         c.resolve<SessionTurnStateRegistry>(
           SDK_TOKENS.SDK_SESSION_TURN_STATE_REGISTRY,
         ),
+        c.isRegistered(
+          SDK_TOKENS.SDK_SESSION_ID_RESOLVED_CALLBACK_REGISTRY,
+          true,
+        )
+          ? c.resolve<SessionIdResolvedCallbackRegistry>(
+              SDK_TOKENS.SDK_SESSION_ID_RESOLVED_CALLBACK_REGISTRY,
+            )
+          : undefined,
       );
     }),
   });

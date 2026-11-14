@@ -55,6 +55,15 @@ describe('NextTurnReminderQueue', () => {
     expect(queue.take('sdk')).toBe('after');
   });
 
+  it('keeps a Claude reminder separate when a Codex tab resolves', () => {
+    const { queue, resolve } = setup();
+    queue.put('claude-tab', 'claude');
+    queue.put('codex-tab', 'codex');
+    resolve('codex-tab', 'codex-thread');
+    expect(queue.take('codex-thread')).toBe('codex');
+    expect(queue.take('claude-tab')).toBe('claude');
+  });
+
   it('routes a put after resolution and keeps the newer entry on collision', () => {
     const { queue, resolve } = setup();
     resolve('tab', 'sdk');

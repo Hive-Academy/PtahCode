@@ -94,3 +94,22 @@ PR #1265: draft, REVIEW_REQUIRED, 0 reviews, no new comments. Fifth report to th
 (decision on item (a): A = fix rail link in PR #1265, B = follow-up task + accept (a) as
 partial, then `gh pr ready 1265`): NOT delivered (parent-session-not-active). No production
 change; PR #1265 stays draft. This commit stays local until the next real change.
+Superseded by session e919afa2 on 2026-11-14
+Correction 2026-11-14 15:10Z: the program coordinator (session agent-permissions-pr-ece2) stopped
+e919afa2 and made this session the Phase B coordinator again. Decision on item (a): OPTION A.
+- Fast-forwarded to origin 5d3be6ea9 (e919afa2 commit, sdkIdOf fallback to isSessionActive).
+- Defect in 5d3be6ea9: for a Claude tab, SdkAgentAdapter.isSessionActive = lifecycle.find(id)
+  defined, so a tab with no resolved SDK id returns its tab id as parentSdkSessionId.
+- Root cause of the missing child bind: CodexChatAdapter calls only its single-slot resolved
+  callback (codex-chat-adapter.ts:477), never SessionIdResolvedCallbackRegistry.notifyAll, so
+  SessionSpawner.onSessionIdResolved never runs for a Codex child (log a-7: "Session ID
+  resolved" for the child, no "bound to SDK session").
+- Codex lane 57f46235 started: confirmed-only sdkIdOf, Codex adapter notifies the registry,
+  regression specs. Deliverable lane-report-rail-link-fix.md.
+- 16:20Z lane 57f46235 done (listener audit in lane-report-rail-link-fix.md, listener specs in
+  lane-report-listener-specs.md). Inner loop `--related` 3/3 pass. lint+typecheck 6/6 pass.
+- Codex review lane 9464d778: REJECT, one High finding (review-rail-link-fix.md): the new
+  host-routing alias guard blocked a resume of the same session in a new tab. Fixed: guard
+  removed (host-routing.coordinator.ts has no diff from main), spec now pins the move of the
+  alias to the resuming tab. Other review results: sdkIdOf call sites, registry listeners and
+  double-handling OK.

@@ -29,6 +29,8 @@ export interface RuntimeAdmissionPort {
 export interface NativeChatAdapter extends IAgentAdapter {
   /** Includes open sessions and in-progress opens keyed by their tab id. */
   owns(sessionId: SessionId): boolean;
+  /** Resolves a live native thread; returns undefined for an opening tab. */
+  resolveLiveSessionId?(callerId: string): SessionId | undefined;
   listSessionModels(sessionId: SessionId): Promise<readonly AgentModelInfo[]>;
 }
 
@@ -201,6 +203,11 @@ export class RoutingAgentAdapter implements IAgentAdapter {
     ...args: Parameters<IAgentAdapter['isSessionActive']>
   ): boolean {
     return this.adapter(args[0]).isSessionActive(...args);
+  }
+  /** Confirms a published native thread id, excluding opening tab ids. */
+  resolveLiveSessionId(callerId: string): SessionId | undefined {
+    const resolved = this.native?.resolveLiveSessionId?.(callerId);
+    return resolved === callerId ? resolved : undefined;
   }
   getSessionToken(
     ...args: Parameters<IAgentAdapter['getSessionToken']>

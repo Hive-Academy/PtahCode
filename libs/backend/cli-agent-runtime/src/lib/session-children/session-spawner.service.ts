@@ -1918,12 +1918,19 @@ export class SessionSpawnerService implements ISessionSpawner {
   }
 
   private sdkIdOf(sessionId: string): string | undefined {
-    // First, look up in the lifecycle manager (tab ID → SDK ID).
-    const fromLifecycle = this.lifecycle.find(sessionId)?.realSessionId;
-    if (fromLifecycle) return fromLifecycle;
-    // If not found in lifecycle, check if this is already a live SDK ID
-    // (e.g., a Codex thread ID that is not a tab ID).
-    if (this.adapter?.isSessionActive(sessionId)) return sessionId;
+    const record = this.lifecycle.find(sessionId);
+    if (record) return record.realSessionId ?? undefined;
+    const id = SessionId.safeParse(sessionId);
+    // Native opens are keyed by tab id until published. Only the native
+    // adapter can confirm that the input itself is a published thread id.
+    if (
+      id &&
+      this.adapter?.isSessionActive(id) &&
+      'resolveLiveSessionId' in this.adapter &&
+      typeof this.adapter.resolveLiveSessionId === 'function' &&
+      this.adapter.resolveLiveSessionId(id) === id
+    )
+      return id;
     return undefined;
   }
 

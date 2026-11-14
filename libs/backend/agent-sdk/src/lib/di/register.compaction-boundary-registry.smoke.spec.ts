@@ -29,6 +29,7 @@
 
 import 'reflect-metadata';
 import { SubagentStopNotices } from '../helpers/compaction/subagent-stop-notices';
+import { SessionIdResolvedCallbackRegistry } from '../helpers/session-id-resolved-callback-registry';
 
 import { container as rootContainer } from 'tsyringe';
 import type { DependencyContainer } from 'tsyringe';
@@ -93,7 +94,13 @@ function buildSmokeContainer(
 
   c.register(TOKENS.LOGGER, { useValue: logger });
   c.register(PLATFORM_TOKENS.HOST_ATTENTION_NOTIFICATIONS, {
-    useValue: { present: jest.fn(), resolve: jest.fn(), isEligible: jest.fn(() => false), open: jest.fn(), dispose: jest.fn() },
+    useValue: {
+      present: jest.fn(),
+      resolve: jest.fn(),
+      isEligible: jest.fn(() => false),
+      open: jest.fn(),
+      dispose: jest.fn(),
+    },
   });
   if (governor !== undefined) {
     c.register(TOKENS.BACKGROUND_WORK_GOVERNOR, { useValue: governor });
@@ -244,6 +251,25 @@ describe('registerSdkServices — CompactionBoundaryGenerationRegistry DI smoke'
 
   beforeEach(() => {
     container = buildSmokeContainer();
+  });
+
+  it('rekeys only the resolved Codex tab turn state', () => {
+    const turns = container.resolve<SessionTurnStateRegistry>(
+      SDK_TOKENS.SDK_SESSION_TURN_STATE_REGISTRY,
+    );
+    const resolved = container.resolve<SessionIdResolvedCallbackRegistry>(
+      SDK_TOKENS.SDK_SESSION_ID_RESOLVED_CALLBACK_REGISTRY,
+    );
+    const codex = turns.markGenerating('codex-tab');
+    const claude = turns.markGenerating('claude-tab');
+    resolved.notifyAll({
+      tabId: 'codex-tab',
+      realSessionId: 'codex-thread',
+      isNewSession: true,
+      timestamp: 1,
+    });
+    expect(turns.get('codex-thread')).toBe(codex);
+    expect(turns.get('claude-tab')).toBe(claude);
   });
 
   it('resolves the same stop notice store for SDK services', () => {
