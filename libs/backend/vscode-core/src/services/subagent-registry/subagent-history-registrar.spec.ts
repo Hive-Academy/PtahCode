@@ -54,6 +54,23 @@ describe('SubagentHistoryRegistrar', () => {
     registrar = new SubagentHistoryRegistrar(store, logger);
   });
 
+  it('never registers native Codex children as resumable, terminal or running', () => {
+    const terminal = makeAgentStart({ toolCallId: 'native-done', agentId: 'child-done',
+      agentType: 'codex', parentToolUseId: 'native-done' });
+    const running = makeAgentStart({ toolCallId: 'native-running', agentId: 'child-running',
+      agentType: 'codex', parentToolUseId: 'native-running' });
+    const status: FlatStreamEventUnion = {
+      eventType: 'agent_status', id: 'native-status', source: 'history',
+      sessionId: 'sess-1', messageId: 'message-1', timestamp: Date.now(),
+      parentToolUseId: 'native-done', agentId: 'child-done', status: 'completed',
+      native: { provider: 'codex', agentThreadId: 'child-done', activityId: 'done',
+        cycleId: 'child-done:1', cycleOrdinal: 1, kind: 'completed' },
+    };
+    expect(registrar.register([terminal, status, running], 'parent-1')).toBe(0);
+    expect(store.has('native-done')).toBe(false);
+    expect(store.has('native-running')).toBe(false);
+  });
+
   it('returns 0 and logs when there are no agent_start events', () => {
     const events: FlatStreamEventUnion[] = [
       makeToolResult('tc-other') as unknown as FlatStreamEventUnion,
@@ -84,6 +101,19 @@ describe('SubagentHistoryRegistrar', () => {
     expect(record?.status).toBe('interrupted');
     expect(record?.agentId).toBe('a1');
     expect(record?.parentSessionId).toBe('parent-1');
+  });
+
+  it.each(['completed', 'running'] as const)('never registers a native Codex child with %s status as resumable', (status) => {
+    const start = makeAgentStart({ toolCallId: 'native-card', agentId: 'child-thread', agentType: 'codex' });
+    const nativeStatus: Extract<FlatStreamEventUnion, { eventType: 'agent_status' }> = {
+      eventType: 'agent_status', id: 'native-status', source: 'history', timestamp: 10,
+      sessionId: 'parent-1', messageId: 'turn-1', parentToolUseId: 'native-card',
+      agentId: 'child-thread', status,
+      native: { provider: 'codex', agentThreadId: 'child-thread', activityId: 'activity-1',
+        cycleId: 'child-thread:1', cycleOrdinal: 1, kind: 'started' },
+    };
+    expect(registrar.register([start, nativeStatus], 'parent-1')).toBe(0);
+    expect(store.has('native-card')).toBe(false);
   });
 
   it('skips agent_start when a matching tool_result exists (completed agent)', () => {

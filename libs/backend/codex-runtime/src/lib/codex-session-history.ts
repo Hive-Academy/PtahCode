@@ -182,7 +182,6 @@ export async function readCodexSessionHistory(
   const failures: { archived?: boolean; threadId?: string; reason: string; issues: string; rpcCode?: number }[] = [];
   let completedLists = 0;
   let failedLists = 0;
-  let processFailed = false;
 
   function errorCauses(error: unknown): Error[] {
     let cause: unknown = error;
@@ -238,12 +237,29 @@ export async function readCodexSessionHistory(
       failedLists++;
       recordFailure(error, { archived });
       if (error instanceof CodexSessionHistoryError && error.code === 'processFailure') {
-        processFailed = true;
         break;
       }
     }
   }
   const candidates = new Map(listed.map((thread) => [thread.id, thread]));
+  // The parent transcript names native children directly. Use those ids when
+  // thread/list is incomplete (including source-kind filtered results).
+  const linkedIds = new Set(threads[0].turns.flatMap((turn) => turn.items.flatMap((item) => {
+    if (item.type === 'subAgentActivity' && 'agentThreadId' in item) return [item.agentThreadId];
+    if (item.type === 'collabAgentToolCall' && 'receiverThreadIds' in item) return item.receiverThreadIds;
+    return [];
+  })));
+  for (const childId of linkedIds) {
+    if (childId === rootThreadId || candidates.has(childId)) continue;
+    try {
+      const child = (await call('thread/read', { threadId: childId })).thread;
+      if (child.id === childId && child.parentThreadId === rootThreadId)
+        candidates.set(childId, child);
+    } catch (error) {
+      assertOpen();
+      recordFailure(error, { threadId: childId });
+    }
+  }
   const selected = new Map([[root.id, root]]);
   let found = true;
   while (found) {
@@ -259,15 +275,12 @@ export async function readCodexSessionHistory(
 
   const children = [...selected.values()].filter((thread) => thread.id !== root.id)
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-  if (!processFailed) {
-    for (const listedThread of children) {
-      try {
-        threads.push(await hydrateThread(listedThread));
-      } catch (error) {
-        assertOpen();
-        recordFailure(error, { threadId: listedThread.id });
-        if (error instanceof CodexSessionHistoryError && error.code === 'processFailure') break;
-      }
+  for (const listedThread of children) {
+    try {
+      threads.push(await hydrateThread(listedThread));
+    } catch (error) {
+      assertOpen();
+      recordFailure(error, { threadId: listedThread.id });
     }
   }
   if (failures.length > 0)

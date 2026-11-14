@@ -103,8 +103,10 @@ export function projectCodexHistory(
       }
     }
   }
+  // A native activity owns the canonical card even when a collab spawn item
+  // also names the child. The latter is a separate tool call in history.
   for (const [childId, card] of nativeCards)
-    if (!parentTool.has(childId)) parentTool.set(childId, card.cardId);
+    parentTool.set(childId, card.cardId);
 
   for (const thread of projectionThreads) {
     let threadTime = millis(thread.createdAt, Number.isFinite(fallbackTime) ? fallbackTime : 0);
