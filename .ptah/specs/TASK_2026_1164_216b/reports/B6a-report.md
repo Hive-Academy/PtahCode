@@ -34,7 +34,7 @@ None.
 
 ## Extra reads
 
-Read the Nx terminal output for the failed CLI test at `C:\Users\abdal\.nx\d60e02896ae18ad9\cache\terminalOutputs\16136736772495642826`; no source file outside the read set was opened.
+Read the Nx terminal output for the failed CLI test at `C:\Users\dev\.nx\d60e02896ae18ad9\cache\terminalOutputs\16136736772495642826`; no source file outside the read set was opened.
 
 ## Decisions
 

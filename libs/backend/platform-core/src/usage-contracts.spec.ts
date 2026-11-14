@@ -6,7 +6,7 @@ import type {
   UsageReconciliationTrigger,
   UsageScope,
 } from './index';
-import { PLATFORM_TOKENS } from './index';
+import { PLATFORM_TOKENS } from './di/tokens';
 
 describe('public usage contracts', () => {
   it('exports stable platform tokens for the usage ports', () => {
