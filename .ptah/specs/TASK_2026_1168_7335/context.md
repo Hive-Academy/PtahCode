@@ -17,10 +17,10 @@ visibility, completion-notice dedup. Regression tests plus real Electron UI evid
 
 | Phase | Task ID | Pull request | State |
 | --- | --- | --- | --- |
-| A permissions | TASK_2026_1172_fd37 | https://github.com/Hive-Academy/PtahCode/pull/1266 | ready, in_review; head a37e74065 (persisted policy, fail-closed restore); re-review approved; evidence items 2-4 passed (.ptah/tmp/electron-evidence in worktree fix-lane-permission-routing-v5); CI pending; coordinator e48a105f |
-| B attribution | TASK_2026_1171_7664 | https://github.com/Hive-Academy/PtahCode/pull/1265 | ready; head 9aa561471 (rail-link rework, gate passed, review High fixed); evidence (a) passed (caller-item-a-child.png); CI pending; coordinator: old session ee2801 (e919afa2 stopped by user) |
-| C native subagents | TASK_2026_1173_c17f | https://github.com/Hive-Academy/PtahCode/pull/1263 | ready, in_review; head de562341c; CI green except the main axe failure (shard 2: 1 failed, 54 passed); 0 threads without reply; needs one approving review; child 1b50b412 done |
-| Side: axe contrast on main | TASK_2026_1178_9339 | https://github.com/Hive-Academy/PtahCode/pull/1273 | ready; all picker themes fixed; CI pending on head 4cd5de7de (first commit green) |
+| A permissions | TASK_2026_1172_fd37 | https://github.com/Hive-Academy/PtahCode/pull/1266 | in_review; main merged (D30) in 87e113cde plus review commit 58a6498aa, gate running, push pending; evidence 2-4 from a37e74065 still valid (no permission path changed); coordinator 2d2c011b |
+| B attribution | TASK_2026_1171_7664 | https://github.com/Hive-Academy/PtahCode/pull/1265 | in_review; main merged locally (7e8e3d6e2) plus fix 66549cd66 (route check gets the resolved caller ID, after a Codex review REJECT, Medium); gate running, push pending; evidence (a) passed; coordinator: user-started session fde4c0 (reports ready; the parent merges, D31) |
+| C native subagents | TASK_2026_1173_c17f | https://github.com/Hive-Academy/PtahCode/pull/1263 | in_review; main (with #1273) merged in 025c23df4, gate running, push pending; coordinator 8d2fe57b |
+| Side: axe contrast on main | TASK_2026_1178_9339 | https://github.com/Hive-Academy/PtahCode/pull/1273 | merged 2026-11-14T19:05Z as 9cb890ad6; all CI green; both commits reviewed APPROVE |
 
 ## Decisions (recovered summary)
 
@@ -46,12 +46,15 @@ visibility, completion-notice dedup. Regression tests plus real Electron UI evid
   reworks the sdkIdOf change.
 - D30 (new): #1265 and #1266 conflicted with main (no CI ran). The user authorized a merge
   commit of origin/main into both PR branches (no rebase, no force push).
+- D31 (new): the user gave all orchestrator sessions full authority to fix, review and merge
+  PRs without waiting. Rule: merge own PR only, all CI green, independent review approved,
+  `gh pr merge --merge` (`--admin` only for REVIEW_REQUIRED alone), no squash, rebase,
+  force push, branch deletion or worktree removal.
 
 ## Open problems
 
-1. Pre-existing CI failure on main: `conflict-and-history-axe.spec.ts:55` contrast 3.87:1.
-   Side task fixed it in PR #1273 (branch `fix/conflict-history-axe-contrast`; CI green on
-   22a5d7bde, including electron-e2e shard 2). Needs review and merge.
+1. Fixed: the axe contrast failure on main. #1273 merged (9cb890ad6). PR branches need a merge
+   of main (a re-run does not pick up the fix).
 2. D13 stop-but-alive session defect.
 3. First chat session after Electron start can show "MCP 0".
 4. Child `ptah_session_handoff` times out, or is refused after max successions.
