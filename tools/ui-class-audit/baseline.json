@@ -678,31 +678,6 @@
   "libs/frontend/dashboard/src/lib/components/skill-selection-card/skill-selection-card.component.ts": {
     "card-title": 1
   },
-  "libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-breakdown-table.component.ts": {
-    "btn": 2,
-    "btn-active": 2,
-    "btn-primary": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-cost-donut.component.ts": {
-    "btn": 2,
-    "btn-active": 2,
-    "btn-primary": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-dashboard.component.html": {
-    "alert": 2,
-    "alert-error": 1,
-    "alert-warning": 1,
-    "badge": 1,
-    "badge-sm": 1,
-    "badge-warning": 1,
-    "btn": 4,
-    "btn-active": 3,
-    "btn-primary": 3,
-    "btn-sm": 1,
-    "btn-xs": 3
-  },
   "libs/frontend/declarative-dashboard/src/lib/components/dashboard-alert.component.ts": {
     "<dynamic>": 5
   },
