@@ -1918,7 +1918,13 @@ export class SessionSpawnerService implements ISessionSpawner {
   }
 
   private sdkIdOf(sessionId: string): string | undefined {
-    return this.lifecycle.find(sessionId)?.realSessionId ?? undefined;
+    // First, look up in the lifecycle manager (tab ID → SDK ID).
+    const fromLifecycle = this.lifecycle.find(sessionId)?.realSessionId;
+    if (fromLifecycle) return fromLifecycle;
+    // If not found in lifecycle, check if this is already a live SDK ID
+    // (e.g., a Codex thread ID that is not a tab ID).
+    if (this.adapter?.isSessionActive(sessionId)) return sessionId;
+    return undefined;
   }
 
   private async interruptTurn(

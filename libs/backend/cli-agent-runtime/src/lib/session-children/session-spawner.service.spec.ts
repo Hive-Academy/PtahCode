@@ -1307,6 +1307,30 @@ describe('SessionSpawnerService — session organization record (TASK_2026_580 R
     expect(Object.values(input)).not.toContain(PARENT);
   });
 
+  it('recognizes a live SDK ID (e.g., Codex thread) as an active parent and records it (regression)', async () => {
+    // When a Codex parent starts a child, the parent's SDK ID is already a live thread ID,
+    // not a tab ID in the lifecycle manager. The spawner must recognize it as active
+    // and use it directly as parentSdkSessionId.
+    const h = makeHarness();
+    const codexThreadId = 'thread-id-from-codex-' + randomUUID();
+    // Simulate Codex parent: add it to active sessions, but NOT to lifecycleIds.
+    h.active.add(codexThreadId);
+    h.lifecycleIds.delete(PARENT);
+
+    const child = await h.startChild({
+      callerSessionId: codexThreadId,
+    });
+    expect(child.parentSessionId).toBe(codexThreadId);
+    expect(child.parentSdkSessionId).toBe(codexThreadId);
+
+    resolveChild(h, child.childSessionId);
+    await flush();
+
+    expect(recordCalls(h)).toHaveBeenCalledWith(
+      expect.objectContaining({ parentSessionId: codexThreadId }),
+    );
+  });
+
   it('records the same input again when the same child resolves twice (the store upserts)', async () => {
     const h = makeHarness();
     const child = await h.startChild({ taskId: 'TASK_2026_001' });
