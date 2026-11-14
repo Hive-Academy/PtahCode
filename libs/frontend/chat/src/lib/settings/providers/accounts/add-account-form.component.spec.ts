@@ -181,12 +181,12 @@ describe('AddAccountFormComponent', () => {
     expect(announce).not.toHaveBeenCalled();
   });
 
-  it('while pending is the pattern saving state: Adding…, busy Add, disabled fields and Cancel, one submit', () => {
+  it('while pending is the pattern saving state: Adding…, busy Add, aria-disabled fields, disabled Cancel, one submit', () => {
     type('Personal');
     send();
     expect(submit().textContent?.trim()).toBe('Adding…');
     expect(submit().getAttribute('aria-busy')).toBe('true');
-    expect(fieldset().disabled).toBe(true);
+    expect(fieldset().getAttribute('aria-disabled')).toBe('true');
     expect(cancelButton().disabled).toBe(true);
     expect(form().getAttribute('aria-busy')).toBe('true');
     send();

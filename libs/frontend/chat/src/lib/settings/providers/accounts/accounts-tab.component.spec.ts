@@ -141,6 +141,7 @@ describe('AccountsTabComponent', () => {
   });
 
   const root = () => fixture.nativeElement as HTMLElement;
+  const accountsHeading = () => byTestId('accounts-tab-header')?.querySelector<HTMLElement>('h3') ?? null;
   const byTestId = (id: string) => root().querySelector<HTMLElement>(`[data-testid="${id}"]`);
   const all = (id: string) => Array.from(root().querySelectorAll<HTMLElement>(`[data-testid="${id}"]`));
   const rowOf = (label: string) =>
@@ -190,7 +191,7 @@ describe('AccountsTabComponent', () => {
     });
 
     it('header: the form section "Accounts" heading (focusable by script); Add account in the list header actions', () => {
-      const heading = byTestId('accounts-tab-heading');
+      const heading = accountsHeading();
       expect(heading?.tagName).toBe('H3');
       expect(heading?.textContent?.trim()).toBe('Accounts');
       expect(heading?.closest('ptah-form-section')).toBe(byTestId('accounts-tab-header'));
@@ -313,7 +314,7 @@ describe('AccountsTabComponent', () => {
       await openDetailOf('Team plan');
       expect(detail()?.account().profileId).toBe(TEAM.profileId);
       expect(detail()?.accounts()).toEqual([WORK, TEAM]);
-      expect(byTestId('accounts-tab-heading')).toBeNull();
+      expect(accountsHeading()).toBeNull();
       expect(byTestId('accounts-tab-list')).toBeNull();
       expect(document.activeElement).toBe(detailHeading());
     });
@@ -332,7 +333,7 @@ describe('AccountsTabComponent', () => {
       await settle();
       expect(detail()).toBeUndefined();
       expect(announce).toHaveBeenCalledWith(ACCOUNT_COPY.accountGone, 'status');
-      expect(document.activeElement).toBe(byTestId('accounts-tab-heading'));
+      expect(document.activeElement).toBe(accountsHeading());
     });
 
     it('a push that removes the open account while focus is outside the tab leaves focus there', async () => {
@@ -601,7 +602,7 @@ describe('AccountsTabComponent', () => {
       detail()?.remove.emit(WORK.profileId);
       accounts.commit(snapshot([TEAM]));
       await settle();
-      expect(document.activeElement).toBe(byTestId('accounts-tab-heading'));
+      expect(document.activeElement).toBe(accountsHeading());
     });
 
     it('focus moved outside the tab during the removal stays there', async () => {

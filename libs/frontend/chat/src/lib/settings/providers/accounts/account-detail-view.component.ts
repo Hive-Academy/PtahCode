@@ -90,7 +90,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
  * Presentational: it renders one authoritative `ProviderAccountSummary` and emits intents; the parent (Accounts tab)
  * writes them, announces every host outcome and owns B-2 focus after a write. This panel announces only the copy
  * result through `SettingsSaveFeedbackService.announce` (P6-A9); a rename validation error shows as the alert of the
- * Details section. Busy controls use `ptahBusyDisabled`, so focus never drops to `body`. Names and scripts are text
+ * Details section. Busy controls use `ptahBusyDisabled`, and the rename section keeps its fields focusable while it saves, so focus stays on the field. Names and scripts are text
  * bindings only.
  */
 @Component({

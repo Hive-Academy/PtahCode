@@ -6,7 +6,6 @@ import {
   ElementRef,
   Injector,
   OnInit,
-  afterEveryRender,
   afterNextRender,
   computed,
   effect,
@@ -370,16 +369,6 @@ export class AccountsTabComponent implements OnInit {
 
   constructor() {
     inject(DestroyRef).onDestroy(() => (this.destroyed = true));
-    // The form section owns the `Accounts` heading. It is the B-2 fallback target, so it is focusable by script and
-    // keeps its test id.
-    afterEveryRender({
-      write: () => {
-        const heading = this.accountsHeading();
-        if (!heading || heading.hasAttribute('tabindex')) return;
-        heading.setAttribute('tabindex', '-1');
-        heading.setAttribute('data-testid', 'accounts-tab-heading');
-      },
-    });
     // The open account left the authoritative snapshot: back to the list. Our own Remove completes its own focus
     // and toast; a push announces the loss, and the heading takes focus only if focus was inside that detail (B-2).
     effect(() => {
@@ -689,11 +678,10 @@ export class AccountsTabComponent implements OnInit {
     return !this.destroyed && (active === null || active === this.document.body);
   }
 
-  /** The form section's `Accounts` heading, present in the list view only. */
-  private accountsHeading(): HTMLElement | undefined {
-    const id = this.formSection()?.headingId;
-    if (!id) return undefined;
-    return this.region()?.nativeElement.querySelector<HTMLElement>(`[id="${id}"]`) ?? undefined;
+  /** The form section's `Accounts` heading as a focus target, present in the list view only. */
+  private accountsHeading(): { focus(): void } | undefined {
+    const section = this.formSection();
+    return section ? { focus: () => section.focusHeading() } : undefined;
   }
 
   private focusInside(area: HTMLElement | undefined): boolean {
@@ -724,7 +712,7 @@ export class AccountsTabComponent implements OnInit {
    * Moves focus after the next render. With `wait`, only while focus has not moved since the intent: it is still on
    * the waiting target (then it stays), or that target was removed and focus fell to the body.
    */
-  private focusAfterRender(target: () => HTMLElement | undefined, wait?: FocusWait, anyView = false): void {
+  private focusAfterRender(target: () => { focus(): void } | undefined, wait?: FocusWait, anyView = false): void {
     if (this.destroyed) return;
     afterNextRender(
       () => {
