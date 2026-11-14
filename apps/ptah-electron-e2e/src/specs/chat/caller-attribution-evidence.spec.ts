@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -55,6 +56,16 @@ test.describe('@evidence Codex caller attribution', () => {
     fs.mkdirSync(home);
     fs.mkdirSync(workspace);
     fs.writeFileSync(path.join(workspace, 'README.md'), '# caller attribution evidence\n');
+    // ptah_session_start puts each child in a git worktree of the workspace, so
+    // the temp workspace needs its own repository with one commit at HEAD. This
+    // throwaway fixture repository is never pushed; signing is off only here.
+    const git = (...args: string[]): void => {
+      execFileSync('git', ['-c', 'user.name=Ptah Evidence', '-c', 'user.email=evidence@example.invalid',
+        '-c', 'commit.gpgsign=false', ...args], { cwd: workspace, stdio: 'ignore' });
+    };
+    git('init', '-q', '-b', 'main');
+    git('add', 'README.md');
+    git('commit', '-q', '-m', 'evidence fixture');
     const app = await launchPtah({
       args: [workspace], userDataDir: profile, timeout: 180_000,
       env: {
