@@ -619,6 +619,10 @@ export interface AgentOutputDelta {
  * Stored in SessionMetadata.cliSessions[] for resume capability.
  */
 export interface CliSessionReference {
+  /** Validated effective permission and network snapshot for cold resume. */
+  readonly effectivePolicy?: EffectiveLanePolicy;
+  /** Original explicit permission and network request for this lane. */
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   /** Last observed turn number. Absent in older persisted references. */
   readonly turnSeq?: number;
   /** Immutable run snapshot. Malformed persisted values must refuse resume. */

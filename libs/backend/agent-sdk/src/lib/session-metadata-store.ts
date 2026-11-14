@@ -84,6 +84,8 @@ import type {
   SubagentRecord,
 } from '@ptah-extension/shared';
 import {
+  EFFECTIVE_LANE_POLICY_SCHEMA,
+  REQUESTED_LANE_POLICY_SCHEMA,
   blankToUndefined,
   isProviderAccountOpaqueId,
   isProviderAccountOwnerKey,
@@ -872,6 +874,18 @@ const restoredPtahCliNameSchema = z
   .refine((name) => name.trim().length > 0);
 
 /**
+ * The policy a malformed persisted snapshot restores as. It matches the
+ * parent-plan cap in `resolveCliLanePolicy`: plan, and network deny for Codex.
+ */
+function failClosedLanePolicy(
+  cli: unknown,
+): NonNullable<CliSessionReference['effectivePolicy']> {
+  return cli === 'codex'
+    ? { permission: 'plan', network: 'deny' }
+    : { permission: 'plan' };
+}
+
+/**
  * A restored reference carries its `quotaOwner` and `modelScope` only when
  * they validate. A
  * malformed or legacy value — including an older build's bare `quotaOwnerKey`,
@@ -891,7 +905,9 @@ function restoreQuotaOwner(ref: CliSessionReference): CliSessionReference {
     !('modelScope' in stored) &&
     !('potentialCapabilities' in stored) &&
     !('workspaceKey' in stored) &&
-    !('ptahCliName' in stored)
+    !('ptahCliName' in stored) &&
+    !('effectivePolicy' in stored) &&
+    !('requestedPolicy' in stored)
   ) {
     return ref;
   }
@@ -902,6 +918,8 @@ function restoreQuotaOwner(ref: CliSessionReference): CliSessionReference {
     potentialCapabilities,
     workspaceKey,
     ptahCliName,
+    effectivePolicy,
+    requestedPolicy,
     ...rest
   } = stored;
   const owner = parseQuotaOwnerRef(quotaOwner);
@@ -910,12 +928,22 @@ function restoreQuotaOwner(ref: CliSessionReference): CliSessionReference {
   const capabilities = cliAdapterManifestSchema.safeParse(potentialCapabilities);
   const workspace = restoredWorkspaceKeySchema.safeParse(workspaceKey);
   const agentName = restoredPtahCliNameSchema.safeParse(ptahCliName);
+  const effective = EFFECTIVE_LANE_POLICY_SCHEMA.safeParse(effectivePolicy);
+  const requested = REQUESTED_LANE_POLICY_SCHEMA.safeParse(requestedPolicy);
   const identity = {
     ...(capabilities.success
       ? { potentialCapabilities: capabilities.data }
       : {}),
     ...(workspace.success ? { workspaceKey: workspace.data } : {}),
     ...(agentName.success ? { ptahCliName: agentName.data } : {}),
+    // An unreadable snapshot must not resume under wider saved defaults:
+    // restore it as the parent-plan cap (plan, and network deny for Codex).
+    ...(effective.success
+      ? { effectivePolicy: effective.data }
+      : effectivePolicy !== undefined
+        ? { effectivePolicy: failClosedLanePolicy(rest.cli) }
+        : {}),
+    ...(requested.success ? { requestedPolicy: requested.data } : {}),
   };
   return owner
     ? { ...rest, quotaOwner: owner, ...scope, ...identity }

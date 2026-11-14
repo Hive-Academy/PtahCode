@@ -2647,6 +2647,43 @@ describe('SessionMetadataStore', () => {
       ]);
     });
 
+    it('round-trips valid lane policies', async () => {
+      const effectivePolicy = { permission: 'ask' as const, permissionSource: 'spawn' as const, network: 'deny' as const };
+      const requestedPolicy = { permission: 'ask' as const, network: 'deny' as const };
+      await seedRun(undefined, { effectivePolicy, requestedPolicy });
+
+      const [run] = await store.getCliSessionsForRestore('sess-1');
+      expect(run.effectivePolicy).toEqual(effectivePolicy);
+      expect(run.requestedPolicy).toEqual(requestedPolicy);
+    });
+
+    it('fails closed for a malformed effective policy and drops a malformed requested policy', async () => {
+      await seedRun(undefined, {
+        effectivePolicy: { permission: 'yolo', unexpected: true },
+        requestedPolicy: { network: 'wide-open' },
+      });
+
+      const [run] = await store.getCliSessionsForRestore('sess-1');
+      expect(run.effectivePolicy).toEqual({ permission: 'plan', network: 'deny' });
+      expect(run).not.toHaveProperty('requestedPolicy');
+    });
+
+    it('fails closed to plan without a network field for a malformed Claude policy', async () => {
+      await seedRun(undefined, {
+        cli: 'claude',
+        effectivePolicy: 'not-an-object',
+      });
+
+      const [run] = await store.getCliSessionsForRestore('sess-1');
+      expect(run.effectivePolicy).toEqual({ permission: 'plan' });
+    });
+
+    it('leaves a legacy reference without an effective policy unset', async () => {
+      await seedRun(undefined, { requestedPolicy: { permission: 'ask' } });
+      const [run] = await store.getCliSessionsForRestore('sess-1');
+      expect(run).not.toHaveProperty('effectivePolicy');
+    });
+
     it('restores a valid manifest and workspace key', async () => {
       await seedRun(undefined, {
         potentialCapabilities: RESTORE_MANIFEST,

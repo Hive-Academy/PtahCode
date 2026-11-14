@@ -107,6 +107,12 @@ import {
   LaneModelBlockedError,
   type AgentRoleStamp,
 } from './agent-process-manager.service';
+import type { DependencyContainer } from 'tsyringe';
+import { SessionMetadataStore, SDK_TOKENS, flushSessionMetadataStores } from '@ptah-extension/agent-sdk';
+import { createMockStateStorage } from '@ptah-extension/platform-core/testing';
+import { AgentId } from '@ptah-extension/shared';
+import { persistCliSessionReference } from '../wiring/agent-events';
+import { SystemCliLaneResumer } from './messaging/lane-resumers/system-cli-lane-resumer';
 import { PTAH_CLI_ROLE_DELIVERY } from '../ptah-cli/helpers/ptah-cli-registry.utils';
 import {
   BUFFER_LOW_WATER_SIZE,
@@ -433,6 +439,7 @@ function createManager(deps: {
       delivered: false,
       reason: 'chat-runtime-unavailable',
     })),
+    replayOutbox: jest.fn(async () => undefined),
   };
   const resumeGate = {
     evaluate: jest.fn(async () => ({
@@ -1409,6 +1416,50 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     }
 
     it.each([
+      ['claude', { permission: 'ask', permissionSource: 'spawn' }, { permission: 'ask' }, { permission: 'ask', permissionSource: 'spawn' }],
+      ['codex', { permission: 'auto-edit', network: 'deny', permissionSource: 'spawn', networkSource: 'spawn' }, { permission: 'auto-edit', network: 'deny' }, { permission: 'auto-edit', network: 'deny', permissionSource: 'spawn' }],
+      ['claude', { permission: 'ask', permissionSource: 'spawn' }, { permission: 'ask' }, { permission: 'plan', permissionSource: 'parent-plan' }],
+      ['codex', { permission: 'auto-edit', network: 'deny', permissionSource: 'spawn' }, { permission: 'auto-edit', network: 'deny' }, { permission: 'plan', network: 'deny', permissionSource: 'parent-plan' }],
+      ['claude', { permission: 'ask', unexpected: true }, { permission: 'ask' }, { permission: 'plan' }],
+      ['codex', { permission: 'auto-edit', unexpected: true }, { permission: 'auto-edit' }, { permission: 'plan', network: 'deny' }],
+    ] as const)('persists, restores, and resumes %s policy case %#', async (cli, effectivePolicy, requestedPolicy, expected) => {
+      useAdapter(cli);
+      const storage = createMockStateStorage();
+      const store = new SessionMetadataStore(storage, logger);
+      const parent = 'policy-parent';
+      await store.create(parent, '/workspace/root', 'Parent');
+      const child = Object.assign(Object.create(null) as DependencyContainer, {
+        isRegistered: (token: symbol) => token === SDK_TOKENS.SDK_SESSION_METADATA_STORE,
+        resolve: (token: symbol) => token === SDK_TOKENS.SDK_SESSION_METADATA_STORE ? store : undefined,
+      });
+      const agentId = AgentId.from('aaaaaaaa-bbbb-4ccc-8ddd-000000000999');
+      const info: AgentProcessInfo = {
+        agentId, cli, task: 'Original', workingDirectory: '/workspace/root',
+        status: 'completed', startedAt: '2026-11-07T00:00:00.000Z',
+        cliSessionId: `thread-${cli}`, parentSessionId: parent,
+        effectivePolicy: effectivePolicy as EffectiveLanePolicy,
+        requestedPolicy,
+      };
+      await persistCliSessionReference(child, logger, '[test]', info, undefined);
+      setupVscodeConfig({ cliLaneDefaults: { claude: { permission: 'yolo', network: 'allow' }, codex: { permission: 'yolo', network: 'allow' } } });
+      const [restored] = await store.getCliSessionsForRestore(parent);
+      manager.restoreAgents([restored], '/workspace/root', parent);
+      const restoredInfo = manager.getStatus(agentId);
+      if (!restoredInfo || Array.isArray(restoredInfo)) throw new Error('Expected restored lane');
+      expect(restoredInfo.effectivePolicy?.permission).toBe('unexpected' in effectivePolicy ? 'plan' : effectivePolicy.permission);
+      const capped = 'permissionSource' in expected && expected.permissionSource === 'parent-plan';
+      const resumer = new SystemCliLaneResumer(manager, capped ? () => 'plan' : undefined);
+      await resumer.resume(restoredInfo, 'Continue');
+      expect(lastRunSdkCall()).toMatchObject(expected);
+      if ('unexpected' in effectivePolicy) {
+        // Saved defaults (yolo, network allow) must not leak into the resume.
+        expect(lastRunSdkCall().network).toBe(cli === 'codex' ? 'deny' : undefined);
+        expect(lastRunSdkCall().permissionSource).toBeUndefined();
+      }
+      await flushSessionMetadataStores();
+    });
+
+    it.each([
       ['claude', 'ask', undefined],
       ['claude', 'plan', undefined],
       ['claude', 'auto-edit', undefined],
@@ -1519,6 +1570,20 @@ describe('AgentProcessManager - SDK Execution Path', () => {
 
   describe('resume gate (TASK_2026_597, R9.1)', () => {
     const SESSION = 'thread-1';
+
+    it.each([
+      ['claude', { permission: 'ask' as const, permissionSource: 'spawn' as const }, { permission: 'ask' as const }],
+      ['codex', { permission: 'auto-edit' as const, network: 'deny' as const }, { permission: 'auto-edit' as const, network: 'deny' as const }],
+    ] as const)('restores %s lane policy snapshots', (cli, effectivePolicy, requestedPolicy) => {
+      const agentId = 'policy-previous' as CliSessionReference['agentId'];
+      manager.restoreAgents([{
+        cliSessionId: SESSION, cli, agentId, task: 'Continue',
+        startedAt: '2026-10-04T08:00:00.000Z', status: 'completed',
+        effectivePolicy, requestedPolicy,
+      }], '/workspace/root');
+
+      expect(manager.getStatus(agentId)).toMatchObject({ effectivePolicy, requestedPolicy });
+    });
 
     function restorePreviousLane(): void {
       const ref: CliSessionReference = {

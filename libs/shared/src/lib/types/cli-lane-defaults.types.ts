@@ -7,6 +7,18 @@ export const CLI_LANE_DEFAULT_SCHEMA = z.object({
   network: z.enum(['allow', 'deny']).optional(),
 }).strict();
 
+/** Validated policy snapshot stored with a CLI session reference. */
+export const EFFECTIVE_LANE_POLICY_SCHEMA = CLI_LANE_DEFAULT_SCHEMA.extend({
+  nativeDescription: z.string().max(500).optional(),
+  permissionSource: z.enum(['spawn', 'saved', 'built-in', 'parent-plan']).optional(),
+  networkSource: z.enum(['spawn', 'saved', 'built-in', 'parent-plan']).optional(),
+}).strict();
+
+export const REQUESTED_LANE_POLICY_SCHEMA = EFFECTIVE_LANE_POLICY_SCHEMA.pick({
+  permission: true,
+  network: true,
+});
+
 export const CLI_LANE_DEFAULTS_SCHEMA = z.partialRecord(
   z.enum([...SYSTEM_CLI_TYPES, 'ptah-cli']),
   CLI_LANE_DEFAULT_SCHEMA,

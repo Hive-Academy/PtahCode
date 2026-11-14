@@ -1820,6 +1820,8 @@ export class AgentProcessManager {
         task: ref.task,
         workingDirectory,
         startedAt: ref.startedAt,
+        ...(ref.effectivePolicy ? { effectivePolicy: ref.effectivePolicy } : {}),
+        ...(ref.requestedPolicy ? { requestedPolicy: ref.requestedPolicy } : {}),
         ...(ref.turnSeq !== undefined ? { turnSeq: ref.turnSeq } : {}),
         ...(ref.cliSessionId ? { cliSessionId: ref.cliSessionId } : {}),
         ...(ref.agentBudget ? { agentBudget: ref.agentBudget } : {}),
