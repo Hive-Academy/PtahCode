@@ -138,9 +138,18 @@ function buildHarness(): {
 }
 
 describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('exposes an assigned lane id before the SDK query starts', async () => {
     const { registry, createCallback } = buildHarness();
-    await registry.spawnAgent(BASE_CONFIG.id, 'do work', { agentId: 'lane-assigned' });
+    // An ask lane builds canUseTool. The lane level now drives the callback,
+    // so the default (manifest yolo) lane would build none.
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', {
+      agentId: 'lane-assigned',
+      permission: 'ask',
+    });
     const resolver = createCallback.mock.calls[0][1] as () => string | undefined;
     expect(resolver()).toBe('lane-assigned');
   });
