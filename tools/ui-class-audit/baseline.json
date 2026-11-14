@@ -965,20 +965,9 @@
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/onboarding/src/lib/proposal/new-project-intake.page.ts": {
-    "btn": 4,
-    "btn-sm": 4,
-    "btn-warning": 1
-  },
   "libs/frontend/onboarding/src/lib/ready/provider-panel.component.ts": {
     "<dynamic>": 1,
     "skeleton": 2
-  },
-  "libs/frontend/onboarding/src/lib/ready/ready-connection-step.page.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-primary": 1
   },
   "libs/frontend/onboarding/src/lib/ready/ready-strip.component.ts": {
     "<dynamic>": 2

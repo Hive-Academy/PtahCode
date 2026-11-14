@@ -1,4 +1,4 @@
-<section class="space-y-5" aria-labelledby="skill-review-title">
+<section class="space-y-[var(--ptah-gap-group)]" aria-labelledby="skill-review-title">
   <div>
     <h2 id="skill-review-title" class="text-xl font-semibold" tabindex="-1">
       Skills and project guidance
@@ -28,7 +28,7 @@
       }
       @for (row of recommendations(); track key(row.skill)) {
         <ptah-native-card>
-          <label class="flex cursor-pointer gap-3 p-3">
+          <label class="flex cursor-pointer gap-[var(--ptah-gap-heading)] p-[var(--ptah-surface-pad)]">
             <input
               type="checkbox"
               ptahCheckbox
@@ -61,7 +61,7 @@
   <section class="space-y-3" aria-labelledby="search-title">
     <h3 id="search-title" class="font-semibold">Find more skills</h3>
     <form
-      class="flex flex-wrap items-end gap-2"
+      class="flex flex-wrap items-end gap-[var(--ptah-gap-controls)]"
       (submit)="submitSearch($event)"
     >
       <ptah-field
@@ -91,7 +91,7 @@
     @for (skill of searchResults(); track key(skill)) {
       @if (!recommendationIds().has(key(skill))) {
         <ptah-native-card
-          ><label class="flex cursor-pointer gap-3 p-3"
+          ><label class="flex cursor-pointer gap-[var(--ptah-gap-heading)] p-[var(--ptah-surface-pad)]"
             ><input
               type="checkbox"
               ptahCheckbox
@@ -167,7 +167,7 @@
       Choose how to handle existing practices before continuing or skipping.
     </p>
   }
-  <div class="flex flex-wrap justify-between gap-2">
+  <div class="flex flex-wrap justify-between gap-[var(--ptah-gap-controls)]">
     <button
       ptahButton
       variant="ghost"
