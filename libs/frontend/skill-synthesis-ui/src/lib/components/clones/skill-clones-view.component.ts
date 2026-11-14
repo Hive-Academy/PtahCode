@@ -89,6 +89,7 @@ import { CloneBulkToolbarComponent } from './clone-bulk-toolbar.component';
 import { EnhancePreviewDrawerComponent } from './enhance-preview-drawer.component';
 import {
   canEditCloneBody,
+  bulkSkippedRoleCount,
   eligibleForBulkRebase,
   KEEP_MINE_EXPLANATION,
   REBASE_EXPLANATION,
@@ -319,6 +320,16 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
               (divergedOnlyToggled)="divergedOnly.set($event)"
               (bulkRebaseRequested)="bulkConfirmOpen.set(true)"
             />
+            @if (bulkSkippedRoles() > 0) {
+              <p
+                class="mb-3 text-xs text-base-content-muted"
+                data-testid="clones-bulk-skipped-roles"
+              >
+                Rebase all skips {{ bulkSkippedRoles() }} role
+                {{ bulkSkippedRoles() === 1 ? 'agent' : 'agents' }}. Rebase a
+                role from its own card.
+              </p>
+            }
 
             @if (onAgentTab()) {
               <div
@@ -697,6 +708,11 @@ export class SkillClonesViewComponent implements OnInit {
    */
   public readonly bulkEligible = computed<CloneSummary[]>(() =>
     eligibleForBulkRebase(this.clones(), this.currentKind()),
+  );
+
+  /** Diverged role agents of the current tab that the bulk rebase skips. */
+  public readonly bulkSkippedRoles = computed<number>(() =>
+    bulkSkippedRoleCount(this.clones(), this.currentKind()),
   );
 
   /**

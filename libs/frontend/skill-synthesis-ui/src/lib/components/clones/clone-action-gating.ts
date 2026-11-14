@@ -24,11 +24,30 @@
  * the action.
  */
 import { formatDuration, formatRelative as formatRelativeAge } from '@ptah-extension/ui';
-import type {
-  CloneSummary,
-  SkillCloneKind,
-  SkillCloneStatus,
+import {
+  isRetiredRole,
+  phaseKindForRole,
+  type CloneSummary,
+  type SkillCloneKind,
+  type SkillCloneStatus,
 } from '@ptah-extension/shared';
+
+/** True for an agent clone whose slug is one of the 14 legacy role slugs. */
+export function isRoleAgentClone(clone: CloneSummary): boolean {
+  return clone.kind === 'agent' && phaseKindForRole(clone.slug) !== null;
+}
+
+/** True for an agent clone whose role Phase 4 retired. Read-only history. */
+export function isRetiredRoleClone(
+  clone: CloneSummary,
+  isRetired: (slug: string) => boolean = isRetiredRole,
+): boolean {
+  return clone.kind === 'agent' && isRetired(clone.slug);
+}
+
+/** Reason shown when an action is not available for a retired role. */
+export const RETIRED_ROLE_REASON =
+  'This role was replaced by a phase. It is read-only history now.';
 
 /** Availability of one card action plus the reason when it is unavailable. */
 export interface CloneActionState {
@@ -56,6 +75,8 @@ export interface CloneActionModel {
   readonly eligibility: CloneEnhanceEligibility;
   /** Compact eligibility tag: `3/5 runs`, `cooldown 2h`, or `ready`. */
   readonly eligibilityLabel: string;
+  /** Retired role: the card shows the badge and history only. */
+  readonly retired: boolean;
 }
 
 /**
@@ -128,12 +149,26 @@ export function eligibleForBulkRebase(
   kind: SkillCloneKind,
 ): CloneSummary[] {
   return clones.filter(
-    (c) =>
-      c.kind === kind &&
-      c.diverged &&
-      c.orphaned !== true &&
-      hasUpstreamSource(c),
+    (c) => bulkRebaseCandidate(c, kind) && !isRoleAgentClone(c),
   );
+}
+
+function bulkRebaseCandidate(c: CloneSummary, kind: SkillCloneKind): boolean {
+  return (
+    c.kind === kind && c.diverged && c.orphaned !== true && hasUpstreamSource(c)
+  );
+}
+
+/**
+ * How many role agents a bulk rebase of this kind skips. A fifth condition of
+ * {@link eligibleForBulkRebase}: a role file is rebased from its own card.
+ */
+export function bulkSkippedRoleCount(
+  clones: readonly CloneSummary[],
+  kind: SkillCloneKind,
+): number {
+  return clones.filter((c) => bulkRebaseCandidate(c, kind) && isRoleAgentClone(c))
+    .length;
 }
 
 /**
@@ -257,7 +292,24 @@ function remainingCooldownMs(clone: CloneSummary, now: number): number {
 export function cloneActionModel(
   clone: CloneSummary,
   now: number = Date.now(),
+  isRetired: (slug: string) => boolean = isRetiredRole,
 ): CloneActionModel {
+  if (isRetiredRoleClone(clone, isRetired)) {
+    const blocked: CloneActionState = {
+      enabled: false,
+      reason: RETIRED_ROLE_REASON,
+    };
+    return {
+      enhance: blocked,
+      revert: blocked,
+      rebase: null,
+      keep: null,
+      upstreamNote: null,
+      eligibility: 'ready',
+      eligibilityLabel: 'retired',
+      retired: true,
+    };
+  }
   const belowThreshold = clone.invocationCount < clone.enhanceMinInvocations;
   const cooldownMs = remainingCooldownMs(clone, now);
 
@@ -313,6 +365,7 @@ export function cloneActionModel(
       upstreamNote: null,
       eligibility,
       eligibilityLabel,
+      retired: false,
     };
   }
 
@@ -326,5 +379,6 @@ export function cloneActionModel(
     upstreamNote,
     eligibility,
     eligibilityLabel,
+    retired: false,
   };
 }

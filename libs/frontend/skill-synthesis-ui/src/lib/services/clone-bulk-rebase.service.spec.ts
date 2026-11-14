@@ -80,8 +80,24 @@ describe('CloneBulkRebaseService', () => {
     await service.run([clone('a'), clone('b', 'agent')]);
 
     expect(rebaseClone).toHaveBeenCalledTimes(2);
-    expect(rebaseClone).toHaveBeenNthCalledWith(1, 'skill', 'a');
-    expect(rebaseClone).toHaveBeenNthCalledWith(2, 'agent', 'b');
+    expect(rebaseClone).toHaveBeenNthCalledWith(1, 'skill', 'a', 'bulk');
+    expect(rebaseClone).toHaveBeenNthCalledWith(2, 'agent', 'b', 'bulk');
+  });
+
+  it('skips a role agent even when the caller supplies it', async () => {
+    const { service, rebaseClone } = setup();
+    rebaseClone.mockImplementation((kind: SkillCloneKind, slug: string) =>
+      Promise.resolve(ok(slug, kind)),
+    );
+
+    const outcomes = await service.run([
+      clone('team-leader', 'agent'),
+      clone('my-agent', 'agent'),
+    ]);
+
+    expect(rebaseClone).toHaveBeenCalledTimes(1);
+    expect(rebaseClone).toHaveBeenCalledWith('agent', 'my-agent', 'bulk');
+    expect(outcomes.map((o) => o.slug)).toEqual(['my-agent']);
   });
 
   it('runs sequentially — the next call starts only after the previous settles', async () => {

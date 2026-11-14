@@ -59,6 +59,10 @@ import {
 import { CliModelListService } from '../services/cli-model-list.service';
 import { CloneRebaseService } from './skill-synthesis/clone-rebase.service';
 import {
+  assertNotBulkRoleRebase,
+  assertRoleMutable,
+} from './skill-synthesis/retired-role-guard';
+import {
   CloneProvenanceResolver,
   type CloneOriginFacts,
   type ResolvedCloneOrigin,
@@ -348,6 +352,7 @@ export class SkillsSynthesisRpcHandlers {
         params,
         'skillSynthesis:previewEnhancement',
       );
+      assertRoleMutable('enhance', parsed.kind, parsed.slug);
       this.assertSkillsNotPaused('skillSynthesis:previewEnhancement');
       try {
         const enhancer = this.requireDesktop(this.enhancer);
@@ -409,6 +414,7 @@ export class SkillsSynthesisRpcHandlers {
         params,
         'skillSynthesis:applyProposal',
       );
+      assertRoleMutable('enhance', parsed.kind, parsed.slug);
       try {
         const enhancer = this.requireDesktop(this.enhancer);
         const kind = parsed.kind as SkillRegistryKind;
@@ -502,6 +508,7 @@ export class SkillsSynthesisRpcHandlers {
         params,
         'skillSynthesis:revertEnhancement',
       );
+      assertRoleMutable('revert', parsed.kind, parsed.slug);
       try {
         const enhancer = this.requireDesktop(this.enhancer);
         const result = await enhancer.revert(
@@ -538,6 +545,8 @@ export class SkillsSynthesisRpcHandlers {
         params,
         'skillSynthesis:rebaseClone',
       );
+      assertRoleMutable('rebase', parsed.kind, parsed.slug);
+      assertNotBulkRoleRebase(parsed.origin, parsed.kind, parsed.slug);
       try {
         const outcome = await this.cloneRebase.rebase(
           parsed.kind as SkillRegistryKind,
@@ -589,6 +598,7 @@ export class SkillsSynthesisRpcHandlers {
         params,
         'skillSynthesis:keepClone',
       );
+      assertRoleMutable('keep', parsed.kind, parsed.slug);
       try {
         const registry = this.requireDesktop(this.registry);
         const mirror = this.requireDesktop(this.mirror);
@@ -640,6 +650,7 @@ export class SkillsSynthesisRpcHandlers {
         params,
         'skillSynthesis:saveCloneBody',
       );
+      assertRoleMutable('save', parsed.kind, parsed.slug);
       try {
         const registry = this.requireDesktop(this.registry);
         const mirror = this.requireDesktop(this.mirror);

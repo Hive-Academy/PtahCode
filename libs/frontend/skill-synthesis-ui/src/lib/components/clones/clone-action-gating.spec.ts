@@ -3,6 +3,9 @@ import { makeLibraryAgreementFixtures } from '@ptah-extension/shared/testing';
 
 import {
   BULK_REBASE_EXPLANATION,
+  bulkSkippedRoleCount,
+  isRetiredRoleClone,
+  RETIRED_ROLE_REASON,
   canEditCloneBody,
   cloneActionModel,
   cloneBodyDraftRefusal,
@@ -277,6 +280,59 @@ describe('eligibleForBulkRebase', () => {
       'skill',
     );
     expect(out.map((c) => c.slug)).toEqual(['ok-1', 'ok-2']);
+  });
+});
+
+describe('role agents (Phase 4 U-D13)', () => {
+  const diverged = (overrides: Partial<CloneSummary> = {}): CloneSummary =>
+    clone({ diverged: true, cloneStatus: 'diverged', ...overrides });
+  const isBackendRetired = (slug: string): boolean =>
+    slug === 'backend-developer';
+
+  it('excludes every role agent from the bulk rebase and counts them', () => {
+    const role = diverged({ slug: 'team-leader', kind: 'agent' });
+    const own = diverged({ slug: 'my-agent', kind: 'agent' });
+    const skillWithRoleName = diverged({ slug: 'team-leader', kind: 'skill' });
+    expect(eligibleForBulkRebase([role, own], 'agent')).toEqual([own]);
+    expect(bulkSkippedRoleCount([role, own], 'agent')).toBe(1);
+    expect(eligibleForBulkRebase([skillWithRoleName], 'skill')).toEqual([
+      skillWithRoleName,
+    ]);
+    expect(bulkSkippedRoleCount([skillWithRoleName], 'skill')).toBe(0);
+  });
+
+  it('keeps single rebase and keep for a role that has not retired', () => {
+    const model = cloneActionModel(
+      diverged({ slug: 'team-leader', kind: 'agent' }),
+      NOW,
+      isBackendRetired,
+    );
+    expect(model.retired).toBe(false);
+    expect(model.rebase).toEqual({ enabled: true, reason: null });
+    expect(model.keep).toEqual({ enabled: true, reason: null });
+  });
+
+  it('shows history only for a retired role', () => {
+    const model = cloneActionModel(
+      diverged({ slug: 'backend-developer', kind: 'agent' }),
+      NOW,
+      isBackendRetired,
+    );
+    expect(model.retired).toBe(true);
+    expect(model.rebase).toBeNull();
+    expect(model.keep).toBeNull();
+    expect(model.enhance.enabled).toBe(false);
+    expect(model.revert.enabled).toBe(false);
+    expect(model.enhance.reason).toBe(RETIRED_ROLE_REASON);
+  });
+
+  it('does not treat a skill with a retired role slug as retired', () => {
+    expect(
+      isRetiredRoleClone(
+        clone({ slug: 'backend-developer', kind: 'skill' }),
+        isBackendRetired,
+      ),
+    ).toBe(false);
   });
 });
 

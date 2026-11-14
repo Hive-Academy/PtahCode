@@ -238,10 +238,11 @@ export class SkillSynthesisRpcService {
   public async rebaseClone(
     kind: SkillCloneKind,
     slug: string,
+    origin: 'single' | 'bulk' = 'single',
   ): Promise<SkillSynthesisRebaseCloneResult> {
     const result = await this.rpcService.call(
       'skillSynthesis:rebaseClone',
-      { kind, slug },
+      { kind, slug, origin },
       { timeout: SKILL_RPC_TIMEOUTS.PROMOTE_MS },
     );
     if (result.isSuccess() && result.data) {

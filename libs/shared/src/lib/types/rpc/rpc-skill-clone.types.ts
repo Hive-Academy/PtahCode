@@ -191,6 +191,11 @@ export interface SkillSynthesisRevertEnhancementResult {
 export interface SkillSynthesisRebaseCloneParams {
   kind: SkillCloneKind;
   slug: string;
+  /**
+   * `bulk` marks a call from "Rebase all diverged". The backend refuses a
+   * bulk rebase of a role agent. Absent means `single`.
+   */
+  origin?: 'single' | 'bulk';
 }
 export interface SkillSynthesisRebaseCloneResult {
   kind: SkillCloneKind;

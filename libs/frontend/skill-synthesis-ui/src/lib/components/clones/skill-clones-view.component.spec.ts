@@ -1016,8 +1016,8 @@ describe('SkillClonesViewComponent — bulk rebase', () => {
     await click('clones-bulk-confirm');
 
     expect(rpc.rebaseClone).toHaveBeenCalledTimes(2);
-    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(1, 'skill', 'alpha');
-    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(2, 'skill', 'beta');
+    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(1, 'skill', 'alpha', 'bulk');
+    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(2, 'skill', 'beta', 'bulk');
     // ngOnInit is the first call; the batch adds exactly one more (R1.5).
     expect(state.refreshClones).toHaveBeenCalledTimes(2);
   });
@@ -1127,8 +1127,8 @@ describe('SkillClonesViewComponent — bulk rebase', () => {
     await settle();
 
     expect(rpc.rebaseClone).toHaveBeenCalledTimes(3);
-    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(2, 'skill', 'beta');
-    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(3, 'skill', 'delta');
+    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(2, 'skill', 'beta', 'bulk');
+    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(3, 'skill', 'delta', 'bulk');
     const toast = q('clones-toast')?.textContent ?? '';
     expect(toast).toContain('Rebased 2 of 3');
     expect(toast).toContain('alpha');
