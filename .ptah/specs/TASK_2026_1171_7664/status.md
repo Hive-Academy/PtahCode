@@ -124,3 +124,14 @@ e919afa2 and made this session the Phase B coordinator again. Decision on item (
 - PR body updated (rail-link row, gate, evidence (a), follow-up for the getAttempt cast in
   agent-process-manager.service.ts, per the coordinator: no more edits to that file).
   `gh pr ready 1265` done. CI for 9aa561471 pending.
+- 2026-11-14 ~19:45Z successor session (merge of main, D30): 7e8e3d6e2 merges origin/main.
+  One conflict (lane-completion-notifier.service.ts), both sides kept. Lint+typecheck 16/16.
+  Codex review merge-resolution-review.md: REJECT, 1 Medium (route canStart got the raw
+  caller id). Fixed in 66549cd66 (resolveChildSessionCallerId + spec); Codex review
+  route-caller-review.md: APPROVE (1 Low: throwing lookup not tested, unchanged fallback).
+- Test gate for the 8 touched projects: 7/8 pass; cli-agent-runtime 4035 pass, 1 fail
+  (lane-terminal-outcomes.integration.spec.ts:220, fixed 30 ms wait under load). That spec
+  and the notifier spec pass alone under the lock, 108/108.
+- 90403a6ee merges origin/main again for #1273 (axe fix); clean, only webview + libs/frontend/ui.
+  chat-streaming lint, typecheck and test pass. Evidence (a)/(b) are from 9aa561471; the merge
+  and 66549cd66 do not change the session-start or report-delivery path.
