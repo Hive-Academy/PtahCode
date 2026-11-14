@@ -58,3 +58,14 @@ forces network deny. The code implements "refuse" on main and here.
 PR #1266 stays a draft (head c092fea7c). CI on c092fea7c: only the pre-existing axe failure
 (shard 2: 1 failed, 54 passed). No reviews yet. The spec fix (strict mode + MCP 0 retry) is
 still uncommitted. It goes into the next harness commit.
+
+## 2026-11-14 12:20 (successor child session) — report to parent, NOT delivered (parent not active)
+
+- Pushed `1fa80af21` (test-only harness commit) to `fix/lane-permission-routing-v3`
+  (fast-forward from `c092fea7c`, fetch check clean, pre-push gate passed). PR #1266 is still a draft.
+- Evidence run 8 (items 2 + 3) is alive but waits in the verify lock queue (free memory 1.2 GB;
+  two other worktrees hold slots). No second run was started. No other process was stopped.
+- **Decision still needed for item 4:** (A) add the one-line fix at
+  `agent-process-manager.service.ts:989` (`effectivePolicy: options.effectivePolicy?.requested,`)
+  plus a manager spec (spawn + resume) to #1266, then rerun item 4; or (B) a follow-up task, and
+  #1266 stays a draft. Recommendation: A. The fix is not applied without the parent's answer.
