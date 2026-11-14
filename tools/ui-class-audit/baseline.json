@@ -771,11 +771,7 @@
     "<dynamic>": 2
   },
   "libs/frontend/git-ui/src/lib/review-canvas/comparison-bar.component.ts": {
-    "<dynamic>": 4,
-    "btn": 4,
-    "btn-active": 4,
-    "btn-ghost": 4,
-    "btn-xs": 4
+    "<dynamic>": 4
   },
   "libs/frontend/git-ui/src/lib/review-canvas/file-diff-section.component.ts": {
     "<dynamic>": 2,
@@ -794,17 +790,8 @@
     "<dynamic>": 1
   },
   "libs/frontend/git-ui/src/lib/spot-editor/spot-editor.component.ts": {
-    "alert": 2,
-    "alert-error": 1,
-    "alert-warning": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/git-ui/src/lib/stash/stash-popover.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-xs": 3
+    "alert": 1,
+    "alert-error": 1
   },
   "libs/frontend/git-ui/src/lib/task/task-pr-panel.component.ts": {
     "<dynamic>": 1,
