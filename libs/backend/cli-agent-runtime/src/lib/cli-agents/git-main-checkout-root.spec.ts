@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { worktreeMainRoot } from './git-main-checkout-root';
@@ -34,6 +34,14 @@ describe('worktreeMainRoot', () => {
     const forged = join(base, 'other-workspace');
     linkWorktree(forged, join(main, '.git', 'worktrees', 'wt'), false);
     expect(worktreeMainRoot(forged)).toBeNull();
+  });
+
+  it('accepts a worktree opened through a directory symlink or junction', () => {
+    const wt = join(main, '.claude-worktrees', 'wt');
+    linkWorktree(wt, join(main, '.git', 'worktrees', 'wt'));
+    const alias = join(base, 'alias');
+    symlinkSync(wt, alias, 'junction');
+    expect(worktreeMainRoot(alias)).toBe(resolve(main));
   });
 
   it('returns null when the back-pointer file is missing', () => {

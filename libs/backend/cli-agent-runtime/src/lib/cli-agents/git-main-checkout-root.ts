@@ -1,8 +1,20 @@
-import { readFileSync, statSync } from 'fs';
+import { readFileSync, realpathSync, statSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
 
-function samePath(a: string, b: string): boolean {
+function sameText(a: string, b: string): boolean {
   return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+/** Compare two paths, also through symlinks and junctions. */
+function samePath(a: string, b: string): boolean {
+  if (sameText(a, b)) return true;
+  try {
+    return sameText(realpathSync.native(a), realpathSync.native(b));
+  } catch {
+    // degradation-audit: optional-capability - a path that cannot be
+    // resolved is not proved to be the same file.
+    return false;
+  }
 }
 
 /** Resolve the main checkout of a linked git worktree without starting git. */
