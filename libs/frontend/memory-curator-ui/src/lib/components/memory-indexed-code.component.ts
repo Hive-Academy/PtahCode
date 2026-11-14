@@ -73,7 +73,7 @@ import { PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahStateP
         >
           @for (sym of items(); track sym.id) {
             <li
-              class="flex flex-wrap items-center gap-x-[var(--ptah-gap-field)] gap-y-[var(--ptah-gap-controls)] p-[var(--ptah-surface-pad)] transition-colors duration-150 hover:bg-surface-3"
+              class="flex flex-wrap items-center gap-x-[var(--ptah-gap-field)] gap-y-[var(--ptah-gap-controls)] px-[var(--ptah-surface-pad)] py-[var(--ptah-space-2)] transition-colors duration-150 hover:bg-surface-3"
             >
               <span class="font-mono text-sm text-base-content">
                 {{ sym.symbolName }}

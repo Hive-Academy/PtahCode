@@ -107,7 +107,7 @@ const RUN_TONE: Record<MemoryRetentionRunDto['outcome'], NativeCardTone> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NativeCardComponent, PtahBadgeDirective],
   template: `
-    <section class="flex flex-col gap-[var(--ptah-gap-section)]" aria-label="Storage and retention">
+    <section class="flex flex-col gap-[var(--ptah-gap-heading)]" aria-label="Storage and retention">
       <header class="flex items-center justify-between gap-[var(--ptah-gap-controls)]">
         <h3 class="text-sm font-semibold text-base-content">
           Storage and Retention
@@ -134,7 +134,7 @@ const RUN_TONE: Record<MemoryRetentionRunDto['outcome'], NativeCardTone> = {
             {{ warning }}
           </div>
         }
-        <div class="grid gap-[var(--ptah-gap-group)] sm:grid-cols-2">
+        <div class="grid gap-[var(--ptah-gap-field)] sm:grid-cols-2">
           <ptah-native-card [spine]="true" density="compact">
             <div card-header class="text-xs font-medium">Database size</div>
             <p class="text-sm tabular-nums" data-testid="storage-db-size">

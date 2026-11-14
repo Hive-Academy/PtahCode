@@ -6,7 +6,6 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
-  Brain,
   LucideAngularModule,
   Pin,
   PinOff,
@@ -29,18 +28,11 @@ import { PtahIconButtonDirective, PtahStatePanelComponent } from '@ptah-extensio
       @if (loading() && entries().length === 0) {
         <ptah-state-panel state="loading" title="Loading memories" />
       } @else if (entries().length === 0) {
-        <div class="flex flex-col items-center gap-[var(--ptah-gap-controls)] p-[var(--ptah-surface-pad)] text-center">
-          <lucide-angular
-            [img]="BrainIcon"
-            class="size-8 text-base-content-muted"
-            aria-hidden="true"
-          />
-          <p class="text-sm font-medium">No memories yet</p>
-          <p class="text-xs text-base-content-muted">
-            Thoth captures facts and decisions as you chat. Keep working and
-            they'll appear here.
-          </p>
-        </div>
+        <ptah-state-panel
+          state="empty"
+          title="No memories yet"
+          body="Thoth captures facts and decisions as you chat. Keep working and they will appear here."
+        />
       } @else {
         <ul
           class="divide-y divide-surface-border overflow-hidden surface-2 rounded-xl"
@@ -48,7 +40,7 @@ import { PtahIconButtonDirective, PtahStatePanelComponent } from '@ptah-extensio
           @for (entry of entries(); track entry.id) {
             <li
               data-testid="memory-entry-row"
-              class="group flex items-start gap-[var(--ptah-gap-field)] p-[var(--ptah-surface-pad)] transition-colors duration-150 hover:bg-surface-3"
+              class="group flex items-start gap-[var(--ptah-gap-field)] px-[var(--ptah-surface-pad)] py-[var(--ptah-space-3)] transition-colors duration-150 hover:bg-surface-3"
             >
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -93,6 +85,7 @@ import { PtahIconButtonDirective, PtahStatePanelComponent } from '@ptah-extensio
                     type="button"
                     data-testid="memory-entry-unpin"
                     ptahIconButton
+                    class="text-base-content-muted"
                     variant="ghost"
                     size="xs"
                     density="compact"
@@ -111,6 +104,7 @@ import { PtahIconButtonDirective, PtahStatePanelComponent } from '@ptah-extensio
                     type="button"
                     data-testid="memory-entry-pin"
                     ptahIconButton
+                    class="text-base-content-muted"
                     variant="ghost"
                     size="xs"
                     density="compact"
@@ -158,7 +152,6 @@ export class MemoryEntryListComponent {
   public readonly unpin = output<string>();
   public readonly forget = output<string>();
 
-  protected readonly BrainIcon = Brain;
   protected readonly PinIcon = Pin;
   protected readonly PinOffIcon = PinOff;
   protected readonly Trash2Icon = Trash2;
