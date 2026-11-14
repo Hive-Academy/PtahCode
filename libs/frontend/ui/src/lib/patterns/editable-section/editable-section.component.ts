@@ -28,6 +28,9 @@ import { PtahFormActionsComponent } from '../form-actions/form-actions.component
 
 let nextEditableSectionId = 0;
 
+/** Keys that only move focus or close. They stay active while saving. */
+const SAVING_ALLOWED_KEYS = new Set(['Tab', 'Escape', 'Shift', 'Control', 'Alt', 'Meta']);
+
 /** Candidates for the first field (spec section 4.4 step 9). */
 const FIRST_FOCUSABLE = 'input, select, textarea, button, [tabindex]:not([tabindex="-1"])';
 
@@ -150,6 +153,14 @@ export class PtahEditTemplateDirective {
           [attr.aria-busy]="saving() ? 'true' : null"
           (submit)="onSubmit($event)"
           (keydown.escape)="onEscape($event)"
+          (focusin)="onFocusIn($event)"
+          (keydown)="guardKey($event)"
+          (beforeinput)="guardEdit($event)"
+          (paste)="guardEdit($event)"
+          (cut)="guardEdit($event)"
+          (drop)="guardEdit($event)"
+          (click)="guardEdit($event)"
+          (mousedown)="guardEdit($event)"
         >
           @if (error(); as errorText) {
             <ptah-alert
@@ -161,11 +172,15 @@ export class PtahEditTemplateDirective {
               [id]="errorId"
             >{{ errorText }}</ptah-alert>
           }
+          <!--
+            Not a native disabled fieldset: it blurs the focused field and focus drops to body.
+            While saving, the fields stay focusable and the guard blocks edits.
+          -->
           <fieldset
             #editSlot
             data-ptah-editable-fields
             class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]"
-            [disabled]="saving()"
+            [attr.aria-disabled]="saving() ? 'true' : null"
           >
             <ng-container [ngTemplateOutlet]="editTemplate()?.templateRef ?? null" />
             <ng-content select="[edit]" />
@@ -299,6 +314,8 @@ export class PtahEditableSectionComponent {
   private readonly editButton = viewChild<ElementRef<HTMLButtonElement>>('editButton');
   private readonly cancelButton = viewChild<ElementRef<HTMLButtonElement>>('cancelButton');
   private readonly errorAlert = viewChild('errorAlert', { read: ElementRef<HTMLElement> });
+  /** The last element in the edit form that had focus. Focus goes back to it after a failed save. */
+  private lastFocused: HTMLElement | null = null;
 
   constructor() {
     afterEveryRender({
@@ -322,7 +339,10 @@ export class PtahEditableSectionComponent {
       const previous = wasEditing;
       wasEditing = editing;
       if (previous === undefined || previous === editing) return;
-      if (!editing) untracked(() => this.confirmOpen.set(false));
+      if (!editing) {
+        this.lastFocused = null;
+        untracked(() => this.confirmOpen.set(false));
+      }
       afterNextRender(
         { write: () => (editing ? this.focusFirstField() : this.editButton()?.nativeElement.focus()) },
         { injector: this.injector },
@@ -334,9 +354,12 @@ export class PtahEditableSectionComponent {
       const saving = this.saving();
       const failed = wasSaving && !saving;
       wasSaving = saving;
-      if (!failed || !untracked(this.editing) || !untracked(this.error)) return;
+      if (!failed || !untracked(this.editing)) return;
+      const hasError = !!untracked(this.error);
       afterNextRender(
-        { write: () => this.errorAlert()?.nativeElement.focus() },
+        {
+          write: () => (hasError ? this.errorAlert()?.nativeElement.focus() : this.restoreFocus()),
+        },
         { injector: this.injector },
       );
     });
@@ -351,6 +374,25 @@ export class PtahEditableSectionComponent {
     event.preventDefault();
     if (this.saving() || !this.dirty()) return;
     this.save.emit();
+  }
+
+  protected onFocusIn(event: FocusEvent): void {
+    if (event.target instanceof HTMLElement) this.lastFocused = event.target;
+  }
+
+  /** Blocks keys that change a field while saving. Tab and Escape stay active. */
+  protected guardKey(event: KeyboardEvent): void {
+    if (SAVING_ALLOWED_KEYS.has(event.key)) return;
+    this.guardEdit(event);
+  }
+
+  /**
+   * Blocks text input, paste, drop and pointer changes (checkbox, select) in the
+   * fields while saving. The form actions keep their own saving state.
+   */
+  protected guardEdit(event: Event): void {
+    if (!this.saving() || !(event.target instanceof Node)) return;
+    if (this.editSlot()?.nativeElement.contains(event.target)) event.preventDefault();
   }
 
   protected onEscape(event: Event): void {
@@ -385,6 +427,19 @@ export class PtahEditableSectionComponent {
 
   private headingElement(): HTMLElement | null {
     return this.hostRef.nativeElement.querySelector<HTMLElement>(`[id="${this.headingId}"]`);
+  }
+
+  /** After a failed save with no error text: focus goes back to the last focused field. */
+  private restoreFocus(): void {
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const last = this.lastFocused;
+    const form = this.editSlot()?.nativeElement.closest('form');
+    if (last?.isConnected && form?.contains(last) && !last.matches(':disabled')) {
+      last.focus();
+      return;
+    }
+    this.focusFirstField();
   }
 
   private focusFirstField(): void {

@@ -87,6 +87,21 @@ describe('PtahFormSectionComponent', () => {
     expect(section().querySelector('h3')?.id).toBe(cmp.headingId);
   });
 
+  it.each([2, 3, 4])(
+    'gives the level %p heading tabindex -1 and focuses it with focusHeading()',
+    (level) => {
+      host.level.set(level);
+      fixture.detectChanges();
+      const heading = section().querySelector('h2, h3, h4') as HTMLElement;
+      expect(heading.getAttribute('tabindex')).toBe('-1');
+      (q('[data-testid="field-input"]') as HTMLElement).focus();
+      const cmp = fixture.debugElement.children[0]
+        .componentInstance as PtahFormSectionComponent;
+      cmp.focusHeading();
+      expect(document.activeElement).toBe(heading);
+    },
+  );
+
   it('gives each instance a unique heading id', () => {
     const other = TestBed.createComponent(HostComponent);
     other.detectChanges();
