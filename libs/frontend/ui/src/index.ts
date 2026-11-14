@@ -46,3 +46,4 @@ export * from './lib/badge';
 export * from './lib/time';
 export * from './lib/charts';
 export * from './lib/card';
+export * from './lib/patterns';
