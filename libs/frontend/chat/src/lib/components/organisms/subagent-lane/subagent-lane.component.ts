@@ -36,6 +36,7 @@ import { subagentProgressText } from '../../../utils/subagent-progress.utils';
 import { subagentLaneStats } from '../../../utils/lane-stats.adapters';
 import { SubagentLaneComposerComponent } from './subagent-lane-composer.component';
 import { findScrollingAncestor } from '../../../utils/scroll-parent.utils';
+import { isNativeCodexAgent, NATIVE_CODEX_CONTROL_REASON } from '../native-codex-control-reason';
 
 import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 /**
@@ -113,6 +114,19 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
         </div>
       }
     </ptah-execution-header>
+    }
+    @if (isNativeCodex()) {
+      <div [class]="columnClass + ' py-1 text-xs text-base-content-muted'" data-testid="native-codex-lane-status">
+        {{ record().description || name() }} - {{ record().status }}
+        @if (record().status === 'failed' && record().errorMessage) {
+          <span class="text-error">{{ record().errorMessage }}</span>
+        }
+      </div>
+      <div [class]="columnClass + ' flex items-center gap-2 py-1 text-xs text-base-content-muted'" data-testid="native-codex-controls">
+        <button type="button" class="btn btn-ghost btn-xs" disabled [title]="nativeControlReason" [attr.aria-label]="nativeControlReason">Send</button>
+        <button type="button" class="btn btn-ghost btn-xs" disabled [title]="nativeControlReason" [attr.aria-label]="nativeControlReason">Stop</button>
+        <span>{{ nativeControlReason }}</span>
+      </div>
     }
     @if (commandError(); as err) {
       <p
@@ -210,8 +224,8 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
     <ptah-subagent-lane-composer
       [class]="columnClass + ' shrink-0 pt-2 pb-2' + (presentation() === 'flat' ? ' mt-auto sticky bottom-0 z-10 bg-base-100' : '')"
       [record]="record()"
-      [context]="context()"
-      [sessionId]="sessionId()"
+      [context]="isNativeCodex() ? null : context()"
+      [sessionId]="isNativeCodex() ? null : sessionId()"
       [stopPending]="stopPending()"
       [backgroundPending]="backgroundPending()"
       (stopRequested)="onStop($event)"
@@ -230,6 +244,8 @@ export class SubagentLaneComponent {
   readonly permissionResponded = output<PermissionResponse>();
 
   protected readonly columnClass = LANE_COLUMN_CLASS;
+  protected readonly nativeControlReason = NATIVE_CODEX_CONTROL_REASON;
+  protected readonly isNativeCodex = computed(() => isNativeCodexAgent(this.record()));
   protected readonly tray = inject(SessionAgentTrayService);
   private readonly monitor = inject(AgentMonitorStore);
   private readonly store = inject(SubagentExecutionStore);
@@ -243,9 +259,9 @@ export class SubagentLaneComponent {
   protected readonly backgroundPending = signal(false);
   protected readonly context = computed(
     () =>
-      this.tray
+      (this.isNativeCodex() ? null : this.tray
         .contextsFor(this.sessionId())
-        .get(this.record().parentToolUseId) ?? null,
+        .get(this.record().parentToolUseId)) ?? null,
   );
   protected readonly key = computed(() => this.record().parentToolUseId);
   protected readonly entry = computed(() => this.store.entryFor(this.key()));
@@ -412,7 +428,7 @@ export class SubagentLaneComponent {
   }
 
   protected async onStop(ctx: TrayAgentContext): Promise<void> {
-    if (this.stopPending() || !ctx.taskId || !ctx.sessionId) return;
+    if (this.isNativeCodex() || this.stopPending() || !ctx.taskId || !ctx.sessionId) return;
     this.stopPending.set(true);
     try {
       await this.monitor.stopAgent(ctx.taskId, ctx.sessionId);

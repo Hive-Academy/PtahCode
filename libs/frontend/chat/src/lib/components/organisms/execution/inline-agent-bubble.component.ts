@@ -46,6 +46,7 @@ import {
   SubagentExecutionStore,
   SessionManager,
 } from '@ptah-extension/chat-streaming';
+import { isNativeCodexAgent, NATIVE_CODEX_CONTROL_REASON } from '../native-codex-control-reason';
 import type {
   ExecutionNode,
   PermissionRequest,
@@ -267,6 +268,9 @@ import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahT
                 <span class="text-[9px]">stopped</span>
               </span>
             }
+            @case ('paused') {
+              <span ptahBadge tone="warn" size="xs" data-testid="subagent-status-badge" data-status="paused">paused</span>
+            }
             @case ('pending') {
               <span
                 class="gap-1 flex-shrink-0" ptahBadge size="xs"
@@ -283,6 +287,9 @@ import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahT
           }
 
           <!-- Progress sub-line: italic, muted, ellipsis-truncated single line -->
+          @if (rec.status === 'failed' && rec.errorMessage) {
+            <span class="text-error text-[9px] truncate" [title]="rec.errorMessage" data-testid="native-agent-error">{{ rec.errorMessage }}</span>
+          }
           @if (progressLine(); as line) {
             <span
               class="flex-1 min-w-0 italic text-[9px] text-base-content-muted truncate"
@@ -314,15 +321,15 @@ import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahT
           }
 
           <!-- Stop button: only when running and we have a taskId to stop. -->
-          @if (canStop()) {
+          @if (canStop() || isNativeCodex()) {
             <button
               type="button"
               class="btn btn-ghost btn-xs px-1 min-h-0 h-5 text-base-content-muted hover:text-error"
               (click)="onStopClick($event)"
-              [disabled]="stopPending()"
+              [disabled]="stopPending() || isNativeCodex()"
               data-testid="subagent-stop-button"
-              title="Stop this subagent"
-              aria-label="Stop subagent"
+              [title]="isNativeCodex() ? nativeControlReason : 'Stop this subagent'"
+              [attr.aria-label]="isNativeCodex() ? nativeControlReason : 'Stop subagent'"
             >
               <lucide-angular
                 [img]="stopPending() ? LoaderIcon : SquareIcon"
@@ -330,6 +337,10 @@ import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahT
                 [class.animate-spin]="stopPending()"
               />
             </button>
+          }
+
+          @if (isNativeCodex()) {
+            <span class="text-[9px] text-base-content-muted" data-testid="native-codex-control-reason">{{ nativeControlReason }}</span>
           }
 
           <!-- Message-agent toggle (collapsed by default).
@@ -344,6 +355,8 @@ import { PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahT
               sendInputExpanded() ? 'Hide message input' : 'Message this agent'
             "
             (click)="toggleSendInput($event)"
+            [disabled]="isNativeCodex()"
+            [title]="isNativeCodex() ? nativeControlReason : ''"
             data-testid="subagent-send-toggle"
             [attr.aria-expanded]="sendInputExpanded()"
           >
@@ -1030,6 +1043,8 @@ export class InlineAgentBubbleComponent {
     if (!key) return undefined;
     return this.agentMonitorStore.subagents().get(key);
   });
+  protected readonly nativeControlReason = NATIVE_CODEX_CONTROL_REASON;
+  readonly isNativeCodex = computed(() => isNativeCodexAgent(this.subagentRecord()));
 
   /**
    * Human-legible name for the header. Prefers the teammate name captured on
@@ -1070,7 +1085,7 @@ export class InlineAgentBubbleComponent {
   /** Whether the send-message textarea should accept input. */
   readonly canSendMessage = computed(() => {
     const rec = this.subagentRecord();
-    return !!rec && rec.status === 'running';
+    return !!rec && rec.status === 'running' && !this.isNativeCodex();
   });
 
   /**
@@ -1088,6 +1103,7 @@ export class InlineAgentBubbleComponent {
     return (
       !!rec &&
       rec.status === 'running' &&
+      !this.isNativeCodex() &&
       !this.isBackground() &&
       !(key !== null && this.backgroundAgentStore.isBackgroundAgent(key))
     );
