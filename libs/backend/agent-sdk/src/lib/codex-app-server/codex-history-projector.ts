@@ -21,6 +21,16 @@ export interface CodexHistoryProjection {
 }
 
 type HistoryItem = CodexHistoryTurn['items'][number];
+type NativeItem = Extract<HistoryItem, { type: 'subAgentActivity' }>;
+interface NativeCard {
+  cardId: string;
+  agentThreadId: string;
+  agentPath: string;
+  activityId: string;
+  kind: NativeItem['kind'];
+  cycleOrdinal: number;
+  cycles: string[];
+}
 function millis(value: number | null | undefined, fallback: number): number {
   if (value == null) return fallback;
   return value < 100_000_000_000 ? value * 1000 : value;
@@ -61,6 +71,7 @@ export function projectCodexHistory(
     for (const event of events) collected.push({ event, ordinal: ordinal++ });
   };
   const parentTool = new Map<string, string>();
+  const nativeCards = new Map<string, NativeCard>();
   const spawnReceivers = new Map<string, readonly string[]>();
   const threadsById = new Map(snapshot.threads.map((thread) => [thread.id, thread]));
   const knownTimes = snapshot.threads.flatMap((thread) => [
@@ -68,9 +79,17 @@ export function projectCodexHistory(
     ...thread.turns.map((turn) => millis(turn.startedAt, Number.POSITIVE_INFINITY)),
   ]);
   const fallbackTime = Math.min(...knownTimes);
-  for (const thread of snapshot.threads) {
+  const projectionThreads = [...snapshot.threads].sort((a, b) =>
+    Number(b.id === snapshot.rootThreadId) - Number(a.id === snapshot.rootThreadId));
+  for (const thread of projectionThreads) {
     for (const turn of thread.turns) {
       for (const item of turn.items) {
+        if (item.type === 'subAgentActivity' && 'agentThreadId' in item && item.kind === 'started' &&
+          !nativeCards.has(item.agentThreadId)) {
+          nativeCards.set(item.agentThreadId, { cardId: item.id,
+            agentThreadId: item.agentThreadId, agentPath: item.agentPath,
+            activityId: item.id, kind: item.kind, cycleOrdinal: 0, cycles: [] });
+        }
         if (item.type === 'collabAgentToolCall' && 'receiverThreadIds' in item) {
           if (item.tool === 'spawnAgent') spawnReceivers.set(item.id, item.receiverThreadIds);
           for (const childId of item.receiverThreadIds) {
@@ -84,8 +103,10 @@ export function projectCodexHistory(
       }
     }
   }
+  for (const [childId, card] of nativeCards)
+    if (!parentTool.has(childId)) parentTool.set(childId, card.cardId);
 
-  for (const thread of snapshot.threads) {
+  for (const thread of projectionThreads) {
     let threadTime = millis(thread.createdAt, Number.isFinite(fallbackTime) ? fallbackTime : 0);
     const parentThreadId = thread.id === snapshot.rootThreadId ? null : thread.parentThreadId;
     const linked = parentThreadId ? parentTool.get(thread.id) : undefined;
@@ -95,10 +116,10 @@ export function projectCodexHistory(
         : undefined);
     if (parentThreadId && !linked)
       skippedItems.push({ threadId: thread.id, turnId: thread.turns[0]?.id ?? '', itemId: thread.id, reason: 'unresolvedParentTool' });
-    for (const turn of thread.turns) {
+    for (const [turnIndex, turn] of thread.turns.entries()) {
       threadTime = projectTurn(
         thread, turn, sessionId, parentToolUseId, threadTime, push,
-        skippedItems, parentTool,
+        skippedItems, parentTool, nativeCards, turnIndex,
       );
     }
   }
@@ -157,6 +178,8 @@ function projectTurn(
   push: (events: readonly FlatStreamEventUnion[]) => void,
   skipped: CodexHistoryProjection['skippedItems'][number][],
   parentTool: ReadonlyMap<string, string>,
+  nativeCards: Map<string, NativeCard>,
+  turnIndex: number,
 ): number {
   const turnStart = Math.max(fallbackTime, millis(turn.startedAt, fallbackTime));
   const messageId = JSON.stringify([thread.id, turn.id]);
@@ -219,7 +242,23 @@ function projectTurn(
       const presented = event.type === 'userInputAsync' ? { ...event, presentation: 'text' as const } : event;
       if (event.type === 'userInputAsync' && event.questions.length > 0)
         skip(item.id, 'asyncQuestionsNotPresented');
-      const mapped = projection.map(presented);
+      const card = event.type === 'subagentActivity'
+        ? nativeCards.get(event.agentThreadId) : undefined;
+      if (event.type === 'subagentActivity' && !card) continue;
+      if (event.type === 'subagentActivity' && card) {
+        if (event.kind === 'started' || event.kind === 'interacted') {
+          card.cycleOrdinal++;
+          card.cycles.push(`${card.agentThreadId}:${card.cycleOrdinal}`);
+        }
+        card.activityId = event.activityId;
+        card.kind = event.kind;
+        card.agentPath = event.agentPath;
+      }
+      const mapped = projection.map(event.type === 'subagentActivity' && card
+        ? { ...event, cardToolCallId: card.cardId,
+          cycleOrdinal: card.cycleOrdinal,
+          cycleId: `${card.agentThreadId}:${card.cycleOrdinal}` }
+        : presented);
       if (mapped.some((entry) => entry.eventType === 'message_start')) assistantStarted = true;
       push(mapped.map((entry, index) => ({
         ...entry,
@@ -298,6 +337,21 @@ function projectTurn(
       ]),
       ...(parentToolUseId === undefined ? {} : { parentToolUseId }),
     })));
+  }
+  const native = nativeCards.get(thread.id);
+  if (native && parentToolUseId === native.cardId && turn.status !== 'inProgress' &&
+    (turn.status === 'completed' || turn.status === 'failed' || turn.status === 'interrupted')) {
+    const cycleOrdinal = Math.min(turnIndex + 1, native.cycles.length);
+    if (cycleOrdinal > 0) {
+      const status = turn.status === 'interrupted' ? 'paused' : turn.status;
+      push([{ id: JSON.stringify([thread.id, turn.id, 'native-terminal']),
+        eventType: 'agent_status', source: 'history', timestamp: Math.max(timestamp, millis(turn.completedAt, timestamp)),
+        sessionId, messageId, parentToolUseId: native.cardId, agentId: thread.id,
+        status, ...(status === 'failed' && turn.error?.message ? { errorMessage: turn.error.message } : {}),
+        native: { provider: 'codex', agentThreadId: thread.id,
+          activityId: native.activityId, cycleId: native.cycles[cycleOrdinal - 1],
+          cycleOrdinal, kind: native.kind } }]);
+    }
   }
   translator.dispose();
   return timestamp;

@@ -5,6 +5,7 @@ import {
   type CodexHistoryTurn,
   type CodexSessionHistory,
 } from '@ptah-extension/codex-runtime';
+import type { FlatStreamEventUnion } from '@ptah-extension/shared';
 import { CodexChatEvents } from './codex-chat-events';
 import { projectCodexHistory } from './codex-history-projector';
 
@@ -52,6 +53,71 @@ const snapshot: CodexSessionHistory = {
 };
 
 describe('projectCodexHistory', () => {
+  const activity = (id: string, kind: 'started' | 'interacted' | 'completed'): CodexHistoryTurn['items'][number] => ({
+    type: 'subAgentActivity', id, agentThreadId: 'native-child',
+    agentPath: '/root/reviewer', kind,
+  });
+  const parentTurn = (id: string, at: number, nativeItems: CodexHistoryTurn['items']): CodexHistoryTurn => ({
+    id, status: 'completed', startedAt: at, completedAt: at + 1,
+    itemsView: 'full', items: nativeItems,
+  });
+  const nativeSnapshot = (second: CodexHistoryTurn, childTurns: CodexHistoryTurn[] = []): CodexSessionHistory => ({
+    rootThreadId: 'root', threads: [
+      thread('root', null, [parentTurn('one', 100, [activity('card', 'started'), activity('done-1', 'completed')]), second]),
+      ...(childTurns.length ? [thread('native-child', 'root', childTurns)] : []),
+    ],
+  });
+  it('keeps the parent session and canonical card across reload and follow-up cycles', () => {
+    const history = nativeSnapshot(parentTurn('two', 120,
+      [activity('again', 'interacted'), activity('done-2', 'completed')]), [
+      parentTurn('child-one', 102, [{ type: 'agentMessage', id: 'child-text', text: 'real child text' }]),
+      parentTurn('child-two', 122, []),
+    ]);
+    const first = projectCodexHistory('parent-session', history);
+    const second = projectCodexHistory('parent-session', history);
+    expect(first.stats).toBeNull();
+    expect(first.events.every(event => event.sessionId === 'parent-session')).toBe(true);
+    expect(first.events).toEqual(second.events);
+    const reversed = projectCodexHistory('parent-session', {
+      ...history, threads: [...history.threads].reverse(),
+    });
+    expect(reversed.events.filter(event => event.eventType === 'agent_status' &&
+      event.parentToolUseId === 'card').at(-1)).toEqual(expect.objectContaining({ status: 'completed' }));
+    const cards = first.events.filter(event => event.eventType === 'tool_start' && event.isTaskTool);
+    const starts = first.events.filter(event => event.eventType === 'agent_start');
+    expect(cards).toHaveLength(1);
+    expect(starts).toHaveLength(1);
+    expect(cards[0]).toEqual(expect.objectContaining({ toolCallId: 'card' }));
+    expect(starts[0]).toEqual(expect.objectContaining({ toolCallId: 'card', agentId: 'native-child', parentToolUseId: 'card' }));
+    expect(first.events).toContainEqual(expect.objectContaining({ eventType: 'text_delta', delta: 'real child text', parentToolUseId: 'card' }));
+    const statuses = first.events.filter((event): event is Extract<FlatStreamEventUnion, { eventType: 'agent_status' }> =>
+      event.eventType === 'agent_status' && event.parentToolUseId === 'card');
+    expect(statuses.map(event => event.native?.cycleOrdinal)).toEqual(expect.arrayContaining([1, 2]));
+    expect(statuses.at(-1)).toEqual(expect.objectContaining({ status: 'completed', native: expect.objectContaining({ cycleId: 'native-child:2' }) }));
+    expect(first.events.some(event => event.eventType.startsWith('background_agent_'))).toBe(false);
+  });
+
+  it.each(['completed', 'failed'] as const)('retains %s when a later parent turn has no child activity', status => {
+    const child: CodexHistoryTurn = { ...parentTurn('child-one', 102, []), status,
+      ...(status === 'failed' ? { error: { message: 'structured failure' } } : {}) };
+    const history = nativeSnapshot(parentTurn('two', 120, [
+      { type: 'agentMessage', id: 'parent-only', text: 'Follow up' },
+    ]), [child]);
+    const result = projectCodexHistory('parent-session', history);
+    const statuses = result.events.filter((event): event is Extract<FlatStreamEventUnion, { eventType: 'agent_status' }> =>
+      event.eventType === 'agent_status' && event.parentToolUseId === 'card');
+    expect(statuses.at(-1)).toEqual(expect.objectContaining({ status,
+      ...(status === 'failed' ? { errorMessage: 'structured failure' } : {}) }));
+    expect(statuses.filter(event => event.status === 'running')).toHaveLength(1);
+  });
+
+  it('keeps the parent card when the descendant read is absent', () => {
+    const result = projectCodexHistory('parent-session', nativeSnapshot(parentTurn('two', 120, [])));
+    expect(result.events).toContainEqual(expect.objectContaining({ eventType: 'tool_start', toolCallId: 'card' }));
+    expect(result.events).toContainEqual(expect.objectContaining({ eventType: 'agent_start', agentId: 'native-child' }));
+    expect(result.events.some(event => event.parentToolUseId === 'card' && event.eventType === 'text_delta')).toBe(false);
+    expect(result.stats).toBeNull();
+  });
   it('keeps two spawn results distinct and releases each after its last receiver', () => {
     const spawn = (id: string, receivers: string[]): CodexHistoryTurn['items'][number] => ({
       type: 'collabAgentToolCall', id, senderThreadId: 'root',

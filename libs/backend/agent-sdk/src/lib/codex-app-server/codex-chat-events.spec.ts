@@ -1,9 +1,11 @@
 // The presentation helper now comes from the codex-runtime barrel, which
 // loads tsyringe registrations; production entry points load this first.
 import 'reflect-metadata';
-import type { CodexRuntimeEvent } from '@ptah-extension/codex-runtime';
+import type { CodexRuntimeEvent, CodexSessionHistory } from '@ptah-extension/codex-runtime';
+import type { FlatStreamEventUnion } from '@ptah-extension/shared';
 import { CodexChatAdapterError } from './codex-chat-adapter-error';
 import { CodexChatEvents, tokenUsage } from './codex-chat-events';
+import { projectCodexHistory } from './codex-history-projector';
 import { CODEX_DENIED_TOOL_RESULT_TEXT } from './codex-tool-presentation';
 
 const identity = {
@@ -26,6 +28,163 @@ function setup() {
   };
 }
 describe('CodexChatEvents', () => {
+  it('projects a later-turn native terminal without a local card record', () => {
+    const { callbacks } = setup();
+    const projection = new CodexChatEvents('session', { ...identity, turnId: 'later' }, callbacks);
+    const mapped = projection.map({ ...identity, threadId: 'child', turnId: 'child-turn',
+      parentToolUseId: 'card', sequence: 8, type: 'terminal', status: 'completed',
+      native: { agentThreadId: 'child', activityId: 'card', cycleId: 'child:2',
+        cycleOrdinal: 2, kind: 'interacted' } });
+    expect(mapped.filter((event) => event.eventType === 'agent_status')).toEqual([
+      expect.objectContaining({ status: 'completed', parentToolUseId: 'card',
+        native: expect.objectContaining({ cycleId: 'child:2' }) }),
+    ]);
+    expect(mapped.some((event) => event.eventType === 'tool_start' || event.eventType === 'agent_start')).toBe(false);
+  });
+
+  it('keeps a native card pending for background drain without inventing a terminal', () => {
+    const { projection } = setup();
+    projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
+      activityId: 'card', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/child', kind: 'started', cycleId: 'child:1', cycleOrdinal: 1 });
+    expect(projection.hasPendingChildren).toBe(true);
+    expect(projection.finishBackground()).toEqual([]);
+  });
+
+  it('maps an interrupted child terminal to paused with the native cycle', () => {
+    const { projection } = setup();
+    projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
+      activityId: 'card', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/child', kind: 'started', cycleId: 'child:1', cycleOrdinal: 1 });
+    const mapped = projection.map({ ...identity, threadId: 'child', turnId: 'child-turn',
+      parentToolUseId: 'card', sequence: 2, type: 'terminal', status: 'interrupted',
+      native: { agentThreadId: 'child', activityId: 'card', cycleId: 'child:1',
+        cycleOrdinal: 1, kind: 'started' } });
+    expect(mapped).toContainEqual(expect.objectContaining({ eventType: 'agent_status',
+      status: 'paused', native: expect.objectContaining({ cycleId: 'child:1' }) }));
+    const thread = (id: string, parentThreadId: string | null,
+      turns: CodexSessionHistory['threads'][number]['turns']): CodexSessionHistory['threads'][number] => ({
+      id, parentThreadId, turns, cliVersion: 'pinned', createdAt: 1, updatedAt: 2,
+      cwd: '/repo', ephemeral: false, modelProvider: 'openai', preview: '',
+      projectId: null, sessionId: 'session', source: 'appServer', status: { type: 'idle' },
+    });
+    const history = projectCodexHistory('session', { rootThreadId: 'thread', threads: [
+      thread('thread', null, [{ id: 'turn', status: 'completed', startedAt: 1,
+        completedAt: 2, itemsView: 'full', items: [{ type: 'subAgentActivity',
+          id: 'card', agentThreadId: 'child', agentPath: '/child', kind: 'started' }] }]),
+      thread('child', 'thread', [{ id: 'child-turn', status: 'interrupted',
+        startedAt: 2, completedAt: 3, itemsView: 'full', items: [] }]),
+    ] });
+    const liveStatus = mapped.find((event) => event.eventType === 'agent_status');
+    const historyStatus = history.events.find((event): event is Extract<FlatStreamEventUnion,
+      { eventType: 'agent_status' }> => event.eventType === 'agent_status' && event.status === 'paused');
+    expect(liveStatus).toMatchObject({ status: historyStatus?.status,
+      native: { cycleId: historyStatus?.native?.cycleId, cycleOrdinal: historyStatus?.native?.cycleOrdinal } });
+  });
+  it('reuses the native card across separate parent-turn projectors', () => {
+    const callbacks = { result: jest.fn(), content: jest.fn(), live: jest.fn(),
+      compaction: jest.fn(), error: jest.fn() };
+    const first = new CodexChatEvents('parent-session', { ...identity, turnId: 'one' }, callbacks, () => 10);
+    const second = new CodexChatEvents('parent-session', { ...identity, turnId: 'two' }, callbacks, () => 20);
+    const base: Extract<CodexRuntimeEvent, { type: 'subagentActivity' }> = {
+      ...identity, turnId: 'one', sequence: 1, type: 'subagentActivity',
+      activityId: 'card', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/root/reviewer', kind: 'started', cycleId: 'child:1', cycleOrdinal: 1,
+    };
+    const started = first.map(base);
+    const resumed = second.map({ ...base, turnId: 'two', activityId: 'again',
+      kind: 'interacted', cycleId: 'child:2', cycleOrdinal: 2 });
+    expect(started.filter(event => event.eventType === 'tool_start')).toHaveLength(1);
+    expect(started.filter(event => event.eventType === 'agent_start')).toHaveLength(1);
+    expect(resumed.filter(event => event.eventType === 'tool_start' || event.eventType === 'agent_start')).toHaveLength(0);
+    expect(resumed).toContainEqual(expect.objectContaining({ eventType: 'agent_status',
+      parentToolUseId: 'card', agentId: 'child', sessionId: 'parent-session',
+      native: expect.objectContaining({ cycleId: 'child:2' }) }));
+    expect([...started, ...resumed].every(event => event.sessionId === 'parent-session')).toBe(true);
+  });
+
+  it('emits no status for a completed native card without new activity on the next turn', () => {
+    const callbacks = { result: jest.fn(), content: jest.fn(), live: jest.fn(),
+      compaction: jest.fn(), error: jest.fn() };
+    const first = new CodexChatEvents('parent-session', { ...identity, turnId: 'one' }, callbacks, () => 10);
+    const second = new CodexChatEvents('parent-session', { ...identity, turnId: 'two' }, callbacks, () => 20);
+    first.map({ ...identity, turnId: 'one', sequence: 1, type: 'subagentActivity',
+      activityId: 'card', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/child', kind: 'completed', cycleId: 'child:1', cycleOrdinal: 1 });
+    const next = second.map({ ...identity, turnId: 'two', sequence: 1,
+      type: 'textFinal', itemId: 'parent-only', text: 'Follow up' });
+    expect(next.filter(event => event.eventType === 'agent_status')).toHaveLength(0);
+  });
+  it('projects native child activity and nested output on one parent card', () => {
+    const callbacks = { result: jest.fn(), content: jest.fn(), live: jest.fn(),
+      compaction: jest.fn(), error: jest.fn() };
+    const projection = new CodexChatEvents('parent-session', identity, callbacks, () => 10);
+    const activity: Extract<CodexRuntimeEvent, { type: 'subagentActivity' }> = {
+      ...identity, sequence: 1, type: 'subagentActivity', activityId: 'activity-1',
+      cardToolCallId: 'card', agentThreadId: 'child', agentPath: '/root/reviewer',
+      kind: 'started', cycleId: 'cycle-1', cycleOrdinal: 1,
+    };
+    const started = projection.map(activity);
+    expect(started).toContainEqual(expect.objectContaining({
+      eventType: 'tool_start', toolCallId: 'card', isTaskTool: true,
+      sessionId: 'parent-session',
+    }));
+    expect(started).toContainEqual(expect.objectContaining({
+      eventType: 'agent_start', toolCallId: 'card', agentId: 'child',
+      agentType: 'codex', agentDescription: 'reviewer', sessionId: 'parent-session',
+    }));
+    expect(started).toContainEqual(expect.objectContaining({
+      eventType: 'agent_status', agentId: 'child', parentToolUseId: 'card',
+      status: 'running', sessionId: 'parent-session',
+      native: { provider: 'codex', agentThreadId: 'child', activityId: 'activity-1',
+        cycleId: 'cycle-1', cycleOrdinal: 1, kind: 'started' },
+    }));
+    const child = { ...identity, threadId: 'child', turnId: 'child-turn',
+      parentToolUseId: 'card' };
+    expect(projection.map({ ...child, sequence: 2, type: 'textDelta',
+      itemId: 'text', delta: 'Hello' })).toContainEqual(expect.objectContaining({
+      eventType: 'text_delta', parentToolUseId: 'card', sessionId: 'parent-session',
+    }));
+    expect(projection.map({ ...child, sequence: 3, type: 'toolStarted',
+      toolId: 'tool', toolName: 'shell', input: {} })).toContainEqual(expect.objectContaining({
+      eventType: 'tool_start', parentToolUseId: 'card', sessionId: 'parent-session',
+    }));
+    const completed = projection.map({ ...child, sequence: 4, type: 'terminal', status: 'completed' });
+    expect(completed).toContainEqual(expect.objectContaining({
+      eventType: 'agent_status', status: 'completed', parentToolUseId: 'card',
+      sessionId: 'parent-session',
+    }));
+    expect(projection.map({ ...child, sequence: 5, type: 'terminal', status: 'completed' })
+      .filter(event => event.eventType === 'agent_status')).toHaveLength(0);
+    expect(projection.map({ ...activity, sequence: 6, turnId: 'later-turn',
+      activityId: 'other-turn', kind: 'interacted', cycleId: 'cycle-2', cycleOrdinal: 2 }))
+      .toEqual([]);
+    const followUp = projection.map({ ...activity, sequence: 7,
+      activityId: 'activity-2', kind: 'interacted', cycleId: 'cycle-2', cycleOrdinal: 2 });
+    expect(followUp.filter(event => event.eventType === 'agent_start' || event.eventType === 'tool_start'))
+      .toHaveLength(0);
+    expect(followUp).toContainEqual(expect.objectContaining({
+      eventType: 'agent_status', status: 'running', parentToolUseId: 'card',
+    }));
+    expect([...started, ...completed, ...followUp].filter(event => event.eventType === 'message_delta'))
+      .toHaveLength(0);
+    expect([...started, ...completed, ...followUp].filter(event => event.eventType.startsWith('background_agent_')))
+      .toHaveLength(0);
+  });
+
+  it('reports native child failure from structured error data', () => {
+    const { projection } = setup();
+    projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
+      activityId: 'a', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/child', kind: 'started', cycleId: 'cycle', cycleOrdinal: 1 });
+    const failed = projection.map({ ...identity, threadId: 'child', turnId: 'child-turn',
+      parentToolUseId: 'card', sequence: 2, type: 'terminal', status: 'failed',
+      error: { code: 'test', message: 'Structured failure', retryable: false } });
+    expect(failed).toContainEqual(expect.objectContaining({
+      eventType: 'agent_status', status: 'failed', errorMessage: 'Structured failure',
+      parentToolUseId: 'card',
+    }));
+  });
   it('releases a spawn after every receiver terminal with final child text', () => {
     const { projection } = setup();
     const start = projection.map({

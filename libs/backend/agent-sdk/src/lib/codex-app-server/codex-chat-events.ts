@@ -126,6 +126,9 @@ export class CodexChatEvents {
   /** Raw native tool names by tool id, from toolStarted to toolCompleted. */
   private readonly tools = new Map<string, string>();
   private readonly agentStarts = new Set<string>();
+  private readonly nativeCards = new Map<string, Extract<CodexRuntimeEvent, { type: 'subagentActivity' }>>();
+  private readonly nativeStarts = new Set<string>();
+  private readonly nativeTerminals = new Set<string>();
   private readonly agentInputs = new Map<string, Record<string, unknown>>();
   private readonly childProjections = new Map<string, CodexChatEvents>();
   private lastResultText = '';
@@ -141,7 +144,9 @@ export class CodexChatEvents {
   ) {}
 
   get hasPendingChildren(): boolean {
-    return this.agentState.pending.size > 0;
+    return this.agentState.pending.size > 0 ||
+      [...this.nativeCards.values()].some((card) =>
+        !this.nativeTerminals.has(JSON.stringify([card.cardToolCallId, card.cycleId])));
   }
 
   /** The caller can end a bounded background drain without claiming a child answer. */
@@ -208,6 +213,27 @@ export class CodexChatEvents {
           pending.remaining.delete(event.threadId);
           const result = this.completedAgentResult(toolId);
           if (result) mapped.push(result);
+        }
+        const card = this.nativeCards.get(childParent);
+        const native = event.native ?? card;
+        if (native) {
+          const terminalKey = JSON.stringify([childParent, native.cycleId, event.status]);
+          if (!this.nativeTerminals.has(terminalKey)) {
+            this.nativeTerminals.add(terminalKey);
+            if (event.status !== 'interrupted')
+              this.nativeTerminals.add(JSON.stringify([childParent, native.cycleId]));
+            mapped.push(this.nativeStatus({
+              agentThreadId: native.agentThreadId, activityId: native.activityId,
+              cycleId: native.cycleId, cycleOrdinal: native.cycleOrdinal,
+              kind: native.kind, cardToolCallId: childParent,
+            }, {
+              id: JSON.stringify([event.contextId, event.processGeneration, event.threadId, event.turnId, event.sequence]),
+              messageId: JSON.stringify([event.threadId, event.turnId]),
+              sessionId: this.sessionId, timestamp: this.now(), source: 'stream',
+            }, event.status === 'failed' || event.error !== undefined ? 'failed' :
+              event.status === 'interrupted' ? 'paused' : 'completed',
+            event.error?.message));
+          }
         }
       }
       return mapped;
@@ -352,22 +378,26 @@ export class CodexChatEvents {
           event.input !== null && !Array.isArray(event.input))
           this.agentInputs.set(event.toolId, Object.fromEntries(Object.entries(event.input)));
         return [
-          {
-            ...base,
-            eventType: 'tool_start',
-            toolCallId: event.toolId,
-            isTaskTool: event.agentThreadIds !== undefined,
-            ...presentCodexTool(
-              event.agentThreadIds !== undefined ? 'Task' : event.toolName,
-              typeof event.input === 'object' &&
-              event.input !== null &&
-              !Array.isArray(event.input)
-                ? Object.fromEntries(Object.entries(event.input))
-                : undefined,
-            ),
-          },
+          this.toolStartEvent(event.toolId, event.agentThreadIds !== undefined ? 'Task' : event.toolName,
+            event.agentThreadIds !== undefined, base,
+            typeof event.input === 'object' && event.input !== null && !Array.isArray(event.input)
+              ? Object.fromEntries(Object.entries(event.input)) : undefined),
           ...this.agentStartEvents(event, base),
         ];
+      case 'subagentActivity': {
+        const first = event.kind === 'started' && !this.nativeStarts.has(event.cardToolCallId);
+        if (first) this.nativeStarts.add(event.cardToolCallId);
+        this.nativeCards.set(event.cardToolCallId, event);
+        const label = event.agentPath.split('/').filter(Boolean).at(-1) ?? event.agentPath;
+        return [
+          ...(first ? [
+            this.toolStartEvent(event.cardToolCallId, 'Task', true, base, { description: label }),
+            this.agentStartEvent(event.cardToolCallId, event.agentThreadId, 'codex', label, base),
+          ] : []),
+          this.nativeStatus(event, base,
+            event.kind === 'interrupted' ? 'paused' : event.kind === 'completed' ? 'completed' : 'running'),
+        ];
+      }
       case 'toolCompleted': {
         // The result is shaped like Claude's tool_result for the tool that
         // started (the runtime completion carries no name).
@@ -496,18 +526,40 @@ export class CodexChatEvents {
       const key = JSON.stringify([event.toolId, agentId]);
       if (this.agentStarts.has(key)) return [];
       this.agentStarts.add(key);
-      return [{
-        ...base,
-        id: `${base.id}:agent:${agentId}`,
-        eventType: 'agent_start' as const,
-        toolCallId: event.toolId,
-        agentId,
-        agentType: typeof agentType === 'string' ? agentType : 'codex',
-        agentDescription: typeof description === 'string' ? description : 'Codex sub-agent',
-        ...(typeof prompt === 'string' ? { agentPrompt: prompt } : {}),
-        parentToolUseId: event.toolId,
-      }];
+      return [this.agentStartEvent(event.toolId, agentId,
+        typeof agentType === 'string' ? agentType : 'codex',
+        typeof description === 'string' ? description : 'Codex sub-agent', base,
+        typeof prompt === 'string' ? prompt : undefined)];
     });
+  }
+
+  private toolStartEvent(toolCallId: string, toolName: string, isTaskTool: boolean,
+    base: { id: string; messageId: string; sessionId: string; timestamp: number; source: 'stream' },
+    input?: Record<string, unknown>): Extract<FlatStreamEventUnion, { eventType: 'tool_start' }> {
+    return { ...base, eventType: 'tool_start', toolCallId, isTaskTool,
+      ...presentCodexTool(toolName, input) };
+  }
+
+  private agentStartEvent(toolCallId: string, agentId: string, agentType: string,
+    agentDescription: string,
+    base: { id: string; messageId: string; sessionId: string; timestamp: number; source: 'stream' },
+    agentPrompt?: string): Extract<FlatStreamEventUnion, { eventType: 'agent_start' }> {
+    return { ...base, id: `${base.id}:agent:${agentId}`, eventType: 'agent_start',
+      toolCallId, agentId, agentType, agentDescription,
+      ...(agentPrompt === undefined ? {} : { agentPrompt }), parentToolUseId: toolCallId };
+  }
+
+  private nativeStatus(event: Pick<Extract<CodexRuntimeEvent, { type: 'subagentActivity' }>,
+    'cardToolCallId' | 'agentThreadId' | 'activityId' | 'cycleId' | 'cycleOrdinal' | 'kind'>,
+    base: { id: string; messageId: string; sessionId: string; timestamp: number; source: 'stream' },
+    status: 'running' | 'paused' | 'completed' | 'failed', errorMessage?: string,
+  ): Extract<FlatStreamEventUnion, { eventType: 'agent_status' }> {
+    return { ...base, eventType: 'agent_status', parentToolUseId: event.cardToolCallId,
+      agentId: event.agentThreadId, status,
+      ...(status === 'failed' && errorMessage !== undefined ? { errorMessage } : {}),
+      native: { provider: 'codex', agentThreadId: event.agentThreadId,
+        activityId: event.activityId, cycleId: event.cycleId,
+        cycleOrdinal: event.cycleOrdinal, kind: event.kind } };
   }
 
   private block(kind: string, itemId: string): number {
