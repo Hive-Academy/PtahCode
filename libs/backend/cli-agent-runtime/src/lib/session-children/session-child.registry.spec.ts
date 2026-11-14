@@ -85,6 +85,14 @@ describe('SessionChildRegistry', () => {
       rmSync(workspace, { recursive: true, force: true });
     }
   });
+  it('refreshes the cached cwd key if a record moves', () => {
+    const registry = new SessionChildRegistry();
+    addChild(registry, 'moving');
+    const movedPath = resolve('/ws-worktrees/moved');
+    registry.update('moving', { worktreePath: movedPath });
+    expect(registry.findUniqueUnboundByCwd(movedPath)?.childSessionId).toBe('moving');
+    expect(registry.findUniqueUnboundByCwd(resolve('/ws-worktrees/moving'))).toBeUndefined();
+  });
   describe('succession', () => {
     it('replaces a live child without consuming another slot and preserves links', () => {
       const registry = new SessionChildRegistry();
@@ -291,6 +299,9 @@ describe('SessionChildRegistry', () => {
       addChild(registry, 'owner', { worktreePath: shared });
       addChild(registry, 'attached', { worktreePath: shared });
       expect(registry.findByCwd(shared)?.childSessionId).toBe('owner');
+      expect(registry.findUniqueUnboundByCwd(shared)).toBeUndefined();
+      registry.bindSdkSessionId('owner', 'sdk-owner');
+      expect(registry.findUniqueUnboundByCwd(shared)?.childSessionId).toBe('attached');
     });
 
     it('treats a live child as a child for the depth guard, by either id', () => {

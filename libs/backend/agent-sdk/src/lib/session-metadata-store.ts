@@ -36,7 +36,7 @@ import EventEmitter from 'eventemitter3';
 import { z } from 'zod';
 import { normalizeCodexWorkspaceKey } from '@ptah-extension/codex-runtime';
 import { SessionRuntimeIdentitySchema } from '@ptah-extension/shared/schemas';
-import type { SessionId, SessionRuntimeIdentity } from '@ptah-extension/shared';
+import type { PhaseDispatchV1, SessionId, SessionRuntimeIdentity } from '@ptah-extension/shared';
 
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
@@ -427,6 +427,10 @@ function sameAccountBinding(
  * Session metadata - UI state only, NOT message storage
  */
 export interface SessionMetadata {
+  /** Governing phase restored for every resumed SDK run. */
+  readonly phase?: PhaseDispatchV1;
+  /** Distinguishes an intentional phase-free child from legacy metadata. */
+  readonly phaseState?: 'none' | 'present';
   /** Versioned native usage checkpoint; absent on legacy and Claude sessions. */
   readonly codexUsageCheckpoint?: CodexUsageCheckpoint;
   /** Native thread binding; rollout history remains owned by Codex. */
@@ -1742,6 +1746,14 @@ export class SessionMetadataStore {
       ...(existing?.workingDirectory && !metadata.workingDirectory
         ? { workingDirectory: existing.workingDirectory }
         : {}),
+      ...(existing?.phase && metadata.phase === undefined
+        ? { phase: existing.phase }
+        : {}),
+      ...((metadata.phase ?? existing?.phase)
+        ? { phaseState: 'present' as const }
+        : existing?.phaseState && metadata.phaseState === undefined
+          ? { phaseState: existing.phaseState }
+          : {}),
       ...(existing?.providerId ? { providerId: existing.providerId } : {}),
       ...(existing && !allowLineageUpgrade
         ? { pluginConfigAncestorRoots: existing.pluginConfigAncestorRoots }
@@ -2637,6 +2649,7 @@ export class SessionMetadataStore {
     workingDirectory?: string,
     providerId?: string,
     pluginConfigAncestorRoots?: readonly string[],
+    phase?: PhaseDispatchV1,
   ): Promise<SessionMetadata> {
     // Same invariant SessionRegistry.bindRealSessionId enforces on the same
     // value three lines away in SdkAgentAdapter. A record keyed by '' is not a
@@ -2656,6 +2669,8 @@ export class SessionMetadataStore {
       const knownProviderId = blankToUndefined(providerId);
       const updated = {
         ...existing,
+        ...(phase ? { phase } : {}),
+        phaseState: phase || existing.phase ? 'present' as const : existing.phaseState ?? 'none' as const,
         lastActiveAt: Date.now(),
         ...(knownProviderId ? { providerId: knownProviderId } : {}),
       };
@@ -2688,6 +2703,8 @@ export class SessionMetadataStore {
       ...(pluginConfigAncestorRoots !== undefined
         ? { pluginConfigAncestorRoots }
         : {}),
+      ...(phase ? { phase } : {}),
+      phaseState: phase ? 'present' : 'none',
       ...(blankToUndefined(providerId)
         ? { providerId: blankToUndefined(providerId) }
         : {}),

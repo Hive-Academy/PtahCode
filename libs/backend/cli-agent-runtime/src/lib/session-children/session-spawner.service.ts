@@ -469,9 +469,11 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (!paths.ok) return this.refuseStart('invalid-arguments', paths.detail);
 
     const skillPrompts: string[] = [];
+    const resolvedSkills: { name: string; text: string }[] = [];
     for (const skill of request.skills ?? request.phase?.skills ?? []) {
       if (skill.text !== undefined) {
         skillPrompts.push(`Skill ${skill.name}:\n${skill.text}`);
+        resolvedSkills.push({ name: skill.name, text: skill.text });
         continue;
       }
       if (!skill.path?.trim()) {
@@ -491,7 +493,9 @@ export class SessionSpawnerService implements ISessionSpawner {
         return this.refuseStart('invalid-arguments', `Skill ${skill.name} delivery unavailable: file not found`);
       }
       try {
-        skillPrompts.push(`Skill ${skill.name}:\n${await readFile(skillPath, 'utf8')}`);
+        const text = await readFile(skillPath, 'utf8');
+        skillPrompts.push(`Skill ${skill.name}:\n${text}`);
+        resolvedSkills.push({ name: skill.name, text });
       } catch (error: unknown) {
         return this.refuseStart(
           'invalid-arguments',
@@ -515,6 +519,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       task,
       paths,
       skillPrompts,
+      resolvedSkills,
     });
     this.pendingStarts.set(childTabId, run);
     try {
@@ -572,7 +577,10 @@ export class SessionSpawnerService implements ISessionSpawner {
     childTabId: string,
     request: SessionChildStartRequest,
     guard: StartGuardPass,
-    { root, branch, task, paths, skillPrompts }: PreparedStart & { readonly skillPrompts: readonly string[] },
+    { root, branch, task, paths, skillPrompts, resolvedSkills }: PreparedStart & {
+      readonly skillPrompts: readonly string[];
+      readonly resolvedSkills: readonly { name: string; text: string }[];
+    },
   ): Promise<SessionChildStartResult> {
     // After the cheap argument checks, still before any git work: a refused
     // model leaves no worktree, branch or registry record behind.
@@ -783,8 +791,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         prompt: composeSessionChildPrompt(
           contract,
           [
-            request.phase?.text,
-            ...skillPrompts,
+            ...(!request.phase ? skillPrompts : []),
             task,
           ]
             .filter(Boolean)
@@ -797,7 +804,7 @@ export class SessionSpawnerService implements ISessionSpawner {
           : {}),
         ...(resolvedModel ? { model: resolvedModel } : {}),
         ...(resolvedEffort ? { effort: resolvedEffort } : {}),
-        ...(request.phase ? { phase: request.phase } : {}),
+        ...(request.phase ? { phase: { ...request.phase, skills: resolvedSkills } } : {}),
       });
       if (!outcome.started) {
         return await this.failStart(
@@ -1919,7 +1926,7 @@ export class SessionSpawnerService implements ISessionSpawner {
   ): SessionChildRecord | undefined {
     let child = this.registry.get(sessionId);
     if (!child) {
-      const byCwd = this.registry.findByCwd(cwd);
+      const byCwd = this.registry.findUniqueUnboundByCwd(cwd);
       if (!byCwd) return undefined;
       // Another session opened in the same worktree is not this child.
       if (byCwd.sdkSessionId && byCwd.sdkSessionId !== sessionId)

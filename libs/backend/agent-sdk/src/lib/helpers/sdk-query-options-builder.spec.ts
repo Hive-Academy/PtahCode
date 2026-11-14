@@ -2751,6 +2751,7 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
 
   async function buildWith(input: BuiltinBuildInput = {}): Promise<{
     options: SdkQueryOptions;
+    toolProfileApplied?: true;
     settings: Record<string, unknown>;
     credentialBinding: McpCallerBinding;
   }> {
@@ -2832,6 +2833,7 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     });
     return {
       options: cfg.options,
+      ...(cfg.toolProfileApplied ? { toolProfileApplied: cfg.toolProfileApplied } : {}),
       credentialBinding: issuedBindings[0],
       settings: JSON.parse(cfg.options.settings as string) as Record<
         string,
@@ -2879,6 +2881,7 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     const phase = phaseFixture(['mcp__firecrawl']);
     const built = await buildWith({ named: true, phase });
     expect(built.options.disallowedTools).toEqual([...DEFAULT_TOOLS, 'mcp__firecrawl']);
+    expect(built.toolProfileApplied).toBe(true);
   });
 
   it('keeps preset denials when phase denials are empty or absent', async () => {
@@ -2886,6 +2889,7 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     expect((await buildWith({ phase })).options.disallowedTools).toEqual(DEFAULT_TOOLS);
     const withoutPhase = await buildWith();
     expect(withoutPhase.options.disallowedTools).toEqual(DEFAULT_TOOLS);
+    expect(withoutPhase.toolProfileApplied).toBeUndefined();
     expect(withoutPhase.credentialBinding).toEqual({
       kind: 'session',
       sessionId: 'tab-fixture',

@@ -397,7 +397,7 @@ describe('registered same-task attach', () => {
     expect(h.host.startChildSession.mock.calls[0][0].phase).toBeUndefined();
     h.spawner.dispose();
   });
-  it('delivers resolved phase discipline and skill text in the child prompt', async () => {
+  it('delivers resolved phase discipline and skill text once through SDK options', async () => {
     const h = makeHarness();
     h.host.startChildSession.mockImplementationOnce(async () => ({
       started: true as const, uiAnnounced: true, toolProfileApplied: true,
@@ -436,15 +436,13 @@ describe('registered same-task attach', () => {
     } else {
       throw new Error(`Child start failed: ${started.refusal}`);
     }
-    expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
-      'Phase discipline: follow the plan.',
-    );
+    expect(h.host.startChildSession.mock.calls[0][0].prompt).not.toContain('Phase discipline: follow the plan.');
     expect(h.host.startChildSession.mock.calls[0][0].phase).toMatchObject({
       kind: 'implement', toolProfile: { disallowedTools: ['Bash'] },
     });
-    expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
-      'Skill coding:\nRun focused checks.',
-    );
+    expect(h.host.startChildSession.mock.calls[0][0].phase?.skills).toEqual([
+      { name: 'coding', text: 'Run focused checks.' },
+    ]);
     h.spawner.dispose();
   });
   it('refuses a path-only skill outside the workspace', async () => {

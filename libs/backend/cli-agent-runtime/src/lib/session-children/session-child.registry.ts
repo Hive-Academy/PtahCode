@@ -130,6 +130,16 @@ export class SessionChildRegistry {
   private readonly records = new Map<string, SessionChildRecord>();
   /** SDK session id → child tab id. */
   private readonly bySdkId = new Map<string, string>();
+  /** Canonical keys for stored paths; record updates retain the cached key. */
+  private readonly storedPathKeys = new Map<string, string>();
+  private storedPathKey(record: SessionChildRecord): string {
+    let key = this.storedPathKeys.get(record.childSessionId);
+    if (key === undefined) {
+      key = pathKey(record.worktreePath);
+      this.storedPathKeys.set(record.childSessionId, key);
+    }
+    return key;
+  }
   /** Reservations taken by `reserveSlot` and not yet consumed or released. */
   private readonly reservations = new Set<number>();
   private nextReservationId = 1;
@@ -184,6 +194,7 @@ export class SessionChildRegistry {
     this.reservations.delete(reservation.id);
     this.pending.delete(record.childSessionId);
     const stored: SessionChildRecord = { ...record };
+    this.storedPathKeys.set(stored.childSessionId, pathKey(stored.worktreePath));
     this.records.set(stored.childSessionId, stored);
     if (stored.sdkSessionId) {
       this.bySdkId.set(stored.sdkSessionId, stored.childSessionId);
@@ -225,6 +236,7 @@ export class SessionChildRegistry {
     const record = this.records.get(childSessionId);
     if (!record) return false;
     this.records.delete(childSessionId);
+    this.storedPathKeys.delete(childSessionId);
     if (record.sdkSessionId) this.bySdkId.delete(record.sdkSessionId);
     const index = this.endedOrder.indexOf(childSessionId);
     if (index >= 0) this.endedOrder.splice(index, 1);
@@ -265,7 +277,7 @@ export class SessionChildRegistry {
       record.branch === branch &&
       (callerIds.includes(record.parentSessionId) ||
         (!!record.parentSdkSessionId && callerIds.includes(record.parentSdkSessionId))) &&
-      pathKey(record.worktreePath) === pathKey(worktreePath)
+      this.storedPathKey(record) === pathKey(worktreePath)
       ? record
       : undefined;
   }
@@ -280,7 +292,7 @@ export class SessionChildRegistry {
     let ended: SessionChildRecord | undefined;
     let live: SessionChildRecord | undefined;
     for (const record of this.records.values()) {
-      if (pathKey(record.worktreePath) !== key) continue;
+      if (this.storedPathKey(record) !== key) continue;
       if (!record.terminalStatus) {
         // The first live record owns the worktree when several sessions share it.
         live ??= record;
@@ -289,6 +301,19 @@ export class SessionChildRegistry {
       ended = record;
     }
     return live ?? ended;
+  }
+
+  /** Bind an early SDK event only when cwd identifies one live, unbound child. */
+  findUniqueUnboundByCwd(path: string | undefined): SessionChildRecord | undefined {
+    if (!path?.trim()) return undefined;
+    const key = pathKey(path);
+    let match: SessionChildRecord | undefined;
+    for (const record of this.records.values()) {
+      if (record.terminalStatus || record.sdkSessionId || this.storedPathKey(record) !== key) continue;
+      if (match) return undefined;
+      match = record;
+    }
+    return match;
   }
 
   /**
@@ -530,6 +555,7 @@ export class SessionChildRegistry {
       const record = this.records.get(id);
       if (!record) continue;
       this.records.delete(id);
+      this.storedPathKeys.delete(id);
       if (record.sdkSessionId) this.bySdkId.delete(record.sdkSessionId);
     }
   }
@@ -544,6 +570,9 @@ export class SessionChildRegistry {
   }
 
   private replace(record: SessionChildRecord): SessionChildRecord {
+    if (this.records.get(record.childSessionId)?.worktreePath !== record.worktreePath) {
+      this.storedPathKeys.set(record.childSessionId, pathKey(record.worktreePath));
+    }
     this.records.set(record.childSessionId, record);
     return record;
   }

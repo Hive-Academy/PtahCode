@@ -342,7 +342,7 @@ export interface IAgentAdapter extends IAIProvider, FollowUpQueueOperations {
    */
   startChatSession(
     config: AgentSessionStartConfig,
-  ): Promise<AsyncIterable<FlatStreamEventUnion>>;
+  ): Promise<AsyncIterable<FlatStreamEventUnion> & { readonly toolProfileApplied?: true }>;
 
   /** Resume an existing session by its real SDK UUID. */
   resumeSession(

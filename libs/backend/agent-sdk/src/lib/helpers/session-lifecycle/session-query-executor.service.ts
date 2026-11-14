@@ -1919,6 +1919,7 @@ export class SessionQueryExecutor {
 
       return {
         sdkQuery,
+        ...(queryOptions.toolProfileApplied ? { toolProfileApplied: true as const } : {}),
         initialModel,
         abortController,
         activityWatchdog,

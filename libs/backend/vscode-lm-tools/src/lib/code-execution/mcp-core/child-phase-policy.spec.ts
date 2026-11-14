@@ -43,3 +43,9 @@ it('accepts equal and larger child denial lists', () => {
 it('preserves main behavior for a caller without phase denials', () => {
   expect(childPhasePolicyRefusal(undefined, undefined)).toBeUndefined();
 });
+
+it('refuses a malformed caller denial list before checking the child', () => {
+  const malformed = { kind: 'agent' as const, capability: 'privileged' as const,
+    phaseKind: 'batch' as const, disallowedTools: [''] };
+  expect(childPhasePolicyRefusal(malformed, undefined)).toContain('binding is malformed');
+});

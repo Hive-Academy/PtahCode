@@ -1088,6 +1088,8 @@ export function withPhaseDelivery(
  * Complete query configuration returned by builder
  */
 export interface QueryConfig {
+  /** Phase denials observed in the SDK options passed to query(). */
+  readonly toolProfileApplied?: true;
   /** Prompt for SDK: async iterable of user messages */
   prompt: AsyncIterable<SDKUserMessage>;
   /** SDK query options (typed directly as SDK's Options) */
@@ -1644,6 +1646,8 @@ export class SdkQueryOptionsBuilder {
 
     return {
       prompt: userMessageStream,
+      ...(phaseDisallowedTools?.length && phaseDisallowedTools.every(tool => disallowedTools.includes(tool))
+        ? { toolProfileApplied: true as const } : {}),
       options: {
         abortController,
         cwd,

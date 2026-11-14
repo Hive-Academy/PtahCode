@@ -147,10 +147,13 @@ export interface SessionChildStartRequest {
   readonly deliverables?: readonly string[];
   readonly model?: string;
   readonly effort?: SessionChildSnapshot['effort'];
-  /** Host-resolved phase contract, forwarded in the child prompt. */
+  /** Host-resolved phase contract delivered through the selected executor. */
   readonly phase?: PhaseDispatchV1;
   readonly skills?: readonly PhaseSkillV1[];
-  /** Existing registered child whose same-task worktree may be shared. */
+  /**
+   * Existing registered child whose same-task worktree may be shared.
+   * Each attach call starts a new session; retries are not idempotent.
+   */
   readonly attachToSessionId?: string;
 }
 

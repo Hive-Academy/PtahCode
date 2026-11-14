@@ -360,6 +360,8 @@ export function buildAgentNamespace(
     spawn: async (request: UntypedSpawnRequest) => {
       if (request.phase) parsePhaseDispatch(request.phase);
       assertEffort(request.effort);
+      assertOutcomeField('taskKind', request.taskKind, OUTCOME_TASK_KINDS);
+      assertOutcomeField('routingSource', request.routingSource, OUTCOME_ROUTING_SOURCES);
       const resolvedSkills = resolvedSkillsSchema.parse(
         request.skills === undefined ? request.phase?.skills ?? [] : request.skills,
       );
@@ -376,12 +378,6 @@ export function buildAgentNamespace(
       }).join('\n\n');
       const deliveryText = [request.phase?.text, skillText].filter(Boolean).join('\n\n');
       const deliveredTask = deliveryText ? `${request.task}\n\n${deliveryText}` : request.task;
-      assertOutcomeField('taskKind', request.taskKind, OUTCOME_TASK_KINDS);
-      assertOutcomeField(
-        'routingSource',
-        request.routingSource,
-        OUTCOME_ROUTING_SOURCES,
-      );
       const accountSelection = assertAccountSelection(request);
       if (request.systemPrompt !== undefined) {
         logger.warn(
