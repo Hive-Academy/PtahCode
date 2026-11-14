@@ -16,6 +16,7 @@ import type {
   DivergedReason,
   LibraryProvenance,
 } from '../library-provenance';
+import type { PhaseKind } from '../phase-contract.types';
 
 export type SkillCloneKind = 'skill' | 'agent' | 'command';
 export type SkillCloneStatus = 'clone' | 'authored' | 'synth' | 'diverged';
@@ -191,6 +192,11 @@ export interface SkillSynthesisRevertEnhancementResult {
 export interface SkillSynthesisRebaseCloneParams {
   kind: SkillCloneKind;
   slug: string;
+  /**
+   * `bulk` marks a call from "Rebase all diverged". The backend refuses a
+   * bulk rebase of a role agent. Absent means `single`.
+   */
+  origin?: 'single' | 'bulk';
 }
 export interface SkillSynthesisRebaseCloneResult {
   kind: SkillCloneKind;
@@ -260,6 +266,28 @@ export interface SkillSynthesisInvocationStatsResult {
 }
 
 /**
+ * Phase scorecard row (TASK_2026_1175_2690, migration 0075). Grades key on the
+ * phase kind of the lane row, for every executor kind.
+ *
+ * `source: 'phase'` rows count grades with subject kind `phase`.
+ * `source: 'role-alias'` rows (`legacy: true`) count old role grades whose
+ * role slug maps to this phase in `ROLE_PHASE_ALIASES`. A role grade whose run
+ * also has a phase grade is not in the legacy row. Show the two rows apart; do
+ * not add them into one total. Stored grade rows are never rewritten.
+ */
+export interface PhaseScorecard {
+  phaseKind: PhaseKind;
+  source: 'phase' | 'role-alias';
+  legacy: boolean;
+  /** Role slugs read through the alias table. Empty for `source: 'phase'`. */
+  aliasedRoles: string[];
+  gradedCount: number;
+  passedCount: number;
+  /** `null` when nothing is graded. Never a fake 0. */
+  gradedSuccessRate: number | null;
+}
+
+/**
  * Batched per-subagent scorecard surfaced on agent clone cards in the Library
  * tab. Composed from graded orchestration runs (reconciled spec verdicts) plus
  * NULL-excluding metric aggregates. `gradedSuccessRate` is `null` (never a fake
@@ -326,6 +354,11 @@ export interface SkillSynthesisGetScorecardsParams {
 }
 export interface SkillSynthesisGetScorecardsResult {
   scorecards: Record<string, AgentScorecard>;
+  /**
+   * Phase scorecards (migration 0075). Optional: an older host omits it.
+   * Phase rows and legacy role-alias rows are separate entries.
+   */
+  phaseScorecards?: PhaseScorecard[];
 }
 
 export interface SkillSynthesisGetScorecardDetailParams {

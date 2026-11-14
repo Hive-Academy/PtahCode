@@ -51,7 +51,7 @@ describe('migration 0046_memory_merge_subject_index', () => {
     // 72 since TASK_2026_886 appended 0072_task_end_hook.
     // 73 since TASK_2026_898 appended 0073_task_close_out.
     expect(Math.max(...MIGRATIONS.map((migration) => migration.version))).toBe(
-      74,
+      75,
     );
     expect(sql0046MemoryMergeSubjectIndex).not.toContain('${');
   });

@@ -261,6 +261,24 @@ describe('SkillRebaseCloneParamsSchema', () => {
       slug: 'my-skill',
     });
     expect(result.kind).toBe('skill');
+    expect(result.origin).toBe('single');
+  });
+
+  it('accepts a bulk origin and rejects an unknown origin', () => {
+    expect(
+      SkillRebaseCloneParamsSchema.parse({
+        kind: 'agent',
+        slug: 'my-agent',
+        origin: 'bulk',
+      }).origin,
+    ).toBe('bulk');
+    expect(() =>
+      SkillRebaseCloneParamsSchema.parse({
+        kind: 'agent',
+        slug: 'my-agent',
+        origin: 'x',
+      }),
+    ).toThrow();
   });
 
   it('rejects an unknown kind', () => {

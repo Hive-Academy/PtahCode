@@ -31,13 +31,15 @@ function fixture(file = ':memory:', migrate = false) {
       if (!migration?.sql) throw new Error(`Missing SQL migration ${version}`);
       db.exec(migration.sql);
     }
+    // The lane half of migration 0075; its grade half needs skill_task_grades.
+    db.exec('ALTER TABLE lane_outcome_records ADD COLUMN phase_kind TEXT;');
   } else db.exec(`
     CREATE TABLE IF NOT EXISTS lane_outcome_records (
       run_id TEXT NOT NULL PRIMARY KEY, executor_kind TEXT NOT NULL,
       lane_id TEXT NOT NULL, agent_id TEXT NOT NULL, family TEXT,
       subagent_session_id TEXT, parent_session_id TEXT, workspace_root TEXT,
       provider TEXT, model TEXT NOT NULL, role TEXT, task_kind TEXT,
-      task_kind_source TEXT,
+      task_kind_source TEXT, phase_kind TEXT,
       task_id TEXT, verdict TEXT NOT NULL, failure_class TEXT,
       budget_stopped INTEGER NOT NULL DEFAULT 0, started_at INTEGER,
       ended_at INTEGER NOT NULL, duration_ms INTEGER, input_tokens INTEGER,
@@ -106,6 +108,26 @@ describe('SqliteLaneOutcomeStore', () => {
         taskKind: 'review',
         taskKindSource: 'mapped',
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('stores the phase kind and reads a legacy row as null (migration 0075)', async () => {
+    const { db, store } = fixture(':memory:', true);
+    try {
+      db.prepare(`INSERT INTO lane_outcome_records
+        (run_id, executor_kind, lane_id, agent_id, family, model, verdict,
+         ended_at, created_at, updated_at)
+        VALUES (?, 'cli', 'lane', 'old', 'codex', 'model', 'delivered', 1, 1, 1)`)
+        .run('legacy-phase');
+      expect((await store.get('legacy-phase'))?.phaseKind).toBeNull();
+      await store.insertIfAbsent({ ...outcomeRow('phased'), executorKind: 'cli', phaseKind: 'tests' });
+      expect((await store.get('phased'))?.phaseKind).toBe('tests');
+      expect(db.prepare('SELECT phase_kind FROM lane_outcome_records WHERE run_id = ?')
+        .get('phased')).toEqual({ phase_kind: 'tests' });
+      await store.update('phased', { failureClass: 'crash' });
+      expect((await store.get('phased'))?.phaseKind).toBe('tests');
     } finally {
       db.close();
     }
