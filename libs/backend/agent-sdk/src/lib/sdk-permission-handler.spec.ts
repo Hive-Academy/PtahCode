@@ -1993,6 +1993,38 @@ describe('CLI lane callback level override', () => {
     expect(sent.filter((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST ||
       message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)).toEqual([]);
   });
+  it.each([
+    ['ExitPlanMode', { plan: 'go' }, 'deny'],
+    ['WebFetch', { url: 'https://example.com' }, 'deny'],
+    ['mcp__other__write', { value: 1 }, 'deny'],
+    ['SomeUnknownTool', {}, 'deny'],
+    ['mcp__ptah__ptah_agent_report', { message: 'BLOCKED: plan mode' }, 'allow'],
+  ] as const)('decides %s for a plan-level lane without an approval prompt', async (toolName, input, behavior) => {
+    const { handler, sent } = makeHandler();
+    const result = await handler.createCallback(
+      asSessionId('11111111-2222-4333-8444-555555555555'), () => 'plan-lane', undefined, () => 'plan',
+    )(toolName, { ...input }, {
+      signal: new AbortController().signal, toolUseID: `plan-${toolName}`, requestId: `plan-${toolName}`,
+    });
+    expect(result).toMatchObject(behavior === 'deny'
+      ? { behavior, message: expect.stringContaining('BLOCKED: plan mode') }
+      : { behavior });
+    expect(sent.filter((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST ||
+      message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)).toEqual([]);
+  });
+  it('keeps the prompt for a plan-level interactive session (no lane resolver)', async () => {
+    const { handler, sent } = makeHandler();
+    const abort = new AbortController();
+    const pending = handler.createCallback(
+      asSessionId('11111111-2222-4333-8444-555555555555'), undefined, undefined, () => 'plan',
+    )('Write', { file_path: '/tmp/chat', content: 'x' }, {
+      signal: abort.signal, toolUseID: 'chat-plan-write', requestId: 'chat-plan-write',
+    });
+    await flushMicrotasks();
+    expect(sent.some((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST)).toBe(true);
+    abort.abort();
+    await pending.catch(() => undefined);
+  });
   it.each(['plan', 'ask'] as const)(
     'does not auto-approve Bash for a %s lane under global yolo', async (laneLevel) => {
       const { handler } = makeHandler();

@@ -245,11 +245,12 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
           !options.canUseTool
         ) {
           const permissionRoutingId = input.resumeSessionId ?? input.parentSessionId ?? routingId;
+          const laneLevel = lanePolicy.requested.permission;
           options.canUseTool = this.deps.permissionHandler.createCallback(
             SessionId.safeParse(permissionRoutingId) ?? undefined,
             () => agentIdHolder.value,
             undefined,
-            undefined,
+            () => laneLevel,
             permissionRoutingId,
           );
         }

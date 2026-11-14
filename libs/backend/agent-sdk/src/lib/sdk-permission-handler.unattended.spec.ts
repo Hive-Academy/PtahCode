@@ -181,6 +181,31 @@ describe('SdkPermissionHandler — unattended session policy', () => {
     });
   });
 
+  describe('Plan-mode CLI lane routed through an unattended parent', () => {
+    it('refuses an in-root write instead of applying the unattended policy', async () => {
+      const h = makeHarness();
+      h.registry.register(CHILD_TAB, makePolicy());
+      const laneCallback = h.handler.createCallback(
+        CHILD_TAB as SessionIdParam,
+        () => 'plan-lane',
+        undefined,
+        () => 'plan',
+        CHILD_TAB,
+      );
+
+      const result = await invoke(laneCallback, 'Write', {
+        file_path: path.join(WRITABLE_ROOT, 'notes.md'),
+        content: 'x',
+      });
+
+      expect(result).toMatchObject({
+        behavior: 'deny',
+        message: expect.stringContaining('BLOCKED: plan mode'),
+      });
+      expect(h.permissionRequests()).toHaveLength(0);
+    });
+  });
+
   describe('YOLO level', () => {
     it('allows an out-of-policy call without a prompt', async () => {
       const h = makeHarness();

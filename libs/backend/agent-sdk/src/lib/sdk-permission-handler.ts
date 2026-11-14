@@ -118,6 +118,11 @@ const LANE_PLAN_MODE_REFUSAL =
   'BLOCKED: plan mode. This lane is read-only and no approval prompt will appear. ' +
   'Stop and report "BLOCKED: plan mode" with the reason in your final message.';
 
+/** Refusal a Plan-mode CLI lane gets when it tries to leave Plan mode. */
+const LANE_PLAN_MODE_EXIT_REFUSAL =
+  'BLOCKED: plan mode. This lane cannot leave Plan mode and no approval prompt will appear. ' +
+  'Put the plan in your final message. If the task needs file writes, say "BLOCKED: plan mode".';
+
 /**
  * Lifecycle of one user-facing permission prompt, observed out-of-band by
  * hosts that own a surface the webview cannot reach — the messaging gateway
@@ -602,6 +607,19 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         },
       );
 
+      // A CLI lane in Plan mode never gets an approval prompt: nobody watches
+      // a lane prompt, so it would only look like a pending approval. This
+      // runs before the unattended policy, which a lane can inherit through
+      // its parent routing id and which would allow writes. Interactive
+      // sessions pass no cliAgentResolver and keep their plan handling.
+      if (
+        cliAgentResolver &&
+        (levelResolver ? levelResolver() : this._permissionLevel) === 'plan'
+      ) {
+        const planDecision = this.decidePlanLaneToolCall(toolName, input);
+        if (planDecision) return planDecision;
+      }
+
       // Unattended (child) sessions: read live so a release takes effect on
       // the next call. The policy table decides and returns; the
       // background-agent and "Always Allow" paths below never apply. A YOLO
@@ -688,26 +706,6 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       const effectiveLevel = levelResolver
         ? levelResolver()
         : this._permissionLevel;
-
-      // A CLI lane in Plan mode never gets an approval prompt for a write or
-      // shell tool: nobody watches a lane prompt, so it would only look like a
-      // pending approval. Refuse it explicitly. Interactive sessions pass no
-      // cliAgentResolver and keep the SDK's own plan-mode handling.
-      if (
-        effectiveLevel === 'plan' &&
-        cliAgentResolver &&
-        (DANGEROUS_TOOLS.includes(toolName) ||
-          AUTO_EDIT_TOOLS.includes(toolName))
-      ) {
-        this.logger.info(
-          `[SdkPermissionHandler] Plan mode: refused lane tool: ${toolName}`,
-        );
-        return {
-          behavior: 'deny' as const,
-          message: LANE_PLAN_MODE_REFUSAL,
-          interrupt: false,
-        };
-      }
 
       if (effectiveLevel === 'yolo') {
         this.logger.info(
@@ -822,6 +820,43 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
           Date.now() - (this.recentBudgetStops.get(session as string) ?? 0) < 60_000,
       });
       return result;
+    };
+  }
+
+  /**
+   * The decision table for a CLI lane in Plan mode. Read-only tools, subagent
+   * tools and questions keep their normal path (`undefined`). Ptah MCP tools
+   * are allowed, so the lane can still report "BLOCKED: plan mode". Every
+   * other tool is refused at once, so no lane call waits on an approval
+   * prompt that nobody watches.
+   */
+  private decidePlanLaneToolCall(
+    toolName: string,
+    input: Record<string, unknown>,
+  ): PermissionResult | undefined {
+    if (
+      SAFE_TOOLS.includes(toolName) ||
+      SUBAGENT_TOOLS.includes(toolName) ||
+      toolName === 'AskUserQuestion'
+    ) {
+      return undefined;
+    }
+    if (toolName.startsWith(PTAH_MCP_TOOL_PREFIX)) {
+      this.logger.debug(
+        `[SdkPermissionHandler] Plan mode: allowed lane Ptah tool: ${toolName}`,
+      );
+      return { behavior: 'allow' as const, updatedInput: input };
+    }
+    this.logger.info(
+      `[SdkPermissionHandler] Plan mode: refused lane tool: ${toolName}`,
+    );
+    return {
+      behavior: 'deny' as const,
+      message:
+        toolName === 'ExitPlanMode'
+          ? LANE_PLAN_MODE_EXIT_REFUSAL
+          : LANE_PLAN_MODE_REFUSAL,
+      interrupt: false,
     };
   }
 
