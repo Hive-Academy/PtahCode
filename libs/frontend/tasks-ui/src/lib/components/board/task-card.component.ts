@@ -51,6 +51,7 @@ import {
 import {
   PtahBadgeDirective,
   PtahButtonDirective,
+  PtahCheckboxDirective,
   PtahIconButtonDirective,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
@@ -144,6 +145,7 @@ const HTTP_URL = /^https?:\/\//i;
   imports: [
     PtahBadgeDirective,
     PtahButtonDirective,
+    PtahCheckboxDirective,
     PtahIconButtonDirective,
     PtahToggleDirective,
     LucideAngularModule,
@@ -206,7 +208,9 @@ const HTTP_URL = /^https?:\/\//i;
                out of the run at the moment it is being written. -->
           <input
             type="checkbox"
-            class="checkbox h-6 w-6 shrink-0"
+            ptahCheckbox
+            size="sm"
+            class="h-6 w-6 shrink-0"
             data-testid="task-card-select"
             [attr.tabindex]="rovingTabIndex()"
             [checked]="checked()"
@@ -504,7 +508,10 @@ const HTTP_URL = /^https?:\/\//i;
           >
             @for (label of visibleLabels(); track $index) {
               <span
-                class="badge badge-xs border font-normal max-w-[6rem] truncate"
+                ptahBadge
+                tone="neutral"
+                size="xs"
+                class="border font-normal max-w-[6rem] truncate"
                 [class]="chipClass(label)"
                 [title]="'Label: ' + label"
               >
@@ -661,7 +668,10 @@ const HTTP_URL = /^https?:\/\//i;
             <div class="join">
               <button
                 type="button"
-                class="btn btn-primary btn-xs join-item gap-1"
+                ptahButton
+                variant="secondary"
+                size="xs"
+                class="join-item gap-1"
                 [attr.tabindex]="rovingTabIndex()"
                 (click)="$event.stopPropagation(); onStart()"
                 [attr.aria-label]="'Start task ' + task().id"
@@ -672,7 +682,10 @@ const HTTP_URL = /^https?:\/\//i;
               <div class="dropdown dropdown-end">
                 <button
                   type="button"
-                  class="btn btn-primary btn-xs join-item btn-square"
+                  ptahButton
+                  variant="secondary"
+                  size="xs"
+                  class="join-item px-0"
                   [attr.tabindex]="rovingTabIndex()"
                   [attr.aria-label]="
                     'Assign task ' + task().id + ' to an agent'

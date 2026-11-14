@@ -1178,14 +1178,7 @@
     "btn-warning": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-card.component.ts": {
-    "<dynamic>": 2,
-    "badge": 1,
-    "badge-xs": 1,
-    "btn": 2,
-    "btn-primary": 2,
-    "btn-square": 1,
-    "btn-xs": 2,
-    "checkbox": 1
+    "<dynamic>": 2
   },
   "libs/frontend/tasks-ui/src/lib/components/board/task-column.component.ts": {
     "<dynamic>": 2
@@ -1212,9 +1205,6 @@
     "badge": 1,
     "badge-sm": 1
   },
-  "libs/frontend/tasks-ui/src/lib/components/detail/task-document-reader.component.ts": {
-    "skeleton": 4
-  },
   "libs/frontend/tasks-ui/src/lib/components/detail/task-folder-files.component.ts": {
     "skeleton": 3
   },
@@ -1235,19 +1225,16 @@
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-filter-bar.component.ts": {
     "<dynamic>": 1,
-    "btn": 2,
-    "btn-active": 2,
+    "btn": 1,
+    "btn-active": 1,
     "btn-ghost": 1,
-    "btn-sm": 2
+    "btn-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/filter/task-view-menu.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-xs": 1,
-    "btn": 2,
+    "btn": 1,
     "btn-active": 1,
-    "btn-ghost": 2,
-    "btn-sm": 2
+    "btn-ghost": 1,
+    "btn-sm": 1
   },
   "libs/frontend/tasks-ui/src/lib/components/task-board-header.component.ts": {
     "btn": 1,

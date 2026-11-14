@@ -549,7 +549,7 @@ describe('TaskCardComponent', () => {
       const host = render(makeTask({ labels: many }))
         .nativeElement as HTMLElement;
       const chips = host.querySelectorAll(
-        '[data-testid="task-card-labels"] .badge:not([data-testid])',
+        '[data-testid="task-card-labels"] [data-ptah-badge]:not([data-testid])',
       );
       expect(chips).toHaveLength(3);
 
@@ -574,7 +574,7 @@ describe('TaskCardComponent', () => {
       const host = render(makeTask({ labels: ['a'.repeat(200)] }))
         .nativeElement as HTMLElement;
       const chip = host.querySelector(
-        '[data-testid="task-card-labels"] .badge',
+        '[data-testid="task-card-labels"] [data-ptah-badge]',
       );
       expect(chip?.className).toContain('truncate');
       expect(chip?.className).toContain('max-w-');
