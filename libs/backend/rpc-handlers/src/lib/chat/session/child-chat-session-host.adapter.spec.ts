@@ -175,7 +175,7 @@ describe('ChildChatSessionHostAdapter', () => {
     const definition = {
       version: 1 as const, kind: 'review' as const,
       input: ['task'], deliverable: ['report'], verdict: ['done'], acceptanceStep: ['check'],
-      requiredCapabilities: [], toolProfile: { disallowedTools: ['Write'], permission: 'allow' as const },
+      requiredCapabilities: [], machineCapabilities: [], toolProfile: { disallowedTools: ['Write'], permission: 'allow' as const },
       discipline: { method: 'Review.', outputContract: 'Report.', returnValue: 'Evidence.',
         refusals: 'Report.', escalationProtocol: 'Ask.' },
     };

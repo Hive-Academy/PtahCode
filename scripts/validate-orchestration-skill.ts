@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import matter from 'gray-matter';
 import * as ts from 'typescript';
-import { PHASE_KINDS } from '../libs/shared/src/lib/types/phase-contract.types';
+import { PHASE_KINDS, PHASE_CONTRACT_VERSION, MACHINE_CAPABILITIES } from '../libs/shared/src/lib/types/phase-contract.types';
 
 /**
  * Represents a validation error found during checks.
@@ -250,9 +250,10 @@ function validatePhase(file: string, roles: readonly string[]): ValidationError[
     return [error(relative, `Invalid phase YAML: ${caught instanceof Error ? caught.message : String(caught)}`)];
   }
   if (!content.startsWith('---')) errors.push(error(relative, 'Missing phase YAML frontmatter'));
-  const topKeys = ['version', 'kind', 'input', 'deliverable', 'verdict', 'acceptanceStep', 'requiredCapabilities', 'toolProfile'];
+  const topKeys = ['version', 'kind', 'input', 'deliverable', 'verdict', 'acceptanceStep', 'requiredCapabilities', 'machineCapabilities', 'toolProfile'];
   for (const key of Object.keys(data ?? {})) if (!topKeys.includes(key)) errors.push(error(relative, `Unknown phase field: ${key}`));
-  if (data?.version !== 1) errors.push(error(relative, 'Invalid phase field: version must be 1'));
+  if (data?.version !== 1 && data?.version !== PHASE_CONTRACT_VERSION) errors.push(error(relative, `Invalid phase field: version must be 1 or ${PHASE_CONTRACT_VERSION}`));
+  if (data?.machineCapabilities !== undefined && (!Array.isArray(data.machineCapabilities) || !data.machineCapabilities.every(value => MACHINE_CAPABILITIES.includes(value as typeof MACHINE_CAPABILITIES[number])))) errors.push(error(relative, 'Invalid phase field: machineCapabilities contains an unknown token'));
   const kind = path.basename(file, '.md');
   if (!PHASE_KINDS.includes(kind as typeof PHASE_KINDS[number]) || data?.kind !== kind) errors.push(error(relative, `Invalid phase field: kind must equal filename ${kind}`));
   for (const field of ['input', 'deliverable', 'verdict', 'acceptanceStep', 'requiredCapabilities'] as const) {

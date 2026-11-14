@@ -43,6 +43,8 @@ export type {
   StructuredDecisionRequest,
 } from './lib/decision-model/structured-decision.port';
 export { registerLaneRoutingServices } from './lib/di/register';
+export type { PhaseDefinitionReader } from './lib/phase-definition-reader.port';
+export { PhaseDefinitionFileReader } from './lib/phase-definition-file.reader';
 export type {
   CapabilityMatrixView,
   CapabilityMatrixViewReader,

@@ -29,6 +29,7 @@ import {
 import type { Capability } from './capabilities';
 import {
   AttentionRpcHandlers,
+  UsageRpcHandlers,
   AgentRpcHandlers,
   AgentMessageRpcHandlers,
   AgentOutcomeRpcHandlers,
@@ -404,6 +405,14 @@ export const RPC_HANDLER_MANIFEST = [
     methods: AttentionRpcHandlers.METHODS,
     requires: [],
     handler: AttentionRpcHandlers,
+  },
+  {
+    // `requires: []`: the stats repository is an optional injection, so every
+    // host serves the method and answers `PERSISTENCE_UNAVAILABLE` without it.
+    key: 'usage',
+    methods: UsageRpcHandlers.METHODS,
+    requires: [],
+    handler: UsageRpcHandlers,
   },
   {
     key: 'settings',

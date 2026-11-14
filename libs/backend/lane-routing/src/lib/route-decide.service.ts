@@ -19,7 +19,6 @@ import {
 } from './contracts/route-decide-args.schema';
 import {
   loggableErrorName,
-  SUBAGENT_LANE_ID,
   type LoggableErrorName,
 } from '@ptah-extension/shared';
 import type { DecisionModelConfig } from './decision-model/decision-model.config';
@@ -30,7 +29,8 @@ import type { LaneModelListing } from './lane-model-listing.port';
 import type { LaneRoutingLogger } from './lane-routing-logger';
 import type { OutcomeFigureLookup } from './matrix/outcome-figures';
 import type { RouteCandidateSource } from './route-candidate-source.port';
-import { laneCandidateId } from './ranking/candidate.types';
+import type { PhaseDefinitionReader } from './phase-definition-reader.port';
+import { resolvePhaseDefinition } from './contracts/phase-definition-resolver';
 import type { RotationPick } from './ranking/rotation.store';
 import { assembleGateResult } from './pipeline/assemble-gate';
 import {
@@ -102,6 +102,7 @@ export interface RouteDecideDependencies {
   readonly listing?: LaneModelListing;
   readonly structured?: StructuredDecisionCompleter;
   readonly reuse?: PreflightReuseCache;
+  readonly phaseDefinitionReader?: PhaseDefinitionReader;
   readonly seams?: RouteDecideSeams;
 }
 
@@ -243,7 +244,9 @@ export class RouteDecideService implements RotationStateReader {
       nowMs: this.nowMs,
       listingBudgetMs: this.listingBudget,
     });
-    const toolNamesByPhase = await readCandidateTools(args.phases, gathered, source, this.deps.logger);
+    const phases = await this.resolveMachineRequirements(args.phases);
+    const effectiveArgs: GateArgs = { ...args, phases };
+    const toolNamesByPhase = await readCandidateTools(phases, gathered, source, this.deps.logger);
     const inputRowIds: string[] = [];
     const remember = (candidates: readonly RoutingCandidate[]): void => {
       for (const candidate of candidates) {
@@ -252,10 +255,10 @@ export class RouteDecideService implements RotationStateReader {
     };
 
     let cursor = gathered.rotation;
-    const nonReview = args.phases.filter((phase) => !isReviewPhase(phase.kind));
+    const nonReview = phases.filter((phase) => !isReviewPhase(phase.kind));
     const pass1 = planRoutePhases(
       nonReview,
-      args,
+      effectiveArgs,
       gathered,
       cursor,
       true,
@@ -272,10 +275,10 @@ export class RouteDecideService implements RotationStateReader {
     const plans = new Map<string, PhasePlan>();
     storePass(pass1.plans, pass1Run.context, plans, resolutions);
 
-    const reviews = args.phases.filter((phase) => isReviewPhase(phase.kind));
+    const reviews = phases.filter((phase) => isReviewPhase(phase.kind));
     const pass2 = planRoutePhases(
       reviews,
-      args,
+      effectiveArgs,
       gathered,
       cursor,
       false,
@@ -311,6 +314,38 @@ export class RouteDecideService implements RotationStateReader {
       (pass1Run.outcome?.outcomeFigures ?? 0) + (pass2Run.outcome?.outcomeFigures ?? 0),
     )));
     return validated.data;
+  }
+
+  private async resolveMachineRequirements(
+    phases: GateArgs['phases'],
+  ): Promise<GateArgs['phases']> {
+    const resolved = new Map<GateArgs['phases'][number]['kind'], GateArgs['phases'][number]['requiredCapabilities']>();
+    return Promise.all(phases.map(async (phase) => {
+      if (phase.requiredCapabilities !== undefined) return phase;
+      let requiredCapabilities = resolved.get(phase.kind);
+      if (requiredCapabilities === undefined) {
+        const reader = this.deps.phaseDefinitionReader;
+        if (reader !== undefined) {
+          try {
+            const text = await reader.read(phase.kind);
+            requiredCapabilities = [...resolvePhaseDefinition(phase.kind, () => text).definition.machineCapabilities];
+          } catch (error: unknown) {
+            // degradation-audit: optional-capability - retain the legacy browser gate when a phase definition cannot be read.
+            this.deps.logger.warn('[lane-routing] phase definition unavailable; using legacy machine capabilities', {
+              kind: phase.kind,
+              errorName: error instanceof Error ? error.name : 'unknown',
+            });
+          }
+        } else {
+          this.deps.logger.warn('[lane-routing] phase definition reader unavailable; using legacy machine capabilities', {
+            kind: phase.kind,
+          });
+        }
+        requiredCapabilities ??= phase.kind === 'visual-review' || phase.kind === 'design' ? ['browser'] : [];
+        resolved.set(phase.kind, requiredCapabilities);
+      }
+      return { ...phase, requiredCapabilities };
+    }));
   }
 
   private summaryFacts(caller: OpenedCaller, started: number, outcomeFigures: number): DecisionSummaryFacts {

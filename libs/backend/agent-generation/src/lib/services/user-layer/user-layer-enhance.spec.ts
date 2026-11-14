@@ -10,6 +10,7 @@ import {
 } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import type { SkillClonePhaseFile } from '@ptah-extension/shared';
 
 let fakeHome: string;
 
@@ -108,6 +109,35 @@ describe('UserLayerMirrorService enhance/revert/history', () => {
     expect(sidecar.currentContentHash).toBe(result.currentContentHash);
     const tmps = (await readdir(skillDir)).filter((n) => n.endsWith('.tmp'));
     expect(tmps).toHaveLength(0);
+  });
+
+  it('writes one phase and restores only that phase from its folder snapshot', async () => {
+    const phases = join(skillDir, 'phases');
+    await mkdir(phases);
+    await writeFile(join(phases, 'review.md'), 'old review');
+    await writeFile(join(phases, 'design.md'), 'old design');
+    const written = await service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/review.md', newBody: 'new review' });
+    expect(written.historyTs).not.toBeNull();
+    expect(await readFile(join(phases, 'review.md'), 'utf8')).toBe('new review');
+    await writeFile(join(phases, 'design.md'), 'edited design');
+    const reverted = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/review.md', historyTs: written.historyTs as string });
+    expect(reverted.restored).toBe(true);
+    expect(await readFile(join(phases, 'review.md'), 'utf8')).toBe('old review');
+    expect(await readFile(join(phases, 'design.md'), 'utf8')).toBe('edited design');
+  });
+
+  it('refuses non-phase paths and escape attempts', async () => {
+    await expect(service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'SKILL.md' as SkillClonePhaseFile, newBody: 'bad' })).rejects.toThrow('Invalid phase file');
+    await expect(service.writeEnhancedSkillFile({ slug: 'deep-research', file: '../escape.md' as SkillClonePhaseFile, newBody: 'bad' })).rejects.toThrow('Invalid phase file');
+    await expect(service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'xxxxxxxreview.md' as SkillClonePhaseFile, newBody: 'bad' })).rejects.toThrow('Invalid phase file');
+    expect(await readFile(join(skillDir, 'SKILL.md'), 'utf8')).toBe('original body');
+  });
+
+  it('does not replace a phase when the snapshot lacks it', async () => {
+    const snapshot = await service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/review.md', newBody: 'new review' });
+    const result = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/review.md', historyTs: snapshot.historyTs as string });
+    expect(result).toEqual({ restored: false, revertedFrom: snapshot.historyTs, newHistoryTs: null });
+    expect(await readFile(join(skillDir, 'phases', 'review.md'), 'utf8')).toBe('new review');
   });
 
   it('writeEnhancedSkill HARD GUARD: never writes outside ~/.ptah/user/', async () => {

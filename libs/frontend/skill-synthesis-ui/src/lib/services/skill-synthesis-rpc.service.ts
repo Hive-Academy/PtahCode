@@ -27,6 +27,7 @@ import type {
   SkillSynthesisGetAgentModelsResult,
   SkillSynthesisSetAgentModelParams,
   SkillSynthesisSetAgentModelResult,
+  SkillCloneFile,
 } from '@ptah-extension/shared';
 
 /**
@@ -171,10 +172,11 @@ export class SkillSynthesisRpcService {
   public async previewEnhancement(
     kind: SkillCloneKind,
     slug: string,
+    file?: SkillCloneFile,
   ): Promise<SkillSynthesisPreviewEnhancementResult> {
     const result = await this.rpcService.call(
       'skillSynthesis:previewEnhancement',
-      { kind, slug },
+      file === undefined ? { kind, slug } : { kind, slug, file },
       { timeout: SKILL_RPC_TIMEOUTS.ENHANCE_MS },
     );
     if (result.isSuccess() && result.data) {
@@ -206,10 +208,11 @@ export class SkillSynthesisRpcService {
     kind: SkillCloneKind,
     slug: string,
     ts: string,
+    file?: SkillCloneFile,
   ): Promise<SkillSynthesisGetHistoryBodyResult> {
     const result = await this.rpcService.call(
       'skillSynthesis:getHistoryBody',
-      { kind, slug, ts },
+      file === undefined ? { kind, slug, ts } : { kind, slug, ts, file },
       { timeout: SKILL_RPC_TIMEOUTS.LIST_MS },
     );
     if (result.isSuccess() && result.data) {
@@ -223,10 +226,13 @@ export class SkillSynthesisRpcService {
     kind: SkillCloneKind,
     slug: string,
     historyTs: string,
+    file?: SkillCloneFile,
   ): Promise<SkillSynthesisRevertEnhancementResult> {
     const result = await this.rpcService.call(
       'skillSynthesis:revertEnhancement',
-      { kind, slug, historyTs },
+      file === undefined
+        ? { kind, slug, historyTs }
+        : { kind, slug, historyTs, file },
       { timeout: SKILL_RPC_TIMEOUTS.PROMOTE_MS },
     );
     if (result.isSuccess() && result.data) {

@@ -16,9 +16,47 @@ import type {
   DivergedReason,
   LibraryProvenance,
 } from '../library-provenance';
-import type { PhaseKind } from '../phase-contract.types';
+import { PHASE_KINDS, type PhaseKind } from '../phase-contract.types';
 
 export type SkillCloneKind = 'skill' | 'agent' | 'command';
+
+/**
+ * A file inside a skill clone folder that the learning actions (enhance,
+ * snapshot body, revert) can address. `SKILL.md` is the default. A phase
+ * definition of the `orchestration` skill is `phases/<kind>.md`, with `<kind>`
+ * in {@link PHASE_KINDS}. No other value is accepted (U-D13 (1)).
+ */
+export const SKILL_CLONE_MAIN_FILE = 'SKILL.md' as const;
+export type SkillClonePhaseFile = `phases/${PhaseKind}.md`;
+export type SkillCloneFile = typeof SKILL_CLONE_MAIN_FILE | SkillClonePhaseFile;
+
+/** The phase file path of one phase kind. */
+export function skillClonePhaseFile(kind: PhaseKind): SkillClonePhaseFile {
+  return `phases/${kind}.md`;
+}
+
+/** Every accepted {@link SkillCloneFile} value, `SKILL.md` first. */
+export const SKILL_CLONE_FILES: readonly SkillCloneFile[] = [
+  SKILL_CLONE_MAIN_FILE,
+  ...PHASE_KINDS.map(skillClonePhaseFile),
+];
+
+/** Exact match against {@link SKILL_CLONE_FILES}. No normalization. */
+export function isSkillCloneFile(value: unknown): value is SkillCloneFile {
+  return (
+    typeof value === 'string' &&
+    (SKILL_CLONE_FILES as readonly string[]).includes(value)
+  );
+}
+
+/** The phase kind of a phase file, or `null` for `SKILL.md`. */
+export function phaseKindOfSkillCloneFile(
+  file: SkillCloneFile,
+): PhaseKind | null {
+  if (file === SKILL_CLONE_MAIN_FILE) return null;
+  const kind = file.slice('phases/'.length, -'.md'.length);
+  return PHASE_KINDS.find((k) => k === kind) ?? null;
+}
 export type SkillCloneStatus = 'clone' | 'authored' | 'synth' | 'diverged';
 
 export interface CloneSummary {
@@ -99,6 +137,12 @@ export interface SkillSynthesisGetCloneResult {
   clone: CloneSummary | null;
   body: string | null;
   history: SkillCloneHistoryEntry[];
+  /**
+   * Phase files present in the `phases/` folder of a skill clone, in
+   * {@link PHASE_KINDS} order. Empty for a skill with no `phases/` folder and
+   * for agents and commands. Absent on older hosts: treat as empty.
+   */
+  phaseFiles?: SkillClonePhaseFile[];
 }
 
 export interface SkillSynthesisEnhanceNowParams {
@@ -131,6 +175,8 @@ export interface SkillSynthesisEnhanceNowResult {
 export interface SkillSynthesisPreviewEnhancementParams {
   kind: SkillCloneKind;
   slug: string;
+  /** Kind `skill` only. Absent means `SKILL.md`. */
+  file?: SkillCloneFile;
 }
 export interface SkillSynthesisPreviewEnhancementResult {
   proposed: boolean;
@@ -171,6 +217,8 @@ export interface SkillSynthesisGetHistoryBodyParams {
   kind: SkillCloneKind;
   slug: string;
   ts: string;
+  /** Kind `skill` only. Absent means `SKILL.md`. */
+  file?: SkillCloneFile;
 }
 export interface SkillSynthesisGetHistoryBodyResult {
   body: string | null;
@@ -181,6 +229,12 @@ export interface SkillSynthesisRevertEnhancementParams {
   kind: SkillCloneKind;
   slug: string;
   historyTs: string;
+  /**
+   * Kind `skill` only. Absent or `SKILL.md` restores the whole folder (the
+   * old behavior). A phase file restores only that file from the folder
+   * snapshot.
+   */
+  file?: SkillCloneFile;
 }
 export interface SkillSynthesisRevertEnhancementResult {
   reverted: boolean;

@@ -45,6 +45,7 @@ import {
   type CloneSummary,
   type ScorecardInvocationRow,
   type SkillCloneHistoryEntry,
+  type SkillClonePhaseFile,
   type SkillCloneStatus,
 } from '@ptah-extension/shared';
 
@@ -53,6 +54,7 @@ import {
   formatAgentOutcomeSignals,
 } from './agent-outcome-signals';
 import { CloneBodyEditorComponent } from './clone-body-editor.component';
+import { ClonePhaseFilesComponent } from './clone-phase-files.component';
 import { LazyDiffViewComponent } from './lazy-diff-view.component';
 import { ScorecardBadgeComponent } from './scorecard-badge.component';
 import { ScorecardDetailComponent } from './scorecard-detail.component';
@@ -82,6 +84,17 @@ export interface CloneHistoryDiff {
 export interface CloneHistoryRequest {
   readonly clone: CloneSummary;
   readonly ts: string;
+  /**
+   * One phase file of a skill clone. Absent means the whole entry (the main
+   * body for a diff, the whole folder for a revert).
+   */
+  readonly file?: SkillClonePhaseFile;
+}
+
+/** An enhance request for one phase file of a skill clone. */
+export interface ClonePhaseFileRequest {
+  readonly clone: CloneSummary;
+  readonly file: SkillClonePhaseFile;
 }
 
 /**
@@ -132,6 +145,7 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
     CloneBodyEditorComponent,
     ProvenanceBadgeComponent,
     DivergedReasonComponent,
+    ClonePhaseFilesComponent,
   ],
   template: `
     <ptah-native-drawer
@@ -407,6 +421,30 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
             }
           </section>
 
+          @if (
+            m.clone.kind === 'skill' &&
+            !m.actions.retired &&
+            phaseFiles().length > 0
+          ) {
+            <ptah-clone-phase-files
+              [files]="phaseFiles()"
+              [history]="history()"
+              [busy]="busy()"
+              [enhanceEnabled]="
+                m.actions.enhance.enabled && enhanceBlockedReason() === null
+              "
+              [enhanceTitle]="
+                enhanceBlockedReason() ?? m.actions.enhance.reason ?? enhanceTitle
+              "
+              [revertEnabled]="m.actions.revert.enabled"
+              [revertTitle]="m.actions.revert.reason ?? ''"
+              (enhance)="phaseEnhance.emit({ clone: m.clone, file: $event })"
+              (revert)="
+                phaseRevert.emit({ clone: m.clone, ts: $event.ts, file: $event.file })
+              "
+            />
+          }
+
           <section class="space-y-2">
             <h3 class="text-xs font-medium text-base-content-muted">
               History
@@ -518,6 +556,8 @@ export class CloneDetailDrawerComponent {
   public readonly clone = input<CloneSummary | null>(null);
   public readonly body = input<string | null>(null);
   public readonly history = input<readonly SkillCloneHistoryEntry[]>([]);
+  /** Phase files of a skill clone that has a `phases/` folder. */
+  public readonly phaseFiles = input<readonly SkillClonePhaseFile[]>([]);
   public readonly detailLoading = input<boolean>(false);
   public readonly scorecard = input<AgentScorecard | null>(null);
   /**
@@ -563,6 +603,8 @@ export class CloneDetailDrawerComponent {
   public readonly historyDiffCleared = output<void>();
   /** The user pressed Save on the body editor. Cancel emits nothing. */
   public readonly bodySaved = output<CloneBodySaveRequest>();
+  public readonly phaseEnhance = output<ClonePhaseFileRequest>();
+  public readonly phaseRevert = output<CloneHistoryRequest>();
 
   private readonly injector = inject(Injector);
 

@@ -14,6 +14,7 @@ import { instanceCachingFactory, type DependencyContainer } from 'tsyringe';
 
 import {
   AttentionRpcHandlers,
+  UsageRpcHandlers,
   AgentOutcomeRpcHandlers,
   CapabilityMatrixRpcHandlers,
   AnalyticsRpcHandlers,
@@ -126,6 +127,7 @@ export function registerSharedRpcHandlers(
   );
   container.registerSingleton(SetupRpcHandlers);
   container.registerSingleton(AttentionRpcHandlers);
+  container.registerSingleton(UsageRpcHandlers);
   container.registerSingleton(WizardGenerationRpcHandlers);
   container.registerSingleton(EnhancedPromptsRpcHandlers);
   container.registerSingleton(LlmRpcHandlers);

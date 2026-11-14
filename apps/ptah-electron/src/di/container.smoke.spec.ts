@@ -798,6 +798,10 @@ describe('Electron DI — decision model config (TL-59)', () => {
     );
     expect(phase2.match(/registerLaneRoutingServices\(/g)).toHaveLength(1);
     expect(phase2).toContain('registerLaneRoutingServices(container, logger);');
+    expect(phase2.indexOf('LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER')).toBeLessThan(
+      phase2.indexOf('registerLaneRoutingServices(container, logger);'),
+    );
+    expect(phase2).toContain('SKILL_FILE_WRITER_TOKEN');
 
     const di = fs.readFileSync(path.join(__dirname, 'container.ts'), 'utf8');
     expect(di.indexOf('registerPhase2Libraries(root')).toBeLessThan(

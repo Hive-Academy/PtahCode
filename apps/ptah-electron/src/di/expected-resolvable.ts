@@ -20,7 +20,9 @@ import {
   DisplayWindowRpcHandlers,
   GitWindowRpcHandlers,
   ReviewRpcHandlers,
+  UsageRpcHandlers,
 } from '@ptah-extension/rpc-handlers';
+import { SKILL_FILE_WRITER_TOKEN } from '@ptah-extension/skill-synthesis';
 import { CHAT_TOKENS } from '@ptah-extension/rpc-handlers';
 import {
   SKILL_RECOMMENDATION_SERVICE,
@@ -58,6 +60,7 @@ export const EXPECTED_RESOLVABLE = [
   DisplayWindowRpcHandlers,
   GitWindowRpcHandlers,
   ReviewRpcHandlers,
+  UsageRpcHandlers,
 ] as const;
 
 /** Lib-owned tokens composed by Electron in addition to handler classes. */
@@ -66,6 +69,8 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ['SKILL_PROJECT_GUIDANCE_SERVICE', SKILL_PROJECT_GUIDANCE_SERVICE],
   ['SKILL_SELECTION_SERVICE', SKILL_SELECTION_SERVICE],
   ['SKILL_CONSENT_SERVICE', SKILL_CONSENT_SERVICE],
+  ['SKILL_FILE_WRITER_TOKEN', SKILL_FILE_WRITER_TOKEN],
+  ['PHASE_DEFINITION_READER', LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER],
   ['HOST_ROUTING_COORDINATOR', CHAT_TOKENS.HOST_ROUTING_COORDINATOR],
   ['SESSION_USAGE_SINK', PLATFORM_TOKENS.SESSION_USAGE_SINK],
   ['SESSION_DRIVER_LOCK', PLATFORM_TOKENS.SESSION_DRIVER_LOCK],

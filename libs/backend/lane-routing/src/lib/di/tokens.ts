@@ -16,6 +16,8 @@ export const LANE_ROUTING_TOKENS = {
   DECISION_MODEL_CATALOG: Symbol.for('LaneRoutingDecisionModelCatalog'),
   /** Optional port. Implemented outside this library. */
   LANE_MODEL_LISTING: Symbol.for('LaneRoutingLaneModelListing'),
+  /** Optional host reader for the active orchestration phase files. */
+  PHASE_DEFINITION_READER: Symbol.for('LaneRoutingPhaseDefinitionReader'),
   /** Optional port. Implemented outside this library. */
   STRUCTURED_DECISION: Symbol.for('LaneRoutingStructuredDecision'),
   /**

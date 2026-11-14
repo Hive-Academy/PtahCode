@@ -25,7 +25,10 @@ import {
 import {
   registerSkillSynthesisServices,
   SKILL_REPROPAGATION_TOKEN,
+  SKILL_FILE_WRITER_TOKEN,
+  type SkillFileWriterPort,
 } from '@ptah-extension/skill-synthesis';
+import { AGENT_GENERATION_TOKENS, type UserLayerMirrorService } from '@ptah-extension/agent-generation';
 import {
   registerTaskSpecsServices,
   startTaskSpecsIndex,
@@ -135,6 +138,9 @@ export function registerThothLibraries(
     // RPC handlers still require the shared registration, including its
     // Library stores, trigger, harvester, and foreground activity tracker.
     registerSkillSynthesisServices(container, logger);
+    container.register<SkillFileWriterPort>(SKILL_FILE_WRITER_TOKEN, {
+      useFactory: (c) => c.resolve<UserLayerMirrorService>(AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE),
+    });
     container.registerInstance(
       SKILL_REPROPAGATION_TOKEN,
       new CliSkillRepropagation(container),

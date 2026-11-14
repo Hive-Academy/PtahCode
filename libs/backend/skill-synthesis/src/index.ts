@@ -133,6 +133,14 @@ export {
   type SkillRepropagationKind,
 } from './lib/skill-repropagation.port';
 export {
+  SKILL_FILE_WRITER_TOKEN,
+  type SkillFileWriterPort,
+  type WriteSkillFileArgs,
+  type WriteSkillFileResult,
+  type RevertSkillFileArgs,
+  type RevertSkillFileResult,
+} from './lib/skill-file-writer.port';
+export {
   SPEC_FINDINGS_TOKEN,
   NoOpSpecFindings,
   type SpecFindingsPort,

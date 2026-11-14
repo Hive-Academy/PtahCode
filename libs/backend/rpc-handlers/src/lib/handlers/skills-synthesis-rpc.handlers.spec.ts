@@ -171,6 +171,8 @@ function makeEnhancer() {
       judgeReason: null,
       historyTs: null,
     }),
+    // U-D13 (1): `false` is a host without the phase-file write port.
+    supportsPhaseFileWrites: jest.fn().mockReturnValue(false),
   };
 }
 
@@ -541,6 +543,7 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       '1717848000000',
       'skill',
       { userInitiated: true },
+      'SKILL.md',
     );
     expect(result).toMatchObject({ reverted: true });
   });
@@ -565,6 +568,7 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       '1717848000000',
       'agent',
       { userInitiated: true },
+      'SKILL.md',
     );
   });
 
@@ -672,6 +676,135 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       false,
     );
     expect(result).toMatchObject({ sourceHash: 'sha256:ccc' });
+  });
+
+  describe('phase files and provider re-sync (U-D13 (1))', () => {
+    it('revertEnhancement restores one phase file when the host can write it', async () => {
+      const { rpcHandler, enhancer } = buildHandlers();
+      enhancer.supportsPhaseFileWrites.mockReturnValue(true);
+      enhancer.revert.mockResolvedValue({
+        reverted: true,
+        slug: 'deep-research',
+        revertedFrom: '1717848000000',
+        newHistoryTs: '1717848000001',
+      });
+
+      await rpcHandler.call('skillSynthesis:revertEnhancement', {
+        kind: 'skill',
+        slug: 'deep-research',
+        historyTs: '1717848000000',
+        file: 'phases/plan.md',
+      });
+
+      expect(enhancer.revert).toHaveBeenCalledWith(
+        'deep-research',
+        '1717848000000',
+        'skill',
+        { userInitiated: true },
+        'phases/plan.md',
+      );
+    });
+
+    it('revertEnhancement refuses a phase file without the write port', async () => {
+      const { rpcHandler, enhancer } = buildHandlers();
+      await expect(
+        rpcHandler.call('skillSynthesis:revertEnhancement', {
+          kind: 'skill',
+          slug: 'deep-research',
+          historyTs: '1717848000000',
+          file: 'phases/plan.md',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'PERSISTENCE_UNAVAILABLE' });
+      expect(enhancer.revert).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a file on kind agent', 'agent', 'phases/plan.md'],
+      ['a path escape', 'skill', '../SKILL.md'],
+      ['an unknown phase kind', 'skill', 'phases/unknown.md'],
+    ])('revertEnhancement refuses %s with INVALID_PARAMS', async (_label, kind, file) => {
+      const { rpcHandler, enhancer } = buildHandlers();
+      enhancer.supportsPhaseFileWrites.mockReturnValue(true);
+      await expect(
+        rpcHandler.call('skillSynthesis:revertEnhancement', {
+          kind,
+          slug: 'deep-research',
+          historyTs: '1717848000000',
+          file,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
+      expect(enhancer.revert).not.toHaveBeenCalled();
+    });
+
+    it('rebaseClone re-syncs the providers after a successful rebase', async () => {
+      const { rpcHandler, registry, mirror, repropagation } = buildHandlers();
+      registry.getBySlug.mockReturnValue(sampleRow);
+      mirror.rebaseClone.mockResolvedValue({
+        kind: 'skill',
+        slug: 'deep-research',
+        sourceHash: 'sha256:bbb',
+        snapshotPath: '/snap',
+        failed: false,
+      });
+
+      await rpcHandler.call('skillSynthesis:rebaseClone', {
+        kind: 'skill',
+        slug: 'deep-research',
+      });
+
+      expect(repropagation.repropagate).toHaveBeenCalledWith(
+        'skill',
+        'deep-research',
+        expect.any(String),
+        { userInitiated: true },
+      );
+    });
+
+    it('rebaseClone does not re-sync the providers after a failed rebase', async () => {
+      const { rpcHandler, registry, mirror, repropagation } = buildHandlers();
+      registry.getBySlug.mockReturnValue(sampleRow);
+      mirror.rebaseClone.mockResolvedValue({
+        kind: 'skill',
+        slug: 'deep-research',
+        sourceHash: 'sha256:aaa',
+        snapshotPath: '/snap',
+        failed: true,
+      });
+
+      await rpcHandler.call('skillSynthesis:rebaseClone', {
+        kind: 'skill',
+        slug: 'deep-research',
+      });
+
+      expect(repropagation.repropagate).not.toHaveBeenCalled();
+    });
+
+    it('keepClone re-syncs the providers, and a re-sync failure does not fail the keep', async () => {
+      const { rpcHandler, mirror, repropagation, logger } = buildHandlers();
+      mirror.keepClone.mockResolvedValue({
+        kind: 'skill',
+        slug: 'deep-research',
+        sourceHash: 'sha256:ccc',
+      });
+      repropagation.repropagate.mockRejectedValue(new Error('provider down'));
+
+      const result = await rpcHandler.call('skillSynthesis:keepClone', {
+        kind: 'skill',
+        slug: 'deep-research',
+      });
+
+      expect(repropagation.repropagate).toHaveBeenCalledWith(
+        'skill',
+        'deep-research',
+        expect.any(String),
+        { userInitiated: true },
+      );
+      expect(result).toMatchObject({ sourceHash: 'sha256:ccc' });
+      expect(logger.error).toHaveBeenCalledWith(
+        'RPC SkillsSynthesisRpcHandlers.resyncProviders failed',
+        expect.any(Error),
+      );
+    });
   });
 
   describe('saveCloneBody', () => {

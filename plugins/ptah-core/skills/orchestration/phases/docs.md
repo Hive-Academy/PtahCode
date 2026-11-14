@@ -1,11 +1,12 @@
 ---
-version: 1
+version: 2
 kind: docs
 input: [task brief, repository entry points, design system, design-spec.md when applicable]
 deliverable: [content-specification.md, claim verification, asset briefs]
 verdict: [content ready, claims unverified, design dependency]
 acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", orchestrator checks factual support and handoff completeness]
 requiredCapabilities: [read source evidence, write audience-specific content, verify claims]
+machineCapabilities: []
 toolProfile:
   disallowedTools: []
   permission: prompt

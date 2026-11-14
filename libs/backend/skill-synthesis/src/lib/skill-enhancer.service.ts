@@ -65,7 +65,21 @@ import {
   type SpecFindingsPort,
 } from './spec-findings.port';
 import type { SkillScorecardService } from './skill-scorecard.service';
-import type { AgentScorecard } from '@ptah-extension/shared';
+import {
+  SKILL_CLONE_MAIN_FILE,
+  phaseKindOfSkillCloneFile,
+  type AgentScorecard,
+  type SkillCloneFile,
+  type SkillClonePhaseFile,
+} from '@ptah-extension/shared';
+import {
+  PhaseDefinitionError,
+  resolvePhaseDefinition,
+} from '@ptah-extension/lane-routing';
+import {
+  SKILL_FILE_WRITER_TOKEN,
+  type SkillFileWriterPort,
+} from './skill-file-writer.port';
 /**
  * `generateCandidate`'s answer when the provider never answered, or a
  * background call was held by its open network back-off (TASK_2026_437 C14 f).
@@ -98,6 +112,11 @@ export interface EnhanceOptions extends QueryOrigin {
   /** Required for manual proposal generation. */
   readonly manual?: boolean;
   readonly kind?: SkillRegistryKind;
+  /**
+   * The file of a skill clone to improve. Kind `skill` only; absent means
+   * `SKILL.md`. A phase file is checked with `resolvePhaseDefinition`.
+   */
+  readonly file?: SkillCloneFile;
 }
 
 export type EnhanceSkipReason =
@@ -118,6 +137,10 @@ export type EnhanceSkipReason =
    * no write, no cooldown — the next pass retries.
    */
   | 'provider-unreachable'
+  /** A `file` other than `SKILL.md` was given for an agent or a command. */
+  | 'invalid-file'
+  /** This host has no write port for a phase file (`SKILL_FILE_WRITER_TOKEN`). */
+  | 'phase-write-unavailable'
   | 'error';
 
 export interface EnhanceResult {
@@ -146,6 +169,8 @@ export interface EnhancementProposal {
   readonly proposalId: string;
   readonly slug: string;
   readonly kind: SkillRegistryKind;
+  /** The clone file this proposal replaces. `SKILL.md` for a file kind. */
+  readonly file: SkillCloneFile;
   readonly currentBody: string;
   readonly proposedBody: string;
   readonly judgeScore: number | null;
@@ -163,6 +188,7 @@ export interface GenerateProposalResult {
   proposed: boolean;
   slug: string;
   kind: SkillRegistryKind;
+  file: SkillCloneFile;
   currentBody: string | null;
   proposedBody: string | null;
   judgeScore: number | null;
@@ -282,7 +308,19 @@ export class SkillEnhancerService {
      */
     @inject(PROVIDER_AUTH_RESOLVER_TOKEN, { isOptional: true })
     private readonly authResolver: ILaneAuthResolver | null = null,
+    /**
+     * Write port for one phase file of a skill clone. Optional and LAST, like
+     * the parameters above. Absent means a phase-file apply and a phase-file
+     * revert are refused (`phase-write-unavailable`).
+     */
+    @inject(SKILL_FILE_WRITER_TOKEN, { isOptional: true })
+    private readonly skillFileWriter: SkillFileWriterPort | null = null,
   ) {}
+
+  /** `true` when this host can write and revert one phase file. */
+  supportsPhaseFileWrites(): boolean {
+    return this.skillFileWriter !== null;
+  }
 
   /** Automatic enhancement is retired; callers retain this compatibility seam. */
   isEligible(
@@ -308,10 +346,12 @@ export class SkillEnhancerService {
     options: EnhanceOptions = {},
   ): Promise<GenerateProposalResult> {
     const kind: SkillRegistryKind = options.kind ?? 'skill';
+    const file: SkillCloneFile = options.file ?? SKILL_CLONE_MAIN_FILE;
     const base: GenerateProposalResult = {
       proposed: false,
       slug,
       kind,
+      file,
       currentBody: null,
       proposedBody: null,
       judgeScore: null,
@@ -320,6 +360,10 @@ export class SkillEnhancerService {
     };
 
     try {
+      if (kind !== 'skill' && file !== SKILL_CLONE_MAIN_FILE) {
+        return { ...base, skipReason: 'invalid-file' };
+      }
+      const phaseKind = phaseKindOfSkillCloneFile(file);
       if (!options.manual) return { ...base, skipReason: 'paused' };
       if (
         this.workspaceProvider.getConfiguration<boolean>(
@@ -333,7 +377,7 @@ export class SkillEnhancerService {
         return { ...base, skipReason: 'no-internal-query' };
       }
 
-      const bodyPath = this.resolveBodyPath(kind, slug);
+      const bodyPath = this.resolveBodyPath(kind, slug, file);
       const currentBody = await this.readBody(bodyPath);
       if (currentBody === null) {
         return { ...base, skipReason: 'missing-clone' };
@@ -365,6 +409,7 @@ export class SkillEnhancerService {
         // automatic pass must yield to it (C14).
         skillQueryLane(options),
         draftContext,
+        file,
       );
       if (candidateBody === PROVIDER_UNREACHABLE) {
         return { ...base, currentBody, skipReason: 'provider-unreachable' };
@@ -439,7 +484,11 @@ export class SkillEnhancerService {
         return { ...judged, skipReason: 'judge-rejected' };
       }
 
-      if (
+      if (phaseKind !== null) {
+        if (!this.isValidPhaseDefinition(slug, file, candidateBody)) {
+          return { ...judged, skipReason: 'invalid-candidate' };
+        }
+      } else if (
         this.requiresFrontmatter(kind) &&
         !this.hasValidFrontmatter(candidateBody)
       ) {
@@ -466,6 +515,7 @@ export class SkillEnhancerService {
         proposalId: randomUUID(),
         slug,
         kind,
+        file,
         currentBody,
         proposedBody: candidateBody,
         judgeScore: decision.score,
@@ -511,10 +561,34 @@ export class SkillEnhancerService {
     if (!proposalClearsJudge(proposal.judgeScore)) {
       return this.refusedApply(proposal, 'judge-rejected');
     }
+    const phaseFile = this.asPhaseFile(proposal.file);
+    if (phaseFile !== null) {
+      // A refused apply writes nothing: the old file stays and the cached
+      // proposal stays. The check runs again here because the cache is
+      // process memory and the contract is the gate for every phase write.
+      if (
+        !this.isValidPhaseDefinition(
+          proposal.slug,
+          phaseFile,
+          proposal.proposedBody,
+        )
+      ) {
+        return this.refusedApply(proposal, 'invalid-candidate');
+      }
+      if (!this.skillFileWriter) {
+        return this.refusedApply(proposal, 'phase-write-unavailable');
+      }
+    }
     this.takeProposal(kind, slug, proposalId);
 
-    const written: WriteEnhancedResult =
-      proposal.kind === 'skill'
+    const written: Pick<WriteEnhancedResult, 'historyTs' | 'currentContentHash'> =
+      phaseFile !== null && this.skillFileWriter
+        ? await this.skillFileWriter.writeEnhancedSkillFile({
+            slug: proposal.slug,
+            file: phaseFile,
+            newBody: proposal.proposedBody,
+          })
+        : proposal.kind === 'skill'
         ? await this.mirror.writeEnhancedSkill({
             slug: proposal.slug,
             newBody: proposal.proposedBody,
@@ -538,6 +612,7 @@ export class SkillEnhancerService {
     this.logger.info('[skill-enhancer] clone enhanced', {
       slug: proposal.slug,
       kind: proposal.kind,
+      file: proposal.file,
       judgeScore: proposal.judgeScore,
       judgeReason: proposal.judgeReason,
       historyTs: written.historyTs,
@@ -756,14 +831,43 @@ export class SkillEnhancerService {
     historyTs: string,
     kind: SkillRegistryKind = 'skill',
     origin: QueryOrigin = {},
+    file: SkillCloneFile = SKILL_CLONE_MAIN_FILE,
   ): Promise<RevertEnhancementResult> {
-    try {
-      const result = await this.mirror.revert({
-        kind,
+    const refused: RevertEnhancementResult = {
+      reverted: false,
+      slug,
+      revertedFrom: historyTs,
+      newHistoryTs: null,
+    };
+    if (kind !== 'skill' && file !== SKILL_CLONE_MAIN_FILE) {
+      this.logger.warn('[skill-enhancer] revert refused: file on a file kind', {
         slug,
-        historyTs,
-        workspaceRoot: this.resolveAgentScope(),
+        kind,
       });
+      return refused;
+    }
+    const phaseFile = this.asPhaseFile(file);
+    if (phaseFile !== null && !this.skillFileWriter) {
+      this.logger.warn('[skill-enhancer] revert refused: no phase-file writer', {
+        slug,
+        file: phaseFile,
+      });
+      return refused;
+    }
+    try {
+      const result =
+        phaseFile !== null && this.skillFileWriter
+          ? await this.skillFileWriter.revertSkillFile({
+              slug,
+              file: phaseFile,
+              historyTs,
+            })
+          : await this.mirror.revert({
+              kind,
+              slug,
+              historyTs,
+              workspaceRoot: this.resolveAgentScope(),
+            });
       if (result.restored) {
         this.registry.markEnhanced(kind, slug, Date.now());
         await this.repropagate(slug, kind, origin);
@@ -779,6 +883,7 @@ export class SkillEnhancerService {
         slug,
         kind,
         historyTs,
+        file,
         error: error instanceof Error ? error.message : String(error),
       });
       return {
@@ -812,11 +917,46 @@ export class SkillEnhancerService {
     }
   }
 
-  private resolveBodyPath(kind: SkillRegistryKind, slug: string): string {
+  private resolveBodyPath(
+    kind: SkillRegistryKind,
+    slug: string,
+    file: SkillCloneFile = SKILL_CLONE_MAIN_FILE,
+  ): string {
     const roots = this.mirror.getUserLayerRoots(this.resolveAgentScope());
-    if (kind === 'skill') return join(roots.skills, slug, 'SKILL.md');
+    // `file` is one of the fixed `SKILL_CLONE_FILES` values (no `..`, no
+    // absolute path), so the join stays inside the clone folder.
+    if (kind === 'skill') return join(roots.skills, slug, ...file.split('/'));
     if (kind === 'agent') return join(roots.agents, `${slug}.md`);
     return join(roots.commands, `${slug}.md`);
+  }
+
+  private asPhaseFile(file: SkillCloneFile): SkillClonePhaseFile | null {
+    return file === SKILL_CLONE_MAIN_FILE ? null : file;
+  }
+
+  /**
+   * The phase contract check of a new phase text. It uses the same resolver
+   * as the orchestration runtime, so an apply never writes a phase file that
+   * a phase dispatch refuses to read.
+   */
+  private isValidPhaseDefinition(
+    slug: string,
+    file: SkillCloneFile,
+    body: string,
+  ): boolean {
+    const phaseKind = phaseKindOfSkillCloneFile(file);
+    if (phaseKind === null) return true;
+    try {
+      resolvePhaseDefinition(phaseKind, () => body);
+      return true;
+    } catch (error: unknown) {
+      if (!(error instanceof PhaseDefinitionError)) throw error;
+      this.logger.warn(
+        '[skill-enhancer] phase candidate refused by the phase contract',
+        { slug, file, code: error.code },
+      );
+      return false;
+    }
   }
 
   private requiresFrontmatter(kind: SkillRegistryKind): boolean {
@@ -834,7 +974,9 @@ export class SkillEnhancerService {
       model?: string;
       evidence?: EnhancementDraft['evidence'];
     },
+    file: SkillCloneFile = SKILL_CLONE_MAIN_FILE,
   ): Promise<string | null | typeof PROVIDER_UNREACHABLE> {
+    const isPhaseFile = file !== SKILL_CLONE_MAIN_FILE;
     if (!this.internalQuery) return null;
     const backoff = this.networkBackoffs?.for(ACTIVE_PROVIDER_KEY) ?? null;
     // A background call waits out an open window; a user's call is never held.
@@ -909,8 +1051,9 @@ export class SkillEnhancerService {
       }
     }
 
-    const artifactLabel =
-      kind === 'agent'
+    const artifactLabel = isPhaseFile
+      ? 'phase definition'
+      : kind === 'agent'
         ? 'agent definition'
         : kind === 'command'
           ? 'command prompt'
@@ -918,9 +1061,11 @@ export class SkillEnhancerService {
     const promptLines = [
       `You are improving an existing AI ${artifactLabel} based on real usage signal.`,
       `Rewrite it to be clearer, more actionable, and more robust against the observed failures.`,
-      ...this.bestPracticeGuidance(kind),
+      ...(isPhaseFile
+        ? this.phaseBestPracticeGuidance()
+        : this.bestPracticeGuidance(kind)),
     ];
-    if (this.requiresFrontmatter(kind)) {
+    if (!isPhaseFile && this.requiresFrontmatter(kind)) {
       promptLines.push(
         `Preserve the YAML frontmatter (name, description) unless it is clearly wrong — and if you touch the description, make sure it still states WHEN to use this ${artifactLabel}.`,
       );
@@ -1003,6 +1148,15 @@ export class SkillEnhancerService {
    * prompt so rewrites converge on well-formed artifacts rather than just
    * "more text". Mirrors the synthesis-time skill-creator guidance.
    */
+  private phaseBestPracticeGuidance(): string[] {
+    return [
+      `Best practices for a phase definition (orchestration phases/<kind>.md):`,
+      `- Keep the YAML frontmatter keys and values exactly as they are, including kind. A strict parser validates them.`,
+      `- Keep every existing level-2 section heading, in the same order. Improve only the text under the headings.`,
+      `- Write short imperative steps. Do not add new top-level sections.`,
+    ];
+  }
+
   private bestPracticeGuidance(kind: SkillRegistryKind): string[] {
     if (kind === 'agent') {
       return [

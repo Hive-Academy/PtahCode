@@ -59,6 +59,14 @@ import {
 import { CliModelListService } from '../services/cli-model-list.service';
 import { CloneRebaseService } from './skill-synthesis/clone-rebase.service';
 import {
+  listSkillClonePhaseFiles,
+  resolveSkillCloneFilePath,
+} from './skill-synthesis/skill-clone-file-path';
+import {
+  SKILL_CLONE_MAIN_FILE,
+  type SkillCloneFile,
+} from '@ptah-extension/shared';
+import {
   assertNotBulkRoleRebase,
   assertRoleMutable,
 } from './skill-synthesis/retired-role-guard';
@@ -328,7 +336,13 @@ export class SkillsSynthesisRpcHandlers {
           await this.readOrphanFlag(mirror, kind, parsed.slug),
           origin,
         );
-        return { clone, body, history };
+        const phaseFiles =
+          kind === 'skill'
+            ? listSkillClonePhaseFiles(
+                join(mirror.getUserLayerRoots().skills, parsed.slug),
+              )
+            : [];
+        return { clone, body, history, phaseFiles };
       } catch (error: unknown) {
         if (error instanceof RpcUserError) throw error;
         this.report(error, 'SkillsSynthesisRpcHandlers.registerGetClone');
@@ -365,6 +379,15 @@ export class SkillsSynthesisRpcHandlers {
             'INVALID_PARAMS',
           );
         }
+        if (parsed.file !== undefined) {
+          this.assertSkillFileTarget(
+            parsed.slug,
+            parsed.file,
+            'skillSynthesis:previewEnhancement',
+          );
+          // A preview that can never apply costs a model call for nothing.
+          this.assertPhaseWritable(enhancer, parsed.file);
+        }
         // manual: a user-initiated preview, not the retired automatic pass.
         // The enhancer still enforces the 5-use floor, the 24-hour cooldown
         // and a scored judge verdict. `manual` does not bypass those gates.
@@ -374,6 +397,7 @@ export class SkillsSynthesisRpcHandlers {
           {
             manual: true,
             kind,
+            ...(parsed.file !== undefined ? { file: parsed.file } : {}),
             // Skips the background-work governor (C14, Batch 16b).
             userInitiated: true,
           },
@@ -471,11 +495,25 @@ export class SkillsSynthesisRpcHandlers {
           this.agentScope(),
         );
         const entry = entries.find((e) => e.ts === parsed.ts);
-        if (!entry || !entry.hasSkillMd) {
+        const file: SkillCloneFile = parsed.file ?? SKILL_CLONE_MAIN_FILE;
+        // `hasSkillMd` describes the main file only; a phase file is checked
+        // on disk below.
+        if (!entry || (file === SKILL_CLONE_MAIN_FILE && !entry.hasSkillMd)) {
           return { body: null, ts: parsed.ts };
         }
-        const fileName = kind === 'skill' ? 'SKILL.md' : `${parsed.slug}.md`;
-        const filePath = join(entry.path, fileName);
+        let filePath: string;
+        if (kind === 'skill') {
+          const resolved = resolveSkillCloneFilePath(entry.path, file);
+          if (resolved === null) {
+            throw new RpcUserError(
+              'Invalid parameters for skillSynthesis:getHistoryBody',
+              'INVALID_PARAMS',
+            );
+          }
+          filePath = resolved;
+        } else {
+          filePath = join(entry.path, `${parsed.slug}.md`);
+        }
         const roots = mirror.getUserLayerRoots(this.agentScope());
         const root =
           kind === 'skill'
@@ -511,12 +549,21 @@ export class SkillsSynthesisRpcHandlers {
       assertRoleMutable('revert', parsed.kind, parsed.slug);
       try {
         const enhancer = this.requireDesktop(this.enhancer);
+        if (parsed.file !== undefined) {
+          this.assertSkillFileTarget(
+            parsed.slug,
+            parsed.file,
+            'skillSynthesis:revertEnhancement',
+          );
+          this.assertPhaseWritable(enhancer, parsed.file);
+        }
         const result = await enhancer.revert(
           parsed.slug,
           parsed.historyTs,
           parsed.kind as SkillRegistryKind,
           // The harness refresh after the restore skips the governor (FU-17b).
           { userInitiated: true },
+          parsed.file ?? SKILL_CLONE_MAIN_FILE,
         );
         return {
           reverted: result.reverted,
@@ -572,6 +619,13 @@ export class SkillsSynthesisRpcHandlers {
             );
         }
         const result = outcome.result;
+        if (!result.failed) {
+          // Same provider re-sync as enhance and revert (U-D13 (1), gap 5).
+          await this.resyncProviders(
+            parsed.kind as SkillRegistryKind,
+            parsed.slug,
+          );
+        }
         return {
           kind: result.kind as SkillCloneKind,
           slug: result.slug,
@@ -610,6 +664,8 @@ export class SkillsSynthesisRpcHandlers {
         });
         registry.setDiverged(kind, parsed.slug, false);
         registry.setPending(kind, parsed.slug, null);
+        // Same provider re-sync as enhance and revert (U-D13 (1), gap 5).
+        await this.resyncProviders(kind, parsed.slug);
         return {
           kind: result.kind as SkillCloneKind,
           slug: result.slug,
@@ -1566,6 +1622,60 @@ export class SkillsSynthesisRpcHandlers {
       // degradation-audit: optional-capability - the clone body is optional
       // detail content; null renders the entry with no body preview.
       return null;
+    }
+  }
+
+  /**
+   * Second gate for a `file` argument (the Zod schema is the first): the file
+   * must resolve inside the user-layer clone folder of the skill.
+   */
+  private assertSkillFileTarget(
+    slug: string,
+    file: SkillCloneFile,
+    method: string,
+  ): void {
+    const mirror = this.requireDesktop(this.mirror);
+    const cloneDir = join(mirror.getUserLayerRoots().skills, slug);
+    if (resolveSkillCloneFilePath(cloneDir, file) === null) {
+      this.logger.warn(`[skill-synthesis] ${method} — file outside clone`, {
+        slug,
+        file,
+      });
+      throw new RpcUserError(`Invalid parameters for ${method}`, 'INVALID_PARAMS');
+    }
+  }
+
+  /** A phase file needs the host's phase-file write port. */
+  private assertPhaseWritable(
+    enhancer: SkillEnhancerService,
+    file: SkillCloneFile,
+  ): void {
+    if (file !== SKILL_CLONE_MAIN_FILE && !enhancer.supportsPhaseFileWrites()) {
+      throw new RpcUserError(
+        'This app version cannot change a phase file yet.',
+        'PERSISTENCE_UNAVAILABLE',
+      );
+    }
+  }
+
+  /**
+   * Provider re-sync after a rebase or a keep mine. The clone change is
+   * already committed, so a failure is logged and reported, not thrown.
+   */
+  private async resyncProviders(
+    kind: SkillRegistryKind,
+    slug: string,
+  ): Promise<void> {
+    if (!this.repropagation) return;
+    try {
+      await this.repropagation.repropagate(
+        kind,
+        slug,
+        this.workspaceRoot() ?? homedir(),
+        { userInitiated: true },
+      );
+    } catch (error: unknown) {
+      this.report(error, 'SkillsSynthesisRpcHandlers.resyncProviders');
     }
   }
 

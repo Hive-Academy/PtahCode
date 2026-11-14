@@ -1,11 +1,12 @@
 ---
-version: 1
+version: 2
 kind: tests
 input: [context.md, task-description.md, implementation-plan.md, batches.md, review findings, changed code]
 deliverable: [scoped test files, test-report.md or testing-infrastructure-escalation.md]
 verdict: [criteria proven, criteria unproven, observed pass or failure]
 acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", orchestrator checks the test report and scoped command evidence before accepting a batch]
 requiredCapabilities: [read project test configuration, write behavioral tests, run scoped checks]
+machineCapabilities: []
 toolProfile:
   disallowedTools: []
   permission: prompt

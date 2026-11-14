@@ -40,7 +40,7 @@ it('resolves a valid definition deterministically', () => {
 it.each([
   ['MISSING', (): string => ''],
   ['YAML_PARSE', (): string => '---\nfoo: [bad\n---\n' + body],
-  ['INVALID_SCHEMA', (): string => metadata.replace('version: 1', 'version: 2') + body],
+  ['INVALID_SCHEMA', (): string => metadata.replace('version: 1', 'version: 3') + body],
   ['KIND_MISMATCH', (): string => metadata.replace('kind: batch', 'kind: plan') + body],
   ['MISSING_SECTION', (): string => metadata + body.replace('## Method', '## Different')],
 ] as const)('fails closed with %s', (code, source) => {
@@ -96,8 +96,21 @@ it('rejects malformed handoffs and skills before spawn', () => {
   expect(() => parsePhaseDispatch({ ...payload, text: 'unrelated' })).toThrow(PhaseDefinitionError);
   expect(() => resolvePhaseDispatch('batch', () => metadata + body, [{ name: 'missing' }]))
     .toThrow(PhaseDefinitionError);
-  expect(() => resolvePhaseDispatch('batch', () => metadata.replace('version: 1', 'version: 2') + body))
+  expect(() => resolvePhaseDispatch('batch', () => metadata.replace('version: 1', 'version: 3') + body))
     .toThrow(PhaseDefinitionError);
+});
+
+it('reads version 1 as no machine requirements and version 2 with browser', () => {
+  expect(resolvePhaseDefinition('batch', () => metadata + body).definition.machineCapabilities).toEqual([]);
+  const oldDispatch = resolvePhaseDispatch('batch', () => metadata + body);
+  const { machineCapabilities, ...oldDefinition } = oldDispatch.definition;
+  expect(machineCapabilities).toEqual([]);
+  expect(parsePhaseDispatch({ ...oldDispatch, version: 1, definition: oldDefinition }).definition.machineCapabilities).toEqual([]);
+  const current = metadata.replace('version: 1', 'version: 2').replace('requiredCapabilities: [reasoning]', 'requiredCapabilities: [reasoning]\nmachineCapabilities: [browser]');
+  expect(resolvePhaseDefinition('batch', () => current + body).definition.machineCapabilities).toEqual(['browser']);
+  expect(resolvePhaseDispatch('batch', () => current + body).definition.machineCapabilities).toEqual(['browser']);
+  expect(() => resolvePhaseDefinition('batch', () => current.replace('browser', 'unknown') + body))
+    .toThrow(new PhaseDefinitionError('INVALID_SCHEMA', 'batch'));
 });
 
 it('keeps legacy phase resolution without a skill field', () => {

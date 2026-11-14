@@ -1,11 +1,12 @@
 ---
-version: 1
+version: 2
 kind: completion
 input: [context.md, task-description.md, parity-inventory.md, batches.md, scoped check reports, review reports, visual evidence]
 deliverable: [completion-report.md, Gate 3 readiness decision]
 verdict: [TASK COMPLETE, COMPLETION BLOCKED]
 acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", orchestrator presents Gate 3 only after parity, checks and reviews are evidenced]
 requiredCapabilities: [audit capability parity, trace write paths, assess gate evidence]
+machineCapabilities: []
 toolProfile:
   disallowedTools: []
   permission: prompt

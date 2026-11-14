@@ -1,11 +1,12 @@
 ---
-version: 1
+version: 2
 kind: architecture
 input: ["Task context and requirements", "Research, parity inventory and design handoff when applicable", "Repository source and rules"]
 deliverable: ["implementation-plan.md", "parity-inventory.md in inventory-only mode"]
 verdict: ["Design ready for decomposition", "Decision or evidence missing"]
 acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", "Verify cited contracts and component boundaries", "Obtain the applicable architecture gate decision"]
 requiredCapabilities: ["Source-backed architecture", "Dependency and failure tracing", "Inventory-only analysis"]
+machineCapabilities: []
 toolProfile:
   disallowedTools: []
   permission: prompt

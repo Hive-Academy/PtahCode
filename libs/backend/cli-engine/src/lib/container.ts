@@ -43,6 +43,7 @@ import {
   PLATFORM_TOKENS,
   isFileBasedSettingKey,
   ContentDownloadService,
+    resolvePtahHomeDir,
   migrateAgentBudgetSettings,
 } from '@ptah-extension/platform-core';
 import type {
@@ -53,6 +54,7 @@ import type {
   IWorkspaceProvider,
   IWorkspaceLifecycleProvider,
   IHostAttentionIngress,
+    IFileSystemProvider,
 } from '@ptah-extension/platform-core';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
 import type {
@@ -114,7 +116,7 @@ import {
   createContainerHarnessCliDetector,
 } from '@ptah-extension/cli-agent-runtime';
 import { registerCliCodexLaneFactory } from './codex-lane-runtime-composition';
-import { registerLaneRoutingServices } from '@ptah-extension/lane-routing';
+import { registerLaneRoutingServices, LANE_ROUTING_TOKENS, PhaseDefinitionFileReader } from '@ptah-extension/lane-routing';
 import { startCliLaneOutcomes, wireLaneOutcomes } from './lane-outcomes-wiring';
 import {
   registerAgentGenerationServices,
@@ -792,6 +794,13 @@ export class CliDIContainer {
     });
     // Before phase 4 registerVsCodeLmToolsServices and registerRpcSurface.
     // AgentRpcHandlers injects DECISION_MODEL_CONFIG.
+    container.register(LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER, {
+      useFactory: (c) => new PhaseDefinitionFileReader(
+        c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER),
+        path.join(resolvePtahHomeDir(), 'user', 'skills'),
+        c.resolve<ContentDownloadService>(PLATFORM_TOKENS.CONTENT_DOWNLOAD).getPluginsPath(),
+      ),
+    });
     registerLaneRoutingServices(container, logger);
     wireLaneOutcomes(container, logger);
     registerCliCodexLaneFactory(container, logger);

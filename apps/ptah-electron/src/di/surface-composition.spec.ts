@@ -11,6 +11,8 @@ import {
 } from '@ptah-extension/rpc-handlers';
 import { REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS } from '@ptah-extension/review-core';
 import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
+import { SKILL_FILE_WRITER_TOKEN } from '@ptah-extension/skill-synthesis';
+import { LANE_ROUTING_TOKENS } from '@ptah-extension/lane-routing';
 /**
  * Electron surface composition — lazy push host across a real registration
  * order, through the real production window getter (TASK_2026_538 Batch 14,
@@ -74,6 +76,8 @@ import { createElectronRpcHostProfile } from '../rpc-host-profile';
 import { registerArtifactNotification } from './phase-3-storage';
 
 it('includes the shared skill services in the Electron composition guard', () => {
+  expect(EXPECTED_RESOLVABLE_TOKENS.some(([, token]) => token === SKILL_FILE_WRITER_TOKEN)).toBe(true);
+  expect(EXPECTED_RESOLVABLE_TOKENS.some(([, token]) => token === LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER)).toBe(true);
   for (const token of [
     SKILL_RECOMMENDATION_SERVICE,
     SKILL_PROJECT_GUIDANCE_SERVICE,

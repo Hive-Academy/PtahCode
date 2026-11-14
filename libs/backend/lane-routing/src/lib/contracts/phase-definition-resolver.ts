@@ -1,18 +1,19 @@
 import matter from 'gray-matter';
 import { z } from 'zod';
 import { PhaseDispatchSchema, renderPhaseDiscipline } from '@ptah-extension/shared/schemas';
-import { PHASE_KINDS, PHASE_CONTRACT_VERSION, type PhaseDefinitionV1, type PhaseDispatchV1, type PhaseKind, type PhaseSkillV1 } from '@ptah-extension/shared';
+import { PHASE_KINDS, PHASE_CONTRACT_VERSION, MACHINE_CAPABILITIES, type PhaseDefinitionV1, type PhaseDispatchV1, type PhaseKind, type PhaseSkillV1 } from '@ptah-extension/shared';
 
 const MATTER_OPTIONS = { language: 'yaml' } as const;
 const list = z.array(z.string().trim().min(1)).min(1);
 const metadataSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(PHASE_CONTRACT_VERSION)]),
   kind: z.enum(PHASE_KINDS),
   input: list,
   deliverable: list,
   verdict: list,
   acceptanceStep: list,
   requiredCapabilities: list,
+  machineCapabilities: z.array(z.enum(MACHINE_CAPABILITIES)).default([]),
   toolProfile: z.object({
     disallowedTools: z.array(z.string().trim().min(1)),
     permission: z.enum(['allow', 'deny', 'prompt']),

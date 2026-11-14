@@ -25,6 +25,10 @@ import {
 } from './decision-model/system-one.client';
 import type { LaneModelListing } from './lane-model-listing.port';
 import type { LaneRoutingLogger } from './lane-routing-logger';
+import type { PhaseDefinitionReader } from './phase-definition-reader.port';
+import { PhaseDefinitionFileReader } from './phase-definition-file.reader';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { FAMILY_PROFILE_MODEL } from './matrix/matrix.types';
 import { EMPTY_OUTCOME_FIGURES } from './matrix/outcome-figures';
 import type { RouteMatrix } from './pipeline/gather';
@@ -203,6 +207,7 @@ function harness(options: {
   readonly matrix?: RouteMatrix;
   readonly logger?: LaneRoutingLogger;
   readonly tools?: RouteCandidateSource['tools'];
+  readonly phaseDefinitionReader?: PhaseDefinitionReader;
 }) {
   const calls: DecisionPayload[] = [];
   const seen: SystemOneClientOptions[] = [];
@@ -230,6 +235,7 @@ function harness(options: {
     matrix: options.matrix ?? neutralMatrix(),
     rotation,
     logger: options.logger ?? testLogger(),
+    ...(options.phaseDefinitionReader !== undefined ? { phaseDefinitionReader: options.phaseDefinitionReader } : {}),
     listing:
       options.listing ??
       listingOf(async () => [{ id: 'listed', provenance: 'reported' }]),
@@ -283,6 +289,54 @@ describe('gate phase policy roster', () => {
 
   it('reports missing browser capability when no candidate has one', async () => {
     const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [] });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'look', kind: 'visual-review' }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'unavailable', exclusionReason: 'missing-capability' });
+    expect(result.roster[0].reason).toContain('browser');
+  });
+
+  it('requires browser for design when the caller omits machine requirements', async () => {
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [] });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'draw', kind: 'design' }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'unavailable', exclusionReason: 'missing-capability' });
+    expect(result.roster[0].reason).toContain('browser');
+  });
+
+  it('honors an explicit empty machine list over the browser fallback', async () => {
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [] });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'draw', kind: 'design', requiredCapabilities: [] }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'chosen' });
+    expect(run.tools).not.toHaveBeenCalled();
+  });
+
+  it('names browser when an incapable visual-review candidate is pinned', async () => {
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [] });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'look', kind: 'visual-review' }], pins: [{ phaseId: 'look', executor: 'codex' }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'unavailable', exclusionReason: 'pin-unavailable', pinRule: 'missing-capability' });
+    expect(result.roster[0].reason).toContain('browser');
+  });
+
+  it('uses the active phase definition when the reader is registered', async () => {
+    const text = `---\nversion: 2\nkind: design\ninput: [brief]\ndeliverable: [design]\nverdict: [ready]\nacceptanceStep: [review]\nrequiredCapabilities: [design]\nmachineCapabilities: [browser]\ntoolProfile:\n  disallowedTools: []\n  permission: prompt\n---\n## Method\nDesign.\n## Output contract\nDocument.\n## Return value\nReturn.\n## Refusals\nRefuse.\n## Escalation protocol\nEscalate.\n`;
+    const reader = jest.fn(async () => text);
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [], phaseDefinitionReader: { read: reader } });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'draw', kind: 'design' }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'unavailable', exclusionReason: 'missing-capability' });
+    expect(reader).toHaveBeenCalledWith('design');
+    expect(run.tools).toHaveBeenCalled();
+  });
+
+  it('reads browser from the shipped visual-review phase during gate-0.1', async () => {
+    const reader = new PhaseDefinitionFileReader(
+      { exists: async () => false, readFile: (path) => readFile(path, 'utf8') },
+      join(process.cwd(), '.ptah', 'missing-user-skills'),
+      join(process.cwd(), 'plugins'),
+    );
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [], phaseDefinitionReader: reader });
     const result = await run.service.decide({ ...implement(), phases: [{ id: 'look', kind: 'visual-review' }] }, run.source);
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     expect(result.roster[0]).toMatchObject({ status: 'unavailable', exclusionReason: 'missing-capability' });

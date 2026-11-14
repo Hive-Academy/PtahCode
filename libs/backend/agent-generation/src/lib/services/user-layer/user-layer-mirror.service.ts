@@ -10,6 +10,7 @@ import {
   USER_LAYER_AGENTS_DIR_NAME,
   userLayerAgentDirName,
 } from '@ptah-extension/shared';
+import { writeSkillPhaseFile, revertSkillPhaseFile, type SkillPhaseFileOps, type SkillPhaseWriteArgs, type SkillPhaseRevertArgs } from './user-layer-skill-phase-writer';
 import type {
   OriginKind,
   OriginSidecar,
@@ -1142,6 +1143,28 @@ export class UserLayerMirrorService {
 
       return { slug: args.slug, historyTs, currentContentHash };
     });
+  }
+
+  async writeEnhancedSkillFile(args: SkillPhaseWriteArgs): Promise<{ slug: string; historyTs: string | null; currentContentHash: string }> {
+    return writeSkillPhaseFile(this.skillPhaseFileOps(), args);
+  }
+
+  async revertSkillFile(args: SkillPhaseRevertArgs): Promise<{ restored: boolean; revertedFrom: string; newHistoryTs: string | null }> {
+    return revertSkillPhaseFile(this.skillPhaseFileOps(), args);
+  }
+
+  private skillPhaseFileOps(): SkillPhaseFileOps {
+    return {
+      skillsRoot: () => this.getUserLayerRoots().skills,
+      withSlugLock: (slug, work) => this.withSlugLock('skill', slug, work),
+      assertUnderUserLayer: (path) => this.assertUnderUserLayer(path),
+      dirExists: (path) => this.dirExists(path),
+      fileExists: (path) => this.fileExists(path),
+      snapshotDirToHistory: (path) => this.snapshotDirToHistory(path),
+      writeTextAtomic: (path, text) => this.writeTextAtomic(path, text),
+      copyFileAtomic: (source, target) => this.copyFileAtomic(source, target),
+      refreshSidecar: (dir, slug, hash) => this.refreshEnhancedSidecarDir(dir, slug, hash),
+    };
   }
 
   async writeEnhancedFileClone(

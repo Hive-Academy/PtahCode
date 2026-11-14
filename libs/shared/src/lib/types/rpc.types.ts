@@ -44,6 +44,29 @@ export interface SkillConsentRecord {
   consentDate: string;
 }
 
+/** One usage row of a session, grouped by a single dimension value. */
+export interface UsageDimensionTotalRow {
+  dimension: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  /** Micro-USD sum of the priced turns. Null when no turn has a price. */
+  known_cost_micro_usd: number | null;
+  /** 1 when at least one turn of the row has no price. */
+  has_unpriced: number;
+}
+
+export interface UsageGetDimensionTotalsParams {
+  sessionId: string;
+}
+
+/** The two views are separate so tokens are never counted twice. */
+export interface UsageGetDimensionTotalsResult {
+  byPhaseKind: UsageDimensionTotalRow[];
+  byExecutorType: UsageDimensionTotalRow[];
+}
+
 export interface WizardRecommendSkillsParams {
   analysis: DeepProjectAnalysis;
 }
@@ -1219,6 +1242,10 @@ export interface RpcMethodRegistry
   'analytics:spendSummary': {
     params: UsageSummaryParams;
     result: UsageSummary;
+  };
+  'usage:getDimensionTotals': {
+    params: UsageGetDimensionTotalsParams;
+    result: UsageGetDimensionTotalsResult;
   };
   'attention:getSnapshot': {
     params: AttentionGetSnapshotParams;
@@ -3733,6 +3760,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'gitWindow:getScope': true,
   'gitWindow:setMode': true,
   'analytics:spendSummary': true,
+  'usage:getDimensionTotals': true,
   'attention:getSnapshot': true,
   'chat:start': true,
   'chat:continue': true,

@@ -11,7 +11,7 @@
  */
 
 import { instanceCachingFactory, type DependencyContainer } from 'tsyringe';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { resolveReviewRootsForPath } from '../services/review/resolve-review-roots-for-path';
 import { registerElectronCodexReadinessAndLogin } from './codex-login-composition';
 import { registerTaskEndHookComposition } from './task-end-hook-composition';
@@ -25,6 +25,8 @@ import {
 } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
+  resolvePtahHomeDir,
+  type IFileSystemProvider,
   type ContentDownloadService,
   type IProcessSpawner,
   type IWorkspaceProvider,
@@ -84,6 +86,7 @@ import {
 } from '@ptah-extension/cli-agent-runtime';
 import {
   LANE_ROUTING_TOKENS,
+  PhaseDefinitionFileReader,
   registerLaneRoutingServices,
 } from '@ptah-extension/lane-routing';
 import {
@@ -93,6 +96,7 @@ import {
 import {
   registerAgentGenerationServices,
   AGENT_GENERATION_TOKENS,
+  type UserLayerMirrorService,
 } from '@ptah-extension/agent-generation';
 import {
   registerPersistenceSqliteServices,
@@ -118,6 +122,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   registerSkillSynthesisServices,
+  SKILL_FILE_WRITER_TOKEN,
+  type SkillFileWriterPort,
   SKILL_REPROPAGATION_TOKEN,
 } from '@ptah-extension/skill-synthesis';
 import {
@@ -329,6 +335,13 @@ export function registerPhase2Libraries(
   registerCuratorAuthServices(container, logger);
   // Before phase 3 registerVsCodeLmToolsServices and wire-runtime
   // registerRpcSurface. AgentRpcHandlers injects DECISION_MODEL_CONFIG.
+  container.register(LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER, {
+    useFactory: (c) => new PhaseDefinitionFileReader(
+      c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER),
+      join(resolvePtahHomeDir(), 'user', 'skills'),
+      c.resolve<ContentDownloadService>(PLATFORM_TOKENS.CONTENT_DOWNLOAD).getPluginsPath(),
+    ),
+  });
   registerLaneRoutingServices(container, logger);
   registerLaneOutcomeServices(container, logger);
   container.register(LANE_ROUTING_TOKENS.LANE_OUTCOME_READER, {
@@ -622,6 +635,9 @@ export function registerPhase2Libraries(
   });
   // Register the skill trigger and telemetry seam for library RPC handlers.
   registerSkillSynthesisServices(container, logger);
+  container.register<SkillFileWriterPort>(SKILL_FILE_WRITER_TOKEN, {
+    useFactory: (c) => c.resolve<UserLayerMirrorService>(AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE),
+  });
   registerTaskSpecsServices(container, logger);
   // Task-end hook (TASK_2026_886): binds the seven host ports, then the
   // library. Only with the SQLite block's connection: the run store and its

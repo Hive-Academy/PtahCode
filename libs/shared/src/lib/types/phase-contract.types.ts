@@ -1,4 +1,6 @@
-export const PHASE_CONTRACT_VERSION = 1 as const;
+export const PHASE_CONTRACT_VERSION = 2 as const;
+export const MACHINE_CAPABILITIES = ['browser'] as const;
+export type MachineCapability = (typeof MACHINE_CAPABILITIES)[number];
 
 export const PHASE_KINDS = [
   'plan',
@@ -18,13 +20,14 @@ export const PHASE_KINDS = [
 export type PhaseKind = (typeof PHASE_KINDS)[number];
 
 export interface PhaseDefinitionV1 {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly kind: PhaseKind;
   readonly input: readonly string[];
   readonly deliverable: readonly string[];
   readonly verdict: readonly string[];
   readonly acceptanceStep: readonly string[];
   readonly requiredCapabilities: readonly string[];
+  readonly machineCapabilities: readonly MachineCapability[];
   readonly toolProfile: {
     readonly disallowedTools: readonly string[];
     readonly permission: 'allow' | 'deny' | 'prompt';
@@ -57,7 +60,7 @@ export interface ToolProfileAdapterResultV1 {
 
 /** Versioned handoff from phase resolution to an executor. */
 export interface PhaseDispatchV1 {
-  readonly version: typeof PHASE_CONTRACT_VERSION;
+  readonly version: 1 | typeof PHASE_CONTRACT_VERSION;
   readonly kind: PhaseKind;
   readonly text: string;
   readonly definition: PhaseDefinitionV1;
