@@ -92,13 +92,13 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
               <table class="table table-xs min-w-[780px]" data-testid="capability-matrix-table">
                 <thead>
                   <tr>
-                    <th scope="col" class="sticky left-0 bg-base-100 px-[var(--ptah-surface-pad)] py-[var(--ptah-space-2)]">Model</th>
-                    @for (kind of tasks; track kind) { <th scope="col" class="capitalize px-[var(--ptah-surface-pad)] py-[var(--ptah-space-2)]">{{ kind }}</th> }
+                    <th scope="col" class="sticky left-0 bg-base-100 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]">Model</th>
+                    @for (kind of tasks; track kind) { <th scope="col" class="capitalize px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]">{{ kind }}</th> }
                   </tr>
                 </thead>
                 @for (family of families(); track family) {
                   <tbody [id]="'family-' + family">
-                    <tr><th scope="rowgroup" colspan="7" class="bg-base-content/5 px-[var(--ptah-surface-pad)] py-[var(--ptah-space-2)]">
+                    <tr><th scope="rowgroup" colspan="7" class="bg-base-content/5 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]">
                       <button type="button" [class]="'flex min-h-8 items-center gap-2 rounded text-sm font-semibold ' + focusRing" [attr.aria-expanded]="expanded().has(family)" [attr.aria-controls]="'family-' + family" [title]="family" (click)="toggleFamily(family)">
                         <span aria-hidden="true" class="inline-block w-3 transition-transform" [class.rotate-90]="expanded().has(family)">›</span>
                         <span>{{ names.executor(family).text }}</span>
@@ -111,13 +111,13 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
                     @if (expanded().has(family)) {
                       @for (profile of familyProfiles(family); track profile.model) {
                         <tr>
-                          <th scope="row" class="sticky left-0 bg-base-100 px-[var(--ptah-surface-pad)] py-[var(--ptah-space-2)] [overflow-wrap:anywhere]">
+                          <th scope="row" class="sticky left-0 bg-base-100 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)] [overflow-wrap:anywhere]">
                             {{ names.model(profile.model).text }}
                             @if (names.model(profile.model).raw; as raw) { <span class="sr-only">Raw model ID {{ raw }}</span> }
                           </th>
                           @for (kind of tasks; track kind) {
                             @let cell = profile.cells[kind];
-                            <td class="min-w-24 px-[var(--ptah-surface-pad)] py-[var(--ptah-space-2)]" [attr.data-testid]="'matrix-row-' + family + '-' + profile.model + '-' + kind">
+                            <td class="min-w-24 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]" [attr.data-testid]="'matrix-row-' + family + '-' + profile.model + '-' + kind">
                               @if (cell.kind === 'unknown') { <span class="text-base-content-muted">— Unrated</span> }
                               @else {
                                 <span class="font-semibold">{{ cell.score }}/100</span>
