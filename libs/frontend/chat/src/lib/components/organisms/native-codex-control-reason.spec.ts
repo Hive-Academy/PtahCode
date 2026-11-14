@@ -1,5 +1,20 @@
 import type { SubagentRecord } from '@ptah-extension/chat-streaming';
-import { isNativeCodexAgent } from './native-codex-control-reason';
+import { isNativeCodexAgent, withoutNativeCodexAgents } from './native-codex-control-reason';
+
+describe('withoutNativeCodexAgents', () => {
+  const monitor = new Map<string, SubagentRecord>([
+    ['native-card', { parentToolUseId: 'native-card', agentType: 'codex', status: 'interrupted', nativeCycleId: 'thread-1:1', nativeCycleOrdinal: 1 }],
+    ['claude-task', { parentToolUseId: 'claude-task', agentType: 'Explore', status: 'interrupted', taskId: 'task-1' }],
+  ]);
+
+  it('never offers a native Codex child for resume and keeps Claude subagents', () => {
+    const resumable = [{ toolCallId: 'native-card' }, { toolCallId: 'claude-task' }, { toolCallId: 'unknown' }];
+    expect(withoutNativeCodexAgents(resumable, (id) => monitor.get(id))).toEqual([
+      { toolCallId: 'claude-task' },
+      { toolCallId: 'unknown' },
+    ]);
+  });
+});
 
 describe('isNativeCodexAgent', () => {
   const record: SubagentRecord = {

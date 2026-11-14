@@ -261,6 +261,8 @@ function makeHarness(
 
   // Interrupted subagents the "N interrupted agents — Resume" banner reads.
   const resumableSubagentsSig = signal<SubagentRecord[]>([]);
+  // Monitor records keyed by card tool call id (native Codex filter, D15).
+  const monitorSubagentsSig = signal(new Map<string, SubagentRecord>());
   const switchSessionMock = jest.fn().mockResolvedValue(undefined);
   const sendOrQueueMessageMock = jest.fn().mockResolvedValue({ success: true });
   const removeResumableSubagentMock = jest.fn();
@@ -489,6 +491,7 @@ function makeHarness(
       ReturnType<AgentMonitorStore['pendingHistoryCandidates']>
     >([]).asReadonly(),
     agents: agentsSig.asReadonly(),
+    subagents: monitorSubagentsSig.asReadonly(),
     agentsForSession: agentsForSessionMock,
     // Exact-parent rule of the real store: an unresolved parent matches none.
     agentsOwnedBySession: (sessionId: string): MonitoredAgent[] =>
@@ -832,6 +835,7 @@ function makeHarness(
     sessionFocusedSig,
     forcedCardSig,
     resumableSubagentsSig,
+    monitorSubagentsSig,
     isCompactingForTabMock,
     replayingTabIds,
     isReplayingMock,
@@ -2626,6 +2630,25 @@ describe('ChatViewComponent — resolvedResumableSubagents() scoping', () => {
       parentSessionId,
     } as SubagentRecord;
   }
+
+  it('never offers a native Codex child for resume and keeps a Claude subagent', () => {
+    const h = makeHarness();
+    h.monitorSubagentsSig.set(
+      new Map([
+        ['toolu_native', { parentToolUseId: 'toolu_native', agentType: 'codex', status: 'interrupted', nativeCycleId: 'thread-1:1', nativeCycleOrdinal: 1 } as SubagentRecord],
+        ['toolu_claude', { parentToolUseId: 'toolu_claude', agentType: 'Explore', status: 'interrupted', taskId: 'task-1' } as SubagentRecord],
+      ]),
+    );
+    // Backend records carry the card id as toolCallId.
+    h.resumableSubagentsSig.set([
+      { ...subagent('toolu_native', h.sessionId), toolCallId: 'toolu_native' },
+      { ...subagent('toolu_claude', h.sessionId), toolCallId: 'toolu_claude' },
+    ] as SubagentRecord[]);
+
+    expect(
+      h.component.resolvedResumableSubagents().map((s) => s.parentToolUseId),
+    ).toEqual(['toolu_claude']);
+  });
 
   it('keeps an ownerless interrupted subagent out of a session view', () => {
     const h = makeHarness({ sessionContextTabId: 'tab-abc' });

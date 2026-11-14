@@ -258,6 +258,7 @@ export async function readCodexSessionHistory(
     } catch (error) {
       assertOpen();
       recordFailure(error, { threadId: childId });
+      if (error instanceof CodexSessionHistoryError && error.code === 'processFailure') break;
     }
   }
   const selected = new Map([[root.id, root]]);
@@ -281,6 +282,7 @@ export async function readCodexSessionHistory(
     } catch (error) {
       assertOpen();
       recordFailure(error, { threadId: listedThread.id });
+      if (error instanceof CodexSessionHistoryError && error.code === 'processFailure') break;
     }
   }
   if (failures.length > 0)

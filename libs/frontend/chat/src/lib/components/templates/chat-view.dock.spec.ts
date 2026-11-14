@@ -358,6 +358,7 @@ function mount(
             ReturnType<AgentMonitorStore['pendingHistoryCandidates']>
           >([]).asReadonly(),
           agents: agents.asReadonly(),
+          subagents: signal(new Map()).asReadonly(),
           agentsForSession: (): MonitoredAgent[] => agents(),
           agentsOwnedBySession: (sid: string): MonitoredAgent[] =>
             agents().filter((agent) => agent.parentSessionId === sid),
