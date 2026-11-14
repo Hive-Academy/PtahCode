@@ -1,5 +1,6 @@
 import matter from 'gray-matter';
 import { z } from 'zod';
+import { PhaseDispatchSchema, renderPhaseDiscipline } from '@ptah-extension/shared/schemas';
 import { PHASE_KINDS, PHASE_CONTRACT_VERSION, type PhaseDefinitionV1, type PhaseDispatchV1, type PhaseKind, type PhaseSkillV1 } from '@ptah-extension/shared';
 
 const MATTER_OPTIONS = { language: 'yaml' } as const;
@@ -17,34 +18,6 @@ const metadataSchema = z.object({
     permission: z.enum(['allow', 'deny', 'prompt']),
   }).strict(),
 }).strict();
-
-const skillSchema = z.object({
-  name: z.string().trim().min(1),
-  path: z.string().trim().min(1).optional(),
-  text: z.string().trim().min(1).optional(),
-}).strict().refine(skill => skill.path !== undefined || skill.text !== undefined);
-
-const dispatchSchema = z.object({
-  version: z.literal(PHASE_CONTRACT_VERSION),
-  kind: z.enum(PHASE_KINDS),
-  text: z.string().trim().min(1),
-  definition: metadataSchema.extend({ discipline: z.object({
-    method: z.string().trim().min(1),
-    outputContract: z.string().trim().min(1),
-    returnValue: z.string().trim().min(1),
-    refusals: z.string().trim().min(1),
-    escalationProtocol: z.string().trim().min(1),
-    reviewerStance: z.string().trim().min(1).optional(),
-  }).strict() }),
-  toolProfile: metadataSchema.shape.toolProfile,
-  skills: z.array(skillSchema).optional(),
-}).strict().superRefine((payload, ctx) => {
-  if (payload.kind !== payload.definition.kind ||
-      JSON.stringify(payload.toolProfile) !== JSON.stringify(payload.definition.toolProfile) ||
-      payload.text !== renderDiscipline(payload.definition.discipline)) {
-    ctx.addIssue({ code: 'custom', message: 'dispatch metadata mismatch' });
-  }
-});
 
 const headings = [
   ['Method', 'method'],
@@ -134,18 +107,16 @@ export function resolvePhaseDefinition(
 }
 
 function renderDiscipline(discipline: PhaseDefinitionV1['discipline']): string {
-  return headings
-    .filter(([heading]) => heading !== 'Reviewer stance' || discipline.reviewerStance)
-    .map(([heading, key]) => `## ${heading}\n${discipline[key]}`)
-    .join('\n\n');
+  return renderPhaseDiscipline(discipline);
 }
 
 /** Validate a handoff before any executor is started. */
 export function parsePhaseDispatch(payload: unknown): PhaseDispatchV1 {
-  const result = dispatchSchema.safeParse(payload);
+  const result = PhaseDispatchSchema.safeParse(payload);
   if (!result.success) {
-    const kind = typeof payload === 'object' && payload !== null && 'kind' in payload &&
-      PHASE_KINDS.includes(payload.kind as PhaseKind) ? payload.kind as PhaseKind : 'batch';
+    const rawKind = typeof payload === 'object' && payload !== null && 'kind' in payload
+      ? payload.kind : undefined;
+    const kind = z.enum(PHASE_KINDS).safeParse(rawKind).data ?? 'batch';
     throw new PhaseDefinitionError('INVALID_SCHEMA', kind);
   }
   return result.data;

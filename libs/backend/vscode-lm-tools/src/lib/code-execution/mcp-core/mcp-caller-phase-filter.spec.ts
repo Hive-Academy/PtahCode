@@ -47,6 +47,7 @@ describe('mcp caller phase filter', () => {
       true,
     );
     expect(isPhaseToolDenied('execute_code', binding(['ptah_task_create']))).toBe(true);
+    expect(isPhaseToolDenied('execute_code', binding(['Read']))).toBe(true);
     expect(
       isPhaseToolDenied('ptah_browser_screenshot', binding(['ptah_task_create'])),
     ).toBe(false);

@@ -3,12 +3,13 @@
  * started (TASK_2026_584).
  *
  * One instance per host, lifetime = process. Records are plain serialisable
- * objects so TASK_2026_580 can persist them without a shape change; nothing
- * here touches SQLite or the filesystem.
+ * objects so TASK_2026_580 can persist them without a shape change. Path
+ * lookups resolve existing filesystem aliases before comparing records.
  *
  * Records are never mutated in place: every change replaces the record, so a
  * caller holding an older reference never observes a half-applied update.
  */
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { injectable } from 'tsyringe';
 import type { PhaseKind } from '@ptah-extension/shared';
@@ -42,6 +43,8 @@ export interface SessionChildRecord extends Omit<
   readonly phaseKind?: PhaseKind;
   /** Phase tool denials from start. Kept off the public snapshot. */
   readonly phaseDisallowedTools?: readonly string[];
+  /** SDK start confirmed that its query options contain phase denials. */
+  readonly toolProfileApplied?: boolean;
   /** Set once by {@link SessionChildRegistry.markEnded}; never cleared. */
   readonly terminalStatus?: SessionChildTerminalStatus;
   /**
@@ -94,7 +97,14 @@ function trimTrailingSeparators(path: string): string {
 
 /** Path key for cwd lookups: resolved, no trailing separator, case-folded on Windows. */
 function pathKey(path: string): string {
-  const resolved = trimTrailingSeparators(resolve(path));
+  let resolved = resolve(path);
+  try {
+    resolved = realpathSync(resolved);
+  } catch {
+    // degradation-audit: optional-capability - a pending or removed worktree
+    // may not exist yet; its lexical path still supports registry lookups.
+  }
+  resolved = trimTrailingSeparators(resolved);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
@@ -241,17 +251,20 @@ export class SessionChildRegistry {
     return tabId ? this.records.get(tabId) : undefined;
   }
 
-  /** Attach is admitted only against an existing registered task and path. */
+  /** Attach is admitted only against a registered task, canonical path and owner. */
   findAttachTarget(
     id: string,
     taskId: string,
     branch: string,
     worktreePath: string,
+    callerIds: readonly (string | undefined)[],
   ): SessionChildRecord | undefined {
     const record = this.get(id);
     return record &&
       record.taskId === taskId &&
       record.branch === branch &&
+      (callerIds.includes(record.parentSessionId) ||
+        (!!record.parentSdkSessionId && callerIds.includes(record.parentSdkSessionId))) &&
       pathKey(record.worktreePath) === pathKey(worktreePath)
       ? record
       : undefined;
@@ -269,9 +282,8 @@ export class SessionChildRegistry {
     for (const record of this.records.values()) {
       if (pathKey(record.worktreePath) !== key) continue;
       if (!record.terminalStatus) {
-        // A shared cwd cannot identify which live session emitted an event.
-        if (live) return undefined;
-        live = record;
+        // The first live record owns the worktree when several sessions share it.
+        live ??= record;
         continue;
       }
       ended = record;

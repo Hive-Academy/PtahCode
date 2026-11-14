@@ -16,7 +16,7 @@ import type { GatheredCall } from './gather';
 import type { ModelRequestOutcome } from './model-refine';
 import { usageOf, type UsageTally } from './preflight-answer';
 import type { RoutingCandidate } from '../ranking/candidate.types';
-import type { PhaseConstraintResult } from '../ranking/hard-constraints';
+import type { PhaseConstraintResult, UnavailablePhase } from '../ranking/hard-constraints';
 import type { SpreadResult } from '../ranking/spread';
 import {
   compileGateReasons,
@@ -306,6 +306,13 @@ function reasonAt(
   return reason;
 }
 
+export function missingCapabilityLabel(constraint: UnavailablePhase): string {
+  return constraint.excluded.find(item => item.capability)?.capability
+    ?? constraint.pinRule
+    ?? constraint.exclusionReason
+    ?? 'capability-unknown';
+}
+
 function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
   if (plan.constraint.status !== 'unavailable') {
     throw new Error(`phase ${plan.phaseId} constraint is not unavailable`);
@@ -334,7 +341,7 @@ function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
       : plan.constraint.exclusionReason === 'missing-capability' ||
           plan.constraint.pinRule === 'missing-capability' ||
           plan.constraint.pinRule === 'capability-unknown'
-        ? `${reason}; missing capability: ${plan.constraint.excluded.find(item => item.capability)?.capability ?? 'browser'}`
+        ? `${reason}; missing capability: ${missingCapabilityLabel(plan.constraint)}`
         : reason,
   };
 }

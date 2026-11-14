@@ -44,6 +44,7 @@ import type {
   SessionId,
   SessionStatsEntry,
   SessionStatsLivePayload,
+  PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import {
   createMockLogger,
@@ -1793,6 +1794,53 @@ describe('SdkAgentAdapter', () => {
   });
 
   describe('SdkAgentAdapter.startChatSession (mcpServersOverride threading)', () => {
+    it('passes a phase to the SDK and records child usage as a session', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      const queryResult = {
+        sdkQuery: createFakeQuery(),
+        initialModel: 'claude-sonnet-4-20250514',
+        abortController: new AbortController(),
+      } as ExecuteQueryResult;
+      h.sessionLifecycle.executeQuery.mockResolvedValueOnce(queryResult).mockResolvedValueOnce(queryResult);
+      const toolProfile = { disallowedTools: ['Bash'], permission: 'allow' as const };
+      const phase: PhaseDispatchV1 = {
+        version: 1,
+        kind: 'implement',
+        text: 'Implement the change',
+        definition: {
+          version: 1,
+          kind: 'implement',
+          input: [], deliverable: [], verdict: [], acceptanceStep: [], requiredCapabilities: [],
+          toolProfile,
+          discipline: {
+            method: '', outputContract: '', returnValue: '', refusals: '', escalationProtocol: '',
+          },
+        },
+        toolProfile,
+      };
+      const beginRun = jest.spyOn(h.statsOwner, 'beginRun');
+      await h.adapter.startChatSession({ ...makeSessionConfig(), phase });
+      expect(h.sessionLifecycle.executeQuery.mock.calls[0][0].phase).toBe(phase);
+      expect(beginRun.mock.calls[0][4]).toEqual({ phaseKind: 'implement', executorType: 'session' });
+      await h.adapter.resumeSession('tab_1' as SessionId, makeSessionConfig());
+      expect(h.sessionLifecycle.executeQuery.mock.calls[1][0].phase).toBe(phase);
+      expect(beginRun.mock.calls[1][4]).toEqual({ phaseKind: 'implement', executorType: 'session' });
+    });
+
+    it('records an ordinary session without a phase kind', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.sessionLifecycle.executeQuery.mockResolvedValueOnce({
+        sdkQuery: createFakeQuery(),
+        initialModel: 'claude-sonnet-4-20250514',
+        abortController: new AbortController(),
+      } as ExecuteQueryResult);
+      const beginRun = jest.spyOn(h.statsOwner, 'beginRun');
+      await h.adapter.startChatSession(makeSessionConfig());
+      expect(beginRun.mock.calls[0][4]).toEqual({ phaseKind: undefined, executorType: 'session' });
+    });
+
     it('forwards mcpServersOverride to sessionLifecycle.executeQuery', async () => {
       const h = makeAdapter();
       await h.adapter.initialize();

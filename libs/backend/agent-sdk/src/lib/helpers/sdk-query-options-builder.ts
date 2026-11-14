@@ -14,19 +14,18 @@
 
 import { injectable, inject } from 'tsyringe';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
-import { resolve, isAbsolute, relative, sep } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
   INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
+  resolveWorkspaceSkillPath,
   type HostKind,
   type IWorkspaceProvider,
   type IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
 import { MemoryPromptInjector } from './memory-prompt-injector';
-import { SkillPathRefusalError } from './skill-path-refusal.error';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
 import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
 import {
@@ -49,6 +48,7 @@ import {
   type McpToolProfile,
   type PermissionLevel,
   type SessionMcpNotice,
+  type PhaseKind,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
 import {
@@ -1052,11 +1052,6 @@ function namedRunPolicy(
  */
 export type SdkQueryOptions = Options;
 
-function isInsideRoot(candidate: string, root: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-}
-
 /** Apply the same host-resolved phase and skills to the SDK prompt. */
 export function withPhaseDelivery(
   systemPrompt: Options['systemPrompt'],
@@ -1076,30 +1071,8 @@ export function withPhaseDelivery(
       if (skill.text) return `Skill ${skill.name}: ${skill.text}`;
       if (!skill.path?.trim()) return undefined;
 
-      const candidate = resolve(cwd, skill.path);
-      if (!isInsideRoot(candidate, cwd)) {
-        throw new SkillPathRefusalError();
-      }
-
-      let realCandidate: string;
-      try {
-        realCandidate = realpathSync(candidate);
-      } catch {
-        // degradation-audit: optional-capability - a missing in-workspace skill
-        // file is skipped by design (decision O-6); the phase text still applies.
-        return undefined;
-      }
-      let realCwd: string;
-      try {
-        realCwd = realpathSync(cwd);
-      } catch {
-        // degradation-audit: optional-capability - an unresolved workspace
-        // real path skips this optional skill; the phase text still applies.
-        return undefined;
-      }
-      if (!isInsideRoot(realCandidate, realCwd)) {
-        throw new SkillPathRefusalError();
-      }
+      const realCandidate = resolveWorkspaceSkillPath(cwd, skill.path);
+      if (!realCandidate) return undefined;
       try {
         return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
       } catch {
@@ -2451,7 +2424,7 @@ export class SdkQueryOptionsBuilder {
     onWorktreeRemoved?: WorktreeRemovedCallback,
     activityHold?: ActivityHold,
     ptahUiHint = false,
-    phaseKind?: import('@ptah-extension/shared').PhaseDispatchV1['kind'],
+    phaseKind?: PhaseKind,
   ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     // Root tool lifetime, not child registration, owns watchdog protection.
     const subagentHooks = this.subagentHookHandler.createHooks(cwd, sessionId, phaseKind);

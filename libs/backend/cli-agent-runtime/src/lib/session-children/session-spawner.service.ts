@@ -48,6 +48,7 @@ import {
 import {
   PLATFORM_TOKENS,
   isPathWithinRoots,
+  resolveWorkspaceSkillPath,
   type IMcpServerStatus,
   type IMcpSubagentRootRegistrar,
   type IOutputChannel,
@@ -379,24 +380,10 @@ export class SessionSpawnerService implements ISessionSpawner {
     const eligibility = this.checkStartEligibility(request.callerSessionId);
     if (!eligibility.ok) return this.refuseStart(eligibility.code, eligibility.reason);
     const { caller, callerSdkId, adapter, host } = eligibility;
-    const existing = this.existingStart(
+    const existing = !request.attachToSessionId && this.existingStart(
       [caller, callerSdkId],
       request.branch?.trim() ?? '',
     );
-    if (existing && request.attachToSessionId) {
-      if (existing.childSessionId !== request.attachToSessionId) {
-        return this.refuseStart(
-          'branch-exists',
-          `attach target ${request.attachToSessionId} does not match existing child ${existing.childSessionId} on this branch`,
-        );
-      }
-      if (existing.taskId !== request.taskId) {
-        return this.refuseStart(
-          'branch-exists',
-          'attach requires the same taskId as the existing child',
-        );
-      }
-    }
     if (existing) {
       this.log(
         `start for ${caller} on ${existing.branch} returns existing child ${existing.childSessionId}`,
@@ -493,7 +480,16 @@ export class SessionSpawnerService implements ISessionSpawner {
           `Skill ${skill.name} delivery unavailable: no text or path was provided`,
         );
       }
-      const skillPath = resolve(root, skill.path);
+      let skillPath: string | undefined;
+      try {
+        skillPath = resolveWorkspaceSkillPath(root, skill.path);
+      } catch (error: unknown) {
+        // degradation-audit: reported - the skill path refusal is returned to the caller.
+        return this.refuseStart('invalid-arguments', errorMessage(error));
+      }
+      if (!skillPath) {
+        return this.refuseStart('invalid-arguments', `Skill ${skill.name} delivery unavailable: file not found`);
+      }
       try {
         skillPrompts.push(`Skill ${skill.name}:\n${await readFile(skillPath, 'utf8')}`);
       } catch (error: unknown) {
@@ -670,6 +666,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         request.taskId ?? '',
         branch,
         canonical,
+        [guard.caller, this.sdkIdOf(guard.caller)],
       );
       // degradation-audit: reported - an unresolvable registered path never
       // equals the canonical path, so the start is refused with the reason below.
@@ -703,6 +700,18 @@ export class SessionSpawnerService implements ISessionSpawner {
     // older, so it never reads as this child's deliverable.
     const startedAt = new Date().toISOString();
     const { worktree } = provisioned;
+    let canonicalWorktreePath: string;
+    try {
+      canonicalWorktreePath = await realpath(worktree.worktreePath);
+    } catch (error: unknown) {
+      // degradation-audit: reported - a vanished worktree is rolled back and refused.
+      return {
+        ok: false,
+        refusal: 'session-start-failed',
+        detail: `Could not resolve the child worktree: ${errorMessage(error)}`,
+        rollback: worktree.owned === false ? [] : await this.provisioner.rollback(worktree),
+      };
+    }
 
     const parentSdkSessionId = this.sdkIdOf(guard.caller);
     const label = request.label?.trim() || branch;
@@ -719,7 +728,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       branch,
       baseRef: worktree.baseSha,
       workspaceRoot: root,
-      worktreePath: worktree.worktreePath,
+      worktreePath: canonicalWorktreePath,
       ...(paths.taskFolder ? { taskFolder: paths.taskFolder } : {}),
       deliverables: paths.deliverables,
       subagentPtahTools: 'unavailable',
@@ -788,6 +797,7 @@ export class SessionSpawnerService implements ISessionSpawner {
           : {}),
         ...(resolvedModel ? { model: resolvedModel } : {}),
         ...(resolvedEffort ? { effort: resolvedEffort } : {}),
+        ...(request.phase ? { phase: request.phase } : {}),
       });
       if (!outcome.started) {
         return await this.failStart(
@@ -796,6 +806,9 @@ export class SessionSpawnerService implements ISessionSpawner {
           outcome.error,
           outcome.accountRefusal,
         );
+      }
+      if (outcome.toolProfileApplied === true) {
+        this.registry.update(childTabId, { toolProfileApplied: true });
       }
 
       this.armRuntimeCap(runtime, childTabId, guard.settings.maxRuntimeMinutes);
@@ -1780,6 +1793,7 @@ export class SessionSpawnerService implements ISessionSpawner {
           ...(child.phaseDisallowedTools
             ? { phaseDisallowedTools: child.phaseDisallowedTools }
             : {}),
+          ...(child.toolProfileApplied ? { toolProfileApplied: true } : {}),
         },
         { turn, status, completedAt: new Date(timestampMs).toISOString() },
       );
@@ -2013,6 +2027,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     delete snapshot['heldCompletion'];
     delete snapshot['phaseKind'];
     delete snapshot['phaseDisallowedTools'];
+    delete snapshot['toolProfileApplied'];
     const held = record.heldCompletion;
     const latest =
       record.terminalStatus === 'handed-off'
@@ -2385,6 +2400,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       ...(child.phaseDisallowedTools
         ? { phaseDisallowedTools: child.phaseDisallowedTools }
         : {}),
+      ...(child.toolProfileApplied ? { toolProfileApplied: true } : {}),
     };
     const nextRuntime: ChildRuntime = {
       worktree: runtime.worktree,

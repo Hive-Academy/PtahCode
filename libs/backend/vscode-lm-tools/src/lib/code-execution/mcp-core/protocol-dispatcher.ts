@@ -230,15 +230,10 @@ import {
 } from './mcp-caller';
 import { isToolPermitted } from './mcp-caller-policy';
 import { composeEffectiveToolList, buildToolDefinitions } from './effective-tool-list';
-import {
-  MCP_CALLER_FORBIDDEN_CODE,
-  MCP_TOOL_DENIED_MESSAGE,
-} from './mcp-caller-auth.types';
+import { childPhasePolicyRefusal } from './child-phase-policy';
+import { MCP_CALLER_FORBIDDEN_CODE, MCP_TOOL_DENIED_MESSAGE } from './mcp-caller-auth.types';
 import type { McpCallerCapability } from '@ptah-extension/platform-core';
-import {
-  applyPhaseToolFilter,
-  isPhaseToolDenied,
-} from './mcp-caller-phase-filter';
+import { isPhaseToolDenied } from './mcp-caller-phase-filter';
 import {
   applyToolResultBudget,
   getToolResultBudget,
@@ -930,6 +925,10 @@ async function dispatchToolsCall(
   }
 
   const { name, arguments: args } = params;
+  if (name === 'ptah_agent_spawn' || name === 'ptah_session_start') {
+    const refusal = childPhasePolicyRefusal(request._callerBinding, args?.['phase']);
+    if (refusal) return toolErrorResponse(request, refusal);
+  }
   if (APPS_ONLY_TOOL_NAMES.has(name) && getCallerToolProfile() !== 'apps') {
     return toolErrorResponse(request, appsOnlyToolMessage(name));
   }

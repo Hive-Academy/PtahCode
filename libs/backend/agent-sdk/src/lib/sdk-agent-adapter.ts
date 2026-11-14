@@ -212,6 +212,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
    * session's first prompt and its system `init` message.
    */
   private readonly pendingUserActivity = new Map<string, PendingUserActivity>();
+  /** Phase inherited by later turns of a child session in this host process. */
+  private readonly phaseBySession = new Map<string, import('@ptah-extension/shared').PhaseDispatchV1>();
 
   /** An `observe` throw is WARNed once per adapter, never per result. */
   private budgetObserveWarned = false;
@@ -822,6 +824,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
     this.logger.info('[SdkAgentAdapter] Disposing adapter...');
     this.events.emitDisposed({ timestamp: Date.now() });
     this.flushAllPendingUserActivity();
+    this.phaseBySession.clear();
     const endedIds = this.sessionLifecycle
       .getLiveSessionIds()
       .flatMap((id) => this.sessionKeys(id as SessionId));
@@ -1103,6 +1106,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       authEnvOverride: effectiveAuthEnv,
       admissionDeadline: config.admissionDeadline,
     });
+    if (config.phase) this.phaseBySession.set(tabId, config.phase);
     // A brand-new session has a known-empty history and nothing saved to
     // restore. It is keyed by the tab id until the SDK reports the canonical
     // id (see createSessionIdCallback).
@@ -1112,7 +1116,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       statsLease.generation,
       sessionToken,
       null,
-      { phaseKind: config.phase?.kind, executorType: config.phase ? 'sdk-subagent' : 'session' },
+      { phaseKind: config.phase?.kind, executorType: 'session' },
     );
 
     const resolvedProjectPath = config?.projectPath || os.homedir();
@@ -1227,6 +1231,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
   private releaseBudget(keys: readonly string[]): void {
     for (const key of keys) {
       this.sessionBudget.release(key);
+      this.phaseBySession.delete(key);
     }
   }
 
@@ -1418,6 +1423,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
     }
 
     const mcpServerRunning = config?.mcpServerRunning ?? true;
+    const phase = config?.phase ?? this.phaseBySession.get(sessionId as string) ??
+      (config?.tabId ? this.phaseBySession.get(config.tabId) : undefined);
     const enhancedPromptsContent = config?.enhancedPromptsContent;
     const permissionLevel = config?.permissionLevel;
     const includePartialMessages = config?.includePartialMessages;
@@ -1489,7 +1496,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       accountingAuthEnv,
       capacityRoute,
     } = await this.sessionLifecycle.executeQuery({
-      phase: config?.phase,
+      phase,
       skills: config?.skills,
       sessionId,
       sessionConfig: sessionConfigWithProfileModel,
@@ -1505,12 +1512,13 @@ export class SdkAgentAdapter implements IAgentAdapter {
       authEnvOverride: effectiveAuthEnv,
       admissionDeadline: config?.admissionDeadline,
     });
+    if (config?.phase) this.phaseBySession.set(sessionId as string, config.phase);
     this.statsOwner.beginRun(
       sessionId as string,
       statsRun.generation,
       sessionToken,
       statsRun.candidate,
-      { phaseKind: config?.phase?.kind, executorType: config?.phase ? 'sdk-subagent' : 'session' },
+      { phaseKind: phase?.kind, executorType: 'session' },
     );
 
     const resumeCallback = async (
@@ -1707,6 +1715,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
         // before any `result`, so the run's first result finds its owner
         // under the canonical id.
         this.statsOwner.rebind(tabId, realSessionId, statsGeneration);
+        const phase = this.phaseBySession.get(tabId);
+        if (phase) this.phaseBySession.set(realSessionId, phase);
       }
 
       const metadataArgs = [

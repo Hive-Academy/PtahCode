@@ -30,7 +30,7 @@ export function isPhaseToolDenied(
   if (malformedPhase(binding)) return name === 'execute_code' || name.startsWith('ptah_');
   const denied = phaseDisallowedTools(binding);
   return denied !== undefined && (denied.includes(name) ||
-    (name === 'execute_code' && denied.some((tool) => tool.startsWith('ptah_'))));
+    (name === 'execute_code' && denied.length > 0));
 }
 
 /**

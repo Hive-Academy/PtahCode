@@ -391,6 +391,7 @@ export interface SessionChildCompletionSubject {
   readonly phaseKind?: PhaseKind;
   /** Copied from the phase tool profile. An empty list records no adapter result. */
   readonly phaseDisallowedTools?: readonly string[];
+  readonly toolProfileApplied?: boolean;
 }
 
 /** One settled turn of a child. */

@@ -34,4 +34,17 @@ describe('executor completion result', () => {
       toolProfileAdapter: { executorId: 'session', toolProfileStatus: 'unfiltered' },
     });
   });
+  it('reports filtering only with explicit SDK option evidence', () => {
+    const base = {
+      executorId: 'session', phaseKind: 'implement' as const,
+      deliverableCheck: [], verdict: 'unverified' as const,
+      parentSignal: 'child envelope', disallowedTools: ['Read'],
+    };
+    expect(buildSessionCompletionResult({ ...base, toolProfileApplied: true }).toolProfileAdapter)
+      .toEqual({ executorId: 'session', toolProfileStatus: 'filtered' });
+    expect(buildSessionCompletionResult({ ...base, toolProfileApplied: false }).toolProfileAdapter)
+      .toEqual({ executorId: 'session', toolProfileStatus: 'unfiltered' });
+    expect(buildSessionCompletionResult({ ...base, disallowedTools: [] }).toolProfileAdapter)
+      .toBeNull();
+  });
 });

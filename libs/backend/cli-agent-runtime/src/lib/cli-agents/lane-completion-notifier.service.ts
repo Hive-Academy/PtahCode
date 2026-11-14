@@ -327,6 +327,7 @@ export function buildSessionChildCompletionEnvelope(
       verdict,
       parentSignal: text,
       disallowedTools: subject.phaseDisallowedTools,
+      toolProfileApplied: subject.toolProfileApplied,
     }),
   };
 }

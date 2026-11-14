@@ -785,7 +785,7 @@ export function buildAgentSpawnTool({
         skills: {
           type: 'array',
           items: { type: 'object' },
-          description: 'Host-resolved skills with name and path or text. CLI channels without a proven skill loader receive inline discipline and report skillDelivery unavailable.',
+          description: 'Host-resolved skills with name and path or text. Resolved skill text is included in the spawn prompt and reported as skillDelivery inline.',
         },
         effort: {
           type: 'string',

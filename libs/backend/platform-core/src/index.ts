@@ -477,3 +477,4 @@ export type {
   ListedControlLock,
   ControlReleaseResult,
 } from './session-driver-lock/control-endpoint';
+export { resolveWorkspaceSkillPath, SkillPathRefusalError } from './lib/resolve-workspace-skill-path';

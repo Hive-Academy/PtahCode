@@ -12,6 +12,8 @@
 
 import type { AgentNamespace } from '../types';
 import { readFileSync } from 'node:fs';
+import { z } from 'zod';
+import { resolveWorkspaceSkillPath } from '@ptah-extension/platform-core';
 import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
 import {
   MAX_EFFORT_LENGTH,
@@ -327,6 +329,12 @@ function assertOutcomeField(
 const NO_PARENT_NOTICE =
   'No parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.';
 
+const resolvedSkillsSchema = z.array(z.object({
+  name: z.string().min(1),
+  path: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
+}).strict().refine(skill => Boolean(skill.path || skill.text)));
+
 export function buildAgentNamespace(
   deps: AgentNamespaceDependencies,
 ): AgentNamespace {
@@ -351,15 +359,23 @@ export function buildAgentNamespace(
   return {
     spawn: async (request: UntypedSpawnRequest) => {
       if (request.phase) parsePhaseDispatch(request.phase);
-      const resolvedSkills = request.skills ?? request.phase?.skills ?? [];
+      assertEffort(request.effort);
+      const resolvedSkills = resolvedSkillsSchema.parse(
+        request.skills === undefined ? request.phase?.skills ?? [] : request.skills,
+      );
       const skillText = resolvedSkills.map(skill => {
         if (skill.text) return `### Skill: ${skill.name}\n${skill.text}`;
-        try { return `### Skill: ${skill.name}\n${readFileSync(skill.path!, 'utf8')}`; }
-        catch { throw new Error(`Resolved skill ${skill.name} could not be read: ${skill.path}`); }
+        const path = resolveWorkspaceSkillPath(getWorkspaceRoot(), skill.path ?? '');
+        if (!path) throw new Error(`Resolved skill ${skill.name} could not be read`);
+        try {
+          return `### Skill: ${skill.name}\n${readFileSync(path, 'utf8')}`;
+        } catch {
+          // degradation-audit: reported - the caller receives a bounded skill read error.
+          throw new Error(`Resolved skill ${skill.name} could not be read`);
+        }
       }).join('\n\n');
       const deliveryText = [request.phase?.text, skillText].filter(Boolean).join('\n\n');
       const deliveredTask = deliveryText ? `${request.task}\n\n${deliveryText}` : request.task;
-      assertEffort(request.effort);
       assertOutcomeField('taskKind', request.taskKind, OUTCOME_TASK_KINDS);
       assertOutcomeField(
         'routingSource',
@@ -534,7 +550,7 @@ export function buildAgentNamespace(
         );
         result.setAgentId(spawnResult.agentId);
 
-        return { ...markParentless(spawnResult), ...(resolvedSkills.length && { skillDelivery: 'unavailable' as const }) };
+        return { ...markParentless(spawnResult), ...(resolvedSkills.length && { skillDelivery: 'inline' as const }) };
       }
       if (request.cli) {
         const disabledClis = getDisabledClis?.() ?? [];
@@ -586,7 +602,7 @@ export function buildAgentNamespace(
         ...(projectGuidance && { projectGuidance }),
         ...(pluginPaths && pluginPaths.length > 0 && { pluginPaths }),
       };
-      return { ...markParentless(await agentProcessManager.spawn(enrichedRequest)), ...(resolvedSkills.length && { skillDelivery: 'unavailable' as const }) };
+      return { ...markParentless(await agentProcessManager.spawn(enrichedRequest)), ...(resolvedSkills.length && { skillDelivery: 'inline' as const }) };
     },
 
     status: async (agentId?) => {

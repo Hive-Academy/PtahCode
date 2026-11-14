@@ -41,6 +41,8 @@ export interface SessionCompletionResultInput {
   readonly verdict: LaneCompletionVerdict;
   readonly parentSignal: string;
   readonly disallowedTools?: readonly string[];
+  /** True only after the SDK query options received the phase denial list. */
+  readonly toolProfileApplied?: boolean;
 }
 
 /**
@@ -56,17 +58,19 @@ export function buildSessionCompletionResult(
     deliverableCheck: input.deliverableCheck,
     verdict: input.verdict,
     parentSignal: input.parentSignal,
-    toolProfileAdapter: unfilteredAdapter(
+    toolProfileAdapter: sessionToolProfileAdapter(
       input.executorId,
       input.disallowedTools,
+      input.toolProfileApplied === true,
     ),
   };
 }
 
-function unfilteredAdapter(
+function sessionToolProfileAdapter(
   executorId: string,
   disallowedTools: readonly string[] | undefined,
+  applied: boolean,
 ): ToolProfileAdapterResultV1 | null {
   if (!disallowedTools?.some((name) => name.trim().length > 0)) return null;
-  return { executorId, toolProfileStatus: 'unfiltered' };
+  return { executorId, toolProfileStatus: applied ? 'filtered' : 'unfiltered' };
 }

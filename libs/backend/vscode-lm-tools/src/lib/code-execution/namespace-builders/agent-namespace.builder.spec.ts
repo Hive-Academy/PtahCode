@@ -15,6 +15,10 @@
 // The builder imports `@ptah-extension/lane-routing`, whose index loads tsyringe.
 import 'reflect-metadata';
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 // The real barrel cannot load here: it reaches tsyringe without the
 // reflect-metadata polyfill. The builder needs only PTAH_CLI_ROLE_DELIVERY at
 // runtime, overridden with non-default values so a hand-typed literal fails.
@@ -244,6 +248,37 @@ describe('buildAgentNamespace — outcome metadata validation', () => {
 });
 
 describe('buildAgentNamespace — spawn (non-ptahCli)', () => {
+  it('accepts a relative in-workspace skill and refuses an outside skill', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'ptah-agent-skills-'));
+    const outside = mkdtempSync(join(tmpdir(), 'ptah-agent-outside-'));
+    try {
+      writeFileSync(join(workspace, 'SKILL.md'), 'Check evidence');
+      const outsidePath = join(outside, 'SKILL.md');
+      writeFileSync(outsidePath, 'Outside');
+      const { deps, mocks } = makeDeps({ getWorkspaceRoot: () => workspace });
+      mocks.processManager.spawn.mockResolvedValue({ agentId: 'a1' });
+      const agent = buildAgentNamespace(deps);
+      await expect(agent.spawn({ task: 'work', skills: [{ name: 'review', path: outsidePath }] }))
+        .rejects.toThrow(/outside the session workspace/);
+      expect(mocks.processManager.spawn).not.toHaveBeenCalled();
+      const result = await agent.spawn({ task: 'work', skills: [{ name: 'review', path: 'SKILL.md' }] });
+      expect(mocks.processManager.spawn).toHaveBeenCalledWith(expect.objectContaining({
+        task: expect.stringContaining('Check evidence'),
+      }));
+      expect(result).toEqual(expect.objectContaining({ skillDelivery: 'inline' }));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('validates skill shape before spawning', async () => {
+    const { deps, mocks } = makeDeps();
+    await expect(buildAgentNamespace(deps).spawn({ task: 'work', skills: [{ name: 'review' }] }))
+      .rejects.toThrow();
+    expect(mocks.processManager.spawn).not.toHaveBeenCalled();
+  });
+
   it('delivers resolved discipline and skills inline when CLI skill loading is unavailable', async () => {
     const { deps, mocks } = makeDeps();
     mocks.processManager.spawn.mockResolvedValue({ agentId: 'a1' } as SpawnAgentResult);
@@ -253,7 +288,7 @@ describe('buildAgentNamespace — spawn (non-ptahCli)', () => {
     expect(mocks.processManager.spawn).toHaveBeenCalledWith(expect.objectContaining({
       task: expect.stringContaining('Check evidence'),
     }));
-    expect(result).toEqual(expect.objectContaining({ skillDelivery: 'unavailable' }));
+    expect(result).toEqual(expect.objectContaining({ skillDelivery: 'inline' }));
   });
   it('forwards the verified parent plan level and drops caller policy metadata', async () => {
     const { deps, mocks } = makeDeps();

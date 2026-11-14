@@ -212,7 +212,7 @@ describe('buildRouteNamespace', () => {
   it('throws F9 and does not touch the agent when the service is absent', async () => {
     const rows = agent();
     const { container, resolve } = locator({ registered: false });
-    const namespace = buildRouteNamespace({ agent: rows, container });
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false, agent: rows, container });
 
     let thrown: unknown;
     try {
@@ -249,7 +249,7 @@ describe('buildRouteNamespace', () => {
     });
     const decide = jest.fn().mockResolvedValue(RESULT);
     const { container } = locator({ registered: true, service: { decide } });
-    const namespace = buildRouteNamespace({ agent: rows, container });
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false, agent: rows, container });
 
     await expect(namespace.decide(ARGS)).resolves.toBe(RESULT);
     expect(decide).toHaveBeenCalledTimes(1);
@@ -278,7 +278,7 @@ describe('buildRouteNamespace', () => {
       listRoles: jest.fn().mockResolvedValue(['code-logic-reviewer']),
     };
     const decide = jest.fn().mockResolvedValue(RESULT);
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: rows,
       container: locator({ registered: true, service: { decide } }).container,
     });
@@ -290,7 +290,7 @@ describe('buildRouteNamespace', () => {
   it('reports limits unavailable when the lookup returns undefined', async () => {
     const decide = jest.fn().mockResolvedValue(RESULT);
     const rows = agent({ limits: jest.fn().mockResolvedValue(undefined) });
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: rows,
       container: locator({ registered: true, service: { decide } }).container,
     });
@@ -303,7 +303,7 @@ describe('buildRouteNamespace', () => {
     const rows = agent({
       listRoles: jest.fn().mockRejectedValue(new Error('roles down')),
     });
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: rows,
       container: locator({ registered: true, service: { decide } }).container,
     });
@@ -316,7 +316,7 @@ describe('buildRouteNamespace', () => {
     const rows = agent({
       list: jest.fn().mockRejectedValue(new Error('agent list down')),
     });
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: rows,
       container: locator({ registered: true, service: { decide } }).container,
     });

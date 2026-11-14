@@ -15,12 +15,9 @@
 import * as path from 'node:path';
 import { z } from 'zod';
 import { SESSION_READ_MAX_TAIL_KIB } from '@ptah-extension/cli-agent-runtime';
-import { TaskIdSchema } from '@ptah-extension/shared/schemas';
-import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
+import { TaskIdSchema, PhaseDispatchSchema } from '@ptah-extension/shared/schemas';
 import {
   EFFORT_LEVELS,
-  PHASE_KINDS,
-  type PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import { MAX_AGENT_MESSAGE_LENGTH } from './tool-description.builder';
 
@@ -39,62 +36,11 @@ function isAbsolutePath(value: string): boolean {
 }
 
 const sessionId = z.string().min(1).max(200);
-
-const phaseSkill = z
-  .object({
-    name: z.string().min(1),
-    path: z.string().min(1).optional(),
-    text: z.string().min(1).optional(),
-  })
-  .strict()
-  .refine((skill) => !!(skill.path || skill.text));
-
-const discipline = z
-  .object({
-    method: z.string().min(1),
-    outputContract: z.string().min(1),
-    returnValue: z.string().min(1),
-    refusals: z.string().min(1),
-    escalationProtocol: z.string().min(1),
-    reviewerStance: z.string().min(1).optional(),
-  })
-  .strict();
-const toolProfile = z
-  .object({
-    disallowedTools: z.array(z.string().min(1)),
-    permission: z.enum(['allow', 'deny', 'prompt']),
-  })
-  .strict();
-const phaseDefinition = z
-  .object({
-    version: z.literal(1),
-    kind: z.enum(PHASE_KINDS),
-    input: z.array(z.string().min(1)),
-    deliverable: z.array(z.string().min(1)),
-    verdict: z.array(z.string().min(1)),
-    acceptanceStep: z.array(z.string().min(1)),
-    requiredCapabilities: z.array(z.string().min(1)),
-    toolProfile,
-    discipline,
-  })
-  .strict();
-const phaseDispatch: z.ZodType<PhaseDispatchV1> = z
-  .object({
-    version: z.literal(1),
-    kind: z.enum(PHASE_KINDS),
-    text: z.string().min(1),
-    definition: phaseDefinition,
-    toolProfile,
-    skills: z.array(phaseSkill).optional(),
-  })
-  .strict()
-  .refine(
-    (phase) =>
-      phase.kind === phase.definition.kind &&
-      JSON.stringify(phase.toolProfile) ===
-        JSON.stringify(phase.definition.toolProfile),
-    { message: 'phase dispatch metadata mismatch' },
-  );
+const phaseSkill = z.object({
+  name: z.string().min(1),
+  path: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
+}).strict().refine(skill => !!(skill.path || skill.text));
 
 export const SessionStartArgsSchema = z
   .object({
@@ -119,20 +65,11 @@ export const SessionStartArgsSchema = z
       .optional(),
     model: z.string().min(1).max(200).optional(),
     effort: z.enum(EFFORT_LEVELS).optional(),
-    phase: phaseDispatch.optional(),
+    phase: PhaseDispatchSchema.optional(),
     skills: z.array(phaseSkill).optional(),
     attachToSessionId: sessionId.optional(),
   })
-  .strict()
-  .superRefine((args, ctx) => {
-    if (args.phase) {
-      try {
-        parsePhaseDispatch(args.phase);
-      } catch {
-        ctx.addIssue({ code: 'custom', path: ['phase'], message: 'invalid phase dispatch' });
-      }
-    }
-  });
+  .strict();
 
 export const SessionSendArgsSchema = z
   .object({

@@ -55,7 +55,7 @@ export interface RouteNamespaceDependencies {
   readonly agent: Pick<AgentNamespace, 'list' | 'limits' | 'listRoles'>;
   /** Lazy caller-bound child eligibility; absent hosts offer no child session. */
   readonly childSession?: { canStart(): SessionChildEligibility };
-  readonly hasIDECapabilities?: boolean;
+  readonly hasIDECapabilities: boolean;
   /** Read on every call. Absent or unregistered → F9, and no agent I/O. */
   readonly container: RouteServiceLocator | undefined;
 }
@@ -159,7 +159,7 @@ export function buildRouteNamespace(
           if (!deps.container?.isRegistered(token, true)) return null;
           const setting = deps.container.resolve<Pick<HostRoutingSetting, 'disabledMcpNamespaces'>>(token);
           const disabledMcpNamespaces = setting.disabledMcpNamespaces();
-          return disabledMcpNamespaces === null || deps.hasIDECapabilities === undefined
+          return disabledMcpNamespaces === null
             ? null
             : { hasIDECapabilities: deps.hasIDECapabilities, disabledMcpNamespaces };
         }, deps.childSession),

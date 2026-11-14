@@ -56,7 +56,8 @@ export function laneToolProfileAdapterResult(
   if (names.length === 0) return undefined;
   return {
     executorId,
-    toolProfileStatus: applied ? 'filtered' : 'unfiltered',
+    toolProfileStatus: applied && (executorId === 'claude' || names.every(name => name.startsWith('ptah_')))
+      ? 'filtered' : 'unfiltered',
   };
 }
 

@@ -1052,7 +1052,7 @@ exports[`effective tool list characterization denied ptah tool hides execute_cod
           "type": "string",
         },
         "skills": {
-          "description": "Host-resolved skills with name and path or text. CLI channels without a proven skill loader receive inline discipline and report skillDelivery unavailable.",
+          "description": "Host-resolved skills with name and path or text. Resolved skill text is included in the spawn prompt and reported as skillDelivery inline.",
           "items": {
             "type": "object",
           },
@@ -1402,6 +1402,7 @@ exports[`effective tool list characterization denied ptah tool hides execute_cod
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "deliverable": {
@@ -1409,6 +1410,7 @@ exports[`effective tool list characterization denied ptah tool hides execute_cod
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "discipline": {
@@ -1453,6 +1455,7 @@ exports[`effective tool list characterization denied ptah tool hides execute_cod
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "kind": {
@@ -1477,6 +1480,7 @@ exports[`effective tool list characterization denied ptah tool hides execute_cod
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "toolProfile": {
@@ -1509,6 +1513,7 @@ exports[`effective tool list characterization denied ptah tool hides execute_cod
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "version": {
@@ -3855,7 +3860,7 @@ Results are automatically extracted from Promises. No special syntax required.",
           "type": "string",
         },
         "skills": {
-          "description": "Host-resolved skills with name and path or text. CLI channels without a proven skill loader receive inline discipline and report skillDelivery unavailable.",
+          "description": "Host-resolved skills with name and path or text. Resolved skill text is included in the spawn prompt and reported as skillDelivery inline.",
           "items": {
             "type": "object",
           },
@@ -4205,6 +4210,7 @@ Results are automatically extracted from Promises. No special syntax required.",
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "deliverable": {
@@ -4212,6 +4218,7 @@ Results are automatically extracted from Promises. No special syntax required.",
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "discipline": {
@@ -4256,6 +4263,7 @@ Results are automatically extracted from Promises. No special syntax required.",
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "kind": {
@@ -4280,6 +4288,7 @@ Results are automatically extracted from Promises. No special syntax required.",
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "toolProfile": {
@@ -4312,6 +4321,7 @@ Results are automatically extracted from Promises. No special syntax required.",
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "version": {
@@ -6617,7 +6627,7 @@ exports[`effective tool list characterization phase with denials keeps the order
           "type": "string",
         },
         "skills": {
-          "description": "Host-resolved skills with name and path or text. CLI channels without a proven skill loader receive inline discipline and report skillDelivery unavailable.",
+          "description": "Host-resolved skills with name and path or text. Resolved skill text is included in the spawn prompt and reported as skillDelivery inline.",
           "items": {
             "type": "object",
           },
@@ -6967,6 +6977,7 @@ exports[`effective tool list characterization phase with denials keeps the order
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "deliverable": {
@@ -6974,6 +6985,7 @@ exports[`effective tool list characterization phase with denials keeps the order
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "discipline": {
@@ -7018,6 +7030,7 @@ exports[`effective tool list characterization phase with denials keeps the order
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "kind": {
@@ -7042,6 +7055,7 @@ exports[`effective tool list characterization phase with denials keeps the order
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "toolProfile": {
@@ -7074,6 +7088,7 @@ exports[`effective tool list characterization phase with denials keeps the order
                     "minLength": 1,
                     "type": "string",
                   },
+                  "minItems": 1,
                   "type": "array",
                 },
                 "version": {

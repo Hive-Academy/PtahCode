@@ -185,6 +185,7 @@ interface AutoResumePreflight extends MainSessionAccountSelection {
 
 /** Input of {@link ChatSessionService.startAgentChildSession} (TASK_2026_584). */
 export interface AgentChildSessionStartParams extends MainSessionAccountSelection {
+  readonly phase?: import('@ptah-extension/shared').PhaseDispatchV1;
   /** Authoritative parent SDK id, supplied by the host rather than the prompt. */
   readonly sourceSessionId?: SessionId;
   /** Backend-minted child tab id: the stream key and MCP routing id. */
@@ -233,6 +234,7 @@ interface AgentSessionPathLabels {
 
 /** What {@link ChatSessionService.launchSdkSession} needs from its callers. */
 interface SdkSessionLaunch {
+  readonly phase?: import('@ptah-extension/shared').PhaseDispatchV1;
   /** Label in the launch log lines (`chat:start` keeps its existing text). */
   readonly logLabel: string;
   readonly tabId: string;
@@ -1416,7 +1418,7 @@ export class ChatSessionService {
   async startAgentChildSession(
     params: AgentChildSessionStartParams,
   ): Promise<
-    ChatStartResult | NonNullable<ReturnType<typeof mainSessionAccountFailure>>
+    (ChatStartResult & { readonly toolProfileApplied?: boolean }) | NonNullable<ReturnType<typeof mainSessionAccountFailure>>
   > {
     const { tabId, workspaceRoot, worktreePath, prompt, sessionName, model, effort } =
       params;
@@ -1450,8 +1452,9 @@ export class ChatSessionService {
         permissionLevel,
       });
 
-      await this.launchSdkSession({
+      const toolProfileApplied = await this.launchSdkSession({
         logLabel: 'agent child session',
+        phase: params.phase,
         tabId,
         workspaceId: workspaceRoot,
         projectPath: worktreePath,
@@ -1466,7 +1469,7 @@ export class ChatSessionService {
         accountSelection,
       });
 
-      return { success: true };
+      return toolProfileApplied ? { success: true, toolProfileApplied } : { success: true };
     } catch (error) {
       const codexFailure = this.codexFailure(error);
       if (codexFailure) return codexFailure;
@@ -1639,7 +1642,7 @@ export class ChatSessionService {
    * is resolved for; `projectPath` is where it runs. `chat:start` passes the
    * same path for both.
    */
-  private async launchSdkSession(input: SdkSessionLaunch): Promise<void> {
+  private async launchSdkSession(input: SdkSessionLaunch): Promise<true | undefined> {
     const { logLabel, tabId, workspaceId, projectPath, options } = input;
     if (input.pluginConfigAncestorRoots !== undefined) {
       await validateSessionPolicyRoot(
@@ -1750,6 +1753,7 @@ export class ChatSessionService {
     try {
       const startConfig: AgentSessionStartConfig = {
         ...config,
+        ...(input.phase ? { phase: input.phase } : {}),
         runtime: execution.runtime,
         ...(execution.runtime === 'claude-sdk'
           ? {
@@ -1796,6 +1800,13 @@ export class ChatSessionService {
         tabId,
         input.surfaceMode,
       );
+      // Claude SDK query initialization awaited its options builder above.
+      // That builder merges every phase denial into Options.disallowedTools.
+      // Absent (not false) when nothing was applied, so ordinary starts keep
+      // their previous result shape.
+      const applied = execution.runtime === 'claude-sdk' && !!input.phase &&
+        input.phase.toolProfile.disallowedTools.length > 0;
+      return applied ? true : undefined;
     } catch (error) {
       this.pendingLineage.delete(tabId);
       throw error;

@@ -104,6 +104,7 @@ function envelope(turn: number): SessionChildCompletionEnvelope {
 
 export function makeHarness(
   options: {
+    root?: string;
     config?: Record<string, unknown>;
     closer?: { close: jest.Mock };
     /** `null` builds the spawner with no recorder bound (VS Code). */
@@ -187,7 +188,7 @@ export function makeHarness(
     ),
   };
   const environment = {
-    scopedWorkspaceRoot: jest.fn(() => ROOT as string | undefined),
+    scopedWorkspaceRoot: jest.fn(() => (options.root ?? ROOT) as string | undefined),
   };
   const lanes: AgentProcessInfo[] = [];
   const agents = {
@@ -224,7 +225,7 @@ export function makeHarness(
       <T>(_section: string, key: string, fallback?: T) =>
         (key in config ? config[key] : fallback) as T,
     ),
-    getWorkspaceFolders: jest.fn(() => [ROOT]),
+    getWorkspaceFolders: jest.fn(() => [options.root ?? ROOT]),
   };
   const lines: string[] = [];
   const output = { appendLine: jest.fn((line: string) => lines.push(line)) };
@@ -389,8 +390,18 @@ beforeEach(() => {
 });
 
 describe('registered same-task attach', () => {
+  it('starts an ordinary child without a phase when none is requested', async () => {
+    const h = makeHarness();
+    const result = await h.spawner.start(h.request());
+    expect(result.ok).toBe(true);
+    expect(h.host.startChildSession.mock.calls[0][0].phase).toBeUndefined();
+    h.spawner.dispose();
+  });
   it('delivers resolved phase discipline and skill text in the child prompt', async () => {
     const h = makeHarness();
+    h.host.startChildSession.mockImplementationOnce(async () => ({
+      started: true as const, uiAnnounced: true, toolProfileApplied: true,
+    }));
     const definition = {
       version: 1 as const,
       kind: 'implement' as const,
@@ -399,7 +410,7 @@ describe('registered same-task attach', () => {
       verdict: ['done'],
       acceptanceStep: ['check'],
       requiredCapabilities: [],
-      toolProfile: { disallowedTools: [], permission: 'allow' as const },
+      toolProfile: { disallowedTools: ['Bash'], permission: 'allow' as const },
       discipline: {
         method: 'Follow the plan.',
         outputContract: 'Commit.',
@@ -408,7 +419,7 @@ describe('registered same-task attach', () => {
         escalationProtocol: 'Ask.',
       },
     };
-    await h.spawner.start(
+    const started = await h.spawner.start(
       h.request({
         phase: {
           version: 1,
@@ -420,15 +431,23 @@ describe('registered same-task attach', () => {
         skills: [{ name: 'coding', text: 'Run focused checks.' }],
       }),
     );
+    if (started.ok) {
+      expect(h.registry.get(started.child.childSessionId)?.toolProfileApplied).toBe(true);
+    } else {
+      throw new Error(`Child start failed: ${started.refusal}`);
+    }
     expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
       'Phase discipline: follow the plan.',
     );
+    expect(h.host.startChildSession.mock.calls[0][0].phase).toMatchObject({
+      kind: 'implement', toolProfile: { disallowedTools: ['Bash'] },
+    });
     expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
       'Skill coding:\nRun focused checks.',
     );
     h.spawner.dispose();
   });
-  it('reads a path-only skill before starting the host session', async () => {
+  it('refuses a path-only skill outside the workspace', async () => {
     const h = makeHarness();
     const directory = mkdtempSync(join(tmpdir(), 'ptah-skill-'));
     const skillPath = join(directory, 'SKILL.md');
@@ -437,10 +456,23 @@ describe('registered same-task attach', () => {
       const result = await h.spawner.start(
         h.request({ skills: [{ name: 'coding', path: skillPath }] }),
       );
+      expect(result).toMatchObject({ ok: false, refusal: 'invalid-arguments' });
+      expect(h.host.startChildSession).not.toHaveBeenCalled();
+    } finally {
+      h.spawner.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  it('reads a relative skill inside the workspace', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ptah-skill-root-'));
+    const h = makeHarness({ root: directory });
+    try {
+      writeFileSync(join(directory, 'SKILL.md'), 'Run focused checks.');
+      const result = await h.spawner.start(h.request({
+        skills: [{ name: 'coding', path: 'SKILL.md' }],
+      }));
       expect(result.ok).toBe(true);
-      expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
-        'Skill coding:\nRun the focused check.',
-      );
+      expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain('Run focused checks.');
     } finally {
       h.spawner.dispose();
       rmSync(directory, { recursive: true, force: true });
@@ -448,7 +480,7 @@ describe('registered same-task attach', () => {
   });
   it('refuses an unavailable skill path before host dispatch', async () => {
     const h = makeHarness();
-    const skillPath = join(tmpdir(), `missing-skill-${randomUUID()}.md`);
+    const skillPath = join(ROOT, `missing-skill-${randomUUID()}.md`);
     const result = await h.spawner.start(
       h.request({ skills: [{ name: 'coding', path: skillPath }] }),
     );
@@ -466,10 +498,8 @@ describe('registered same-task attach', () => {
     const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
     expect(first.ok).toBe(true);
     if (!first.ok) return;
-    h.active.add(OTHER);
     const second = await h.spawner.start(
       h.request({
-        callerSessionId: OTHER,
         taskId: 'TASK_2026_584',
         attachToSessionId: first.child.childSessionId,
       }),
@@ -477,21 +507,19 @@ describe('registered same-task attach', () => {
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.child.childSessionId).not.toBe(first.child.childSessionId);
-    expect(second.child.parentSessionId).toBe(OTHER);
+    expect(second.child.parentSessionId).toBe(PARENT);
     expect(second.child.worktreePath).toBe(first.child.worktreePath);
     expect(second.child.branch).toBe(first.child.branch);
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
     expect(h.provisioner.attach).toHaveBeenCalledTimes(1);
-    expect(h.registry.findByCwd(first.child.worktreePath)).toBeUndefined();
+    expect(h.registry.findByCwd(first.child.worktreePath)?.childSessionId).toBe(first.child.childSessionId);
     h.spawner.dispose();
   });
   it('refuses an attach retry with a different target ID', async () => {
     const h = makeHarness();
     const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
     if (!first.ok) throw new Error('first start failed');
-    h.active.add(OTHER);
     const attach = h.request({
-      callerSessionId: OTHER,
       taskId: 'TASK_2026_584',
       attachToSessionId: first.child.childSessionId,
     });
@@ -505,7 +533,7 @@ describe('registered same-task attach', () => {
     expect(wrongTarget).toMatchObject({
       ok: false,
       refusal: 'branch-exists',
-      detail: expect.stringContaining('does not match existing child'),
+      detail: expect.stringContaining('registered child'),
     });
     expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
     h.spawner.dispose();
@@ -515,14 +543,12 @@ describe('registered same-task attach', () => {
     const h = makeHarness();
     const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
     if (!first.ok) throw new Error('first start failed');
-    h.active.add(OTHER);
     h.host.startChildSession.mockResolvedValueOnce({
       started: false,
       error: 'spawn failed',
     } as never);
     const attached = await h.spawner.start(
       h.request({
-        callerSessionId: OTHER,
         taskId: 'TASK_2026_584',
         attachToSessionId: first.child.childSessionId,
       }),
@@ -562,6 +588,21 @@ describe('registered same-task attach', () => {
       );
       expect(result).toMatchObject({ ok: false, refusal: 'branch-exists' });
     }
+    expect(h.provisioner.attach).not.toHaveBeenCalled();
+    h.spawner.dispose();
+  });
+
+  it('refuses another caller attaching to an owned child', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    if (!first.ok) throw new Error('first start failed');
+    h.active.add(OTHER);
+    const result = await h.spawner.start(h.request({
+      callerSessionId: OTHER,
+      taskId: 'TASK_2026_584',
+      attachToSessionId: first.child.childSessionId,
+    }));
+    expect(result).toMatchObject({ ok: false, refusal: 'branch-exists' });
     expect(h.provisioner.attach).not.toHaveBeenCalled();
     h.spawner.dispose();
   });

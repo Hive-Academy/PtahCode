@@ -45,6 +45,13 @@ const TASK_KIND_BY_ROLE: ReadonlyMap<string, OutcomeTaskKind> = new Map<
   ['ui-ux-designer', 'docs'],
 ]);
 
+const TASK_KIND_BY_PHASE: Readonly<Record<PhaseKind, OutcomeTaskKind>> = {
+  plan: 'plan', architecture: 'plan', batch: 'plan', completion: 'plan',
+  implement: 'implement', review: 'review', 'document-review': 'review',
+  'visual-review': 'review', research: 'research',
+  tests: 'tests', docs: 'docs', design: 'docs',
+};
+
 /**
  * The task kind a known role or subagent type performs, or null when the role
  * is absent or unknown (including `general-purpose`, `Explore` and `unknown`).
@@ -72,8 +79,7 @@ export function resolveTaskKind(
 ): ResolvedTaskKind {
   if (explicit) return { taskKind: explicit, taskKindSource: 'explicit' };
   if (phaseKind) {
-    const fromPhase = taskKindForRole(phaseKind);
-    if (fromPhase) return { taskKind: fromPhase, taskKindSource: 'mapped' };
+    return { taskKind: TASK_KIND_BY_PHASE[phaseKind], taskKindSource: 'mapped' };
   }
   const mapped = taskKindForRole(role);
   if (mapped) return { taskKind: mapped, taskKindSource: 'mapped' };

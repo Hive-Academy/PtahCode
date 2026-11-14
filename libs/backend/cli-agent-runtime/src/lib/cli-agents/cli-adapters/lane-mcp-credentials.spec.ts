@@ -168,6 +168,11 @@ describe('laneToolProfileAdapterResult', () => {
       laneToolProfileAdapterResult('claude', phase(['', '  '])),
     ).toBeUndefined();
   });
+
+  it('reports non-Claude filtering only for ptah tool denials', () => {
+    expect(laneToolProfileAdapterResult('codex', phase(['ptah_search_files']), true)?.toolProfileStatus).toBe('filtered');
+    expect(laneToolProfileAdapterResult('codex', phase(['ptah_search_files', 'Read']), true)?.toolProfileStatus).toBe('unfiltered');
+  });
 });
 
 describe('laneMcpAuthUrl', () => {

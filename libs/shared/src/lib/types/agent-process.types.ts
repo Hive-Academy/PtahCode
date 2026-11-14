@@ -252,6 +252,8 @@ export interface AgentProcessInfo {
   readonly role?: string;
   /** How the role was delivered (only set when `role` is set). */
   readonly roleDelivery?: AgentRoleDelivery;
+  /** Resolved skill text was included in the spawn prompt. */
+  readonly skillDelivery?: 'inline';
   /** Adapter channel that carried the role (only set when `role` is set). */
   readonly roleChannel?: AgentRoleChannel;
   /**
