@@ -45,3 +45,42 @@ Source: the nx-video parent Codex thread rollout
 4. Only the v1 `collabAgentToolCall(spawnAgent)` path produces Task `tool_start` + `agent_start`
    (`codex-event-translator.ts:685-707`, `codex-chat-events.ts:349-370,483-510`). Existing tests
    cover only v1.
+
+## Electron UI evidence (screenshots)
+
+The screenshots are in `screenshots/` in this task folder. The repository `.gitignore` keeps
+`.ptah/specs/**/*.png` local, so they are not in git. Each file below exists in the task worktree.
+Captured in the Electron dev app (user data "Ptah Dev", CDP port 9334), workspace `ws-codex`.
+The dev profile sets the ws-codex main agent to OpenAI Codex `gpt-6.1-sol` (Full Auto). Local
+paths in agent answers are blurred.
+
+| File | Theme | Shows |
+| --- | --- | --- |
+| 01-dark-running-inline.png | dark | Native card Running inline in the parent turn |
+| 02-dark-running-lane.png | dark | Child lane while it runs, linked to the parent |
+| 03-dark-terminal-lane-controls.png | dark | Terminal state, Send/Stop disabled with the reason |
+| 04-dark-parent-after-terminal.png | dark | Parent turn after the child completed |
+| 05-dark-followup-parent.png | dark | Follow-up turn on the same child |
+| 06-dark-followup-lane.png | dark | Lane after the follow-up |
+| 07-dark-after-reload-parent.png | dark | BEFORE FIX: reload showed a Resume banner (fixed in 57597f080) |
+| 08-dark-after-reload-card.png | dark | BEFORE FIX: reload lost the child state (fixed in 69fb0b851) |
+| 09-light-running-inline.png | light | New demo: card Running, header lane chip `codex` |
+| 10-light-running-tool-count.png | light | Running card with a live tool count (3 tools) |
+| 11-light-agents-panel-terminal.png | light | Session panel: parent and child both done, child 52s |
+| 12-light-lane-terminal-controls.png | light | Lane `native_demo - completed`, Send/Stop disabled with the reason |
+| 13-light-parent-card-completed.png | light | Parent card Completed, 3 tools |
+| 14-light-follow-up-turn.png | light | Follow-up turn reuses the child (no new card) |
+| 15-light-lane-after-follow-up.png | light | Lane after the follow-up: 4 tools, done 2m 10s |
+| 16-light-after-restart-card.png | light | After an app restart: card Completed 4 tools, lane chip, no Resume banner |
+| 17-light-after-restart-lane.png | light | After an app restart: lane done 2m 14s, 4 tools, controls disabled |
+| 18-dark-after-restart-lane.png | dark | Same as 17 in the dark theme |
+| 19-dark-after-restart-card.png | dark | Same as 16 in the dark theme |
+
+Observations:
+
+- Before batch 11 (D16), an app restart showed the card as Running 0 tools with no lane chip.
+  16-19 are from the build with 1071e9b85.
+- After an app restart, the lane shows the tool count but not the final text of the child.
+- The lane time after a follow-up spans both cycles (D15 limitation).
+- The `electron:build:dev` target does not rebuild the renderer. Run
+  `nx copy-renderer-dev ptah-electron` to put renderer changes into the dev app.
