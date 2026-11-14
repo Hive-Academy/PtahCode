@@ -165,7 +165,7 @@ Read-only key/value rows for view mode. Each row has a term and a value. An empt
 Two APIs give the rows. Use one per list.
 
 1. Data API: the `items` input. The pattern renders the rows. Use it for plain text values.
-2. Projection API: child `div[ptahDescriptionItem]` rows (attribute selector on a native `div`). Use it when a value has a badge, a status dot, a chip list or a row action.
+2. Projection API: child `ptah-description-item` components. Use it when a value has a badge, a status dot, a chip list or a row action.
 
 ### 2.2 Tokens per slot
 
@@ -231,12 +231,11 @@ export class PtahDescriptionListComponent {
 }
 
 @Component({
-  // eslint-disable-next-line @angular-eslint/component-selector
-  selector: 'div[ptahDescriptionItem]',
+  selector: 'ptah-description-item',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // The host div is the row (dl > div > dt + dd). The parent dl gives the list layout.
-  host: { 'data-ptah-pattern': 'description-item', 'data-ptah-description-row': '' },
+  // Renders the row wrapper with dt and dd. The parent dl gives the grid.
+  host: { 'data-ptah-pattern': 'description-item', class: 'contents' },
 })
 export class PtahDescriptionItemComponent {
   readonly term = input.required<string>();
@@ -247,14 +246,14 @@ export class PtahDescriptionItemComponent {
 }
 ```
 
-Slots of `div[ptahDescriptionItem]`:
+Slots of `ptah-description-item`:
 
 | Selector | Content |
 | --- | --- |
 | default | Rich value: text, `ptahBadge`, status dot + word, chip list |
-| `[actions]` | Row action, for example a copy `ptahIconButton`. It renders in a second `dd` of the row (a `dl` row holds only `dt` and `dd`). The `dd` is hidden (`empty:hidden`) when no action is given. |
+| `[actions]` | Row action, for example a copy `ptahIconButton` |
 
-Rule: `div[ptahDescriptionItem]` shows the placeholder when the `value` input is bound and empty, or when it is unbound and the default slot has no content. Detect projected content with a `contentChildren`-free method: wrap the slot in a `<span #valueSlot>` and read `childNodes.length` in `afterRenderEffect`.
+Rule: `ptah-description-item` shows the placeholder when the `value` input is bound and empty, or when it is unbound and the default slot has no content. Detect projected content with a `contentChildren`-free method: wrap the slot in a `<span #valueSlot>` and read `childNodes.length` in `afterRenderEffect`.
 
 ---
 
@@ -390,12 +389,12 @@ The header uses `ptah-section-header` (existing). The Edit button goes in its `[
 
 ### 4.4 Behavior
 
-1. The parent owns `editing`. The pattern does not change modes by itself. It emits `edit`, `save` and `cancelEdit`.
+1. The parent owns `editing`. The pattern does not change modes by itself. It emits `edit`, `save` and `cancel`.
 2. Edit button click → emit `edit`.
 3. Form submit (Enter in a field, or Save click) → emit `save`. The Save button is `type="submit"`. It is disabled when `!dirty` or `saving`.
 4. Cancel click or Escape key in the form:
-   - When `dirty=false` → emit `cancelEdit`.
-   - When `dirty=true` → open the confirm-discard dialog. "Discard changes" emits `cancelEdit`. "Keep editing" closes the dialog and focus goes back to Cancel.
+   - When `dirty=false` → emit `cancel`.
+   - When `dirty=true` → open the confirm-discard dialog. "Discard changes" emits `cancel`. "Keep editing" closes the dialog and focus goes back to Cancel.
 5. Dialog copy: title "Discard changes?", body "Your edits to {heading} will be lost.", buttons "Keep editing" (default focus) and "Discard" (`variant="danger"`).
 6. When the parent sets `editing` from false to true: focus moves to the first focusable element in the `[edit]` slot.
 7. When the parent sets `editing` from true to false: focus moves back to the Edit button. This applies after Save and after Cancel.
@@ -407,9 +406,7 @@ The header uses `ptah-section-header` (existing). The Edit button goes in its `[
 - `<section role="region">` with `aria-labelledby` = heading id. Real heading with `level` input.
 - The Edit button has an accessible name with the heading: `aria-label="Edit {heading}"`. The visible text stays "Edit".
 - Edit mode `<form>` has `aria-labelledby` = heading id.
-- The heading id goes to `ptah-section-header` through its `headingId` input (`input<string | null>(null)`, bound as the `id` of the h2/h3/h4). The pattern does not write the id into the header DOM.
 - Error alert id joins `aria-describedby` of the form.
-- The error alert is the first child of the form, before the fields and the form actions, with `live="assertive"`. When `saving` turns false with an `error`, focus moves to the alert, so the error is announced before the fields and the `ptah-form-actions` status.
 - The dialog uses `ptah-native-modal` with `ariaLabelledby`. Focus goes back to Cancel after "Keep editing".
 - Escape inside an open `ptah-select` panel must not reach the form handler. Handle `keydown.escape` only when `event.defaultPrevented` is false.
 
@@ -445,8 +442,7 @@ export class PtahEditableSectionComponent {
 
   readonly edit = output<void>();
   readonly save = output<void>();
-  /** Not named `cancel`: a native `cancel` event (a file input) bubbles to the host element. */
-  readonly cancelEdit = output<void>();
+  readonly cancel = output<void>();
 }
 ```
 
@@ -587,7 +583,7 @@ Source: `libs/frontend/chat/src/lib/settings/providers/accounts/`.
 | Part (today) | File and test id | Mode | Pattern that composes it |
 | --- | --- | --- | --- |
 | Tab heading "Accounts", stale badge, "Try again", "Add account" | `accounts-tab` `accounts-tab-header` | View | `ptah-form-section` title + `[aside]` stale badge. "Add account" moves to `ptah-section-header [actions]` of the list section. |
-| Ambient login row ("Existing Claude login", status, "Used by", Check) | `ambient-account-row` | View | List row (stays a row). Row content uses `div[ptahDescriptionItem]` for status and "Used by". Check stays a row action. |
+| Ambient login row ("Existing Claude login", status, "Used by", Check) | `ambient-account-row` | View | List row (stays a row). Row content uses `ptah-description-item` for status and "Used by". Check stays a row action. |
 | Account rows (initial, name, status, chips, Sign in, Manage) | `accounts-tab` `accounts-tab-row` | View | Stays a list (not a form). The list sits in the default slot of `ptah-form-section` "Accounts". Row spacing comes from the list primitive (see Decisions D4). |
 | Load error | `accounts-tab-error` | View, error | `alert alert-error role="alert"` in `ptah-form-section [error]` input, plus the Try again button |
 | Loading / "Open a workspace" | `accounts-tab-loading` | View, empty | `ptah-state-panel` in the default slot |
@@ -612,7 +608,7 @@ Source: `libs/frontend/chat/src/lib/settings/providers/accounts/`.
   <ptah-editable-section heading="Account details" [level]="4"
       [editing]="editing()" [dirty]="edited()" [saving]="renaming()" [error]="renameError()"
       [disabled]="pending()" [disabledReason]="copy.signInLocked"
-      (edit)="startEdit()" (save)="submitRename()" (cancelEdit)="stopEdit()">
+      (edit)="startEdit()" (save)="submitRename()" (cancel)="stopEdit()">
     <ptah-description-list view [items]="facts()" />
     <ng-template ptahEditTemplate>
       <ptah-field label="Name" for="account-detail-name">
@@ -694,7 +690,7 @@ The root `src/index.ts` export and the gallery go in P1b, so P1a ships no public
 - Spacing classes use only `var(--ptah-...)` arbitrary values. Add one spec assertion: no class on the rendered pattern matches `/\b(gap|p|px|py|m|mx|my|space-[xy])-\d/`.
 - `ptah-description-list`: placeholder for `null`, `undefined`, `''` and `'  '`. Not for `0`.
 - `ptah-form-actions`: hidden with no projected button. Dirty status text appears in a `role="status"` node.
-- `ptah-editable-section`: focus to first field on `editing` false → true. Focus to Edit on true → false. Dirty Cancel opens the confirm. Clean Cancel emits `cancelEdit` once. Escape while `saving` emits nothing. Save disabled when not dirty.
+- `ptah-editable-section`: focus to first field on `editing` false → true. Focus to Edit on true → false. Dirty Cancel opens the confirm. Clean Cancel emits `cancel` once. Escape while `saving` emits nothing. Save disabled when not dirty.
 - `ptah-settings-layout`: arrow keys move focus, Enter emits `selectedChange`, disabled tab emits nothing, `aria-orientation` follows width (mock the container width with a class toggle helper).
 
 ### Verification for lanes
