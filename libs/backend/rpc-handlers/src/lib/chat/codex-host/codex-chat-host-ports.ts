@@ -373,8 +373,7 @@ export function createCodexChatHostPorts(
         throw new Error('Native provider required');
       const { seed, cwd, workspacePath } = execution;
       const mcpServers = new Map<string, CodexHttpMcpServer>();
-      // Claude `mergeMcpOverride` parity: a user server named `ptah` wins,
-      // so the session URL is recorded only when that entry survives.
+      // Keep the host's session-scoped Ptah entry ahead of user overrides.
       const ptahSessionUrl =
         attachPtahMcp && routingId
           ? ptahMcpSessionUrl(PTAH_MCP_PORT, routingId, cwd)
@@ -389,8 +388,19 @@ export function createCodexChatHostPorts(
           toolTimeoutSec: CODEX_PTAH_TOOL_TIMEOUT_SEC,
         });
       }
-      for (const server of user.servers) mcpServers.set(server.name, server);
+      for (const server of user.servers) {
+        if (server.name === 'ptah' && ptahSessionUrl) {
+          deps.logger.debug('Ignoring user Ptah MCP override for Codex chat.');
+          continue;
+        }
+        mcpServers.set(server.name, server);
+      }
       const secrets = new Map(user.secrets);
+      if (ptahSessionUrl) {
+        for (const reference of secrets.keys()) {
+          if (reference.startsWith('mcp.ptah.')) secrets.delete(reference);
+        }
+      }
       if (ptahSessionUrl && mcpServers.get('ptah')?.url === ptahSessionUrl) {
         try {
           if (!deps.mcpCredentials || !routingId)

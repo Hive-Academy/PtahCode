@@ -824,7 +824,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       ).toContain('(config-write-failed)');
     });
 
-    it('clears a handle timeout warning when attachment arrives later', async () => {
+    it('late attachment clears timeout and rejected handshake reports rejected:forbidden', async () => {
       getMcpPort.mockReturnValue(51821);
       let notifyTimeout: (() => void) | undefined;
       // A holder: probe.get() reads it before the attachment arrives.
@@ -834,10 +834,11 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       let resolveAttachment: (
         entry: import('./mcp-attachment-probe.port').McpAttachment | undefined,
       ) => void = () => undefined;
-      const probe: import('./mcp-attachment-probe.port').IMcpAttachmentProbe = {
+      const probe = {
         get: () => attachmentRef.current,
+        getAttempt: () => ({ reason: 'forbidden', method: 'POST' }),
         waitFor: () =>
-          new Promise((resolve) => {
+          new Promise<import('./mcp-attachment-probe.port').McpAttachment | undefined>((resolve) => {
             resolveAttachment = resolve;
           }),
       };
@@ -870,7 +871,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       );
       notifyTimeout?.();
       expect(harness.manager.getStatus(result.agentId)).toMatchObject({
-        mcpAttachmentWarning: expect.stringContaining('(handshake-timeout)'),
+        mcpAttachmentWarning: expect.stringContaining('rejected:forbidden'),
       });
       await jest.advanceTimersByTimeAsync(5_000);
       attachmentRef.current = {
@@ -890,6 +891,39 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(
         harness.laneCompletion.signal.mock.calls[0][0].mcpAttachmentWarning,
       ).toBeUndefined();
+    });
+
+    it('valid authenticated handshake prevents warning', async () => {
+      getMcpPort.mockReturnValue(51821);
+      let agentId = '';
+      const probe: import('./mcp-attachment-probe.port').IMcpAttachmentProbe = {
+        get: (id, port) => id === agentId && port === 51821
+          ? { agentId: id, port, method: 'initialize', time: Date.now() }
+          : undefined,
+        waitFor: async (id, port) => id === agentId && port === 51821
+          ? { agentId: id, port, method: 'initialize', time: Date.now() }
+          : undefined,
+      };
+      let notifyTimeout: (() => void) | undefined;
+      const controls = createMockSdkHandle();
+      (sdkAdapter.runSdk as jest.Mock).mockResolvedValue({
+        ...controls.handle,
+        onMcpAttachmentTimeout: (callback: () => void) => { notifyTimeout = callback; },
+      });
+      const harness = createManager({
+        logger, cliDetection,
+        workspaceProvider: createMockWorkspaceProvider(),
+        reasoningSettings: { effort: { get: reasoningEffortGet } },
+        harnessPreflight: null,
+        mcpServerStatus: { getPort: getMcpPort },
+        hostAttention, attachmentProbe: probe,
+      });
+      const result = await harness.manager.spawn({ task: 'Use tools', cli: 'codex', workingDirectory: '/workspace/root' });
+      agentId = result.agentId;
+      notifyTimeout?.();
+      expect(harness.manager.getStatus(agentId)).not.toHaveProperty('mcpAttachmentWarning');
+      controls.resolve(0);
+      await controls.handle.done;
     });
 
     it('does not resolve an MCP port for adapters that opt out', async () => {

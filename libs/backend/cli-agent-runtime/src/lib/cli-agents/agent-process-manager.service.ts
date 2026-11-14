@@ -1425,13 +1425,15 @@ export class AgentProcessManager {
         | 'handshake-timeout'
         | 'lane-exited-before-handshake'
         | 'config-write-failed',
+      detail?: string,
     ): void => {
       if (this.agents.get(agentId) !== tracked) return;
       if (tracked.info.mcpAttachmentWarning) return;
-      const warning = `Ptah MCP did not connect for this lane (${cause}); report in your final message.`;
+      const warning = `Ptah MCP did not connect for this lane (${cause})${detail ? `; detail: ${detail}` : ''}; report in your final message.`;
       tracked.info = { ...tracked.info, mcpAttachmentWarning: warning };
       this.logger.warn('[AgentProcessManager] MCP attachment warning', {
         cause,
+        detail,
         cli: tracked.info.cli,
         agentId,
         port: mcp?.mcpPort,
@@ -1454,6 +1456,14 @@ export class AgentProcessManager {
     if (mcp?.expectsMcp && mcp.mcpPort && this.attachmentProbe) {
       const port = mcp.mcpPort;
       const probe = this.attachmentProbe;
+      const timeoutDetail = (): string => {
+        const attemptProbe = probe as typeof probe & {
+          getAttempt?: (id: string, port: number) => { reason: string; method: string } | undefined;
+        };
+        const attempt = attemptProbe.getAttempt?.(agentId, port);
+        if (!attempt) return 'no-request-seen';
+        return attempt.reason === 'seen' ? 'seen-but-not-initialize' : `rejected:${attempt.reason}`;
+      };
       const clearWarning = (): void => {
         if (this.agents.get(agentId) !== tracked) return;
         if (!probe.get(agentId, port)) return;
@@ -1468,13 +1478,13 @@ export class AgentProcessManager {
       if (sdkHandle.onMcpAttachmentTimeout) {
         sdkHandle.onMcpAttachmentTimeout(() => {
           if (!probe.get(agentId, port) && !tracked.hasExited)
-            warnMcp('handshake-timeout');
+            warnMcp('handshake-timeout', timeoutDetail());
         });
       } else {
         void probe
           .waitFor(agentId, port, MCP_ATTACHMENT_TIMEOUT_MS)
           .then((entry) => {
-            if (!entry && !tracked.hasExited) warnMcp('handshake-timeout');
+            if (!entry && !tracked.hasExited) warnMcp('handshake-timeout', timeoutDetail());
           });
       }
       const onMcpLaneExit = (): void => {

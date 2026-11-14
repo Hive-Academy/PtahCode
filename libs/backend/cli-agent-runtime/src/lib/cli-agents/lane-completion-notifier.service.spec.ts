@@ -21,7 +21,7 @@ import {
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
-import type { AgentProcessInfo } from '@ptah-extension/shared';
+import { AgentId, type AgentProcessInfo } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { IFileSystemProvider } from '@ptah-extension/platform-core';
 import type { SessionUsageSink } from '@ptah-extension/agent-sdk';
@@ -41,6 +41,7 @@ import type {
   SessionChildSettle,
 } from '../session-children/session-spawner.port';
 import { recordLaneUsageOutcome } from './lane-completion-outcome';
+import { acknowledgeTerminalRead } from './completion-read-ack';
 import { ParentEnvelopeStoreService } from './parent-delivery/parent-envelope-store.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { FakeStateStorage } from './parent-delivery/__fixtures__/fake-state-storage';
@@ -1083,6 +1084,81 @@ describe('LaneCompletionNotifier.signal', () => {
 
       expect(h.envelope()).toContain('Role: code-logic-reviewer');
     });
+  });
+});
+
+describe('terminal read reconciliation', () => {
+  it('read before delayed completion suppresses push; a different terminal transition still pushes', async () => {
+    const h = createHarness();
+    const first = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174101') });
+    await acknowledgeTerminalRead(first, PARENT);
+    const skipped = await h.notifier.signal(first);
+    expect(skipped.delivered).toBe(false);
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+    expect(h.logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining('acknowledged completion'),
+      expect.objectContaining({ agentId: first.agentId }),
+    );
+
+    const resumed = createInfo({
+      agentId: first.agentId,
+      completedAt: '2026-09-21T10:03:30.000Z',
+    });
+    expect((await h.notifier.signal(resumed)).delivered).toBe(true);
+    expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('delayed completion reconciles with the existing agent and never pushes duplicate work', async () => {
+    const h = createHarness();
+    const info = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174102') });
+    await h.notifier.signal(info);
+    await h.notifier.signal(info);
+    expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
+    expect(h.recordLaneCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it('a read cancels a pending queued completion', async () => {
+    const h = createHarness({ sessionActive: false });
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const cancel = jest.spyOn(drainer, 'cancel');
+    const notifier = new LaneCompletionNotifier(
+      h.logger, { exists: h.exists, stat: h.stat } as never,
+      adapter, () => null, drainer,
+    );
+    const info = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174105') });
+    const queued = await notifier.signal(info);
+    expect(queued.recorded).toBe(true);
+    await acknowledgeTerminalRead(info, PARENT);
+    expect(cancel).toHaveBeenCalledWith(queued.deliveryId);
+    expect(store.find(`${info.agentId}:${info.completedAt}`)).toBeUndefined();
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+    drainer.dispose();
+  });
+
+  it('exit 0 with missing deliverables stays no-deliverable', async () => {
+    const h = createHarness();
+    const result = await h.notifier.signal(createInfo({
+      agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174103'),
+      deliverables: ['missing.md'],
+    }));
+    expect(result.signal?.verdict).toBe('no-deliverable');
+  });
+
+  it('delivered verdict still shows MCP not attached and report status', async () => {
+    const h = createHarness({ files: { '/ws/report.md': 42 } });
+    const result = await h.notifier.signal(createInfo({
+      agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174104'),
+      deliverables: ['report.md'],
+      mcpAttachmentWarning: 'connection timed out',
+    }));
+    expect(result.signal?.verdict).toBe('delivered');
+    expect(h.envelope()).toContain('MCP attachment: not attached (connection timed out)');
+    expect(h.envelope()).toContain('Report delivery: 0 sent; failed: unavailable');
   });
 });
 

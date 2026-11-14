@@ -26,6 +26,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { z } from 'zod';
+import { wasTerminalReadAcknowledged } from '@ptah-extension/cli-agent-runtime';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   countTokens,
@@ -189,6 +190,95 @@ const CLEAN_GRAPH_COVERAGE: LanguageCoverage = withCoverageVerdict({
     edgeCapHit: false,
     context: 'complete',
   },
+});
+
+describe('terminal lane read acknowledgment', () => {
+  const agent = {
+    agentId: 'dispatcher-ack-lane',
+    cli: 'codex',
+    task: 'inspect',
+    workingDirectory: 'D:\\workspace',
+    status: 'completed',
+    parentSessionId: 'dispatcher-parent',
+    startedAt: '2026-09-21T10:00:00.000Z',
+    completedAt: '2026-09-21T10:02:30.000Z',
+  };
+  const key = `${agent.agentId}:${agent.completedAt}`;
+
+  it('read from a tab alias acknowledges the resolved parent transition', async () => {
+    const aliasAgent = { ...agent, agentId: 'dispatcher-alias-lane' };
+    const read = jest.fn().mockResolvedValue({
+      agentId: aliasAgent.agentId, stdout: '', stderr: '', lineCount: 0,
+      totalLines: 0, omittedLines: 0, stdoutTotalLines: 0,
+      stderrTotalLines: 0, truncated: false,
+    });
+    const status = jest.fn().mockResolvedValue(aliasAgent);
+    const resolveCallerParentId = jest.fn().mockReturnValue('dispatcher-parent');
+    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({
+      agent: { read, status, resolveCallerParentId },
+    }) });
+    await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'tab-alias',
+      params: { name: 'ptah_agent_read', arguments: { agentId: aliasAgent.agentId } },
+    }), deps);
+    expect(resolveCallerParentId).toHaveBeenCalledWith('tab-alias');
+    expect(wasTerminalReadAcknowledged(`${aliasAgent.agentId}:${aliasAgent.completedAt}`)).toBe(true);
+  });
+
+  it('read from a different resolved parent does not acknowledge', async () => {
+    const otherAgent = { ...agent, agentId: 'dispatcher-other-parent-lane' };
+    const read = jest.fn().mockResolvedValue({
+      agentId: otherAgent.agentId, stdout: '', stderr: '', lineCount: 0,
+      totalLines: 0, omittedLines: 0, stdoutTotalLines: 0,
+      stderrTotalLines: 0, truncated: false,
+    });
+    const status = jest.fn().mockResolvedValue(otherAgent);
+    const resolveCallerParentId = jest.fn().mockReturnValue('different-session');
+    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({
+      agent: { read, status, resolveCallerParentId },
+    }) });
+    await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'different-tab',
+      params: { name: 'ptah_agent_read', arguments: { agentId: otherAgent.agentId } },
+    }), deps);
+    expect(resolveCallerParentId).toHaveBeenCalledWith('different-tab');
+    expect(wasTerminalReadAcknowledged(`${otherAgent.agentId}:${otherAgent.completedAt}`)).toBe(false);
+  });
+
+  it('read on a terminal lane acknowledges its observed transition', async () => {
+    const read = jest.fn().mockResolvedValue({
+      agentId: agent.agentId, stdout: '', stderr: '', lineCount: 0,
+      totalLines: 0, omittedLines: 0, stdoutTotalLines: 0,
+      stderrTotalLines: 0, truncated: false,
+    });
+    const status = jest.fn().mockResolvedValue(agent);
+    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({
+      agent: { read, status } as unknown as PtahAPI['agent'],
+    }) });
+    await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'dispatcher-parent',
+      params: { name: 'ptah_agent_read', arguments: { agentId: agent.agentId } },
+    }), deps);
+    expect(wasTerminalReadAcknowledged(key)).toBe(true);
+  });
+
+  it('wait on a terminal lane acknowledges its observed transition', async () => {
+    const waitForAgents = jest.fn().mockResolvedValue({
+      mode: 'all', timedOut: false, cancelled: false, waitedMs: 0,
+      entries: [{ agentId: agent.agentId, state: 'exited', info: agent }],
+    });
+    const read = jest.fn().mockResolvedValue({
+      agentId: agent.agentId, stdout: '', stderr: '', lineCount: 0,
+      totalLines: 0, omittedLines: 0, stdoutTotalLines: 0,
+      stderrTotalLines: 0, truncated: false,
+    });
+    const resolveCallerParentId = jest.fn().mockReturnValue('dispatcher-parent');
+    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({
+      agent: { waitForAgents, read, resolveCallerParentId },
+    }) });
+    await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'wait-tab-alias',
+      params: { name: 'ptah_agent_wait', arguments: { agentIds: [agent.agentId], timeoutSec: 0 } },
+    }), deps);
+    expect(resolveCallerParentId).toHaveBeenCalledWith('wait-tab-alias');
+    expect(wasTerminalReadAcknowledged(key)).toBe(true);
+  });
 });
 
 describe('artifact publish dispatch scope', () => {

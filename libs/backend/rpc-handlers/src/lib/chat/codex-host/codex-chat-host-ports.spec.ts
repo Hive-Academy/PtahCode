@@ -795,8 +795,9 @@ describe('Codex chat host ports', () => {
       },
     );
 
-    it('lets a user server named ptah replace the Ptah entry (caller wins)', async () => {
-      const { profile, secrets } = await harness().ports.profile({
+    it('keeps the host Ptah URL and credential when a user overrides ptah', async () => {
+      const h = harness();
+      const { profile, secrets } = await h.ports.profile({
         ...config(),
         mcpServerRunning: true,
         mcpServersOverride: {
@@ -812,8 +813,10 @@ describe('Codex chat host ports', () => {
         {
           name: 'ptah',
           transport: 'http',
-          url: 'https://proxy.example.invalid/ptah',
-          headerReferences: { Authorization: 'mcp.ptah.header.0' },
+          url: `http://localhost:51820/session/tab/workspace/${encodeURIComponent(profile.cwd)}`,
+          headerReferences: {},
+          authReference: 'mcp.ptah.authorization',
+          toolTimeoutSec: 960,
         },
         {
           name: 'other',
@@ -822,7 +825,11 @@ describe('Codex chat host ports', () => {
           headerReferences: {},
         },
       ]);
-      expect(secrets?.get('mcp.ptah.header.0')).toBe(`Bearer ${token}`);
+      expect(secrets).toEqual(new Map([['mcp.ptah.authorization', mcpToken]]));
+      expect(h.mcpCredentials.issue).toHaveBeenCalledTimes(1);
+      expect(h.logger.debug).toHaveBeenCalledWith(
+        'Ignoring user Ptah MCP override for Codex chat.',
+      );
     });
 
     it('returns only the Ptah credential when no user server needs one', async () => {
@@ -839,6 +846,24 @@ describe('Codex chat host ports', () => {
       expect(prepared.profile.mcpServers.map((server) => server.name)).toEqual([
         'ptah',
         'open',
+      ]);
+    });
+
+    it('retains a user Ptah server when the host has no session URL', async () => {
+      const { profile } = await harness().ports.profile({
+        ...config(),
+        mcpServerRunning: false,
+        mcpServersOverride: {
+          ptah: { type: 'http', url: 'https://proxy.example.invalid/ptah' },
+        },
+      });
+      expect(profile.mcpServers).toEqual([
+        {
+          name: 'ptah',
+          transport: 'http',
+          url: 'https://proxy.example.invalid/ptah',
+          headerReferences: {},
+        },
       ]);
     });
 

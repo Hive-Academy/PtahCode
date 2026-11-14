@@ -51,6 +51,7 @@ import {
   type HeldReport,
 } from './agent-report-coalescer';
 import { buildLaneCompletionEnvelope } from './lane-completion-envelope';
+import { reconcilePendingCompletionRead, wasTerminalReadAcknowledged } from './completion-read-ack';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { readReviewDeliverables } from './review-deliverable.reader';
 import type {
@@ -410,6 +411,8 @@ export class LaneCompletionNotifier {
 
     const completedAt = info.completedAt ?? new Date().toISOString();
     const key = `${info.agentId}:${completedAt}`;
+    if (this.skipAcknowledged(key, info.agentId))
+      return { delivered: false, reason: 'already-signalled' };
     const existing = this.parentDelivery?.find(key);
     if (existing)
       return {
@@ -478,6 +481,8 @@ export class LaneCompletionNotifier {
       completionSignal = signal;
       completionBody = this.completionEnvelope(signal, info);
     }
+    if (this.skipAcknowledged(key, info.agentId))
+      return { delivered: false, reason: 'already-signalled', signal };
     if (firstSignal)
       enqueueLaneCompletionOutcome(
         this.outcomeRecorder,
@@ -543,6 +548,8 @@ export class LaneCompletionNotifier {
         createdAt: Date.now(),
       };
       const checkpoint = await this.checkpoint(entry);
+      if (this.skipAcknowledged(key, info.agentId))
+        return { delivered: false, reason: 'already-signalled', signal };
       // A durable checkpoint owns the report even when envelope indexing fails.
       if (held && fits && checkpoint === 'durable') held.markEnqueued();
       const saved = await this.parentDelivery.enqueue(
@@ -558,6 +565,19 @@ export class LaneCompletionNotifier {
         saved,
         checkpoint === 'durable',
       );
+      if (!result.delivered && result.deliveryId) {
+        const deliveryId = result.deliveryId;
+        await reconcilePendingCompletionRead(key, async () => {
+          try {
+            await this.parentDelivery?.cancel(deliveryId);
+          } catch (error: unknown) {
+            this.logger.warn('[LaneCompletionNotifier] Could not cancel acknowledged completion', {
+              agentId: info.agentId,
+              detail: error instanceof Error ? error.name : 'UNKNOWN',
+            });
+          }
+        });
+      }
       if (result.reason !== 'storage-unavailable') this.remember(key);
       return {
         ...result,
@@ -645,6 +665,8 @@ export class LaneCompletionNotifier {
   async replay(
     entry: ParentCompletionOutboxEntry,
   ): Promise<LaneCompletionResult> {
+    if (this.skipAcknowledged(entry.dedupeKey, entry.agentId))
+      return { delivered: false, reason: 'already-signalled' };
     const parentDelivery = this.parentDelivery;
     if (!parentDelivery)
       return { delivered: false, reason: 'chat-runtime-unavailable' };
@@ -679,6 +701,8 @@ export class LaneCompletionNotifier {
       }
       return this.settleSatisfied(entry);
     }
+    if (this.skipAcknowledged(entry.dedupeKey, entry.agentId))
+      return { delivered: false, reason: 'already-signalled' };
     const saved = await parentDelivery.enqueue(completionEnqueueInput(entry));
     if (!('refused' in saved)) {
       const report = this.pendingReportMarks.get(entry.dedupeKey);
@@ -820,6 +844,11 @@ export class LaneCompletionNotifier {
     durable: boolean,
   ): Promise<LaneCompletionResult> {
     const parentDelivery = this.parentDelivery;
+    if (!('refused' in saved) && wasTerminalReadAcknowledged(entry.dedupeKey)) {
+      await parentDelivery?.cancel(saved.id);
+      this.skipAcknowledged(entry.dedupeKey, entry.agentId);
+      return { delivered: false, reason: 'already-signalled' };
+    }
     if ('refused' in saved) {
       if (saved.refused === 'parent-session-deleted') {
         this.pendingReplays.delete(entry.dedupeKey);
@@ -1154,7 +1183,15 @@ export class LaneCompletionNotifier {
     signal: LaneCompletionSignal,
     info: AgentProcessInfo,
   ): string {
-    const body = buildLaneCompletionEnvelope(signal);
+    const attachment = info.mcpAttachmentWarning
+      ? `MCP attachment: not attached (${info.mcpAttachmentWarning}).`
+      : 'MCP attachment: status unavailable.';
+    const reports = `Report delivery: ${signal.reportsDelivered} sent; failed: unavailable.`;
+    const body = buildLaneCompletionEnvelope(signal).replace(
+      `verdict="${signal.verdict}"`,
+      `verdict="${signal.verdict}"` +
+        ` report-delivery="${signal.reportsDelivered}-sent"`,
+    ).replace('\nDeliverables:', `\n${attachment}\n${reports}\nDeliverables:`);
     if (info.stopReason !== 'usage-limit' && info.stopReason !== 'auth')
       return body;
     const resetDate =
@@ -1250,5 +1287,14 @@ export class LaneCompletionNotifier {
         this.signalledKeys.length - SIGNALLED_HISTORY_SIZE,
       );
     }
+  }
+
+  private skipAcknowledged(key: string, agentId: string): boolean {
+    if (!wasTerminalReadAcknowledged(key)) return false;
+    this.logger.debug('[LaneCompletionNotifier] Skipped acknowledged completion', {
+      agentId,
+      key,
+    });
+    return true;
   }
 }

@@ -27,6 +27,7 @@ import {
   MCP_AUTH_REQUIRED_MESSAGE,
   MCP_CALLER_FORBIDDEN_CODE,
   MCP_CONTENT_TYPE_MESSAGE,
+  MCP_CREDENTIAL_INVALID_MESSAGE,
   MCP_TOOL_DENIED_MESSAGE,
   type McpHttpAuthInput,
   type McpRequestAuth,
@@ -378,13 +379,24 @@ async function handleHttpRequest(
   authenticate?: (input: McpHttpAuthInput) => McpRequestAuth,
 ): Promise<void> {
   const port = req.socket.localPort ?? 0;
+  const recordRejected = (url: string | undefined, reason: 'auth-required' | 'invalid-credential' | 'forbidden' | 'auth-error' | 'invalid-url'): void => {
+    try {
+      const agentId = extractCallerAgentId(url);
+      if (agentId && /^[A-Za-z0-9-]{1,128}$/.test(agentId))
+        mcpAttachmentObserver.recordAttempt({ agentId, port, reason, method: req.method === 'POST' ? 'POST' : 'OTHER', time: Date.now() });
+    } catch {
+      // A malformed identity cannot be keyed to a lane.
+    }
+  };
   if (!isAllowedHost(req.headers.host, port)) {
+    recordRejected(req.url, 'forbidden');
     discardBody(req);
     res.writeHead(403);
     res.end();
     return;
   }
   if (isRejectedOrigin(req.headers.origin)) {
+    recordRejected(req.url, 'forbidden');
     discardBody(req);
     res.writeHead(403);
     res.end();
@@ -407,12 +419,14 @@ async function handleHttpRequest(
     return;
   }
   if (!isJsonContentType(req.headers['content-type'])) {
+    recordRejected(req.url, 'auth-required');
     discardBody(req);
     endAuthFailure(res, 415, MCP_AUTH_REQUIRED_CODE, MCP_CONTENT_TYPE_MESSAGE);
     return;
   }
   const presented = splitCredential(req.headers.authorization, req.url);
   if (!presented.ok) {
+    recordRejected(req.url, 'auth-required');
     discardBody(req);
     endAuthFailure(res, 401, MCP_AUTH_REQUIRED_CODE, MCP_AUTH_REQUIRED_MESSAGE);
     return;
@@ -428,6 +442,7 @@ async function handleHttpRequest(
       toolProfile: extractCallerToolProfile(identityUrl),
     };
   } catch (error) {
+    recordRejected(identityUrl, 'invalid-url');
     // degradation-audit: reported - the handler returns a JSON-RPC parse error
     // for a malformed caller identity URL.
     discardBody(req);
@@ -450,6 +465,7 @@ async function handleHttpRequest(
         ? authenticateWithoutRegistry(authInput)
         : authenticate(authInput);
   } catch {
+    recordRejected(identityUrl, 'auth-error');
     // degradation-audit: reported - the fixed 401 response avoids disclosure
     // of credential details when authentication throws.
     discardBody(req);
@@ -457,6 +473,7 @@ async function handleHttpRequest(
     return;
   }
   if (!decision.ok) {
+    recordRejected(identityUrl, decision.failure.httpStatus === 403 ? 'forbidden' : decision.failure.message === MCP_CREDENTIAL_INVALID_MESSAGE ? 'invalid-credential' : 'auth-required');
     discardBody(req);
     endAuthFailure(
       res,
@@ -532,6 +549,9 @@ async function handleHttpRequest(
         _callerBinding: accepted.binding,
         _abortSignal: abortOnEarlyClose(res),
       };
+
+      if (mcpRequest._callerAgentId && /^[A-Za-z0-9-]{1,128}$/.test(mcpRequest._callerAgentId))
+        mcpAttachmentObserver.recordAttempt({ agentId: mcpRequest._callerAgentId, port, reason: 'seen', method: mcpRequest.method === 'initialize' || mcpRequest.method === 'tools/list' ? mcpRequest.method : 'other', time: Date.now() });
 
       const mcpResponse = await onMCPRequest(mcpRequest);
       if (

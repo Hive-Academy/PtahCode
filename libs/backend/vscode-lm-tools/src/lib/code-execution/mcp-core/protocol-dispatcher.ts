@@ -47,6 +47,7 @@ import {
   LaneSpawnPolicyError,
   CliCommandLineTooLongError,
   MAX_AGENT_REPORT_LENGTH,
+  acknowledgeTerminalRead,
 } from '@ptah-extension/cli-agent-runtime';
 import { AgentSpawnArgsSchema } from './agent-spawn-args.schema';
 import {
@@ -1448,6 +1449,14 @@ async function handleIndividualTool(
         }
         const { agentId, tail, offset } = parsed.data;
         const result = await ptahAPI.agent.read(agentId, tail, offset);
+        const status = await ptahAPI.agent.status?.(agentId);
+        if (status && !Array.isArray(status)) {
+          const raw = request._callerSessionId;
+          const reader = raw
+            ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
+            : undefined;
+          await acknowledgeTerminalRead(status, reader);
+        }
         const view = await renderAgentRead(
           result,
           offset,
@@ -1712,8 +1721,17 @@ async function handleIndividualTool(
         const text = await runAgentWait(
           { ...parsed.data, timeoutSec },
           {
-            waitForAgents: (ids, mode, timeoutMs, signal) =>
-              ptahAPI.agent.waitForAgents(ids, mode, timeoutMs, signal),
+            waitForAgents: async (ids, mode, timeoutMs, signal) => {
+              const result = await ptahAPI.agent.waitForAgents(ids, mode, timeoutMs, signal);
+              const raw = request._callerSessionId;
+              const reader = raw
+                ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
+                : undefined;
+              for (const entry of result.entries)
+                if (entry.state === 'exited')
+                  await acknowledgeTerminalRead(entry.info, reader);
+              return result;
+            },
             readOutput: (agentId, tail) => ptahAPI.agent.read(agentId, tail),
             signal: getRequestAbortSignal(),
             ...(timeoutSec < requestedTimeoutSec

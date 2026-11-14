@@ -5,8 +5,17 @@ import type {
 
 const RETENTION_MS = 60 * 60 * 1000;
 
+export interface McpAttachmentAttempt {
+  readonly agentId: string;
+  readonly port: number;
+  readonly reason: 'auth-required' | 'invalid-credential' | 'forbidden' | 'auth-error' | 'invalid-url' | 'seen';
+  readonly method: string;
+  readonly time: number;
+}
+
 class McpAttachmentObserver implements IMcpAttachmentProbe {
   private readonly entries = new Map<string, McpAttachment>();
+  private readonly attempts = new Map<string, McpAttachmentAttempt>();
   private readonly listeners = new Map<
     string,
     Set<(entry?: McpAttachment) => void>
@@ -24,6 +33,23 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
       return undefined;
     }
     return entry;
+  }
+
+  getAttempt(agentId: string, port: number): McpAttachmentAttempt | undefined {
+    const key = this.key(agentId, port);
+    const attempt = this.attempts.get(key);
+    if (attempt && Date.now() - attempt.time > RETENTION_MS) {
+      this.attempts.delete(key);
+      return undefined;
+    }
+    return attempt;
+  }
+
+  recordAttempt(attempt: McpAttachmentAttempt): void {
+    const key = this.key(attempt.agentId, attempt.port);
+    if (this.attempts.size >= 512 && !this.attempts.has(key))
+      this.attempts.delete(this.attempts.keys().next().value ?? '');
+    this.attempts.set(key, attempt);
   }
 
   record(entry: McpAttachment): void {
@@ -70,11 +96,15 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
 
   clear(): void {
     this.entries.clear();
+    this.attempts.clear();
     for (const listeners of this.listeners.values()) {
       for (const listener of [...listeners]) listener();
     }
   }
   clearPort(port: number): void {
+    for (const [key, attempt] of this.attempts) {
+      if (attempt.port === port) this.attempts.delete(key);
+    }
     for (const [key, entry] of this.entries) {
       if (entry.port === port) this.entries.delete(key);
     }

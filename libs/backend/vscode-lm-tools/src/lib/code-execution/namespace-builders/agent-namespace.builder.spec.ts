@@ -330,6 +330,23 @@ describe('buildAgentNamespace — spawn (non-ptahCli)', () => {
     expect(enriched.pluginPaths).toBeUndefined();
   });
 
+  it('resolves caller parent IDs with the same resolver used by spawn', async () => {
+    const resolver = jest.fn((id: string) =>
+      id === 'tab-1' ? 'session-uuid-1' : id,
+    );
+    const { deps, mocks } = makeDeps({ resolveSessionId: resolver });
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a1' });
+    const agent = buildAgentNamespace(deps);
+
+    expect(agent.resolveCallerParentId?.('tab-1')).toBe('session-uuid-1');
+    expect(agent.resolveCallerParentId?.('other')).toBe('other');
+    await agent.spawn({ task: 'do thing', cli: 'codex', parentSessionId: 'tab-1' });
+    expect(mocks.processManager.spawn.mock.calls[0][0].parentSessionId).toBe(
+      'session-uuid-1',
+    );
+    expect(resolver).toHaveBeenCalledWith('tab-1');
+  });
+
   it('uses the caller session identity supplied by the transport', async () => {
     const { deps, mocks } = makeDeps({
       resolveSessionId: (s) => s,
