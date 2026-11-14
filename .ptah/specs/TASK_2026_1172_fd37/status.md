@@ -69,3 +69,25 @@ still uncommitted. It goes into the next harness commit.
   `agent-process-manager.service.ts:989` (`effectivePolicy: options.effectivePolicy?.requested,`)
   plus a manager spec (spawn + resume) to #1266, then rerun item 4; or (B) a follow-up task, and
   #1266 stays a draft. Recommendation: A. The fix is not applied without the parent's answer.
+
+## 2026-11-14 12:40 — run 9 (items 2 + 3) result; report NOT delivered (parent not active)
+
+Run 8 never got a lock slot (its waiter died). Run 9 ran items 2 and 3. The harness works now
+(MCP 2, the spawn ran, the lanes completed, the isolated sessions DB works). Both items failed
+on the product defect, not on the harness:
+
+- Item 2: Codex auto-edit spawn -> `requested auto-edit -> effective none (source: Built-in
+  default)`. The lane ran `pwd` correctly.
+- Item 3: Codex plan + network deny -> the lane reported `BLOCKED: plan mode` and did not write
+  the file (correct). The result line is `requested plan -> effective none (source: Built-in
+  default)`.
+- Screenshots: `.ptah/tmp/test-results-{2,3}-r9/*/test-failed-1.png`.
+
+Correction: the earlier note "Codex lanes are not affected" is wrong for this build.
+`agent-process-manager.service.ts:1134` replaces the stored value only when the SDK handle sets
+its own `effectivePolicy`. The Codex handle did not set it here, so the wrapper from line 989
+stays. Items 2, 3 and 4 all depend on the line-989 fix.
+
+**Decision still needed:** (A) the fix plus a manager spec (spawn + resume, Claude and Codex)
+in #1266, then run items 2-4 again; or (B) a follow-up task, and #1266 stays a draft.
+Recommendation: A. No production change was made.
