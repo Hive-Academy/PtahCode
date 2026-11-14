@@ -25,7 +25,7 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
         <span class="text-sm">{{ msg }}</span>
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          ptahButton variant="ghost" size="xs"
           (click)="onDismissApprovalToast()"
         >
           Dismiss
@@ -83,7 +83,7 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
                 </button>
                 <button
                   type="button"
-                  class="btn btn-xs btn-ghost hover:text-error"
+                  ptahButton variant="ghost" size="xs" tone="muted-danger"
                   (click)="onReject(b)"
                 >
                   Reject
@@ -138,7 +138,7 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
                 }
                 <button
                   type="button"
-                  class="btn btn-xs btn-ghost hover:text-error"
+                  ptahButton variant="ghost" size="xs" tone="muted-danger"
                   (click)="onRevoke(b)"
                 >
                   Revoke
