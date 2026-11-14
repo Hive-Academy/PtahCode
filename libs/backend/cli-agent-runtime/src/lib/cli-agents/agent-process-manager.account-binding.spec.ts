@@ -742,6 +742,7 @@ describe('Claude lane account selection precedence', () => {
       mkdirSync(worktree, { recursive: true });
       writeFileSync(join(worktree, '.git'), `gitdir: ${gitDir}\n`);
       writeFileSync(join(gitDir, 'commondir'), '../..\n');
+      writeFileSync(join(gitDir, 'gitdir'), `${join(worktree, '.git')}\n`);
     });
 
     afterEach(() => rmSync(root, { recursive: true, force: true }));

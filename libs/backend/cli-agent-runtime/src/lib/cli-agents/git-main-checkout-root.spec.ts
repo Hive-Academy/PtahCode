@@ -18,10 +18,29 @@ describe('worktreeMainRoot', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  function linkWorktree(dir: string, pointer: string): void {
+  function linkWorktree(dir: string, pointer: string, backPointer = true): void {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '.git'), `gitdir: ${pointer}\n`);
+    const gitDir = resolve(dir, pointer);
+    if (backPointer) {
+      mkdirSync(gitDir, { recursive: true });
+      writeFileSync(join(gitDir, 'gitdir'), `${join(dir, '.git').replace(/\\/g, '/')}\n`);
+    }
   }
+
+  it('returns null for a forged pointer that the main repository does not link back', () => {
+    const real = join(main, '.claude-worktrees', 'wt');
+    linkWorktree(real, join(main, '.git', 'worktrees', 'wt'));
+    const forged = join(base, 'other-workspace');
+    linkWorktree(forged, join(main, '.git', 'worktrees', 'wt'), false);
+    expect(worktreeMainRoot(forged)).toBeNull();
+  });
+
+  it('returns null when the back-pointer file is missing', () => {
+    const wt = join(base, 'no-back');
+    linkWorktree(wt, join(main, '.git', 'worktrees', 'wt'), false);
+    expect(worktreeMainRoot(wt)).toBeNull();
+  });
 
   it('returns the main checkout for a linked worktree with an absolute gitdir', () => {
     const wt = join(main, '.claude-worktrees', 'wt');
