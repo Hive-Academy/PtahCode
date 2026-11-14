@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1179_c809
-status: backlog
+status: in_review
 type: BUGFIX
 title: "Permissions follow-ups: typed probe and flaky test fixes"
 depends_on: []
