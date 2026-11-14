@@ -62,3 +62,9 @@ Evidence runs 2-5 failed on test setup only; no Phase B defect found so far.
 started. Report to parent NOT delivered (parent-session-not-active). Decision needed from the
 parent: fix the Codex child rail link (session-spawner recordOrganization / sdkIdOf) in
 PR #1265, or record it as a follow-up and accept item (a) as partial. PR stays draft until then.
+
+2026-11-14 (successor session): fetch showed no foreign commits; pushed 085f486a8..1ebd6ed85
+(no force). CI at that time: 6 pass, 10 pending, 3 skipping, no failure. Report to parent sent
+again (same text as 12:45/12:50 plus CI state): NOT delivered (parent-session-not-active).
+Decision on item (a) still open. Assumption: no production change to session-spawner without
+the parent's decision; PR #1265 stays draft.
