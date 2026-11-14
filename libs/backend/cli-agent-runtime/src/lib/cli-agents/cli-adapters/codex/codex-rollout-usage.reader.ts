@@ -19,12 +19,14 @@
  */
 
 import { open, readdir, stat } from 'fs/promises';
+import type { Dirent } from 'node:fs';
 import { join } from 'path';
 import { basename } from 'path';
+import { isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { codexHomeDir } from '@ptah-extension/harness-sync';
-import type { AgentUsageDatum } from '@ptah-extension/shared';
+import { normalizeWorkspaceRoot, type AgentUsageDatum } from '@ptah-extension/shared';
 import type { IFileSystemProvider, SessionUsageContribution } from '@ptah-extension/platform-core';
 import type { UsageCollector, UsageSourceCursor } from '@ptah-extension/agent-sdk';
 
@@ -72,6 +74,7 @@ const replayRecordSchema = z.object({
   payload: z.object({
     type: z.string().optional(),
     id: z.string().optional(),
+    cwd: z.string().optional(),
     info: z.object({ total_token_usage: totalsSchema.optional() }).nullable().optional(),
   }).optional(),
 });
@@ -90,7 +93,7 @@ export async function* listCodexRolloutFiles(sessionsDir = selectedCodexUsageRoo
       if (startAfter && month > startAfter) continue;
       for (const day of await dateDirsNewestFirst(month)) {
         if (startAfter && day > startAfter) continue;
-        for (const name of (await listDir(day)).sort().reverse()) {
+        for (const name of (await listRegularFiles(day)).sort().reverse()) {
           const file = join(day, name);
           if (startAfter && file >= startAfter) continue;
           if (ROLLOUT_RE.test(name)) yield file;
@@ -119,6 +122,8 @@ export class CodexRolloutUsageCollector implements UsageCollector {
     const fingerprint = createHash('sha256').update(headEnd < 0 ? head.bytes : head.bytes.subarray(0, headEnd)).digest('hex').slice(0, 32);
     const meta = headEnd < 0 ? null : parseReplayLine(new TextDecoder().decode(head.bytes.subarray(0, headEnd)));
     const nativeMatch = meta?.type !== 'session_meta' || !meta.payload?.id || meta.payload.id.toLowerCase() === threadId;
+    const worktreePath = meta?.type === 'session_meta' && meta.payload?.cwd && isAbsolute(meta.payload.cwd)
+      ? meta.payload.cwd : null;
     let offset = cursor?.sourcePath === file && cursor.fingerprint === fingerprint && cursor.byteOffset <= stat.size
       ? cursor.byteOffset : 0;
     const originalOffset = offset;
@@ -165,8 +170,10 @@ export class CodexRolloutUsageCollector implements UsageCollector {
                   sessionId: threadId, producer: 'transcript-replay', runId: threadId,
                   nativeThreadId: threadId, turnId: null, eventKey,
                   parentSessionId: null, subagentId: null, providerId: 'codex',
+                  workspaceKey: worktreePath ? normalizeWorkspaceRoot(worktreePath) : null,
+                  worktreePath,
                   occurredAtMs: Number.isFinite(occurredAt) ? occurredAt : Math.floor(stat.mtime),
-                  revision: lineOffset, models: [{ modelId: null, inputTokens: input,
+                   revision: lineOffset, models: [{ modelId: null, inputTokens: Math.max(0, input - cache),
                     outputTokens: output, cacheReadTokens: cache, cacheCreationTokens: null,
                     knownCostMicroUsd: null, costAuthority: 'unpriced' }],
                   totalCostMicroUsd: null, totalCostAuthority: 'unpriced', pricingVersion: null,
@@ -184,7 +191,7 @@ export class CodexRolloutUsageCollector implements UsageCollector {
       }
       pending = joined.slice(start);
       if (pending.length >= MAX_PARTIAL_LINE) {
-        // degradation-audit: optional-capability - oversized JSONL line has no trustworthy usage.
+        // An oversized JSONL line has no trustworthy usage.
         pending = new Uint8Array(0);
         discardLine = true;
         offset = readOffset;
@@ -282,11 +289,28 @@ async function findRolloutFile(
 }
 
 async function dateDirsNewestFirst(dir: string): Promise<string[]> {
-  const names = await listDir(dir);
-  return names
-    .filter((name) => DATE_DIR_RE.test(name))
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error: unknown) {
+    if (isMissing(error)) return [];
+    throw error;
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() && DATE_DIR_RE.test(entry.name))
+    .map((entry) => entry.name)
     .sort((a, b) => Number(b) - Number(a))
     .map((name) => join(dir, name));
+}
+
+async function listRegularFiles(dir: string): Promise<string[]> {
+  try {
+    return (await readdir(dir, { withFileTypes: true }))
+      .filter((entry) => entry.isFile()).map((entry) => entry.name);
+  } catch (error: unknown) {
+    if (isMissing(error)) return [];
+    throw error;
+  }
 }
 
 /** A missing directory lists as empty; any other failure propagates. */

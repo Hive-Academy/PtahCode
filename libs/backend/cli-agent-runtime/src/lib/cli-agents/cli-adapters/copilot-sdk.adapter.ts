@@ -396,7 +396,8 @@ export class CopilotSdkAdapter implements CliAdapter {
       let nativeTurnId: string | undefined;
       const emitTurnSegment = (item: CliOutputSegment): void => {
         if (item.usage) turnUsages.push(item.usage);
-        segment.emit(item);
+        // Intermediate message usage feeds the aggregate but is not a turn total.
+        segment.emit(item.usage ? { ...item, usage: undefined } : item);
       };
       let lineBuf = '';
       let stderrBuf = '';

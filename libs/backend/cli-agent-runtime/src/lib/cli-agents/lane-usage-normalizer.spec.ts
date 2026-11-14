@@ -73,3 +73,42 @@ describe('Codex missing usage reasons', () => {
     });
   });
 });
+
+describe('lane model breakdown', () => {
+  it('retains reported models while keeping aggregate cost separate', async () => {
+    const recordUsage = jest.fn();
+    const logger = Object.create(Logger.prototype) as Logger;
+    jest.spyOn(logger, 'warn').mockImplementation();
+    const info: AgentProcessInfo = {
+      agentId: AgentId.create(), cli: 'opencode', task: 'synthetic',
+      workingDirectory: 'C:/workspace', status: 'completed', startedAt: '2026-11-08T00:00:00.000Z',
+    };
+    recordLaneUsageOutcome({ recordUsage }, logger, info, '2026-11-08T00:01:00.000Z', {
+      inputTokens: 3, outputTokens: 4, costUsd: 0.1,
+      models: [{ modelId: 'a', inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        { modelId: 'b', inputTokens: 2, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }],
+    });
+    await Promise.resolve();
+    expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({
+      totalCostMicroUsd: 100000,
+      models: [expect.objectContaining({ modelId: 'a', inputTokens: 1 }),
+        expect.objectContaining({ modelId: 'b', inputTokens: 2 })],
+    }));
+  });
+
+  it('uses the current turn start for replay coverage', async () => {
+    const recordUsage = jest.fn();
+    const logger = Object.create(Logger.prototype) as Logger;
+    jest.spyOn(logger, 'warn').mockImplementation();
+    const info: AgentProcessInfo = {
+      agentId: AgentId.create(), cli: 'codex', task: 'synthetic',
+      workingDirectory: 'C:/workspace', status: 'completed', startedAt: '2026-11-08T00:00:00.000Z',
+    };
+    recordLaneUsageOutcome({ recordUsage }, logger, info, '2026-11-08T00:03:00.000Z',
+      { inputTokens: 1 }, 'native-thread', undefined, '2026-11-08T00:02:00.000Z');
+    await Promise.resolve();
+    expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({
+      coverageStartMs: Date.parse('2026-11-08T00:02:00.000Z'),
+    }));
+  });
+});

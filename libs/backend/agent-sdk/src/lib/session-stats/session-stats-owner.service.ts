@@ -872,6 +872,8 @@ export class SessionStatsOwnerService {
           occurredAtMs: Date.now(), revision: state.revision, models,
           totalCostMicroUsd: null, totalCostAuthority: 'unpriced',
           pricingVersion: null, missingReason: 'aborted-before-result',
+          source: 'estimated',
+          billable: false,
           coverageStartMs: run.provisionalStartMs ?? run.turnStartMs, coverageEndMs: Date.now(),
         });
         if (contribution) {

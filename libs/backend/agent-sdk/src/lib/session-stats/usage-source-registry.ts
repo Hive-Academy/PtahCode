@@ -9,7 +9,7 @@ export class ClaudeUsageSourceRegistry {
   async listRoots(): Promise<readonly string[]> {
     const named = await this.profiles.listActiveRoots();
     return [...new Set([
-      path.join(os.homedir(), '.claude', 'projects'),
+      path.join(process.env['CLAUDE_CONFIG_DIR']?.trim() || path.join(os.homedir(), '.claude'), 'projects'),
       ...named.map((profile) => path.join(profile.canonicalConfigDir, 'projects')),
     ])];
   }

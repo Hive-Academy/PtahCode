@@ -118,6 +118,24 @@ describe('usage reconciliation', () => {
     service.stop();
   });
 
+  it('continues a budget-limited scan without waiting for the idle interval', async () => {
+    const { service, collector, sources } = fixture();
+    sources.listClaudeFiles = async function* (_root, startAfter) {
+      for (let index = 19; index >= 0; index--) {
+        const file = `/synthetic/${String(index).padStart(2, '0')}.jsonl`;
+        if (!startAfter || file < startAfter) yield file;
+      }
+    };
+    service.start();
+    await flush();
+    await flush();
+    expect(collector.collect).toHaveBeenCalledTimes(16);
+    await jest.advanceTimersByTimeAsync(2_001);
+    await flush();
+    expect(collector.collect).toHaveBeenCalledTimes(20);
+    service.stop();
+  });
+
   it('resumes a file past the 4 MiB cap on the next pass', async () => {
     const { service, collector, store } = fixture();
     store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
@@ -190,6 +208,25 @@ describe('usage reconciliation', () => {
     expect(store.saveDiscoveryKey).toHaveBeenCalledWith(JSON.stringify({
       source: 0, root: '/synthetic', file: cursor.sourcePath,
     }));
+    service.stop();
+  });
+
+  it('continues discovery soon after a pending file completes', async () => {
+    const { service, collector, sources, store } = fixture();
+    store.loadDiscoveryKey = jest.fn().mockResolvedValue(JSON.stringify({
+      source: 0, root: '/synthetic', file: cursor.sourcePath, pending: true, pendingPasses: 1,
+    }));
+    store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
+    sources.listClaudeFiles = async function* (_root, startAfter) {
+      expect(startAfter).toBe(cursor.sourcePath);
+      yield '/synthetic/next.jsonl';
+    };
+    service.start();
+    await flush();
+    expect(collector.collect).not.toHaveBeenCalledWith('/synthetic/next.jsonl', null, 1_048_576);
+    await jest.advanceTimersByTimeAsync(2_001);
+    await flush();
+    expect(collector.collect).toHaveBeenCalledWith('/synthetic/next.jsonl', null, 1_048_576);
     service.stop();
   });
 

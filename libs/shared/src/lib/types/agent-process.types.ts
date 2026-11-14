@@ -571,6 +571,8 @@ export interface CliOutputSegment {
   readonly turnTelemetry?: AgentTurnTelemetry;
   readonly usage?: {
     readonly model?: string;
+    readonly models?: { modelId: string; inputTokens: number; outputTokens: number;
+      cacheReadTokens: number; cacheWriteTokens: number }[];
     readonly inputTokens?: number;
     readonly outputTokens?: number;
     /** Prompt-cache tokens served from an existing cache entry. */

@@ -22,7 +22,7 @@
 
 import 'reflect-metadata';
 import * as path from 'path';
-import { readdir } from 'node:fs/promises';
+import { listCliClaudeProjectFiles } from './claude-project-discovery';
 import * as os from 'os';
 import { registerSessionStoreServices } from '@ptah-extension/persistence-sqlite';
 import { runCliSessionStoreMigration } from './bootstrap/session-store-migration';
@@ -317,19 +317,6 @@ export function attachCliHostAttention(
     );
     return undefined;
   }
-}
-
-async function* listCliClaudeProjectFiles(root: string, startAfter?: string): AsyncGenerator<string> {
-  async function* visit(dir: string, depth: number): AsyncGenerator<string> {
-    for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? 1 : a.name > b.name ? -1 : 0)) {
-      const file = path.join(dir, entry.name);
-      if (startAfter && file > startAfter) continue;
-      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-        if (!startAfter || file < startAfter) yield file;
-      } else if (entry.isDirectory() && depth < 3) yield* visit(file, depth + 1);
-    }
-  }
-  yield* visit(root, 0);
 }
 
 export class CliDIContainer {

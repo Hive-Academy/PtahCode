@@ -136,7 +136,8 @@ export class UsageAnalyticsService {
         repositories = [];
         for (const id of ids) {
           if (signal?.aborted) break;
-          repositories.push(await this.statsRepository.getRepositoryUsageTotals(id, since, until));
+          const totals = await this.statsRepository.getRepositoryUsageTotals(id, since, until);
+          repositories.push({ ...totals, worktreePaths: totals.worktreePaths.slice(0, 1000) });
         }
       } catch (error: unknown) {
         this.logger.warn('[UsageAnalytics] Repository totals unavailable', { reason: error instanceof Error ? error.name : 'unknown' });

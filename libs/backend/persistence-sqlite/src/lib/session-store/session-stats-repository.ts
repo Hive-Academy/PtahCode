@@ -211,9 +211,10 @@ export class SessionStatsRepository {
     const from = safeInteger.parse(fromMs);
     const until = safeInteger.parse(untilMs);
     if (until <= from) throw new Error('Usage range must be increasing');
-    const rows: unknown[] = db.prepare(`SELECT DISTINCT repository_id AS repositoryId FROM session_usage_turns
-      WHERE workspace_key = ? AND repository_id IS NOT NULL AND billable = 1
-      AND occurred_at_ms >= ? AND occurred_at_ms < ? ORDER BY repository_id LIMIT 100`)
+    const rows: unknown[] = db.prepare(`SELECT DISTINCT t.repository_id AS repositoryId FROM session_usage_turns t
+      LEFT JOIN sessions s ON s.session_id = t.session_id
+      WHERE COALESCE(s.workspace_key, t.workspace_key) = ? AND t.repository_id IS NOT NULL AND t.billable = 1
+      AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ? ORDER BY t.repository_id LIMIT 100`)
       .all(text.parse(workspaceKey), from, until);
     return rows.map((row) => z.object({ repositoryId: text }).parse(row).repositoryId);
   }
@@ -396,14 +397,14 @@ export class SessionStatsRepository {
           : [codexThread];
         const affected = db.prepare(`SELECT DISTINCT session_id FROM session_usage_turns
           WHERE source = 'replay' AND billable = 1 AND provider_id = ? AND ${ownership}
-          AND (? IS NULL OR coverage_start_ms IS NULL OR occurred_at_ms >= ?)
-          AND (? IS NULL OR coverage_end_ms IS NULL OR occurred_at_ms <= ?)`).all(first.providerId, ...args,
+           AND (? IS NULL OR occurred_at_ms >= ?)
+           AND (? IS NULL OR occurred_at_ms <= ?)`).all(first.providerId, ...args,
             first.coverageStartMs ?? null, first.coverageStartMs ?? null, first.coverageEndMs ?? null, first.coverageEndMs ?? null) as { session_id: string }[];
         affectedReplaySessions.push(...affected.map((row) => row.session_id));
         db.prepare(`UPDATE session_usage_turns SET billable = 0 WHERE source = 'replay'
           AND provider_id = ? AND ${ownership}
-          AND (? IS NULL OR coverage_start_ms IS NULL OR occurred_at_ms >= ?)
-          AND (? IS NULL OR coverage_end_ms IS NULL OR occurred_at_ms <= ?)`)
+           AND (? IS NULL OR occurred_at_ms >= ?)
+           AND (? IS NULL OR occurred_at_ms <= ?)`)
           .run(first.providerId, ...args,
             first.coverageStartMs ?? null, first.coverageStartMs ?? null, first.coverageEndMs ?? null, first.coverageEndMs ?? null);
       }

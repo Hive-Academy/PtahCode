@@ -670,13 +670,7 @@ describe('CopilotSdkAdapter', () => {
         type: 'info',
         content:
           'Usage: model: claude-sonnet-4.5, 1000 input, 500 output, $0.0025, 3.5s',
-        usage: {
-          model: 'claude-sonnet-4.5',
-          inputTokens: 1000,
-          outputTokens: 500,
-          costUsd: 0.0025,
-          durationMs: 3500,
-        },
+        usage: undefined,
       });
       expect(segments).toContainEqual(expect.objectContaining({
         turnTelemetry: expect.objectContaining({
@@ -741,6 +735,7 @@ describe('CopilotSdkAdapter', () => {
       expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
         status: 'unavailable',
       });
+      expect(segments.every((item) => item.usage === undefined)).toBe(true);
     });
 
     it('fails closed when a successful turn has no usage event', async () => {

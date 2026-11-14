@@ -482,6 +482,7 @@ export class PiCliAdapter implements CliAdapter {
       let turnModel = options.model;
       const messageUsage: PiMessageUsage[] = [];
       const endUsage: PiMessageUsage[] = [];
+      let incompleteUsage = false;
       const turnSequence = spawnedChildrenSequence++;
 
       return new Promise<number>((resolve) => {
@@ -514,9 +515,12 @@ export class PiCliAdapter implements CliAdapter {
           for (const line of lines) {
             const completion = this.readCompletionUsage(line);
             if (completion) {
-              if (completion.type === 'message_end') messageUsage.push(completion.usage);
-              else endUsage.push(completion.usage);
-              turnModel = completion.usage.model || turnModel;
+              if (!completion.usage) incompleteUsage = true;
+              else {
+                if (completion.type === 'message_end') messageUsage.push(completion.usage);
+                else endUsage.push(completion.usage);
+                turnModel = completion.usage.model || turnModel;
+              }
             }
             const isSettled = this.handleLine(line, output.emit, segment.emit, {
               onSessionId: (id) => {
@@ -528,7 +532,7 @@ export class PiCliAdapter implements CliAdapter {
             });
             if (isSettled) {
               const records = messageUsage.length ? messageUsage : endUsage;
-              const usage = records.length ? {
+              const usage = !incompleteUsage && records.length ? {
                 inputTokens: records.reduce((total, record) => total + record.usage.input, 0),
                 outputTokens: records.reduce((total, record) => total + record.usage.output, 0),
                 cacheReadTokens: records.every((record) => record.usage.cacheRead !== undefined)
@@ -744,7 +748,7 @@ export class PiCliAdapter implements CliAdapter {
     }
   }
 
-  private readCompletionUsage(line: string): { type: 'message_end' | 'turn_end'; usage: PiMessageUsage } | undefined {
+  private readCompletionUsage(line: string): { type: 'message_end' | 'turn_end'; usage?: PiMessageUsage } | undefined {
     let event: unknown;
     try {
       event = JSON.parse(line);
@@ -753,8 +757,12 @@ export class PiCliAdapter implements CliAdapter {
       // completion event; the normal output handler processes it.
       return undefined;
     }
+    const assistantCompletion = z.object({ type: z.enum(['message_end', 'turn_end']),
+      message: z.object({ role: z.literal('assistant') }) }).safeParse(event);
+    if (!assistantCompletion.success) return undefined;
     const parsed = piCompletionUsageSchema.safeParse(event);
-    return parsed.success ? { type: parsed.data.type, usage: parsed.data.message } : undefined;
+    return parsed.success ? { type: parsed.data.type, usage: parsed.data.message }
+      : { type: assistantCompletion.data.type };
   }
 
   /**

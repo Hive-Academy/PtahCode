@@ -50,6 +50,7 @@ const PASS_DISCOVERY_BUDGET = 64;
 const PASS_BYTE_BUDGET = 4 * BYTE_BUDGET;
 const MAX_PENDING_PASSES = 4;
 const DEBOUNCE_MS = 2_000;
+const CONTINUATION_MS = 2_001;
 const ACTIVE_IDLE_MS = 15 * 60_000;
 const QUIET_IDLE_MS = 60 * 60_000;
 const discoveryKeySchema = z.object({ source: z.number().int().min(0).max(1), root: z.string().min(1), file: z.string().min(1), pending: z.boolean().optional(), pendingPasses: z.number().int().min(0).optional() });
@@ -70,6 +71,7 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
   private discoveryLoaded = false;
   private running = false;
   private followUp = false;
+  private passIncomplete = false;
   private debounceTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private firstTimer: NodeJS.Timeout | null = null;
@@ -137,6 +139,7 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
 
   private async runPass(): Promise<void> {
     this.running = true;
+    this.passIncomplete = false;
     let changed = false;
     try {
       changed = await this.scan();
@@ -156,7 +159,7 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
           this.followUp = false;
           this.requestPass();
         } else {
-          const delay = changed ? ACTIVE_IDLE_MS : this.idleDelayMs;
+          const delay = this.passIncomplete ? CONTINUATION_MS : changed ? ACTIVE_IDLE_MS : this.idleDelayMs;
           this.idleDelayMs = changed ? ACTIVE_IDLE_MS : QUIET_IDLE_MS;
           this.idleTimer = setTimeout(() => this.requestPass(), delay);
           this.idleTimer.unref();
@@ -188,6 +191,7 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
             ? { source, root, file }
             : { source, root, file, pending: true, pendingPasses };
           await this.cursors.saveDiscoveryKey?.(JSON.stringify(this.discoveryKey));
+          this.passIncomplete = true;
           return changed;
         }
       } catch (error: unknown) {
@@ -195,6 +199,8 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
       }
       this.discoveryKey = { source, root, file };
       await this.cursors.saveDiscoveryKey?.(JSON.stringify(this.discoveryKey));
+      // Discovery resumes after this file, so continue without the idle wait.
+      this.passIncomplete = true;
       return changed;
     }
     let visited = 0;
@@ -212,6 +218,7 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
             if (!this.started) return changed;
             if (visited >= PASS_FILE_BUDGET || spentBytes >= PASS_BYTE_BUDGET || enumerated >= PASS_DISCOVERY_BUDGET) {
               await this.cursors.saveDiscoveryKey?.(JSON.stringify(this.discoveryKey));
+              this.passIncomplete = true;
               return changed;
             }
             enumerated++;
@@ -235,6 +242,7 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
             if (!result.complete && spentBytes >= PASS_BYTE_BUDGET) {
               this.discoveryKey = { source: index, root, file, pending: true, pendingPasses: 1 };
               await this.cursors.saveDiscoveryKey?.(JSON.stringify(this.discoveryKey));
+              this.passIncomplete = true;
               return changed;
             }
             await yieldImmediate();

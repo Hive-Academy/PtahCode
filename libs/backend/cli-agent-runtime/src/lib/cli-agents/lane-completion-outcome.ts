@@ -117,6 +117,7 @@ export function recordLaneUsageOutcome(
   usage: CliOutputSegment['usage'],
   nativeThreadId: string | null = null,
   trigger?: UsageReconciliationTrigger,
+  turnStartedAt?: string,
 ): void {
   const runId = String(info.agentId);
   const eventKey = `${runId}:${completedAt}`;
@@ -163,7 +164,15 @@ export function recordLaneUsageOutcome(
       providerId: info.providerId ?? info.quotaOwner?.providerId ?? null,
       occurredAtMs: Date.parse(completedAt) || Date.now(),
       revision: info.turnSeq ?? 0,
-      models: [
+      models: usage?.models?.length ? usage.models.map((model) => ({
+        modelId: model.modelId,
+        inputTokens: model.inputTokens,
+        outputTokens: model.outputTokens,
+        cacheReadTokens: model.cacheReadTokens,
+        cacheCreationTokens: model.cacheWriteTokens,
+        knownCostMicroUsd: null,
+        costAuthority: 'unpriced' as const,
+      })) : [
         {
           // The requested alias is not evidence of the model that incurred cost.
           modelId: usage?.model ?? null,
@@ -183,7 +192,7 @@ export function recordLaneUsageOutcome(
       source: 'live',
       missingReason,
       billable: hasCounter,
-      coverageStartMs: Number.isFinite(Date.parse(info.startedAt)) ? Date.parse(info.startedAt) : null,
+       coverageStartMs: Number.isFinite(Date.parse(turnStartedAt ?? info.startedAt)) ? Date.parse(turnStartedAt ?? info.startedAt) : null,
       coverageEndMs: Number.isFinite(Date.parse(completedAt)) ? Date.parse(completedAt) : null,
     };
     const contribution = parseSessionUsageContribution(built);

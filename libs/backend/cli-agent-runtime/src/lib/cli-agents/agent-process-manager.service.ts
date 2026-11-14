@@ -1388,6 +1388,7 @@ export class AgentProcessManager {
       pendingMessages: [],
       reportsDelivered: 0,
       turnSegmentStart: 0,
+      turnStartedAt: info.startedAt,
     };
 
     const previousBudget = info.cliSessionId
@@ -2656,6 +2657,7 @@ export class AgentProcessManager {
       tracked.exitEmitHandle = undefined;
     }
     const continuedAt = new Date().toISOString();
+    tracked.turnStartedAt = continuedAt;
     tracked.info = {
       ...tracked.info,
       turnSeq: (tracked.info.turnSeq ?? 1) + 1,
@@ -3665,6 +3667,7 @@ export class AgentProcessManager {
         tracked.outcomeUsage,
         tracked.sdkHandle?.getObservedNativeThreadId?.() ?? null,
         this.usageReconciliationTrigger,
+        tracked.turnStartedAt,
       );
     }
     void Promise.resolve(

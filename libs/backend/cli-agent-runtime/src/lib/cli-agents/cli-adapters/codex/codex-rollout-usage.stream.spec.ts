@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FileType } from '@ptah-extension/platform-core';
@@ -35,12 +35,19 @@ function fixture(lines: string[]) {
 }
 
 describe('CodexRolloutUsageCollector', () => {
+  it('attributes a standalone rollout to session metadata cwd', async () => {
+    const cwd = join(tmpdir(), 'codex-worktree');
+    const replay = fixture([JSON.stringify({ type: 'session_meta', payload: { id: thread, cwd } }), count(1, 1)]);
+    const result = await replay.collector.collect(file, null, 4096);
+    expect(result.events[0]).toMatchObject({ worktreePath: cwd,
+      workspaceKey: cwd.replace(/\\/g, '/').toLowerCase() });
+  });
   it('deltas cumulative counts and keeps native thread ownership', async () => {
     const replay = fixture([meta, count(10, 2, 3), count(18, 5, 7)]);
     const result = await replay.collector.collect(file, null, 4096);
     expect(result.events.map((event) => event.models[0])).toMatchObject([
-      { inputTokens: 10, outputTokens: 2, cacheReadTokens: 3 },
-      { inputTokens: 8, outputTokens: 3, cacheReadTokens: 4 },
+      { inputTokens: 7, outputTokens: 2, cacheReadTokens: 3 },
+      { inputTokens: 4, outputTokens: 3, cacheReadTokens: 4 },
     ]);
     expect(result.events[0]).toMatchObject({ nativeThreadId: thread, sessionId: thread, billable: true });
     expect(result.next.byteOffset).toBeGreaterThan(0);
@@ -78,6 +85,25 @@ describe('CodexRolloutUsageCollector', () => {
 });
 
 describe('Codex rollout discovery', () => {
+  it('does not discover a rollout symlink outside the selected tree', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codex-symlink-'));
+    try {
+      const day = join(root, 'sessions', '2026', '01', '01');
+      mkdirSync(day, { recursive: true });
+      const external = join(root, file);
+      writeFileSync(external, `${meta}\n`);
+      try {
+        symlinkSync(external, join(day, file), 'file');
+      } catch (error: unknown) {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') return;
+        throw error;
+      }
+      const found: string[] = [];
+      for await (const candidate of listCodexRolloutFiles(join(root, 'sessions'))) found.push(candidate);
+      expect(found).toEqual([]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('scans date partitions newest first', async () => {
     const root = mkdtempSync(join(tmpdir(), 'codex-stream-'));
     try {

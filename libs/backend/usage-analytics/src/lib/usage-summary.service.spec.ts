@@ -31,7 +31,7 @@ describe('UsageAnalyticsService', () => {
     jest.spyOn(repository, 'getWorkspaceTopSessions').mockResolvedValue([]);
     const ids = jest.spyOn(repository, 'getWorkspaceRepositoryIds').mockResolvedValue(['repo-a']);
     jest.spyOn(repository, 'getRepositoryUsageTotals').mockResolvedValue({
-      repositoryId: 'repo-a', worktreePaths: ['/work/a'], inputTokens: 10,
+      repositoryId: 'repo-a', worktreePaths: Array.from({ length: 1001 }, (_, index) => `/work/${index}`), inputTokens: 10,
       outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0,
       knownCostMicroUsd: 250000, hasUnknownTokens: true,
     });
@@ -47,6 +47,7 @@ describe('UsageAnalyticsService', () => {
     expect(summary.repositories).toEqual([expect.objectContaining({
       repositoryId: 'repo-a', knownCostMicroUsd: 250000, hasUnknownTokens: true,
     })]);
+    expect(summary.repositories?.[0].worktreePaths).toHaveLength(1000);
   });
 
   it('does not start ledger SQL when the budget has expired', async () => {

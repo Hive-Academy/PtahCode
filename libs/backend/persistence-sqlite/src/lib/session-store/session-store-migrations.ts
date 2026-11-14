@@ -134,12 +134,16 @@ INSERT OR IGNORE INTO session_usage_turns_new
  (session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,
   input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,known_cost_micro_usd,
   cost_authority,source,pricing_version,revision,workspace_key,host)
-SELECT session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,
-  input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,known_cost_micro_usd,
-  cost_authority,source,pricing_version,revision,workspace_key,host
-FROM session_usage_turns
-ORDER BY CASE producer WHEN 'sdk-owner' THEN 0 WHEN 'codex-checkpoint' THEN 1
-  WHEN 'cli-lane' THEN 2 ELSE 3 END, revision DESC, rowid DESC;
+ SELECT t.session_id,t.producer,t.run_id,t.turn_id,t.model_id,t.event_key,t.occurred_at_ms,t.provider_id,
+   t.input_tokens,t.output_tokens,t.cache_read_tokens,t.cache_write_tokens,t.known_cost_micro_usd,
+   t.cost_authority,t.source,t.pricing_version,t.revision,t.workspace_key,t.host
+ FROM session_usage_turns AS t
+ WHERE t.producer = (SELECT owner.producer FROM session_usage_turns AS owner
+   WHERE owner.session_id = t.session_id AND owner.event_key = t.event_key
+   ORDER BY CASE owner.producer WHEN 'sdk-owner' THEN 0 WHEN 'codex-checkpoint' THEN 1
+     WHEN 'cli-lane' THEN 2 ELSE 3 END, owner.revision DESC, owner.rowid DESC LIMIT 1)
+ ORDER BY CASE t.producer WHEN 'sdk-owner' THEN 0 WHEN 'codex-checkpoint' THEN 1
+   WHEN 'cli-lane' THEN 2 ELSE 3 END, t.revision DESC, t.rowid DESC;
 DROP TABLE session_usage_turns;
 ALTER TABLE session_usage_turns_new RENAME TO session_usage_turns;
 CREATE INDEX idx_session_usage_turns_time ON session_usage_turns (occurred_at_ms,provider_id,model_id);
@@ -151,6 +155,16 @@ CREATE INDEX idx_session_usage_native_thread ON session_usage_turns (native_thre
 ALTER TABLE session_stats ADD COLUMN repository_id TEXT;
 ALTER TABLE session_stats ADD COLUMN worktree_path TEXT;
 ALTER TABLE session_stats ADD COLUMN missing_reason TEXT;
+-- The old key included producer. Recompute aggregates after selecting one owner
+-- for each event so completed sessions cannot retain totals from discarded rows.
+UPDATE session_stats SET
+  input_tokens = COALESCE((SELECT SUM(input_tokens) FROM session_usage_turns WHERE session_id = session_stats.session_id AND billable = 1), 0),
+  output_tokens = COALESCE((SELECT SUM(output_tokens) FROM session_usage_turns WHERE session_id = session_stats.session_id AND billable = 1), 0),
+  cache_read_tokens = COALESCE((SELECT SUM(cache_read_tokens) FROM session_usage_turns WHERE session_id = session_stats.session_id AND billable = 1), 0),
+  cache_write_tokens = COALESCE((SELECT SUM(cache_write_tokens) FROM session_usage_turns WHERE session_id = session_stats.session_id AND billable = 1), 0),
+  known_cost_micro_usd = (SELECT SUM(known_cost_micro_usd) FROM session_usage_turns WHERE session_id = session_stats.session_id AND billable = 1),
+  has_unpriced = COALESCE((SELECT MAX(known_cost_micro_usd IS NULL OR input_tokens IS NULL OR output_tokens IS NULL OR cache_read_tokens IS NULL OR cache_write_tokens IS NULL)
+    FROM session_usage_turns WHERE session_id = session_stats.session_id AND billable = 1), 0);
 CREATE INDEX idx_session_stats_repository_time ON session_stats (repository_id,last_usage_at_ms);
 `;
 

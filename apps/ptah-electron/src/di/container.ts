@@ -26,6 +26,7 @@ import { registerPhase1Infra } from './phase-1-infra';
 import { registerPhase2Libraries } from './phase-2-libraries';
 import { registerPhase3Storage } from './phase-3-storage';
 import { registerPhase4Handlers } from './phase-4-handlers';
+import { repositoryBackfillAvailable } from './repository-backfill-availability';
 
 export class ElectronDIContainer {
   private static _root: DependencyContainer | undefined;
@@ -50,8 +51,10 @@ export class ElectronDIContainer {
     // Start after every phase so eager recorder resolution sees the complete graph.
     startAndRegisterLaneOutcomes(root, logger, { observeSubagentEnded: true });
     const usageReconciliationService = root.resolve(UsageReconciliationService);
-    const backfill = root.resolve(RepositoryIdentityBackfillService);
-    usageReconciliationService.setAfterPass(() => backfill.runOnce().then(() => undefined));
+    if (repositoryBackfillAvailable(root)) {
+      const backfill = root.resolve(RepositoryIdentityBackfillService);
+      usageReconciliationService.setAfterPass(() => backfill.runOnce().then(() => undefined));
+    }
     setImmediate(() => {
       if (!ElectronDIContainer._stopping && ElectronDIContainer._root === root) {
         usageReconciliationService.start();

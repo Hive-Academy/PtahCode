@@ -243,7 +243,8 @@ describe('SessionStatsOwnerService', () => {
     owner.publishLive(SESSION, generation, 'run-aborted', [{ model: MODEL, inputTokens: 2, outputTokens: 10, cacheRead: 0, cacheCreation: 0, costUSD: 1 }]);
     expect(contributions).toHaveLength(1);
     owner.markRunIncomplete(SESSION, generation, 'run-aborted');
-    expect(contributions.at(-1)).toMatchObject({ missingReason: 'aborted-before-result', models: [{ inputTokens: 2 }] });
+    expect(contributions.at(-1)).toMatchObject({ missingReason: 'aborted-before-result',
+      source: 'estimated', billable: false, models: [{ inputTokens: 2 }] });
   });
 
   it('sends an absolute run snapshot when accepted cumulative cost decreases', () => {

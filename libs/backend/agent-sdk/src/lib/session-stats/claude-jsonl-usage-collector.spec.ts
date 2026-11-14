@@ -34,6 +34,12 @@ function collector(lines: string[]) {
 }
 
 describe('ClaudeJsonlUsageCollector', () => {
+  it('attributes a standalone replay to its transcript working directory', async () => {
+    const cwd = path.resolve('standalone-worktree');
+    const result = await collector([line(parent, 'm0', 3, { cwd })]).collect(`${parent}.jsonl`, null, 1024);
+    expect(result.events[0]).toMatchObject({ worktreePath: cwd,
+      workspaceKey: cwd.replace(/\\/g, '/').toLowerCase() });
+  });
   it('uses the JSONL session ID and rejects a mismatched ordinary filename', async () => {
     const result = await collector([line(other, 'm1', 3)]).collect(`${parent}.jsonl`, null, 1024);
     expect(result.events).toHaveLength(1);

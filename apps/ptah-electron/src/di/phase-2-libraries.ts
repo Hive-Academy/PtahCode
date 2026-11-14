@@ -78,20 +78,7 @@ import { CodexRolloutUsageCollector, selectedCodexUsageRoots, listCodexFiles } f
 import { SqliteUsageCursorRepository } from '@ptah-extension/persistence-sqlite';
 import { AUTH_PROVIDERS_TOKENS, type ClaudeUsageProfileRoots } from '@ptah-extension/auth-providers-tokens';
 import { RepositoryIdentityResolver, ReadOnlyGit, TASK_END_TOKENS, type GitReadRunner } from '@ptah-extension/task-end-hook';
-import { readdir } from 'node:fs/promises';
-
-async function* listClaudeProjectFiles(root: string, startAfter?: string): AsyncGenerator<string> {
-  async function* visit(dir: string, depth: number): AsyncGenerator<string> {
-    for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? 1 : a.name > b.name ? -1 : 0)) {
-      const file = path.join(dir, entry.name);
-      if (startAfter && file > startAfter) continue;
-      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-        if (!startAfter || file < startAfter) yield file;
-      } else if (entry.isDirectory() && depth < 3) yield* visit(file, depth + 1);
-    }
-  }
-  yield* visit(root, 0);
-}
+import { listClaudeProjectFiles } from './claude-project-discovery';
 import {
   registerCliAgentRuntimeServices,
   CLI_AGENT_RUNTIME_TOKENS,

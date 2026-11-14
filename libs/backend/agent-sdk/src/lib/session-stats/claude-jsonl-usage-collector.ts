@@ -2,31 +2,40 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import type { IFileSystemProvider, SessionUsageContribution } from '@ptah-extension/platform-core';
+import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import type { UsageCollector, UsageSourceCursor } from './usage-collector.interface';
 
 const MAX_READ = 256 * 1024;
 const MAX_PARTIAL = 1024 * 1024;
 const HEAD_BYTES = 4096;
-const counter = z.number().finite().nonnegative().optional().catch(undefined);
-const optionalString = z.string().optional().catch(undefined);
+function optionalValid<T>(schema: z.ZodType<T>): z.ZodType<T | undefined> {
+  return z.preprocess((value: unknown) => {
+    const parsed = schema.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+  }, schema.optional());
+}
+
+const counter = optionalValid(z.number().finite().nonnegative());
+const optionalString = optionalValid(z.string());
 // Zod strips content and tool arguments at the JSONL boundary.
 const recordSchema = z.object({
   type: optionalString,
+  cwd: optionalString,
   sessionId: optionalString,
   timestamp: optionalString,
   requestId: optionalString,
   request_id: optionalString,
-  isSidechain: z.boolean().optional().catch(undefined),
-  message: z.object({
+  isSidechain: optionalValid(z.boolean()),
+  message: optionalValid(z.object({
     id: optionalString,
     model: optionalString,
-    usage: z.object({
+    usage: optionalValid(z.object({
       input_tokens: counter,
       output_tokens: counter,
       cache_read_input_tokens: counter,
       cache_creation_input_tokens: counter,
-    }).optional().catch(undefined),
-  }).optional().catch(undefined),
+    })),
+  })),
 });
 
 function ownerFromPath(file: string): { parent: string | null; subagent: string | null; ordinary: string | null } {
@@ -98,7 +107,7 @@ export class ClaudeJsonlUsageCollector implements UsageCollector {
       const newline = joined.lastIndexOf(10);
       if (newline < 0) {
         if (joined.length >= MAX_PARTIAL) {
-          // degradation-audit: optional-capability - skip an oversized line without retaining its text.
+          // Skip an oversized line without retaining its text.
           offset = readOffset;
           pending = new Uint8Array(0);
         } else pending = joined;
@@ -137,6 +146,8 @@ export class ClaudeJsonlUsageCollector implements UsageCollector {
           producer: 'transcript-replay', runId: sessionId, nativeThreadId: sessionId,
           turnId: null, eventKey, parentSessionId: owner.subagent ? (valid ? sessionId : owner.parent) : null,
           subagentId: owner.subagent, providerId: 'claude',
+          workspaceKey: record.cwd && path.isAbsolute(record.cwd) ? normalizeWorkspaceRoot(record.cwd) : null,
+          worktreePath: record.cwd && path.isAbsolute(record.cwd) ? record.cwd : null,
           occurredAtMs: Number.isFinite(occurredAtMs) ? occurredAtMs : Math.floor(stat.mtime),
           revision: lineOffset, models: [{
             modelId: record.message.model ?? null, inputTokens: usage.input_tokens ?? null,
@@ -156,7 +167,7 @@ export class ClaudeJsonlUsageCollector implements UsageCollector {
       offset += complete.length;
       pending = joined.slice(newline + 1);
       if (pending.length >= MAX_PARTIAL) {
-        // degradation-audit: optional-capability - the next chunk starts after this oversized line fragment.
+        // The next chunk starts after this oversized line fragment.
         offset = readOffset;
         pending = new Uint8Array(0);
       }

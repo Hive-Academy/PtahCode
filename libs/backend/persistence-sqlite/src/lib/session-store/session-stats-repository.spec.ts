@@ -170,6 +170,25 @@ describe('SessionStatsRepository', () => {
     } finally { store.close(); }
   });
 
+  it('keeps replay outside a live coverage window billable when replay bounds are absent', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      const replay = { ...contribution, sessionId: 'native-thread', producer: 'transcript-replay',
+        runId: 'native-thread', nativeThreadId: 'native-thread', providerId: 'codex',
+        source: 'replay' as const, coverageStartMs: null, coverageEndMs: null };
+      await repository.recordUsage({ ...replay, eventKey: 'before', occurredAtMs: 50 });
+      await repository.recordUsage({ ...replay, eventKey: 'inside', occurredAtMs: 150 });
+      await repository.recordUsage({ ...replay, eventKey: 'after', occurredAtMs: 250 });
+      await repository.recordUsage({ ...contribution, sessionId: 'live', producer: 'cli-lane',
+        runId: 'lane', nativeThreadId: 'native-thread', providerId: 'codex',
+        eventKey: 'live', occurredAtMs: 150, coverageStartMs: 100, coverageEndMs: 200 });
+      const rows = store.raw.prepare('SELECT event_key, billable FROM session_usage_turns WHERE source = ? ORDER BY occurred_at_ms').all('replay');
+      expect(rows).toMatchObject([{ event_key: 'before', billable: 1 },
+        { event_key: 'inside', billable: 0 }, { event_key: 'after', billable: 1 }]);
+    } finally { store.close(); }
+  });
+
   it.each([
     ['checkpoint', 'codex-checkpoint', 'native-thread', null, 0],
     ['observed lane', 'cli-lane', 'lane-id', 'native-thread', 0],
@@ -277,15 +296,22 @@ describe('SessionStatsRepository', () => {
       const insert = raw.prepare(`INSERT INTO session_usage_turns
         (session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,
          input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cost_authority,source,revision)
-        VALUES ('s',?,'r','t','m','same-key',1,'anthropic',?,0,0,0,'unpriced','live',?)`);
-      insert.run('cli-lane', 10, 9);
-      insert.run('codex-checkpoint', 20, 8);
-      insert.run('sdk-owner', 30, 1);
+         VALUES ('s',?,'r','t',?,'same-key',1,'anthropic',?,0,0,0,'unpriced','live',?)`);
+      insert.run('cli-lane', 'm', 10, 9);
+      insert.run('cli-lane', 'other-model', 11, 9);
+      insert.run('codex-checkpoint', 'm', 20, 8);
+      insert.run('sdk-owner', 'm', 30, 1);
+      raw.exec(`INSERT INTO session_stats
+        (session_id,host,provider_id,started_at_ms,last_usage_at_ms,input_tokens,output_tokens,
+         cache_read_tokens,cache_write_tokens,has_unpriced,source,revision,updated_at_ms)
+        VALUES ('s','cli','anthropic',1,1,71,0,0,0,1,'live',1,1)`);
       for (const migration of SESSION_STORE_MIGRATIONS.filter((item) => item.version > 4)) {
         if (migration.sql) raw.exec(migration.sql);
       }
       expect(raw.prepare('SELECT producer,input_tokens FROM session_usage_turns').all())
         .toMatchObject([{ producer: 'sdk-owner', input_tokens: 30 }]);
+      expect(raw.prepare('SELECT input_tokens FROM session_stats WHERE session_id = ?').get('s'))
+        .toMatchObject({ input_tokens: 30 });
     } finally {
       raw.close();
     }
@@ -838,6 +864,20 @@ describe('SessionStatsRepository', () => {
     } finally {
       store.close();
     }
+  });
+
+  it('discovers a replay repository through its matching session workspace', async () => {
+    const store = openTestStore();
+    try {
+      store.raw.exec(`INSERT INTO sessions
+        (session_id,workspace_key,host,name,created_at,last_active_at,summary_json,detail_json,updated_at)
+        VALUES ('replayed','/work/a','cli','Replay',1,1,'{}','{}',1)`);
+      const repository = new SessionStatsRepository(store);
+      await repository.recordUsage({ ...contribution, sessionId: 'replayed',
+        eventKey: 'replay-only', source: 'replay', producer: 'transcript-replay',
+        workspaceKey: null, repositoryId: 'repo-a' });
+      expect(await repository.getWorkspaceRepositoryIds('/work/a', 0, 172_800_000)).toEqual(['repo-a']);
+    } finally { store.close(); }
   });
 });
 
