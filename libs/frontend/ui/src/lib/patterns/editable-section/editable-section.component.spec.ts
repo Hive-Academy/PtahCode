@@ -274,7 +274,7 @@ describe('PtahEditableSectionComponent', () => {
       expect(document.activeElement).toBe(cancelButton());
     });
 
-    it('marks saving: busy Save, disabled Cancel and fields, aria-busy, no Escape or cancel', async () => {
+    it('marks saving: busy Save, disabled Cancel, guarded fields, aria-busy, no Escape or cancel', async () => {
       host.dirty.set(true);
       await openEdit();
       host.saving.set(true);
@@ -282,7 +282,7 @@ describe('PtahEditableSectionComponent', () => {
       expect(form()?.getAttribute('aria-busy')).toBe('true');
       expect(saveButton().getAttribute('aria-busy')).toBe('true');
       expect(cancelButton().disabled).toBe(true);
-      expect((q('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+      expect((q('fieldset') as HTMLFieldSetElement).getAttribute('aria-disabled')).toBe('true');
       pressEscape(q('[data-testid="name-input"]') as HTMLElement);
       cancelButton().click();
       form()?.dispatchEvent(new Event('submit', { cancelable: true }));
@@ -305,6 +305,81 @@ describe('PtahEditableSectionComponent', () => {
       expect(form()?.getAttribute('aria-describedby')).toBe(alert.id);
       expect(document.activeElement).toBe(alert);
       expect(form()).not.toBeNull();
+    });
+
+    it('keeps the fields focusable and not natively disabled while saving', async () => {
+      host.dirty.set(true);
+      await openEdit();
+      const input = q<HTMLInputElement>('[data-testid="name-input"]') as HTMLInputElement;
+      expect(document.activeElement).toBe(input);
+      host.saving.set(true);
+      await settle();
+      const fieldset = q('fieldset') as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(false);
+      expect(input.matches(':disabled')).toBe(false);
+      expect(document.activeElement).toBe(input);
+    });
+
+    it('blocks edits in the fields while saving and allows them again after', async () => {
+      host.dirty.set(true);
+      await openEdit();
+      const input = q('[data-testid="name-input"]') as HTMLElement;
+      host.saving.set(true);
+      await settle();
+      const typed = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      const before = new InputEvent('beforeinput', { bubbles: true, cancelable: true });
+      const pasted = new Event('paste', { bubbles: true, cancelable: true });
+      input.dispatchEvent(typed);
+      input.dispatchEvent(tab);
+      input.dispatchEvent(before);
+      input.dispatchEvent(pasted);
+      expect(typed.defaultPrevented).toBe(true);
+      expect(tab.defaultPrevented).toBe(false);
+      expect(before.defaultPrevented).toBe(true);
+      expect(pasted.defaultPrevented).toBe(true);
+      host.saving.set(false);
+      await settle();
+      const later = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+      input.dispatchEvent(later);
+      expect(later.defaultPrevented).toBe(false);
+    });
+
+    it('emits no second save while saving', async () => {
+      host.dirty.set(true);
+      await openEdit();
+      form()?.dispatchEvent(new Event('submit', { cancelable: true }));
+      host.saving.set(true);
+      await settle();
+      form()?.dispatchEvent(new Event('submit', { cancelable: true }));
+      saveButton().click();
+      await settle();
+      expect(host.edits).toEqual(['save']);
+    });
+
+    it('keeps focus on the field after a failed save with no error text', async () => {
+      host.dirty.set(true);
+      await openEdit();
+      const input = q('[data-testid="name-input"]') as HTMLElement;
+      host.saving.set(true);
+      await settle();
+      host.saving.set(false);
+      await settle();
+      expect(form()).not.toBeNull();
+      expect(document.activeElement).toBe(input);
+    });
+
+    it('restores focus to the last focused field when a failed save drops it to body', async () => {
+      host.dirty.set(true);
+      await openEdit();
+      const input = q('[data-testid="name-input"]') as HTMLElement;
+      host.saving.set(true);
+      await settle();
+      input.blur();
+      expect(document.activeElement).toBe(document.body);
+      host.saving.set(false);
+      await settle();
+      expect(document.activeElement).toBe(input);
     });
 
     it('uses no raw spacing utility', async () => {
