@@ -17,7 +17,7 @@ import { History, LucideAngularModule } from 'lucide-angular';
 import { ATTENTION_ACTION_DISPATCHER, NotificationService, type AttentionItem } from '@ptah-extension/core';
 import { DOCUMENT } from '@angular/common';
 import { TabManagerService } from '@ptah-extension/chat';
-import { RailIconActionDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, RailIconActionDirective } from '@ptah-extension/ui';
 import type {
   CompactRailDensity,
   CompactRailState,
@@ -58,7 +58,7 @@ const CHIP_STATES = [
 @Component({
   selector: 'ptah-canvas-rail',
   standalone: true,
-  imports: [CanvasRailCardComponent, LucideAngularModule, RailIconActionDirective],
+  imports: [CanvasRailCardComponent, LucideAngularModule, PtahButtonDirective, RailIconActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full min-h-0' },
   styles: [
@@ -136,7 +136,7 @@ const CHIP_STATES = [
             >
             <button
               type="button"
-              class="btn btn-ghost btn-xs"
+              ptahButton variant="ghost" size="xs"
               data-testid="rail-sort-toggle"
               [attr.aria-label]="
                 sort() === 'recent'
@@ -201,7 +201,7 @@ const CHIP_STATES = [
               @if (count(chip.state) > 0) {
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs shrink-0"
+                  ptahButton variant="ghost" size="xs" class="shrink-0"
                   [class.state-needs]="chip.state === 'needs'"
                   [class.state-error]="chip.state === 'error'"
                   [class.state-running]="chip.state === 'running'"
@@ -307,7 +307,7 @@ const CHIP_STATES = [
         <button
           type="button"
           data-testid="canvas-footer-new-session"
-          class="btn btn-outline btn-sm h-[30px] w-full"
+          ptahButton variant="outline" size="sm" class="h-[30px] w-full"
           [attr.aria-disabled]="disabledReason() ? 'true' : null"
           [attr.aria-describedby]="
             disabledReason() ? 'rail-new-session-reason' : null
@@ -322,7 +322,7 @@ const CHIP_STATES = [
           type="button"
           data-testid="rail-previous-sessions"
           data-previous-sessions-trigger
-          class="btn btn-ghost btn-sm h-[30px] min-h-[30px] w-full gap-1.5 border border-[color:var(--surface-border-strong)] font-medium hover:!bg-surface-2 hover:!border-[color:var(--surface-border-strong)] [&[aria-expanded=true]]:!bg-surface-3"
+          ptahButton variant="ghost" size="sm" class="h-[30px] min-h-[30px] w-full gap-1.5 border border-[color:var(--surface-border-strong)] font-medium hover:!bg-surface-2 hover:!border-[color:var(--surface-border-strong)] [&[aria-expanded=true]]:!bg-surface-3"
           aria-haspopup="dialog"
           [attr.aria-expanded]="previousSessionsOpen()"
           [attr.aria-controls]="previousSessionsOpen() ? 'previous-sessions-dialog' : null"
