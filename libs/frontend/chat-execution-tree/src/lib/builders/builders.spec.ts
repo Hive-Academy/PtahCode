@@ -20,6 +20,7 @@ import type {
   FlatStreamEventUnion,
   MessageCompleteEvent,
   MessageStartEvent,
+  NativeCodexAgentStatusEvent,
   ToolResultEvent,
   ToolStartEvent,
 } from '@ptah-extension/shared';
@@ -459,6 +460,112 @@ describe('builder fns (integration)', () => {
   });
 
   describe('agent dispatch + buildAgentNode', () => {
+    it('uses the latest native cycle for one stable agent node across parent turns', () => {
+      const state = createEmptyStreamingState();
+      const cardId = 'native_card';
+      const sessionId = 'parent_thread';
+      const messageId = 'parent_message';
+      setEvent(state, {
+        id: 'parent_start', eventType: 'message_start', timestamp: 1,
+        sessionId, messageId, role: 'assistant',
+      } as MessageStartEvent);
+      const task: ToolStartEvent = {
+        id: 'native_task', eventType: 'tool_start', timestamp: 2,
+        sessionId, messageId, toolCallId: cardId, toolName: 'Task', isTaskTool: true,
+      };
+      const agent: AgentStartEvent = {
+        id: 'native_agent', eventType: 'agent_start', timestamp: 3,
+        sessionId, messageId, parentToolUseId: cardId,
+        toolCallId: cardId, agentType: 'codex', agentId: 'child_thread',
+      };
+      setEvent(state, task);
+      setEvent(state, agent);
+      setEvent(state, {
+        id: 'child_message', eventType: 'message_start', timestamp: 4,
+        sessionId, messageId: 'child_message', parentToolUseId: cardId, role: 'assistant',
+      } as MessageStartEvent);
+      setEvent(state, {
+        id: 'child_tool', eventType: 'tool_start', timestamp: 5,
+        sessionId, messageId: 'child_message', parentToolUseId: cardId,
+        toolCallId: 'child_tool_call', toolName: 'Read',
+      } as ToolStartEvent);
+      const deps = makeDeps(agentStats, makeBackgroundAgentStub());
+      const addStatus = (
+        id: string, cycleOrdinal: number,
+        status: NativeCodexAgentStatusEvent['status'],
+        kind: NativeCodexAgentStatusEvent['native']['kind'],
+        errorMessage?: string,
+      ): void => setEvent(state, {
+        id, eventType: 'agent_status', timestamp: 10 + state.events.size,
+        sessionId, messageId, parentToolUseId: cardId, agentId: 'child_thread',
+        status, errorMessage,
+        native: { provider: 'codex', agentThreadId: 'child_thread',
+          activityId: id, cycleId: `cycle_${cycleOrdinal}`, cycleOrdinal, kind },
+      } as NativeCodexAgentStatusEvent);
+      const node = (): ExecutionNode => {
+        const nodes = collectTools(deps, messageId, state, 0);
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0].id).toBe(`agent:${cardId}`);
+        expect(nodes[0].children).toHaveLength(1);
+        expect(nodes[0].children[0].toolCallId).toBe('child_tool_call');
+        return nodes[0];
+      };
+
+      addStatus('running_1', 1, 'running', 'started');
+      expect(node().status).toBe('streaming');
+      addStatus('completed_1', 1, 'completed', 'completed');
+      expect(node().status).toBe('complete');
+      // A later parent turn without an activity does not reset the terminal card.
+      setEvent(state, {
+        id: 'later_parent', eventType: 'message_start', timestamp: 20,
+        sessionId, messageId: 'later_parent', role: 'assistant',
+      } as MessageStartEvent);
+      expect(node().status).toBe('complete');
+      addStatus('running_2', 2, 'running', 'interacted');
+      expect(node().status).toBe('streaming');
+      addStatus('old_failed', 1, 'failed', 'completed', 'old error');
+      expect(node().status).toBe('streaming');
+      addStatus('completed_2', 2, 'completed', 'completed');
+      expect(node().status).toBe('complete');
+      // A same-cycle non-terminal replay never reopens a terminal card.
+      addStatus('running_2_replay', 2, 'running', 'interacted');
+      expect(node().status).toBe('complete');
+      addStatus('failed_2', 2, 'failed', 'completed', 'structured failure');
+      expect(node()).toMatchObject({ status: 'error', error: 'structured failure' });
+      addStatus('completed_2_replay', 2, 'completed', 'completed');
+      expect(node().status).toBe('error');
+
+      // Replay of the card start in another parent turn keeps one node.
+      setEvent(state, { ...task, id: 'replayed_task' });
+      setEvent(state, { ...agent, id: 'replayed_agent' });
+      expect(node().status).toBe('error');
+    });
+
+    it('keeps Task tool_result authoritative for SDK and v1 Codex agents', () => {
+      for (const agentType of ['researcher', 'codex']) {
+        const state = createEmptyStreamingState();
+        const cardId = `task_${agentType}`;
+        setEvent(state, {
+          id: `tool_${agentType}`, eventType: 'tool_start', timestamp: 1,
+          sessionId: 's', messageId: 'm', toolCallId: cardId,
+          toolName: 'Task', isTaskTool: true,
+        } as ToolStartEvent);
+        setEvent(state, {
+          id: `agent_${agentType}`, eventType: 'agent_start', timestamp: 2,
+          sessionId: 's', messageId: 'm', parentToolUseId: cardId,
+          toolCallId: cardId, agentType,
+        } as AgentStartEvent);
+        const deps = makeDeps(agentStats, makeBackgroundAgentStub());
+        expect(collectTools(deps, 'm', state, 0)[0].status).toBe('streaming');
+        setEvent(state, {
+          id: `result_${agentType}`, eventType: 'tool_result', timestamp: 3,
+          sessionId: 's', messageId: 'm', toolCallId: cardId,
+          output: 'done', isError: true,
+        } as ToolResultEvent);
+        expect(collectTools(deps, 'm', state, 0)[0].status).toBe('complete');
+      }
+    });
+
     it('builds an agent node when a Task tool has a matching agent_start', () => {
       const state = createEmptyStreamingState();
       const sessionId = 'session_agent';

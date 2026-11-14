@@ -8,6 +8,32 @@ import {
   codexRequestSchemas,
   validateCodexFrame,
 } from './codex-protocol-validator';
+
+describe('v2 subagent activity', () => {
+  const activity = (kind: 'started' | 'interacted' | 'interrupted' | 'completed') => ({
+    type: 'subAgentActivity', id: 'call-1', agentThreadId: 'child',
+    agentPath: '/root/native_vortex', kind, model: 'gpt-6', reasoningEffort: 'high',
+  });
+  it.each(['started', 'interacted', 'interrupted', 'completed'] as const)(
+    'maps %s without an unsupported error', (kind) => {
+      const translator = new CodexEventTranslator('context', 1);
+      expect(translator.translate({ method: 'item/started', params: {
+        threadId: 'root', turnId: 'turn', startedAtMs: 1, item: activity(kind),
+      } })).toMatchObject([{ type: 'subagentActivity', activityId: 'call-1',
+        agentThreadId: 'child', kind, model: 'gpt-6', reasoningEffort: 'high' }]);
+    },
+  );
+  it('deduplicates item started and completed for the same activity', () => {
+    const translator = new CodexEventTranslator('context', 1);
+    const params = { threadId: 'root', turnId: 'turn', item: activity('started') };
+    expect(translator.translate({ method: 'item/started', params: {
+      ...params, startedAtMs: 1,
+    } })).toHaveLength(1);
+    expect(translator.translate({ method: 'item/completed', params: {
+      ...params, completedAtMs: 2,
+    } })).toEqual([]);
+  });
+});
 const frozenNotificationMethods = z
   .object({
     definitions: z.object({

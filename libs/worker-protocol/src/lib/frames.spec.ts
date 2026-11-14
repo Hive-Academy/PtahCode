@@ -59,6 +59,81 @@ const historyEvent = {
   blockIndex: 0,
 };
 
+const agentStatusEvent = {
+  id: 'evt-agent-1',
+  eventType: 'agent_status',
+  timestamp: 1_700_000_000_000,
+  sessionId: 's-1',
+  messageId: 'm-1',
+  parentToolUseId: 'tool-1',
+  status: 'running',
+};
+
+function acceptsAgentStatus(event: unknown): boolean {
+  return checkSessionRecord('worker:baseline', {
+    events: [event],
+    historyMark: { count: 1, lastEventId: 'evt-agent-1' },
+  }).ok;
+}
+
+describe('agent_status flat events', () => {
+  const native = {
+    provider: 'codex',
+    agentThreadId: 'child-1',
+    activityId: 'activity-1',
+    cycleId: 'cycle-1',
+    cycleOrdinal: 0,
+    kind: 'started',
+  };
+
+  it('accepts SDK events with a taskId', () => {
+    expect(acceptsAgentStatus({ ...agentStatusEvent, taskId: 'task-1' })).toBe(
+      true,
+    );
+  });
+
+  it('rejects SDK events without a taskId', () => {
+    expect(acceptsAgentStatus(agentStatusEvent)).toBe(false);
+  });
+
+  it('accepts native Codex events', () => {
+    expect(
+      acceptsAgentStatus({ ...agentStatusEvent, agentId: 'child-1', native }),
+    ).toBe(true);
+  });
+
+  it('rejects native events missing agentThreadId', () => {
+    const { agentThreadId: _agentThreadId, ...missingThreadId } = native;
+    expect(
+      acceptsAgentStatus({
+        ...agentStatusEvent,
+        agentId: 'child-1',
+        native: missingThreadId,
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects native events with an invalid kind', () => {
+    expect(
+      acceptsAgentStatus({
+        ...agentStatusEvent,
+        agentId: 'child-1',
+        native: { ...native, kind: 'unknown' },
+      }),
+    ).toBe(false);
+  });
+
+  it.each([-1, 1.5])('rejects native events with cycleOrdinal %s', (cycleOrdinal) => {
+    expect(
+      acceptsAgentStatus({
+        ...agentStatusEvent,
+        agentId: 'child-1',
+        native: { ...native, cycleOrdinal },
+      }),
+    ).toBe(false);
+  });
+});
+
 function evt(type: string, payload: unknown, seq = 1): string {
   return JSON.stringify({
     v: 1,

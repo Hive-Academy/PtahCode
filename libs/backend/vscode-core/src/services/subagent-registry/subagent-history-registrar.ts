@@ -76,6 +76,12 @@ export class SubagentHistoryRegistrar {
         .filter((e): e is ToolResultEvent => e.eventType === 'tool_result')
         .map((e) => e.toolCallId),
     );
+    const nativeToolCallIds = new Set(
+      events.flatMap((event) => event.eventType === 'agent_status' && event.native?.provider === 'codex'
+        ? [event.parentToolUseId]
+        : event.eventType === 'agent_start' && event.agentType === 'codex' &&
+          event.parentToolUseId === event.toolCallId ? [event.toolCallId] : []),
+    );
     const agentIdToToolCallIds = new Map<string, string[]>();
     for (const agentStart of agentStartEvents) {
       if (!agentStart.agentId) continue;
@@ -111,6 +117,10 @@ export class SubagentHistoryRegistrar {
 
     for (const agentStart of agentStartEvents) {
       const { toolCallId, agentType, agentId, timestamp } = agentStart;
+      // Native Codex threads cannot be resumed by the SDK registry. Their
+      // terminal event is agent_status, never a Task tool_result.
+      if (nativeToolCallIds.has(toolCallId) ||
+          (agentType === 'codex' && agentStart.parentToolUseId === toolCallId)) continue;
       if (this.store.has(toolCallId)) {
         this.logger.debug(
           '[SubagentRegistryService.registerFromHistoryEvents] Agent already registered, skipping',

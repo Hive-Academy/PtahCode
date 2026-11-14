@@ -22,7 +22,7 @@ describe('native child event admission', () => {
       knownChildParents: new Map<string, string>(),
       childParentThreads: new Map<string, string>(),
       pendingChildParents: new Map<string, string>(),
-      childTools: new Map<string, string>(),
+      childTools: new Map<string, string>(), limitedNativeChildren: new Set<string>(),
       earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(), earlyChildCount: 0,
       options: { logger: { info: jest.fn(), debug: jest.fn(), error: jest.fn() } },
     }) as RuntimeContext;
@@ -43,6 +43,8 @@ describe('native child event admission', () => {
       translator: new CodexEventTranslator('context', 1),
       childTools: new Map<string, string>(), childParentThreads: new Map<string, string>(),
       childTurns: new Map<string, string>(), knownChildParents: new Map<string, string>(),
+      nativeChildren: new Map(), limitedNativeChildren: new Set(),
+      pendingNativeTerminals: [] as CodexRuntimeEvent[],
       pendingSpawns: new Map<string, Set<string>>(), pendingChildParents: new Map<string, string>(),
       earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(), earlyChildCount: 0,
       unlinkedMethodsLogged: new Set<string>(), rootTerminalPending: false,
@@ -134,6 +136,8 @@ describe('native child event admission', () => {
       earlyChildCount: 0, rootTerminalPending: false,
       terminalTurns: new Set<string>(), targets: new Map(),
       asyncQuestionItems: new Set<string>(), subscribers: new Set(),
+      nativeChildren: new Map(), limitedNativeChildren: new Set(),
+      pendingNativeTerminals: [] as CodexRuntimeEvent[],
       turnController: new AbortController(), sequence: 0,
       finishCompact: jest.fn(),
       pendingChildParents: new Map<string, string>(),
@@ -239,6 +243,7 @@ describe('native child event admission', () => {
     expect(Reflect.get(context, 'activeTurn')).toBe('root-turn');
     expect(Reflect.get(context, 'state')).toBe('running');
     expect(Reflect.get(context, 'childTools')).toEqual(new Map([
+      ['child', 'spawn'],
       ['thread-linked', 'spawn-nested'],
     ]));
     feed('turn/completed', { threadId: 'root',
@@ -261,14 +266,14 @@ describe('native child event admission', () => {
   });
 
   it('logs the early child buffer overflow once per root turn', () => {
-    const logger = { error: jest.fn(), debug: jest.fn(), info: jest.fn() };
+    const logger = { error: jest.fn(), debug: jest.fn(), info: jest.fn(), warn: jest.fn() };
     const context = Object.assign(Object.create(RuntimeContext.prototype), {
       committedIdentity: { contextId: 'context', processGeneration: 1,
         threadId: 'root' },
       state: 'running', activeTurn: 'root-turn',
       profile: { consumer: 'chat', contextId: 'context' },
       translator: new CodexEventTranslator('context', 1),
-      childTools: new Map<string, string>(),
+      childTools: new Map<string, string>(), limitedNativeChildren: new Set<string>(),
       childParentThreads: new Map<string, string>(),
       childTurns: new Map<string, string>(),
       knownChildParents: new Map<string, string>(),
@@ -301,15 +306,457 @@ describe('native child event admission', () => {
     };
     feedUnlinked(520);
     expect(logger.error).toHaveBeenCalledTimes(1);
-    expect(Reflect.get(context, 'earlyChildCount')).toBe(512);
+    expect(Reflect.get(context, 'earlyChildCount')).toBe(128);
     feed('turn/completed', { threadId: 'root',
       turn: { id: 'root-turn', status: 'completed', items: [] } });
     expect(Reflect.get(context, 'earlyChildEvents')).toEqual(new Map());
+    expect(logger.warn).toHaveBeenCalledWith('Codex unlinked child events dropped',
+      expect.objectContaining({ threadIds: '["child"]', count: 128 }));
     // The cleared buffer lets a later root turn report its own overflow.
     feedUnlinked(520);
     expect(logger.error).toHaveBeenCalledTimes(2);
-    expect(Reflect.get(context, 'earlyChildCount')).toBe(512);
+    expect(Reflect.get(context, 'earlyChildCount')).toBe(128);
   });
+});
+
+describe('native activity cycle linkage', () => {
+  function harness() {
+    const logger = { info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const context = Object.assign(Object.create(RuntimeContext.prototype), {
+      committedIdentity: { threadId: 'root' }, profile: { contextId: 'ctx' }, generation: 1,
+      knownChildParents: new Map<string, string>(), childParentThreads: new Map<string, string>(),
+      childTools: new Map<string, string>(), pendingChildParents: new Map<string, string>(),
+      earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(), earlyChildCount: 0,
+      nativeChildren: new Map(), limitedNativeChildren: new Set(), unlinkedMethodsLogged: new Set<string>(), childTurns: new Map<string, string>(), options: { logger },
+      pendingNativeTerminals: [] as CodexRuntimeEvent[],
+      subscribers: new Set(), sequence: 0, terminalTurns: new Set<string>(),
+    }) as RuntimeContext;
+    const activity = (kind: 'started' | 'interacted' | 'completed', turnId: string) =>
+      ({ type: 'subagentActivity', contextId: 'ctx', processGeneration: 1,
+        threadId: 'root', turnId, sequence: 1, activityId: `call-${turnId}`,
+        cardToolCallId: `call-${turnId}`, agentThreadId: 'child',
+        agentPath: '/root/native_vortex', kind, cycleOrdinal: 0, cycleId: '' });
+    const apply = (kind: 'started' | 'interacted' | 'completed', turnId: string) =>
+      Reflect.apply(Reflect.get(context, 'applyNativeActivity'), context, [activity(kind, turnId)]) as CodexRuntimeEvent | undefined;
+    return { context, logger, apply };
+  }
+
+  it('reuses the first card on a later parent turn and increments the cycle', () => {
+    const h = harness();
+    const first = h.apply('started', 'turn-1');
+    const next = h.apply('interacted', 'turn-2');
+    expect(first).toMatchObject({ cardToolCallId: 'call-turn-1', cycleOrdinal: 1,
+      cycleId: 'child:1' });
+    expect(next).toMatchObject({ cardToolCallId: 'call-turn-1', cycleOrdinal: 2,
+      cycleId: 'child:2' });
+    expect(h.apply('interacted', 'turn-2')).toBeUndefined();
+  });
+
+  it('logs a non-started activity for an unknown child', () => {
+    const h = harness();
+    expect(h.apply('completed', 'parent')).toBeUndefined();
+    expect(h.logger.debug).toHaveBeenCalledWith(
+      'Codex native activity for unknown child',
+      { agentThreadId: 'child', kind: 'completed' },
+    );
+  });
+
+  it('flushes pre-activity child events with the canonical card id', () => {
+    const h = harness();
+    const subscriber = { queue: [] as CodexRuntimeEvent[], wake: jest.fn(),
+      closed: false, release: jest.fn() };
+    Reflect.get(h.context, 'subscribers').add(subscriber);
+    const event: CodexRuntimeEvent = { type: 'textFinal', contextId: 'ctx',
+      processGeneration: 1, threadId: 'child', turnId: 'child-turn',
+      sequence: 1, itemId: 'message', text: 'answer' };
+    Reflect.apply(Reflect.get(h.context, 'bufferEarlyChild'), h.context, [event]);
+    h.apply('started', 'turn-1');
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['child', 'call-turn-1', 'root']);
+    expect(Reflect.get(h.context, 'earlyChildCount')).toBe(0);
+    expect(Reflect.get(h.context, 'childTools').get('child')).toBe('call-turn-1');
+    expect(subscriber.queue).toContainEqual(expect.objectContaining({
+      type: 'textFinal', parentToolUseId: 'call-turn-1', parentThreadId: 'root',
+    }));
+  });
+
+  it('admits activity before buffered child items and exactly one terminal', () => {
+    const h = harness();
+    Object.assign(h.context, {
+      translator: new CodexEventTranslator('ctx', 1), state: 'running', activeTurn: 'parent',
+      pendingSpawns: new Map(), unlinkedMethodsLogged: new Set(), targets: new Map(),
+    });
+    const queue: CodexRuntimeEvent[] = [];
+    Reflect.get(h.context, 'subscribers').add({ queue, wake: jest.fn(), release: jest.fn() });
+    const feed = (method: string, params: Record<string, unknown>) =>
+      Reflect.apply(Reflect.get(h.context, 'onNotification'), h.context, [{ method,
+        params: method === 'item/started' ? { ...params, startedAtMs: 1 } :
+          method === 'item/completed' ? { ...params, completedAtMs: 1 } : params }]);
+    feed('turn/started', { threadId: 'child', turn: { id: 'child-turn', status: 'inProgress', items: [] } });
+    feed('item/completed', { threadId: 'child', turnId: 'child-turn',
+      item: { type: 'agentMessage', id: 'msg', text: 'answer' } });
+    feed('turn/completed', { threadId: 'child',
+      turn: { id: 'child-turn', status: 'completed', items: [] } });
+    feed('item/started', { threadId: 'root', turnId: 'parent', item: {
+      type: 'subAgentActivity', id: 'card', agentThreadId: 'child',
+      agentPath: '/root/child', kind: 'started',
+    } });
+    expect(queue.map((event) => event.type)).toEqual([
+      'subagentActivity', 'textFinal', 'terminal',
+    ]);
+    expect(queue.filter((event) => event.type === 'terminal')).toEqual([
+      expect.objectContaining({ parentToolUseId: 'card', native: expect.objectContaining({ cycleId: 'child:1' }) }),
+    ]);
+  });
+
+  it('replays a native terminal to the next subscriber once', async () => {
+    const h = harness();
+    h.apply('started', 'parent');
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['child', 'call-parent']);
+    Reflect.apply(Reflect.get(h.context, 'bindChildTurn'), h.context, ['child', 'child-turn']);
+    const terminal: CodexRuntimeEvent = { type: 'terminal', contextId: 'ctx',
+      processGeneration: 1, threadId: 'child', turnId: 'child-turn', sequence: 0, status: 'completed' };
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context, [terminal, 'call-parent']);
+    const events = h.context.events(new AbortController().signal)[Symbol.asyncIterator]();
+    await expect(events.next()).resolves.toMatchObject({ value: {
+      type: 'terminal', parentToolUseId: 'call-parent', native: { cycleId: 'child:1' },
+    } });
+    await events.return?.();
+    expect(Reflect.get(h.context, 'pendingNativeTerminals')).toHaveLength(0);
+    h.context.events(new AbortController().signal);
+    const later = [...(Reflect.get(h.context, 'subscribers') as Set<{
+      queue: CodexRuntimeEvent[];
+    }>)][0];
+    expect(later?.queue).toEqual([]);
+  });
+
+  it('finishes the root after the last non-native child while a native link remains', () => {
+    const h = harness();
+    h.apply('started', 'parent');
+    Object.assign(h.context, { activeTurn: 'parent', state: 'running',
+      rootTerminalPending: true, turnController: new AbortController(),
+      targets: new Map(), asyncQuestionItems: new Set(), pendingSpawns: new Map(),
+      pendingChildParents: new Map(), followUps: new Set() });
+    Reflect.get(h.context, 'childTools').set('child', 'card');
+    Reflect.get(h.context, 'childTools').set('v1-child', 'spawn');
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context, [{
+      type: 'terminal', contextId: 'ctx', processGeneration: 1,
+      threadId: 'v1-child', turnId: 'v1-turn', sequence: 1, status: 'completed',
+    }, 'spawn']);
+    expect(Reflect.get(h.context, 'activeTurn')).toBeUndefined();
+    expect(Reflect.get(h.context, 'rootTerminalPending')).toBe(false);
+  });
+
+  it('evicts the oldest terminal native child before an active child', () => {
+    const h = harness();
+    for (let index = 0; index < 256; index++) {
+      const id = `child-${index}`;
+      const state = { cardToolCallId: id, parentThreadId: 'root', agentPath: id,
+        lastActivityKind: 'started', cycleOrdinal: 1, cycleId: `${id}:1`,
+        seenActivityKeys: new Set(), turnCycleByTurnId: new Map(),
+        ...(index === 1 ? { lastTerminalKey: 'done' } : {}),
+      };
+      Reflect.get(h.context, 'nativeChildren').set(id, state);
+    }
+    const event: CodexRuntimeEvent = { type: 'subagentActivity', contextId: 'ctx',
+      processGeneration: 1, threadId: 'root', turnId: 'parent', sequence: 0,
+      activityId: 'new', cardToolCallId: 'new', agentThreadId: 'new',
+      agentPath: '/new', kind: 'started', cycleId: '', cycleOrdinal: 0 };
+    const admitted = Reflect.apply(Reflect.get(h.context, 'applyNativeActivity'), h.context, [event]);
+    expect(admitted).toMatchObject({ cardToolCallId: 'new', cycleId: 'new:1' });
+    expect(admitted).not.toHaveProperty('limitMessage');
+    expect(h.logger.warn).not.toHaveBeenCalled();
+    const children = Reflect.get(h.context, 'nativeChildren') as Map<string, unknown>;
+    expect(children.size).toBe(256);
+    expect(children.has('child-0')).toBe(true);
+    expect(children.has('child-1')).toBe(false);
+    expect(children.has('new')).toBe(true);
+  });
+
+  it('shows a 257th child as limited when all 256 have active cycles after earlier terminals', () => {
+    const h = harness();
+    Object.assign(h.context, { translator: new CodexEventTranslator('ctx', 1),
+      state: 'running', activeTurn: 'parent', targets: new Map() });
+    const queue: CodexRuntimeEvent[] = [];
+    Reflect.get(h.context, 'subscribers').add({ queue, wake: jest.fn(), release: jest.fn() });
+    const children = Reflect.get(h.context, 'nativeChildren') as Map<string, unknown>;
+    for (let index = 0; index < 256; index++) {
+      const id = `old-${index}`;
+      children.set(id, {
+        cardToolCallId: id, parentThreadId: 'root', agentPath: '/old',
+        lastActivityKind: 'completed', lastTerminalKey: JSON.stringify([id, `${id}:1`, 'completed']),
+        cycleOrdinal: 1, cycleId: `${id}:1`,
+        seenActivityKeys: new Set(), turnCycleByTurnId: new Map(),
+      });
+      Reflect.apply(Reflect.get(h.context, 'applyNativeActivity'), h.context, [{
+        type: 'subagentActivity', contextId: 'ctx', processGeneration: 1,
+        threadId: 'root', turnId: 'parent', sequence: 0, activityId: `restart-${index}`,
+        cardToolCallId: id, agentThreadId: id, agentPath: '/old',
+        kind: 'interacted', cycleId: '', cycleOrdinal: 0,
+      }]);
+    }
+    Reflect.apply(Reflect.get(h.context, 'onNotification'), h.context, [{
+      method: 'item/started', params: { threadId: 'root', turnId: 'parent', startedAtMs: 1,
+        item: { type: 'subAgentActivity', id: 'new-card', agentThreadId: 'new',
+          agentPath: '/root/new', kind: 'started' } },
+    }]);
+    expect(queue).toContainEqual(expect.objectContaining({ type: 'subagentActivity',
+      agentThreadId: 'new', cardToolCallId: 'new-card', kind: 'started',
+      limitMessage: 'Not tracked: native child limit (256) reached; the child may still be running.' }));
+    expect(children.size).toBe(256);
+    expect(children.has('old-0')).toBe(true);
+    expect(children.has('old-255')).toBe(true);
+    expect(children.has('new')).toBe(false);
+    expect(Reflect.get(h.context, 'childTools').has('new')).toBe(false);
+    expect(h.logger.warn).toHaveBeenCalledWith('Codex native child cache overflow',
+      expect.objectContaining({ agentThreadId: 'new' }));
+  });
+
+  it('keeps a limited native child unlinked and settled for later activity and events', () => {
+    const h = harness();
+    Object.assign(h.context, { translator: new CodexEventTranslator('ctx', 1),
+      state: 'running', activeTurn: 'parent', targets: new Map() });
+    const queue: CodexRuntimeEvent[] = [];
+    Reflect.get(h.context, 'subscribers').add({ queue, wake: jest.fn(), release: jest.fn() });
+    const children = Reflect.get(h.context, 'nativeChildren') as Map<string, {
+      lastTerminalKey?: string }>;
+    for (let index = 0; index < 256; index++) children.set(`old-${index}`, {
+      cardToolCallId: `old-${index}`, parentThreadId: 'root', agentPath: '/old',
+      lastActivityKind: 'started', cycleOrdinal: 1, cycleId: `old-${index}:1`,
+      seenActivityKeys: new Set(), turnCycleByTurnId: new Map(),
+    } as never);
+    const childTools = Reflect.get(h.context, 'childTools') as Map<string, string>;
+    // A spawn hint linked the child before its activity arrived.
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['new', 'other-spawn', 'root']);
+    expect(childTools.get('new')).toBe('other-spawn');
+    const activity = (kind: string, turnId: string) => ({
+      method: 'item/started', params: { threadId: 'root', turnId, startedAtMs: 1,
+        item: { type: 'subAgentActivity', id: `new-${kind}`, agentThreadId: 'new',
+          agentPath: '/root/new', kind } },
+    });
+    const notify = (frame: unknown) =>
+      Reflect.apply(Reflect.get(h.context, 'onNotification'), h.context, [frame]);
+    notify(activity('started', 'parent'));
+    expect(childTools.has('new')).toBe(false);
+    expect(Reflect.get(h.context, 'knownChildParents').has('new')).toBe(false);
+    // The child's own events stay unlinked: no self-link, no buffer.
+    Object.assign(h.context, { pendingSpawns: new Map([['root', new Set(['other-spawn'])]]) });
+    notify({ method: 'item/completed', params: { threadId: 'new', turnId: 'new-turn',
+      completedAtMs: 2, item: { type: 'agentMessage', id: 'msg', text: 'hidden' } } });
+    expect(childTools.has('new')).toBe(false);
+    expect(Reflect.get(h.context, 'earlyChildEvents').has('new')).toBe(false);
+    // Room in the cache must not reopen the settled card as a tracked cycle.
+    const freed = children.get('old-0');
+    if (freed) freed.lastTerminalKey = 'done';
+    notify(activity('started', 'parent-2'));
+    notify(activity('completed', 'parent-2'));
+    expect(children.has('new')).toBe(false);
+    expect(children.has('old-0')).toBe(true);
+    expect(queue.filter((event) => event.type === 'subagentActivity')).toEqual([
+      expect.objectContaining({ agentThreadId: 'new', kind: 'started',
+        limitMessage: 'Not tracked: native child limit (256) reached; the child may still be running.' }),
+    ]);
+    expect(queue.some((event) => event.threadId === 'new')).toBe(false);
+    expect(h.logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('admits native activity while an unrelated spawn is pending', () => {
+    const h = harness();
+    Object.assign(h.context, { translator: new CodexEventTranslator('ctx', 1),
+      state: 'running', activeTurn: 'parent', targets: new Map(),
+      pendingSpawns: new Map([['root', new Set(['other-spawn'])]]) });
+    const queue: CodexRuntimeEvent[] = [];
+    Reflect.get(h.context, 'subscribers').add({ queue, wake: jest.fn(), release: jest.fn() });
+    // A child event that arrives before the activity stays buffered until the link.
+    Reflect.apply(Reflect.get(h.context, 'bufferEarlyChild'), h.context, [{
+      type: 'textFinal', contextId: 'ctx', processGeneration: 1, threadId: 'child',
+      turnId: 'child-turn', sequence: 1, itemId: 'early', text: 'early answer' }]);
+    Reflect.apply(Reflect.get(h.context, 'onNotification'), h.context, [{
+      method: 'item/started', params: { threadId: 'root', turnId: 'parent', startedAtMs: 1,
+        item: { type: 'subAgentActivity', id: 'card', agentThreadId: 'child',
+          agentPath: '/root/child', kind: 'started' } },
+    }]);
+    const activity = queue.findIndex((event) => event.type === 'subagentActivity');
+    const early = queue.findIndex((event) => event.type === 'textFinal');
+    expect(activity).toBeGreaterThanOrEqual(0);
+    expect(early).toBeGreaterThan(activity);
+    expect(queue[early]).toMatchObject({ parentToolUseId: 'card' });
+    expect(queue.some((event) => event.parentToolUseId === 'other-spawn')).toBe(false);
+    expect(Reflect.get(h.context, 'childTools').get('child')).toBe('card');
+  });
+
+  it('keeps a resumed active cycle out of eviction after an older terminal turn', () => {
+    const h = harness();
+    Reflect.apply(Reflect.get(h.context, 'seedSubagentActivity'), h.context, [{
+      rootThreadId: 'root', threads: [
+        { id: 'root', parentThreadId: null, turns: [
+          { id: 'parent-1', status: 'completed', items: [{ type: 'subAgentActivity',
+            id: 'card', agentThreadId: 'child', agentPath: '/root/child', kind: 'started' }] },
+          { id: 'parent-2', status: 'inProgress', items: [{ type: 'subAgentActivity',
+            id: 'again', agentThreadId: 'child', agentPath: '/root/child', kind: 'interacted' }] },
+        ] },
+        { id: 'child', parentThreadId: 'root', turns: [
+          { id: 'child-1', status: 'completed', items: [] },
+          { id: 'child-2', status: 'inProgress', items: [] },
+        ] },
+      ],
+    }]);
+    const children = Reflect.get(h.context, 'nativeChildren') as Map<string, {
+      lastTerminalKey?: string; cycleId: string; turnCycleByTurnId: Map<string, string> }>;
+    const child = children.get('child');
+    expect(child?.cycleId).toBe('child:2');
+    expect(child?.turnCycleByTurnId.get('child-1')).toBe('child:1');
+    expect(child?.turnCycleByTurnId.get('child-2')).toBe('child:2');
+    expect(child?.lastTerminalKey).toBeUndefined();
+    for (let index = 0; index < 255; index++) children.set(`done-${index}`, {
+      cardToolCallId: `done-${index}`, parentThreadId: 'root', agentPath: '/done',
+      lastActivityKind: 'completed', lastTerminalKey: 'done', cycleOrdinal: 1,
+      cycleId: `done-${index}:1`, seenActivityKeys: new Set(), turnCycleByTurnId: new Map(),
+    } as never);
+    Reflect.apply(Reflect.get(h.context, 'applyNativeActivity'), h.context, [{
+      type: 'subagentActivity', contextId: 'ctx', processGeneration: 1,
+      threadId: 'root', turnId: 'parent-2', sequence: 0, activityId: 'new',
+      cardToolCallId: 'new', agentThreadId: 'new', agentPath: '/new',
+      kind: 'started', cycleId: '', cycleOrdinal: 0,
+    }]);
+    expect(children.has('child')).toBe(true);
+    expect(children.has('done-0')).toBe(false);
+    expect(children.has('new')).toBe(true);
+  });
+
+  it('nests child notifications that arrive after the activity link', () => {
+    const h = harness();
+    const subscriber = { queue: [] as CodexRuntimeEvent[], wake: jest.fn(),
+      closed: false, release: jest.fn() };
+    Reflect.get(h.context, 'subscribers').add(subscriber);
+    h.apply('started', 'turn-1');
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['child', 'call-turn-1', 'root']);
+    const event: CodexRuntimeEvent = { type: 'textFinal', contextId: 'ctx',
+      processGeneration: 1, threadId: 'child', turnId: 'child-turn',
+      sequence: 1, itemId: 'message', text: 'answer' };
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context,
+      [event, 'call-turn-1']);
+    expect(subscriber.queue).toContainEqual(expect.objectContaining({
+      type: 'textFinal', parentToolUseId: 'call-turn-1', parentThreadId: 'root',
+    }));
+  });
+
+  it('ignores an unbound terminal and a late terminal from an older child turn', () => {
+    const h = harness();
+    h.apply('started', 'parent-1');
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['child', 'call-parent-1', 'root']);
+    const terminal = (turnId: string): CodexRuntimeEvent => ({
+      type: 'terminal', contextId: 'ctx', processGeneration: 1,
+      threadId: 'child', turnId, sequence: 1, status: 'completed',
+    });
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context,
+      [terminal('unbound'), 'call-parent-1']);
+    expect(Reflect.get(h.context, 'terminalTurns').size).toBe(0);
+    Reflect.apply(Reflect.get(h.context, 'bindChildTurn'), h.context, ['child', 'old-turn']);
+    h.apply('interacted', 'parent-2');
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context,
+      [terminal('old-turn'), 'call-parent-1']);
+    expect(Reflect.get(h.context, 'terminalTurns').size).toBe(0);
+  });
+
+  it('lets structured failure override completed only within its bound cycle', () => {
+    const h = harness();
+    h.apply('started', 'parent-1');
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['child', 'call-parent-1', 'root']);
+    Reflect.apply(Reflect.get(h.context, 'bindChildTurn'), h.context, ['child', 'child-1']);
+    h.apply('completed', 'parent-1');
+    const failure: CodexRuntimeEvent = { type: 'terminal', contextId: 'ctx',
+      processGeneration: 1, threadId: 'child', turnId: 'child-1',
+      sequence: 1, status: 'failed' };
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context,
+      [failure, 'call-parent-1']);
+    const native = Reflect.get(h.context, 'nativeChildren').get('child');
+    expect(native.lastTerminalKey).toContain('failed');
+    h.apply('interacted', 'parent-2');
+    const before = native.lastTerminalKey;
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context,
+      [{ ...failure, sequence: 2 }, 'call-parent-1']);
+    expect(native.lastTerminalKey).toBe(before);
+  });
+
+  it('seeds the first card and completed terminal from parent history', () => {
+    const h = harness();
+    const history = { rootThreadId: 'root', threads: [{ id: 'root', turns: [{
+      id: 'parent-turn', items: [
+        { type: 'subAgentActivity', id: 'spawn', agentThreadId: 'child',
+          agentPath: '/root/native_vortex', kind: 'started' },
+        { type: 'subAgentActivity', id: 'done', agentThreadId: 'child',
+          agentPath: '/root/native_vortex', kind: 'completed' },
+      ],
+    }] }] };
+    Reflect.apply(Reflect.get(h.context, 'seedSubagentActivity'), h.context, [history]);
+    expect(Reflect.get(h.context, 'childTools').get('child')).toBe('spawn');
+    expect(Reflect.apply(Reflect.get(h.context, 'applyNativeActivity'), h.context, [{
+      type: 'subagentActivity', contextId: 'ctx', processGeneration: 1,
+      threadId: 'root', turnId: 'parent-turn', sequence: 1,
+      activityId: 'done', cardToolCallId: 'done', agentThreadId: 'child',
+      agentPath: '/root/native_vortex', kind: 'completed',
+      cycleOrdinal: 0, cycleId: '',
+    }])).toBeUndefined();
+  });
+
+  it('seeds nested subAgentActivity from child threads', () => {
+    const h = harness();
+    const history = { rootThreadId: 'root', threads: [
+      { id: 'root', parentThreadId: null, turns: [{
+        id: 'parent-turn', items: [
+          { type: 'subAgentActivity', id: 'spawn-child', agentThreadId: 'child',
+            agentPath: '/root/vortex', kind: 'started' },
+        ],
+      }] },
+      { id: 'child', parentThreadId: 'root', turns: [{
+        id: 'child-turn', items: [
+          { type: 'subAgentActivity', id: 'spawn-grandchild', agentThreadId: 'grandchild',
+            agentPath: '/root/vortex/nested', kind: 'started' },
+          { type: 'subAgentActivity', id: 'done-grandchild', agentThreadId: 'grandchild',
+            agentPath: '/root/vortex/nested', kind: 'completed' },
+        ],
+      }] },
+    ] };
+    Reflect.apply(Reflect.get(h.context, 'seedSubagentActivity'), h.context, [history]);
+    // Verify root child is linked
+    expect(Reflect.get(h.context, 'childTools').get('child')).toBe('spawn-child');
+    // Verify grandchild from nested thread is also seeded
+    const nativeChildren = Reflect.get(h.context, 'nativeChildren') as Map<string, unknown>;
+    expect(nativeChildren.has('grandchild')).toBe(true);
+    const grandchildState = nativeChildren.get('grandchild');
+    expect(grandchildState).toMatchObject({
+      agentPath: '/root/vortex/nested',
+      lastActivityKind: 'completed',
+    });
+  });
+});
+
+it('flushes v1 child notifications once toolStarted supplies agentThreadIds', () => {
+  const logger = { info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  const context = Object.assign(Object.create(RuntimeContext.prototype), {
+    committedIdentity: { contextId: 'ctx', processGeneration: 1, threadId: 'root' },
+    state: 'running', activeTurn: 'parent', translator: new CodexEventTranslator('ctx', 1),
+    childTools: new Map(), childParentThreads: new Map(), knownChildParents: new Map(),
+    pendingChildParents: new Map(), pendingSpawns: new Map(), nativeChildren: new Map(), limitedNativeChildren: new Set(),
+    earlyChildEvents: new Map(), earlyChildCount: 0, childTurns: new Map(),
+    terminalTurns: new Set(), unlinkedMethodsLogged: new Set(), targets: new Map(),
+    subscribers: new Set(), sequence: 0, options: { logger },
+  }) as RuntimeContext;
+  const queue: CodexRuntimeEvent[] = [];
+  Reflect.get(context, 'subscribers').add({ queue, wake: jest.fn(), release: jest.fn() });
+  const feed = (method: string, params: Record<string, unknown>) =>
+    Reflect.apply(Reflect.get(context, 'onNotification'), context, [{ method,
+      params: method === 'item/started' ? { ...params, startedAtMs: 1 } :
+        method === 'item/completed' ? { ...params, completedAtMs: 1 } : params }]);
+  feed('item/completed', { threadId: 'child', turnId: 'child-turn',
+    item: { type: 'agentMessage', id: 'msg', text: 'early' } });
+  feed('item/started', { threadId: 'root', turnId: 'parent', item: {
+    type: 'collabAgentToolCall', id: 'spawn', senderThreadId: 'root',
+    receiverThreadIds: ['child'], status: 'inProgress', tool: 'spawnAgent',
+    agentsStates: {}, prompt: 'Inspect',
+  } });
+  expect(queue.filter((event) => event.type === 'textFinal' && event.threadId === 'child'))
+    .toEqual([expect.objectContaining({ parentToolUseId: 'spawn', text: 'early' })]);
 });
 
 describe('CodexContext thread frame boundary', () => {
@@ -423,7 +870,7 @@ describe('RuntimeContext userInputAsync lifecycle', () => {
       turnHistory: true,
       onFailure: jest.fn(),
       translator: new CodexEventTranslator('context', 1),
-      childTools: new Map<string, string>(),
+      childTools: new Map<string, string>(), limitedNativeChildren: new Set<string>(),
       childParentThreads: new Map<string, string>(),
       childTurns: new Map<string, string>(),
       knownChildParents: new Map<string, string>(),

@@ -460,6 +460,8 @@ export const knownItem = z.discriminatedUnion('type', [
     agentPath: string,
     agentThreadId: string,
     kind: z.enum(['started', 'interacted', 'interrupted', 'completed']),
+    model: string.nullish(),
+    reasoningEffort: string.nullish(),
   }),
   z.object({
     type: z.literal('imageGeneration'),
