@@ -71,3 +71,11 @@ the parent's decision; PR #1265 stays draft.
 - CI final at 1ebd6ed85: all pass except electron-e2e shard 2 (1 failed, 57 passed): only the
   accepted pre-existing `conflict-and-history-axe.spec.ts:55` contrast failure. Review state:
   REVIEW_REQUIRED (draft, no review comments). Third report: NOT delivered (parent not active).
+
+2026-11-14 (second successor session): CI at 27a173020 (docs only): all pass except
+(1) the accepted electron-e2e shard 2 axe failure `conflict-and-history-axe.spec.ts:55`, and
+(2) test shard 1: `libs/frontend/core` `message-router.service.spec.ts:512` (burst coalescing
+order, timing). The branch does not change `libs/frontend/core`; the same test passed at
+1ebd6ed85. Treated as a flake: rerun of the failed job started (`gh run rerun --failed`).
+Fourth report to the parent (decision on item (a) plus CI state): NOT delivered
+(parent-session-not-active). No production change; PR #1265 stays draft.
