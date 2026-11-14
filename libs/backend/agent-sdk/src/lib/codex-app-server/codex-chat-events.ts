@@ -158,6 +158,12 @@ export class CodexChatEvents {
       timestamp: this.now(),
     }));
     this.agentState.pending.clear();
+    // Clear native cards that have completed/drained
+    for (const card of this.nativeCards.values()) {
+      if (this.nativeTerminals.has(JSON.stringify([card.cardToolCallId, card.cycleId]))) {
+        this.nativeCards.delete(card.cardToolCallId);
+      }
+    }
     return results;
   }
 

@@ -62,6 +62,24 @@ describe('CodexChatEvents', () => {
     expect(projection.hasPendingChildren).toBe(false);
   });
 
+  it('clears drained cards when finishBackground is called after completion', () => {
+    const { projection } = setup();
+    projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
+      activityId: 'card', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/child', kind: 'started', cycleId: 'child:1', cycleOrdinal: 1 });
+    expect(projection.hasPendingChildren).toBe(true);
+    // Completed activity without child terminal arrives
+    projection.map({ ...identity, sequence: 2, type: 'subagentActivity',
+      activityId: 'done', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/child', kind: 'completed', cycleId: 'child:1', cycleOrdinal: 1 });
+    // Card is still marked as pending until finishBackground clears drained ones
+    expect(projection.hasPendingChildren).toBe(false);
+    // Explicitly call finishBackground and verify drain clears
+    const results = projection.finishBackground();
+    expect(results).toEqual([]);
+    expect(projection.hasPendingChildren).toBe(false);
+  });
+
   it('maps an interrupted child terminal to paused with the native cycle', () => {
     const { projection } = setup();
     projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
