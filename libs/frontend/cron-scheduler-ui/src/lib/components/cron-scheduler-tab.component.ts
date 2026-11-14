@@ -40,6 +40,7 @@ import {
   PtahInputDirective,
   PtahSelectDirective,
   PtahSectionHeaderComponent,
+  PtahStatePanelComponent,
   PtahSurfaceDirective,
   PtahTextareaDirective,
   PtahToggleDirective,
@@ -110,6 +111,7 @@ function emptyForm(timezone: string): CronJobFormState {
     PtahInputDirective,
     PtahSelectDirective,
     PtahSectionHeaderComponent,
+    PtahStatePanelComponent,
     PtahSurfaceDirective,
     PtahTextareaDirective,
     PtahToggleDirective,
@@ -282,31 +284,14 @@ function emptyForm(timezone: string): CronJobFormState {
         <div class="flex flex-col gap-[var(--ptah-gap-heading)]">
           <ptah-section-header heading="Scheduled jobs" level="2" size="section" />
           @if (jobs().length === 0) {
-            <div
-              class="flex flex-col items-center gap-2 px-6 py-16 text-center"
+            <ptah-state-panel
+              state="empty"
+              title="No scheduled jobs yet"
+              body="Cron jobs run a prompt on a recurring schedule as a headless PtahCode session — perfect for nightly builds, digests, or maintenance."
+              actionLabel="New job"
               data-testid="cron-empty-state"
-            >
-              <lucide-angular
-                [img]="CalendarClockIcon"
-                class="size-8 text-base-content-muted"
-                aria-hidden="true"
-              />
-              <p class="text-sm font-medium">No scheduled jobs yet</p>
-              <p class="max-w-sm text-xs text-base-content-muted">
-                Cron jobs run a prompt on a recurring schedule as a headless
-                PtahCode session — perfect for nightly builds, digests, or
-                maintenance.
-              </p>
-              <button
-                type="button"
-                ptahButton
-                variant="primary"
-                class="mt-1"
-                (click)="newJob()"
-              >
-                New job
-              </button>
-            </div>
+              (action)="newJob()"
+            />
           } @else {
             <section
               class="grid gap-[var(--ptah-gap-field)] sm:grid-cols-2 xl:grid-cols-3"
@@ -351,8 +336,8 @@ function emptyForm(timezone: string): CronJobFormState {
                 <ptah-field
                   label="Cron expression"
                   appearance="stacked"
-                  [hint]="exprPreview().valid ? exprPreview().description : null"
-                  [error]="!exprPreview().valid && form().cronExpr.length > 0 ? exprPreview().error : null"
+                  [hint]="exprPreview().valid ? (exprPreview().description ?? null) : null"
+                  [error]="!exprPreview().valid && form().cronExpr.length > 0 ? (exprPreview().error ?? null) : null"
                 >
                   <input
                     type="text"
