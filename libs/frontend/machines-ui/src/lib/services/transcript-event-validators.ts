@@ -1,6 +1,7 @@
 import type {
   EventSource,
   FlatStreamEventUnion,
+  NativeCodexAgentStatus,
   SdkAssistantMessageError,
   SdkTerminalReason,
   SessionTurnPhase,
@@ -166,6 +167,30 @@ const AGENT_TASK_OPTIONAL: FieldChecks = {
 };
 
 const isTokenUsage = shape({ input: isNumber, output: isNumber });
+const isNativeCodexAgentStatus = shape({
+  provider: (value) => value === 'codex',
+  agentThreadId: isString,
+  activityId: isString,
+  cycleId: isString,
+  cycleOrdinal: (value) =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+  kind: isOneOf<NativeCodexAgentStatus['kind']>({
+    started: true,
+    interacted: true,
+    interrupted: true,
+    completed: true,
+  }),
+});
+
+function hasAgentStatusVariant(raw: Raw): boolean {
+  const native = ownField(raw, 'native');
+  const taskId = ownField(raw, 'taskId');
+  return native === undefined
+    ? isString(taskId)
+    : taskId === undefined &&
+        isString(ownField(raw, 'agentId')) &&
+        isNativeCodexAgentStatus(native);
+}
 
 /**
  * One entry per variant; the mapped type makes adding a union member without
@@ -308,7 +333,6 @@ const EVENT_FIELD_CHECKS: { readonly [K in EventType]: FieldChecks } = {
   },
   agent_status: {
     parentToolUseId: isString,
-    taskId: isString,
     status: isOneOf<EventOf<'agent_status'>['status']>({
       pending: true,
       running: true,
@@ -364,6 +388,7 @@ export function isFlatEventType(eventType: string): eventType is EventType {
 export function hasEventFields(eventType: EventType, raw: Raw): boolean {
   return (
     hasFields(raw, BASE_OPTIONAL) &&
-    hasFields(raw, EVENT_FIELD_CHECKS[eventType])
+    hasFields(raw, EVENT_FIELD_CHECKS[eventType]) &&
+    (eventType !== 'agent_status' || hasAgentStatusVariant(raw))
   );
 }
