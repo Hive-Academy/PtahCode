@@ -20,6 +20,7 @@ import { DAISYUI_THEMES } from '@ptah-extension/core';
 
 const { interpolate, parse, wcagContrast } = require('culori/require');
 const BUILTIN_THEMES = require('daisyui/src/theming/themes.js');
+const daisyFunctions = require('daisyui/src/theming/functions.js');
 const TAILWIND_CONFIG = require('../../tailwind.config.js');
 
 const STYLES_CSS = readFileSync(join(__dirname, '..', 'styles.css'), 'utf8');
@@ -35,7 +36,10 @@ const BASE_LAYERS = ['b1', 'b2', 'b3'] as const;
 
 type ThemeSource = Record<string, string>;
 
-const customThemes: Record<string, ThemeSource> = Object.assign({}, ...TAILWIND_CONFIG.daisyui.themes);
+const customThemes: Record<string, ThemeSource> = Object.assign(
+  {},
+  ...TAILWIND_CONFIG.daisyui.themes,
+);
 
 const isDark = (color: unknown): boolean =>
   wcagContrast(color, 'black') < wcagContrast(color, 'white');
@@ -142,6 +146,138 @@ describe('file-status badge (text-base-content on bg-base-300)', () => {
   });
 });
 
+/**
+ * The value that a theme gives a custom property in a rule whose selector list
+ * is only `[data-theme='…']` entries, for example
+ * `[data-theme='retro'], [data-theme='nord'] { --x: …; }`.
+ */
+function themeToken(theme: string, property: string): string | undefined {
+  const blocks = STYLES_CSS.matchAll(
+    /(?:^|\n)((?:\[data-theme='[^']+'\],?\s*)+)\{([^}]*)\}/g,
+  );
+  for (const [, selectors, body] of blocks) {
+    if (!selectors.includes(`[data-theme='${theme}']`)) continue;
+    const match = new RegExp(`${property}:\\s*([^;]+);`).exec(body);
+    if (match) return match[1].trim();
+  }
+  return undefined;
+}
+
+/**
+ * ptahButton danger, every theme in the picker, rest / hover / active. The
+ * ink is the theme override or the daisyUI `error-content`; the hover and
+ * active fills are 90% and 82% of the error fill, moved toward the theme shade
+ * or base-content (ptah-tokens.css). The disabled state is exempt from
+ * WCAG 1.4.3 (inactive component), so it has no check here.
+ */
+describe('ptahButton danger ink in every picker theme', () => {
+  const FILLS = [
+    ['rest', 1],
+    ['hover', 0.9],
+    ['active', 0.82],
+  ] as const;
+  const themes = DAISYUI_THEMES.map((entry) => entry.name as string);
+
+  it('paints the disabled state with the neutral disabled tokens, not the danger fill', () => {
+    const buttonCss = readFileSync(
+      join(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        '..',
+        'libs',
+        'frontend',
+        'ui',
+        'src',
+        'lib',
+        'button',
+        'ptah-button.css',
+      ),
+      'utf8',
+    );
+    const rule = /\.btn\[data-ptah-button\]:is\(:disabled[^{]*\{([^}]*)\}/.exec(
+      buttonCss,
+    );
+    expect(rule?.[1]).toContain(
+      'background-color: var(--ptah-btn-disabled-bg)',
+    );
+    expect(rule?.[1]).toContain('color: var(--ptah-btn-disabled-fg)');
+    expect(rule?.[1]).not.toContain('--ptah-btn-danger');
+  });
+
+  it.each(themes)('clears the AA text ratio in %s', (name) => {
+    const source = (customThemes[name] ?? BUILTIN_THEMES[name]) as ThemeSource;
+    const resolved = daisyFunctions.convertColorFormat(source) as Record<
+      string,
+      string
+    >;
+    const oklch = (value: string): unknown => parsed(`oklch(${value})`);
+    const fill = oklch(resolved['--er']);
+    const ink = themeToken(name, '--ptah-btn-danger-fg');
+    const shade = themeToken(name, '--ptah-btn-danger-shade');
+    const inkColour = ink ? parsed(ink) : oklch(resolved['--erc']);
+    const shadeColour = shade ? parsed(shade) : oklch(resolved['--bc']);
+
+    for (const [state, share] of FILLS) {
+      const background =
+        share === 1 ? fill : interpolate([shadeColour, fill], 'oklch')(share);
+
+      expect({
+        state,
+        ratio: wcagContrast(inkColour, background) >= AA_NORMAL,
+      }).toEqual({ state, ratio: true });
+    }
+  });
+});
+
+describe('ptahButton danger token wiring', () => {
+  const UI_LIB = join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    '..',
+    'libs',
+    'frontend',
+    'ui',
+    'src',
+    'lib',
+  );
+  const TOKENS_CSS = readFileSync(
+    join(UI_LIB, 'tokens', 'ptah-tokens.css'),
+    'utf8',
+  );
+  const BUTTON_CSS = readFileSync(
+    join(UI_LIB, 'button', 'ptah-button.css'),
+    'utf8',
+  );
+
+  it('paints the danger ink from --ptah-btn-danger-fg in the rest, hover and active states', () => {
+    // The three state rules set a fill; the busy spinner rule sets a border only.
+    const rules = (
+      BUTTON_CSS.match(/\.btn\[data-ptah-button\]\.btn-error[^{]*\{[^}]*\}/g) ??
+      []
+    ).filter((rule) => rule.includes('background-color'));
+
+    expect(rules).toHaveLength(3);
+    for (const rule of rules) {
+      expect(rule).toContain('color: var(--ptah-btn-danger-fg);');
+    }
+  });
+
+  it.each(['hover', 'active'])(
+    'moves the %s fill toward --ptah-btn-danger-shade',
+    (state) => {
+      const pattern = new RegExp(
+        `--ptah-btn-danger-bg-${state}:\\s*color-mix\\([^;]*var\\(--ptah-btn-danger-shade\\)`,
+      );
+
+      expect(TOKENS_CSS).toMatch(pattern);
+    },
+  );
+});
+
 describe('anubis ink overrides', () => {
   describe.each(ANUBIS_THEMES)('theme "%s"', (theme) => {
     const source = customThemes[theme];
@@ -176,6 +312,32 @@ describe('anubis ink overrides', () => {
         AA_NORMAL,
       );
     });
+
+    // ptahButton danger (ptah-button.css) paints --ptah-btn-danger-fg with
+    // id-level specificity, so `.err-solid-text` never reaches it. The theme
+    // sets the token; the fills in the hover and active states move toward
+    // --ptah-btn-danger-shade (ptah-tokens.css: 90% and 82% of the error fill).
+    it.each([
+      ['rest', 1],
+      ['hover', 0.9],
+      ['active', 0.82],
+    ] as const)(
+      `ptahButton danger ink clears ${AA_NORMAL}:1 on the %s fill`,
+      (_state, share) => {
+        const ink = parsed(
+          blockProperty(`[data-theme='${theme}']`, '--ptah-btn-danger-fg'),
+        );
+        const shade = parsed(
+          blockProperty(`[data-theme='${theme}']`, '--ptah-btn-danger-shade'),
+        );
+        const fill =
+          share === 1
+            ? parsed(source['error'])
+            : interpolate([shade, parsed(source['error'])], 'oklch')(share);
+
+        expect(wcagContrast(ink, fill)).toBeGreaterThanOrEqual(AA_NORMAL);
+      },
+    );
 
     it.each(['b1', 'b3'] as const)(
       `.diff-add-text clears ${AA_NORMAL}:1 on %s`,

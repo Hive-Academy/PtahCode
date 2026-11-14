@@ -2416,9 +2416,37 @@ ANUBIS SEMANTIC INK OVERRIDES (TASK_2026_576, design-spec §0)
  */
 [data-theme='anubis'] {
   --ptah-error-ink: #f87171;
+  /* ptahButton danger: `.btn[data-ptah-button].btn-error` (ptah-button.css) has
+     id-level specificity and paints `--ptah-btn-danger-fg`, so `.err-solid-text`
+     below cannot reach it. The ink here is the same measured ink. The fills move
+     toward black, so hover and active keep the ink at >= 4.5:1. */
+  --ptah-btn-danger-fg: #ffffff;
+  --ptah-btn-danger-shade: #000000;
 }
 [data-theme='anubis-light'] {
   --ptah-error-ink: oklch(45% 0.22 20);
+  /* The fills move toward white, because the ink is dark in this theme. */
+  --ptah-btn-danger-fg: #131317;
+  --ptah-btn-danger-shade: #ffffff;
+}
+
+/* ptahButton danger in the other picker themes. The stock `error-content` ink
+   or the stock hover and active mix toward base-content measured below 4.5:1
+   in these seven themes. status-badge-contrast.spec.ts measures every picker
+   theme in the rest, hover and active states. The disabled state is exempt
+   (WCAG 1.4.3, inactive component) and uses the neutral disabled tokens. */
+[data-theme='retro'],
+[data-theme='wireframe'],
+[data-theme='cmyk'],
+[data-theme='acid'],
+[data-theme='nord'] {
+  --ptah-btn-danger-fg: #000000;
+  --ptah-btn-danger-shade: #ffffff;
+}
+[data-theme='autumn'],
+[data-theme='business'] {
+  --ptah-btn-danger-fg: #ffffff;
+  --ptah-btn-danger-shade: #000000;
 }
 
 [data-theme='anubis'] .text-error {
