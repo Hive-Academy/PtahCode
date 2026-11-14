@@ -79,8 +79,17 @@ export function projectCodexHistory(
     ...thread.turns.map((turn) => millis(turn.startedAt, Number.POSITIVE_INFINITY)),
   ]);
   const fallbackTime = Math.min(...knownTimes);
+  const depth = (thread: CodexHistoryThread): number => {
+    const visited = new Set<string>();
+    let parent = thread.parentThreadId;
+    while (parent && !visited.has(parent)) {
+      visited.add(parent);
+      parent = threadsById.get(parent)?.parentThreadId ?? null;
+    }
+    return visited.size;
+  };
   const projectionThreads = [...snapshot.threads].sort((a, b) =>
-    Number(b.id === snapshot.rootThreadId) - Number(a.id === snapshot.rootThreadId));
+    depth(a) - depth(b));
   for (const thread of projectionThreads) {
     for (const turn of thread.turns) {
       for (const item of turn.items) {

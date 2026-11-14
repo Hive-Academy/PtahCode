@@ -51,6 +51,17 @@ describe('CodexChatEvents', () => {
     expect(projection.finishBackground()).toEqual([]);
   });
 
+  it('ends background drain when native activity completes', () => {
+    const { projection } = setup();
+    projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
+      activityId: 'card', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/child', kind: 'started', cycleId: 'child:1', cycleOrdinal: 1 });
+    projection.map({ ...identity, sequence: 2, type: 'subagentActivity',
+      activityId: 'done', cardToolCallId: 'card', agentThreadId: 'child',
+      agentPath: '/child', kind: 'completed', cycleId: 'child:1', cycleOrdinal: 1 });
+    expect(projection.hasPendingChildren).toBe(false);
+  });
+
   it('maps an interrupted child terminal to paused with the native cycle', () => {
     const { projection } = setup();
     projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
@@ -62,6 +73,7 @@ describe('CodexChatEvents', () => {
         cycleOrdinal: 1, kind: 'started' } });
     expect(mapped).toContainEqual(expect.objectContaining({ eventType: 'agent_status',
       status: 'paused', native: expect.objectContaining({ cycleId: 'child:1' }) }));
+    expect(projection.hasPendingChildren).toBe(false);
     const thread = (id: string, parentThreadId: string | null,
       turns: CodexSessionHistory['threads'][number]['turns']): CodexSessionHistory['threads'][number] => ({
       id, parentThreadId, turns, cliVersion: 'pinned', createdAt: 1, updatedAt: 2,

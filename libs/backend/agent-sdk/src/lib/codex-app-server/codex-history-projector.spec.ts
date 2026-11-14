@@ -127,6 +127,24 @@ describe('projectCodexHistory', () => {
     expect(first.events.some(event => event.eventType.startsWith('background_agent_'))).toBe(false);
   });
 
+  it('projects a native grandchild after its parent regardless of snapshot order', () => {
+    const history: CodexSessionHistory = { rootThreadId: 'root', threads: [
+      thread('grandchild', 'child', [parentTurn('grandchild-turn', 104, [])]),
+      thread('child', 'root', [parentTurn('child-turn', 102, [{
+        type: 'subAgentActivity', id: 'nested-card', agentThreadId: 'grandchild',
+        agentPath: '/root/child/grandchild', kind: 'started',
+      }])]),
+      thread('root', null, [parentTurn('root-turn', 100, [{
+        type: 'subAgentActivity', id: 'card', agentThreadId: 'child',
+        agentPath: '/root/child', kind: 'started',
+      }])]),
+    ] };
+    const projected = projectCodexHistory('session', history);
+    expect(projected.events).toEqual(projectCodexHistory('session', {
+      ...history, threads: [...history.threads].reverse(),
+    }).events);
+  });
+
   it.each(['completed', 'failed'] as const)('retains %s when a later parent turn has no child activity', status => {
     const child: CodexHistoryTurn = { ...parentTurn('child-one', 102, []), status,
       ...(status === 'failed' ? { error: { message: 'structured failure' } } : {}) };

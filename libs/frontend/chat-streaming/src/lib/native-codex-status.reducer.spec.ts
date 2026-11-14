@@ -81,6 +81,12 @@ describe('reduceNativeCodexStatus', () => {
     expect(reduceNativeCodexStatus(record('completed'), statusEvent('completed'), parentSessionId)).toBeNull();
   });
 
+  it('fills missing failure text from a duplicate terminal status', () => {
+    expect(reduceNativeCodexStatus(record('failed'), {
+      ...statusEvent('failed'), errorMessage: 'child failed',
+    }, parentSessionId)).toMatchObject({ status: 'failed', errorMessage: 'child failed' });
+  });
+
   it('lets same-cycle failure override completion', () => {
     expect(reduceNativeCodexStatus(record('completed'), {
       ...statusEvent('failed'), errorMessage: 'child failed',

@@ -596,7 +596,6 @@ class RuntimeContext implements CodexContext {
     for (let event of this.translator.translate(frame)) {
       let linkNative = false;
       if (event.type === 'subagentActivity') {
-        if (this.pendingSpawns.get(event.threadId)?.size) continue;
         const activity = this.applyNativeActivity(event);
         if (!activity) continue;
         event = activity;
@@ -692,14 +691,13 @@ class RuntimeContext implements CodexContext {
         return undefined;
       }
       if (this.nativeChildren.size >= 256) {
-        const oldest = [...this.nativeChildren].find(([, child]) => child.lastTerminalKey)?.[0]
-          ?? this.nativeChildren.keys().next().value;
-        if (oldest) {
-          if (!this.nativeChildren.get(oldest)?.lastTerminalKey)
-            this.options.logger.error('Codex native child cache overflow',
-              { reason: 'No terminal child available for eviction' });
-          this.nativeChildren.delete(oldest);
+        const oldest = [...this.nativeChildren].find(([, child]) => child.lastTerminalKey)?.[0];
+        if (!oldest) {
+          this.options.logger.error('Codex native child cache overflow',
+            { reason: 'No terminal child available for eviction' });
+          return undefined;
         }
+        this.nativeChildren.delete(oldest);
       }
       state = { cardToolCallId: event.activityId, parentThreadId: event.threadId,
         agentPath: event.agentPath, lastActivityKind: event.kind, cycleOrdinal: 0, cycleId: '',
@@ -849,7 +847,8 @@ class RuntimeContext implements CodexContext {
            this.childParentThreads.delete(event.threadId);
           this.childTurns.delete(event.threadId);
           this.pendingSpawns.delete(event.threadId);
-          if (this.rootTerminalPending && this.childTools.size === 0)
+           if (this.rootTerminalPending &&
+             ![...this.childTools.keys()].some((id) => !this.nativeChildren.has(id)))
             this.finishActiveTurn();
           return;
         }

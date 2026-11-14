@@ -243,6 +243,7 @@ describe('native child event admission', () => {
     expect(Reflect.get(context, 'activeTurn')).toBe('root-turn');
     expect(Reflect.get(context, 'state')).toBe('running');
     expect(Reflect.get(context, 'childTools')).toEqual(new Map([
+      ['child', 'spawn'],
       ['thread-linked', 'spawn-nested'],
     ]));
     feed('turn/completed', { threadId: 'root',
@@ -428,6 +429,23 @@ describe('native activity cycle linkage', () => {
     expect(later?.queue).toEqual([]);
   });
 
+  it('finishes the root after the last non-native child while a native link remains', () => {
+    const h = harness();
+    h.apply('started', 'parent');
+    Object.assign(h.context, { activeTurn: 'parent', state: 'running',
+      rootTerminalPending: true, turnController: new AbortController(),
+      targets: new Map(), asyncQuestionItems: new Set(), pendingSpawns: new Map(),
+      pendingChildParents: new Map(), followUps: new Set() });
+    Reflect.get(h.context, 'childTools').set('child', 'card');
+    Reflect.get(h.context, 'childTools').set('v1-child', 'spawn');
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context, [{
+      type: 'terminal', contextId: 'ctx', processGeneration: 1,
+      threadId: 'v1-child', turnId: 'v1-turn', sequence: 1, status: 'completed',
+    }, 'spawn']);
+    expect(Reflect.get(h.context, 'activeTurn')).toBeUndefined();
+    expect(Reflect.get(h.context, 'rootTerminalPending')).toBe(false);
+  });
+
   it('evicts the oldest terminal native child before an active child', () => {
     const h = harness();
     for (let index = 0; index < 256; index++) {
@@ -451,7 +469,7 @@ describe('native activity cycle linkage', () => {
     expect(children.has('new')).toBe(true);
   });
 
-  it('logs when a full native cache has no terminal child to evict', () => {
+  it('preserves active native children when a full cache has no terminal child', () => {
     const h = harness();
     const children = Reflect.get(h.context, 'nativeChildren') as Map<string, unknown>;
     for (let index = 0; index < 256; index++) children.set(`old-${index}`, {
@@ -466,9 +484,26 @@ describe('native activity cycle linkage', () => {
       kind: 'started', cycleId: '', cycleOrdinal: 0,
     }]);
     expect(children.size).toBe(256);
-    expect(children.has('old-0')).toBe(false);
+    expect(children.has('old-0')).toBe(true);
+    expect(children.has('new')).toBe(false);
     expect(h.logger.error).toHaveBeenCalledWith('Codex native child cache overflow',
       { reason: 'No terminal child available for eviction' });
+  });
+
+  it('admits native activity while an unrelated spawn is pending', () => {
+    const h = harness();
+    Object.assign(h.context, { translator: new CodexEventTranslator('ctx', 1),
+      state: 'running', activeTurn: 'parent', targets: new Map(),
+      pendingSpawns: new Map([['root', new Set(['other-spawn'])]]) });
+    const queue: CodexRuntimeEvent[] = [];
+    Reflect.get(h.context, 'subscribers').add({ queue, wake: jest.fn(), release: jest.fn() });
+    Reflect.apply(Reflect.get(h.context, 'onNotification'), h.context, [{
+      method: 'item/started', params: { threadId: 'root', turnId: 'parent', startedAtMs: 1,
+        item: { type: 'subAgentActivity', id: 'card', agentThreadId: 'child',
+          agentPath: '/root/child', kind: 'started' } },
+    }]);
+    expect(queue).toContainEqual(expect.objectContaining({ type: 'subagentActivity',
+      agentThreadId: 'child' }));
   });
 
   it('nests child notifications that arrive after the activity link', () => {

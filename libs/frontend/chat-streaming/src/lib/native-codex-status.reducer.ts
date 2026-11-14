@@ -34,7 +34,8 @@ export function reduceNativeCodexStatus(
   const terminalKey = terminal ? `${cycleId}:${event.status}` : undefined;
   if (sameCycle) {
     if (!terminal && (existing?.status === event.status || (existing && isTerminal(existing.status)))) return null;
-    if (terminal && existing?.nativeLastTerminalKey === terminalKey) return null;
+    if (terminal && existing?.nativeLastTerminalKey === terminalKey &&
+      !(event.status === 'failed' && event.errorMessage && !existing?.errorMessage)) return null;
     if (existing?.status === 'failed' && event.status === 'completed') return null;
   }
 

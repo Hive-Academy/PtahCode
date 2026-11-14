@@ -220,8 +220,7 @@ export class CodexChatEvents {
           const terminalKey = JSON.stringify([childParent, native.cycleId, event.status]);
           if (!this.nativeTerminals.has(terminalKey)) {
             this.nativeTerminals.add(terminalKey);
-            if (event.status !== 'interrupted')
-              this.nativeTerminals.add(JSON.stringify([childParent, native.cycleId]));
+            this.nativeTerminals.add(JSON.stringify([childParent, native.cycleId]));
             mapped.push(this.nativeStatus({
               agentThreadId: native.agentThreadId, activityId: native.activityId,
               cycleId: native.cycleId, cycleOrdinal: native.cycleOrdinal,
@@ -385,6 +384,8 @@ export class CodexChatEvents {
           ...this.agentStartEvents(event, base),
         ];
       case 'subagentActivity': {
+        if (event.kind === 'completed' || event.kind === 'interrupted')
+          this.nativeTerminals.add(JSON.stringify([event.cardToolCallId, event.cycleId]));
         const first = event.kind === 'started' && !this.nativeStarts.has(event.cardToolCallId);
         if (first) this.nativeStarts.add(event.cardToolCallId);
         this.nativeCards.set(event.cardToolCallId, event);
