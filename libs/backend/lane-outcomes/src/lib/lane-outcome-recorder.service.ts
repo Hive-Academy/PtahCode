@@ -10,6 +10,7 @@ import {
   type LaneTaskKindClassifier,
   type OutcomeExecutorKind,
   type PhaseKind,
+  phaseKindForRole,
 } from '@ptah-extension/shared';
 import type {
   SdkAdapterSubagentEndedEvent,
@@ -50,10 +51,14 @@ export type LaneCompletionOutcomeInput = Omit<
   | 'telemetryJoin'
   | 'skillsLoaded'
   | 'sessionEvidenceClass'
+  | 'phaseKind'
 > & {
   executorKind: Exclude<LaneOutcomeRecord['executorKind'], 'subagent'>;
 } & Pick<LaneFailureClassificationInput, 'status' | 'failureKind' | 'exitCode'> & {
-  /** Phase kind for classification. Never stored on the row. */
+  /**
+   * Phase kind of the lane. It resolves the task kind and is stored on the
+   * row (`phase_kind`, migration 0075) as the phase grade key.
+   */
   readonly phaseKind?: PhaseKind | null;
 };
 
@@ -174,6 +179,7 @@ export class LaneOutcomeRecorder {
     const row: LaneOutcomeRecord = {
       ...facts,
       ...resolveTaskKind(input.taskKind, phaseKind ?? null, input.role),
+      phaseKind: phaseKind ?? null,
       subagentSessionId: null,
       parentSessionId: input.parentSessionId ?? null,
       workspaceRoot: input.workspaceRoot?.trim() || null,
@@ -505,6 +511,9 @@ export class LaneOutcomeRecorder {
       workspaceRoot: facts.workspaceRoot,
       role,
       ...resolveTaskKind(null, null, role),
+      // A built-in role slug maps to its phase kind (ROLE_PHASE_ALIASES), so the
+      // run is graded as a phase. A user-written agent name keeps a null phase.
+      phaseKind: role ? phaseKindForRole(role) : null,
     };
     if (!LaneOutcomeRowSchema.safeParse(row).success) {
       this.logger.warn('Invalid subagent outcome', { agentId: facts.agentId });

@@ -79,7 +79,10 @@ describe('SkillClonesStateService — 200-clone Library render perf (NFR)', () =
     const rpc: jest.Mocked<RpcSlice> = {
       listClones: jest.fn(async () => ({ clones })),
       getClone: jest.fn(),
-      getScorecards: jest.fn(async () => scorecardsBySlug),
+      getScorecards: jest.fn(async () => ({
+        scorecards: scorecardsBySlug,
+        phaseScorecards: [],
+      })),
       getScorecardDetail: jest.fn(),
     } as unknown as jest.Mocked<RpcSlice>;
 

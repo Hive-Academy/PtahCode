@@ -10,6 +10,7 @@ import { HarnessHealthStore } from '@ptah-extension/marketplace/services';
 import type {
   AgentOutcomeSignals,
   AgentScorecard,
+  PhaseScorecard,
   CloneSummary,
   HarnessHealth,
   HarnessTargetHealth,
@@ -111,6 +112,7 @@ interface StateStub {
   readonly scorecards: ReturnType<
     typeof signal<Record<string, AgentScorecard>>
   >;
+  readonly phaseScorecards: ReturnType<typeof signal<PhaseScorecard[]>>;
   readonly agentOutcomeSignals: ReturnType<
     typeof signal<Record<string, AgentOutcomeSignals>>
   >;
@@ -138,6 +140,7 @@ function makeStateStub(initial: CloneSummary[] = []): StateStub {
     detailLoading: signal<boolean>(false),
     detail: signal<SkillCloneDetail | null>(null),
     scorecards: signal<Record<string, AgentScorecard>>({}),
+    phaseScorecards: signal<PhaseScorecard[]>([]),
     agentOutcomeSignals: signal<Record<string, AgentOutcomeSignals>>({}),
     outcomeWindowDays: signal<number | null>(null),
     outcomeStatus: signal<
@@ -1016,8 +1019,8 @@ describe('SkillClonesViewComponent — bulk rebase', () => {
     await click('clones-bulk-confirm');
 
     expect(rpc.rebaseClone).toHaveBeenCalledTimes(2);
-    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(1, 'skill', 'alpha');
-    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(2, 'skill', 'beta');
+    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(1, 'skill', 'alpha', 'bulk');
+    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(2, 'skill', 'beta', 'bulk');
     // ngOnInit is the first call; the batch adds exactly one more (R1.5).
     expect(state.refreshClones).toHaveBeenCalledTimes(2);
   });
@@ -1127,8 +1130,8 @@ describe('SkillClonesViewComponent — bulk rebase', () => {
     await settle();
 
     expect(rpc.rebaseClone).toHaveBeenCalledTimes(3);
-    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(2, 'skill', 'beta');
-    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(3, 'skill', 'delta');
+    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(2, 'skill', 'beta', 'bulk');
+    expect(rpc.rebaseClone).toHaveBeenNthCalledWith(3, 'skill', 'delta', 'bulk');
     const toast = q('clones-toast')?.textContent ?? '';
     expect(toast).toContain('Rebased 2 of 3');
     expect(toast).toContain('alpha');
@@ -1539,7 +1542,10 @@ describe('SkillClonesViewComponent — body save', () => {
             clone({ slug: 'beta', kind: 'skill' }),
           ],
         })),
-        getScorecards: jest.fn(async () => ({})),
+        getScorecards: jest.fn(async () => ({
+          scorecards: {},
+          phaseScorecards: [],
+        })),
         getClone: jest.fn(
           (slug: string) =>
             new Promise<Detail>((resolve) => resolvers.set(slug, resolve)),
