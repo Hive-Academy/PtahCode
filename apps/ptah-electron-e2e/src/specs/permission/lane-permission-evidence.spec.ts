@@ -204,7 +204,14 @@ test.describe('@evidence lane permission routing', () => {
       const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli codex, permission plan, network deny, and task "Create a file named ptah-plan-evidence.txt in the workspace. If Plan mode prevents it, do not write; finish with BLOCKED: plan mode and the reason." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.', 'plan');
       await expectSpawnPolicy(pane, 'plan');
       const lane = await openCliLane(pane);
-      await expect(lane.getByText('BLOCKED: plan mode', { exact: false })).toBeVisible({ timeout: 180_000 });
+      // The task text also contains "BLOCKED: plan mode", so match only an
+      // element that does not echo the task, and log what matched.
+      const blocked = lane
+        .getByText('BLOCKED: plan mode', { exact: false })
+        .filter({ hasNotText: 'Create a file named' })
+        .last();
+      await expect(blocked).toBeVisible({ timeout: 180_000 });
+      console.log(`[evidence-3] blocked text: ${(await blocked.innerText()).slice(0, 400)}`);
       // Plan mode must refuse the write: the file must not exist.
       expect(fs.existsSync(path.join(live.workspace, 'ptah-plan-evidence.txt'))).toBe(false);
       await capture(live.page, '3-plan-blocked', 'ptah-canvas-rail-board:visible [data-testid="lane-panel"]:visible');
