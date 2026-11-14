@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { launchPtah } from '../../support/electron-launcher';
 import { UiDriver } from '../../support/ui-driver';
 import { visibleNewSessionTrigger } from '../../support/new-session-trigger';
@@ -20,8 +20,7 @@ test.describe('@evidence lane permission routing', () => {
 
   const root = path.resolve(__dirname, '../../../../..');
   const shots = path.join(root, '.ptah', 'tmp', 'electron-evidence');
-  const composer = 'ptah-chat-input textarea[role="combobox"]:visible';
-  const send = '[data-testid="chat-send-btn"]:visible';
+  const paneSelector = 'ptah-canvas-rail-board:visible [data-testid="rail-pane-container"] > [data-pane-side]:visible';
 
   async function capture(page: Page, name: string, crop?: string): Promise<void> {
     fs.mkdirSync(shots, { recursive: true });
@@ -37,8 +36,14 @@ test.describe('@evidence lane permission routing', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-lane-evidence-'));
     const profile = path.join(dir, 'profile');
     fs.mkdirSync(profile);
+    // The worktree root contains dist/apps/ptah-electron (the app install
+    // directory), and the host refuses to start a session in an ancestor of
+    // it. Open a separate scratch project folder instead.
+    const workspace = path.join(dir, 'workspace');
+    fs.mkdirSync(workspace);
+    fs.writeFileSync(path.join(workspace, 'README.md'), '# lane permission evidence\n');
     const app = await launchPtah({
-      args: [root],
+      args: [workspace],
       userDataDir: profile,
       env: { PTAH_DB_PATH: path.join(dir, 'state.sqlite') },
       timeout: 180_000,
@@ -49,24 +54,37 @@ test.describe('@evidence lane permission routing', () => {
     return { app, page, ui: new UiDriver(app, page), cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }) };
   }
 
-  async function openClaudeTab(page: Page, ui: UiDriver): Promise<void> {
+  async function openClaudeTab(page: Page, ui: UiDriver): Promise<Locator> {
     await ui.goto('chat');
+    const cards = page.locator('li[ptah-canvas-rail-card][data-tab-id]');
+    const before = await cards.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-tab-id')));
     await (await visibleNewSessionTrigger(page)).click();
     await page.getByRole('button', { name: 'Create', exact: true }).click();
-    await expect(page.locator(composer).first()).toBeVisible();
+    await expect.poll(() => cards.count()).toBeGreaterThan(before.length);
+    const ids = await cards.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-tab-id')));
+    const id = ids.find((value) => value && !before.includes(value));
+    if (!id) throw new Error('New canvas tab did not appear');
+    const card = page.locator(`li[ptah-canvas-rail-card][data-tab-id="${id}"]`);
+    await card.click();
+    const focused = page.locator(paneSelector).first();
+    await expect(focused.locator('ptah-canvas-detail-transcript ptah-chat-input textarea[role="combobox"]')).toBeVisible();
+    return focused;
   }
 
-  async function ask(page: Page, prompt: string): Promise<void> {
-    await page.locator(composer).first().fill(prompt);
-    await page.locator(send).first().click();
+  async function ask(pane: Locator, prompt: string): Promise<void> {
+    await pane.locator('ptah-canvas-detail-transcript ptah-chat-input textarea[role="combobox"]').fill(prompt);
+    await pane.locator('ptah-canvas-detail-transcript [data-testid="chat-send-btn"]').click();
+    await expect(pane.locator('[data-testid="chat-user-message"]')).toContainText(prompt);
   }
 
-  async function openMonitor(page: Page): Promise<void> {
-    const panel = page.locator('ptah-agent-monitor-panel:visible').first();
-    if (!(await panel.isVisible())) {
-      await page.getByRole('button', { name: 'Toggle Agents panel' }).first().click();
-    }
-    await expect(panel).toBeVisible();
+  async function openCliLane(pane: Locator): Promise<Locator> {
+    const tabs = pane.locator('ptah-canvas-lane-tabs:not([inspectorRailAgents])');
+    const cli = tabs.getByRole('tab', { name: /active agents|finished agents/i }).first();
+    await expect(cli).toBeVisible({ timeout: 180_000 });
+    await cli.click();
+    const lane = pane.locator('ptah-canvas-lane-view [data-testid="lane-panel"]:visible');
+    await expect(lane).toBeVisible();
+    return lane;
   }
 
   test('1 saved Codex lane default survives Electron reload', async () => {
@@ -112,11 +130,15 @@ test.describe('@evidence lane permission routing', () => {
     test.setTimeout(300_000);
     const live = await liveApp();
     try {
-      await openClaudeTab(live.page, live.ui);
-      await ask(live.page, 'Call ptah_agent_spawn exactly once with cli codex, permission auto-edit, and task "Run pwd once, then report the directory." Do not change settings. Report the spawn result.');
-      const policy = live.page.getByText(/requested auto-edit\s*->\s*effective auto-edit/).first();
+      const pane = await openClaudeTab(live.page, live.ui);
+      await ask(pane, 'Call ptah_agent_spawn exactly once with cli codex, permission auto-edit, and task "Run pwd once, then report the directory." Do not change settings. Report the spawn result.');
+      const transcript = pane.locator('ptah-canvas-detail-transcript');
+      const policy = transcript.getByText(/requested auto-edit\s*->\s*effective auto-edit/).first();
+      await expect(policy).toBeAttached({ timeout: 180_000 });
+      const disclosure = transcript.locator('[data-test="turn-disclosure-row"][aria-expanded="false"]').last();
+      if (await disclosure.count()) await disclosure.click();
       await expect(policy).toBeVisible({ timeout: 180_000 });
-      await capture(live.page, '2-spawn-matched', '[data-testid="chat-tool-output"]');
+      await capture(live.page, '2-spawn-matched', 'ptah-canvas-rail-board:visible ptah-canvas-detail-transcript:visible');
     } finally {
       await closeDocsApp(live.app);
       live.cleanup();
@@ -127,12 +149,11 @@ test.describe('@evidence lane permission routing', () => {
     test.setTimeout(300_000);
     const live = await liveApp();
     try {
-      await openClaudeTab(live.page, live.ui);
-      await openMonitor(live.page);
-      await ask(live.page, 'Call ptah_agent_spawn exactly once with cli codex, permission plan, and task "Create a file named ptah-plan-evidence.txt in the workspace. If Plan mode prevents it, do not write; finish with BLOCKED: plan mode and the reason." Do not change settings.');
-      const panel = live.page.locator('ptah-agent-monitor-panel:visible').first();
-      await expect(panel.getByText('BLOCKED: plan mode', { exact: false })).toBeVisible({ timeout: 180_000 });
-      await capture(live.page, '3-plan-blocked', 'ptah-agent-monitor-panel:visible');
+      const pane = await openClaudeTab(live.page, live.ui);
+      await ask(pane, 'Call ptah_agent_spawn exactly once with cli codex, permission plan, and task "Create a file named ptah-plan-evidence.txt in the workspace. If Plan mode prevents it, do not write; finish with BLOCKED: plan mode and the reason." Do not change settings.');
+      const lane = await openCliLane(pane);
+      await expect(lane.getByText('BLOCKED: plan mode', { exact: false })).toBeVisible({ timeout: 180_000 });
+      await capture(live.page, '3-plan-blocked', 'ptah-canvas-rail-board:visible [data-testid="lane-panel"]:visible');
     } finally {
       await closeDocsApp(live.app);
       live.cleanup();
@@ -143,13 +164,12 @@ test.describe('@evidence lane permission routing', () => {
     test.setTimeout(300_000);
     const live = await liveApp();
     try {
-      await openClaudeTab(live.page, live.ui);
-      await openMonitor(live.page);
-      await ask(live.page, 'Call ptah_agent_spawn exactly once with cli claude, permission ask, and task "Use Bash to run pwd once. Wait for permission if requested; do not choose a different tool." Do not change settings.');
-      const panel = live.page.locator('ptah-agent-monitor-panel:visible').first();
-      await expect(panel.getByRole('button', { name: 'Allow' })).toBeVisible({ timeout: 180_000 });
-      await expect(panel.getByRole('button', { name: 'Deny' })).toBeVisible();
-      await capture(live.page, '4-claude-tab-approval', 'ptah-agent-monitor-panel:visible');
+      const pane = await openClaudeTab(live.page, live.ui);
+      await ask(pane, 'Call ptah_agent_spawn exactly once with cli claude, permission ask, and task "Use Bash to run pwd once. Wait for permission if requested; do not choose a different tool." Do not change settings.');
+      const lane = await openCliLane(pane);
+      await expect(lane.getByRole('button', { name: 'Allow' })).toBeVisible({ timeout: 180_000 });
+      await expect(lane.getByRole('button', { name: 'Deny' })).toBeVisible();
+      await capture(live.page, '4-claude-tab-approval', 'ptah-canvas-rail-board:visible [data-testid="lane-panel"]:visible');
     } finally {
       await closeDocsApp(live.app);
       live.cleanup();
