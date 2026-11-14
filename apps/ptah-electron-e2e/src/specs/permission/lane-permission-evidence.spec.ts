@@ -77,6 +77,39 @@ test.describe('@evidence lane permission routing', () => {
     await expect(pane.locator('[data-testid="chat-user-message"]')).toContainText(prompt);
   }
 
+  /**
+   * A session that starts before the Ptah MCP server is ready reports no
+   * connected MCP server and has no ptah_* tools. Ask again in a new tab then.
+   */
+  async function askWithPtahTools(page: Page, ui: UiDriver, prompt: string): Promise<Locator> {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const pane = await openClaudeTab(page, ui);
+      await ask(pane, prompt);
+      const chip = pane.locator('ptah-canvas-detail-transcript ptah-mcp-status-chip button').first();
+      const label = async (): Promise<string> =>
+        (await chip.count()) ? ((await chip.textContent()) ?? '').replace(/\s+/g, ' ').trim() : '';
+      const connected = await expect
+        .poll(label, { timeout: 90_000 })
+        .toMatch(/^MCP [1-9]/)
+        .then(() => true, () => false);
+      if (connected) return pane;
+      await page.waitForTimeout(15_000);
+    }
+    throw new Error('The Ptah MCP server did not connect to a new session');
+  }
+
+  async function expectSpawnPolicy(pane: Locator, level: string): Promise<Locator> {
+    const transcript = pane.locator('ptah-canvas-detail-transcript');
+    const policy = transcript.getByText(new RegExp(`requested ${level}\\s*->\\s*effective ${level}`)).first();
+    await expect(policy).toBeAttached({ timeout: 180_000 });
+    if (!(await policy.isVisible())) {
+      const disclosure = transcript.locator('[data-test="turn-disclosure-row"][aria-expanded="false"]').last();
+      if (await disclosure.count()) await disclosure.click();
+    }
+    await expect(policy).toBeVisible({ timeout: 30_000 });
+    return policy;
+  }
+
   async function openCliLane(pane: Locator): Promise<Locator> {
     const tabs = pane.locator('ptah-canvas-lane-tabs:not([inspectorRailAgents])');
     const cli = tabs.getByRole('tab', { name: /active agents|finished agents/i }).first();
@@ -127,17 +160,11 @@ test.describe('@evidence lane permission routing', () => {
   });
 
   test('2 fresh auto-edit spawn shows matching requested and effective policy', async () => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const live = await liveApp();
     try {
-      const pane = await openClaudeTab(live.page, live.ui);
-      await ask(pane, 'Call ptah_agent_spawn exactly once with cli codex, permission auto-edit, and task "Run pwd once, then report the directory." Do not change settings. Report the spawn result.');
-      const transcript = pane.locator('ptah-canvas-detail-transcript');
-      const policy = transcript.getByText(/requested auto-edit\s*->\s*effective auto-edit/).first();
-      await expect(policy).toBeAttached({ timeout: 180_000 });
-      const disclosure = transcript.locator('[data-test="turn-disclosure-row"][aria-expanded="false"]').last();
-      if (await disclosure.count()) await disclosure.click();
-      await expect(policy).toBeVisible({ timeout: 180_000 });
+      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli codex, permission auto-edit, and task "Run pwd once, then report the directory." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.');
+      await expectSpawnPolicy(pane, 'auto-edit');
       await capture(live.page, '2-spawn-matched', 'ptah-canvas-rail-board:visible ptah-canvas-detail-transcript:visible');
     } finally {
       await closeDocsApp(live.app);
@@ -146,11 +173,11 @@ test.describe('@evidence lane permission routing', () => {
   });
 
   test('3 Plan lane reports explicit write refusal in agent monitor', async () => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const live = await liveApp();
     try {
-      const pane = await openClaudeTab(live.page, live.ui);
-      await ask(pane, 'Call ptah_agent_spawn exactly once with cli codex, permission plan, and task "Create a file named ptah-plan-evidence.txt in the workspace. If Plan mode prevents it, do not write; finish with BLOCKED: plan mode and the reason." Do not change settings.');
+      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli codex, permission plan, and task "Create a file named ptah-plan-evidence.txt in the workspace. If Plan mode prevents it, do not write; finish with BLOCKED: plan mode and the reason." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.');
+      await expectSpawnPolicy(pane, 'plan');
       const lane = await openCliLane(pane);
       await expect(lane.getByText('BLOCKED: plan mode', { exact: false })).toBeVisible({ timeout: 180_000 });
       await capture(live.page, '3-plan-blocked', 'ptah-canvas-rail-board:visible [data-testid="lane-panel"]:visible');
@@ -161,11 +188,14 @@ test.describe('@evidence lane permission routing', () => {
   });
 
   test('4 ask lane permission appears in its Claude tab', async () => {
-    test.setTimeout(300_000);
+    test.setTimeout(600_000);
     const live = await liveApp();
     try {
-      const pane = await openClaudeTab(live.page, live.ui);
-      await ask(pane, 'Call ptah_agent_spawn exactly once with cli claude, permission ask, and task "Use Bash to run pwd once. Wait for permission if requested; do not choose a different tool." Do not change settings.');
+      // Claude Code approves read-only Bash commands (such as pwd) before it
+      // asks the permission callback, so the lane task must write a file.
+      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli claude, permission ask, and task "Use the Bash tool to run exactly: echo lane-ask > ask-evidence.txt . Wait for permission if requested; do not choose a different tool." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.');
+      await expectSpawnPolicy(pane, 'ask');
+      await capture(live.page, '4-spawn-policy', 'ptah-canvas-rail-board:visible ptah-canvas-detail-transcript:visible');
       const lane = await openCliLane(pane);
       await expect(lane.getByRole('button', { name: 'Allow' })).toBeVisible({ timeout: 180_000 });
       await expect(lane.getByRole('button', { name: 'Deny' })).toBeVisible();
