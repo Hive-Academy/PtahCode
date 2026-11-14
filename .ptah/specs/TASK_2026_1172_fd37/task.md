@@ -1,11 +1,11 @@
 ---
 id: TASK_2026_1172_fd37
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix lane permission propagation and approval routing (Phase A)
 depends_on: []
 created: "2026-11-13T18:37:19.319Z"
-updated: "2026-11-13T18:37:19.319Z"
+updated: "2026-11-14T08:45:00.000Z"
 description: "Settings permission revert to Plan, requested vs effective lane permissions, explicit Plan refusals, approval routing to the correct session UI."
 estimate: L
 labels:
