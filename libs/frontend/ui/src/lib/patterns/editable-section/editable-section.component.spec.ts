@@ -39,7 +39,7 @@ const RAW_SPACING = /\b(gap|p|px|py|m|mx|my|space-[xy])-\d/;
       [disabledReason]="disabledReason()"
       (edit)="onEdit()"
       (save)="onSave()"
-      (cancel)="onCancel()"
+      (cancelEdit)="onCancel()"
     >
       <span status data-testid="status">Beta</span>
       @if (hasView()) {
@@ -228,7 +228,7 @@ describe('PtahEditableSectionComponent', () => {
       cancelButton().click();
       await settle();
       expect(host.edits).toEqual(['cancel']);
-      expect(dialog().hasAttribute('open')).toBe(false);
+      expect(dialog()).toBeNull();
     });
 
     it('emits cancel on Escape when clean and ignores an Escape that a child handled', async () => {
@@ -254,7 +254,7 @@ describe('PtahEditableSectionComponent', () => {
       q('[data-ptah-editable-discard]')?.click();
       await settle();
       expect(host.edits).toEqual(['cancel']);
-      expect(dialog().hasAttribute('open')).toBe(false);
+      expect(dialog()).toBeNull();
     });
 
     it('asks for confirmation on a dirty Escape: Keep editing closes and focuses Cancel', async () => {
@@ -265,7 +265,7 @@ describe('PtahEditableSectionComponent', () => {
       expect(dialog().hasAttribute('open')).toBe(true);
       q('[data-ptah-editable-keep]')?.click();
       await settle();
-      expect(dialog().hasAttribute('open')).toBe(false);
+      expect(dialog()).toBeNull();
       expect(host.edits).toEqual([]);
       expect(form()).not.toBeNull();
       expect(document.activeElement).toBe(cancelButton());
@@ -285,7 +285,7 @@ describe('PtahEditableSectionComponent', () => {
       form()?.dispatchEvent(new Event('submit', { cancelable: true }));
       await settle();
       expect(host.edits).toEqual([]);
-      expect(dialog().hasAttribute('open')).toBe(false);
+      expect(dialog()).toBeNull();
     });
 
     it('shows the error alert, links it to the form and focuses it after a failed save', async () => {

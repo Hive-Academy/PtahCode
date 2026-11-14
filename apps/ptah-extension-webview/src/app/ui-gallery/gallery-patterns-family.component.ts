@@ -176,7 +176,7 @@ import { GallerySectionComponent } from './gallery-section.component';
           [error]="saveError()"
           (edit)="startEdit()"
           (save)="saveProfile()"
-          (cancel)="stopEdit()"
+          (cancelEdit)="stopEdit()"
         >
           <span status ptahBadge size="xs" tone="info">Demo</span>
           <ptah-description-list view ariaLabel="Profile details">

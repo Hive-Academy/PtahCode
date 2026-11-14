@@ -67,14 +67,14 @@ export class PtahEditTemplateDirective {
 /**
  * One section with a view mode and an edit mode (TASK_2026_1177_9109, pattern
  * spec section 4). The parent owns `editing`, `dirty`, `saving` and `error`.
- * The section emits `edit`, `save` and `cancel`, moves focus on mode changes
+ * The section emits `edit`, `save` and `cancelEdit`, moves focus on mode changes
  * and asks for confirmation before it discards dirty edits.
  *
  * @example
  * ```html
  * <ptah-editable-section heading="Profile" [editing]="editing()" [dirty]="dirty()"
  *   [saving]="saving()" [error]="error()" (edit)="editing.set(true)"
- *   (save)="save()" (cancel)="editing.set(false)">
+ *   (save)="save()" (cancelEdit)="editing.set(false)">
  *   <ptah-description-list view [items]="rows()" />
  *   <ng-template ptahEditTemplate>…fields…</ng-template>
  * </ptah-editable-section>
@@ -195,39 +195,42 @@ export class PtahEditTemplateDirective {
         </form>
       }
 
-      <ptah-native-modal
-        size="sm"
-        [isOpen]="confirmOpen()"
-        [ariaLabelledby]="dialogTitleId"
-        (closed)="keepEditing()"
-      >
-        <h2 modal-header [id]="dialogTitleId" [class]="dialogTitleClass">Discard changes?</h2>
-        <p data-ptah-editable-confirm-body [class]="dialogBodyClass">
-          Your edits to {{ heading() }} will be lost.
-        </p>
-        <!-- Keep editing is the first control, so showModal() gives it the default focus. -->
-        <div
-          modal-footer
-          class="mt-[var(--ptah-gap-group)] flex flex-wrap justify-end gap-[var(--ptah-gap-controls)]"
+      <!-- Rendered only while open, so a closed dialog costs nothing and needs no dialog API. -->
+      @if (confirmOpen()) {
+        <ptah-native-modal
+          size="sm"
+          [isOpen]="true"
+          [ariaLabelledby]="dialogTitleId"
+          (closed)="keepEditing()"
         >
-          <button
-            ptahButton
-            variant="ghost"
-            size="sm"
-            type="button"
-            data-ptah-editable-keep
-            (click)="keepEditing()"
-          >Keep editing</button>
-          <button
-            ptahButton
-            variant="danger"
-            size="sm"
-            type="button"
-            data-ptah-editable-discard
-            (click)="discard()"
-          >Discard</button>
-        </div>
-      </ptah-native-modal>
+          <h2 modal-header [id]="dialogTitleId" [class]="dialogTitleClass">Discard changes?</h2>
+          <p data-ptah-editable-confirm-body [class]="dialogBodyClass">
+            Your edits to {{ heading() }} will be lost.
+          </p>
+          <!-- Keep editing is the first control, so showModal() gives it the default focus. -->
+          <div
+            modal-footer
+            class="mt-[var(--ptah-gap-group)] flex flex-wrap justify-end gap-[var(--ptah-gap-controls)]"
+          >
+            <button
+              ptahButton
+              variant="ghost"
+              size="sm"
+              type="button"
+              data-ptah-editable-keep
+              (click)="keepEditing()"
+            >Keep editing</button>
+            <button
+              ptahButton
+              variant="danger"
+              size="sm"
+              type="button"
+              data-ptah-editable-discard
+              (click)="discard()"
+            >Discard</button>
+          </div>
+        </ptah-native-modal>
+      }
     </section>
   `,
 })
@@ -253,9 +256,8 @@ export class PtahEditableSectionComponent {
 
   readonly edit = output<void>();
   readonly save = output<void>();
-  // Spec section 4.6 names this output. A dialog `cancel` event does not bubble, so none reaches the host.
-  // eslint-disable-next-line @angular-eslint/no-output-native
-  readonly cancel = output<void>();
+  /** Not named `cancel`: a native `cancel` event (a file input) bubbles to the host element. */
+  readonly cancelEdit = output<void>();
 
   private readonly id = `ptah-editable-section-${nextEditableSectionId++}`;
   protected readonly headingId = `${this.id}-heading`;
@@ -360,7 +362,7 @@ export class PtahEditableSectionComponent {
       this.confirmOpen.set(true);
       return;
     }
-    this.cancel.emit();
+    this.cancelEdit.emit();
   }
 
   protected keepEditing(): void {
@@ -374,7 +376,7 @@ export class PtahEditableSectionComponent {
 
   protected discard(): void {
     this.confirmOpen.set(false);
-    this.cancel.emit();
+    this.cancelEdit.emit();
   }
 
   private headingElement(): HTMLElement | null {
