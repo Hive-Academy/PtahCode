@@ -406,16 +406,6 @@
     "btn-outline": 4,
     "btn-xs": 4
   },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-list.component.ts": {
-    "badge": 4,
-    "badge-outline": 4,
-    "badge-xs": 4,
-    "btn": 3,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-square": 2,
-    "btn-xs": 3
-  },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-notices.component.ts": {
     "btn": 1,
     "btn-outline": 1,
@@ -436,10 +426,6 @@
     "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts": {
-    "badge": 4,
-    "badge-outline": 4,
-    "badge-warning": 1,
-    "badge-xs": 4,
     "skeleton": 3
   },
   "libs/frontend/chat/src/lib/settings/pro-features/mcp-port-config.component.ts": {
@@ -615,11 +601,6 @@
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-config.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
   },
   "libs/frontend/command-center/src/lib/components/command-center-page.component.html": {
     "alert": 1
