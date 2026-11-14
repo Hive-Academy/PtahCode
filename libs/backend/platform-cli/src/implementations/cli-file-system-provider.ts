@@ -100,6 +100,17 @@ export class CliFileSystemProvider implements IFileSystemProvider {
 
   async readFileBoundedNoFollow(filePath: string, maxBytes: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new RangeError('Invalid read bound');
+    return this.readRangeNoFollow(filePath, 0, maxBytes);
+  }
+
+  async readFileRangeNoFollow(filePath: string, offset: number, maxBytes: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > 256 * 1024 || !Number.isSafeInteger(offset + maxBytes)) {
+      throw new RangeError('Invalid file range');
+    }
+    return this.readRangeNoFollow(filePath, offset, maxBytes);
+  }
+
+  private async readRangeNoFollow(filePath: string, offset: number, maxBytes: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
     const before = await fs.lstat(filePath);
     if (!before.isFile() || before.isSymbolicLink()) throw new Error('Not a regular file');
     // Windows has no O_NOFOLLOW; pre-open lstat, post-open dev/ino identity, and post-read lstat protect the read there.
@@ -110,7 +121,7 @@ export class CliFileSystemProvider implements IFileSystemProvider {
       const buffer = Buffer.alloc(maxBytes + 1);
       let count = 0;
       while (count < buffer.length) {
-        const { bytesRead } = await handle.read(buffer, count, buffer.length - count, count);
+        const { bytesRead } = await handle.read(buffer, count, buffer.length - count, offset + count);
         if (bytesRead === 0) break;
         count += bytesRead;
       }

@@ -118,6 +118,9 @@ export type {
   SessionUsageCostAuthority,
   SessionUsageSink,
 } from './lib/session-stats/session-usage-sink';
+export type { UsageCollector, UsageSourceCursor } from './lib/session-stats/usage-collector.interface';
+export { ClaudeJsonlUsageCollector } from './lib/session-stats/claude-jsonl-usage-collector';
+export { ClaudeUsageSourceRegistry } from './lib/session-stats/usage-source-registry';
 
 // Session budget (TASK_2026_597 N7): resolved by rpc-handlers through
 // `SDK_TOKENS.SDK_SESSION_BUDGET` to publish the advisory state on load.

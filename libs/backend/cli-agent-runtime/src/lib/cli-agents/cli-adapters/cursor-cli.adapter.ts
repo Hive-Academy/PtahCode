@@ -604,6 +604,9 @@ export class CursorCliAdapter implements CliAdapter {
         }),
       supportsInterrupt: () => true,
       interrupt,
+      outcomeUsageIsTurnTotal: true,
+      usageScope: 'turn',
+      getObservedNativeThreadId: () => capturedAgentId,
     };
   }
 

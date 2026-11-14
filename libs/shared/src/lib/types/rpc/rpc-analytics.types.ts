@@ -45,6 +45,16 @@ export const UsageSourceStatusSchema = z.object({
 }).strict();
 export type UsageSourceStatus = z.infer<typeof UsageSourceStatusSchema>;
 
+export const UsageRepositoryTotalsSchema = z.object({
+  repositoryId: z.string().min(1).max(4096),
+  worktreePaths: z.array(z.string().min(1).max(4096)).max(1000),
+  inputTokens: count.nullable(), outputTokens: count.nullable(),
+  cacheReadTokens: count.nullable(), cacheWriteTokens: count.nullable(),
+  knownCostMicroUsd: count.nullable(),
+  hasUnknownTokens: z.boolean(),
+}).strict();
+export type UsageRepositoryTotals = z.infer<typeof UsageRepositoryTotalsSchema>;
+
 export const UsageSummarySchema = z.object({
   version: z.literal(1), generatedAt: instant, timeZone: z.literal('UTC'),
   fromDay: day, untilDayExclusive: day,
@@ -53,6 +63,7 @@ export const UsageSummarySchema = z.object({
   sessionCount: count.optional(), messageCount: count.optional(),
   subagentCount: count.optional(),
   sources: z.array(UsageSourceStatusSchema).max(100),
+  repositories: z.array(UsageRepositoryTotalsSchema).max(100).optional(),
   pricing: z.object({
     source: z.enum(['openrouter', 'bundled', 'unavailable']),
     asOf: instant.nullable(),

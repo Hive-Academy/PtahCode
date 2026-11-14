@@ -168,6 +168,13 @@ export function createMockFileSystemProvider(
       const bytes = await mock.readFileBytes(path);
       return { bytes: bytes.slice(0, maxBytes), truncated: bytes.length > maxBytes };
     }),
+    readFileRangeNoFollow: jest.fn(async (path: string, offset: number, maxBytes: number) => {
+      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > 256 * 1024 || !Number.isSafeInteger(offset + maxBytes)) {
+        throw new RangeError('Invalid file range');
+      }
+      const bytes = await mock.readFileBytes(path);
+      return { bytes: bytes.slice(offset, offset + maxBytes), truncated: bytes.length > offset + maxBytes };
+    }),
     exists: jest.fn(async (path: string): Promise<boolean> => {
       if (files.has(path)) return true;
       const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');

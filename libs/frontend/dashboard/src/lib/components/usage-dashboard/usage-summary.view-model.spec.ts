@@ -6,14 +6,21 @@
  * unknown ("—") when no fact reports them and a lower bound ("≥") when
  * only some do.
  */
-import type { UsageFact } from '@ptah-extension/shared';
+import { UsageSummarySchema, type UsageFact } from '@ptah-extension/shared';
 import { buildUsageViewModel } from './usage-summary.view-model';
 import { buildCostSlices } from './usage-cost-donut.geometry';
-import { daySpanLabel, enumerateDays, formatChartUsd, formatCompactTokens, formatCompactUsd, formatDayShort, formatPercent, formatUsd, providerDisplayName } from './usage-formatting';
 import {
-  usageFact,
-  usageSummary,
-} from '../../services/dashboard-rpc.testing';
+  daySpanLabel,
+  enumerateDays,
+  formatChartUsd,
+  formatCompactTokens,
+  formatCompactUsd,
+  formatDayShort,
+  formatPercent,
+  formatUsd,
+  providerDisplayName,
+} from './usage-formatting';
+import { usageFact, usageSummary } from '../../services/dashboard-rpc.testing';
 
 /** Day 18: priced Anthropic Sonnet with every token class. */
 const factSonnetDay18: UsageFact = usageFact({
@@ -60,22 +67,41 @@ describe('usage-summary view model helpers', () => {
   });
 
   it('calculates the displayed before-savings multiple for $11.05 saved on $3.82 cost', () => {
-    const vm = buildUsageViewModel(usageSummary([
-      { ...factSonnetDay18, costUsd: 3.82, cacheSavingsUsd: 11.05 },
-    ]))!;
+    const vm = buildUsageViewModel(
+      usageSummary([
+        { ...factSonnetDay18, costUsd: 3.82, cacheSavingsUsd: 11.05 },
+      ]),
+    )!;
     expect(vm.kpis.savingsMultiple).toBeCloseTo((3.82 + 11.05) / 3.82);
     expect(vm.kpis.savingsMultiple?.toFixed(1)).toBe('3.9');
   });
 
   it('excludes unpriced cost from donut arcs and groups slices after the top five', () => {
     const items = [1, 2, 3, 4, 5, 6].map((cost, i) => ({
-      id: String(i), label: `Model ${i}`, costUsd: cost, color: '#123456', unpriced: false,
+      id: String(i),
+      label: `Model ${i}`,
+      costUsd: cost,
+      color: '#123456',
+      unpriced: false,
     }));
-    const slices = buildCostSlices([...items, { id: 'unknown', label: 'Unknown', costUsd: null, color: '#654321', unpriced: true }]);
+    const slices = buildCostSlices([
+      ...items,
+      {
+        id: 'unknown',
+        label: 'Unknown',
+        costUsd: null,
+        color: '#654321',
+        unpriced: true,
+      },
+    ]);
     expect(slices).toHaveLength(7);
     expect(slices.find((slice) => slice.id === 'other')?.costUsd).toBe(1);
     expect(slices.find((slice) => slice.id === 'unknown')?.percent).toBeNull();
-    expect(slices.filter((slice) => slice.percent !== null).reduce((sum, slice) => sum + slice.percent!, 0)).toBeCloseTo(1);
+    expect(
+      slices
+        .filter((slice) => slice.percent !== null)
+        .reduce((sum, slice) => sum + slice.percent!, 0),
+    ).toBeCloseTo(1);
   });
   it('enumerates every UTC day of a half-open window, oldest first', () => {
     expect(enumerateDays('2026-10-18', '2026-10-21')).toEqual([
@@ -128,7 +154,12 @@ describe('buildUsageViewModel', () => {
 
   it('folds tokens, cost, shares, kpis and quality over the window', () => {
     const vm = buildUsageViewModel(
-      usageSummary([factSonnetDay18, factOpusDay19, factQwenDay19, factOutOfWindow]),
+      usageSummary([
+        factSonnetDay18,
+        factOpusDay19,
+        factQwenDay19,
+        factOutOfWindow,
+      ]),
       availableModels,
     )!;
 
@@ -239,45 +270,76 @@ describe('buildUsageViewModel', () => {
     const vm = buildUsageViewModel(
       usageSummary([factSonnetDay18], {
         sources: [
-          { sourceId: 'claude-ledger', status: 'partial', reason: 'one malformed line' },
+          {
+            sourceId: 'claude-ledger',
+            status: 'partial',
+            reason: 'one malformed line',
+          },
           { sourceId: 'antigravity', status: 'complete' },
         ],
       }),
     )!;
     expect(vm.isPartial).toBe(true);
     expect(vm.sources).toHaveLength(2);
-    expect(vm.emptyPartialMessage).toBe('Some usage sources are unavailable for this range, so totals may be incomplete.');
+    expect(vm.emptyPartialMessage).toBe(
+      'Some usage sources are unavailable for this range, so totals may be incomplete.',
+    );
   });
 
   it('explains ledger gaps and unavailable sources separately', () => {
     const sources = [
-      { sourceId: 'claude-ledger', status: 'partial' as const,
-        coverageStart: '2026-10-19', reason: 'Historical sessions were not backfilled' },
+      {
+        sourceId: 'claude-ledger',
+        status: 'partial' as const,
+        coverageStart: '2026-10-19',
+        reason: 'Historical sessions were not backfilled',
+      },
       { sourceId: 'codex', status: 'unavailable' as const },
     ];
-    expect(buildUsageViewModel(usageSummary([], { sources: [sources[0]!] }))?.emptyPartialMessage)
-      .toBe('Usage before 2026-10-19 was not captured.');
-    expect(buildUsageViewModel(usageSummary([], { sources }))?.emptyPartialMessage)
-      .toBe('Usage before 2026-10-19 was not captured. Some usage sources are unavailable for this range, so totals may be incomplete.');
+    expect(
+      buildUsageViewModel(usageSummary([], { sources: [sources[0]!] }))
+        ?.emptyPartialMessage,
+    ).toBe('Usage before 2026-10-19 was not captured.');
+    expect(
+      buildUsageViewModel(usageSummary([], { sources }))?.emptyPartialMessage,
+    ).toBe(
+      'Usage before 2026-10-19 was not captured. Some usage sources are unavailable for this range, so totals may be incomplete.',
+    );
   });
 
   it('keeps the SQL known-cost lower bound when a grouped fact also has unpriced turns', () => {
-    const vm = buildUsageViewModel(usageSummary([
-      usageFact({
-        costUsd: null,
-        knownCostUsd: 2.5,
-        costSource: 'unpriced',
-        inputUncachedTokens: 100,
-      }),
-    ], {
-      sources: [{ sourceId: 'claude-ledger', status: 'partial', coverageStart: '2026-10-18', reason: 'Historical sessions were not backfilled' }],
-    }))!;
+    const vm = buildUsageViewModel(
+      usageSummary(
+        [
+          usageFact({
+            costUsd: null,
+            knownCostUsd: 2.5,
+            costSource: 'unpriced',
+            inputUncachedTokens: 100,
+          }),
+        ],
+        {
+          sources: [
+            {
+              sourceId: 'claude-ledger',
+              status: 'partial',
+              coverageStart: '2026-10-18',
+              reason: 'Historical sessions were not backfilled',
+            },
+          ],
+        },
+      ),
+    )!;
 
     expect(vm.totalCostUsd).toBe(2.5);
     expect(vm.totalCostUnpricedFactCount).toBe(1);
     expect(vm.providers[0]!.costUsd).toBe(2.5);
     expect(vm.providers[0]!.hasUnpricedFacts).toBe(true);
-    expect(vm.providerSeries[0]!.costUnknownByDay).toEqual([true, false, false]);
+    expect(vm.providerSeries[0]!.costUnknownByDay).toEqual([
+      true,
+      false,
+      false,
+    ]);
     expect(vm.dayRows[0]!.costUsd).toBe(2.5);
     expect(vm.dayRows[0]!.unpricedFactCount).toBe(1);
     expect(vm.kpis.savingsMultiple).toBeNull();
@@ -325,7 +387,9 @@ describe('buildUsageViewModel', () => {
     expect(vm.quality.unpricedTokenShare).toBeNull();
     // Empty days still get rows, all unknown/empty.
     expect(vm.dayRows).toHaveLength(7);
-    expect(vm.dayRows.every((row) => row.costUsd === null && row.tokens === 0)).toBe(true);
+    expect(
+      vm.dayRows.every((row) => row.costUsd === null && row.tokens === 0),
+    ).toBe(true);
   });
 });
 
@@ -442,5 +506,55 @@ describe('buildUsageViewModel cache savings', () => {
     expect(vm.kpis.cacheSavingsUnknownFactCount).toBe(0);
     // The multiple needs a known, positive raw cost.
     expect(vm.kpis.savingsMultiple).toBeNull();
+  });
+});
+
+describe('repository usage view model', () => {
+  it('keeps unknown coverage and labels repository cost as a known subtotal', () => {
+    const summary = UsageSummarySchema.parse({
+      version: 1,
+      generatedAt: '2026-10-20T12:00:00.000Z',
+      timeZone: 'UTC',
+      fromDay: '2026-10-20',
+      untilDayExclusive: '2026-10-21',
+      facts: [],
+      sources: [],
+      pricing: { source: 'unavailable', asOf: null },
+      repositories: [
+        {
+          repositoryId: 'repo-1',
+          worktreePaths: ['/work/tree'],
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: null,
+          cacheWriteTokens: 0,
+          knownCostMicroUsd: 250000,
+          hasUnknownTokens: true,
+        },
+      ],
+    });
+    expect(buildUsageViewModel(summary)?.repositories).toEqual([
+      expect.objectContaining({
+        repositoryId: 'repo-1',
+        worktreePaths: ['/work/tree'],
+        recordedTokens: 15,
+        knownCostLabel: '$0.25',
+        hasUnknownTokens: true,
+      }),
+    ]);
+  });
+
+  it('accepts an older summary without repository totals', () => {
+    const summary = UsageSummarySchema.parse({
+      version: 1,
+      generatedAt: '2026-10-20T12:00:00.000Z',
+      timeZone: 'UTC',
+      fromDay: '2026-10-20',
+      untilDayExclusive: '2026-10-21',
+      facts: [],
+      sources: [],
+      pricing: { source: 'unavailable', asOf: null },
+    });
+    expect(buildUsageViewModel(summary)?.repositories).toEqual([]);
   });
 });

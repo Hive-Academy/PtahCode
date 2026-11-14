@@ -5,7 +5,7 @@ import type {
   CliOutputSegment,
   LaneCompletionSignal,
 } from '@ptah-extension/shared';
-import type { LaneOutcomeRecorder } from '@ptah-extension/lane-outcomes';
+import { LaneOutcomeRecorder } from '@ptah-extension/lane-outcomes';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   parseSessionUsageContribution,
@@ -13,6 +13,7 @@ import {
   type SessionUsageContribution,
   type SessionUsageSink,
 } from '@ptah-extension/agent-sdk';
+import type { UsageMissingReason, UsageReconciliationTrigger } from '@ptah-extension/platform-core';
 import { classifyLaneFailureClass } from './limits/lane-failure-class';
 import { phaseKindFromAgentInfo } from './lane-completion-result';
 
@@ -116,25 +117,35 @@ export function recordLaneUsageOutcome(
   info: AgentProcessInfo,
   completedAt: string,
   usage: CliOutputSegment['usage'],
+  nativeThreadId: string | null = null,
+  trigger?: UsageReconciliationTrigger,
+  turnStartedAt?: string,
 ): void {
-  if (!sink || !usage) return;
   const runId = String(info.agentId);
+  const eventKey = `${runId}:${completedAt}`;
+  const countReason = (reason: UsageMissingReason): void => {
+    if (info.cli === 'codex') LaneOutcomeRecorder.countCodexUsageReason(eventKey, reason);
+  };
+  if (!sink) {
+    countReason('sink-unavailable');
+    logger.warn('[LaneCompletionNotifier] Usage sink unavailable', { runId, reason: 'sink-unavailable' });
+    return;
+  }
   try {
-    const inputTokens = usage.inputTokens ?? 0;
-    const outputTokens = usage.outputTokens ?? 0;
-    const cacheReadTokens = usage.cacheReadTokens ?? 0;
-    const cacheCreationTokens = usage.cacheWriteTokens ?? 0;
+    const inputTokens = usage?.inputTokens ?? null;
+    const outputTokens = usage?.outputTokens ?? null;
+    const cacheReadTokens = usage?.cacheReadTokens ?? null;
+    const cacheCreationTokens = usage?.cacheWriteTokens ?? null;
     const knownCostMicroUsd =
-      usage.costUsd === undefined ? null : usdToMicroUsd(usage.costUsd);
-    if (
-      inputTokens === 0 &&
-      outputTokens === 0 &&
-      cacheReadTokens === 0 &&
-      cacheCreationTokens === 0 &&
-      (knownCostMicroUsd ?? 0) === 0
-    ) {
-      return;
-    }
+      usage?.costUsd === undefined ? null : usdToMicroUsd(usage.costUsd);
+    const hasCounter = [inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens]
+      .some((value) => value !== null);
+    const missingReason: UsageMissingReason | null = !usage
+      ? info.status === 'stopped' ? 'aborted-before-result'
+        : info.status === 'failed' ? 'failed-before-result' : 'no-usage-event'
+      : !hasCounter ? 'invalid-usage'
+        : [inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens]
+          .some((value) => value === null) ? 'partial-usage' : null;
     const costAuthority =
       knownCostMicroUsd === null ? 'unpriced' : 'provider-reported';
     // `parentSessionId` holds the frontend tab id until the real SDK uuid
@@ -150,17 +161,26 @@ export function recordLaneUsageOutcome(
       sessionId: info.cliSessionId ?? runId,
       producer: 'cli-lane',
       runId,
+      nativeThreadId,
       turnId: info.turnSeq === undefined ? null : String(info.turnSeq),
-      eventKey: `${runId}:${completedAt}`,
+      eventKey,
       parentSessionId: parentSessionId ?? null,
       subagentId: null,
       providerId: info.providerId ?? info.quotaOwner?.providerId ?? null,
       occurredAtMs: Date.parse(completedAt) || Date.now(),
       revision: info.turnSeq ?? 0,
-      models: [
+      models: usage?.models?.length ? usage.models.map((model) => ({
+        modelId: model.modelId,
+        inputTokens: model.inputTokens,
+        outputTokens: model.outputTokens,
+        cacheReadTokens: model.cacheReadTokens,
+        cacheCreationTokens: model.cacheWriteTokens,
+        knownCostMicroUsd: null,
+        costAuthority: 'unpriced' as const,
+      })) : [
         {
           // The requested alias is not evidence of the model that incurred cost.
-          modelId: usage.model ?? null,
+          modelId: usage?.model ?? null,
           inputTokens,
           outputTokens,
           cacheReadTokens,
@@ -174,19 +194,34 @@ export function recordLaneUsageOutcome(
       pricingVersion: null,
       workspaceKey: normalizeWorkspaceRoot(info.workingDirectory),
       host: 'cli',
+      source: 'live',
+      missingReason,
+      billable: hasCounter,
+       coverageStartMs: Number.isFinite(Date.parse(turnStartedAt ?? info.startedAt)) ? Date.parse(turnStartedAt ?? info.startedAt) : null,
+      coverageEndMs: Number.isFinite(Date.parse(completedAt)) ? Date.parse(completedAt) : null,
     };
     const contribution = parseSessionUsageContribution(built);
     if (contribution === null) {
+      countReason('invalid-usage');
       logger.warn(
         '[LaneCompletionNotifier] Usage contribution rejected at the capture boundary',
         { runId },
       );
       return;
     }
-    void Promise.resolve(sink.recordUsage(contribution)).catch((error: unknown) => {
+    void Promise.resolve(sink.recordUsage(contribution)).then(() => {
+      if (missingReason) countReason(missingReason);
+      trigger?.enqueue({
+        kind: 'lane-completed', sessionId: contribution.sessionId,
+        providerId: contribution.providerId ?? info.cli,
+        occurredAtMs: contribution.occurredAtMs,
+      });
+    }).catch((error: unknown) => {
+      countReason('sink-unavailable');
       logger.error('[LaneCompletionNotifier] Usage capture failed', error instanceof Error ? error : new Error(String(error)));
     });
   } catch (error: unknown) {
+    countReason('sink-unavailable');
     logger.error(
       '[LaneCompletionNotifier] Usage capture failed; the completion signal is unaffected',
       error instanceof Error ? error : new Error(String(error)),
