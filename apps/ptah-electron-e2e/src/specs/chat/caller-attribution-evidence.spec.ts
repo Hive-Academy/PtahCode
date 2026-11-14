@@ -74,7 +74,13 @@ test.describe('@evidence Codex caller attribution', () => {
     });
     const selection = z.object({ success: z.boolean(), error: z.string().optional() }).parse(selected);
     if (!selection.success) throw new Error(`Codex provider selection failed: ${selection.error ?? 'unknown'}`);
-    const listed = models.parse(await rpc(bridge, 'config:models-list', { workspacePath: workspace }));
+    // The Codex model catalog loads asynchronously after the provider switch,
+    // so an early list can be empty. Ask again until it has entries.
+    let listed: z.infer<typeof models> = { models: [] };
+    await expect.poll(async () => {
+      listed = models.parse(await rpc(bridge, 'config:models-list', { workspacePath: workspace }));
+      return listed.models.length;
+    }, { timeout: 120_000, intervals: [3_000] }).toBeGreaterThan(0);
     const model = listed.models.find((entry) => /codex|gpt/i.test(entry.name)) ?? listed.models[0];
     if (!model) throw new Error('No Codex model available');
     await rpc(bridge, 'config:model-switch', { model: model.id, applyTo: 'workspace' });
