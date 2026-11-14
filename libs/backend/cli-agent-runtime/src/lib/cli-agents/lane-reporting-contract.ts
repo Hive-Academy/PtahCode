@@ -19,6 +19,23 @@ import { PTAH_MCP_TOOL_GUIDANCE } from './ptah-mcp-tool-guidance.constant';
 
 export const LANE_PLAN_MODE_INSTRUCTION = 'This lane runs in Plan mode (read-only). Do not wait for approval. If the task needs file writes, stop and say "BLOCKED: plan mode" with the reason in your final message.';
 
+/**
+ * Append the Plan instruction once when the RESOLVED lane permission is plan.
+ * The spawn paths call this after the policy resolver, so a Plan that comes
+ * from a saved lane default is covered too. A task that already carries the
+ * instruction (for example from `renderLaneCompletionContract`) is returned
+ * unchanged.
+ */
+export function withLanePlanModeInstruction(
+  task: string,
+  resolvedPermission: string | undefined,
+): string {
+  if (resolvedPermission !== 'plan' || task.includes(LANE_PLAN_MODE_INSTRUCTION)) {
+    return task;
+  }
+  return `${task}\n\n${LANE_PLAN_MODE_INSTRUCTION}`;
+}
+
 export interface LaneCompletionContractInput {
   readonly effectivePermission?: string;
   readonly canUsePtahMcp?: boolean;

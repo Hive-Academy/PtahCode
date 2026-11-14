@@ -54,7 +54,7 @@ import {
   type IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
 import { issueLaneMcpToken } from './cli-adapters/lane-mcp-credentials';
-import { LANE_PLAN_MODE_INSTRUCTION } from './lane-reporting-contract';
+import { withLanePlanModeInstruction } from './lane-reporting-contract';
 import {
   claudeModelFamily,
   SDK_TOKENS,
@@ -1079,8 +1079,10 @@ export class AgentProcessManager {
           admittedReference = snapshot;
           admittedSdkSessionId = sdkSessionId;
         },
-        task: options.effectivePolicy?.requested?.permission === 'plan'
-          ? `${task}\n\n${LANE_PLAN_MODE_INSTRUCTION}` : task,
+        task: withLanePlanModeInstruction(
+          task,
+          options.effectivePolicy?.requested?.permission,
+        ),
         workingDirectory,
         files: request.files,
         taskFolder: request.taskFolder,

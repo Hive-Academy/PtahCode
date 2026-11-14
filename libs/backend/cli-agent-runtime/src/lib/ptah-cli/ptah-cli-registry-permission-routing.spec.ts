@@ -36,6 +36,7 @@ import type { ProviderModelsService } from '@ptah-extension/auth-providers';
 import type { PtahCliConfig } from '@ptah-extension/shared';
 import { PtahCliRegistry } from './ptah-cli-registry';
 import { createFakeSdkProcessSpawner } from './testing/fake-sdk-process-spawner';
+import * as mailboxModule from './helpers/ptah-cli-prompt-mailbox';
 
 jest.mock('@ptah-extension/agent-sdk', () => {
   const actual = jest.requireActual('@ptah-extension/agent-sdk');
@@ -152,6 +153,30 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({ permissionMode: 'plan' }),
     }));
+  });
+
+  it('adds the Plan instruction when Plan comes from a saved lane default', async () => {
+    const { registry, queryFn } = buildHarness();
+    Reflect.set(registry, 'laneWorkspace', {
+      getConfiguration: jest.fn(() => ({ 'ptah-cli': { permission: 'plan' } })),
+    });
+    const mailboxSpy = jest.spyOn(mailboxModule, 'createPromptMailbox');
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ permissionMode: 'plan' }),
+    }));
+    expect(mailboxSpy).toHaveBeenCalledWith(
+      expect.stringContaining('BLOCKED: plan mode'),
+    );
+    mailboxSpy.mockRestore();
+  });
+
+  it('does not add the Plan instruction to a non-plan lane', async () => {
+    const { registry } = buildHarness();
+    const mailboxSpy = jest.spyOn(mailboxModule, 'createPromptMailbox');
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'auto-edit' });
+    expect(mailboxSpy).toHaveBeenCalledWith('do work');
+    mailboxSpy.mockRestore();
   });
 
   it('uses the manifest built-in yolo mode when no lane choice is saved', async () => {

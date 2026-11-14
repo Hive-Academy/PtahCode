@@ -13,6 +13,10 @@ Program decisions are named "program Dn". Local rows in decisions.md are named "
 
 ## Limitations
 
-- A Ptah CLI lane prompt names only a parent or explicit Plan. A saved-default Plan shows in spawn/status only.
+- A saved-default Plan lane also gets the "BLOCKED: plan mode" instruction (local D20).
 - Codex `ask` is unsupported for native lanes (refused before launch).
-- Electron UI screenshots are taken after both Phase A and Phase B PRs land (parent instruction).
+- Electron UI evidence (parent correction, 2026-11-14): four items are captured with Phase A alone
+  from this worktree build: (1) lane permission saved after reload, (2) fresh spawn requested ->
+  effective match, (3) explicit "BLOCKED: plan mode" refusal, (4) approval request from a lane of a
+  Claude-tab parent in that session's UI. Only approval routing for a Codex-tab parent (row 6) waits
+  for the Phase B PR. The PR stays a draft until the four items exist.
