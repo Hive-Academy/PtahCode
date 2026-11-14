@@ -1,9 +1,11 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   afterNextRender,
   computed,
+  inject,
   input,
   output,
   signal,
@@ -69,103 +71,112 @@ export interface TaskCreateDraft {
       data-testid="tasks-create-dialog"
       (closed)="cancelIfIdle()"
     >
-        <h2 modal-header id="task-create-title" class="mb-[var(--ptah-gap-heading)] text-lg font-semibold">
-          New Task
-        </h2>
+      <h2
+        modal-header
+        id="task-create-title"
+        class="mb-[var(--ptah-gap-heading)] text-lg font-semibold"
+      >
+        New Task
+      </h2>
 
-        <form class="flex flex-col gap-[var(--ptah-gap-field)]" (ngSubmit)="submit()" (keydown.escape)="preventBusyEscape($event)">
-            <ptah-field
-              label="Title"
-              [error]="titleError() ? 'A task needs a title.' : null"
-              [attr.data-testid]="titleError() ? 'tasks-create-title-error' : null"
+      <form
+        class="flex flex-col gap-[var(--ptah-gap-field)]"
+        (ngSubmit)="submit()"
+      >
+        <ptah-field
+          label="Title"
+          [error]="titleError() ? 'A task needs a title.' : null"
+          [attr.data-testid]="titleError() ? 'tasks-create-title-error' : null"
+        >
+          <input
+            #titleInput
+            type="text"
+            name="title"
+            ptahInput
+            placeholder="Short imperative title"
+            aria-label="Task title"
+            data-testid="tasks-create-title"
+            [invalid]="!!titleError()"
+            [ngModel]="title()"
+            (ngModelChange)="title.set($event)"
+            (blur)="touched.set(true)"
+          />
+        </ptah-field>
+
+        <div class="grid grid-cols-2 gap-[var(--ptah-gap-controls)]">
+          <ptah-field label="Type">
+            <select
+              name="type"
+              ptahSelect
+              aria-label="Task type"
+              data-testid="tasks-create-type"
+              [ngModel]="type()"
+              (ngModelChange)="setType($event)"
             >
-              <input
-                #titleInput
-                type="text"
-                name="title"
-                ptahInput
-                placeholder="Short imperative title"
-                aria-label="Task title"
-                data-testid="tasks-create-title"
-                [invalid]="!!titleError()"
-                [ngModel]="title()"
-                (ngModelChange)="title.set($event)"
-                (blur)="touched.set(true)"
-              />
-            </ptah-field>
-
-          <div class="grid grid-cols-2 gap-[var(--ptah-gap-controls)]">
-            <ptah-field label="Type">
-              <select
-                name="type"
-                ptahSelect
-                aria-label="Task type"
-                data-testid="tasks-create-type"
-                [ngModel]="type()"
-                (ngModelChange)="setType($event)"
-              >
-                @for (option of taskTypes; track option) {
-                  <option [value]="option">{{ option }}</option>
-                }
-              </select>
-            </ptah-field>
-
-            <ptah-field label="Status">
-              <select
-                name="status"
-                ptahSelect
-                aria-label="Task status"
-                data-testid="tasks-create-status"
-                [ngModel]="status()"
-                (ngModelChange)="setStatus($event)"
-              >
-                @for (option of taskStatuses; track option) {
-                  <option [value]="option">{{ statusLabel(option) }}</option>
-                }
-              </select>
-            </ptah-field>
-          </div>
-
-          <ptah-field label="Description (optional)">
-            <textarea
-              name="description"
-              ptahTextarea
-              rows="3"
-              placeholder="One-line summary"
-              aria-label="Task description"
-              [ngModel]="description()"
-              (ngModelChange)="description.set($event)"
-            ></textarea>
+              @for (option of taskTypes; track option) {
+                <option [value]="option">{{ option }}</option>
+              }
+            </select>
           </ptah-field>
 
-          <div class="mt-[var(--ptah-gap-group)] flex justify-end gap-[var(--ptah-gap-controls)]">
-            <button
-              type="button"
-              ptahButton
-              variant="ghost"
-              data-testid="tasks-create-cancel"
-              [disabled]="creating()"
-              (click)="cancelled.emit()"
+          <ptah-field label="Status">
+            <select
+              name="status"
+              ptahSelect
+              aria-label="Task status"
+              data-testid="tasks-create-status"
+              [ngModel]="status()"
+              (ngModelChange)="setStatus($event)"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              ptahButton
-              variant="primary"
-              data-testid="tasks-create-submit"
-              [disabled]="!canCreate() || creating()"
-            >
-              @if (creating()) {
-                <span
-                  class="loading loading-spinner loading-xs"
-                  aria-hidden="true"
-                ></span>
+              @for (option of taskStatuses; track option) {
+                <option [value]="option">{{ statusLabel(option) }}</option>
               }
-              Create
-            </button>
-          </div>
-        </form>
+            </select>
+          </ptah-field>
+        </div>
+
+        <ptah-field label="Description (optional)">
+          <textarea
+            name="description"
+            ptahTextarea
+            rows="3"
+            placeholder="One-line summary"
+            aria-label="Task description"
+            [ngModel]="description()"
+            (ngModelChange)="description.set($event)"
+          ></textarea>
+        </ptah-field>
+
+        <div
+          class="mt-[var(--ptah-gap-group)] flex justify-end gap-[var(--ptah-gap-controls)]"
+        >
+          <button
+            type="button"
+            ptahButton
+            variant="ghost"
+            data-testid="tasks-create-cancel"
+            [disabled]="creating()"
+            (click)="cancelled.emit()"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            ptahButton
+            variant="primary"
+            data-testid="tasks-create-submit"
+            [disabled]="!canCreate() || creating()"
+          >
+            @if (creating()) {
+              <span
+                class="loading loading-spinner loading-xs"
+                aria-hidden="true"
+              ></span>
+            }
+            Create
+          </button>
+        </div>
+      </form>
     </ptah-native-modal>
   `,
 })
@@ -199,8 +210,31 @@ export class TaskCreateDialogComponent {
   private readonly titleInput =
     viewChild.required<ElementRef<HTMLInputElement>>('titleInput');
 
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly destroyRef = inject(DestroyRef);
+
   public constructor() {
-    afterNextRender(() => this.titleInput().nativeElement.focus());
+    afterNextRender(() => {
+      this.titleInput().nativeElement.focus();
+      this.guardNativeCancel();
+    });
+  }
+
+  /**
+   * Escape fires the native `cancel` event on the inner dialog even when focus
+   * has left the form (a disabled submit button drops focus to the body), so
+   * the guard sits on that event and not on a keydown handler.
+   */
+  private guardNativeCancel(): void {
+    const dialog = this.host.nativeElement.querySelector('dialog');
+    if (!dialog) return;
+    const onCancel = (event: Event): void => {
+      if (this.creating()) event.preventDefault();
+    };
+    dialog.addEventListener('cancel', onCancel);
+    this.destroyRef.onDestroy(() =>
+      dialog.removeEventListener('cancel', onCancel),
+    );
   }
 
   protected statusLabel(status: TaskStatus): string {
@@ -232,12 +266,11 @@ export class TaskCreateDialogComponent {
     if (!this.creating()) this.cancelled.emit();
   }
 
-  protected preventBusyEscape(event: KeyboardEvent): void {
-    if (this.creating()) event.preventDefault();
-  }
-
   protected onClick(event: MouseEvent): void {
-    if (this.creating() && (event.target as HTMLElement).closest('.modal-backdrop')) {
+    if (
+      this.creating() &&
+      (event.target as HTMLElement).closest('.modal-backdrop')
+    ) {
       event.preventDefault();
     }
   }

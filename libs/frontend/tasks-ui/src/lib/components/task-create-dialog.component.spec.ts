@@ -131,15 +131,40 @@ describe('TaskCreateDialogComponent', () => {
     expect(cancels).toHaveLength(2);
   });
 
+  it('prevents the native cancel event while a create is in flight', async () => {
+    const { fixture, cancels } = await render('backlog', true);
+    const event = new Event('cancel', { cancelable: true });
+
+    (fixture.nativeElement as HTMLElement)
+      .querySelector('dialog')
+      ?.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(cancels).toEqual([]);
+  });
+
+  it('lets the native cancel event through and emits cancelled when idle', async () => {
+    const { fixture, cancels } = await render();
+    const event = new Event('cancel', { cancelable: true });
+
+    (fixture.nativeElement as HTMLElement)
+      .querySelector('dialog')
+      ?.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(cancels).toHaveLength(1);
+  });
+
   it('cannot be cancelled or resubmitted while a create is in flight', async () => {
     const { fixture, drafts, cancels } = await render('backlog', true);
     type(fixture, 'Ship the board');
 
-    q(fixture, 'tasks-create-title')?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-    );
-    (fixture.nativeElement as HTMLElement).querySelector('dialog')?.dispatchEvent(new Event('cancel'));
-    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.modal-backdrop button')?.click();
+    (fixture.nativeElement as HTMLElement)
+      .querySelector('dialog')
+      ?.dispatchEvent(new Event('cancel', { cancelable: true }));
+    (fixture.nativeElement as HTMLElement)
+      .querySelector<HTMLButtonElement>('.modal-backdrop button')
+      ?.click();
     submit(fixture);
 
     expect(cancels).toEqual([]);
@@ -150,7 +175,9 @@ describe('TaskCreateDialogComponent', () => {
   });
 
   it('wraps Tab from the last control back to the first', async () => {
-    jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+    jest
+      .spyOn(HTMLElement.prototype, 'getClientRects')
+      .mockReturnValue([{}] as unknown as DOMRectList);
     const { fixture } = await render();
     type(fixture, 'Ship the board');
     const submitButton = q<HTMLButtonElement>(fixture, 'tasks-create-submit');
@@ -174,7 +201,11 @@ describe('TaskCreateDialogComponent', () => {
     const dialog = modal?.querySelector('dialog');
     expect(dialog?.open).toBe(true);
     expect(dialog?.getAttribute('aria-labelledby')).toBe('task-create-title');
-    expect(dialog?.querySelector('.modal-box')?.className).toContain('max-w-sm');
-    expect(modal?.querySelector('form.flex')?.className).toContain('gap-[var(--ptah-gap-field)]');
+    expect(dialog?.querySelector('.modal-box')?.className).toContain(
+      'max-w-sm',
+    );
+    expect(modal?.querySelector('form.flex')?.className).toContain(
+      'gap-[var(--ptah-gap-field)]',
+    );
   });
 });
