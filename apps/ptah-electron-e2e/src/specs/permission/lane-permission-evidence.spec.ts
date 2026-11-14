@@ -93,8 +93,14 @@ test.describe('@evidence lane permission routing', () => {
       }, { timeout: 30_000 }).toBe(true);
       await page.reload();
       await expect(matrix).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
+      // Capture before the assertion, so a pre-fix ("before") build still
+      // records what the control shows after the reload.
+      const label = process.env['PTAH_EVIDENCE_LABEL'] ?? 'saved';
+      await codex.scrollIntoViewIfNeeded();
+      await capture(page, `1-settings-${label}`);
+      fs.mkdirSync(shots, { recursive: true });
+      await codex.screenshot({ path: path.join(shots, `1-settings-${label}-crop.png`) });
       await expect(permission).toHaveValue('auto-edit');
-      await capture(page, '1-settings-saved', '[data-testid="cli-matrix"]');
     } finally {
       if (app) await closeDocsApp(app);
       assertProductionSettingsUnchanged(before);
