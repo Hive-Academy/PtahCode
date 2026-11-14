@@ -20,6 +20,7 @@ import { DAISYUI_THEMES } from '@ptah-extension/core';
 
 const { interpolate, parse, wcagContrast } = require('culori/require');
 const BUILTIN_THEMES = require('daisyui/src/theming/themes.js');
+const daisyFunctions = require('daisyui/src/theming/functions.js');
 const TAILWIND_CONFIG = require('../../tailwind.config.js');
 
 const STYLES_CSS = readFileSync(join(__dirname, '..', 'styles.css'), 'utf8');
@@ -142,6 +143,91 @@ describe('file-status badge (text-base-content on bg-base-300)', () => {
 
     expect(Number.isFinite(ratio)).toBe(true);
     expect(ratio).toBeGreaterThanOrEqual(AA_NORMAL);
+  });
+});
+
+/**
+ * The value that a theme gives a custom property in a rule whose selector list
+ * is only `[data-theme='…']` entries, for example
+ * `[data-theme='retro'], [data-theme='nord'] { --x: …; }`.
+ */
+function themeToken(theme: string, property: string): string | undefined {
+  const blocks = STYLES_CSS.matchAll(
+    /(?:^|\n)((?:\[data-theme='[^']+'\],?\s*)+)\{([^}]*)\}/g,
+  );
+  for (const [, selectors, body] of blocks) {
+    if (!selectors.includes(`[data-theme='${theme}']`)) continue;
+    const match = new RegExp(`${property}:\\s*([^;]+);`).exec(body);
+    if (match) return match[1].trim();
+  }
+  return undefined;
+}
+
+/**
+ * ptahButton danger, every theme in the picker, rest / hover / active. The
+ * ink is the theme override or the daisyUI `error-content`; the hover and
+ * active fills are 90% and 82% of the error fill, moved toward the theme shade
+ * or base-content (ptah-tokens.css). The disabled state is exempt from
+ * WCAG 1.4.3 (inactive component), so it has no check here.
+ */
+describe('ptahButton danger ink in every picker theme', () => {
+  const FILLS = [
+    ['rest', 1],
+    ['hover', 0.9],
+    ['active', 0.82],
+  ] as const;
+  const themes = DAISYUI_THEMES.map((entry) => entry.name as string);
+
+  it('paints the disabled state with the neutral disabled tokens, not the danger fill', () => {
+    const buttonCss = readFileSync(
+      join(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        '..',
+        'libs',
+        'frontend',
+        'ui',
+        'src',
+        'lib',
+        'button',
+        'ptah-button.css',
+      ),
+      'utf8',
+    );
+    const rule = /\.btn\[data-ptah-button\]:is\(:disabled[^{]*\{([^}]*)\}/.exec(
+      buttonCss,
+    );
+    expect(rule?.[1]).toContain(
+      'background-color: var(--ptah-btn-disabled-bg)',
+    );
+    expect(rule?.[1]).toContain('color: var(--ptah-btn-disabled-fg)');
+    expect(rule?.[1]).not.toContain('--ptah-btn-danger');
+  });
+
+  it.each(themes)('clears the AA text ratio in %s', (name) => {
+    const source = (customThemes[name] ?? BUILTIN_THEMES[name]) as ThemeSource;
+    const resolved = daisyFunctions.convertColorFormat(source) as Record<
+      string,
+      string
+    >;
+    const oklch = (value: string): unknown => parsed(`oklch(${value})`);
+    const fill = oklch(resolved['--er']);
+    const ink = themeToken(name, '--ptah-btn-danger-fg');
+    const shade = themeToken(name, '--ptah-btn-danger-shade');
+    const inkColour = ink ? parsed(ink) : oklch(resolved['--erc']);
+    const shadeColour = shade ? parsed(shade) : oklch(resolved['--bc']);
+
+    for (const [state, share] of FILLS) {
+      const background =
+        share === 1 ? fill : interpolate([shadeColour, fill], 'oklch')(share);
+
+      expect({
+        state,
+        ratio: wcagContrast(inkColour, background) >= AA_NORMAL,
+      }).toEqual({ state, ratio: true });
+    }
   });
 });
 
