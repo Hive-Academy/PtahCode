@@ -62,10 +62,9 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
         (openSettings)="openSettings()"
       />
       @if (store.pauseError()) {
-        <ptah-state-panel
-          state="partial"
-          title="Publication pause could not be updated."
-        />
+        <div class="alert alert-error" role="alert">
+          Publication pause could not be updated.
+        </div>
       }
       @if (store.poll()?.status === 'failed' || store.refreshError()) {
         <ptah-state-panel
@@ -90,12 +89,12 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
           (action)="store.load()"
         />
       } @else if (store.state() === 'error') {
-        <ptah-state-panel
-          state="partial"
-          title="Review history could not be loaded."
-          actionLabel="Retry"
-          (action)="store.load()"
-        />
+        <div class="alert alert-error" role="alert">
+          <span>Review history could not be loaded.</span>
+          <button ptahButton variant="ghost" (click)="store.load()">
+            Retry
+          </button>
+        </div>
       } @else if (store.state() === 'no-lanes') {
         <ptah-state-panel
           state="partial"

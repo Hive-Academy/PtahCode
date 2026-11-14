@@ -1066,6 +1066,10 @@
   "libs/frontend/review-runs-ui/src/lib/components/review-runs-list.component.ts": {
     "<dynamic>": 1
   },
+  "libs/frontend/review-runs-ui/src/lib/components/review-runs-page.component.ts": {
+    "alert": 2,
+    "alert-error": 2
+  },
   "libs/frontend/setup-wizard/src/lib/components/agent-preview-dialog.component.ts": {
     "alert": 4,
     "alert-info": 1,
