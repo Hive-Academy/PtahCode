@@ -36,6 +36,7 @@ import type { ProviderModelsService } from '@ptah-extension/auth-providers';
 import type { PtahCliConfig } from '@ptah-extension/shared';
 import { PtahCliRegistry } from './ptah-cli-registry';
 import { createFakeSdkProcessSpawner } from './testing/fake-sdk-process-spawner';
+import * as mailboxModule from './helpers/ptah-cli-prompt-mailbox';
 
 jest.mock('@ptah-extension/agent-sdk', () => {
   const actual = jest.requireActual('@ptah-extension/agent-sdk');
@@ -137,9 +138,18 @@ function buildHarness(): {
 }
 
 describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('exposes an assigned lane id before the SDK query starts', async () => {
     const { registry, createCallback } = buildHarness();
-    await registry.spawnAgent(BASE_CONFIG.id, 'do work', { agentId: 'lane-assigned' });
+    // An ask lane builds canUseTool. The lane level now drives the callback,
+    // so the default (manifest yolo) lane would build none.
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', {
+      agentId: 'lane-assigned',
+      permission: 'ask',
+    });
     const resolver = createCallback.mock.calls[0][1] as () => string | undefined;
     expect(resolver()).toBe('lane-assigned');
   });
@@ -154,12 +164,55 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     }));
   });
 
+  it('adds the Plan instruction when Plan comes from a saved lane default', async () => {
+    const { registry, queryFn } = buildHarness();
+    Reflect.set(registry, 'laneWorkspace', {
+      getConfiguration: jest.fn(() => ({ 'ptah-cli': { permission: 'plan' } })),
+    });
+    const mailboxSpy = jest.spyOn(mailboxModule, 'createPromptMailbox');
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ permissionMode: 'plan' }),
+    }));
+    expect(mailboxSpy).toHaveBeenCalledWith(
+      expect.stringContaining('BLOCKED: plan mode'),
+    );
+    mailboxSpy.mockRestore();
+  });
+
+  it('does not add the Plan instruction to a non-plan lane', async () => {
+    const { registry } = buildHarness();
+    const mailboxSpy = jest.spyOn(mailboxModule, 'createPromptMailbox');
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'auto-edit' });
+    expect(mailboxSpy).toHaveBeenCalledWith('do work');
+    mailboxSpy.mockRestore();
+  });
+
   it('uses the manifest built-in yolo mode when no lane choice is saved', async () => {
     const { registry, queryFn } = buildHarness();
     await registry.spawnAgent(BASE_CONFIG.id, 'do work');
     expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({ permissionMode: 'bypassPermissions' }),
     }));
+  });
+
+  it('keeps the main behavior for a lane with no spawn argument and no saved row', async () => {
+    // Global level is 'ask'. On main the same spawn already ran with
+    // bypassPermissions + allowDangerouslySkipPermissions (manifest yolo),
+    // and the SDK skips every permission check in that mode, so the global
+    // callback never ran. The lane level must not become more permissive.
+    const { registry, queryFn, createCallback } = buildHarness();
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+      }),
+    }));
+    expect(queryFn).not.toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ canUseTool: expect.anything() }),
+    }));
+    expect(createCallback).not.toHaveBeenCalled();
   });
 
   it('does not throw when the spawn has neither a resume nor a parent session', async () => {

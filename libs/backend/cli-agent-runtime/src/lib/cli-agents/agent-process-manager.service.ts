@@ -58,6 +58,7 @@ import {
   issueLaneMcpToken,
   laneToolProfileAdapterResult,
 } from './cli-adapters/lane-mcp-credentials';
+import { withLanePlanModeInstruction } from './lane-reporting-contract';
 import {
   claudeModelFamily,
   SDK_TOKENS,
@@ -218,6 +219,7 @@ export interface AgentRoleStamp {
 }
 
 interface SdkSpawnOptions {
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   readonly effectivePolicy?: ReturnType<
     AgentSpawnEnvironment['resolveLanePolicy']
   >;
@@ -611,6 +613,7 @@ export class AgentProcessManager {
       expectsMcp: request.attachMcp !== false && adapter.supportsMcp !== false,
       cliVersion: detection.version,
       effectivePolicy,
+      requestedPolicy: { permission: request.permission, network: request.network },
     });
   }
 
@@ -986,7 +989,10 @@ export class AgentProcessManager {
       taskKind: request.taskKind,
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
-      effectivePolicy: options.effectivePolicy,
+      // Flat policy, not the `translateLaneSpawnPolicy` wrapper: the
+      // formatter and `SystemCliLaneResumer` read `permission` directly.
+      effectivePolicy: options.effectivePolicy?.requested,
+      requestedPolicy: options.requestedPolicy,
       ...(request.phase ? { phaseKind: request.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
     };
 
@@ -1078,7 +1084,10 @@ export class AgentProcessManager {
           admittedReference = snapshot;
           admittedSdkSessionId = sdkSessionId;
         },
-        task,
+        task: withLanePlanModeInstruction(
+          task,
+          options.effectivePolicy?.requested?.permission,
+        ),
         workingDirectory,
         files: request.files,
         taskFolder: request.taskFolder,
@@ -1215,6 +1224,7 @@ export class AgentProcessManager {
       accountReference?: LaneAccountReference;
       potentialCapabilities?: CliAdapterManifest;
       effectivePolicy?: EffectiveLanePolicy;
+      requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
       toolProfileApplied?: boolean;
       /** Phase handoff. A non-empty denial list is recorded on the spawn result. */
       phase?: SpawnAgentRequest['phase'];
@@ -1262,6 +1272,7 @@ export class AgentProcessManager {
         providerId: sdkHandle.providerId,
         potentialCapabilities: meta.potentialCapabilities,
         effectivePolicy: meta.effectivePolicy,
+        requestedPolicy: meta.requestedPolicy,
         taskKind: meta.taskKind,
         routingSource: meta.routingSource,
         resumedFromAgentId: meta.resumedFromAgentId ?? previous?.agentId,
@@ -1583,6 +1594,8 @@ export class AgentProcessManager {
       cli: info.cli,
       status: 'running',
       startedAt: info.startedAt,
+      effectivePolicy: info.effectivePolicy,
+      requestedPolicy: info.requestedPolicy,
       cliSessionId: info.cliSessionId,
       ptahCliName: info.ptahCliName,
       ptahCliId: info.ptahCliId,
@@ -1831,6 +1844,8 @@ export class AgentProcessManager {
         task: ref.task,
         workingDirectory,
         startedAt: ref.startedAt,
+        ...(ref.effectivePolicy ? { effectivePolicy: ref.effectivePolicy } : {}),
+        ...(ref.requestedPolicy ? { requestedPolicy: ref.requestedPolicy } : {}),
         ...(ref.turnSeq !== undefined ? { turnSeq: ref.turnSeq } : {}),
         ...(ref.cliSessionId ? { cliSessionId: ref.cliSessionId } : {}),
         ...(ref.agentBudget ? { agentBudget: ref.agentBudget } : {}),

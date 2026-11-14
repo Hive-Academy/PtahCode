@@ -229,6 +229,11 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
         parentSessionId: input.parentSessionId,
         cliAgentResolver: () => agentIdHolder.value,
         permissionHandler: this.deps.permissionHandler,
+        // The callback follows the lane's resolved level, not the global chat level.
+        lanePermissionLevel:
+          lanePolicy.cli === 'claude' && lanePolicy.permissionMode
+            ? lanePolicy.requested.permission
+            : undefined,
         logger: this.logger,
         processSpawner: this.deps.processSpawner,
         executable,
@@ -245,11 +250,12 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
           !options.canUseTool
         ) {
           const permissionRoutingId = input.resumeSessionId ?? input.parentSessionId ?? routingId;
+          const laneLevel = lanePolicy.requested.permission;
           options.canUseTool = this.deps.permissionHandler.createCallback(
             SessionId.safeParse(permissionRoutingId) ?? undefined,
             () => agentIdHolder.value,
             undefined,
-            undefined,
+            () => laneLevel,
             permissionRoutingId,
           );
         }

@@ -150,6 +150,10 @@ export {
   UnattendedSessionPolicyRegistry,
   type UnattendedSessionPolicy,
 } from './lib/permission/unattended-session-policy.registry';
+export {
+  PLAN_LANE_PTAH_TOOLS,
+  isPlanLaneAllowedPtahTool,
+} from './lib/permission/plan-lane-tool-policy';
 export type { IAuthEnvProvider } from './lib/auth-env.port';
 export {
   MODEL_DISPATCH_PROVENANCE_TAP,

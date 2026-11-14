@@ -19,6 +19,41 @@
 
 import 'reflect-metadata';
 
+describe('lane policy reporting', () => {
+  const base = { agentId: 'a-1' as import('@ptah-extension/shared').AgentId, cli: 'codex' as const, status: 'running' as const, startedAt: '2026-11-13T00:00:00Z' };
+  const cases = [
+    { name: 'explicit auto-edit honored', requestedPolicy: { permission: 'auto-edit' as const }, effectivePolicy: { permission: 'auto-edit' as const, permissionSource: 'spawn' as const }, line: 'requested auto-edit -> effective auto-edit (source: Spawn request)', notice: false },
+    { name: 'explicit auto-edit capped by parent plan', requestedPolicy: { permission: 'auto-edit' as const }, effectivePolicy: { permission: 'plan' as const, permissionSource: 'parent-plan' as const }, line: 'requested auto-edit -> effective plan (source: Parent plan cap)', notice: true },
+    { name: 'saved default plan', requestedPolicy: {}, effectivePolicy: { permission: 'plan' as const, permissionSource: 'saved' as const }, line: 'requested none -> effective plan (source: Saved default)', notice: false },
+  ];
+  it.each(cases)('$name in spawn and status', ({ requestedPolicy, effectivePolicy, line, notice }) => {
+    const spawn = formatAgentSpawn({ ...base, requestedPolicy, effectivePolicy });
+    const status = formatAgentStatus({ ...base, task: 'Test', workingDirectory: '/tmp', requestedPolicy, effectivePolicy });
+    expect(spawn).toContain(line);
+    expect(status).toContain(line);
+    if (notice) {
+      expect(spawn).toContain('Plan refusals are not approval requests');
+      expect(status).toContain('Plan refusals are not approval requests');
+    } else if (effectivePolicy.permission === 'plan') {
+      expect(spawn).toContain('Plan mode: file edits are refused');
+      expect(status).toContain('Plan mode: file edits are refused');
+    } else {
+      expect(spawn).not.toContain('Plan mode: file edits are refused');
+    }
+  });
+  it('keeps an ownerless spawn without policy unchanged', () => {
+    expect(formatAgentSpawn(base)).not.toContain('**Permission:**');
+  });
+  it('names Codex yolo native sandbox and approval behavior', () => {
+    const text = formatAgentSpawn({ ...base, requestedPolicy: { permission: 'yolo' }, effectivePolicy: { permission: 'yolo', permissionSource: 'spawn' } });
+    expect(text).toContain('effective yolo (source: Spawn request) (Codex sandbox danger-full-access, approvals never)');
+  });
+  it('shows requested and effective network with its source', () => {
+    const text = formatAgentSpawn({ ...base, requestedPolicy: { permission: 'auto-edit', network: 'allow' }, effectivePolicy: { permission: 'plan', network: 'deny', permissionSource: 'parent-plan', networkSource: 'parent-plan' } });
+    expect(text).toContain('**Network:** requested allow -> effective deny (source: Parent plan cap)');
+  });
+});
+
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
