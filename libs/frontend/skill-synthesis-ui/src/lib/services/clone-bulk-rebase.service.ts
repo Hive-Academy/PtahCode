@@ -22,7 +22,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import type { CloneSummary } from '@ptah-extension/shared';
 
-import { isRoleAgentClone } from '../components/clones/clone-action-gating';
+import { isRoleAgentClone } from '../role-agent-clone';
 import { SkillSynthesisRpcService } from './skill-synthesis-rpc.service';
 
 /** What happened to one member of the batch. */

@@ -26,16 +26,13 @@
 import { formatDuration, formatRelative as formatRelativeAge } from '@ptah-extension/ui';
 import {
   isRetiredRole,
-  phaseKindForRole,
   type CloneSummary,
   type SkillCloneKind,
   type SkillCloneStatus,
 } from '@ptah-extension/shared';
+import { isRoleAgentClone } from '../../role-agent-clone';
 
-/** True for an agent clone whose slug is one of the 14 legacy role slugs. */
-export function isRoleAgentClone(clone: CloneSummary): boolean {
-  return clone.kind === 'agent' && phaseKindForRole(clone.slug) !== null;
-}
+export { isRoleAgentClone };
 
 /** True for an agent clone whose role Phase 4 retired. Read-only history. */
 export function isRetiredRoleClone(

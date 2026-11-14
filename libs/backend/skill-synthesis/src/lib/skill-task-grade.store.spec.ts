@@ -276,6 +276,22 @@ maybe('SkillTaskGradeStore', () => {
     } finally { db.close(); }
   });
 
+  it('counts a run under its real phase when the role alias names another phase', () => {
+    const { db, store } = setup();
+    try {
+      // One lane row: the role alias is 'tests', but the run was a 'review' phase.
+      // The same attribution key means the same lane row, so it counts once, under 'review'.
+      const role = { ...grade, subjectSlug: TESTS_ROLE, evidenceSource: 'task-review' };
+      store.upsert({ ...role, attributionKey: 'run:mixed', phaseKind: 'review', executorKind: 'subagent' });
+      store.upsert({ ...role, subjectKind: 'phase', subjectSlug: 'review', attributionKey: 'run:mixed', phaseKind: 'review', executorKind: 'subagent' });
+      const rows = store.getPhaseAggregates('/workspace');
+      expect(rows.filter((row) => row.phaseKind === 'tests' && row.legacy)).toEqual([]);
+      expect(rows.filter((row) => row.phaseKind === 'review')).toEqual([
+        { phaseKind: 'review', legacy: false, aliasedRoles: [], graded: 1, passed: 1, successRate: 1 },
+      ]);
+    } finally { db.close(); }
+  });
+
   it('rejects an invalid persisted grade row with a bounded warning', () => {
     const { db, store } = setup();
     try {

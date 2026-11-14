@@ -277,7 +277,9 @@ export class SkillTaskGradeStore {
    * current row (`subject_kind = 'phase'`) and, when legacy grades exist, one
    * legacy row: role grades whose slug maps to the phase in `ROLE_PHASE_ALIASES`.
    * A role grade whose task and attribution key also have a phase grade is left
-   * out of the legacy row, so one lane row counts once. Stored rows are not changed.
+   * out of the legacy row, so one lane row counts once. The same attribution key
+   * (`run:<id>`) means the same lane row, so that run counts under its real phase
+   * kind, even when the role alias names another phase. Stored rows are not changed.
    */
   getPhaseAggregates(workspaceRoot: string | null): PhaseGradeAggregate[] {
     if (!workspaceRoot) return [];
