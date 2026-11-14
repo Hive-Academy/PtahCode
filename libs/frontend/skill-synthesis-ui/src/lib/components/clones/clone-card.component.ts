@@ -222,10 +222,12 @@ function cloneStatusHint(clone: CloneSummary): string {
             <ptah-provenance-badge [provenance]="clone().provenance" />
             @if (actions().retired) {
               <span
-                class="badge badge-ghost badge-sm"
+                ptahBadge
+                size="sm"
+                tone="neutral"
                 [title]="retiredReason"
                 data-testid="clone-card-retired-badge"
-                >Retired role</span
+                ><span class="ptah-badge-text">Retired role</span></span
               >
             }
             <span
