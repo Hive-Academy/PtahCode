@@ -113,3 +113,14 @@ e919afa2 and made this session the Phase B coordinator again. Decision on item (
   removed (host-routing.coordinator.ts has no diff from main), spec now pins the move of the
   alias to the resuming tab. Other review results: sdkIdOf call sites, registry listeners and
   double-handling OK.
+- 2026-11-14 ~17:40Z successor session: gate 1 (all 5 projects) failed only on 0xC0000142
+  process start failures. Rerun `-t test -p cli-agent-runtime,rpc-handlers,memory-curator,
+  session-organization`: 4/4 pass. agent-sdk: 227 suites pass in Nx; the failed probe suite
+  (auto-compact-argv, unchanged) passed with direct Jest under the lock, 16/16.
+- Commit 9aa561471 (rail-link fix) pushed; pre-push gate passed.
+- Evidence (a) run 8 at 9aa561471: PASS (4.3 min). rail-child-glyph + rail-child-count shown,
+  no unattributed-caller. Screenshot .ptah/tmp/electron-evidence/caller-item-a-child.png
+  (checked: no secrets). git status clean after the run (only untracked HANDOFF.md).
+- PR body updated (rail-link row, gate, evidence (a), follow-up for the getAttempt cast in
+  agent-process-manager.service.ts, per the coordinator: no more edits to that file).
+  `gh pr ready 1265` done. CI for 9aa561471 pending.
