@@ -281,6 +281,18 @@ export type CodexRuntimeEvent = CodexEventIdentity &
         readonly agentThreadIds?: readonly string[];
       }
     | {
+        readonly type: 'subagentActivity';
+        readonly activityId: string;
+        readonly cardToolCallId: string;
+        readonly agentThreadId: string;
+        readonly agentPath: string;
+        readonly kind: 'started' | 'interacted' | 'interrupted' | 'completed';
+        readonly model?: string;
+        readonly reasoningEffort?: string;
+        readonly cycleOrdinal: number;
+        readonly cycleId: string;
+      }
+    | {
         readonly type: 'toolCompleted';
         readonly toolId: string;
         readonly output: CodexJsonValue;
@@ -335,6 +347,9 @@ export type CodexRuntimeEvent = CodexEventIdentity &
     | {
         readonly type: 'terminal';
         readonly status: 'completed' | 'interrupted' | 'failed';
+        readonly native?: { readonly agentThreadId: string; readonly activityId: string;
+          readonly cycleId: string; readonly cycleOrdinal: number;
+          readonly kind: 'started' | 'interacted' | 'completed' | 'interrupted' };
         readonly usage?: CodexReportedUsage;
         readonly evidence?: CodexUsageEvidence;
         readonly error?: CodexRuntimeError;
@@ -411,6 +426,8 @@ export interface CodexUserInputAnswer {
 }
 export interface CodexContext {
   readonly identity: CodexThreadIdentity;
+  /** Call after thread/read and before admitting resumed child notifications. */
+  seedSubagentActivity?(history: CodexSessionHistory): void;
   readonly turnPermissionLevel: CodexPermissionLevel;
   listModels(): Promise<readonly CodexModelInfo[]>;
   events(signal: AbortSignal): AsyncIterable<CodexRuntimeEvent>;

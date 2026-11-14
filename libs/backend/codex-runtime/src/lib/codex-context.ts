@@ -13,6 +13,7 @@ import {
   type CodexApprovalBridgeOptions,
 } from './codex-approval-bridge';
 import { CodexEventTranslator } from './codex-event-translator';
+import { knownItem } from './codex-protocol-schemas';
 import {
   codexProfileFingerprint,
   resolveCodexLevelPolicy,
@@ -44,6 +45,7 @@ import type {
   CodexPermissionLevel,
   CodexJsonValue,
   CodexRuntimeEvent,
+  CodexSessionHistory,
   CodexThreadIdentity,
   CodexTurnInput,
   CodexTurnReceipt,
@@ -86,6 +88,20 @@ export function childEventParent(
 
 const MAX_EARLY_CHILD_EVENTS = 512;
 const MAX_EARLY_CHILD_THREADS = 8;
+const MAX_ORPHAN_EVENTS_PER_CHILD = 128;
+
+interface NativeChildState {
+  cardToolCallId: string;
+  parentThreadId: string;
+  agentPath: string;
+  lastActivityKind: 'started' | 'interacted' | 'completed' | 'interrupted';
+  cycleOrdinal: number;
+  cycleId: string;
+  lastTerminalKey?: string;
+  lastActivityKey?: string;
+  seenActivityKeys: Set<string>;
+  turnCycleByTurnId: Map<string, string>;
+}
 
 /** Operations serialize RPC admission, never the lifetime of a running turn. */
 class RuntimeContext implements CodexContext {
@@ -112,6 +128,9 @@ class RuntimeContext implements CodexContext {
   private readonly pendingChildParents = new Map<string, string>();
   private readonly unlinkedMethodsLogged = new Set<string>();
   private readonly earlyChildEvents = new Map<string, CodexRuntimeEvent[]>();
+  private readonly nativeChildren = new Map<string, NativeChildState>();
+  private readonly pendingNativeTerminals: CodexRuntimeEvent[] = [];
+  private pendingNativeOverflowLogged = false;
   private earlyChildCount = 0;
   private earlyChildOverflowLogged = false;
   private rootTerminalPending = false;
@@ -351,6 +370,9 @@ class RuntimeContext implements CodexContext {
     });
     await this.persistence;
     if (this.isClosed()) throw new Error('Codex context closed');
+    if (resume) this.seedSubagentActivity({
+      rootThreadId: result.thread.id, threads: [result.thread],
+    });
     this.bridge = new CodexApprovalBridge({
       identity,
       sink: this.options.sink,
@@ -394,6 +416,9 @@ class RuntimeContext implements CodexContext {
     if (!signal.aborted && this.state !== 'closed') {
       this.subscribers.add(subscriber);
       signal.addEventListener('abort', abort, { once: true });
+      for (const event of this.pendingNativeTerminals)
+        subscriber.queue.push({ ...event, sequence: ++this.sequence });
+      this.pendingNativeTerminals.length = 0;
     } else subscriber.closed = true;
     // Registration happens above, before the first next() call.
     return {
@@ -421,6 +446,14 @@ class RuntimeContext implements CodexContext {
 
   private emit(event: CodexRuntimeEvent): void {
     const ordered = { ...event, sequence: ++this.sequence };
+    if (event.type === 'terminal' && event.native && this.subscribers.size === 0) {
+      if (this.pendingNativeTerminals.length < 64) this.pendingNativeTerminals.push(ordered);
+      else if (!this.pendingNativeOverflowLogged) {
+        this.pendingNativeOverflowLogged = true;
+        this.options.logger.error('Codex pending native terminal overflow',
+          { reason: 'No subscriber received a native child terminal within the buffer limit' });
+      }
+    }
     for (const subscriber of this.subscribers) {
       if (subscriber.queue.length >= 1024) {
         subscriber.queue.length = 0;
@@ -472,7 +505,13 @@ class RuntimeContext implements CodexContext {
       const threadId = params['threadId'];
       const trailingUsage = frame.method === 'thread/tokenUsage/updated' &&
         typeof params['turnId'] === 'string' && this.terminalTurns.has(params['turnId']);
-      if (!this.childTools.has(threadId) && !trailingUsage)
+      const native = this.nativeChildren?.get(threadId);
+      if (native && !this.childTools.has(threadId))
+        this.linkChild(threadId, native.cardToolCallId, native.parentThreadId);
+      // A parent hint means the native activity can still provide the card id.
+      if (!this.childTools.has(threadId) && !trailingUsage &&
+        !this.pendingChildParents.has(threadId) &&
+        (!this.activeTurn || this.pendingSpawns.get(this.identity.threadId)?.size))
         this.linkChild(threadId, threadId);
       if (this.unlinkedMethodsLogged.size < 32 &&
         !this.unlinkedMethodsLogged.has(frame.method)) {
@@ -502,8 +541,8 @@ class RuntimeContext implements CodexContext {
       (frame.method.startsWith('item/') || frame.method.startsWith('turn/'))
     )
       this.resetCompactWatchdog();
-    if (frame.method === 'item/started') {
-      const parsed = codexNotificationSchemas['item/started'].parse(
+    if (frame.method === 'item/started' || frame.method === 'item/completed') {
+      const parsed = codexNotificationSchemas[frame.method].parse(
         frame.params,
       );
       if (parsed.item.type === 'subAgentActivity' && 'agentThreadId' in parsed.item) {
@@ -520,7 +559,7 @@ class RuntimeContext implements CodexContext {
         this.childTools.has(parsed.threadId)
       ) {
         if (this.childTools.has(parsed.threadId))
-          this.childTurns.set(parsed.threadId, parsed.turnId);
+          this.bindChildTurn(parsed.threadId, parsed.turnId);
         const item = parsed.item;
         if (item.type === 'fileChange' && 'changes' in item)
           this.targets.set(item.id, {
@@ -552,9 +591,17 @@ class RuntimeContext implements CodexContext {
         this.state = 'running';
       }
       if (this.childTools.has(parsed.threadId))
-        this.childTurns.set(parsed.threadId, parsed.turn.id);
+        this.bindChildTurn(parsed.threadId, parsed.turn.id);
     }
-    for (const event of this.translator.translate(frame)) {
+    for (let event of this.translator.translate(frame)) {
+      let linkNative = false;
+      if (event.type === 'subagentActivity') {
+        if (this.pendingSpawns.get(event.threadId)?.size) continue;
+        const activity = this.applyNativeActivity(event);
+        if (!activity) continue;
+        event = activity;
+        linkNative = this.childTools.get(event.agentThreadId) !== event.cardToolCallId;
+      }
       let parentToolUseId = childEventParent(
         event.threadId, this.identity.threadId, this.childTools,
       );
@@ -578,6 +625,8 @@ class RuntimeContext implements CodexContext {
       if (event.type === 'toolCompleted')
         this.pendingSpawns.get(event.threadId)?.delete(event.toolId);
       this.admitEvent(event, parentToolUseId);
+      if (linkNative && event.type === 'subagentActivity')
+        this.linkChild(event.agentThreadId, event.cardToolCallId, event.threadId);
       if ((event.type === 'toolStarted' || event.type === 'toolCompleted') &&
         event.agentThreadIds) {
         for (const childId of event.agentThreadIds) {
@@ -588,11 +637,104 @@ class RuntimeContext implements CodexContext {
     }
   }
 
+  /** Prime canonical child links before admitting resumed child notifications. */
+  seedSubagentActivity(history: CodexSessionHistory): void {
+    const root = history.threads.find((thread) => thread.id === history.rootThreadId);
+    if (!root) return;
+    const cycles = new Map<string, string[]>();
+    for (const turn of root.turns) {
+      for (const item of turn.items) {
+        const parsed = knownItem.safeParse(item);
+        if (!parsed.success || parsed.data.type !== 'subAgentActivity') continue;
+        const nativeItem = parsed.data;
+        const activity: Extract<CodexRuntimeEvent, { type: 'subagentActivity' }> = {
+          type: 'subagentActivity', contextId: this.profile.contextId,
+          processGeneration: this.generation, threadId: root.id, turnId: turn.id,
+          sequence: 0, activityId: nativeItem.id, cardToolCallId: nativeItem.id,
+          agentThreadId: nativeItem.agentThreadId, agentPath: nativeItem.agentPath,
+          kind: nativeItem.kind, cycleOrdinal: 0, cycleId: '',
+          ...(nativeItem.model == null ? {} : { model: nativeItem.model }),
+          ...(nativeItem.reasoningEffort == null ? {} : { reasoningEffort: nativeItem.reasoningEffort }),
+        };
+        const applied = this.applyNativeActivity(activity);
+        if (applied && (applied.kind === 'started' || applied.kind === 'interacted')) {
+          const childCycles = cycles.get(applied.agentThreadId) ?? [];
+          childCycles.push(applied.cycleId);
+          cycles.set(applied.agentThreadId, childCycles);
+        }
+      }
+    }
+    for (const child of history.threads) {
+      const state = this.nativeChildren.get(child.id);
+      if (!state) continue;
+      for (const [index, turn] of child.turns.entries()) {
+        const cycle = cycles.get(child.id)?.[index] ?? state.cycleId;
+        state.turnCycleByTurnId.set(turn.id, cycle);
+        if (turn.status === 'completed' || turn.status === 'failed' || turn.status === 'interrupted')
+          state.lastTerminalKey = JSON.stringify([child.id, cycle, turn.status, turn.id]);
+      }
+      this.linkChild(child.id, state.cardToolCallId, state.parentThreadId);
+    }
+    for (const [childId, state] of this.nativeChildren)
+      if (!this.childTools.has(childId))
+        this.linkChild(childId, state.cardToolCallId, state.parentThreadId);
+  }
+
+  private applyNativeActivity(
+    event: Extract<CodexRuntimeEvent, { type: 'subagentActivity' }>,
+  ): Extract<CodexRuntimeEvent, { type: 'subagentActivity' }> | undefined {
+    const key = JSON.stringify([event.threadId, event.turnId, event.activityId, event.kind]);
+    let state = this.nativeChildren.get(event.agentThreadId);
+    if (!state) {
+      if (event.kind !== 'started') {
+        this.options.logger.debug('Codex native activity for unknown child',
+          { agentThreadId: event.agentThreadId, kind: event.kind });
+        return undefined;
+      }
+      if (this.nativeChildren.size >= 256) {
+        const oldest = [...this.nativeChildren].find(([, child]) => child.lastTerminalKey)?.[0]
+          ?? this.nativeChildren.keys().next().value;
+        if (oldest) {
+          if (!this.nativeChildren.get(oldest)?.lastTerminalKey)
+            this.options.logger.error('Codex native child cache overflow',
+              { reason: 'No terminal child available for eviction' });
+          this.nativeChildren.delete(oldest);
+        }
+      }
+      state = { cardToolCallId: event.activityId, parentThreadId: event.threadId,
+        agentPath: event.agentPath, lastActivityKind: event.kind, cycleOrdinal: 0, cycleId: '',
+        seenActivityKeys: new Set(), turnCycleByTurnId: new Map() };
+      this.nativeChildren.set(event.agentThreadId, state);
+    }
+    if (state.seenActivityKeys.has(key)) return undefined;
+    state.seenActivityKeys.add(key);
+    state.lastActivityKey = key;
+    state.lastActivityKind = event.kind;
+    if (event.kind === 'started' || event.kind === 'interacted') {
+      state.cycleOrdinal++;
+      state.cycleId = `${event.agentThreadId}:${state.cycleOrdinal}`;
+    }
+    state.agentPath = event.agentPath;
+    if (event.kind === 'completed' || event.kind === 'interrupted')
+      state.lastTerminalKey = JSON.stringify([event.agentThreadId, state.cycleId, event.kind]);
+    return { ...event, cardToolCallId: state.cardToolCallId,
+      cycleOrdinal: state.cycleOrdinal, cycleId: state.cycleId };
+  }
+
+  private bindChildTurn(threadId: string, turnId: string): void {
+    this.childTurns.set(threadId, turnId);
+    const state = this.nativeChildren?.get(threadId);
+    if (state && !state.turnCycleByTurnId.has(turnId))
+      state.turnCycleByTurnId.set(turnId, state.cycleId);
+  }
+
   private linkChild(
     threadId: string, toolId: string,
     parentThreadId = this.identity.threadId,
   ): void {
     if (threadId === this.identity.threadId) return;
+    const native = this.nativeChildren?.get(threadId);
+    if (native && toolId === threadId) return;
     if (!this.knownChildParents.has(threadId))
       this.options.logger.info('Codex child linked', {
         parentThreadId, childThreadId: threadId,
@@ -621,7 +763,10 @@ class RuntimeContext implements CodexContext {
     this.earlyChildCount -= buffered.length;
     for (const event of buffered) {
       const parentToolUseId = this.childTools.get(threadId);
-      if (parentToolUseId) this.admitEvent(event, parentToolUseId);
+      if (parentToolUseId) {
+        this.bindChildTurn(threadId, event.turnId);
+        this.admitEvent(event, parentToolUseId);
+      }
     }
   }
 
@@ -631,7 +776,8 @@ class RuntimeContext implements CodexContext {
     if (event.type === 'textDelta' ||
       (event.type === 'reasoning' && event.phase === 'delta')) return;
     const current = this.earlyChildEvents.get(event.threadId);
-    if (this.earlyChildCount >= MAX_EARLY_CHILD_EVENTS ||
+    if ((current?.length ?? 0) >= MAX_ORPHAN_EVENTS_PER_CHILD ||
+      this.earlyChildCount >= MAX_EARLY_CHILD_EVENTS ||
       (!current && this.earlyChildEvents.size >= MAX_EARLY_CHILD_THREADS)) {
       // One report per root turn: a still-running unlinked child keeps
       // dropping events, and per-event logging would flood the log.
@@ -650,6 +796,20 @@ class RuntimeContext implements CodexContext {
     this.earlyChildCount++;
   }
 
+  private dropUnlinkedOrphans(): void {
+    const dropped = [...this.earlyChildEvents].filter(([id]) => !this.childTools.has(id));
+    if (dropped.length)
+      this.options.logger.warn('Codex unlinked child events dropped', {
+        threadIds: JSON.stringify(dropped.map(([id]) => id)),
+        count: dropped.reduce((count, [, events]) => count + events.length, 0),
+      });
+    for (const [id, events] of dropped) {
+      this.earlyChildEvents.delete(id);
+      this.earlyChildCount -= events.length;
+    }
+    this.earlyChildOverflowLogged = false;
+  }
+
   private admitEvent(
     event: CodexRuntimeEvent,
     parentToolUseId: string | undefined,
@@ -661,6 +821,28 @@ class RuntimeContext implements CodexContext {
         event = { ...event, evidence: { ...event.evidence, parentThreadId } };
       if (event.type === 'terminal') {
         if (parentToolUseId !== undefined) {
+          const native = this.nativeChildren?.get(event.threadId);
+          if (native) {
+            const cycle = native.turnCycleByTurnId.get(event.turnId);
+            if (!cycle || cycle !== native.cycleId) {
+              this.options.logger.debug('Codex stale or unknown native child terminal',
+                { agentThreadId: event.threadId, turnId: event.turnId,
+                  cycleId: cycle ?? 'unknown' });
+              return;
+            }
+            const key = JSON.stringify([event.threadId, cycle, event.status, event.turnId]);
+            if (native.lastTerminalKey === key) return;
+            if (native.lastTerminalKey && event.status !== 'failed' &&
+              native.lastTerminalKey.startsWith(JSON.stringify([event.threadId, cycle]).slice(0, -1))) return;
+            native.lastTerminalKey = key;
+            this.emit({ ...event, parentToolUseId, native: {
+              agentThreadId: event.threadId, activityId: native.cardToolCallId,
+              cycleId: native.cycleId, cycleOrdinal: native.cycleOrdinal,
+              kind: native.lastActivityKind,
+            } });
+            this.terminalTurns.add(event.turnId);
+            return;
+          }
           this.emit({ ...event, parentToolUseId });
           this.terminalTurns.add(event.turnId);
           this.childTools.delete(event.threadId);
@@ -673,14 +855,14 @@ class RuntimeContext implements CodexContext {
         }
         this.terminalTurns.add(event.turnId);
         if (event.turnId === this.activeTurn) {
-          if (this.childTools.size > 0 && event.status === 'completed') {
+          if ([...this.childTools.keys()].some((id) => !this.nativeChildren?.has(id)) &&
+            event.status === 'completed') {
             this.rootTerminalPending = true;
             this.rootTerminalTimer = setTimeout(() => this.finishActiveTurn(), 30_000);
           } else this.finishActiveTurn();
         }
         this.finishCompact?.();
-        this.earlyChildEvents.clear();
-        this.earlyChildCount = 0;
+        this.dropUnlinkedOrphans();
         this.earlyChildOverflowLogged = false;
       }
       if (parentToolUseId === undefined && event.type === 'compaction' &&
@@ -723,6 +905,7 @@ class RuntimeContext implements CodexContext {
     this.childTurns.clear();
     this.pendingSpawns.clear();
     this.pendingChildParents.clear();
+    this.dropUnlinkedOrphans();
     this.turnController.abort();
     this.releaseTurnSignal?.();
     this.releaseTurnSignal = undefined;
