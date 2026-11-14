@@ -15,7 +15,7 @@ import {
   type SurfaceInputOption,
 } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import type { SurfaceInputCommit } from '../surface-interaction';
-import { PtahSelectDirective } from '@ptah-extension/ui';
+import { PtahFieldComponent, PtahSelectDirective } from '@ptah-extension/ui';
 import type { InputNode } from '../view-model/view-model.types';
 import {
   describedByOf,
@@ -51,10 +51,8 @@ function isOption(value: unknown): value is SurfaceInputOption {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (node().kind === 'select') {
-      <div class="flex flex-col gap-1 text-base-content">
-        <label [for]="controlId" class="block text-xs font-medium">{{ node().label }}@if (required()) {
-          <span aria-hidden="true"> *</span>
-        }</label>
+      <div class="flex flex-col gap-[var(--ptah-gap-heading)] text-base-content">
+        <ptah-field [label]="node().label" [required]="required()" [error]="errorText() ?? null" appearance="stacked">
         <select #selectControl [id]="controlId" ptahSelect size="sm" class="w-full" [invalid]="hasError()"
           [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"
           [attr.aria-describedby]="describedBy()" [attr.data-apps-focus-key]="focusKey('input')"
@@ -64,18 +62,19 @@ function isOption(value: unknown): value is SurfaceInputOption {
             <option [value]="option.value" [selected]="displayedIndex() === $index">{{ option.label }}</option>
           }
         </select>
+        </ptah-field>
         <ng-container [ngTemplateOutlet]="messages" />
       </div>
     } @else {
-      <fieldset role="radiogroup" class="flex flex-col gap-1 text-base-content"
+      <fieldset role="radiogroup" class="flex flex-col gap-[var(--ptah-gap-heading)] text-base-content"
         [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"
         [attr.aria-describedby]="describedBy()">
         <legend class="mb-1 text-xs font-medium">{{ node().label }}@if (required()) {
           <span aria-hidden="true"> *</span>
         }</legend>
-        <div class="flex flex-col gap-1.5">
+        <div class="flex flex-col gap-[var(--ptah-gap-controls)]">
           @for (option of options(); track $index) {
-            <label [for]="optionId($index)" class="flex items-center gap-2 text-sm">
+            <label [for]="optionId($index)" class="flex items-center gap-[var(--ptah-gap-controls)] text-sm">
               <input #radioControl [id]="optionId($index)" type="radio" class="radio radio-sm" [name]="controlId"
                 [value]="option.value" [checked]="displayedIndex() === $index"
                 [attr.data-apps-focus-key]="focusKey('option-' + $index)" (change)="chooseIndex($index + 1)" />
@@ -87,13 +86,15 @@ function isOption(value: unknown): value is SurfaceInputOption {
       </fieldset>
     }
     <ng-template #messages>
-      @if (errorText(); as error) { <p [id]="errorId" class="text-xs font-medium text-base-content">{{ error }}</p> }
+      @if (node().kind === 'radio-group') {
+        @if (errorText(); as error) { <p [id]="errorId" class="text-xs font-medium text-base-content">{{ error }}</p> }
+      }
       @for (issue of issueTexts(); track $index) {
         <p [id]="issueId($index)" class="text-xs font-medium text-base-content">{{ issue }}</p>
       }
     </ng-template>
   `,
-  imports: [NgTemplateOutlet, PtahSelectDirective],
+  imports: [NgTemplateOutlet, PtahFieldComponent, PtahSelectDirective],
 })
 export class SurfaceChoiceInputComponent {
   public readonly controlId = `ptah-surface-choice-${nextChoiceInputInstance++}`;
@@ -128,7 +129,7 @@ export class SurfaceChoiceInputComponent {
     inputErrorText(this.node(), this.drafts(), this.displayedValue(), this.checkedNode()));
   public readonly hasError = computed(() => this.errorText() !== undefined || this.issueTexts().length > 0);
   public readonly describedBy = computed(() => describedByOf(this.controlId, {
-    errorId: this.errorText() !== undefined ? this.errorId : undefined,
+    errorId: this.node().kind === 'radio-group' && this.errorText() !== undefined ? this.errorId : undefined,
     issueCount: this.issueTexts().length,
   }));
 
