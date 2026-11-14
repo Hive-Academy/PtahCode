@@ -79,3 +79,9 @@ order, timing). The branch does not change `libs/frontend/core`; the same test p
 1ebd6ed85. Treated as a flake: rerun of the failed job started (`gh run rerun --failed`).
 Fourth report to the parent (decision on item (a) plus CI state): NOT delivered
 (parent-session-not-active). No production change; PR #1265 stays draft.
+- Rerun 1 of test shard 1: failed again, another test in the same group
+  (`requeues undispatched messages when a zone drain throws`). Local direct Jest run of
+  `message-router.service.spec.ts`: 33/33 pass. Cause: `MessageRouterService` uses a real-time
+  drain budget (`DRAIN_BUDGET_MS = 8`, `performance.now()`, message-router.service.ts:90,118),
+  so on a slow runner a drain stops early. Pre-existing flake, outside Phase B scope. Follow-up
+  candidate: stub `performance.now` in the burst-coalescing specs. Rerun 2 started.
