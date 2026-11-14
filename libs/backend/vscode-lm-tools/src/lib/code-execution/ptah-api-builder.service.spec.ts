@@ -185,6 +185,14 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   McpInstallService: class McpInstallServiceStub {},
   SmitheryRegistrySource: class SmitheryRegistrySourceStub {},
   SkillsShApiClient: class SkillsShApiClientStub {},
+  // The `getParentLevel` wiring delegates here. The resolver rules have their
+  // own spec (`parent-lane-permission.spec.ts`); this stub only lets the
+  // wiring test prove that the Codex reader reaches the resolver.
+  parentLanePermission: (
+    callerId: string,
+    _lifecycle: unknown,
+    codex: { getPermissionLevel(id: string): string | undefined } | undefined,
+  ) => codex?.getPermissionLevel(callerId),
   // A VALUE, not a type: the constructor's `@inject` decorator dereferences
   // `CLI_AGENT_RUNTIME_TOKENS.AGENT_REPORT_ROUTER` at class-definition time,
   // so the mocked barrel has to carry it (TASK_2026_402).
