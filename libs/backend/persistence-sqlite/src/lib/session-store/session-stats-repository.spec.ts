@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 import { SESSION_STORE_MIGRATIONS } from './session-store-migrations';
 import { SqliteSessionUsageSink } from './sqlite-session-usage-sink';
+import type { SessionUsageContribution as LiveContribution } from '@ptah-extension/platform-core';
 import {
   SessionStatsRepository,
   type SessionUsageContribution,
@@ -70,6 +71,169 @@ const contribution: SessionUsageContribution = {
 };
 
 describe('SessionStatsRepository', () => {
+  it('demotes replay-first Codex usage and updates its separate session aggregate', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      await repository.recordUsage({ ...contribution, sessionId: 'native-thread',
+        producer: 'transcript-replay', providerId: 'codex', runId: 'native-thread',
+        nativeThreadId: 'native-thread', source: 'replay', eventKey: 'replay', workspaceKey: '/work' });
+      await repository.recordUsage({ ...contribution, sessionId: 'ptah-session',
+        producer: 'codex-checkpoint', providerId: 'codex', runId: 'native-thread',
+        nativeThreadId: 'native-thread', eventKey: 'live', workspaceKey: '/work',
+        coverageStartMs: 86_399_000, coverageEndMs: 86_401_000 });
+      expect(store.raw.prepare('SELECT billable FROM session_usage_turns WHERE event_key = ?').get('replay'))
+        .toMatchObject({ billable: 0 });
+      expect((await repository.getSessionStats('native-thread', '/work'))?.input_tokens ?? 0).toBe(0);
+      expect((await repository.getSessionStats('native-thread', '/work'))?.known_cost_micro_usd ?? 0).toBe(0);
+      expect((await repository.getSessionStats('ptah-session', '/work'))?.input_tokens).toBe(20);
+      expect((await repository.getSessionStats('ptah-session', '/work'))?.known_cost_micro_usd).toBe(150);
+    } finally { store.close(); }
+  });
+  it.each(['checkpoint-first', 'lane-first'])('keeps one Codex owner across Ptah sessions (%s)', async (order) => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      const lane = { ...contribution, sessionId: 'lane-session', producer: 'cli-lane',
+        providerId: 'codex', runId: 'lane-run', nativeThreadId: 'native-thread',
+        eventKey: 'lane', workspaceKey: '/work', coverageStartMs: 10, coverageEndMs: 30 };
+      const checkpoint = { ...contribution, sessionId: 'checkpoint-session', producer: 'codex-checkpoint',
+        providerId: 'codex', runId: 'native-thread', nativeThreadId: 'native-thread',
+        eventKey: 'checkpoint', workspaceKey: '/work', coverageStartMs: 20, coverageEndMs: 40 };
+      for (const row of order === 'lane-first' ? [lane, checkpoint] : [checkpoint, lane])
+        await repository.recordUsage(row);
+      expect(store.raw.prepare('SELECT billable FROM session_usage_turns WHERE event_key = ?').get('lane'))
+        .toMatchObject({ billable: 0 });
+      expect(store.raw.prepare('SELECT billable FROM session_usage_turns WHERE event_key = ?').get('checkpoint'))
+        .toMatchObject({ billable: 1 });
+      expect((await repository.getSessionStats('lane-session', '/work'))?.input_tokens ?? 0).toBe(0);
+      expect((await repository.getSessionStats('lane-session', '/work'))?.known_cost_micro_usd ?? 0).toBe(0);
+      expect((await repository.getSessionStats('checkpoint-session', '/work'))?.input_tokens).toBe(20);
+      expect((await repository.getSessionStats('checkpoint-session', '/work'))?.known_cost_micro_usd).toBe(150);
+      await repository.recordUsage({ ...checkpoint, revision: 2, inputTokens: null,
+        outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, billable: false });
+      expect(store.raw.prepare('SELECT billable FROM session_usage_turns WHERE event_key = ?').get('lane'))
+        .toMatchObject({ billable: 1 });
+      expect((await repository.getSessionStats('lane-session', '/work'))?.input_tokens).toBe(20);
+      expect((await repository.getSessionStats('lane-session', '/work'))?.known_cost_micro_usd).toBe(150);
+    } finally { store.close(); }
+  });
+
+  it.each(['codex', 'openai-codex'])('repairs both threads when a %s checkpoint moves', async (providerId) => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      const base = { ...contribution, providerId, workspaceKey: '/work', occurredAtMs: 20,
+        coverageStartMs: 10, coverageEndMs: 30 };
+      for (const thread of ['thread-a', 'thread-b']) {
+        await repository.recordUsage({ ...base, sessionId: `lane-${thread}`, producer: 'cli-lane',
+          runId: `lane-${thread}`, nativeThreadId: thread, eventKey: `lane-${thread}` });
+        await repository.recordUsage({ ...base, sessionId: `replay-${thread}`, producer: 'transcript-replay',
+          runId: thread, nativeThreadId: thread, source: 'replay', eventKey: `replay-${thread}` });
+      }
+      const checkpoint = { ...base, sessionId: 'checkpoint-session', producer: 'codex-checkpoint',
+        runId: 'checkpoint-run', nativeThreadId: 'thread-a', eventKey: 'checkpoint' };
+      await repository.recordUsage(checkpoint);
+      await repository.recordUsage({ ...checkpoint, nativeThreadId: 'thread-b', revision: 2 });
+      const billable = (key: string) => store.raw.prepare('SELECT billable FROM session_usage_turns WHERE event_key = ?').get(key);
+      expect(billable('lane-thread-a')).toMatchObject({ billable: 1 });
+      expect(billable('replay-thread-a')).toMatchObject({ billable: 0 });
+      expect(billable('lane-thread-b')).toMatchObject({ billable: 0 });
+      expect(billable('replay-thread-b')).toMatchObject({ billable: 0 });
+      expect((await repository.getSessionStats('lane-thread-a', '/work'))?.input_tokens).toBe(20);
+      expect((await repository.getSessionStats('lane-thread-a', '/work'))?.known_cost_micro_usd).toBe(150);
+      expect((await repository.getSessionStats('lane-thread-b', '/work'))?.input_tokens ?? 0).toBe(0);
+      expect((await repository.getSessionStats('lane-thread-b', '/work'))?.known_cost_micro_usd ?? 0).toBe(0);
+      for (const thread of ['thread-a', 'thread-b']) {
+        expect((await repository.getSessionStats(`replay-${thread}`, '/work'))?.input_tokens ?? 0).toBe(0);
+        expect((await repository.getSessionStats(`replay-${thread}`, '/work'))?.known_cost_micro_usd ?? 0).toBe(0);
+      }
+      expect((await repository.getSessionStats('checkpoint-session', '/work'))?.input_tokens).toBe(20);
+      expect((await repository.getSessionStats('checkpoint-session', '/work'))?.known_cost_micro_usd).toBe(150);
+    } finally { store.close(); }
+  });
+
+  it('keeps nonoverlapping Codex intervals and Claude lanes billable', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      const lane = { ...contribution, sessionId: 'lane-session', producer: 'cli-lane',
+        providerId: 'codex', runId: 'lane', nativeThreadId: 'native-thread',
+        eventKey: 'lane', coverageStartMs: 10, coverageEndMs: 19 };
+      await repository.recordUsage(lane);
+      await repository.recordUsage({ ...lane, sessionId: 'checkpoint-session', producer: 'codex-checkpoint',
+        runId: 'native-thread', eventKey: 'checkpoint', coverageStartMs: 20, coverageEndMs: 30 });
+      await repository.recordUsage({ ...lane, sessionId: 'claude-session', providerId: 'anthropic',
+        eventKey: 'claude', coverageStartMs: 20, coverageEndMs: 30 });
+      expect(store.raw.prepare(`SELECT COUNT(*) AS n FROM session_usage_turns WHERE billable = 1`).get())
+        .toMatchObject({ n: 3 });
+    } finally { store.close(); }
+  });
+
+  it.each([
+    ['checkpoint', 'codex-checkpoint', 'native-thread', null, 0],
+    ['observed lane', 'cli-lane', 'lane-id', 'native-thread', 0],
+    ['unobserved lane', 'cli-lane', 'lane-id', null, 1],
+  ])('%s ownership demotes replay only for a verified native thread', async (
+    _label, producer, runId, nativeThreadId, expectedBillable,
+  ) => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      await repository.recordUsage({ ...contribution, sessionId: 'ptah-session', producer,
+        runId, nativeThreadId, providerId: 'codex', eventKey: 'live', coverageStartMs: 86_399_000,
+        coverageEndMs: 86_401_000 });
+      await repository.recordUsage({ ...contribution, sessionId: 'native-thread', producer: 'transcript-replay',
+        runId: 'native-thread', nativeThreadId: 'native-thread', providerId: 'codex',
+        eventKey: 'replay', source: 'replay' });
+      expect(store.raw.prepare('SELECT billable FROM session_usage_turns WHERE event_key = ?').get('replay'))
+        .toMatchObject({ billable: expectedBillable });
+    } finally { store.close(); }
+  });
+  it('persists lane and SDK owner contributions through the strict live sink', async () => {
+    const store = openTestStore();
+    try {
+      const sink = new SqliteSessionUsageSink(new SessionStatsRepository(store), { error: jest.fn() });
+      const event: LiveContribution = {
+        sessionId: 'ptah-session', producer: 'cli-lane', runId: 'lane-id', nativeThreadId: 'native-thread',
+        turnId: null, eventKey: 'lane-result', parentSessionId: null, subagentId: null,
+        providerId: 'codex', occurredAtMs: 100, revision: 1,
+        models: [{ modelId: null, inputTokens: 2, outputTokens: 0, cacheReadTokens: null,
+          cacheCreationTokens: null, knownCostMicroUsd: null, costAuthority: 'unpriced' }],
+        totalCostMicroUsd: null, totalCostAuthority: 'unpriced', pricingVersion: null,
+        workspaceKey: '/work/a', repositoryId: 'repo-a', worktreePath: '/work/a', host: 'cli',
+        source: 'live', missingReason: 'partial-usage', billable: true,
+        coverageStartMs: 90, coverageEndMs: 110,
+      };
+      await sink.recordUsage(event);
+      await sink.recordUsage({ ...event, sessionId: 'sdk-session', producer: 'sdk-owner',
+        runId: 'sdk-run', nativeThreadId: null, eventKey: 'sdk-result', providerId: 'anthropic',
+        missingReason: null });
+      expect(store.raw.prepare('SELECT COUNT(*) AS count FROM session_usage_turns').get()).toMatchObject({ count: 2 });
+      expect(store.raw.prepare('SELECT input_tokens, cache_read_tokens, native_thread_id FROM session_usage_turns WHERE session_id = ?').get('ptah-session'))
+        .toMatchObject({ input_tokens: 2, cache_read_tokens: null, native_thread_id: 'native-thread' });
+    } finally { store.close(); }
+  });
+
+  it('keeps absent model counters null and nonbillable while measured zeros stay zero', async () => {
+    const store = openTestStore();
+    try {
+      const sink = new SqliteSessionUsageSink(new SessionStatsRepository(store), { error: jest.fn() });
+      const event: LiveContribution = {
+        sessionId: 'empty', producer: 'sdk-owner', runId: 'run', turnId: null, eventKey: 'empty',
+        parentSessionId: null, subagentId: null, providerId: 'anthropic', occurredAtMs: 100,
+        revision: 1, models: [], totalCostMicroUsd: null, totalCostAuthority: 'unpriced', pricingVersion: null,
+      };
+      await sink.recordUsage(event);
+      await sink.recordUsage({ ...event, sessionId: 'zero', eventKey: 'zero', models: [{ modelId: null,
+        inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+        knownCostMicroUsd: 0, costAuthority: 'provider-reported' }] });
+      expect(store.raw.prepare('SELECT input_tokens, billable FROM session_usage_turns WHERE session_id = ?').get('empty'))
+        .toMatchObject({ input_tokens: null, billable: 0 });
+      expect(store.raw.prepare('SELECT input_tokens, billable FROM session_usage_turns WHERE session_id = ?').get('zero'))
+        .toMatchObject({ input_tokens: 0, billable: 1 });
+    } finally { store.close(); }
+  });
   it('retains a measured checkpoint when no result arrives and replaces it on result', async () => {
     const store = openTestStore();
     try {
@@ -653,6 +817,24 @@ describe('SessionStatsRepository', () => {
       expect(
         db.prepare('SELECT count(*) AS count FROM session_usage_turns').get(),
       ).toMatchObject({ count: 0 });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('lists repository identities only for the requested workspace and window', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      await repository.recordUsage({ ...contribution, repositoryId: 'repo-a',
+        worktreePath: '/work/a', workspaceKey: '/work/a' });
+      await repository.recordUsage({ ...contribution, sessionId: 'other', eventKey: 'other',
+        repositoryId: 'repo-b', worktreePath: '/work/b', workspaceKey: '/work/b' });
+      expect(await repository.getWorkspaceRepositoryIds('/work/a', 0, 172_800_000)).toEqual(['repo-a']);
+      expect(await repository.getWorkspaceRepositoryIds('/work/a', 172_800_000, 259_200_000)).toEqual([]);
+      expect(await repository.getRepositoryUsageTotals('repo-a', 0, 172_800_000)).toMatchObject({
+        repositoryId: 'repo-a', worktreePaths: ['/work/a'], knownCostMicroUsd: 150,
+      });
     } finally {
       store.close();
     }

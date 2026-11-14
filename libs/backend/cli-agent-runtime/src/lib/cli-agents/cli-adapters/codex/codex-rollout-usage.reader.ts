@@ -83,12 +83,17 @@ export function selectedCodexUsageRoots(): readonly string[] {
 }
 
 /** Iterate rollout files by date, newest first, using the same directory rules as the gate. */
-export async function* listCodexRolloutFiles(sessionsDir = selectedCodexUsageRoots()[0]): AsyncGenerator<string> {
+export async function* listCodexRolloutFiles(sessionsDir = selectedCodexUsageRoots()[0], startAfter?: string): AsyncGenerator<string> {
   for (const year of await dateDirsNewestFirst(sessionsDir)) {
+    if (startAfter && year > startAfter) continue;
     for (const month of await dateDirsNewestFirst(year)) {
+      if (startAfter && month > startAfter) continue;
       for (const day of await dateDirsNewestFirst(month)) {
+        if (startAfter && day > startAfter) continue;
         for (const name of (await listDir(day)).sort().reverse()) {
-          if (ROLLOUT_RE.test(name)) yield join(day, name);
+          const file = join(day, name);
+          if (startAfter && file >= startAfter) continue;
+          if (ROLLOUT_RE.test(name)) yield file;
         }
       }
     }

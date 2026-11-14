@@ -3,6 +3,7 @@ import { MEMORY_TOKENS } from '@ptah-extension/memory-curator';
 import { CLI_AGENT_RUNTIME_TOKENS } from '@ptah-extension/cli-agent-runtime';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
+import { UsageReconciliationService, RepositoryIdentityBackfillService } from '@ptah-extension/usage-analytics';
 import { CODEX_RUNTIME_TOKENS } from '@ptah-extension/codex-runtime';
 import {
   AnalyticsRpcHandlers,
@@ -114,6 +115,9 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ],
   // `db:reset` pauses the checkpoint worker through this port (review-11).
   ['SQLITE_EXCLUSIVE_ACCESS', PERSISTENCE_TOKENS.SQLITE_EXCLUSIVE_ACCESS],
+  ['USAGE_RECONCILIATION_TRIGGER', PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER],
+  ['USAGE_RECONCILIATION_SERVICE', UsageReconciliationService],
+  ['REPOSITORY_IDENTITY_BACKFILL', RepositoryIdentityBackfillService],
 ] as const;
 
 /**

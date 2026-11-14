@@ -58,6 +58,26 @@ const replay: SessionUsageContribution = {
 };
 
 describe('SqliteUsageCursorRepository', () => {
+  it('reserves the discovery cursor from normal source reads and commits', async () => {
+    const { raw, cursors } = openStore();
+    try {
+      await cursors.saveDiscoveryIndex(7);
+      await expect(cursors.load('discovery', 'all-roots')).rejects.toThrow('Reserved discovery cursor');
+      await expect(cursors.commit({ ...cursor, sourceId: 'discovery', sourcePath: 'all-roots' }, []))
+        .rejects.toThrow('Reserved discovery cursor');
+      expect(await cursors.loadDiscoveryIndex()).toBe(7);
+      expect(await cursors.load(cursor.sourceId, cursor.sourcePath)).toBeNull();
+    } finally { raw.close(); }
+  });
+  it('persists the discovery continuation index in the cursor table', async () => {
+    const { raw, cursors, store, stats } = openStore();
+    try {
+      await cursors.saveDiscoveryIndex(16);
+      expect(await new SqliteUsageCursorRepository(store, stats).loadDiscoveryIndex()).toBe(16);
+      await cursors.saveDiscoveryIndex(0);
+      expect(await cursors.loadDiscoveryIndex()).toBe(0);
+    } finally { raw.close(); }
+  });
   it('upgrades a populated version-4 ledger once and skips S0005/S0006 on rerun', async () => {
     const { raw, db } = openStore(4);
     try {

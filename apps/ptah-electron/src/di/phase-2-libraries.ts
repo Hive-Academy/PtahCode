@@ -29,6 +29,7 @@ import {
   type IProcessSpawner,
   type IWorkspaceProvider,
   type ISecretStorage,
+  type IFileSystemProvider,
 } from '@ptah-extension/platform-core';
 import { registerReviewCore, REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS, ReviewWorktreeService, ReviewPolicyService, ReviewStatusCoordinatorService, type IReviewSettingsStore, type ReviewOrchestratorService, type ReviewStageEnvironment } from '@ptah-extension/review-core';
 import { registerReviewGithubServices, REVIEW_GITHUB_TOKENS, REVIEW_GITHUB_TOKEN_KEY, type ReviewPublicationGuard } from '@ptah-extension/review-github';
@@ -71,7 +72,26 @@ import {
   registerAuthProvidersServices,
   registerCuratorAuthServices,
 } from '@ptah-extension/auth-providers';
-import { registerUsageAnalytics } from '@ptah-extension/usage-analytics';
+import { registerUsageAnalytics, UsageReconciliationService, RepositoryIdentityBackfillService, USAGE_RECONCILIATION_TOKENS, REPOSITORY_IDENTITY_BACKFILL_TOKENS, type ReconciliationSources, type UsageRepositoryIdentityResolver } from '@ptah-extension/usage-analytics';
+import { ClaudeJsonlUsageCollector, ClaudeUsageSourceRegistry } from '@ptah-extension/agent-sdk';
+import { CodexRolloutUsageCollector, selectedCodexUsageRoots, listCodexFiles } from '@ptah-extension/cli-agent-runtime';
+import { SqliteUsageCursorRepository } from '@ptah-extension/persistence-sqlite';
+import { AUTH_PROVIDERS_TOKENS, type ClaudeUsageProfileRoots } from '@ptah-extension/auth-providers-tokens';
+import { RepositoryIdentityResolver, ReadOnlyGit, TASK_END_TOKENS, type GitReadRunner } from '@ptah-extension/task-end-hook';
+import { readdir } from 'node:fs/promises';
+
+async function* listClaudeProjectFiles(root: string, startAfter?: string): AsyncGenerator<string> {
+  async function* visit(dir: string, depth: number): AsyncGenerator<string> {
+    for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? 1 : a.name > b.name ? -1 : 0)) {
+      const file = path.join(dir, entry.name);
+      if (startAfter && file > startAfter) continue;
+      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        if (!startAfter || file < startAfter) yield file;
+      } else if (entry.isDirectory() && depth < 3) yield* visit(file, depth + 1);
+    }
+  }
+  yield* visit(root, 0);
+}
 import {
   registerCliAgentRuntimeServices,
   CLI_AGENT_RUNTIME_TOKENS,
@@ -243,6 +263,24 @@ export function registerPhase2Libraries(
   });
   registerAuthProvidersServices(container, logger);
   registerUsageAnalytics(container);
+  container.register(USAGE_RECONCILIATION_TOKENS.CLAUDE_COLLECTOR, {
+    useFactory: (c) => new ClaudeJsonlUsageCollector(c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER)),
+  });
+  container.register(USAGE_RECONCILIATION_TOKENS.CODEX_COLLECTOR, {
+    useFactory: (c) => new CodexRolloutUsageCollector(c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER)),
+  });
+  container.register(USAGE_RECONCILIATION_TOKENS.CURSOR_STORE, { useToken: SqliteUsageCursorRepository });
+  container.register<ReconciliationSources>(USAGE_RECONCILIATION_TOKENS.SOURCES, {
+    useFactory: (c) => ({
+      listClaudeRoots: () => new ClaudeUsageSourceRegistry(c.resolve<ClaudeUsageProfileRoots>(AUTH_PROVIDERS_TOKENS.SDK_CLAUDE_USAGE_PROFILE_ROOTS)).listRoots(),
+      listCodexRoots: async () => selectedCodexUsageRoots(),
+      listClaudeFiles: listClaudeProjectFiles,
+      listCodexFiles,
+      realpath: (file) => c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER).realpath(file),
+    }),
+  });
+  container.register(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { useToken: UsageReconciliationService });
+  container.registerSingleton(RepositoryIdentityBackfillService);
   // MUST precede registerSdkServices: PluginLoaderService injects the external
   // consent store as its allowlist source. Its late `initialize()` runs from
   // plugin activation, next to `pluginLoader.initialize()`.
@@ -631,6 +669,25 @@ export function registerPhase2Libraries(
   if (container.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)) {
     registerTaskEndHookComposition(container, logger);
   }
+  container.register<UsageRepositoryIdentityResolver>(REPOSITORY_IDENTITY_BACKFILL_TOKENS.resolver, {
+    useFactory: (c) => {
+      const resolver = new RepositoryIdentityResolver(
+        new ReadOnlyGit(c.resolve<GitReadRunner>(TASK_END_TOKENS.GIT_READ_RUNNER)),
+        (file) => c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER).realpath(file),
+      );
+      return { resolve: async (file) => {
+        try {
+          const result = await resolver.resolve(file);
+          if (result.kind === 'ok') return { repositoryId: result.identity.repoId, worktreePath: file };
+          logger.warn('Repository identity backfill could not resolve path');
+          return null;
+        } catch (error: unknown) {
+          logger.error('Repository identity backfill failed', error instanceof Error ? error : new Error(String(error)));
+          return null;
+        }
+      } };
+    },
+  });
   // Resolve the index after the task-end hook has bound its status overlay.
   // The helper also retries when Electron restores workspace folders.
   startTaskSpecsIndex(container, logger);

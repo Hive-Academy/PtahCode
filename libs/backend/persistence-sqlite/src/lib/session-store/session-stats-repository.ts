@@ -205,6 +205,19 @@ export class SessionStatsRepository {
       worktreePaths: paths.map((path) => z.object({ path: text }).parse(path).path) };
   }
 
+  /** Repository identities observed in one workspace/window, capped for the RPC payload. */
+  async getWorkspaceRepositoryIds(workspaceKey: string, fromMs: number, untilMs: number): Promise<string[]> {
+    const db = await this.store.ready();
+    const from = safeInteger.parse(fromMs);
+    const until = safeInteger.parse(untilMs);
+    if (until <= from) throw new Error('Usage range must be increasing');
+    const rows: unknown[] = db.prepare(`SELECT DISTINCT repository_id AS repositoryId FROM session_usage_turns
+      WHERE workspace_key = ? AND repository_id IS NOT NULL AND billable = 1
+      AND occurred_at_ms >= ? AND occurred_at_ms < ? ORDER BY repository_id LIMIT 100`)
+      .all(text.parse(workspaceKey), from, until);
+    return rows.map((row) => z.object({ repositoryId: text }).parse(row).repositoryId);
+  }
+
 
   async recordUsage(value: SessionUsageContribution): Promise<void> {
     await this.recordEvent([value]);
@@ -262,6 +275,12 @@ export class SessionStatsRepository {
           WHERE session_id = ? AND producer = ? AND run_id = ?`)
           .run(first.sessionId, first.producer, first.runId);
       }
+      const priorCodexThreads = first.source === 'live' && ['codex', 'openai-codex'].includes(first.providerId)
+        && ['codex-checkpoint', 'cli-lane'].includes(first.producer)
+        ? db.prepare(`SELECT DISTINCT COALESCE(native_thread_id, CASE WHEN producer = 'codex-checkpoint' THEN run_id END) AS thread
+          FROM session_usage_turns WHERE session_id = ? AND producer = ? AND event_key = ?`)
+          .all(first.sessionId, first.producer, first.eventKey) as { thread: string | null }[]
+        : [];
       const incomingModels = inputs.map((input) => input.modelId);
       db.prepare(`DELETE FROM session_usage_turns WHERE session_id = ? AND producer = ?
         AND event_key = ? AND model_id NOT IN (${incomingModels.map(() => '?').join(',')})`)
@@ -315,28 +334,99 @@ export class SessionStatsRepository {
           input.coverageEndMs ?? null,
         );
       }
-      if (first.source === 'live' && first.billable !== false && inputs.some((row) => row.inputTokens !== null || row.outputTokens !== null || row.cacheReadTokens !== null || row.cacheWriteTokens !== null)) {
+      const affectedReplaySessions: string[] = [];
+      const liveCodexThread = first.source === 'live' && ['codex', 'openai-codex'].includes(first.providerId)
+        ? first.producer === 'codex-checkpoint' ? first.nativeThreadId ?? first.runId
+          : first.producer === 'cli-lane' ? first.nativeThreadId ?? null : null
+        : null;
+      for (const thread of new Set([...priorCodexThreads.map((row) => row.thread), liveCodexThread].filter((value): value is string => value !== null))) {
+        const affected = db.prepare(`SELECT DISTINCT session_id FROM session_usage_turns
+          WHERE provider_id IN ('codex', 'openai-codex') AND source = 'live'
+            AND (native_thread_id = ? OR (producer = 'codex-checkpoint' AND run_id = ?))`)
+          .all(thread, thread) as { session_id: string }[];
+        affectedReplaySessions.push(...affected.map((row) => row.session_id));
+        db.prepare(`UPDATE session_usage_turns AS lane SET billable = CASE
+          WHEN lane.input_tokens IS NULL AND lane.output_tokens IS NULL
+            AND lane.cache_read_tokens IS NULL AND lane.cache_write_tokens IS NULL THEN 0
+          WHEN EXISTS (SELECT 1 FROM session_usage_turns AS checkpoint
+            WHERE checkpoint.producer = 'codex-checkpoint' AND checkpoint.source = 'live'
+              AND checkpoint.provider_id IN ('codex', 'openai-codex') AND checkpoint.billable = 1
+              AND COALESCE(checkpoint.native_thread_id, checkpoint.run_id) = lane.native_thread_id
+              AND (checkpoint.input_tokens IS NOT NULL OR checkpoint.output_tokens IS NOT NULL
+                OR checkpoint.cache_read_tokens IS NOT NULL OR checkpoint.cache_write_tokens IS NOT NULL)
+              AND (checkpoint.coverage_start_ms IS NULL OR lane.coverage_end_ms IS NULL
+                OR checkpoint.coverage_start_ms <= lane.coverage_end_ms)
+              AND (lane.coverage_start_ms IS NULL OR checkpoint.coverage_end_ms IS NULL
+                OR lane.coverage_start_ms <= checkpoint.coverage_end_ms)) THEN 0
+          ELSE 1 END
+          WHERE lane.source = 'live' AND lane.producer = 'cli-lane'
+            AND lane.provider_id IN ('codex', 'openai-codex') AND lane.native_thread_id = ?`)
+          .run(thread);
+        const replaySessions = db.prepare(`SELECT DISTINCT session_id FROM session_usage_turns
+          WHERE source = 'replay' AND provider_id IN ('codex', 'openai-codex') AND native_thread_id = ?`)
+          .all(thread) as { session_id: string }[];
+        affectedReplaySessions.push(...replaySessions.map((row) => row.session_id));
+        db.prepare(`UPDATE session_usage_turns AS replay SET billable = CASE
+          WHEN replay.missing_reason = 'unmatched-provider-event' THEN 0
+          WHEN EXISTS (SELECT 1 FROM session_usage_turns AS live
+            WHERE live.source = 'live' AND live.provider_id IN ('codex', 'openai-codex') AND live.billable = 1
+              AND ((live.producer = 'codex-checkpoint' AND
+                COALESCE(live.native_thread_id, live.run_id) = replay.native_thread_id)
+                OR (live.producer = 'cli-lane' AND live.native_thread_id = replay.native_thread_id))
+              AND (live.input_tokens IS NOT NULL OR live.output_tokens IS NOT NULL
+                OR live.cache_read_tokens IS NOT NULL OR live.cache_write_tokens IS NOT NULL)
+              AND (live.coverage_start_ms IS NULL OR replay.occurred_at_ms >= live.coverage_start_ms)
+              AND (live.coverage_end_ms IS NULL OR replay.occurred_at_ms <= live.coverage_end_ms)) THEN 0
+          ELSE 1 END
+          WHERE replay.source = 'replay' AND replay.provider_id IN ('codex', 'openai-codex')
+            AND replay.native_thread_id = ?`).run(thread);
+      }
+      if (first.source === 'live' && first.billable !== false &&
+        !(first.producer === 'cli-lane' && ['codex', 'openai-codex'].includes(first.providerId) && !first.nativeThreadId) &&
+        inputs.some((row) => row.inputTokens !== null || row.outputTokens !== null || row.cacheReadTokens !== null || row.cacheWriteTokens !== null)) {
+        const codexThread = first.producer === 'codex-checkpoint'
+          ? first.nativeThreadId ?? first.runId
+          : first.producer === 'cli-lane' && ['codex', 'openai-codex'].includes(first.providerId)
+            ? first.nativeThreadId ?? null : null;
+        const ownership = codexThread === null
+          ? `session_id = ? AND (native_thread_id IS ? OR ? IS NULL)`
+          : `native_thread_id = ?`;
+        const args = codexThread === null
+          ? [first.sessionId, first.nativeThreadId ?? null, first.nativeThreadId ?? null]
+          : [codexThread];
+        const affected = db.prepare(`SELECT DISTINCT session_id FROM session_usage_turns
+          WHERE source = 'replay' AND billable = 1 AND provider_id = ? AND ${ownership}
+          AND (? IS NULL OR coverage_start_ms IS NULL OR occurred_at_ms >= ?)
+          AND (? IS NULL OR coverage_end_ms IS NULL OR occurred_at_ms <= ?)`).all(first.providerId, ...args,
+            first.coverageStartMs ?? null, first.coverageStartMs ?? null, first.coverageEndMs ?? null, first.coverageEndMs ?? null) as { session_id: string }[];
+        affectedReplaySessions.push(...affected.map((row) => row.session_id));
         db.prepare(`UPDATE session_usage_turns SET billable = 0 WHERE source = 'replay'
-          AND provider_id = ? AND session_id = ? AND (native_thread_id IS ? OR ? IS NULL)
+          AND provider_id = ? AND ${ownership}
           AND (? IS NULL OR coverage_start_ms IS NULL OR occurred_at_ms >= ?)
           AND (? IS NULL OR coverage_end_ms IS NULL OR occurred_at_ms <= ?)`)
-          .run(first.providerId, first.sessionId, first.nativeThreadId ?? null, first.nativeThreadId ?? null,
+          .run(first.providerId, ...args,
             first.coverageStartMs ?? null, first.coverageStartMs ?? null, first.coverageEndMs ?? null, first.coverageEndMs ?? null);
       }
       if (first.source === 'replay') {
         db.prepare(`UPDATE session_usage_turns AS replay SET billable = 0
           WHERE replay.session_id = ? AND replay.event_key = ? AND replay.source = 'replay'
           AND EXISTS (SELECT 1 FROM session_usage_turns AS live
-            WHERE live.session_id = replay.session_id AND live.provider_id = replay.provider_id
+            WHERE live.provider_id = replay.provider_id
             AND live.source = 'live' AND live.billable = 1
             AND (live.input_tokens IS NOT NULL OR live.output_tokens IS NOT NULL
               OR live.cache_read_tokens IS NOT NULL OR live.cache_write_tokens IS NOT NULL)
-            AND (live.native_thread_id IS replay.native_thread_id OR live.native_thread_id IS NULL)
+            AND ((live.producer = 'codex-checkpoint' AND replay.native_thread_id = COALESCE(live.native_thread_id, live.run_id))
+              OR (live.producer = 'cli-lane' AND live.provider_id IN ('codex', 'openai-codex')
+                AND live.native_thread_id IS NOT NULL AND live.native_thread_id = replay.native_thread_id)
+              OR (live.producer NOT IN ('codex-checkpoint', 'cli-lane') AND live.session_id = replay.session_id
+                AND (live.native_thread_id IS replay.native_thread_id OR live.native_thread_id IS NULL))
+              OR (live.producer = 'cli-lane' AND live.provider_id NOT IN ('codex', 'openai-codex')
+                AND live.session_id = replay.session_id))
             AND (live.coverage_start_ms IS NULL OR replay.occurred_at_ms >= live.coverage_start_ms)
             AND (live.coverage_end_ms IS NULL OR replay.occurred_at_ms <= live.coverage_end_ms))`)
           .run(first.sessionId, first.eventKey);
       }
-      db.prepare(
+      for (const sessionId of new Set([first.sessionId, ...affectedReplaySessions])) db.prepare(
         `INSERT INTO session_stats (
         session_id, host, workspace_key, provider_id, started_at_ms, last_usage_at_ms,
         finalized_at_ms, status, input_tokens, output_tokens, cache_read_tokens,
@@ -374,7 +464,18 @@ export class SessionStatsRepository {
         updated_at_ms = excluded.updated_at_ms,
         repository_id = excluded.repository_id, worktree_path = excluded.worktree_path,
         missing_reason = excluded.missing_reason`,
-      ).run(first.sessionId, first.providerId, Date.now(), first.sessionId);
+      ).run(sessionId, first.providerId, Date.now(), sessionId);
+      for (const sessionId of affectedReplaySessions) {
+        db.prepare(`UPDATE session_stats SET
+          input_tokens = COALESCE((SELECT SUM(input_tokens) FROM session_usage_turns WHERE session_id = ? AND billable = 1), 0),
+          output_tokens = COALESCE((SELECT SUM(output_tokens) FROM session_usage_turns WHERE session_id = ? AND billable = 1), 0),
+          cache_read_tokens = COALESCE((SELECT SUM(cache_read_tokens) FROM session_usage_turns WHERE session_id = ? AND billable = 1), 0),
+          cache_write_tokens = COALESCE((SELECT SUM(cache_write_tokens) FROM session_usage_turns WHERE session_id = ? AND billable = 1), 0),
+          known_cost_micro_usd = (SELECT SUM(known_cost_micro_usd) FROM session_usage_turns WHERE session_id = ? AND billable = 1),
+          has_unpriced = COALESCE((SELECT MAX(known_cost_micro_usd IS NULL OR input_tokens IS NULL OR output_tokens IS NULL OR cache_read_tokens IS NULL OR cache_write_tokens IS NULL)
+            FROM session_usage_turns WHERE session_id = ? AND billable = 1), 0)
+          WHERE session_id = ?`).run(sessionId, sessionId, sessionId, sessionId, sessionId, sessionId, sessionId);
+      }
       const stats = db.prepare('SELECT * FROM session_stats WHERE session_id = ?').get(first.sessionId);
       if (stats !== undefined) statsRowSchema.parse(stats);
       const workspaceKey = db.prepare(`SELECT COALESCE(s.workspace_key, MAX(t.workspace_key)) AS workspace_key,

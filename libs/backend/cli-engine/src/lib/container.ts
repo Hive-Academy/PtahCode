@@ -22,6 +22,7 @@
 
 import 'reflect-metadata';
 import * as path from 'path';
+import { readdir } from 'node:fs/promises';
 import * as os from 'os';
 import { registerSessionStoreServices } from '@ptah-extension/persistence-sqlite';
 import { runCliSessionStoreMigration } from './bootstrap/session-store-migration';
@@ -50,6 +51,7 @@ import type {
   IOutputChannel,
   IStateStorage,
   IProcessSpawner,
+  IFileSystemProvider,
   IWorkspaceProvider,
   IWorkspaceLifecycleProvider,
   IHostAttentionIngress,
@@ -107,7 +109,13 @@ import {
 } from './bootstrap/harness-boot';
 import { shutdownHostRuntime } from './bootstrap/shutdown-host-runtime.js';
 import { registerAuthProvidersServices } from '@ptah-extension/auth-providers';
-import { registerUsageAnalytics } from '@ptah-extension/usage-analytics';
+import { registerUsageAnalytics, UsageReconciliationService, RepositoryIdentityBackfillService, USAGE_RECONCILIATION_TOKENS, REPOSITORY_IDENTITY_BACKFILL_TOKENS, type ReconciliationSources, type UsageRepositoryIdentityResolver } from '@ptah-extension/usage-analytics';
+import { ClaudeJsonlUsageCollector, ClaudeUsageSourceRegistry } from '@ptah-extension/agent-sdk';
+import { CodexRolloutUsageCollector, selectedCodexUsageRoots, listCodexFiles } from '@ptah-extension/cli-agent-runtime';
+import { SqliteUsageCursorRepository } from '@ptah-extension/persistence-sqlite';
+import { AUTH_PROVIDERS_TOKENS, type ClaudeUsageProfileRoots } from '@ptah-extension/auth-providers-tokens';
+import { RepositoryIdentityResolver, ReadOnlyGit } from '@ptah-extension/task-end-hook';
+import { createCliGitReadRunner } from './usage/cli-git-read-runner';
 import {
   registerCliAgentRuntimeServices,
   AgentProcessManager,
@@ -311,6 +319,19 @@ export function attachCliHostAttention(
   }
 }
 
+async function* listCliClaudeProjectFiles(root: string, startAfter?: string): AsyncGenerator<string> {
+  async function* visit(dir: string, depth: number): AsyncGenerator<string> {
+    for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? 1 : a.name > b.name ? -1 : 0)) {
+      const file = path.join(dir, entry.name);
+      if (startAfter && file > startAfter) continue;
+      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        if (!startAfter || file < startAfter) yield file;
+      } else if (entry.isDirectory() && depth < 3) yield* visit(file, depth + 1);
+    }
+  }
+  yield* visit(root, 0);
+}
+
 export class CliDIContainer {
   /**
    * The PtahFileSettingsManager instance shared with CliWorkspaceProvider.
@@ -404,6 +425,7 @@ export class CliDIContainer {
   static async disposeHostRuntime(): Promise<void> {
     const container = CliDIContainer._container;
     CliDIContainer._container = undefined;
+    if (container?.isRegistered(UsageReconciliationService)) container.resolve(UsageReconciliationService).stop();
     CliDIContainer._attentionRegistration?.dispose();
     CliDIContainer._attentionRegistration = undefined;
     await shutdownHostRuntime(container);
@@ -719,6 +741,44 @@ export class CliDIContainer {
     });
     registerAuthProvidersServices(container, logger);
     registerUsageAnalytics(container);
+    container.register(USAGE_RECONCILIATION_TOKENS.CLAUDE_COLLECTOR, {
+      useFactory: (c) => new ClaudeJsonlUsageCollector(c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER)),
+    });
+    container.register(USAGE_RECONCILIATION_TOKENS.CODEX_COLLECTOR, {
+      useFactory: (c) => new CodexRolloutUsageCollector(c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER)),
+    });
+    container.register(USAGE_RECONCILIATION_TOKENS.CURSOR_STORE, { useToken: SqliteUsageCursorRepository });
+    container.register<ReconciliationSources>(USAGE_RECONCILIATION_TOKENS.SOURCES, {
+      useFactory: (c) => ({
+        listClaudeRoots: () => new ClaudeUsageSourceRegistry(c.resolve<ClaudeUsageProfileRoots>(AUTH_PROVIDERS_TOKENS.SDK_CLAUDE_USAGE_PROFILE_ROOTS)).listRoots(),
+        listCodexRoots: async () => selectedCodexUsageRoots(),
+        listClaudeFiles: listCliClaudeProjectFiles,
+        listCodexFiles,
+        realpath: (file) => c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER).realpath(file),
+      }),
+    });
+    container.register(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { useToken: UsageReconciliationService });
+    container.registerSingleton(RepositoryIdentityBackfillService);
+    container.register<UsageRepositoryIdentityResolver>(REPOSITORY_IDENTITY_BACKFILL_TOKENS.resolver, {
+      useFactory: (c) => {
+        const runner = createCliGitReadRunner(c.resolve<IProcessSpawner>(SDK_TOKENS.SDK_PROCESS_SPAWNER));
+        const resolver = new RepositoryIdentityResolver(
+          new ReadOnlyGit(runner),
+          (file) => c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER).realpath(file),
+        );
+        return { resolve: async (file) => {
+          try {
+            const result = await resolver.resolve(file);
+            if (result.kind === 'ok') return { repositoryId: result.identity.repoId, worktreePath: file };
+            logger.warn('Repository identity backfill could not resolve path');
+            return null;
+          } catch (error: unknown) {
+            logger.error('Repository identity backfill failed', error instanceof Error ? error : new Error(String(error)));
+            return null;
+          }
+        } };
+      },
+    });
     // MUST precede registerSdkServices: PluginLoaderService injects the
     // external consent store as its allowlist source.
     registerPluginMarketplaceServices(container, logger);
@@ -833,6 +893,10 @@ export class CliDIContainer {
 
     registerThothLibraries(container, logger);
     startCliLaneOutcomes(container, logger);
+    const usageReconciliationService = container.resolve(UsageReconciliationService);
+    const backfill = container.resolve(RepositoryIdentityBackfillService);
+    usageReconciliationService.setAfterPass(() => backfill.runOnce().then(() => undefined));
+    usageReconciliationService.start();
 
     phaseEnd('2', phase2Start);
     const phase3Start = phaseStart('3');

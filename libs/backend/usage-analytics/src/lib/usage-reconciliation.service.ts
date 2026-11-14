@@ -1,6 +1,6 @@
 import { setImmediate as yieldImmediate } from 'node:timers/promises';
 import { inject, injectable } from 'tsyringe';
-import { ZodError } from 'zod';
+import { z } from 'zod';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import type { SessionUsageContribution, UsageReconciliationTrigger } from '@ptah-extension/platform-core';
 
@@ -25,13 +25,15 @@ export interface ReconciliationCollector {
 export interface ReconciliationCursorStore {
   load(sourceId: string, sourcePath: string): Promise<ReconciliationCursor | null>;
   commit(cursor: ReconciliationCursor, events: readonly SessionUsageContribution[]): Promise<void>;
+  loadDiscoveryKey?(): Promise<string | null>;
+  saveDiscoveryKey?(key: string | null): Promise<void>;
 }
 
 export interface ReconciliationSources {
   listClaudeRoots(): Promise<readonly string[]>;
   listCodexRoots(): Promise<readonly string[]>;
-  listClaudeFiles(root: string): AsyncIterable<string>;
-  listCodexFiles(root: string): AsyncIterable<string>;
+  listClaudeFiles(root: string, startAfter?: string): AsyncIterable<string>;
+  listCodexFiles(root: string, startAfter?: string): AsyncIterable<string>;
   realpath(path: string): Promise<string>;
 }
 
@@ -43,9 +45,14 @@ export const USAGE_RECONCILIATION_TOKENS = {
 } as const;
 
 const BYTE_BUDGET = 1024 * 1024;
+const PASS_FILE_BUDGET = 16;
+const PASS_DISCOVERY_BUDGET = 64;
+const PASS_BYTE_BUDGET = 4 * BYTE_BUDGET;
+const MAX_PENDING_PASSES = 4;
 const DEBOUNCE_MS = 2_000;
 const ACTIVE_IDLE_MS = 15 * 60_000;
 const QUIET_IDLE_MS = 60 * 60_000;
+const discoveryKeySchema = z.object({ source: z.number().int().min(0).max(1), root: z.string().min(1), file: z.string().min(1), pending: z.boolean().optional(), pendingPasses: z.number().int().min(0).optional() });
 
 function isMissing(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error &&
@@ -59,6 +66,8 @@ function isFileChanged(error: unknown): boolean {
 @injectable()
 export class UsageReconciliationService implements UsageReconciliationTrigger {
   private started = false;
+  private discoveryKey: z.infer<typeof discoveryKeySchema> | null = null;
+  private discoveryLoaded = false;
   private running = false;
   private followUp = false;
   private debounceTimer: NodeJS.Timeout | null = null;
@@ -157,25 +166,77 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
   }
 
   private async scan(): Promise<boolean> {
+    if (!this.discoveryLoaded) {
+      const saved = await this.cursors.loadDiscoveryKey?.();
+      if (saved) {
+        this.discoveryKey = discoveryKeySchema.parse(JSON.parse(saved));
+      }
+      this.discoveryLoaded = true;
+    }
     const roots = await Promise.all([this.sources.listClaudeRoots(), this.sources.listCodexRoots()]);
     const seen = new Set<string>();
     let changed = false;
+    if (this.discoveryKey?.pending) {
+      const { source, root, file } = this.discoveryKey;
+      try {
+        const canonical = await this.sources.realpath(file);
+        const result = await this.scanFile(this.collectors[source], canonical, PASS_BYTE_BUDGET);
+        changed = result.changed;
+        if (!result.complete && result.bytes >= PASS_BYTE_BUDGET) {
+          const pendingPasses = (this.discoveryKey.pendingPasses ?? 0) + 1;
+          this.discoveryKey = pendingPasses >= MAX_PENDING_PASSES
+            ? { source, root, file }
+            : { source, root, file, pending: true, pendingPasses };
+          await this.cursors.saveDiscoveryKey?.(JSON.stringify(this.discoveryKey));
+          return changed;
+        }
+      } catch (error: unknown) {
+        if (!isMissing(error)) throw error;
+      }
+      this.discoveryKey = { source, root, file };
+      await this.cursors.saveDiscoveryKey?.(JSON.stringify(this.discoveryKey));
+      return changed;
+    }
+    let visited = 0;
+    let spentBytes = 0;
+    let enumerated = 0;
     for (let index = 0; index < this.collectors.length; index++) {
-      for (const root of roots[index]) {
+      for (const root of [...roots[index]].sort().reverse()) {
+        if (this.discoveryKey && (index < this.discoveryKey.source ||
+          (index === this.discoveryKey.source && root > this.discoveryKey.root))) continue;
         try {
-          const files = index === 0 ? this.sources.listClaudeFiles(root) : this.sources.listCodexFiles(root);
+          const startAfter = this.discoveryKey?.source === index && this.discoveryKey.root === root
+            ? this.discoveryKey.file : undefined;
+          const files = index === 0 ? this.sources.listClaudeFiles(root, startAfter) : this.sources.listCodexFiles(root, startAfter);
           for await (const file of files) {
             if (!this.started) return changed;
+            if (visited >= PASS_FILE_BUDGET || spentBytes >= PASS_BYTE_BUDGET || enumerated >= PASS_DISCOVERY_BUDGET) {
+              await this.cursors.saveDiscoveryKey?.(JSON.stringify(this.discoveryKey));
+              return changed;
+            }
+            enumerated++;
             let canonical: string;
             try {
               canonical = await this.sources.realpath(file);
             } catch (error: unknown) {
-              if (isMissing(error)) continue;
+              if (isMissing(error)) {
+                this.discoveryKey = { source: index, root, file };
+                continue;
+              }
               throw error;
             }
+            this.discoveryKey = { source: index, root, file };
             if (seen.has(canonical)) continue;
             seen.add(canonical);
-            changed = await this.scanFile(this.collectors[index], canonical) || changed;
+            visited++;
+            const result = await this.scanFile(this.collectors[index], canonical, PASS_BYTE_BUDGET - spentBytes);
+            spentBytes += result.bytes;
+            changed = result.changed || changed;
+            if (!result.complete && spentBytes >= PASS_BYTE_BUDGET) {
+              this.discoveryKey = { source: index, root, file, pending: true, pendingPasses: 1 };
+              await this.cursors.saveDiscoveryKey?.(JSON.stringify(this.discoveryKey));
+              return changed;
+            }
             await yieldImmediate();
           }
         } catch (error: unknown) {
@@ -184,47 +245,35 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
         }
       }
     }
+    this.discoveryKey = null;
+    await this.cursors.saveDiscoveryKey?.(null);
     return changed;
   }
 
-  private async scanFile(collector: ReconciliationCollector, file: string): Promise<boolean> {
+  private async scanFile(collector: ReconciliationCollector, file: string, remainingBytes: number): Promise<{ changed: boolean; bytes: number; complete: boolean }> {
     let cursor = await this.cursors.load(collector.sourceId, file);
     let changed = false;
-    while (this.started) {
+    let bytes = 0;
+    let complete = false;
+    while (this.started && bytes < remainingBytes) {
       try {
-        const chunk = await collector.collect(file, cursor, BYTE_BUDGET);
-        await this.commitChunk(chunk.next, chunk.events, cursor);
+        const chunk = await collector.collect(file, cursor, Math.min(BYTE_BUDGET, remainingBytes - bytes));
+        await this.cursors.commit(chunk.next, chunk.events);
         changed = changed || chunk.events.length > 0;
-        if (!chunk.more || chunk.next.byteOffset === cursor?.byteOffset) break;
+        bytes += Math.max(0, chunk.next.byteOffset - (cursor?.byteOffset ?? 0));
+        if (!chunk.more || chunk.next.byteOffset === cursor?.byteOffset) {
+          complete = true;
+          break;
+        }
         cursor = chunk.next;
         await yieldImmediate();
       } catch (error: unknown) {
         if (isFileChanged(error)) this.logger.debug('Usage source changed during read; retrying later');
         else if (isMissing(error)) this.logger.debug('Usage source disappeared during read');
-        else this.logger.warn('Usage reconciliation file scan failed', error);
+        else this.logger.warn(`Usage reconciliation file scan failed at ${file}:${cursor?.byteOffset ?? 0}`, error);
         break;
       }
     }
-    return changed;
-  }
-
-  private async commitChunk(next: ReconciliationCursor, events: readonly SessionUsageContribution[], previous: ReconciliationCursor | null): Promise<void> {
-    try {
-      await this.cursors.commit(next, events);
-    } catch (error: unknown) {
-      if (!(error instanceof ZodError)) throw error;
-      let dropped = 0;
-      const stationary = previous ?? { ...next, byteOffset: 0, lastEventKey: null };
-      for (const event of events) {
-        try {
-          await this.cursors.commit(stationary, [event]);
-        } catch (individualError: unknown) {
-          if (!(individualError instanceof ZodError)) throw individualError;
-          dropped++;
-        }
-      }
-      await this.cursors.commit(next, []);
-      this.logger.warn(`Usage reconciliation dropped ${dropped} invalid events`);
-    }
+    return { changed, bytes, complete };
   }
 }

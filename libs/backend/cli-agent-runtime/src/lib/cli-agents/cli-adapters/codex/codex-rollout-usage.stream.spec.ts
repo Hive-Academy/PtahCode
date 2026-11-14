@@ -90,6 +90,9 @@ describe('Codex rollout discovery', () => {
       for await (const path of listCodexRolloutFiles(root)) found.push(path);
       expect(found).toHaveLength(2);
       expect(found[0]).toContain(join('2026', '01', '01'));
+      const resumed: string[] = [];
+      for await (const path of listCodexRolloutFiles(root, found[0])) resumed.push(path);
+      expect(resumed).toEqual([found[1]]);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

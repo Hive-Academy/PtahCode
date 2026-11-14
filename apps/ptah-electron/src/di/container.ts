@@ -19,6 +19,7 @@ import { container, DependencyContainer } from 'tsyringe';
 import type { ElectronPlatformOptions } from '@ptah-extension/platform-electron';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import { startAndRegisterLaneOutcomes } from '@ptah-extension/lane-outcomes';
+import { UsageReconciliationService, RepositoryIdentityBackfillService } from '@ptah-extension/usage-analytics';
 
 import { registerPhase0Platform } from './phase-0-platform';
 import { registerPhase1Infra } from './phase-1-infra';
@@ -28,6 +29,7 @@ import { registerPhase4Handlers } from './phase-4-handlers';
 
 export class ElectronDIContainer {
   private static _root: DependencyContainer | undefined;
+  private static _stopping = false;
 
   private static ensureRoot(): DependencyContainer {
     if (!ElectronDIContainer._root) {
@@ -37,6 +39,7 @@ export class ElectronDIContainer {
   }
 
   static setup(options: ElectronPlatformOptions): DependencyContainer {
+    ElectronDIContainer._stopping = false;
     const root = ElectronDIContainer.ensureRoot();
     root.register(PLATFORM_TOKENS.DI_CONTAINER, { useValue: root });
     const { logger } = registerPhase0Platform(root, options);
@@ -46,12 +49,27 @@ export class ElectronDIContainer {
     registerPhase4Handlers(root, logger);
     // Start after every phase so eager recorder resolution sees the complete graph.
     startAndRegisterLaneOutcomes(root, logger, { observeSubagentEnded: true });
+    const usageReconciliationService = root.resolve(UsageReconciliationService);
+    const backfill = root.resolve(RepositoryIdentityBackfillService);
+    usageReconciliationService.setAfterPass(() => backfill.runOnce().then(() => undefined));
+    setImmediate(() => {
+      if (!ElectronDIContainer._stopping && ElectronDIContainer._root === root) {
+        usageReconciliationService.start();
+      }
+    });
     logger.info('[Electron DI] All services registered successfully');
     return root;
   }
 
   static getContainer(): DependencyContainer {
     return ElectronDIContainer.ensureRoot();
+  }
+
+  static stopUsageReconciliation(): void {
+    ElectronDIContainer._stopping = true;
+    if (ElectronDIContainer._root?.isRegistered(UsageReconciliationService)) {
+      ElectronDIContainer._root.resolve(UsageReconciliationService).stop();
+    }
   }
 
   static resolve<T>(token: symbol): T {

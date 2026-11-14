@@ -75,7 +75,7 @@ describe('usage reconciliation', () => {
     expect(collector.collect).toHaveBeenCalledTimes(3);
   });
 
-  it('drops poison events and advances the cursor after Zod rollback', async () => {
+  it('keeps the cursor before a rejected event and logs its path and offset', async () => {
     const { service, collector, store, logger } = fixture();
     const valid = { eventKey: 'valid' } as never;
     const invalid = { eventKey: 'invalid' } as never;
@@ -88,9 +88,179 @@ describe('usage reconciliation', () => {
     });
     service.start();
     await flush();
-    expect(store.commit).toHaveBeenCalledTimes(4);
-    expect(store.commit).toHaveBeenLastCalledWith(cursor, []);
-    expect(logger.warn).toHaveBeenCalledWith('Usage reconciliation dropped 1 invalid events');
+    expect(store.commit).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Usage reconciliation file scan failed at /synthetic/usage.jsonl:0', error);
+    service.stop();
+  });
+
+  it('stops after the file budget and resumes from the next file on a later pass', async () => {
+    const { service, collector, sources, store } = fixture();
+    store.loadDiscoveryKey = jest.fn().mockResolvedValue(null);
+    store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
+    sources.listClaudeFiles = async function* (_root, startAfter) {
+      for (let index = 19; index >= 0; index--) {
+        const file = `/synthetic/${String(index).padStart(2, '0')}.jsonl`;
+        if (!startAfter || file < startAfter) yield file;
+      }
+    };
+    service.start();
+    await flush();
+    await flush();
+    expect(collector.collect).toHaveBeenCalledTimes(16);
+    expect(store.saveDiscoveryKey).toHaveBeenCalledWith(JSON.stringify({ source: 0, root: '/synthetic', file: '/synthetic/04.jsonl' }));
+    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
+    await jest.advanceTimersByTimeAsync(2_000);
+    await flush();
+    await flush();
+    expect(collector.collect).toHaveBeenCalledTimes(20);
+    expect(store.saveDiscoveryKey).toHaveBeenCalledWith(null);
+    service.stop();
+  });
+
+  it('resumes a file past the 4 MiB cap on the next pass', async () => {
+    const { service, collector, store } = fixture();
+    store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
+    store.load = jest.fn().mockImplementation(async () => {
+      const calls = jest.mocked(collector.collect).mock.calls.length;
+      return calls ? { ...cursor, byteOffset: calls * 1_048_576 } : null;
+    });
+    jest.mocked(collector.collect).mockImplementation(async (_file, previous) => ({
+      events: [], next: { ...cursor, byteOffset: (previous?.byteOffset ?? 0) + 1_048_576 },
+      more: (previous?.byteOffset ?? 0) < 4 * 1_048_576,
+    }));
+    service.start();
+    await flush();
+    expect(collector.collect).toHaveBeenCalledTimes(4);
+    expect(store.saveDiscoveryKey).toHaveBeenCalledWith(JSON.stringify({ source: 0, root: '/synthetic', file: cursor.sourcePath, pending: true, pendingPasses: 1 }));
+    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
+    await jest.advanceTimersByTimeAsync(2_000);
+    await flush();
+    expect(collector.collect).toHaveBeenCalledTimes(5);
+    expect(jest.mocked(collector.collect).mock.calls[4][0]).toBe(cursor.sourcePath);
+    service.stop();
+  });
+
+  it('rotates a continuously growing file and revisits it after scanning the next file', async () => {
+    const { service, collector, sources, store } = fixture();
+    const growing = '/synthetic/usage.jsonl';
+    const other = '/synthetic/other.jsonl';
+    const offsets = new Map<string, number>();
+    store.loadDiscoveryKey = jest.fn().mockResolvedValue(null);
+    store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
+    store.load = jest.fn().mockImplementation(async (_sourceId: string, file: string) => {
+      const byteOffset = offsets.get(file);
+      return byteOffset === undefined ? null : { ...cursor, sourcePath: file, byteOffset };
+    });
+    store.commit = jest.fn().mockImplementation(async (next: ReconciliationCursor) => {
+      offsets.set(next.sourcePath, next.byteOffset);
+    });
+    sources.listClaudeFiles = async function* (_root, startAfter) {
+      for (const file of [growing, other]) if (!startAfter || file < startAfter) yield file;
+    };
+    jest.mocked(collector.collect).mockImplementation(async (file, previous) => ({
+      events: [],
+      next: { ...cursor, sourcePath: file, byteOffset: (previous?.byteOffset ?? 0) + (file === growing ? 1_048_576 : 8) },
+      more: file === growing,
+    }));
+    const nextPass = async (pass: number) => {
+      service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: pass });
+      await jest.advanceTimersByTimeAsync(2_000);
+      await flush();
+    };
+    service.start();
+    await flush();
+    for (let pass = 1; pass <= 4; pass++) await nextPass(pass);
+    expect(jest.mocked(collector.collect).mock.calls.map(([file]) => file)).toContain(other);
+    expect(offsets.get(growing)).toBe(16 * 1_048_576);
+    await nextPass(5);
+    expect(offsets.get(growing)).toBe(20 * 1_048_576);
+    service.stop();
+  });
+
+  it('loads a legacy pending key without a pass counter', async () => {
+    const { service, collector, store } = fixture();
+    store.loadDiscoveryKey = jest.fn().mockResolvedValue(JSON.stringify({
+      source: 0, root: '/synthetic', file: cursor.sourcePath, pending: true,
+    }));
+    store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
+    service.start();
+    await flush();
+    expect(collector.collect).toHaveBeenCalledWith(cursor.sourcePath, null, 1_048_576);
+    expect(store.saveDiscoveryKey).toHaveBeenCalledWith(JSON.stringify({
+      source: 0, root: '/synthetic', file: cursor.sourcePath,
+    }));
+    service.stop();
+  });
+
+  it('clears a deleted pending file and continues after its path', async () => {
+    const { service, collector, sources, store } = fixture();
+    store.loadDiscoveryKey = jest.fn().mockResolvedValue(JSON.stringify({
+      source: 0, root: '/synthetic', file: '/synthetic/missing.jsonl', pending: true, pendingPasses: 2,
+    }));
+    store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
+    sources.realpath = jest.fn().mockImplementation(async (file: string) => {
+      if (file.endsWith('missing.jsonl')) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return file;
+    });
+    sources.listClaudeFiles = async function* (_root, startAfter) {
+      expect(startAfter).toBe('/synthetic/missing.jsonl');
+      yield '/synthetic/other.jsonl';
+    };
+    service.start();
+    await flush();
+    expect(store.saveDiscoveryKey).toHaveBeenCalledWith(JSON.stringify({
+      source: 0, root: '/synthetic', file: '/synthetic/missing.jsonl',
+    }));
+    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
+    await jest.advanceTimersByTimeAsync(2_000);
+    await flush();
+    expect(collector.collect).toHaveBeenCalledWith('/synthetic/other.jsonl', null, 1_048_576);
+    service.stop();
+  });
+
+  it('continues by path through insertion and deletion at the boundary', async () => {
+    const { service, collector, sources, store } = fixture();
+    let files = Array.from({ length: 20 }, (_, index) => `/synthetic/${String(index).padStart(2, '0')}.jsonl`);
+    store.loadDiscoveryKey = jest.fn().mockResolvedValue(null);
+    store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
+    sources.listClaudeFiles = async function* (_root, startAfter) {
+      for (const file of [...files].sort().reverse()) if (!startAfter || file < startAfter) yield file;
+    };
+    service.start();
+    await flush();
+    await flush();
+    files = files.filter((file) => file !== '/synthetic/04.jsonl');
+    files.push('/synthetic/20.jsonl', '/synthetic/02a.jsonl');
+    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
+    await jest.advanceTimersByTimeAsync(2_000);
+    await flush();
+    expect(jest.mocked(collector.collect).mock.calls.slice(16).map(([file]) => file))
+      .toEqual(['/synthetic/03.jsonl', '/synthetic/02a.jsonl', '/synthetic/02.jsonl', '/synthetic/01.jsonl', '/synthetic/00.jsonl']);
+    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 2 });
+    await jest.advanceTimersByTimeAsync(2_000);
+    await flush();
+    expect(jest.mocked(collector.collect).mock.calls.map(([file]) => file)).toContain('/synthetic/20.jsonl');
+    service.stop();
+  });
+
+  it('passes the continuation into discovery and limits yielded entries', async () => {
+    const { service, sources, store } = fixture();
+    const key = { source: 0, root: '/synthetic', file: '/synthetic/0500.jsonl' };
+    store.loadDiscoveryKey = jest.fn().mockResolvedValue(JSON.stringify(key));
+    store.saveDiscoveryKey = jest.fn().mockResolvedValue(undefined);
+    let yielded = 0;
+    sources.listClaudeFiles = async function* (_root, startAfter) {
+      expect(startAfter).toBe(key.file);
+      for (let index = 499; index >= 0; index--) {
+        yielded++;
+        yield `/synthetic/${String(index).padStart(4, '0')}.jsonl`;
+      }
+    };
+    service.start();
+    await flush();
+    await flush();
+    expect(yielded).toBeLessThanOrEqual(17);
     service.stop();
   });
 

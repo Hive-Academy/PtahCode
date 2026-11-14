@@ -3,6 +3,21 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ELECTRON_CODEX_BOUND_TOKENS, EXPECTED_RESOLVABLE_TOKENS } from './expected-resolvable';
+import { UsageReconciliationService } from '@ptah-extension/usage-analytics';
+
+describe('Electron usage reconciliation composition', () => {
+  it('binds the producer and starts once after all phases', () => {
+    const phase = readFileSync(join(__dirname, 'phase-2-libraries.ts'), 'utf8');
+    const composition = readFileSync(join(__dirname, 'container.ts'), 'utf8');
+    const main = readFileSync(join(__dirname, '..', 'main.ts'), 'utf8');
+    expect(phase).toContain('PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER');
+    expect(phase).toContain('REPOSITORY_IDENTITY_BACKFILL_TOKENS.resolver');
+    expect(composition.indexOf('registerPhase4Handlers(root, logger)')).toBeLessThan(composition.indexOf('usageReconciliationService.start()'));
+    expect(composition).toContain('usageReconciliationService.setAfterPass');
+    expect(main).toContain('ElectronDIContainer.stopUsageReconciliation()');
+    expect(EXPECTED_RESOLVABLE_TOKENS).toContainEqual(['USAGE_RECONCILIATION_SERVICE', UsageReconciliationService]);
+  });
+});
 import { REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS } from '@ptah-extension/review-core';
 import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
 /**

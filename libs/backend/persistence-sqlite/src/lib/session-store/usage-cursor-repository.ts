@@ -15,6 +15,10 @@ export interface UsageSourceCursor {
 export interface UsageCursorRepository {
   load(sourceId: string, sourcePath: string): Promise<UsageSourceCursor | null>;
   commit(cursor: UsageSourceCursor, events: readonly CollectedUsage[]): Promise<void>;
+  loadDiscoveryIndex(): Promise<number>;
+  saveDiscoveryIndex(index: number): Promise<void>;
+  loadDiscoveryKey(): Promise<string | null>;
+  saveDiscoveryKey(key: string | null): Promise<void>;
 }
 
 const nonempty = z.string().min(1);
@@ -83,9 +87,42 @@ export class SqliteUsageCursorRepository implements UsageCursorRepository {
     private readonly stats: SessionStatsRepository,
   ) {}
 
+  async loadDiscoveryIndex(): Promise<number> {
+    const db = await this.store.ready();
+    const row = db.prepare(`SELECT byte_offset AS byteOffset FROM usage_source_cursor
+      WHERE source_id = 'discovery' AND source_path = 'all-roots'`).get() as { byteOffset: number } | undefined;
+    return row?.byteOffset ?? 0;
+  }
+
+  async saveDiscoveryIndex(index: number): Promise<void> {
+    const db = await this.store.ready();
+    db.prepare(`INSERT INTO usage_source_cursor
+      (source_id, source_path, fingerprint, mtime_ms, byte_offset, last_event_key, updated_at_ms)
+      VALUES ('discovery', 'all-roots', 'index', 0, ?, NULL, ?)
+      ON CONFLICT(source_id, source_path) DO UPDATE SET byte_offset = excluded.byte_offset,
+        updated_at_ms = excluded.updated_at_ms`).run(safeInteger.parse(index), Date.now());
+  }
+
+  async loadDiscoveryKey(): Promise<string | null> {
+    const db = await this.store.ready();
+    const row = db.prepare(`SELECT last_event_key AS key FROM usage_source_cursor
+      WHERE source_id = 'discovery' AND source_path = 'all-roots'`).get() as { key: string | null } | undefined;
+    return row?.key ?? null;
+  }
+
+  async saveDiscoveryKey(key: string | null): Promise<void> {
+    const db = await this.store.ready();
+    db.prepare(`INSERT INTO usage_source_cursor
+      (source_id, source_path, fingerprint, mtime_ms, byte_offset, last_event_key, updated_at_ms)
+      VALUES ('discovery', 'all-roots', 'key', 0, 0, ?, ?)
+      ON CONFLICT(source_id, source_path) DO UPDATE SET last_event_key = excluded.last_event_key,
+        updated_at_ms = excluded.updated_at_ms`).run(key, Date.now());
+  }
+
   async load(sourceId: string, sourcePath: string): Promise<UsageSourceCursor | null> {
     nonempty.parse(sourceId);
     nonempty.parse(sourcePath);
+    if (sourceId === 'discovery' && sourcePath === 'all-roots') throw new Error('Reserved discovery cursor');
     const db = await this.store.ready();
     const row = db.prepare(`SELECT source_id AS sourceId, source_path AS sourcePath,
       fingerprint, mtime_ms AS mtimeMs, byte_offset AS byteOffset,
@@ -96,6 +133,7 @@ export class SqliteUsageCursorRepository implements UsageCursorRepository {
 
   async commit(cursor: UsageSourceCursor, events: readonly CollectedUsage[]): Promise<void> {
     const next = cursorSchema.parse(cursor);
+    if (next.sourceId === 'discovery' && next.sourcePath === 'all-roots') throw new Error('Reserved discovery cursor');
     const rows = events.map(toRows);
     const db = await this.store.ready();
     db.exec('BEGIN IMMEDIATE');

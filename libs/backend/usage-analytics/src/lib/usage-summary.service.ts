@@ -3,7 +3,7 @@ import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { UsageSummaryParamsSchema, UsageSummarySchema, UsageTopSessionSchema } from '@ptah-extension/shared';
 import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import { SessionStatsRepository } from '@ptah-extension/persistence-sqlite';
-import type { UsageFact, UsageSummary, UsageSummaryParams, UsageSourceStatus, UsageTopSession } from '@ptah-extension/shared';
+import type { UsageFact, UsageRepositoryTotals, UsageSummary, UsageSummaryParams, UsageSourceStatus, UsageTopSession } from '@ptah-extension/shared';
 import { ClaudeLedgerSource } from './sources/claude-ledger.source';
 import { CliSessionSource } from './cli-session.source';
 import { CodexSource } from './sources/codex.source';
@@ -56,6 +56,7 @@ export class UsageAnalyticsService {
     let workspaceKey: string | undefined;
     let messageCount = 0;
     let priceSource: 'openrouter' | 'bundled' | 'unavailable' = 'unavailable';
+    let repositories: UsageRepositoryTotals[] | undefined;
     if (this.statsRepository) {
       try {
         workspaceKey = normalizeWorkspaceRoot(workspacePath);
@@ -127,6 +128,18 @@ export class UsageAnalyticsService {
         this.logger.warn('[UsageAnalytics] Session ledger unavailable', { reason: error instanceof Error ? error.name : 'unknown' });
         statuses.push({ sourceId: 'claude-ledger', status: 'unavailable', reason: 'Session ledger unavailable' });
         }
+      }
+    }
+    if (this.statsRepository && workspaceKey && !signal?.aborted) {
+      try {
+        const ids = await this.statsRepository.getWorkspaceRepositoryIds(workspaceKey, since, until);
+        repositories = [];
+        for (const id of ids) {
+          if (signal?.aborted) break;
+          repositories.push(await this.statsRepository.getRepositoryUsageTotals(id, since, until));
+        }
+      } catch (error: unknown) {
+        this.logger.warn('[UsageAnalytics] Repository totals unavailable', { reason: error instanceof Error ? error.name : 'unknown' });
       }
     }
     // Start independent disk/SQLite readers together. Consume in source order so
@@ -288,6 +301,7 @@ export class UsageAnalyticsService {
       ).slice(0, 5),
       sessionCount: ledgerSessionCount + sessions.size, messageCount, subagentCount: subagents.size,
       sources: statuses,
+      ...(repositories ? { repositories } : {}),
       pricing: { source: priceSource, asOf: priceSource === 'unavailable' ? null : new Date(now).toISOString() },
     };
     const checked = UsageSummarySchema.parse(summary);

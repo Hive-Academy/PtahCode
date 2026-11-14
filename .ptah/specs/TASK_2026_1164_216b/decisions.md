@@ -12,3 +12,11 @@
 | 8 | Accepted risk: Codex child-thread ownership stays an assumption; B7b must prove it from fixtures or leave child replay billable | plan-review-2 N2 | flagged for the final code review and the live test |
 
 - B10 review (coordinator): `getRepositoryUsageTotals.knownCostMicroUsd` sums priced rows only; unpriced rows are not flagged separately. Accepted as "known cost"; the B11 UI must label it partial when `hasUnknownTokens` or unpriced rows exist. Reversible.
+
+## 2026-11-13 — B9 write set expanded
+
+- The B9 lane blocked: `ReadOnlyGit` is not exported from task-end-hook, the CLI root has no
+  Git read runner, and the Electron container has no disposal hook.
+- Decision: export `ReadOnlyGit` from `task-end-hook/src/index.ts` (additive), add a small
+  CLI Git read runner in cli-engine (argument array, no shell, timeout), and stop the
+  reconciler in the Electron teardown path. Reversible: yes.
