@@ -113,7 +113,9 @@ function build(
     record = { tabId, realSessionId };
   };
   const registrations = {
-    find: jest.fn((id: string) => (record?.realSessionId === id ? record : undefined)),
+    find: jest.fn((id: string) =>
+      record?.realSessionId === id ? record : undefined,
+    ),
   };
   const logger = createMockLogger();
   // Fan-out twin of the adapter's "Session ID resolved" callback.
@@ -124,7 +126,11 @@ function build(
       return () => undefined;
     },
   };
-  const resolve = (tabId: string, realSessionId = SESSION, previousSessionId?: string) => {
+  const resolve = (
+    tabId: string,
+    realSessionId = SESSION,
+    previousSessionId?: string,
+  ) => {
     for (const listener of resolvedListeners) {
       listener({
         tabId,
@@ -143,11 +149,35 @@ function build(
     sessionIdResolved,
   );
   const states = () =>
-    sent.filter((entry) => entry.type === MESSAGE_TYPES.CHAT_QUEUED_MESSAGE_STATE);
-  return { service, fake, sent, states, logger, webviewManager, reregister, resolve };
+    sent.filter(
+      (entry) => entry.type === MESSAGE_TYPES.CHAT_QUEUED_MESSAGE_STATE,
+    );
+  return {
+    service,
+    fake,
+    sent,
+    states,
+    logger,
+    webviewManager,
+    reregister,
+    resolve,
+  };
 }
 
 describe('ChatFollowUpQueueService', () => {
+  it("binds a Codex thread without moving another tab's queued follow-up", () => {
+    const h = build();
+    const claudeSession = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
+    h.resolve(TAB_B, claudeSession);
+    h.service.bind(claudeSession, TAB_B, ID_1);
+    h.fake.hold(ID_1);
+    h.resolve(TAB_A, SESSION);
+    expect(h.service.list(claudeSession, TAB_B)).toEqual([
+      { clientMessageId: ID_1, content: 'follow-up' },
+    ]);
+    expect(h.service.list(SESSION, TAB_A)).toEqual([]);
+  });
+
   it('keeps committed admissions pending until native resume accepts or rejects', () => {
     const h = build();
     h.service.beginAdmission(SESSION, TAB_A, ID_1);
@@ -171,12 +201,19 @@ describe('ChatFollowUpQueueService', () => {
     jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     const h = build();
     for (let index = 0; index < 100; index++) {
-      h.service.rejectAdmission(`session-${index}`, TAB_A, ID_1, 'SESSION_CHANGED');
+      h.service.rejectAdmission(
+        `session-${index}`,
+        TAB_A,
+        ID_1,
+        'SESSION_CHANGED',
+      );
     }
     expect(h.service.receiptSessionCount()).toBe(100);
     jest.advanceTimersByTime(10 * 60 * 1000 + 1);
     for (let index = 0; index < 100; index++) {
-      expect(h.service.receipt(`session-${index}`, TAB_A, ID_1)).toBeUndefined();
+      expect(
+        h.service.receipt(`session-${index}`, TAB_A, ID_1),
+      ).toBeUndefined();
     }
     expect(h.service.receiptSessionCount()).toBe(0);
     jest.useRealTimers();
@@ -185,9 +222,13 @@ describe('ChatFollowUpQueueService', () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     const h = build();
-    const ids = Array.from({ length: 250 }, (_, index) =>
-      `33333333-4444-4555-8666-${String(index).padStart(12, '0')}`);
-    for (const id of ids) h.service.rejectAdmission(SESSION, TAB_A, id, 'SESSION_CHANGED');
+    const ids = Array.from(
+      { length: 250 },
+      (_, index) =>
+        `33333333-4444-4555-8666-${String(index).padStart(12, '0')}`,
+    );
+    for (const id of ids)
+      h.service.rejectAdmission(SESSION, TAB_A, id, 'SESSION_CHANGED');
     expect(h.service.receipt(SESSION, TAB_A, ids[0])).toBeUndefined();
     expect(h.service.receipt(SESSION, TAB_A, ids[49])).toBeUndefined();
     expect(h.service.receipt(SESSION, TAB_A, ids[50])).toBe('rejected');
@@ -205,14 +246,20 @@ describe('ChatFollowUpQueueService', () => {
   });
   it('rejects another tab for an idle Codex session with no held items', () => {
     const h = build({ codexOwner: TAB_A });
-    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(
+      RpcUserError,
+    );
     expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
   });
   it('never infers admission from an absent held item without delivery', () => {
     const h = build();
     h.service.bind(SESSION, TAB_A, ID_1);
     expect(() => h.service.settleAccepted(SESSION, ID_1)).toThrow(RpcUserError);
-    h.fake.emit({ sessionId: SESSION as SessionId, clientMessageId: ID_1, state: 'delivered' });
+    h.fake.emit({
+      sessionId: SESSION as SessionId,
+      clientMessageId: ID_1,
+      state: 'delivered',
+    });
     expect(h.service.settleAccepted(SESSION, ID_1)).toBe('admitted');
   });
 
@@ -234,7 +281,12 @@ describe('ChatFollowUpQueueService', () => {
     });
 
     expect(h.states().map((entry) => entry.payload)).toEqual([
-      { sessionId: SESSION, tabId: TAB_A, clientMessageId: ID_1, state: 'queued' },
+      {
+        sessionId: SESSION,
+        tabId: TAB_A,
+        clientMessageId: ID_1,
+        state: 'queued',
+      },
       {
         sessionId: SESSION,
         tabId: TAB_A,
@@ -253,7 +305,10 @@ describe('ChatFollowUpQueueService', () => {
       { warn: jest.fn() } as unknown as Logger,
       h.webviewManager,
     );
-    await streams.updateViewport({ protocolVersion: 2, visibleTabIds: [TAB_B] });
+    await streams.updateViewport({
+      protocolVersion: 2,
+      visibleTabIds: [TAB_B],
+    });
 
     h.service.bind(SESSION, TAB_A, ID_1);
     h.fake.hold(ID_1);
@@ -280,8 +335,18 @@ describe('ChatFollowUpQueueService', () => {
     });
 
     expect(h.states().map((entry) => entry.payload)).toEqual([
-      { sessionId: SESSION, tabId: TAB_A, clientMessageId: ID_1, state: 'queued' },
-      { sessionId: SESSION, tabId: TAB_A, clientMessageId: ID_1, state: 'delivered' },
+      {
+        sessionId: SESSION,
+        tabId: TAB_A,
+        clientMessageId: ID_1,
+        state: 'queued',
+      },
+      {
+        sessionId: SESSION,
+        tabId: TAB_A,
+        clientMessageId: ID_1,
+        state: 'delivered',
+      },
     ]);
     expect(
       h.sent.some((entry) => entry.type === MESSAGE_TYPES.CHAT_STREAM_SNAPSHOT),
@@ -296,7 +361,9 @@ describe('ChatFollowUpQueueService', () => {
       state: 'delivered',
     });
     expect(h.states()).toEqual([
-      expect.objectContaining({ payload: expect.objectContaining({ tabId: TAB_B }) }),
+      expect.objectContaining({
+        payload: expect.objectContaining({ tabId: TAB_B }),
+      }),
     ]);
   });
 
@@ -317,18 +384,22 @@ describe('ChatFollowUpQueueService', () => {
     expect(h.service.settleAccepted(SESSION, ID_1)).toBe('queued');
 
     h.service.bind(SESSION, TAB_A, ID_2);
-    h.fake.emit({ sessionId: SESSION as SessionId, clientMessageId: ID_2, state: 'delivered' });
+    h.fake.emit({
+      sessionId: SESSION as SessionId,
+      clientMessageId: ID_2,
+      state: 'delivered',
+    });
     expect(h.service.settleAccepted(SESSION, ID_2)).toBe('admitted');
-    expect(h.service.list(SESSION, TAB_A).map((i) => i.clientMessageId)).toEqual([
-      ID_1,
-    ]);
+    expect(
+      h.service.list(SESSION, TAB_A).map((i) => i.clientMessageId),
+    ).toEqual([ID_1]);
   });
 
   it('refuses another tab: registration or held items owned elsewhere', () => {
     const registered = build({ registeredTab: TAB_A });
-    expect(() => registered.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(
-      RpcUserError,
-    );
+    expect(() =>
+      registered.service.assertTabOwnsSession(SESSION, TAB_B),
+    ).toThrow(RpcUserError);
     expect(() => registered.service.list(SESSION, TAB_B)).toThrow(RpcUserError);
 
     const held = build();
@@ -337,7 +408,9 @@ describe('ChatFollowUpQueueService', () => {
     expect(() => held.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(
       RpcUserError,
     );
-    expect(() => held.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+    expect(() =>
+      held.service.assertTabOwnsSession(SESSION, TAB_A),
+    ).not.toThrow();
   });
 
   it('moves ownership to the tab that reopened a live session', () => {
@@ -373,7 +446,9 @@ describe('ChatFollowUpQueueService', () => {
 
     h.service.adoptTab(SESSION, TAB_B);
     h.service.retireSession(SESSION);
-    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(
+      RpcUserError,
+    );
   });
 
   it('adopts nothing for a session that is not live', () => {
@@ -381,7 +456,9 @@ describe('ChatFollowUpQueueService', () => {
     h.service.adoptTab(SESSION, TAB_B);
     h.service.bind(SESSION, TAB_A, ID_1);
     h.fake.hold(ID_1);
-    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+    expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(
+      RpcUserError,
+    );
   });
 
   describe('a tab that still shows the live session after another tab took its stream', () => {
@@ -402,31 +479,52 @@ describe('ChatFollowUpQueueService', () => {
 
     it('accepts queue admission, queued-list and withdraw from tab A without moving the stream', async () => {
       const h = takenOver();
-      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+      expect(() =>
+        h.service.assertTabOwnsSession(SESSION, TAB_A),
+      ).not.toThrow();
       h.service.bind(SESSION, TAB_A, ID_1);
       h.fake.hold(ID_1);
-      expect(h.service.list(SESSION, TAB_A)).toEqual([{ clientMessageId: ID_1, content: 'follow-up' }]);
+      expect(h.service.list(SESSION, TAB_A)).toEqual([
+        { clientMessageId: ID_1, content: 'follow-up' },
+      ]);
       expect(h.service.list(SESSION, TAB_B)).toEqual([]);
       expect(h.service.ownerIdentity(SESSION)).toBe(TAB_B);
-      expect(h.states().at(-1)?.payload).toMatchObject({ tabId: TAB_A, state: 'queued' });
-      await expect(h.service.withdraw(SESSION, TAB_A, ID_1)).resolves.toBe(true);
+      expect(h.states().at(-1)?.payload).toMatchObject({
+        tabId: TAB_A,
+        state: 'queued',
+      });
+      await expect(h.service.withdraw(SESSION, TAB_A, ID_1)).resolves.toBe(
+        true,
+      );
     });
 
     it('accepts tab A when the host saw it only as the registered tab', () => {
       const h = build({ registeredTab: TAB_A });
-      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(RpcUserError);
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_B)).toThrow(
+        RpcUserError,
+      );
       h.reregister(TAB_B);
-      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+      expect(() =>
+        h.service.assertTabOwnsSession(SESSION, TAB_A),
+      ).not.toThrow();
     });
 
     it('still refuses a tab bound to another session or never bound, and logs both tabs', () => {
       const h = takenOver();
       h.resolve(TAB_A, OTHER_SESSION);
-      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).toThrow(RpcUserError);
-      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_C)).toThrow(RpcUserError);
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).toThrow(
+        RpcUserError,
+      );
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_C)).toThrow(
+        RpcUserError,
+      );
       expect(h.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('follow-up refused'),
-        expect.objectContaining({ sessionId: SESSION, tabId: TAB_C, ownerTabId: TAB_B }),
+        expect.objectContaining({
+          sessionId: SESSION,
+          tabId: TAB_C,
+          ownerTabId: TAB_B,
+        }),
       );
     });
 
@@ -435,8 +533,12 @@ describe('ChatFollowUpQueueService', () => {
       // Tab B's record is rebound from SESSION to OTHER_SESSION.
       h.reregister(TAB_B, OTHER_SESSION);
       h.resolve(TAB_B, OTHER_SESSION, SESSION);
-      expect(() => h.service.assertTabOwnsSession(OTHER_SESSION, TAB_A)).not.toThrow();
-      expect(() => h.service.assertTabOwnsSession(OTHER_SESSION, TAB_C)).toThrow(RpcUserError);
+      expect(() =>
+        h.service.assertTabOwnsSession(OTHER_SESSION, TAB_A),
+      ).not.toThrow();
+      expect(() =>
+        h.service.assertTabOwnsSession(OTHER_SESSION, TAB_C),
+      ).toThrow(RpcUserError);
     });
 
     it('does not let an old registration replace the newer binding of its tab', () => {
@@ -448,7 +550,9 @@ describe('ChatFollowUpQueueService', () => {
       // Another tab takes the stream of the old session.
       h.reregister(TAB_B);
       h.resolve(TAB_B);
-      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).toThrow(RpcUserError);
+      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).toThrow(
+        RpcUserError,
+      );
     });
 
     it('keeps a tab in use when many other tabs bind after it', () => {
@@ -457,7 +561,9 @@ describe('ChatFollowUpQueueService', () => {
         h.service.noteTabSession(OTHER_SESSION, `filler-${i}`);
         if (i % 100 === 0) h.service.assertTabOwnsSession(SESSION, TAB_A);
       }
-      expect(() => h.service.assertTabOwnsSession(SESSION, TAB_A)).not.toThrow();
+      expect(() =>
+        h.service.assertTabOwnsSession(SESSION, TAB_A),
+      ).not.toThrow();
     });
   });
 
@@ -505,10 +611,20 @@ describe('ChatFollowUpQueueService', () => {
     h.service.bind(SESSION, TAB_A, ID_1);
     h.fake.hold(ID_1);
     h.fake.steerResult = { ok: true, mode: 'interrupt' };
-    await expect(h.service.steer(SESSION, TAB_A, ID_1)).resolves.toEqual({ ok: true, mode: 'interrupt' });
+    await expect(h.service.steer(SESSION, TAB_A, ID_1)).resolves.toEqual({
+      ok: true,
+      mode: 'interrupt',
+    });
     expect(h.service.list(SESSION, TAB_A)).toHaveLength(1);
-    h.fake.emit({ sessionId: SESSION as SessionId, clientMessageId: ID_1, state: 'delivered' });
-    await expect(h.service.steer(SESSION, TAB_A, ID_1)).resolves.toEqual({ ok: false, code: 'NOT_QUEUED' });
+    h.fake.emit({
+      sessionId: SESSION as SessionId,
+      clientMessageId: ID_1,
+      state: 'delivered',
+    });
+    await expect(h.service.steer(SESSION, TAB_A, ID_1)).resolves.toEqual({
+      ok: false,
+      code: 'NOT_QUEUED',
+    });
   });
 
   it('answers empty / false / UNSUPPORTED when the adapter lacks the queue', async () => {

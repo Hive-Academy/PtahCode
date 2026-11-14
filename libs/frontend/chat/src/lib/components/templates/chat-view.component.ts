@@ -86,6 +86,7 @@ import {
   commandCenterPersonaFor,
 } from '@ptah-extension/chat-state';
 import { questionBelongsToTab } from '../../services/question-visibility';
+import { withoutNativeCodexAgents } from '../organisms/native-codex-control-reason';
 import {
   SESSION_CONTEXT,
   SESSION_DISPLAY_DOCK,
@@ -981,7 +982,12 @@ export class ChatViewComponent implements OnDestroy {
    */
   protected readonly resolvedResumableSubagents = computed<SubagentRecord[]>(
     () => {
-      const all = this.chatStore.resumableSubagents();
+      // Defence in depth: native Codex children are never resumable (D15).
+      const monitor = this.agentMonitorStore.subagents();
+      const all = withoutNativeCodexAgents(
+        this.chatStore.resumableSubagents(),
+        (toolCallId) => monitor.get(toolCallId),
+      );
       if (!this._sessionContext) return all;
       const sid = this.resolvedSessionId();
       return all.filter((s) => agentVisibleInSession(s.parentSessionId, sid));

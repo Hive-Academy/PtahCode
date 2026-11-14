@@ -36,6 +36,16 @@ describe('CodexLaneEvents', () => {
     events.map({ ...identity, sequence: 1, type: 'terminal', status: 'completed' });
     expect(events.finishPendingUsage()?.turnTelemetry?.status).toBe('unavailable');
   });
+  it('ignores native subagent activity and still ends the turn', () => {
+    const map = mapper();
+    const activity = map({ type: 'subagentActivity', activityId: 'card',
+      cardToolCallId: 'card', agentThreadId: 'child', agentPath: '/root/child',
+      kind: 'started', cycleOrdinal: 1, cycleId: 'card:1' });
+    expect(activity).toEqual({ segments: [] });
+    const terminal = map({ type: 'terminal', status: 'completed',
+      usage: { inputTokens: 4, outputTokens: 2 } });
+    expect(terminal.terminal).toBe('completed');
+  });
   it('renders async questions as ordinary text for lane users', () => {
     const map = mapper();
     expect(map({ type: 'userInputAsync', itemId: 'question', text: 'Choose one',

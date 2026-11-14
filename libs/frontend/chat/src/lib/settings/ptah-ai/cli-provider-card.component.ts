@@ -91,7 +91,7 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
         </ptah-native-popover>
       </div>
       <div class="border-t border-base-content/10 px-1 pt-1 text-xs">
-        <p class="font-semibold">Current CLI mode</p><p class="truncate text-base-content-muted" [title]="row().permission.detail">{{ row().permission.badge }}</p>
+        <p class="font-semibold" title="Built-in behavior of this CLI. Lanes that Ptah spawns use the Lane default below; a parent session in Plan Mode caps them to Plan.">Native CLI behavior</p><p class="truncate text-base-content-muted" [title]="row().permission.detail">{{ row().permission.badge }}</p>
       </div>
       <div class="shrink-0 border-t border-base-content/10 px-1 pt-1 text-xs">
         <ptah-cli-lane-default-cell [cli]="row().cli" [name]="row().name" [manifest]="row().manifest"

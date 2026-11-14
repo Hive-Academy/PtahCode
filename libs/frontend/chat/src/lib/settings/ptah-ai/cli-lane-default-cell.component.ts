@@ -36,8 +36,9 @@ let nextTitleId = 0;
       @if (permissions().length) {
         <label class="flex flex-col gap-0.5">Permission
           <select ptahSelect [size]="layout() === 'wide' ? 'sm' : 'xs'" class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission()"
-            [value]="effectivePermission()" [disabled]="disabled() || pending() !== null" (change)="choosePermission($event)">
-            @for (mode of permissions(); track mode) { <option [value]="mode">{{ mode }}</option> }
+            [disabled]="disabled() || pending() !== null" (change)="choosePermission($event)">
+            <!-- Per-option [selected]: a select [value] bound before its options render falls back to the first option ("plan"). -->
+            @for (mode of permissions(); track mode) { <option [value]="mode" [selected]="mode === effectivePermission()">{{ mode }}</option> }
           </select>
         </label>
         @if (cli() === 'cursor') {
@@ -49,8 +50,8 @@ let nextTitleId = 0;
       @if (networks().length) {
         <label class="flex flex-col gap-0.5">Network
           <select ptahSelect [size]="layout() === 'wide' ? 'sm' : 'xs'" class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork()"
-            [value]="effectiveNetwork()" [disabled]="disabled() || pending() !== null" (change)="chooseNetwork($event)">
-            @for (mode of networks(); track mode) { <option [value]="mode">{{ mode }}</option> }
+            [disabled]="disabled() || pending() !== null" (change)="chooseNetwork($event)">
+            @for (mode of networks(); track mode) { <option [value]="mode" [selected]="mode === effectiveNetwork()">{{ mode }}</option> }
           </select>
         </label>
       } @else { <span tabindex="0" [title]="reason()">Network: Unavailable — {{ reason() }}</span> }

@@ -97,6 +97,25 @@ export function runFileSystemContract(
       expect(read.truncated).toBe(true);
     });
 
+    it('range read starts at the byte offset and reports remaining data', async () => {
+      if (!provider.readFileRangeNoFollow) return;
+      await provider.writeFile('/fs/range.txt', 'abcdef');
+      const middle = await provider.readFileRangeNoFollow('/fs/range.txt', 2, 2);
+      expect(Array.from(middle.bytes)).toEqual([99, 100]);
+      expect(middle.truncated).toBe(true);
+      const end = await provider.readFileRangeNoFollow('/fs/range.txt', 4, 2);
+      expect(Array.from(end.bytes)).toEqual([101, 102]);
+      expect(end.truncated).toBe(false);
+    });
+
+    it('range read enforces its 256 KiB cap and rejects non-files', async () => {
+      if (!provider.readFileRangeNoFollow) return;
+      await provider.writeFile('/fs/range-limit.txt', 'x');
+      await expect(provider.readFileRangeNoFollow('/fs/range-limit.txt', 0, 256 * 1024 + 1)).rejects.toThrow(RangeError);
+      await expect(provider.readFileRangeNoFollow('/fs/range-limit.txt', -1, 1)).rejects.toThrow(RangeError);
+      await expect(provider.readFileRangeNoFollow('/fs', 0, 1)).rejects.toThrow();
+    });
+
     it('readDirectory surfaces direct children with correct FileType', async () => {
       await provider.writeFile('/fs/dir/child.txt', 'a');
       await provider.createDirectory('/fs/dir/sub');

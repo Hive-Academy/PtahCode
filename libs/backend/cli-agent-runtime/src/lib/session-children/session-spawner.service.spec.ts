@@ -125,8 +125,12 @@ export function makeHarness(
     },
   };
   const active = new Set<string>([PARENT]);
+  const nativeIds = new Set<string>();
   const adapter = {
     isSessionActive: jest.fn((id: string) => active.has(id)),
+    resolveLiveSessionId: jest.fn((id: string) =>
+      nativeIds.has(id) ? id : undefined,
+    ),
     sendMessageToSession: jest.fn().mockResolvedValue(undefined),
     claimHeldPeerMessages: jest.fn().mockReturnValue([]),
     interruptCurrentTurn: jest.fn().mockResolvedValue(true),
@@ -198,7 +202,7 @@ export function makeHarness(
     ),
     settleLaneAdoption: jest.fn(),
   };
-  const lifecycleIds = new Map<string, string>([[PARENT, PARENT_SDK]]);
+  const lifecycleIds = new Map<string, string | null>([[PARENT, PARENT_SDK]]);
   /** The parent record's live level; what the autopilot toggle rewrites. */
   const parentLevel: { value: PermissionLevel } = { value: 'yolo' };
   const lifecycle = {
@@ -365,6 +369,7 @@ export function makeHarness(
     sessionEnd,
     permissionListeners,
     active,
+    nativeIds,
     adapter,
     host,
     provisioner,
@@ -1584,6 +1589,62 @@ describe('SessionSpawnerService — session organization record (TASK_2026_580 R
     const input = recordCalls(h).mock.calls[0][0];
     expect(input).not.toHaveProperty('parentSessionId');
     expect(Object.values(input)).not.toContain(PARENT);
+  });
+
+  it('recognizes a live SDK ID (e.g., Codex thread) as an active parent and records it (regression)', async () => {
+    // When a Codex parent starts a child, the parent's SDK ID is already a live thread ID,
+    // not a tab ID in the lifecycle manager. The spawner must recognize it as active
+    // and use it directly as parentSdkSessionId.
+    const h = makeHarness();
+    const codexThreadId = randomUUID();
+    // Simulate Codex parent: add it to active sessions, but NOT to lifecycleIds.
+    h.active.add(codexThreadId);
+    h.nativeIds.add(codexThreadId);
+    h.lifecycleIds.delete(PARENT);
+
+    const child = await h.startChild({
+      callerSessionId: codexThreadId,
+    });
+    expect(child.parentSessionId).toBe(codexThreadId);
+    expect(child.parentSdkSessionId).toBe(codexThreadId);
+
+    resolveChild(h, child.childSessionId);
+    await flush();
+
+    expect(recordCalls(h)).toHaveBeenCalledWith(
+      expect.objectContaining({ parentSessionId: codexThreadId }),
+    );
+  });
+
+  it('does not use an unresolved Claude tab as its parent SDK id', async () => {
+    const h = makeHarness();
+    h.lifecycleIds.set(PARENT, null);
+    const child = await h.startChild();
+    expect(child.parentSdkSessionId).toBeUndefined();
+    resolveChild(h, child.childSessionId);
+    await flush();
+    expect(recordCalls(h).mock.calls[0][0]).not.toHaveProperty(
+      'parentSessionId',
+    );
+  });
+
+  it('does not use an unknown inactive id as the parent on resolve', async () => {
+    const h = makeHarness();
+    h.lifecycleIds.delete(PARENT);
+    const child = await h.startChild();
+    resolveChild(h, child.childSessionId);
+    await flush();
+    expect(recordCalls(h).mock.calls[0][0]).not.toHaveProperty(
+      'parentSessionId',
+    );
+  });
+
+  it('does not mistake a native opening tab for its thread id', async () => {
+    const h = makeHarness();
+    h.lifecycleIds.delete(PARENT);
+    h.adapter.resolveLiveSessionId.mockReturnValueOnce(PARENT_SDK);
+    const child = await h.startChild();
+    expect(child.parentSdkSessionId).toBeUndefined();
   });
 
   it('records the same input again when the same child resolves twice (the store upserts)', async () => {

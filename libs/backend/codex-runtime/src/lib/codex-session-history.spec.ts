@@ -107,6 +107,31 @@ describe('readCodexSessionHistory', () => {
     return { ...meta, failures };
   };
 
+  it('recovers a root-linked native child after descendant listing loses the process', async () => {
+    const normal = fixture();
+    const request: CodexHistoryRequest = async (method, params) => {
+      if (method === 'thread/list') throw new Error('Codex process exited');
+      if (method === 'thread/turns/list') {
+        const isChild = 'threadId' in params && params.threadId === 'child';
+        return validateCodexResult(method, { data: [{
+          id: isChild ? 'child-turn' : 'root-turn', status: 'completed', itemsView: 'full',
+          items: isChild ? [
+            { type: 'commandExecution', id: 'tool-1', command: 'pwd', cwd: '/work', commandActions: [], status: 'completed', aggregatedOutput: '/work', exitCode: 0 },
+            { type: 'commandExecution', id: 'tool-2', command: 'echo ok', cwd: '/work', commandActions: [], status: 'completed', aggregatedOutput: 'ok', exitCode: 0 },
+          ] : [
+            { type: 'subAgentActivity', id: 'card', agentThreadId: 'child', agentPath: '/root/native_demo', kind: 'started' },
+            { type: 'subAgentActivity', id: 'done', agentThreadId: 'child', agentPath: '/root/native_demo', kind: 'completed' },
+          ],
+        }], nextCursor: null });
+      }
+      return normal(method, params);
+    };
+    const snapshot = await readCodexSessionHistory('root', request, () => undefined, logger);
+    expect(snapshot.threads.map((thread) => thread.id)).toEqual(['root', 'child']);
+    expect(snapshot.threads[1].turns[0].items).toHaveLength(2);
+    expect(snapshot.threads[1].turns[0].status).toBe('completed');
+  });
+
   it('hydrates root and child in order, including every turn and item page', async () => {
     const snapshot = await readCodexSessionHistory('root', fixture(), () => undefined, logger);
     expect(snapshot.threads.map((thread) => thread.id)).toEqual(['root', 'child']);
@@ -114,6 +139,23 @@ describe('readCodexSessionHistory', () => {
     expect(snapshot.threads[0].turns[0].items.map((item) => item.id)).toEqual(['r1-a', 'r1-b']);
     expect(snapshot.threads[0].turns[0].itemEntries?.[0].startedAtMs).toBe(10);
     expect(snapshot.threads[1].turns[1].items.map((item) => item.id)).toEqual(['c2-a', 'c2-b']);
+  });
+
+  it('hydrates a child named in parent activity when thread/list omits it', async () => {
+    const normal = fixture();
+    const request: CodexHistoryRequest = async (method, params) => {
+      if (method === 'thread/list') return validateCodexResult(method, { data: [] });
+      if (method === 'thread/items/list' && 'threadId' in params && params.threadId === 'root') {
+        const turnId = 'turnId' in params ? params.turnId : '';
+        return validateCodexResult(method, { data: [{ turnId, startedAtMs: 10, completedAtMs: 11,
+          item: { type: 'subAgentActivity', id: 'card', agentThreadId: 'child',
+            agentPath: '/root/native_demo', kind: 'started' } }] });
+      }
+      return normal(method, params);
+    };
+    const snapshot = await readCodexSessionHistory('root', request, () => undefined, logger);
+    expect(snapshot.threads.map((value) => value.id)).toEqual(['root', 'child']);
+    expect(snapshot.threads[1].turns[0].items).toHaveLength(2);
   });
 
   it('uses 25 row pages for turns and items while retaining cursor paging', async () => {

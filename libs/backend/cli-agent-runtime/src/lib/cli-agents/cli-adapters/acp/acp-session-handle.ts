@@ -969,5 +969,8 @@ export function createAcpSessionHandle(
     supportsContinuation,
     continue: continueTurn,
     getPid: () => transport.getPid(),
+    outcomeUsageIsTurnTotal: true,
+    usageScope: 'turn',
+    getObservedNativeThreadId: () => sessionId,
   };
 }

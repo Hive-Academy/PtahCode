@@ -1014,6 +1014,42 @@ describe('HostRoutingCoordinator', () => {
   });
 
   describe('conversation window and lifecycle', () => {
+    it('moves a session alias to the tab that resumes the same session', async () => {
+      const h = harness();
+      // A closed tab keeps its alias: aliases are removed only on eviction.
+      h.registry.fire({ tabId: 'old-tab', realSessionId: SDK, timestamp: 1 });
+      h.nextAnswer({ e: 'yes', s: 'no' });
+      h.turn('first prompt', null);
+      await flush();
+      h.registry.fire({ tabId: TAB, realSessionId: SDK, timestamp: 2 });
+      h.events.emit(SDK, 'Resumed reply');
+      h.nextAnswer({ e: 'no' });
+      h.turn('second prompt');
+      await flush();
+      expect(h.assess.mock.calls.at(-1)?.[0].lastAssistantReply).toBe(
+        'Resumed reply',
+      );
+    });
+
+    it('aliases a Codex thread to its own tab on first bind', async () => {
+      const h = harness();
+      h.nextAnswer({ e: 'yes', s: 'no' });
+      h.turn('first prompt', null);
+      await flush();
+      h.registry.fire({
+        tabId: TAB,
+        realSessionId: 'codex-thread',
+        timestamp: 1,
+      });
+      h.events.emit('codex-thread', 'Codex reply');
+      h.nextAnswer({ e: 'no' });
+      h.turn('second prompt', 'codex-thread');
+      await flush();
+      expect(h.assess.mock.calls.at(-1)?.[0].lastAssistantReply).toBe(
+        'Codex reply',
+      );
+    });
+
     it('stores the assistant reply for a start-turn tab once its session id resolves', async () => {
       const h = harness();
       h.nextAnswer({ e: 'yes', s: 'no' });

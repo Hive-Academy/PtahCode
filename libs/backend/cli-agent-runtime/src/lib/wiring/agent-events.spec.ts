@@ -445,6 +445,22 @@ describe('persistCliSessionReference — missing parent session', () => {
       expect.objectContaining({ workspaceKey: '/workspace/root', potentialCapabilities }),
     );
   });
+
+  it('persists the effective and requested lane policies', () => {
+    const addCliSession = jest.fn().mockResolvedValue(undefined);
+    const container = buildContainer([[
+      SDK_TOKENS.SDK_SESSION_METADATA_STORE,
+      { addCliSession, markChildSession: jest.fn().mockResolvedValue(undefined) },
+    ]]);
+    const effectivePolicy = { permission: 'ask' as const, permissionSource: 'spawn' as const };
+    const requestedPolicy = { permission: 'ask' as const };
+
+    persistCliSessionReference(container, Object.assign(Object.create(null) as Logger, createMockLogger()), '[test]',
+      buildInfo({ parentSessionId: PARENT_SESSION, cliSessionId: 'cli-sess-1', effectivePolicy, requestedPolicy }), undefined);
+
+    expect(addCliSession).toHaveBeenCalledWith(PARENT_SESSION,
+      expect.objectContaining({ effectivePolicy, requestedPolicy }));
+  });
 });
 
 describe('persistCliSessionReference — completion time', () => {

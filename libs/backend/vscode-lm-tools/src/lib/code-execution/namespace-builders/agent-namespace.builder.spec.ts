@@ -378,6 +378,23 @@ describe('buildAgentNamespace — spawn (non-ptahCli)', () => {
     expect(enriched.pluginPaths).toBeUndefined();
   });
 
+  it('resolves caller parent IDs with the same resolver used by spawn', async () => {
+    const resolver = jest.fn((id: string) =>
+      id === 'tab-1' ? 'session-uuid-1' : id,
+    );
+    const { deps, mocks } = makeDeps({ resolveSessionId: resolver });
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a1' });
+    const agent = buildAgentNamespace(deps);
+
+    expect(agent.resolveCallerParentId?.('tab-1')).toBe('session-uuid-1');
+    expect(agent.resolveCallerParentId?.('other')).toBe('other');
+    await agent.spawn({ task: 'do thing', cli: 'codex', parentSessionId: 'tab-1' });
+    expect(mocks.processManager.spawn.mock.calls[0][0].parentSessionId).toBe(
+      'session-uuid-1',
+    );
+    expect(resolver).toHaveBeenCalledWith('tab-1');
+  });
+
   it('uses the caller session identity supplied by the transport', async () => {
     const { deps, mocks } = makeDeps({
       resolveSessionId: (s) => s,
@@ -501,6 +518,19 @@ describe('buildAgentNamespace — spawn (ptahCliId)', () => {
       permission: 'plan', network: 'allow' });
     expect(mocks.registry?.spawnAgent).toHaveBeenCalledWith('agent-a', expect.any(String),
       expect.objectContaining({ permission: 'plan', network: 'allow' }));
+    expect(mocks.processManager.spawnFromSdkHandle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ requestedPolicy: { permission: 'plan', network: 'allow' } }),
+    );
+    // The contract renderer is stubbed (see the jest.mock above): pin the
+    // effective level the builder passes on. The "BLOCKED: plan mode" text
+    // itself is pinned by lane-reporting-contract.spec.ts.
+    const { renderLaneCompletionContract } = jest.requireMock<{
+      renderLaneCompletionContract: jest.Mock;
+    }>('@ptah-extension/cli-agent-runtime');
+    expect(renderLaneCompletionContract).toHaveBeenLastCalledWith(
+      expect.objectContaining({ effectivePermission: 'plan' }),
+    );
   });
 
   it('forwards taskKind and routingSource to the SDK handle spawn', async () => {

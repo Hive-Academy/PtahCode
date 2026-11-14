@@ -72,6 +72,8 @@ export interface IFileSystemProvider {
   realpath(path: string): Promise<string>;
   /** Read no more than maxBytes + 1 from a link-safe handle. */
   readFileBoundedNoFollow(path: string, maxBytes: number): Promise<{ bytes: Uint8Array; truncated: boolean }>;
+  /** Read at most 256 KiB from a byte offset without following the final link. */
+  readFileRangeNoFollow?(path: string, offset: number, maxBytes: number): Promise<{ bytes: Uint8Array; truncated: boolean }>;
 
   /**
    * Check if a file or directory exists.

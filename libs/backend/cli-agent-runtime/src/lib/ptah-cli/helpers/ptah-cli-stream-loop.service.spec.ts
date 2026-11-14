@@ -1103,3 +1103,71 @@ describe('PtahCliStreamLoop API rate-limit marker', () => {
     expect(errorSegments(emitSegment)).toEqual([]);
   });
 });
+
+describe('PtahCliStreamLoop usage tracking', () => {
+  it('resolves session ID from system init', async () => {
+    const sessionResolvedCallback = jest.fn();
+    const { loop } = makeLoop({ onSessionResolved: sessionResolvedCallback });
+    const initMsg = {
+      type: 'system',
+      subtype: 'init',
+      session_id: VALID_UUID,
+      model: 'claude-3-5-sonnet',
+    } as unknown as SDKMessage;
+
+    await loop.run(singleMessage(initMsg));
+
+    expect(sessionResolvedCallback).toHaveBeenCalledWith(VALID_UUID);
+  });
+
+  it('emits segment with usage when result includes usage', async () => {
+    const emitSegment = jest.fn();
+    const loop = new PtahCliStreamLoop({
+      logger: createLogger(),
+      messageTransformer: createTransformerStub(),
+      emitOutput: jest.fn(),
+      emitSegment,
+      emitStreamEvent: jest.fn(),
+      agentName: 'test-agent',
+    });
+
+    const msg = {
+      type: 'result',
+      subtype: 'success',
+      num_turns: 1,
+      usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 10, cache_creation_input_tokens: 5 },
+    } as unknown as SDKMessage;
+
+    await loop.run(singleMessage(msg));
+
+    const usageSegments = emitSegment.mock.calls
+      .map((call) => call[0])
+      .filter((segment) => segment.usage);
+
+    expect(usageSegments.length).toBeGreaterThan(0);
+  });
+
+  it('handles missing usage without error', async () => {
+    const emitSegment = jest.fn();
+    const loop = new PtahCliStreamLoop({
+      logger: createLogger(),
+      messageTransformer: createTransformerStub(),
+      emitOutput: jest.fn(),
+      emitSegment,
+      emitStreamEvent: jest.fn(),
+      agentName: 'test-agent',
+    });
+
+    const msg = {
+      type: 'result',
+      subtype: 'success',
+      num_turns: 1,
+      // No usage field
+    } as unknown as SDKMessage;
+
+    const exitCode = await loop.run(singleMessage(msg));
+
+    expect(exitCode).toBe(0);
+    expect(emitSegment).toHaveBeenCalled();
+  });
+});

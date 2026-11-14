@@ -36,6 +36,7 @@ import {
 } from '../cli-agents/messaging/parent-session-purge.service';
 import type { PtahCliRegistry } from '../ptah-cli';
 import type { ParentLaneLevel } from '../cli-agents/messaging/parent-lane-level';
+import { parentLanePermission } from '../cli-agents/parent-lane-permission';
 
 const envelopeStore = (c: DependencyContainer): AgentMessageEnvelopeStore =>
   c.resolve<AgentMessageEnvelopeStore>(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ENVELOPE_STORE);
@@ -135,19 +136,12 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
       const metadata = (): SessionMetadataStore =>
         c.resolve<SessionMetadataStore>(SDK_TOKENS.SDK_SESSION_METADATA_STORE);
       const parentLevel: ParentLaneLevel = (parentSessionId) => {
-        if (!parentSessionId) return undefined;
         const lifecycle = c.isRegistered(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER, true)
           ? c.resolve<{ find(id: string): { realSessionId?: string; permissionLevel?: 'ask' | 'auto-edit' | 'yolo' | 'plan' } | undefined }>(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER) : undefined;
-        const record = lifecycle?.find(parentSessionId);
-        const codexId = record?.realSessionId ?? parentSessionId;
         const codex = c.isRegistered(SDK_TOKENS.CODEX_CHAT_ADAPTER, true)
-          ? c.resolve<{ getPermissionLevel(id: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined } | null>(SDK_TOKENS.CODEX_CHAT_ADAPTER)
+          ? c.resolve<{ getPermissionLevel(id: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined; resolveLiveSessionId?(callerId: string): string | undefined } | null>(SDK_TOKENS.CODEX_CHAT_ADAPTER)
           : undefined;
-        // Unknown session state is capped at plan; a truly parentless lane stays parentless.
-        const level = codex?.getPermissionLevel(codexId) ?? record?.permissionLevel;
-        if (level === undefined) return 'plan';
-        if (level === 'plan' || level === 'auto-edit' || level === 'yolo') return level;
-        return undefined;
+        return parentLanePermission(parentSessionId, lifecycle, codex);
       };
       return new AgentLaneResumeService(manager, new PtahCliLaneResumer(
         manager,

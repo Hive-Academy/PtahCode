@@ -78,9 +78,10 @@ interface ActivationHarness {
   readonly disk: Map<string, { size: number; mtime: number }>;
   readonly laneOwner: jest.Mock;
   readonly loggerInfo: jest.Mock;
+  readonly probeWait: jest.Mock;
 }
 
-function activationHarness(adapterOverride?: CliAdapter): ActivationHarness {
+function activationHarness(adapterOverride?: CliAdapter, withMcp = false): ActivationHarness {
   type ManagerArgs = ConstructorParameters<typeof AgentProcessManager>;
   type EnvironmentArgs = ConstructorParameters<typeof AgentSpawnEnvironment>;
   type NotifierArgs = ConstructorParameters<typeof LaneCompletionNotifier>;
@@ -126,6 +127,7 @@ function activationHarness(adapterOverride?: CliAdapter): ActivationHarness {
     logger, detection, workspace, reasoning, sentry, null, null, null,
   );
   jest.spyOn(environment, 'validateWorkingDirectory').mockResolvedValue();
+  if (withMcp) jest.spyOn(environment, 'mcpPort').mockReturnValue(51821);
   const disk = new Map<string, { size: number; mtime: number }>();
   const fileSystem = Object.assign(Object.create(null), {
     exists: jest.fn(async (path: string) => disk.has(path)),
@@ -155,12 +157,16 @@ function activationHarness(adapterOverride?: CliAdapter): ActivationHarness {
     recordSuccess: jest.fn(), recordOwnerEvidence: jest.fn(),
     recordWindowEvidence: jest.fn(),
   };
+  const probeWait = jest.fn(async () => undefined);
   const manager = new AgentProcessManager(
     logger, detection, registry, sentry,
     new AgentMessageRouter(logger, detection), environment,
     new AgentOutputBuffer(logger), notifier, gate, owners,
     Object.assign(Object.create(null), ledger) as ManagerArgs[10],
-    undefined, undefined, undefined, undefined, undefined,
+    undefined, withMcp ? {
+      get: () => undefined,
+      waitFor: probeWait,
+    } : undefined, undefined, undefined, undefined,
     {
       issue: jest.fn(() => 'a'.repeat(43)),
       revokeSubject: jest.fn(),
@@ -169,7 +175,7 @@ function activationHarness(adapterOverride?: CliAdapter): ActivationHarness {
   return {
     manager, gate, router: new AgentReportRouter(logger, manager, chat),
     notifier, adapter: adapterOverride ?? adapter, handles, rolloutRead, ledger, chatSend, disk,
-    laneOwner, loggerInfo: logger.info as jest.Mock,
+    laneOwner, loggerInfo: logger.info as jest.Mock, probeWait,
   };
 }
 
@@ -308,6 +314,34 @@ describe('native Codex lane activation at the manager boundary', () => {
   afterEach(() => {
     jest.clearAllTimers();
     jest.useRealTimers();
+  });
+
+  it('native lane initializes with bound token and matching observer key', async () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'ptah-native-mcp-'));
+    try {
+      mkdirSync(join(fixtureRoot, 'home'));
+      mkdirSync(join(fixtureRoot, 'work'));
+      const home = realpathSync(join(fixtureRoot, 'home'));
+      const workDirectory = realpathSync(join(fixtureRoot, 'work'));
+      const native = nativeAdapter(home, workDirectory);
+      const h = activationHarness(native.adapter, true);
+      const lane = await h.manager.spawn({ task: 'MCP probe', cli: 'codex', workingDirectory: workDirectory, model: 'gpt-test' });
+      const opened = (native.runtime.open as jest.Mock).mock.calls[0];
+      const profile = opened[0] as CodexExecutionProfile;
+      const secrets = opened[5] as ReadonlyMap<string, string>;
+      const ptah = profile.mcpServers.find((server) => server.name === 'ptah');
+      expect(ptah).toMatchObject({ transport: 'http', url: expect.stringContaining(`/agent/${lane.agentId}`) });
+      if (!ptah || ptah.transport !== 'http') throw new Error('Missing HTTP Ptah MCP server');
+      const url = new URL(ptah.url);
+      expect(Number(url.port)).toBe(51821);
+      expect(url.pathname).toContain(`/agent/${lane.agentId}`);
+      expect(h.probeWait).toHaveBeenCalledWith(lane.agentId, 51821, expect.any(Number), expect.any(AbortSignal));
+      expect([...secrets.values()]).toEqual(['a'.repeat(43)]);
+      native.contexts[0].terminal(1);
+      await settled();
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it('carries native terminal usage through the manager gate and ledger, then routes an attributed report', async () => {

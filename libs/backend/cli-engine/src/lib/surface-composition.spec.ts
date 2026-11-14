@@ -35,6 +35,49 @@
  */
 
 import 'reflect-metadata';
+import { UsageReconciliationService, USAGE_RECONCILIATION_TOKENS, registerUsageAnalytics } from '@ptah-extension/usage-analytics';
+import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
+
+describe('CLI usage reconciliation composition', () => {
+  it('registers the real producer token and starts after lane outcomes', () => {
+    const source = fs.readFileSync(path.join(__dirname, 'container.ts'), 'utf8');
+    expect(source).toContain('PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER');
+    expect(source.indexOf('startCliLaneOutcomes(container, logger)')).toBeLessThan(source.indexOf('usageReconciliationService.start()'));
+    expect(source).toContain('usageReconciliationService.setAfterPass');
+    expect(source).toContain('container.resolve(UsageReconciliationService).stop()');
+    expect(source).not.toMatch(/from ['"](?:electron|vscode)['"]/);
+  });
+
+  it('resolves one singleton through the producer token and stops event processing', async () => {
+    jest.useFakeTimers();
+    try {
+      const c = rootContainer.createChildContainer();
+      const listClaudeRoots = jest.fn(async () => [] as string[]);
+      c.registerInstance(TOKENS.LOGGER, { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(), trace: jest.fn() });
+      c.register(USAGE_RECONCILIATION_TOKENS.CLAUDE_COLLECTOR, { useValue: { sourceId: 'claude-jsonl', collect: jest.fn() } });
+      c.register(USAGE_RECONCILIATION_TOKENS.CODEX_COLLECTOR, { useValue: { sourceId: 'codex-rollout', collect: jest.fn() } });
+      c.register(USAGE_RECONCILIATION_TOKENS.CURSOR_STORE, { useValue: { load: jest.fn(), commit: jest.fn() } });
+      c.register(USAGE_RECONCILIATION_TOKENS.SOURCES, { useValue: { listClaudeRoots, listCodexRoots: async () => [], listClaudeFiles: async function* () { yield* []; }, listCodexFiles: async function* () { yield* []; }, realpath: async (file: string) => file } });
+      registerUsageAnalytics(c);
+      c.register(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { useToken: UsageReconciliationService });
+      const service = c.resolve(UsageReconciliationService);
+      expect(c.resolve(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER)).toBe(service);
+      service.start();
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(listClaudeRoots).toHaveBeenCalledTimes(1);
+      c.resolve<UsageReconciliationService>(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER).enqueue({ kind: 'session-closed', sessionId: 's1', providerId: 'claude', occurredAtMs: 1 });
+      await jest.advanceTimersByTimeAsync(2000);
+      expect(listClaudeRoots).toHaveBeenCalledTimes(2);
+      service.stop();
+      service.enqueue({ kind: 'session-closed', sessionId: 's1', providerId: 'claude', occurredAtMs: 2 });
+      await jest.advanceTimersByTimeAsync(2000);
+      expect(listClaudeRoots).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';

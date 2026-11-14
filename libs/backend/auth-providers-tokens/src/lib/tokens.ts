@@ -83,6 +83,7 @@ export const AUTH_PROVIDERS_TOKENS = {
   SDK_PROVIDER_ACCOUNT_SELECTION_READER: Symbol.for(
     'SdkProviderAccountSelectionReader',
   ),
+  SDK_CLAUDE_USAGE_PROFILE_ROOTS: Symbol.for('SdkClaudeUsageProfileRoots'),
 } as const;
 
 export type AuthProvidersDIToken = keyof typeof AUTH_PROVIDERS_TOKENS;

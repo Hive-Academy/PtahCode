@@ -423,6 +423,42 @@ describe('SubagentLaneComponent', () => {
     ).toBeNull();
   });
 
+  it('shows native path and status with disabled controls and structured failure', () => {
+    contexts.set(new Map([['tool-1', context({ steerable: true, stoppable: true })]]));
+    const fixture = setup({ ...base, agentType: 'codex', taskId: undefined,
+      nativeCycleId: 'thread-1:1', nativeCycleOrdinal: 1,
+      description: 'native_vortex', teammateName: undefined });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('[data-testid="native-codex-lane-status"]')?.textContent).toContain('native_vortex');
+    expect(root.querySelector('[data-testid="native-codex-lane-status"]')?.textContent).toContain('running');
+    const buttons = root.querySelectorAll<HTMLButtonElement>('[data-testid="native-codex-controls"] button');
+    expect(buttons).toHaveLength(2);
+    buttons.forEach((button) => { expect(button.disabled).toBe(true); button.click(); });
+    expect(root.textContent).toContain('Native Codex subagents do not support send or stop from Ptah yet.');
+    expect(root.querySelector('ptah-agent-steer-input')).toBeNull();
+    expect(steer).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    fixture.componentRef.setInput('record', { ...base, agentType: 'codex', taskId: undefined,
+      nativeCycleId: 'thread-1:1', nativeCycleOrdinal: 1,
+      description: 'native_vortex', teammateName: undefined, status: 'failed', errorMessage: 'child thread failed' });
+    fixture.detectChanges();
+    expect(root.querySelector('[data-testid="native-codex-lane-status"]')?.textContent).toContain('child thread failed');
+  });
+
+  it('keeps v1 Codex send and stop controls enabled without a native reason', async () => {
+    contexts.set(new Map([['tool-1', context({ steerable: true, stoppable: true })]]));
+    const fixture = setup({ ...base, agentType: 'codex', taskId: undefined });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('[data-testid="native-codex-controls"]')).toBeNull();
+    expect(root.textContent).not.toContain('Native Codex subagents do not support send or stop from Ptah yet.');
+    expect(root.querySelector('ptah-agent-steer-input textarea')).not.toBeNull();
+    const stopButton = root.querySelector<HTMLButtonElement>('[aria-label="Stop Explore"]');
+    expect(stopButton?.disabled).toBe(false);
+    stopButton?.click();
+    await Promise.resolve();
+    expect(stop).toHaveBeenCalledWith('task-1', 'session-123456');
+  });
+
   it('shows no actions without tray context and no output when finished', () => {
     const fixture = setup({ ...base, status: 'completed', totalTokens: 0 });
     const root: HTMLElement = fixture.nativeElement;

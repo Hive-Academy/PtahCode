@@ -233,6 +233,24 @@ describe('AgentMonitorPanelComponent — unresolved session scope', () => {
     expect(panel.sessionSubagents()).toEqual([]);
   });
 
+  it('keeps a native Codex child in its parent tab after completion', () => {
+    const native = {
+      parentToolUseId: 'native-card', parentSessionId: OTHER_SESSION,
+      agentType: 'codex', status: 'running', description: 'native_vortex',
+      nativeCycleId: 'thread-1:1', nativeCycleOrdinal: 1,
+    };
+    const records = signal([native]);
+    storeMock.sessionSubagentsForSession.mockImplementation(() => records());
+    const owner = createPanel(OTHER_SESSION).componentInstance;
+    const other = createPanel('different-tab').componentInstance;
+    expect(owner.sessionSubagents()).toEqual([native]);
+    expect(other.sessionSubagents()).toEqual([]);
+    const completed = { ...native, status: 'completed' };
+    records.set([completed]);
+    expect(owner.sessionSubagents()).toEqual([completed]);
+    expect(other.sessionSubagents()).toEqual([]);
+  });
+
   it('keeps an empty scoped session out of both scoped and active selectors', () => {
     const fixture = createPanel('');
 

@@ -2046,7 +2046,20 @@ export class SessionSpawnerService implements ISessionSpawner {
   }
 
   private sdkIdOf(sessionId: string): string | undefined {
-    return this.lifecycle.find(sessionId)?.realSessionId ?? undefined;
+    const record = this.lifecycle.find(sessionId);
+    if (record) return record.realSessionId ?? undefined;
+    const id = SessionId.safeParse(sessionId);
+    // Native opens are keyed by tab id until published. Only the native
+    // adapter can confirm that the input itself is a published thread id.
+    if (
+      id &&
+      this.adapter?.isSessionActive(id) &&
+      'resolveLiveSessionId' in this.adapter &&
+      typeof this.adapter.resolveLiveSessionId === 'function' &&
+      this.adapter.resolveLiveSessionId(id) === id
+    )
+      return id;
+    return undefined;
   }
 
   private async interruptTurn(

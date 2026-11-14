@@ -1,4 +1,5 @@
 export * from './lib/cli-agents';
+export { parentLanePermission } from './lib/cli-agents/parent-lane-permission';
 export { laneMcpTokenCapability } from './lib/cli-agents/lane-mcp-token-rule';
 export { AgentSpawnEnvironment } from './lib/cli-agents/agent-spawn-environment.service';
 export { codexLaneSandboxMode, resolveCliLanePolicy } from './lib/cli-agents/cli-lane-policy-resolver';
@@ -154,3 +155,5 @@ export {
 } from './lib/cli-agents/messaging/parent-session-purge.service';
 export type { AgentDeliveryReceiptEventSink } from './lib/cli-agents/messaging/agent-delivery-receipt-event-sink';
 export { LaneSpawnPolicyError } from './lib/cli-agents/lane-spawn-policy';
+export { CodexRolloutUsageCollector, listCodexRolloutFiles, selectedCodexUsageRoots } from './lib/cli-agents/cli-adapters/codex/codex-rollout-usage.reader';
+export { listCodexFiles } from './lib/cli-agents/cli-adapters/codex/codex-rollout-file-source';

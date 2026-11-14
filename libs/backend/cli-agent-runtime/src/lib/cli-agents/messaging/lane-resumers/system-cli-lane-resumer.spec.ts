@@ -54,6 +54,17 @@ describe('SystemCliLaneResumer', () => {
     });
   });
 
+  it('passes a restored plan snapshot through even when the requested policy was yolo', async () => {
+    const spawn = jest.fn(async () => ({ agentId: NEW_AGENT_ID, cli: 'codex' as const, status: 'running' as const, startedAt: 'now' }));
+    const resumer = new SystemCliLaneResumer({ spawn, releaseIdleForResume: jest.fn(async () => undefined) });
+
+    await resumer.resume({ ...info, effectivePolicy: { permission: 'plan' }, requestedPolicy: { permission: 'yolo' } }, 'continue');
+
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({
+      permission: 'plan', resumePolicy: { permission: 'plan' },
+    }));
+  });
+
   it('raises LaneResumeError when the spawn fails', async () => {
     const resumer = new SystemCliLaneResumer({
       releaseIdleForResume: jest.fn(async () => undefined),

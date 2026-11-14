@@ -748,6 +748,8 @@ export function persistCliSessionReference(
       ...(info.completedAt ? { completedAt: info.completedAt } : {}),
       ...(info.lastActivityAt ? { lastActivityAt: info.lastActivityAt } : {}),
       status: info.status,
+      ...(info.effectivePolicy ? { effectivePolicy: info.effectivePolicy } : {}),
+      ...(info.requestedPolicy ? { requestedPolicy: info.requestedPolicy } : {}),
       ...(info.stopReason ? { stopReason: info.stopReason } : {}),
       ...(info.agentBudget ? { agentBudget: info.agentBudget } : {}),
       ...(typeof info.stopResetAt === 'number' &&

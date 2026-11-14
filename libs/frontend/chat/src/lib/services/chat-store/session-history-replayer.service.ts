@@ -590,6 +590,7 @@ export class SessionHistoryReplayer {
 
     const childrenByParent = new Map<string, FlatStreamEventUnion[]>();
     const resultsByTool = new Map<string, ToolResultEvent>();
+    const nativeStatusesByParent = new Map<string, Extract<FlatStreamEventUnion, { eventType: 'agent_status' }>[]>();
     for (const event of events) {
       if (event.parentToolUseId && event.eventType !== 'agent_start') {
         const children = childrenByParent.get(event.parentToolUseId) ?? [];
@@ -599,13 +600,19 @@ export class SessionHistoryReplayer {
       if (event.eventType === 'tool_result') {
         resultsByTool.set(event.toolCallId, event);
       }
+      if (event.eventType === 'agent_status' && event.native?.provider === 'codex' && event.parentToolUseId) {
+        const statuses = nativeStatusesByParent.get(event.parentToolUseId) ?? [];
+        statuses.push(event);
+        nativeStatusesByParent.set(event.parentToolUseId, statuses);
+      }
     }
     for (const start of events) {
       if (start.eventType !== 'agent_start' || !start.agentId) continue;
       const key = start.toolCallId;
       const children = childrenByParent.get(key) ?? [];
       const result = resultsByTool.get(key);
-      if (!result || children.length === 0) continue;
+      const nativeStatuses = result ? [] : (nativeStatusesByParent.get(key) ?? []);
+      if ((!result && nativeStatuses.length === 0) || children.length === 0) continue;
       const monitor = this.injector.get(AgentMonitorStore);
       const execution = this.injector.get(SubagentExecutionStore);
       const existingRecord = monitor.subagents().get(key);
@@ -622,13 +629,22 @@ export class SessionHistoryReplayer {
           { toolCallId: key, sessionId },
         );
         monitor.onAgentStart(start);
-        monitor.onTaskToolResult(key, result.isError ?? false, result.timestamp);
+        if (result) {
+          monitor.onTaskToolResult(key, result.isError ?? false, result.timestamp);
+        } else {
+          for (const status of nativeStatuses) monitor.onAgentStatus(status);
+        }
       }
-      if (execution.restoreHistoryChild(key, sessionId, start.agentId, children)) {
+      const transcript = result ? children : children.filter((event) =>
+        !['agent_progress', 'agent_status', 'agent_completed',
+          'background_agent_started', 'background_agent_completed',
+          'background_agent_stopped'].includes(event.eventType),
+      );
+      if (execution.restoreHistoryChild(key, sessionId, start.agentId, transcript)) {
         this.logger.debug(
           'SessionHistoryReplayer',
           'Completed history child execution was missing; restored transcript',
-          { toolCallId: key, eventCount: children.length },
+          { toolCallId: key, eventCount: transcript.length },
         );
       }
     }
