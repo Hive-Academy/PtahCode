@@ -25,6 +25,12 @@ describe('CliProviderCardComponent', () => {
     fixture.detectChanges();
     return fixture;
   }
+  it('labels native CLI behavior separately from the saved Lane default', () => {
+    const root = setup().nativeElement as HTMLElement;
+    const label = [...root.querySelectorAll('p')].find(element => element.textContent?.trim() === 'Native CLI behavior');
+    expect(label).toBeDefined();
+    expect(label?.getAttribute('title')).toContain('Lane default');
+  });
   it('uses the inset surface with a faint border and no outer padding', () => {
     const article = (setup().nativeElement as HTMLElement).querySelector('article');
     expect(article?.classList.contains('ptah-card')).toBe(true);

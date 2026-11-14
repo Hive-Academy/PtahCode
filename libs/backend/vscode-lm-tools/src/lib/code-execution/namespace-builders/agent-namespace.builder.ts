@@ -445,6 +445,7 @@ export function buildAgentNamespace(
         const ptahCliTask =
           `${prepared.task}\n\n` +
           renderLaneCompletionContract({
+            effectivePermission: parentLevel === 'plan' || request.permission === 'plan' ? 'plan' : undefined,
             taskFolder: request.taskFolder,
             deliverables: request.deliverables,
             canUsePtahMcp: registry.hasMcpPort?.() === true,
@@ -492,6 +493,7 @@ export function buildAgentNamespace(
             ptahCliId: request.ptahCliId,
             potentialCapabilities: result.potentialCapabilities,
             effectivePolicy: result.effectivePolicy,
+            requestedPolicy: { permission: request.permission, network: request.network },
             mcpPort: registry.getMcpPort?.(),
             // A registry that cannot say its port cannot say MCP was expected.
             expectsMcp: registry.getMcpPort !== undefined,

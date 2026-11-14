@@ -48,6 +48,7 @@ import {
 } from './permission/ask-user-question.service';
 import { ExitPlanModeService } from './permission/exit-plan-mode.service';
 import { evaluateUnattendedBash } from './permission/unattended-bash-policy';
+import { isPlanLaneAllowedPtahTool } from './permission/plan-lane-tool-policy';
 import type {
   UnattendedSessionPolicy,
   UnattendedSessionPolicyRegistry,
@@ -112,6 +113,16 @@ interface PendingRequest {
  * stall on a tool call forever (TASK_2026_295 Wave 2).
  */
 const CLI_AGENT_PERMISSION_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Refusal a Plan-mode CLI lane gets for a write or shell tool. */
+const LANE_PLAN_MODE_REFUSAL =
+  'BLOCKED: plan mode. This lane is read-only and no approval prompt will appear. ' +
+  'Stop and report "BLOCKED: plan mode" with the reason in your final message.';
+
+/** Refusal a Plan-mode CLI lane gets when it tries to leave Plan mode. */
+const LANE_PLAN_MODE_EXIT_REFUSAL =
+  'BLOCKED: plan mode. This lane cannot leave Plan mode and no approval prompt will appear. ' +
+  'Put the plan in your final message. If the task needs file writes, say "BLOCKED: plan mode".';
 
 /**
  * Lifecycle of one user-facing permission prompt, observed out-of-band by
@@ -597,6 +608,19 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         },
       );
 
+      // A CLI lane in Plan mode never gets an approval prompt: nobody watches
+      // a lane prompt, so it would only look like a pending approval. This
+      // runs before the unattended policy, which a lane can inherit through
+      // its parent routing id and which would allow writes. Interactive
+      // sessions pass no cliAgentResolver and keep their plan handling.
+      if (
+        cliAgentResolver &&
+        (levelResolver ? levelResolver() : this._permissionLevel) === 'plan'
+      ) {
+        const planDecision = this.decidePlanLaneToolCall(toolName, input);
+        if (planDecision) return planDecision;
+      }
+
       // Unattended (child) sessions: read live so a release takes effect on
       // the next call. The policy table decides and returns; the
       // background-agent and "Always Allow" paths below never apply. A YOLO
@@ -797,6 +821,44 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
           Date.now() - (this.recentBudgetStops.get(session as string) ?? 0) < 60_000,
       });
       return result;
+    };
+  }
+
+  /**
+   * The decision table for a CLI lane in Plan mode. Read-only tools, subagent
+   * tools and questions keep their normal path (`undefined`). The reporting
+   * tool and read-only Ptah tools (an explicit list, `plan-lane-tool-policy`)
+   * are allowed, so the lane can still report "BLOCKED: plan mode". Every
+   * other tool, including Ptah tools that write or act, is refused at once,
+   * so no lane call waits on an approval prompt that nobody watches.
+   */
+  private decidePlanLaneToolCall(
+    toolName: string,
+    input: Record<string, unknown>,
+  ): PermissionResult | undefined {
+    if (
+      SAFE_TOOLS.includes(toolName) ||
+      SUBAGENT_TOOLS.includes(toolName) ||
+      toolName === 'AskUserQuestion'
+    ) {
+      return undefined;
+    }
+    if (isPlanLaneAllowedPtahTool(toolName)) {
+      this.logger.debug(
+        `[SdkPermissionHandler] Plan mode: allowed read-only lane Ptah tool: ${toolName}`,
+      );
+      return { behavior: 'allow' as const, updatedInput: input };
+    }
+    this.logger.info(
+      `[SdkPermissionHandler] Plan mode: refused lane tool: ${toolName}`,
+    );
+    return {
+      behavior: 'deny' as const,
+      message:
+        toolName === 'ExitPlanMode'
+          ? LANE_PLAN_MODE_EXIT_REFUSAL
+          : LANE_PLAN_MODE_REFUSAL,
+      interrupt: false,
     };
   }
 

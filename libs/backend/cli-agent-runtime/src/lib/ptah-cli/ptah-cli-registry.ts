@@ -85,6 +85,7 @@ import { createPromptMailbox } from './helpers/ptah-cli-prompt-mailbox';
 import { parsePtahCliCredentialSource } from './helpers/ptah-cli-credential-source';
 
 import { AgentSpawnEnvironment } from '../cli-agents/agent-spawn-environment.service';
+import { withLanePlanModeInstruction } from '../cli-agents/lane-reporting-contract';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import {
   PTAH_CLI_KEY_PREFIX,
@@ -957,7 +958,11 @@ export class PtahCliRegistry {
       }
       const queryFn = await this.moduleLoader.getQueryFunction();
       const abortController = new AbortController();
-      const mailbox = createPromptMailbox(task);
+      // The resolved policy decides, so a saved Plan lane default also gets
+      // the "BLOCKED: plan mode" instruction (final review finding 2).
+      const mailbox = createPromptMailbox(
+        withLanePlanModeInstruction(task, lanePolicy.requested.permission),
+      );
       const effectiveOptions = buildClaudeSdkLaneOptions({
         assembly,
         authEnv,
@@ -972,6 +977,7 @@ export class PtahCliRegistry {
         parentSessionId: options?.parentSessionId,
         cliAgentResolver: () => agentIdHolder.value,
         permissionHandler: this.permissionHandler,
+        lanePermissionLevel: lanePolicy.requested.permission,
         logger: this.logger,
         processSpawner: this.processSpawner,
         executable: (await this.moduleLoader.getCliJsPath()) ?? undefined,

@@ -8,13 +8,15 @@
  */
 
 import 'reflect-metadata';
+import { resolveClaudeLanePermissionOptions } from './claude-sdk-lane-options';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   ClaudeAccountNamedRoute,
   ClaudeCertifiedLaunchContext,
 } from '@ptah-extension/auth-providers-tokens';
-import type { AuthEnv, EffectiveCapabilitySet } from '@ptah-extension/shared';
+import type { AuthEnv, CliAdapterManifest, EffectiveCapabilitySet } from '@ptah-extension/shared';
+import { PTAH_CLI_PERMISSION_CAPABILITIES } from '@ptah-extension/shared';
 import {
   assertCertifiedLaunch,
   capabilityFlagsFor,
@@ -26,6 +28,8 @@ import {
   type SdkPermissionHandler,
 } from '@ptah-extension/agent-sdk';
 import type { PtahSpawnAssembly } from '../ptah-cli/helpers/ptah-cli-spawn-options.service';
+import { resolveCliLanePolicy } from '../cli-agents/cli-lane-policy-resolver';
+import { translateLaneSpawnPolicy } from '../cli-agents/lane-spawn-policy';
 import {
   buildClaudeSdkLaneOptions,
   claudeActualLaunch,
@@ -296,4 +300,108 @@ describe('buildClaudeSdkLaneOptions — account-synced skills (TASK_2026_853 Pha
       assertCertifiedLaunch(launch, claudeActualLaunch(options), 'final'),
     ).not.toThrow();
   });
+});
+
+describe('Claude lane permission level binding', () => {
+  it.each(['ask', 'yolo', 'plan'] as const)(
+    'uses effective auto-edit under global %s', (globalLevel) => {
+      const createCallback = jest.fn((..._args: Parameters<SdkPermissionHandler['createCallback']>) =>
+        async () => ({ behavior: 'allow' as const }));
+      const options = resolveClaudeLanePermissionOptions(
+        { getPermissionLevel: () => globalLevel, createCallback },
+        laneInput(assemblyFor(verifiedPolicy())).logger,
+        'ptah-cli:fixture',
+        undefined,
+        'auto-edit',
+      );
+      expect(options.permissionMode).toBe('acceptEdits');
+      expect(options.allowDangerouslySkipPermissions).toBeUndefined();
+      expect(options.canUseTool).toBeDefined();
+      expect(createCallback.mock.calls[0]?.[3]?.()).toBe('auto-edit');
+    },
+  );
+
+  it('keeps global behavior when no lane policy is supplied', () => {
+    const createCallback = jest.fn((..._args: Parameters<SdkPermissionHandler['createCallback']>) =>
+      async () => ({ behavior: 'allow' as const }));
+    const options = resolveClaudeLanePermissionOptions(
+      { getPermissionLevel: () => 'yolo', createCallback },
+      laneInput(assemblyFor(verifiedPolicy())).logger,
+      'ptah-cli:fixture',
+    );
+    expect(options.permissionMode).toBe('bypassPermissions');
+    expect(options.allowDangerouslySkipPermissions).toBe(true);
+    expect(createCallback).not.toHaveBeenCalled();
+  });
+});
+
+const supported = { state: 'supported' as const };
+const laneManifest: CliAdapterManifest = {
+  messaging: { steer: supported, interrupt: supported, continuation: supported, resume: supported },
+  roleChannel: 'task-prompt',
+  ...PTAH_CLI_PERMISSION_CAPABILITIES,
+  limitReader: { state: 'no-reliable-source' },
+  mcp: { state: 'unsupported', reason: 'fixture' },
+};
+
+describe('Claude lane approval routing and policy translation', () => {
+  it.each([
+    ['resume-session', 'parent-session', 'resume-session'],
+    [undefined, 'parent-session', 'parent-session'],
+    [undefined, undefined, 'ptah-cli:fixture'],
+  ])('binds callback routing id to resume %s and parent %s', (resumeSessionId, parentSessionId, expected) => {
+    const input = laneInput(assemblyFor(verifiedPolicy()));
+    input.resumeSessionId = resumeSessionId;
+    input.parentSessionId = parentSessionId;
+    const options = buildClaudeSdkLaneOptions(input);
+    expect(input.permissionHandler.createCallback).toHaveBeenCalledWith(
+      undefined, undefined, undefined, undefined, expected,
+    );
+    expect(options.permissionMode).toBe('default');
+  });
+
+  it('applies the parent plan cap through translation to SDK mode and callback level', () => {
+    const resolved = resolveCliLanePolicy({ cli: 'ptah-cli', manifest: laneManifest,
+      request: { permission: 'auto-edit' }, saved: {}, parentLevel: 'plan' });
+    const translated = translateLaneSpawnPolicy('ptah-cli', laneManifest, resolved);
+    const input = laneInput(assemblyFor(verifiedPolicy()));
+    input.permissionHandler.getPermissionLevel = jest.fn(() => 'yolo');
+    input.lanePermissionLevel = translated.requested.permission;
+    const options = buildClaudeSdkLaneOptions(input);
+    expect(resolved.permission).toBe('plan');
+    expect(options.permissionMode).toBe('plan');
+    expect(options.allowDangerouslySkipPermissions).not.toBe(true);
+    expect(input.permissionHandler.createCallback).toHaveBeenCalledWith(
+      undefined, undefined, undefined, expect.any(Function), 'ptah-cli:fixture',
+    );
+    const resolver = jest.mocked(input.permissionHandler.createCallback).mock.calls[0]?.[3];
+    expect(resolver?.()).toBe('plan');
+  });
+
+  it('uses the global handler level when no lane level is provided', () => {
+    const input = laneInput(assemblyFor(verifiedPolicy()));
+    input.permissionHandler.getPermissionLevel = jest.fn(() => 'auto-edit');
+    const options = buildClaudeSdkLaneOptions(input);
+    expect(options.permissionMode).toBe('acceptEdits');
+    expect(input.permissionHandler.createCallback).toHaveBeenCalledWith(
+      undefined, undefined, undefined, undefined, 'ptah-cli:fixture',
+    );
+  });
+
+  it.each(['plan', 'ask', 'auto-edit'] as const)(
+    'keeps translated %s lane below global yolo', (permission) => {
+      const resolved = resolveCliLanePolicy({ cli: 'ptah-cli', manifest: laneManifest,
+        request: { permission }, saved: {} });
+      const translated = translateLaneSpawnPolicy('ptah-cli', laneManifest, resolved);
+      const input = laneInput(assemblyFor(verifiedPolicy()));
+      input.permissionHandler.getPermissionLevel = jest.fn(() => 'yolo');
+      input.lanePermissionLevel = translated.requested.permission;
+      const options = buildClaudeSdkLaneOptions(input);
+      expect('permissionMode' in translated).toBe(true);
+      const expectedMode = 'permissionMode' in translated ? translated.permissionMode : undefined;
+      expect(options.permissionMode).toBe(expectedMode);
+      expect(options.permissionMode).not.toBe('bypassPermissions');
+      expect(options.allowDangerouslySkipPermissions).not.toBe(true);
+    },
+  );
 });

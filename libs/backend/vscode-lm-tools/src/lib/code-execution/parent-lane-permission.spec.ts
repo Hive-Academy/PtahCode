@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import { parentLanePermission } from './parent-lane-permission';
 
 describe('parentLanePermission', () => {
@@ -11,5 +12,14 @@ describe('parentLanePermission', () => {
     expect(parentLanePermission('unknown', { find: () => undefined }, undefined)).toBe('plan');
     const maybeCaller: string | undefined = undefined;
     expect(maybeCaller ? parentLanePermission(maybeCaller, undefined, undefined) : undefined).toBeUndefined();
+  });
+
+  it('delegates Codex tab resolution to the shared resolver', () => {
+    const codex = {
+      resolveLiveSessionId: jest.fn(() => 'live-thread'),
+      getPermissionLevel: jest.fn(() => 'auto-edit' as const),
+    };
+    expect(parentLanePermission('tab', undefined, codex)).toBe('auto-edit');
+    expect(codex.getPermissionLevel).toHaveBeenCalledWith('live-thread');
   });
 });

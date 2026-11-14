@@ -1870,6 +1870,7 @@ export function formatAgentSpawn(
             : []),
           ...(roleLine ? [roleLine] : []),
           `**Status:** ${result.status}`,
+          ...formatLanePolicyLines(result),
           `**Started:** ${result.startedAt}`,
           ...(result.cliSessionId
             ? [`**CLI Session ID:** ${result.cliSessionId}`]
@@ -1936,6 +1937,7 @@ export function formatAgentStatus(
       const lines = [
         `**CLI:** ${cliLabel}`,
         `**Status:** ${a.status}`,
+        ...formatLanePolicyLines(a),
         `**Task:** ${task}`,
         `**Started:** ${a.startedAt}`,
       ];
@@ -1960,6 +1962,38 @@ export function formatAgentStatus(
   } catch {
     return fallbackJson(result);
   }
+}
+
+function formatLanePolicyLines(
+  lane: Pick<AgentProcessInfo, 'cli' | 'effectivePolicy' | 'requestedPolicy'>,
+): string[] {
+  const policy = lane.effectivePolicy;
+  if (!policy) return [];
+  const sourceLabel = (source: typeof policy.permissionSource): string => {
+    switch (source) {
+      case 'spawn': return 'Spawn request';
+      case 'saved': return 'Saved default';
+      case 'parent-plan': return 'Parent plan cap';
+      default: return 'Built-in default';
+    }
+  };
+  const native = lane.cli === 'codex'
+    ? policy.permission === 'plan' ? ' (Codex sandbox read-only, approvals never)'
+      : policy.permission === 'auto-edit' ? ' (Codex sandbox workspace-write, approvals never)'
+      : policy.permission === 'yolo' ? ' (Codex sandbox danger-full-access, approvals never)' : ''
+    : '';
+  const lines = [
+    `**Permission:** requested ${lane.requestedPolicy?.permission ?? 'none'} -> effective ${policy.permission ?? 'none'} (source: ${sourceLabel(policy.permissionSource)})${native}`,
+  ];
+  if (policy.network !== undefined || lane.requestedPolicy?.network !== undefined) {
+    lines.push(`**Network:** requested ${lane.requestedPolicy?.network ?? 'none'} -> effective ${policy.network ?? 'none'} (source: ${sourceLabel(policy.networkSource)})`);
+  }
+  if (policy.permission === 'plan') {
+    lines.push(policy.permissionSource === 'parent-plan' && lane.requestedPolicy?.permission !== 'plan'
+      ? "Capped to plan by the parent session's Plan mode. This lane cannot edit files. Plan refusals are not approval requests: no approval prompt will appear. To allow edits, switch the parent session out of Plan mode, then spawn again."
+      : 'Plan mode: file edits are refused; no approval prompt is generated.');
+  }
+  return lines;
 }
 
 /**
