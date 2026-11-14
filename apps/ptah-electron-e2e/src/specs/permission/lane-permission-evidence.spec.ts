@@ -32,7 +32,7 @@ test.describe('@evidence lane permission routing', () => {
     }
   }
 
-  async function liveApp(): Promise<{ app: ElectronApplication; page: Page; ui: UiDriver; cleanup: () => void }> {
+  async function liveApp(): Promise<{ app: ElectronApplication; page: Page; ui: UiDriver; workspace: string; cleanup: () => void }> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-lane-evidence-'));
     const profile = path.join(dir, 'profile');
     fs.mkdirSync(profile);
@@ -62,7 +62,7 @@ test.describe('@evidence lane permission routing', () => {
       }
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     };
-    return { app, page, ui: new UiDriver(app, page), cleanup };
+    return { app, page, ui: new UiDriver(app, page), workspace, cleanup };
   }
 
   async function openClaudeTab(page: Page, ui: UiDriver): Promise<Locator> {
@@ -205,6 +205,8 @@ test.describe('@evidence lane permission routing', () => {
       await expectSpawnPolicy(pane, 'plan');
       const lane = await openCliLane(pane);
       await expect(lane.getByText('BLOCKED: plan mode', { exact: false })).toBeVisible({ timeout: 180_000 });
+      // Plan mode must refuse the write: the file must not exist.
+      expect(fs.existsSync(path.join(live.workspace, 'ptah-plan-evidence.txt'))).toBe(false);
       await capture(live.page, '3-plan-blocked', 'ptah-canvas-rail-board:visible [data-testid="lane-panel"]:visible');
     } finally {
       await closeDocsApp(live.app);
