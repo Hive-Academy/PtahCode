@@ -10,6 +10,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { laneMcpTokenCapability } from './lane-mcp-token-rule';
+import { worktreeMainRoot } from './git-main-checkout-root';
 import { injectable, inject } from 'tsyringe';
 import { EventEmitter } from 'eventemitter3';
 import type {
@@ -684,12 +685,19 @@ export class AgentProcessManager {
     if (explicit && explicit.kind !== 'omitted') {
       if (explicit.kind === 'named') selection = explicit;
     } else if (!request.resumeSessionId && this.accountSelections) {
-      let stored: { readonly profileId: string | null };
+      let stored: { readonly profileId: string | null; readonly revision?: number };
+      const workspaceRoot = this.spawnEnvironment.workspaceRoot();
       try {
         stored = await this.accountSelections.readStoredSelection(
-          this.spawnEnvironment.workspaceRoot(),
+          workspaceRoot,
           'lane',
         );
+        if (stored.revision === -1) {
+          const mainRoot = worktreeMainRoot(workspaceRoot);
+          if (mainRoot !== null && mainRoot !== workspaceRoot) {
+            stored = await this.accountSelections.readStoredSelection(mainRoot, 'lane');
+          }
+        }
       } catch (error: unknown) {
         // Not swallowed: the spawn is refused. Only the error class name is
         // logged; store messages can carry paths.
