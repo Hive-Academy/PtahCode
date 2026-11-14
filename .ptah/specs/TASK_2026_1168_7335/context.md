@@ -17,9 +17,9 @@ visibility, completion-notice dedup. Regression tests plus real Electron UI evid
 
 | Phase | Task ID | Pull request | State |
 | --- | --- | --- | --- |
-| A permissions | TASK_2026_1172_fd37 | https://github.com/Hive-Academy/PtahCode/pull/1266 | in_review; main merged (D30) in 87e113cde plus review commit 58a6498aa, gate running, push pending; evidence 2-4 from a37e74065 still valid (no permission path changed); coordinator 2d2c011b |
-| B attribution | TASK_2026_1171_7664 | https://github.com/Hive-Academy/PtahCode/pull/1265 | in_review; main merged locally (7e8e3d6e2) plus fix 66549cd66 (route check gets the resolved caller ID, after a Codex review REJECT, Medium); gate running, push pending; evidence (a) passed; coordinator: user-started session fde4c0 (reports ready; the parent merges, D31) |
-| C native subagents | TASK_2026_1173_c17f | https://github.com/Hive-Academy/PtahCode/pull/1263 | in_review; main (with #1273) merged in 025c23df4, gate running, push pending; coordinator 8d2fe57b |
+| A permissions | TASK_2026_1172_fd37 | https://github.com/Hive-Academy/PtahCode/pull/1266 | done; merged 2026-11-14T20:06Z as 50cd201bb (head 58a6498aa, all CI green, merge by coordinator under D31) |
+| B attribution | TASK_2026_1171_7664 | https://github.com/Hive-Academy/PtahCode/pull/1265 | done; merged by the user 2026-11-14T20:37Z as f763ebbd3 (head 54e73aa0b) |
+| C native subagents | TASK_2026_1173_c17f | https://github.com/Hive-Academy/PtahCode/pull/1263 | done; merged by the user 2026-11-14T20:36Z as e8343561f (head de562341c; local merge commit 025c23df4 was never pushed) |
 | Side: axe contrast on main | TASK_2026_1178_9339 | https://github.com/Hive-Academy/PtahCode/pull/1273 | merged 2026-11-14T19:05Z as 9cb890ad6; all CI green; both commits reviewed APPROVE |
 
 ## Decisions (recovered summary)
@@ -67,3 +67,7 @@ visibility, completion-notice dedup. Regression tests plus real Electron UI evid
    "stay idle" message for the old Phase C session stopped the successor's PR watcher.
 10. Follow-up: remove the `getAttempt` cast in `agent-process-manager.service.ts` timeoutDetail
     (listed in the #1265 body).
+11. `lane-terminal-outcomes.integration.spec.ts:220` (cli-agent-runtime) fails under load in the local
+    gate (`logger.warn` not called); passes alone (16/16) and in CI.
+12. The three PRs merged within about one minute; CI on the combined main head f763ebbd3 is
+    the first test of the combined code.
