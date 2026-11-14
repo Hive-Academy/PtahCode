@@ -131,14 +131,14 @@ describe('PtahDescriptionListComponent (data API)', () => {
   imports: [PtahDescriptionListComponent, PtahDescriptionItemComponent, PtahButtonDirective],
   template: `
     <ptah-description-list ariaLabel="Details">
-      <div ptahDescriptionItem term="Status"><span class="badge">Active</span></div>
-      <div ptahDescriptionItem term="Email" [value]="email()"></div>
-      <div ptahDescriptionItem term="Nickname"></div>
-      <div ptahDescriptionItem term="Count" [value]="0"></div>
-      <div ptahDescriptionItem term="Key" value="sk-1" mono truncate>
+      <ptah-description-item term="Status"><span class="badge">Active</span></ptah-description-item>
+      <ptah-description-item term="Email" [value]="email()" />
+      <ptah-description-item term="Nickname" />
+      <ptah-description-item term="Count" [value]="0" />
+      <ptah-description-item term="Key" value="sk-1" mono truncate>
         <button ptahButton actions variant="ghost" size="xs" type="button">Copy</button>
-      </div>
-      <div ptahDescriptionItem term="Bound empty" value="  "><span>Hidden</span></div>
+      </ptah-description-item>
+      <ptah-description-item term="Bound empty" value="  "><span>Hidden</span></ptah-description-item>
     </ptah-description-list>
   `,
 })
@@ -156,24 +156,16 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
   }
 
   function dd(root: HTMLElement, index: number): HTMLElement {
-    return root.querySelectorAll<HTMLElement>('[ptahDescriptionItem] dd')[index];
+    return root.querySelectorAll<HTMLElement>('ptah-description-item dd')[index];
   }
 
-  it('uses the item host as the row: dl holds only div rows with dt and dd', async () => {
+  it('renders one row per item with the item host as display contents', async () => {
     const { root } = await render();
-    const items = root.querySelectorAll<HTMLElement>('[ptahDescriptionItem]');
+    const items = root.querySelectorAll('ptah-description-item');
     expect(items).toHaveLength(6);
-    expect(items[0].tagName).toBe('DIV');
     expect(items[0].getAttribute('data-ptah-pattern')).toBe('description-item');
-    expect(items[0].hasAttribute('data-ptah-description-row')).toBe(true);
-    expect(items[0].classList.contains('grid')).toBe(true);
-    expect(items[0].classList.contains('contents')).toBe(false);
-    const dl = root.querySelector('dl') as HTMLElement;
-    const children = Array.from(dl.children);
-    expect(children.every((child) => child.tagName === 'DIV' && child.hasAttribute('data-ptah-description-row'))).toBe(true);
-    expect(children[0].firstElementChild?.tagName).toBe('DT');
-    expect(root.querySelectorAll('dl > div > dt')).toHaveLength(6);
-    expect(root.querySelectorAll('dl > div > dd')).toHaveLength(6);
+    expect(items[0].classList.contains('contents')).toBe(true);
+    expect(root.querySelectorAll('dl dt')).toHaveLength(6);
   });
 
   it('shows projected rich content and no placeholder', async () => {
@@ -230,7 +222,6 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
     fixture.componentRef.setInput('term', 'Alone');
     fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
-    expect(host.hasAttribute('data-ptah-description-row')).toBe(true);
     expect(host.querySelector('[aria-hidden="true"]')?.textContent).toBe('Not set');
   });
 
@@ -240,11 +231,11 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
       imports: [PtahDescriptionListComponent, PtahDescriptionItemComponent],
       template: `
         <ptah-description-list>
-          <div ptahDescriptionItem term="Plan">
+          <ptah-description-item term="Plan">
             @if (plan(); as name) {
               <span class="badge">{{ name }}</span>
             }
-          </div>
+          </ptah-description-item>
         </ptah-description-list>
       `,
     })
@@ -259,7 +250,7 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
     };
     await settle();
     const root = fixture.nativeElement as HTMLElement;
-    const value = (): HTMLElement => root.querySelector('[ptahDescriptionItem] dd') as HTMLElement;
+    const value = (): HTMLElement => root.querySelector('ptah-description-item dd') as HTMLElement;
     const slot = (): HTMLElement => value().querySelector('[data-ptah-description-slot]') as HTMLElement;
     expect(value().hasAttribute('data-ptah-description-empty')).toBe(true);
 

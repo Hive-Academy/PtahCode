@@ -1,12 +1,10 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahDescriptionItem,
   PtahDescriptionItemComponent,
   PtahDescriptionListComponent,
-  PtahEditableSectionComponent,
-  PtahEditTemplateDirective,
   PtahFieldComponent,
   PtahFormActionsComponent,
   PtahFormSectionComponent,
@@ -16,9 +14,8 @@ import { GallerySectionComponent } from './gallery-section.component';
 
 /**
  * Gallery sections of the form patterns family (TASK_2026_1177_9109,
- * pattern-spec.md sections 1 to 4): `ptah-form-section`,
- * `ptah-description-list`, `ptah-form-actions` and `ptah-editable-section`
- * in their states.
+ * pattern-spec.md sections 1 to 3): `ptah-form-section`,
+ * `ptah-description-list` and `ptah-form-actions` in their states.
  */
 @Component({
   selector: 'ptah-gallery-patterns-family',
@@ -29,8 +26,6 @@ import { GallerySectionComponent } from './gallery-section.component';
     PtahButtonDirective,
     PtahDescriptionItemComponent,
     PtahDescriptionListComponent,
-    PtahEditableSectionComponent,
-    PtahEditTemplateDirective,
     PtahFieldComponent,
     PtahFormActionsComponent,
     PtahFormSectionComponent,
@@ -92,14 +87,14 @@ import { GallerySectionComponent } from './gallery-section.component';
 
       <div data-testid="patterns-description-list-projection" class="grid gap-ptah-field lg:grid-cols-2">
         <ptah-description-list ariaLabel="Provider status">
-          <div ptahDescriptionItem term="Status">
+          <ptah-description-item term="Status">
             <span ptahBadge status tone="ok" size="xs">Connected</span>
-          </div>
-          <div ptahDescriptionItem term="Endpoint" [mono]="true" [truncate]="true" value="https://api.example.com/v1/very/long/endpoint/path">
+          </ptah-description-item>
+          <ptah-description-item term="Endpoint" [mono]="true" [truncate]="true" value="https://api.example.com/v1/very/long/endpoint/path">
             <button actions ptahButton type="button" size="xs" variant="ghost">Copy</button>
-          </div>
-          <div ptahDescriptionItem term="Proxy" [value]="null"></div>
-          <div ptahDescriptionItem term="Notes"></div>
+          </ptah-description-item>
+          <ptah-description-item term="Proxy" [value]="null" />
+          <ptah-description-item term="Notes" />
         </ptah-description-list>
         <ptah-description-list ariaLabel="Empty list" [items]="[]" emptyText="No details yet" />
       </div>
@@ -158,78 +153,6 @@ import { GallerySectionComponent } from './gallery-section.component';
         </ptah-form-actions>
       </div>
     </ptah-gallery-section>
-
-    <ptah-gallery-section id="patterns-editable-section" title="Editable section pattern">
-      <p class="text-ptah-hint text-base-content-muted">
-        One section with a view mode and an edit mode. The parent owns the mode,
-        the dirty state, the saving state and the error.
-      </p>
-
-      <div data-testid="patterns-editable-section-interactive">
-        <ptah-editable-section
-          heading="Profile"
-          description="Edit the name, then save. Turn on the failure to see the error state."
-          [surface]="true"
-          [editing]="editing()"
-          [dirty]="profileDirty()"
-          [saving]="saving()"
-          [error]="saveError()"
-          (edit)="startEdit()"
-          (save)="saveProfile()"
-          (cancelEdit)="stopEdit()"
-        >
-          <span status ptahBadge size="xs" tone="info">Demo</span>
-          <ptah-description-list view ariaLabel="Profile details">
-            <div ptahDescriptionItem term="Display name" [value]="profileName()"></div>
-            <div ptahDescriptionItem term="Email" [value]="null"></div>
-          </ptah-description-list>
-          <ng-template ptahEditTemplate>
-            <ptah-field label="Display name">
-              <input ptahInput [value]="profileName()" (input)="onNameInput($event)" />
-            </ptah-field>
-          </ng-template>
-          <button
-            actions-start
-            ptahButton
-            type="button"
-            size="xs"
-            variant="ghost"
-            [selected]="failNextSave()"
-            (click)="failNextSave.set(!failNextSave())"
-          >Fail next save</button>
-        </ptah-editable-section>
-      </div>
-
-      <div data-testid="patterns-editable-section-states" class="grid gap-ptah-field lg:grid-cols-2">
-        <ptah-editable-section heading="View mode" description="Read-only rows and one Edit button.">
-          <ptah-description-list view [items]="accountItems" />
-        </ptah-editable-section>
-
-        <ptah-editable-section heading="Empty" description="No view content: the button says Add." />
-
-        <ptah-editable-section heading="Dirty" [editing]="true" [dirty]="true">
-          <ng-template ptahEditTemplate>
-            <ptah-field label="Region"><input ptahInput value="eu-west-1" /></ptah-field>
-          </ng-template>
-        </ptah-editable-section>
-
-        <ptah-editable-section heading="Saving" [editing]="true" [dirty]="true" [saving]="true">
-          <ng-template ptahEditTemplate>
-            <ptah-field label="Region"><input ptahInput value="eu-west-1" /></ptah-field>
-          </ng-template>
-        </ptah-editable-section>
-
-        <ptah-editable-section heading="Error" [editing]="true" [dirty]="true" error="The region is not available.">
-          <ng-template ptahEditTemplate>
-            <ptah-field label="Region"><input ptahInput value="mars-1" /></ptah-field>
-          </ng-template>
-        </ptah-editable-section>
-
-        <ptah-editable-section heading="Disabled" [disabled]="true" disabledReason="Only an admin can edit this.">
-          <ptah-description-list view [items]="accountItems" />
-        </ptah-editable-section>
-      </div>
-    </ptah-gallery-section>
   </div>`,
 })
 export class GalleryPatternsFamilyComponent {
@@ -242,60 +165,4 @@ export class GalleryPatternsFamilyComponent {
   ];
   public readonly stickyRows: readonly number[] = [1, 2, 3, 4, 5];
   public readonly dirty = signal(false);
-
-  // Editable section demo: the parent owns every state.
-  public readonly editing = signal(false);
-  public readonly profileDirty = signal(false);
-  public readonly saving = signal(false);
-  public readonly saveError = signal<string | null>(null);
-  public readonly failNextSave = signal(false);
-  public readonly profileName = signal('Ada Lovelace');
-  private draftName = '';
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-  public constructor() {
-    inject(DestroyRef).onDestroy(() => this.clearSaveTimer());
-  }
-
-  public startEdit(): void {
-    this.draftName = this.profileName();
-    this.profileDirty.set(false);
-    this.saveError.set(null);
-    this.editing.set(true);
-  }
-
-  public onNameInput(event: Event): void {
-    this.draftName = (event.target as HTMLInputElement).value;
-    this.profileDirty.set(this.draftName !== this.profileName());
-  }
-
-  public saveProfile(): void {
-    this.saving.set(true);
-    this.saveError.set(null);
-    this.clearSaveTimer();
-    // One demo timer. It is cleared on cancel and on destroy.
-    this.saveTimer = setTimeout(() => {
-      this.saveTimer = null;
-      this.saving.set(false);
-      if (this.failNextSave()) {
-        this.saveError.set('The name could not be saved. Try again.');
-        return;
-      }
-      this.profileName.set(this.draftName);
-      this.stopEdit();
-    }, 800);
-  }
-
-  public stopEdit(): void {
-    this.clearSaveTimer();
-    this.saving.set(false);
-    this.profileDirty.set(false);
-    this.saveError.set(null);
-    this.editing.set(false);
-  }
-
-  private clearSaveTimer(): void {
-    if (this.saveTimer !== null) clearTimeout(this.saveTimer);
-    this.saveTimer = null;
-  }
 }

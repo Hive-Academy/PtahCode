@@ -57,7 +57,7 @@ function rowClass(divided: boolean): string {
 /**
  * Read-only key/value rows for view mode (TASK_2026_1177_9109, pattern spec
  * section 2). Give rows with the `items` input (plain text values) or with
- * child `div[ptahDescriptionItem]` rows (rich values and row actions).
+ * child `ptah-description-item` components (rich values and row actions).
  * Use one API per list. An empty value shows the `emptyText` placeholder.
  *
  * @example
@@ -65,7 +65,7 @@ function rowClass(divided: boolean): string {
  * <ptah-description-list [items]="rows()" ariaLabel="Account details" />
  *
  * <ptah-description-list>
- *   <div ptahDescriptionItem term="Status"><span ptahBadge tone="ok">Active</span></div>
+ *   <ptah-description-item term="Status"><span ptahBadge tone="ok">Active</span></ptah-description-item>
  * </ptah-description-list>
  * ```
  */
@@ -112,7 +112,7 @@ export class PtahDescriptionListComponent {
 
   protected readonly listClass = computed(() =>
     this.divided()
-      ? 'flex flex-col [&>:last-child]:[border-bottom:0]'
+      ? 'flex flex-col [&>:last-child]:[border-bottom:0] [&>:last-child>*]:[border-bottom:0]'
       : 'flex flex-col gap-[var(--ptah-gap-controls)]',
   );
   protected readonly rowClass = computed(() => rowClass(this.divided()));
@@ -123,9 +123,7 @@ export class PtahDescriptionListComponent {
 }
 
 /**
- * One rich row of `ptah-description-list`. The host `div` is the row, so the
- * `dl` holds only `div` rows with `dt` and `dd` (valid `dl` content). The
- * default slot is the value
+ * One rich row of `ptah-description-list`. The default slot is the value
  * (text, `ptahBadge`, a status dot and a word, a chip list). The `[actions]`
  * slot is a row action, for example a copy `ptahIconButton`.
  *
@@ -134,43 +132,39 @@ export class PtahDescriptionListComponent {
  * non-empty `value` renders as text before the projected content.
  */
 @Component({
-  // A native div row keeps the dl content model valid (dl > div > dt + dd) without a wrapper node.
-  // eslint-disable-next-line @angular-eslint/component-selector
-  selector: 'div[ptahDescriptionItem]',
+  selector: 'ptah-description-item',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // The host is the row with dt and dd. The parent dl gives the list layout.
-  host: {
-    'data-ptah-pattern': 'description-item',
-    'data-ptah-description-row': '',
-    '[class]': 'rowClass()',
-  },
+  // Renders the row wrapper with dt and dd. The parent dl gives the list layout.
+  host: { 'data-ptah-pattern': 'description-item', class: 'contents' },
   template: `
-    <dt [class]="termClass">{{ term() }}</dt>
-    <dd
-      [class]="valueClass()"
-      [attr.title]="truncate() && hasTextValue() ? value() : null"
-      [attr.data-ptah-description-empty]="showPlaceholder() ? '' : null"
-    >
-      @if (showPlaceholder()) {
-        <span aria-hidden="true" [class]="placeholderClass">{{ emptyText() }}</span
-        ><span class="sr-only">{{ term() }} not set</span>
-      } @else if (hasTextValue()) {
-        {{ value() }}
-      }
-      <span
-        #valueSlot
-        data-ptah-description-slot
-        class="inline-flex min-w-0 flex-wrap items-center gap-[var(--ptah-gap-inline)] empty:hidden"
-        [class.hidden]="showPlaceholder()"
-        ><ng-content
-      /></span>
-    </dd>
-    <div
-      data-ptah-description-actions
-      class="flex items-center gap-[var(--ptah-gap-controls)] justify-self-start empty:hidden [@container(min-width:640px)]:justify-self-end"
-      ><ng-content select="[actions]"
-    /></div>
+    <div data-ptah-description-row [class]="rowClass()">
+      <dt [class]="termClass">{{ term() }}</dt>
+      <dd
+        [class]="valueClass()"
+        [attr.title]="truncate() && hasTextValue() ? value() : null"
+        [attr.data-ptah-description-empty]="showPlaceholder() ? '' : null"
+      >
+        @if (showPlaceholder()) {
+          <span aria-hidden="true" [class]="placeholderClass">{{ emptyText() }}</span
+          ><span class="sr-only">{{ term() }} not set</span>
+        } @else if (hasTextValue()) {
+          {{ value() }}
+        }
+        <span
+          #valueSlot
+          data-ptah-description-slot
+          class="inline-flex min-w-0 flex-wrap items-center gap-[var(--ptah-gap-inline)] empty:hidden"
+          [class.hidden]="showPlaceholder()"
+          ><ng-content
+        /></span>
+      </dd>
+      <div
+        data-ptah-description-actions
+        class="flex items-center gap-[var(--ptah-gap-controls)] justify-self-start empty:hidden [@container(min-width:640px)]:justify-self-end"
+        ><ng-content select="[actions]"
+      /></div>
+    </div>
   `,
 })
 export class PtahDescriptionItemComponent {
