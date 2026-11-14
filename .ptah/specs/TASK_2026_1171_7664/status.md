@@ -85,3 +85,6 @@ Fourth report to the parent (decision on item (a) plus CI state): NOT delivered
   drain budget (`DRAIN_BUDGET_MS = 8`, `performance.now()`, message-router.service.ts:90,118),
   so on a slow runner a drain stops early. Pre-existing flake, outside Phase B scope. Follow-up
   candidate: stub `performance.now` in the burst-coalescing specs. Rerun 2 started.
+- Rerun 2 of test shard 1: PASS (`main` aggregate job: success). CI at 27a173020: all pass
+  except the accepted pre-existing electron-e2e shard 2 axe failure. Decision on item (a)
+  still open; PR #1265 stays draft.
