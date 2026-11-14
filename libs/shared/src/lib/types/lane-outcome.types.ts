@@ -14,6 +14,7 @@
  */
 
 import type { AgentStatus, LaneCompletionVerdict } from './agent-process.types';
+import type { PhaseKind } from './phase-contract.types';
 
 export const OUTCOME_TASK_KINDS = [
   'plan',
@@ -89,6 +90,11 @@ export interface LaneOutcomeRecord {
   readonly taskKind: OutcomeTaskKind | null;
   /** Null for older rows whose provenance is unknown. */
   readonly taskKindSource: OutcomeTaskKindSource | null;
+  /**
+   * Phase kind the lane ran for (migration 0075). Null or absent for rows
+   * written before it and for lanes started without a phase.
+   */
+  readonly phaseKind?: PhaseKind | null;
   readonly taskId: string | null;
   readonly verdict: LaneCompletionVerdict;
   readonly failureClass: LaneFailureClass | null;

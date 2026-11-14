@@ -88,14 +88,23 @@ parallel lanes: [phase mode compatibility](team-leader-modes.md#spawning-a-batch
 | `research` (modernization)                   | One lane per module                                          | "Analyze `<dir>` for deprecated APIs and outdated patterns. Prioritized list."                         |
 | `docs`                 | Feature research and section drafts                          | "Read `<dir>` and summarize its capabilities and integration points for developer docs."               |
 
-## Never on a lane
+## Capability rule and lane limits
+
+The router does not refuse a lane by phase name. A phase that needs a capability goes to a
+candidate whose effective tool list has it: `visual-review` and `design` need `browser` (a
+`ptah_browser_*` tool). A candidate without it is not selected. When no candidate has it, the
+router stops the phase with a clear reason (`missing-capability` or `capability-unknown`); it
+does not fall back to an incapable candidate. A pin to an incapable candidate gives
+`pin-unavailable` with the reason.
+
+These items stay off lanes for other reasons:
 
 - Requirements and plans that pass Gate 1 / Gate 2 (`task-description.md`, `implementation-plan.md`) as a
   subagent's _own_ deliverable — lanes may gather inputs, the subagent writes and owns the document.
   A phase assigned wholly to a lane (below) is the exception, and still passes Gate 1 / Gate 2.
 - Git commits, and anything that asks the user.
-- visual-review work — check the lane's tool list; lanes that have `ptah_browser_*` render and screenshot their own UI; the visual-review still gives the independent dark+light evidence.
-- `design` work — it needs interactive discovery with the user.
+- `design` discovery with the user — it is interactive. A lane can do the non-interactive design
+  work when it has the `browser` capability.
 - Final security-critical decisions. A lane document review may approve Gates 1, 1.7 and 2 in
   `lane-review` mode ([checkpoints.md § Approval mode](checkpoints.md#approval-mode)); in `user`
   mode its findings are advisory and you present them at the user gate. A review that needs

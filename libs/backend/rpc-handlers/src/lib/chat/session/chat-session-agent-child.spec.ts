@@ -588,6 +588,21 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
   });
 
   describe('startAgentChildSession', () => {
+    it('reports only the tool profile evidence returned by the SDK start', async () => {
+      const h = makeHarness();
+      expect(await h.service.startAgentChildSession(childParams())).toEqual({ success: true });
+
+      const observed = makeHarness();
+      observed.startChatSession.mockResolvedValueOnce({
+        [Symbol.asyncIterator]: jest.fn(),
+        toolProfileApplied: true,
+      });
+      expect(await observed.service.startAgentChildSession(childParams())).toEqual({
+        success: true,
+        toolProfileApplied: true,
+      });
+    });
+
     it('puts explicit effort into SDK launch options', async () => {
       const h = makeHarness();
       await h.service.startAgentChildSession(childParams({ effort: 'high' }));

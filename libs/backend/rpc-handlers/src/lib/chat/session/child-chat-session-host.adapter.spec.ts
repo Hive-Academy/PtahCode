@@ -170,6 +170,27 @@ describe('ChildChatSessionHostAdapter', () => {
     await h.adapter.startChildSession({ ...input, effort: 'high' });
     expect(h.startAgentChildSession).toHaveBeenCalledWith(expect.objectContaining({ effort: 'high' }));
   });
+  it('passes a phase to the child chat start', async () => {
+    const h = makeHarness();
+    const definition = {
+      version: 1 as const, kind: 'review' as const,
+      input: ['task'], deliverable: ['report'], verdict: ['done'], acceptanceStep: ['check'],
+      requiredCapabilities: [], toolProfile: { disallowedTools: ['Write'], permission: 'allow' as const },
+      discipline: { method: 'Review.', outputContract: 'Report.', returnValue: 'Evidence.',
+        refusals: 'Report.', escalationProtocol: 'Ask.' },
+    };
+    const phase = { version: 1 as const, kind: 'review' as const, text: 'Review.',
+      definition, toolProfile: definition.toolProfile };
+    await h.adapter.startChildSession({ ...input, phase });
+    expect(h.startAgentChildSession).toHaveBeenCalledWith(expect.objectContaining({ phase }));
+  });
+  it('returns the applied SDK tool profile evidence', async () => {
+    const h = makeHarness();
+    h.startAgentChildSession.mockResolvedValueOnce({ success: true, toolProfileApplied: true });
+    await expect(h.adapter.startChildSession(input)).resolves.toMatchObject({
+      started: true, toolProfileApplied: true,
+    });
+  });
   it('validates the explicit model through the chat session before launch', async () => {
     const h = makeHarness();
     await expect(h.adapter.resolveChildModel({ model: 'opus', workspaceRoot: '/repo', parentSessionId: 'parent' })).resolves.toMatchObject({ accepted: true, resolvedModel: 'opus' });

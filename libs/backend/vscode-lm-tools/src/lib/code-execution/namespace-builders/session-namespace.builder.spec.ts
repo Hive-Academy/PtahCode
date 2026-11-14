@@ -18,6 +18,7 @@ const CHILD = {
 
 function fakeSpawner(): jest.Mocked<ISessionSpawner> {
   return {
+    canStart: jest.fn().mockReturnValue({ ok: true }),
     start: jest.fn().mockResolvedValue({ ok: true, child: CHILD }),
     succeed: jest.fn().mockResolvedValue({ ok: true, successor: CHILD, adoptedLanes: [], tabOpened: true }),
     send: jest

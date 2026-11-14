@@ -57,6 +57,7 @@ import { ScorecardBadgeComponent } from './scorecard-badge.component';
 import {
   CloneActionModel,
   KEEP_MINE_EXPLANATION,
+  RETIRED_ROLE_REASON,
   cloneActionModel,
   cloneStatusLabel,
   formatCloneAge,
@@ -219,6 +220,16 @@ function cloneStatusHint(clone: CloneSummary): string {
             data-testid="clone-card-meta"
           >
             <ptah-provenance-badge [provenance]="clone().provenance" />
+            @if (actions().retired) {
+              <span
+                ptahBadge
+                size="sm"
+                tone="neutral"
+                [title]="retiredReason"
+                data-testid="clone-card-retired-badge"
+                ><span class="ptah-badge-text">Retired role</span></span
+              >
+            }
             <span
               class="inline-block size-1.5 rounded-full"
               [class]="dotClass()"
@@ -383,6 +394,7 @@ function cloneStatusHint(clone: CloneSummary): string {
       }
 
       <div card-footer class="flex flex-wrap items-center gap-1.5 pt-1">
+        @if (!actions().retired) {
         <button
           type="button"
           ptahButton
@@ -413,11 +425,15 @@ function cloneStatusHint(clone: CloneSummary): string {
         >
           Revert
         </button>
+        }
 
         @if (actions().rebase; as rebaseAction) {
           <button
             type="button"
-            class="btn btn-ghost btn-xs text-warning transition-colors duration-150"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="text-warning transition-colors duration-150"
             data-testid="clones-rebase-btn"
             [disabled]="!rebaseAction.enabled || busy()"
             title="Replace your local copy with the current upstream version."
@@ -430,7 +446,10 @@ function cloneStatusHint(clone: CloneSummary): string {
         @if (actions().keep) {
           <button
             type="button"
-            class="btn btn-ghost btn-xs text-warning transition-colors duration-150"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="text-warning transition-colors duration-150"
             data-testid="clones-keep-btn"
             [disabled]="busy()"
             [title]="keepMineExplanation"
@@ -490,6 +509,7 @@ export class CloneCardComponent {
   public readonly keep = output<CloneSummary>();
 
   protected readonly keepMineExplanation = KEEP_MINE_EXPLANATION;
+  protected readonly retiredReason = RETIRED_ROLE_REASON;
   protected readonly enhanceEnabledTitle =
     'Propose an improvement from recorded usage. You review the diff before anything is written.';
 

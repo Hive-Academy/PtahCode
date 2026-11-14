@@ -121,10 +121,15 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
         sessionName: input.sessionName,
         model: input.model,
         effort: input.effort,
+        ...(input.phase ? { phase: input.phase } : {}),
         ...(permissionLevel ? { permissionLevel } : {}),
       });
       if (result.success) {
-        return { started: true, uiAnnounced };
+        return { started: true, uiAnnounced,
+          ...('toolProfileApplied' in result && result.toolProfileApplied === true
+            ? { toolProfileApplied: true }
+            : {}),
+        };
       }
       error = result.error || 'unknown error';
       accountRefusal = 'accountRefusal' in result ? result.accountRefusal : undefined;

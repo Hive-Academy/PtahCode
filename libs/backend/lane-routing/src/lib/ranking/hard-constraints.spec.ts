@@ -9,6 +9,7 @@ import {
 import {
   toLaneCandidate,
   toSubagentCandidate,
+  type ChildSessionCandidate,
   type LaneCandidate,
   type RoutingCandidate,
 } from './candidate.types';
@@ -100,6 +101,79 @@ function ids(result: PhaseConstraintResult): readonly string[] {
 }
 
 describe('constrainPhase requirement 3.2', () => {
+  it('accepts an eligible child pin and refuses incapable or missing child pins', () => {
+    const child: ChildSessionCandidate = {
+      kind: 'child-session',
+      id: 'child-session',
+      family: SUBAGENT_FAMILY,
+    };
+    const input: ConstrainPhaseInput = {
+      phase: { id: 'look', kind: 'visual-review' },
+      candidates: [child],
+      pin: { executor: 'child-session' },
+      toolNames: new Map([['child-session', ['ptah_browser_navigate']]]),
+    };
+    expect(ids(constrainPhase(input))).toEqual(['child-session']);
+    expect(constrainPhase({ ...input, toolNames: new Map([['child-session', []]]) })).toMatchObject({
+      status: 'unavailable', exclusionReason: 'pin-unavailable', pinRule: 'missing-capability',
+    });
+    expect(constrainPhase({ ...input, toolNames: new Map([['child-session', null]]) })).toMatchObject({
+      status: 'unavailable', exclusionReason: 'pin-unavailable', pinRule: 'capability-unknown',
+    });
+    expect(constrainPhase({ ...input, candidates: [] })).toMatchObject({
+      status: 'unavailable', exclusionReason: 'pin-unavailable', pinRule: 'not-listed',
+    });
+  });
+  it('routes visual review to a capable lane and excludes one without browser tools', () => {
+    const result = constrainPhase({
+      phase: { id: 'look', kind: 'visual-review' },
+      candidates: [lane({ id: 'codex', cli: 'codex' }), lane({ id: 'grok', cli: 'grok' })],
+      toolNames: new Map([['codex', []], ['grok', ['ptah_browser_navigate']]]),
+    });
+
+    expect(ids(result)).toEqual(['grok']);
+    expect(result.excluded).toEqual([
+      { candidate: 'codex', rule: 'missing-capability', capability: 'browser' },
+    ]);
+  });
+
+  it('excludes an unreadable list and reports the capability when none are capable', () => {
+    const result = constrainPhase({
+      phase: { id: 'look', kind: 'visual-review' },
+      candidates: [lane({ id: 'codex', cli: 'codex' }), lane({ id: 'grok', cli: 'grok' })],
+      toolNames: new Map([['codex', null], ['grok', []]]),
+    });
+
+    expect(result).toMatchObject({
+      status: 'unavailable',
+      exclusionReason: 'missing-capability',
+      excluded: [
+        { candidate: 'codex', rule: 'capability-unknown', capability: 'browser' },
+        { candidate: 'grok', rule: 'missing-capability', capability: 'browser' },
+      ],
+    });
+  });
+
+  it('lets a capable pin win and refuses an incapable pin', () => {
+    const input: ConstrainPhaseInput = {
+      phase: { id: 'look', kind: 'design' },
+      candidates: [lane({ id: 'codex', cli: 'codex' }), lane({ id: 'grok', cli: 'grok' })],
+      toolNames: new Map([['codex', []], ['grok', ['ptah_browser_screenshot']]]),
+    };
+    expect(ids(constrainPhase({ ...input, pin: { executor: 'grok' } }))).toEqual(['grok']);
+    expect(constrainPhase({ ...input, pin: { executor: 'codex' } })).toMatchObject({
+      status: 'unavailable', exclusionReason: 'pin-unavailable', pinRule: 'missing-capability',
+      excluded: [{ candidate: 'codex', rule: 'missing-capability', capability: 'browser' }],
+    });
+  });
+
+  it('keeps an ordinary phase eligible without reading tool names', () => {
+    expect(ids(constrainPhase({
+      phase: { id: 'build', kind: 'implement' },
+      candidates: [lane({ id: 'codex', cli: 'codex' })],
+    }))).toEqual(['codex']);
+  });
+
   it('excludes an at-limit lane with rule at-limit and keeps the other lane', () => {
     const result = constrainPhase({
       phase: { id: 'implement', kind: 'implement' },
@@ -363,11 +437,12 @@ describe('constrainPhase requirement 3.3', () => {
 });
 
 describe('constrainPhase requirement 3.4', () => {
-  it('excludes every lane on visual-review with rule never-on-a-lane and keeps the subagent', () => {
+  it('excludes a lane without browser and keeps a capable subagent', () => {
     const subagent = toSubagentCandidate('visual-reviewer');
     const result = constrainPhase({
       phase: { id: 'visual', kind: 'visual-review' },
       candidates: [lane({ id: 'codex', cli: 'codex' }), subagent],
+      toolNames: new Map([['codex', []], [subagent.id, ['ptah_browser_navigate']]]),
     });
 
     expect(result.status).toBe('eligible');
@@ -379,11 +454,11 @@ describe('constrainPhase requirement 3.4', () => {
     ]);
     expect(ids(result)).toEqual([subagent.id]);
     expect(result.excluded).toEqual([
-      { candidate: 'codex', rule: 'never-on-a-lane' },
+      { candidate: 'codex', rule: 'missing-capability', capability: 'browser' },
     ]);
   });
 
-  it('excludes every lane on design with rule never-on-a-lane and keeps the subagent', () => {
+  it('excludes lanes without browser on design', () => {
     const subagent = toSubagentCandidate('ui-ux-designer');
     const result = constrainPhase({
       phase: { id: 'design', kind: 'design' },
@@ -392,16 +467,17 @@ describe('constrainPhase requirement 3.4', () => {
         lane({ id: 'grok', cli: 'grok' }),
         subagent,
       ],
+      toolNames: new Map([['codex', []], ['grok', []], [subagent.id, ['ptah_browser_navigate']]]),
     });
 
     expect(ids(result)).toEqual([subagent.id]);
     expect(result.excluded).toEqual([
-      { candidate: 'codex', rule: 'never-on-a-lane' },
-      { candidate: 'grok', rule: 'never-on-a-lane' },
+      { candidate: 'codex', rule: 'missing-capability', capability: 'browser' },
+      { candidate: 'grok', rule: 'missing-capability', capability: 'browser' },
     ]);
   });
 
-  it('returns no-eligible-candidate when a visual-review phase has only lanes', () => {
+  it('returns missing-capability when no candidate has browser', () => {
     const result = constrainPhase({
       phase: { id: 'visual', kind: 'visual-review' },
       candidates: [lane({ id: 'codex', cli: 'codex' })],
@@ -409,9 +485,9 @@ describe('constrainPhase requirement 3.4', () => {
 
     expect(result).toMatchObject({
       status: 'unavailable',
-      exclusionReason: 'no-eligible-candidate',
+      exclusionReason: 'missing-capability',
       needsDisclosedFallback: false,
-      excluded: [{ candidate: 'codex', rule: 'never-on-a-lane' }],
+      excluded: [{ candidate: 'codex', rule: 'capability-unknown', capability: 'browser' }],
     });
   });
 });
@@ -503,20 +579,21 @@ describe('constrainPhase requirement 3.6', () => {
     });
   });
 
-  it('returns pin-unavailable with rule never-on-a-lane and does not substitute the subagent', () => {
+  it('returns pin-unavailable with missing browser and does not move the pin', () => {
     const subagent = toSubagentCandidate('ui-ux-designer');
     const result = constrainPhase({
       phase: { id: 'design', kind: 'design' },
       pin: { executor: 'codex' },
       candidates: [lane({ id: 'codex', cli: 'codex' }), subagent],
+      toolNames: new Map([['codex', []], [subagent.id, ['ptah_browser_navigate']]]),
     });
 
     expect(result).toEqual({
       phaseId: 'design',
       status: 'unavailable',
       exclusionReason: 'pin-unavailable',
-      excluded: [{ candidate: 'codex', rule: 'never-on-a-lane' }],
-      pinRule: 'never-on-a-lane',
+      excluded: [{ candidate: 'codex', rule: 'missing-capability', capability: 'browser' }],
+      pinRule: 'missing-capability',
       needsDisclosedFallback: false,
     });
   });

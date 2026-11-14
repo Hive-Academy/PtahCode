@@ -30,6 +30,7 @@ import type {
   ISdkPermissionHandler,
   PermissionLevel,
   SubagentPromptCacheTtl,
+  PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import { KIMI_CODE_PROXY_TOKEN_PLACEHOLDER } from '@ptah-extension/shared';
 
@@ -308,6 +309,38 @@ function makeConfig(
     ...overrides,
   };
 }
+
+it('forwards the resolved phase and skills to the SDK options builder', async () => {
+  const { executor, buildSpy } = makeHarness('ask');
+  const toolProfile = { disallowedTools: [], permission: 'allow' as const };
+  const phase: PhaseDispatchV1 = {
+    version: 1,
+    kind: 'implement',
+    text: 'Implement the change',
+    definition: {
+      version: 1,
+      kind: 'implement',
+      input: [],
+      deliverable: [],
+      verdict: [],
+      acceptanceStep: [],
+      requiredCapabilities: [],
+      toolProfile,
+      discipline: {
+        method: '',
+        outputContract: '',
+        returnValue: '',
+        refusals: '',
+        escalationProtocol: '',
+      },
+    },
+    toolProfile,
+  };
+  const skills = [{ name: 'checks', text: 'Verify output' }];
+  const run = await executor.executeQuery(makeConfig('phase-delivery', { phase, skills }));
+  expect(buildSpy).toHaveBeenCalledWith(expect.objectContaining({ phase, skills }));
+  run.abortController.abort();
+});
 
 // ---------------------------------------------------------------------------
 // Specs

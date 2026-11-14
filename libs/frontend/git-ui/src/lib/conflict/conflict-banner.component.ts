@@ -277,7 +277,9 @@ let nextBannerId = 0;
           }
           <button
             type="button"
-            [class]="askClass()"
+            ptahButton
+            [variant]="canContinue() ? 'outline' : 'primary'"
+            size="xs"
             data-testid="conflict-banner-ask"
             [disabled]="running() !== null"
             (click)="onAskAgent()"
@@ -286,7 +288,11 @@ let nextBannerId = 0;
           </button>
           <button
             type="button"
-            class="btn btn-error btn-xs err-solid-text"
+            ptahButton
+            variant="danger"
+            size="xs"
+            tone="danger"
+            class="err-solid-text"
             data-testid="conflict-banner-abort"
             [disabled]="running() !== null"
             (click)="onAbortClick($event)"
@@ -389,10 +395,6 @@ export class ConflictBannerComponent {
     () => this.operation()?.conflictedPaths.length === 0,
   );
 
-  /** Ask agent is the primary action until Continue takes over. */
-  protected readonly askClass = computed(() =>
-    this.canContinue() ? 'btn btn-outline btn-xs' : 'btn btn-primary btn-xs',
-  );
 
   protected readonly abortDescription = computed(() => {
     const name = this.kindName();

@@ -14,6 +14,7 @@
 import { injectable, inject } from 'tsyringe';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
+import { SessionChildRegistry } from '@ptah-extension/cli-agent-runtime';
 import type { ModelSettings } from '@ptah-extension/settings-core';
 import {
   AuthRequiredError,
@@ -183,6 +184,8 @@ export class ChatSlashCommandRouterService {
     private readonly runtimeControls: SessionRuntimeControls | null = null,
     @inject(SDK_TOKENS.CODEX_CHAT_ADAPTER, { isOptional: true })
     private readonly nativeAdapter: CodexChatAdapter | null = null,
+    @inject(SessionChildRegistry, { isOptional: true })
+    private readonly sessionChildren: SessionChildRegistry | undefined = undefined,
   ) {}
 
   /**
@@ -411,6 +414,9 @@ export class ChatSlashCommandRouterService {
             mcpServerRunning,
             enhancedPromptsContent,
             tabId,
+            ...(this.sessionChildren?.get(sessionId as string)
+              ? { knownSessionChild: true }
+              : {}),
             ...(execution.runtime === 'claude-sdk'
               ? {
                   providerProfile: execution.providerProfile,

@@ -45,6 +45,7 @@ export interface LaneModelFacts {
 }
 
 export interface GatheredCall {
+  readonly childSessionEligible?: boolean;
   readonly lanes: readonly LaneCandidate[];
   readonly roles: readonly string[];
   readonly matrix: CapabilityMatrixSnapshot;
@@ -84,6 +85,14 @@ export async function gatherRouteCall(input: {
   ]);
   const lanes = rows.rows.map((row) => toLaneCandidate(row, limits.map));
   const matrixNotes = classifyMatrixReasons(matrix.reasons);
+  let childSessionEligible = false;
+  let childEligibilityReason: string | undefined;
+  try {
+    childSessionEligible = input.source.childSessionEligible?.() ?? false;
+  } catch (error: unknown) {
+    input.logger.warn('[lane-routing] child session eligibility could not be checked', logFacts(error));
+    childEligibilityReason = 'Child session eligibility could not be checked';
+  }
   const missing = orderedMissing([
     ...(rows.failed ? (['agent-list'] as const) : []),
     ...(limits.failed ? (['limits'] as const) : []),
@@ -93,6 +102,7 @@ export async function gatherRouteCall(input: {
     ...(rotation.reason !== null ? (['rotation-store'] as const) : []),
   ]);
   return {
+    childSessionEligible,
     lanes,
     roles: roles.roles,
     matrix,
@@ -100,7 +110,7 @@ export async function gatherRouteCall(input: {
     rotationUnavailable: rotation.reason !== null,
     models: listed.byLaneId,
     missing,
-    detailReasons: matrixNotes.extra,
+    detailReasons: [...matrixNotes.extra, ...(childEligibilityReason ? [childEligibilityReason] : [])],
   };
 }
 

@@ -44,6 +44,7 @@ import type {
   SessionId,
   SessionStatsEntry,
   SessionStatsLivePayload,
+  PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import {
   createMockLogger,
@@ -1793,6 +1794,130 @@ describe('SdkAgentAdapter', () => {
   });
 
   describe('SdkAgentAdapter.startChatSession (mcpServersOverride threading)', () => {
+    it('passes a phase to the SDK and records child usage as a session', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      const queryResult = {
+        sdkQuery: createFakeQuery(),
+        initialModel: 'claude-sonnet-4-20250514',
+        abortController: new AbortController(),
+      } as ExecuteQueryResult;
+      h.sessionLifecycle.executeQuery.mockResolvedValueOnce(queryResult).mockResolvedValueOnce(queryResult).mockResolvedValueOnce(queryResult);
+      const toolProfile = { disallowedTools: ['Bash'], permission: 'allow' as const };
+      const phase: PhaseDispatchV1 = {
+        version: 1,
+        kind: 'implement',
+        text: '## Method\nDo.\n\n## Output contract\nWrite.\n\n## Return value\nReturn.\n\n## Refusals\nRefuse.\n\n## Escalation protocol\nAsk.',
+        definition: {
+          version: 1,
+          kind: 'implement',
+          input: ['plan'], deliverable: ['change'], verdict: ['done'], acceptanceStep: ['check'], requiredCapabilities: ['reasoning'],
+          toolProfile,
+          discipline: {
+            method: 'Do.', outputContract: 'Write.', returnValue: 'Return.', refusals: 'Refuse.', escalationProtocol: 'Ask.',
+          },
+        },
+        toolProfile,
+      };
+      const beginRun = jest.spyOn(h.statsOwner, 'beginRun');
+      await h.adapter.startChatSession({ ...makeSessionConfig(), phase });
+      expect(h.sessionLifecycle.executeQuery.mock.calls[0][0].phase).toBe(phase);
+      expect(beginRun.mock.calls[0][4]).toEqual({ phaseKind: 'implement', executorType: 'session' });
+      await h.adapter.resumeSession('tab_1' as SessionId, makeSessionConfig());
+      expect(h.sessionLifecycle.executeQuery.mock.calls[1][0].phase).toBe(phase);
+      expect(beginRun.mock.calls[1][4]).toEqual({ phaseKind: 'implement', executorType: 'session' });
+      const startEvent = h.streamTransformer.transform.mock.calls[0][0];
+      await startEvent.onSessionIdResolved?.('tab_1', 'sess-phase');
+      expect(h.metadataStore.create.mock.calls[0][7]).toEqual(phase);
+      h.adapter.endSession('tab_1' as SessionId);
+      const resumed = makeAdapter();
+      await resumed.adapter.initialize();
+      resumed.metadataStore.get.mockResolvedValue({
+        sessionId: 'sess-phase', name: 'Phase', workspaceId: '/tmp',
+        phaseState: 'present', phase,
+      } as never);
+      resumed.sessionLifecycle.executeQuery.mockResolvedValueOnce(queryResult);
+      await resumed.adapter.resumeSession('sess-phase' as SessionId, makeSessionConfig());
+      expect(resumed.sessionLifecycle.executeQuery.mock.calls[0][0].phase).toEqual(phase);
+    });
+
+    it('refuses a child resume when its required phase cannot be restored', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'missing-phase', name: 'Child', workspaceId: '/workspace',
+        workingDirectory: '/workspace/child', phaseState: 'present',
+      } as never);
+      await expect(h.adapter.resumeSession('missing-phase' as SessionId)).rejects.toThrow(
+        'missing phase metadata',
+      );
+      expect(h.sessionLifecycle.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('resumes a legacy handoff in another cwd without child evidence', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'legacy-handoff', name: 'Handoff', workspaceId: '/workspace',
+        workingDirectory: '/workspace/handoff',
+      } as never);
+      h.sessionLifecycle.executeQuery.mockResolvedValueOnce({
+        sdkQuery: createFakeQuery(), initialModel: 'claude',
+        abortController: new AbortController(),
+      } as ExecuteQueryResult);
+      await h.adapter.resumeSession('legacy-handoff' as SessionId);
+      expect(h.sessionLifecycle.executeQuery.mock.calls[0][0].phase).toBeUndefined();
+    });
+
+    it('refuses a legacy child with no phase evidence', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'legacy-child', name: 'Child', workspaceId: '/workspace',
+        workingDirectory: '/workspace/child', isChildSession: true,
+      } as never);
+      await expect(h.adapter.resumeSession('legacy-child' as SessionId)).rejects.toThrow(
+        'legacy child without phase evidence',
+      );
+      expect(h.sessionLifecycle.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('refuses a known child with missing metadata before an unphased run', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue(null);
+      await expect(h.adapter.resumeSession('missing-child' as SessionId, {
+        knownSessionChild: true,
+      })).rejects.toThrow('child without phase metadata');
+      expect(h.sessionLifecycle.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('refuses malformed child phase state before a resumed query', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'invalid-state', name: 'Child', workspaceId: '/workspace',
+        workingDirectory: '/workspace/child', phaseState: 'unknown',
+      } as never);
+      await expect(h.adapter.resumeSession('invalid-state' as SessionId)).rejects.toThrow(
+        'malformed phase state',
+      );
+      expect(h.sessionLifecycle.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('records an ordinary session without a phase kind', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.sessionLifecycle.executeQuery.mockResolvedValueOnce({
+        sdkQuery: createFakeQuery(),
+        initialModel: 'claude-sonnet-4-20250514',
+        abortController: new AbortController(),
+      } as ExecuteQueryResult);
+      const beginRun = jest.spyOn(h.statsOwner, 'beginRun');
+      await h.adapter.startChatSession(makeSessionConfig());
+      expect(beginRun.mock.calls[0][4]).toEqual({ phaseKind: undefined, executorType: 'session' });
+    });
+
     it('forwards mcpServersOverride to sessionLifecycle.executeQuery', async () => {
       const h = makeAdapter();
       await h.adapter.initialize();
@@ -2616,6 +2741,44 @@ describe('SdkAgentAdapter', () => {
   });
 
   describe('executeSlashCommand()', () => {
+    it('restores a saved phase on slash relaunch', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      const phase = {
+        version: 1, kind: 'implement',
+        text: '## Method\nDo.\n\n## Output contract\nWrite.\n\n## Return value\nReturn.\n\n## Refusals\nRefuse.\n\n## Escalation protocol\nAsk.',
+        definition: { version: 1, kind: 'implement', input: ['plan'],
+          deliverable: ['change'], verdict: ['done'], acceptanceStep: ['check'],
+          requiredCapabilities: ['reasoning'],
+          toolProfile: { disallowedTools: ['Bash'], permission: 'allow' },
+          discipline: { method: 'Do.', outputContract: 'Write.', returnValue: 'Return.',
+            refusals: 'Refuse.', escalationProtocol: 'Ask.' } },
+        toolProfile: { disallowedTools: ['Bash'], permission: 'allow' },
+      } as PhaseDispatchV1;
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'phase-slash', name: 'Child', workspaceId: '/workspace',
+        isChildSession: true, phaseState: 'present', phase,
+      } as never);
+      h.sessionLifecycle.executeSlashCommandQuery.mockResolvedValueOnce({
+        sdkQuery: createFakeQuery(), initialModel: 'claude',
+        abortController: new AbortController(),
+      } as ExecuteQueryResult);
+      await h.adapter.executeSlashCommand('phase-slash' as SessionId, '/compact', {});
+      expect(h.sessionLifecycle.executeSlashCommandQuery.mock.calls[0][2].phase).toEqual(phase);
+    });
+
+    it('refuses a legacy child slash relaunch without phase evidence', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'legacy-child', name: 'Child', workspaceId: '/workspace',
+        isChildSession: true,
+      } as never);
+      await expect(h.adapter.executeSlashCommand('legacy-child' as SessionId, '/compact', {}))
+        .rejects.toThrow('legacy child without phase evidence');
+      expect(h.sessionLifecycle.executeSlashCommandQuery).not.toHaveBeenCalled();
+    });
+
     it('throws SdkError before initialize()', async () => {
       const { adapter } = makeAdapter();
       await expect(

@@ -15,6 +15,7 @@
 import type {
   AgentSessionOpenedPayload,
   EffortLevel,
+  PhaseDispatchV1,
   PermissionLevel,
   SessionHandoffOpenedPayload,
 } from '@ptah-extension/shared';
@@ -33,6 +34,7 @@ export interface ChildChatSessionStartInput {
   readonly sessionName: string;
   readonly model?: string;
   readonly effort?: EffortLevel;
+  readonly phase?: PhaseDispatchV1;
   /** Parent permission level captured while the parent was active. */
   readonly permissionLevel?: PermissionLevel;
 }
@@ -61,6 +63,8 @@ export type ChildChatSessionStartOutcome =
       readonly started: true;
       /** False when no webview took the tab; it is adopted late on the next bootstrap. */
       readonly uiAnnounced: boolean;
+      /** Confirmed when the SDK start built query options with phase denials. */
+      readonly toolProfileApplied?: boolean;
     }
   | { readonly started: false; readonly error: string };
 

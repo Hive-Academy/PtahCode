@@ -16,16 +16,141 @@
  */
 
 import 'reflect-metadata';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+const fsModule: typeof import('node:fs') = require('node:fs');
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   SdkQueryOptionsBuilder,
+  withPhaseDelivery,
   getActiveProviderId,
   namedActualLaunch,
   type SdkQueryOptions,
 } from './sdk-query-options-builder';
+import { SkillPathRefusalError } from './skill-path-refusal.error';
+
+/** A complete, typed phase dispatch; no cast to `PhaseDispatchV1`. */
+function phaseFixture(disallowedTools: readonly string[] = []): PhaseDispatchV1 {
+  const toolProfile = { disallowedTools, permission: 'allow' as const };
+  return {
+    version: 1,
+    kind: 'implement',
+    text: 'Implement the change',
+    definition: {
+      version: 1,
+      kind: 'implement',
+      input: [],
+      deliverable: [],
+      verdict: [],
+      acceptanceStep: [],
+      requiredCapabilities: [],
+      toolProfile,
+      discipline: {
+        method: '',
+        outputContract: '',
+        returnValue: '',
+        refusals: '',
+        escalationProtocol: '',
+      },
+    },
+    toolProfile,
+  };
+}
+
+describe('SDK phase delivery', () => {
+  it('keeps legacy prompts and appends resolved skill text', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    try {
+      const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: 'Existing' };
+      expect(withPhaseDelivery(prompt, tmpRoot)).toBe(prompt);
+      expect(withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'checks', text: 'Verify output' }]))
+        .toEqual({ ...prompt, append: 'Existing\n\nSkill checks: Verify output' });
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+
+  it('reads in-workspace relative path skill correctly', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    try {
+      writeFileSync(join(tmpRoot, 'skill.txt'), 'Skill content here');
+      const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: '' };
+      const result = withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'custom', path: 'skill.txt' }]);
+      expect(result && typeof result === 'object' && 'append' in result && result.append).toContain('Skill custom: Skill content here');
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+
+  it('rejects outside-workspace paths with traversal attempts', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    try {
+      const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: '' };
+      expect(() => withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'escape', path: '../outside.txt' }]))
+        .toThrow(SkillPathRefusalError);
+      expect(() => withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'abs', path: '/' }]))
+        .toThrow(SkillPathRefusalError);
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+
+  it('skips missing in-workspace paths without crashing', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    try {
+      const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: 'Base' };
+      const result = withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'missing', path: 'nonexistent.txt' }]);
+      expect(result && typeof result === 'object' && 'append' in result && result.append).toBe('Base');
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+  it('refuses a directory link that escapes the workspace without reading its content', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    const outside = mkdtempSync(join(tmpdir(), 'outside-'));
+    try {
+      writeFileSync(join(outside, 'skill.txt'), 'Outside secret content');
+      symlinkSync(outside, join(tmpRoot, 'linked'), 'junction');
+      const read = jest.spyOn(fsModule, 'readFileSync');
+      try {
+        const prompt = { type: 'preset' as const, preset: 'claude_code' as const, append: 'Base' };
+        expect(() => withPhaseDelivery(prompt, tmpRoot, undefined, [{ name: 'escape', path: 'linked/skill.txt' }]))
+          .toThrow(SkillPathRefusalError);
+        expect(read).not.toHaveBeenCalledWith(join(outside, 'skill.txt'), 'utf8');
+        expect(prompt.append).not.toContain('Outside secret content');
+      } finally {
+        read.mockRestore();
+      }
+    } finally {
+      rmSync(tmpRoot, { recursive: true });
+      rmSync(outside, { recursive: true });
+    }
+  });
+
+  it('skips an unreadable skill and still appends phase text', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'test-'));
+    const path = join(tmpRoot, 'skill.txt');
+    writeFileSync(path, 'Unreadable content');
+    const originalRead = fsModule.readFileSync;
+    const read = jest.spyOn(fsModule, 'readFileSync').mockImplementation((file, ...args) => {
+      if (file === path) throw new Error('Access denied');
+      return originalRead(file, ...args);
+    });
+    try {
+      const result = withPhaseDelivery(
+        { type: 'preset', preset: 'claude_code', append: 'Base' },
+        tmpRoot,
+        phaseFixture(),
+        [{ name: 'unreadable', path: 'skill.txt' }],
+      );
+      expect(result && typeof result === 'object' && 'append' in result && result.append).toBe('Base\n\nImplement the change');
+    } finally {
+      read.mockRestore();
+      rmSync(tmpRoot, { recursive: true });
+    }
+  });
+});
 import {
   CLAUDE_CERTIFIED_ENV_KEYS,
   assertCertifiedLaunch,
@@ -40,6 +165,7 @@ import type {
 import {
   INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
   type IWorkspaceProvider,
+  type McpCallerBinding,
 } from '@ptah-extension/platform-core';
 import {
   CODEX_PROXY_TOKEN_PLACEHOLDER,
@@ -58,6 +184,7 @@ import type {
   EffectiveCapabilitySet,
   McpHttpServerOverride,
   McpToolProfile,
+  PhaseDispatchV1,
 } from '@ptah-extension/shared';
 
 // ---------------------------------------------------------------------------
@@ -336,6 +463,8 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
   }
 
   interface BuildOverrides {
+    phase?: PhaseDispatchV1;
+    skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[];
     sessionId?: string;
     mcpToolProfile?: McpToolProfile;
     enableFileCheckpointing?: boolean;
@@ -385,6 +514,15 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
     });
     return { options: cfg.options, logger };
   }
+
+  it('includes the supplied phase definition and skills in built SDK query options', async () => {
+    const phase = phaseFixture();
+    const skills = [{ name: 'checks', text: 'Verify output' }];
+    const { options } = await buildWithLogger({ phase, skills });
+    expect(options.systemPrompt).toEqual(expect.objectContaining({
+      append: expect.stringContaining('Implement the change\n\nSkill checks: Verify output'),
+    }));
+  });
 
   it('routes SDK SendMessage through PreToolUse before an auto-allow skips canUseTool', async () => {
     const { options, logger } = await buildWithLogger({
@@ -751,12 +889,13 @@ describe('SdkQueryOptionsBuilder.build — activityHold forwarded to subagent ho
   async function buildWithHold(activityHold?: {
     hold: jest.Mock;
     release: jest.Mock;
-  }): Promise<jest.Mock> {
+  }, phase?: PhaseDispatchV1): Promise<jest.Mock> {
     const { builder, createHooksSpy } = makeBuilderWithSubagentSpy();
     const userMessageStream = (async function* () {
       // Intentionally empty.
     })();
     await builder.build({
+      phase,
       userMessageStream,
       abortController: new AbortController(),
       sessionConfig: {
@@ -776,13 +915,18 @@ describe('SdkQueryOptionsBuilder.build — activityHold forwarded to subagent ho
     const createHooksSpy = await buildWithHold(activityHold);
 
     expect(createHooksSpy).toHaveBeenCalledTimes(1);
-    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1');
+    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1', undefined);
   });
 
   it('passes undefined when the caller has no watchdog', async () => {
     const createHooksSpy = await buildWithHold(undefined);
 
-    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1');
+    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1', undefined);
+  });
+
+  it('passes the session phase kind to the subagent hook handler', async () => {
+    const createHooksSpy = await buildWithHold(undefined, phaseFixture());
+    expect(createHooksSpy).toHaveBeenCalledWith('D:/tmp/ws', 'sess-1', 'implement');
   });
 });
 
@@ -2573,6 +2717,8 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
   }
 
   interface BuiltinBuildInput {
+    phase?: PhaseDispatchV1;
+    issue?: jest.Mock;
     settings?: Record<string, unknown>;
     capabilityPolicy?: EffectiveCapabilitySet;
     authEnv?: AuthEnv;
@@ -2605,8 +2751,11 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
 
   async function buildWith(input: BuiltinBuildInput = {}): Promise<{
     options: SdkQueryOptions;
+    toolProfileApplied?: true;
     settings: Record<string, unknown>;
+    credentialBinding: McpCallerBinding;
   }> {
+    const issuedBindings: McpCallerBinding[] = [];
     const noopHooks = { createHooks: jest.fn().mockReturnValue({}) };
     const ctor = SdkQueryOptionsBuilder as unknown as new (
       ...args: unknown[]
@@ -2653,11 +2802,15 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
       settingsWorkspace(input.settings ?? {}),
       undefined, // hostKind
       {
-        issue: jest.fn().mockReturnValue('test-token'),
+        issue: input.issue ?? jest.fn((binding: McpCallerBinding) => {
+          issuedBindings.push(binding);
+          return 'test-token';
+        }),
         revokeSubject: jest.fn(),
       },
     );
     const cfg = await builder.build({
+      phase: input.phase,
       userMessageStream: (async function* () {
         // Intentionally empty — build() attaches the stream, it does not iterate.
       })(),
@@ -2680,6 +2833,8 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     });
     return {
       options: cfg.options,
+      ...(cfg.toolProfileApplied ? { toolProfileApplied: cfg.toolProfileApplied } : {}),
+      credentialBinding: issuedBindings[0],
       settings: JSON.parse(cfg.options.settings as string) as Record<
         string,
         unknown
@@ -2693,6 +2848,54 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     expect(built.settings['skillOverrides']).toEqual(
       Object.fromEntries(DEFAULT_SKILLS.map((name) => [name, 'off'])),
     );
+  });
+
+  it('merges phase denials with Claude preset denials without duplicates', async () => {
+    const phase = phaseFixture(['mcp__firecrawl', 'Workflow', 'mcp__firecrawl']);
+    const built = await buildWith({ phase });
+    expect(built.options.disallowedTools).toEqual([...DEFAULT_TOOLS, 'mcp__firecrawl']);
+    expect(built.credentialBinding).toEqual(expect.objectContaining({
+      phaseKind: 'implement',
+      disallowedTools: ['mcp__firecrawl', 'Workflow'],
+    }));
+  });
+
+  it('refuses a phase missing its tool profile before issuing a credential', async () => {
+    const issue = jest.fn();
+    const phase = Object.assign(phaseFixture(), { toolProfile: undefined });
+    await expect(buildWith({ phase, issue })).rejects.toThrow(
+      'Phase tool profile requires a disallowedTools array.',
+    );
+    expect(issue).not.toHaveBeenCalled();
+  });
+
+  it('keeps credential denials independent of later phase mutations', async () => {
+    const denials = ['mcp__firecrawl'];
+    const phase = phaseFixture(denials);
+    const built = await buildWith({ phase });
+    denials.push('mcp__later');
+    expect(built.credentialBinding.disallowedTools).toEqual(['mcp__firecrawl']);
+  });
+
+  it('applies phase denials to a named account launch', async () => {
+    const phase = phaseFixture(['mcp__firecrawl']);
+    const built = await buildWith({ named: true, phase });
+    expect(built.options.disallowedTools).toEqual([...DEFAULT_TOOLS, 'mcp__firecrawl']);
+    expect(built.toolProfileApplied).toBe(true);
+  });
+
+  it('keeps preset denials when phase denials are empty or absent', async () => {
+    const phase = phaseFixture();
+    expect((await buildWith({ phase })).options.disallowedTools).toEqual(DEFAULT_TOOLS);
+    const withoutPhase = await buildWith();
+    expect(withoutPhase.options.disallowedTools).toEqual(DEFAULT_TOOLS);
+    expect(withoutPhase.toolProfileApplied).toBeUndefined();
+    expect(withoutPhase.credentialBinding).toEqual({
+      kind: 'session',
+      sessionId: 'tab-fixture',
+      workspaceRoot: PROJECT,
+      capability: 'privileged',
+    });
   });
 
   it('keeps the protected tools and subagent spawning available', async () => {

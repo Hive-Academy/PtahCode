@@ -7,12 +7,14 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import {
   SessionStatsRepository,
   type SessionUsageContribution,
+  usageExecutorTypeSchema,
+  usagePhaseKindSchema,
 } from './session-stats-repository';
 
 const safeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const identifier = z.string().min(1);
 const authority = z.enum(['provider-reported', 'model-priced', 'unpriced']);
-const liveContributionSchema: z.ZodType<LiveUsageContribution> = z
+const liveContributionSchema = z
   .object({
     sessionId: identifier,
     producer: z.enum(['sdk-owner', 'codex-checkpoint', 'cli-lane']),
@@ -45,6 +47,8 @@ const liveContributionSchema: z.ZodType<LiveUsageContribution> = z
     runCostSnapshot: z.boolean().optional(),
     workspaceKey: identifier.nullable().optional(),
     host: identifier.nullable().optional(),
+    phaseKind: usagePhaseKindSchema.nullable().optional(),
+    executorType: usageExecutorTypeSchema.nullable().optional(),
   })
   .strict();
 
@@ -207,7 +211,7 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
     }
   }
 
-  private toRows(event: LiveUsageContribution): SessionUsageContribution[] {
+  private toRows(event: z.infer<typeof liveContributionSchema>): SessionUsageContribution[] {
     const eventKey = JSON.stringify([event.runId, event.eventKey]);
     const attributed = event.models.reduce((sum, model) => {
       const next = sum + (model.knownCostMicroUsd ?? 0);
@@ -233,6 +237,8 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
       pricingVersion: event.pricingVersion,
       workspaceKey: event.workspaceKey ?? null,
       host: event.host ?? null,
+      phaseKind: event.phaseKind ?? null,
+      executorType: event.executorType ?? null,
       revision: event.revision,
       runCostSnapshot: event.runCostSnapshot,
     }));
@@ -256,6 +262,8 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         pricingVersion: event.pricingVersion,
         workspaceKey: event.workspaceKey ?? null,
         host: event.host ?? null,
+        phaseKind: event.phaseKind ?? null,
+        executorType: event.executorType ?? null,
         revision: event.revision,
         runCostSnapshot: event.runCostSnapshot,
       });
@@ -284,6 +292,8 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         pricingVersion: event.pricingVersion,
         workspaceKey: event.workspaceKey ?? null,
         host: event.host ?? null,
+        phaseKind: event.phaseKind ?? null,
+        executorType: event.executorType ?? null,
         revision: event.revision,
         runCostSnapshot: event.runCostSnapshot,
       });

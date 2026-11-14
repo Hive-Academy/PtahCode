@@ -137,7 +137,7 @@ describe('SurfaceTextInputComponent', () => {
     jest.advanceTimersByTime(SURFACE_TEXT_COMMIT_DEBOUNCE_MS * 2);
     expect(host.commits).toEqual([]);
     expect(host.drafts()['reason']).toHaveLength(SURFACE_LIMITS.maxStringLength + 1);
-    const error = element.querySelector(`#${control().id}-error`);
+    const error = element.querySelector('.ptah-field__message');
     expect(error?.textContent).toContain('exceeds maxStringLength');
     expect(control().getAttribute('aria-invalid')).toBe('true');
     expect(control().getAttribute('aria-describedby')).toContain(error!.id);
@@ -193,7 +193,7 @@ describe('SurfaceTextInputComponent', () => {
     const { element, control, type } = setup(textNode({}, { form: { reason: 42 } }));
     expect(control().value).toBe('');
     expect(control().getAttribute('aria-invalid')).toBe('true');
-    expect(element.querySelector(`#${control().id}-error`)?.textContent).toContain('reason');
+    expect(element.querySelector('.ptah-field__message')?.textContent).toContain('reason');
     type('fixed');
     expect(control().hasAttribute('aria-invalid')).toBe(false);
   });
@@ -206,11 +206,12 @@ describe('SurfaceTextInputComponent', () => {
     expect(label.querySelector('span[aria-hidden="true"]')?.textContent?.trim()).toBe('*');
     expect(control().getAttribute('aria-required')).toBe('true');
     expect(control().getAttribute('placeholder')).toBe('Reason');
-    expect(control().getAttribute('aria-describedby')).toBe(`${control().id}-hint`);
-    expect(element.querySelector(`#${control().id}-hint`)?.className).toContain('text-base-content-muted');
+    const hint = element.querySelector<HTMLElement>('.ptah-field__message');
+    expect(hint?.textContent).toContain('Why are you rolling back?');
+    expect(control().getAttribute('aria-describedby')).toBe(hint?.id);
     host.issues.set(new Map([['reason', ['is required.']]])); rerender();
     expect(control().getAttribute('aria-invalid')).toBe('true');
-    expect(control().getAttribute('aria-describedby')).toBe(`${control().id}-hint ${control().id}-issue-0`);
+    expect(control().getAttribute('aria-describedby')).toContain(`${control().id}-issue-0`);
     expect(element.querySelector(`#${control().id}-issue-0`)?.textContent).toBe('is required.');
   });
 

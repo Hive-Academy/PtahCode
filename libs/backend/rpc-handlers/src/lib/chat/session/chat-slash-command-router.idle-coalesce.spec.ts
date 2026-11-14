@@ -1,4 +1,29 @@
 import 'reflect-metadata';
+// The CLI runtime barrel reaches the ESM TreeSitter bundle during this CJS Jest run.
+jest.mock('@ptah-extension/workspace-intelligence', () => ({
+  ProjectType: {}, Framework: {}, MonorepoType: {}, FileType: {},
+  TreeSitterParserService: class TreeSitterParserServiceStub {},
+  AstAnalysisService: class AstAnalysisServiceStub {},
+  DependencyGraphService: class DependencyGraphServiceStub {},
+  WorkspaceAnalyzerService: class WorkspaceAnalyzerServiceStub {},
+  ContextService: class ContextServiceStub {},
+  ContextOrchestrationService: class ContextOrchestrationServiceStub {},
+  WorkspaceService: class WorkspaceServiceStub {},
+  TokenCounterService: class TokenCounterServiceStub {},
+  FileSystemService: class FileSystemServiceStub {},
+  FileSystemError: class FileSystemErrorStub extends Error {},
+  ProjectDetectorService: class ProjectDetectorServiceStub {},
+  FrameworkDetectorService: class FrameworkDetectorServiceStub {},
+  DependencyAnalyzerService: class DependencyAnalyzerServiceStub {},
+  MonorepoDetectorService: class MonorepoDetectorServiceStub {},
+  PatternMatcherService: class PatternMatcherServiceStub {},
+  IgnorePatternResolverService: class IgnorePatternResolverServiceStub {},
+  WorkspaceIndexerService: class WorkspaceIndexerServiceStub {},
+  FileTypeClassifierService: class FileTypeClassifierServiceStub {},
+  FileRelevanceScorerService: class FileRelevanceScorerServiceStub {},
+  ContextSizeOptimizerService: class ContextSizeOptimizerServiceStub {},
+  ContextEnrichmentService: class ContextEnrichmentServiceStub {},
+}));
 
 import { container as rootContainer } from 'tsyringe';
 import type {

@@ -144,7 +144,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                 <button
                   #discardConfirmButton
                   type="button"
-                  class="btn btn-outline btn-xs border-error bg-error/10 text-base-content
+                  ptahButton
+                  variant="outline"
+                  size="xs"
+                  class="border-error bg-error/10 text-base-content
                          focus:!outline focus:!outline-2 focus:!outline-offset-2
                          focus:!outline-[oklch(var(--s))]"
                   data-testid="confirm-discard"
@@ -196,7 +199,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                        it secondary to the filled Stash & switch. -->
                   <button
                     type="button"
-                    class="btn btn-outline btn-xs border-error text-base-content"
+                    ptahButton
+                    variant="outline"
+                    size="xs"
+                    class="border-error text-base-content"
                     data-testid="discard-switch"
                     [disabled]="busy()"
                     (click)="confirmingDiscard.set(true)"

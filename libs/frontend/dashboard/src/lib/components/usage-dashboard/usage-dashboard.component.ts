@@ -42,7 +42,7 @@ import { UsageKpiStripComponent } from './usage-kpi-strip.component';
 import { UsageBreakdownTableComponent } from './usage-breakdown-table.component';
 import { UsageCostQualityComponent } from './usage-cost-quality.component';
 import { UsageTopSessionsComponent } from './usage-top-sessions.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent, PtahStatePanelComponent, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-usage-dashboard',
@@ -57,6 +57,10 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
     UsageCostQualityComponent,
     UsageTopSessionsComponent,
     PtahButtonDirective,
+    PtahBadgeDirective,
+    PtahSectionHeaderComponent,
+    PtahStatePanelComponent,
+    PtahSurfaceDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './usage-dashboard.component.html',

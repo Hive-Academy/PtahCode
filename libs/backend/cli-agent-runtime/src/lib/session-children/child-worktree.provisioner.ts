@@ -40,6 +40,8 @@ export interface ChildWorktree {
   readonly worktreePath: string;
   /** The commit the branch was created at. */
   readonly baseSha: string;
+  /** Only a worktree created by this start may be rolled back. */
+  readonly owned?: boolean;
 }
 
 export type ChildWorktreeRefusal = Extract<
@@ -131,7 +133,13 @@ export class ChildWorktreeProvisioner {
         );
       }
 
-      const worktree: ChildWorktree = { root, branch, worktreePath, baseSha };
+      const worktree: ChildWorktree = {
+        root,
+        branch,
+        worktreePath,
+        baseSha,
+        owned: true,
+      };
       return await this.addAndVerify(worktree);
     } catch (error: unknown) {
       // degradation-audit: reported - the git failure (timeout, spawn error)
@@ -142,6 +150,58 @@ export class ChildWorktreeProvisioner {
     }
   }
 
+  /** Verify a registered worktree still exists on the expected branch. */
+  async attach(
+    root: string,
+    branch: string,
+    worktreePath: string,
+  ): Promise<ChildWorktreeCreateResult> {
+    try {
+      const [realRoot, realPath] = await Promise.all([
+        fs.realpath(root),
+        fs.realpath(worktreePath),
+      ]);
+      if (!isPathWithinRoots(realPath, [realRoot])) {
+        return refuse(
+          'worktree-outside-workspace',
+          `the worktree ${worktreePath} is outside ${root}`,
+        );
+      }
+      const current = await this.git(
+        ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+        realPath,
+      );
+      if (current.exitCode !== 0 || current.stdout.trim() !== branch) {
+        return refuse(
+          'branch-exists',
+          `worktree ${worktreePath} is not on branch "${branch}"`,
+        );
+      }
+      const head = await this.git(['rev-parse', '--verify', 'HEAD'], realPath);
+      if (head.exitCode !== 0 || !head.stdout.trim()) {
+        return refuse(
+          'worktree-failed',
+          `cannot resolve HEAD in ${worktreePath}`,
+        );
+      }
+      return {
+        ok: true,
+        worktree: {
+          root,
+          branch,
+          worktreePath: realPath,
+          baseSha: head.stdout.trim(),
+          owned: false,
+        },
+      };
+    } catch (error: unknown) {
+      return refuse(
+        'worktree-failed',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
   /**
    * Remove a worktree and its branch, both created by {@link create}. Each
    * step runs even when the previous one failed, and each is reported.
@@ -149,6 +209,7 @@ export class ChildWorktreeProvisioner {
   async rollback(
     worktree: ChildWorktree,
   ): Promise<readonly SessionChildRollbackStep[]> {
+    if (worktree.owned === false) return [];
     // Sequential on purpose: the branch cannot be deleted while a worktree
     // still has it checked out.
     const removed = await this.step(

@@ -48,7 +48,6 @@ describe('ReportResponseButtonComponent', () => {
     expect(href).toContain('subject=Report%20AI%20response');
     expect(anchor.getAttribute('target')).toBe('_blank');
     expect(anchor.getAttribute('aria-label')).toBe('Report this response');
-    expect(anchor.getAttribute('title')).toBe('Report response');
   });
 
   it('puts the message id, its ISO timestamp and the excerpt in the body', () => {

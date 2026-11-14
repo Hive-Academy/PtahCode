@@ -16,38 +16,34 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { PtahBadgeDirective, ProviderMarkComponent } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent, ProviderMarkComponent } from '@ptah-extension/ui';
 import { type DayBreakdownRow, type ModelBreakdownRow } from './usage-summary.view-model';
 import { formatCompactTokens, formatDayShort, formatPercent, formatUsd, providerDisplayName } from './usage-formatting';
 
 @Component({
   selector: 'ptah-usage-breakdown-table',
   standalone: true,
-  imports: [ProviderMarkComponent, PtahBadgeDirective],
+  imports: [ProviderMarkComponent, PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-2" data-testid="usage-breakdown">
       <div class="flex items-center justify-between gap-2">
-        <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content-muted">
-          Breakdown
-        </h4>
-        <div class="join" role="group" aria-label="Breakdown view">
+        <ptah-section-header heading="Breakdown" [level]="4" />
+        <div class="flex gap-[var(--ptah-gap-controls)]" role="group" aria-label="Breakdown view">
           <button
             type="button"
-            class="join-item btn btn-xs"
-            [class.btn-active]="mode() === 'model'"
-            [class.btn-primary]="mode() === 'model'"
-            [attr.aria-pressed]="mode() === 'model'"
+            ptahButton size="xs"
+            [variant]="mode() === 'model' ? 'primary' : 'ghost'"
+            [selected]="mode() === 'model'"
             (click)="mode.set('model')"
           >
             Model
           </button>
           <button
             type="button"
-            class="join-item btn btn-xs"
-            [class.btn-active]="mode() === 'day'"
-            [class.btn-primary]="mode() === 'day'"
-            [attr.aria-pressed]="mode() === 'day'"
+            ptahButton size="xs"
+            [variant]="mode() === 'day' ? 'primary' : 'ghost'"
+            [selected]="mode() === 'day'"
             (click)="mode.set('day')"
           >
             Day

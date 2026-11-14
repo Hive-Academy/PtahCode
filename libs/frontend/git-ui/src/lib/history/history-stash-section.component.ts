@@ -240,7 +240,11 @@ let instanceCount = 0;
                         <li>
                           <button
                             type="button"
-                            class="btn btn-ghost btn-xs w-full justify-start gap-2 font-normal"
+                            ptahButton
+                            variant="ghost"
+                            size="xs"
+                            align="start"
+                            class="w-full gap-[var(--ptah-gap-controls)] font-normal"
                             data-testid="history-stash-file"
                             [title]="'Open diff for ' + file.path"
                             [disabled]="stash.busy()"

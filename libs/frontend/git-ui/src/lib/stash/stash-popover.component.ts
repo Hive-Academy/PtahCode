@@ -60,7 +60,7 @@ export function stashAge(
       role="dialog"
       aria-label="Stashes"
       data-testid="stash-popover"
-      class="surface-3 absolute top-full left-0 z-50 mt-1 w-96 max-w-[80vw] rounded text-xs"
+      class="surface-3 absolute top-full left-0 z-50 mt-[var(--ptah-space-1)] w-96 max-w-[80vw] rounded text-xs"
     >
       @if (stash.error(); as error) {
         <div role="alert" class="p-2 text-error">{{ error }}</div>
@@ -73,16 +73,21 @@ export function stashAge(
         <ul class="max-h-80 overflow-auto p-1" aria-label="Stash entries">
           @for (entry of stash.entries(); track entry.hash) {
             <li class="rounded" [class.bg-base-300]="isSelected(entry)">
-              <div class="flex items-start gap-1 p-1">
+              <div class="flex items-start gap-[var(--ptah-gap-label)] p-1">
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs h-auto min-h-0 flex-1 flex-col items-start gap-0 py-1 text-left font-normal"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
+                  align="start"
+                  class="flex-1 flex-col items-start text-left"
+                  style="height: auto; min-height: 0; gap: 0; padding-block: var(--ptah-space-1); font-weight: normal"
                   data-testid="stash-entry"
                   [attr.aria-expanded]="isSelected(entry)"
                   [disabled]="stash.busy()"
                   (click)="stash.select(entry)"
                 >
-                  <span class="flex w-full gap-2">
+                  <span class="flex w-full gap-[var(--ptah-gap-controls)]">
                     <span class="font-mono opacity-70">{{
                       stashRef(entry)
                     }}</span>
@@ -98,7 +103,7 @@ export function stashAge(
                   }
                 </button>
               </div>
-              <div class="flex gap-1 px-2 pb-1">
+              <div class="flex gap-[var(--ptah-gap-label)] px-2 pb-1">
                 @if (confirmDrop() === entry.hash) {
                   <span role="alert" class="mr-auto self-center text-warning"
                     >Drop this stash permanently?</span
@@ -151,7 +156,10 @@ export function stashAge(
                   </button>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs text-error"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
+                    tone="danger"
                     data-testid="stash-drop"
                     [disabled]="stash.busy()"
                     [attr.aria-label]="'Drop ' + stashRef(entry)"
@@ -170,7 +178,12 @@ export function stashAge(
                       <li>
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs w-full justify-start gap-2 font-normal"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
+                          align="start"
+                          class="w-full gap-[var(--ptah-gap-controls)]"
+                          style="font-weight: normal"
                           data-testid="stash-file"
                           [title]="'Open diff for ' + file.path"
                           [disabled]="stash.busy()"

@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_977_0876
-status: in_review
+status: done
 type: FEATURE
 title: "Move the workflow from role subagents to phases, skills and sessions"
 depends_on: []

@@ -1,5 +1,6 @@
 import { injectable, inject } from 'tsyringe';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import type { ExecutorCompletionResultV1 } from '@ptah-extension/shared';
 import {
   CallbackRegistryBase,
   type CallbackRegistryCallback,
@@ -15,6 +16,7 @@ export interface SubagentStopPayload {
   readonly agentType: string | null;
   readonly transcriptPath: string | null;
   readonly timestamp: number;
+  readonly completion?: ExecutorCompletionResultV1;
 }
 
 export type SubagentStopCallback =

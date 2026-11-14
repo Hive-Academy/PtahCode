@@ -146,6 +146,31 @@ describe('session tool schemas', () => {
     }
   });
 
+  it('advertises and validates attach and resolved phase skills', () => {
+    const input = {
+      task: 't',
+      branch: 'feat/shared',
+      taskId: 'TASK_2026_584',
+      attachToSessionId: 'child-1',
+      skills: [{ name: 'review', text: 'Check the diff.' }],
+    };
+    expect(SessionStartArgsSchema.safeParse(input).success).toBe(true);
+    expect(
+      SessionStartArgsSchema.safeParse({
+        ...input,
+        skills: [{ name: 'empty' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      SessionStartArgsSchema.safeParse({
+        ...input,
+        phase: { version: 1, kind: 'implement' },
+      }).success,
+    ).toBe(false);
+    expect(buildSessionStartTool().description).toContain('attachToSessionId');
+    expect(buildSessionStartTool().description).toContain('skills');
+  });
+
   it('bounds the task and the label', () => {
     expect(
       SessionStartArgsSchema.safeParse({

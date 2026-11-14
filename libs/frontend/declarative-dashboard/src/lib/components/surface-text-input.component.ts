@@ -13,7 +13,7 @@ import {
   type SurfaceDataValue,
 } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import type { SurfaceInputCommit } from '../surface-interaction';
-import { PtahInputDirective, PtahTextareaDirective } from '@ptah-extension/ui';
+import { PtahFieldComponent, PtahInputDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 import type { InputNode } from '../view-model/view-model.types';
 import {
   committedInputValue,
@@ -63,28 +63,29 @@ let nextTextInputInstance = 0;
 @Component({
   selector: 'ptah-surface-text-input',
   standalone: true,
-  imports: [PtahInputDirective, PtahTextareaDirective],
+  imports: [PtahFieldComponent, PtahInputDirective, PtahTextareaDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex flex-col gap-1 text-base-content">
-      <label [for]="controlId" class="block text-xs font-medium">{{ node().label }}@if (required()) {
-        <span aria-hidden="true"> *</span>
-      }</label>
+    <div class="flex flex-col gap-[var(--ptah-space-1)] text-base-content">
       @if (multiline()) {
-        <textarea #multiLineControl [id]="controlId" ptahTextarea class="w-full" rows="3" [invalid]="hasError()"
+        <ptah-field [label]="node().label" [required]="required()" [hint]="description() ?? null"
+          [error]="errorText() ?? null" appearance="stacked">
+        <textarea #multiLineControl [id]="controlId" ptahTextarea size="sm" class="w-full" rows="3" [invalid]="hasError()"
           [value]="displayedText()" [attr.placeholder]="placeholder()"
           [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"
           [attr.aria-describedby]="describedBy()" [attr.data-apps-focus-key]="focusKey('input')"
           (input)="draftInput(multiLineControl.value)" (blur)="commitNow()"></textarea>
+        </ptah-field>
       } @else {
+        <ptah-field [label]="node().label" [required]="required()" [hint]="description() ?? null"
+          [error]="errorText() ?? null" appearance="stacked">
         <input #singleLineControl [id]="controlId" type="text" ptahInput size="sm" class="w-full" [invalid]="hasError()"
           [value]="displayedText()" [attr.placeholder]="placeholder()"
           [attr.aria-required]="required() ? 'true' : null" [attr.aria-invalid]="hasError() ? 'true' : null"
           [attr.aria-describedby]="describedBy()" [attr.data-apps-focus-key]="focusKey('input')"
           (input)="draftInput(singleLineControl.value)" (blur)="commitNow()" (keydown.enter)="commitOnEnter($event)" />
+        </ptah-field>
       }
-      @if (description(); as description) { <p [id]="hintId" class="text-xs text-base-content-muted">{{ description }}</p> }
-      @if (errorText(); as error) { <p [id]="errorId" class="text-xs font-medium text-base-content">{{ error }}</p> }
       @for (issue of issueTexts(); track $index) {
         <p [id]="issueId($index)" class="text-xs font-medium text-base-content">{{ issue }}</p>
       }
@@ -156,8 +157,6 @@ export class SurfaceTextInputComponent {
   public readonly errorText = computed(() => inputErrorText(this.node(), this.drafts(), this.displayedValue()));
   public readonly hasError = computed(() => this.errorText() !== undefined || this.issueTexts().length > 0);
   public readonly describedBy = computed(() => describedByOf(this.controlId, {
-    hintId: this.description() !== undefined ? this.hintId : undefined,
-    errorId: this.errorText() !== undefined ? this.errorId : undefined,
     issueCount: this.issueTexts().length,
   }));
 

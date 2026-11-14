@@ -8,6 +8,27 @@
  * root registrar.
  */
 import 'reflect-metadata';
+// One factory for every spec that imports this file. `realpath` stays an
+// identity so attach checks do not depend on a real worktree. `access` stays
+// real unless a suite sets `sessionSpawnerFsAccess.current` (succession and
+// start-guard): a second `jest.mock` in those files would replace this factory.
+jest.mock('node:fs/promises', () => {
+  const actual = jest.requireActual<typeof import('node:fs/promises')>(
+    'node:fs/promises',
+  );
+  const accessHolder = jest.requireActual<
+    typeof import('./__fixtures__/session-spawner-fs-access')
+  >('./__fixtures__/session-spawner-fs-access');
+  return {
+    ...actual,
+    realpath: jest.fn(async (path: string) => path),
+    access: (path: Parameters<typeof actual.access>[0]) => {
+      const override = accessHolder.sessionSpawnerFsAccess.current;
+      if (override) return override(path);
+      return actual.access(path);
+    },
+  };
+});
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -83,6 +104,7 @@ function envelope(turn: number): SessionChildCompletionEnvelope {
 
 export function makeHarness(
   options: {
+    root?: string;
     config?: Record<string, unknown>;
     closer?: { close: jest.Mock };
     /** `null` builds the spawner with no recorder bound (VS Code). */
@@ -144,6 +166,12 @@ export function makeHarness(
         },
       };
     }),
+    attach: jest.fn(
+      async (root: string, branch: string, worktreePath: string) => ({
+        ok: true as const,
+        worktree: { root, branch, worktreePath, baseSha: SHA, owned: false },
+      }),
+    ),
     rollback: jest.fn().mockResolvedValue([
       { step: 'remove-worktree', ok: true },
       { step: 'delete-branch', ok: true },
@@ -160,7 +188,7 @@ export function makeHarness(
     ),
   };
   const environment = {
-    scopedWorkspaceRoot: jest.fn(() => ROOT as string | undefined),
+    scopedWorkspaceRoot: jest.fn(() => (options.root ?? ROOT) as string | undefined),
   };
   const lanes: AgentProcessInfo[] = [];
   const agents = {
@@ -207,7 +235,7 @@ export function makeHarness(
       <T>(_section: string, key: string, fallback?: T) =>
         (key in config ? config[key] : fallback) as T,
     ),
-    getWorkspaceFolders: jest.fn(() => [ROOT]),
+    getWorkspaceFolders: jest.fn(() => [options.root ?? ROOT]),
   };
   const lines: string[] = [];
   const output = { appendLine: jest.fn((line: string) => lines.push(line)) };
@@ -372,11 +400,252 @@ beforeEach(() => {
   jest.useFakeTimers({ now: Date.UTC(2026, 9, 1, 11, 0, 0) });
 });
 
+describe('registered same-task attach', () => {
+  it('starts an ordinary child without a phase when none is requested', async () => {
+    const h = makeHarness();
+    const result = await h.spawner.start(h.request());
+    expect(result.ok).toBe(true);
+    expect(h.host.startChildSession.mock.calls[0][0].phase).toBeUndefined();
+    h.spawner.dispose();
+  });
+  it('delivers resolved phase discipline and skill text once through SDK options', async () => {
+    const h = makeHarness();
+    h.host.startChildSession.mockImplementationOnce(async () => ({
+      started: true as const, uiAnnounced: true, toolProfileApplied: true,
+    }));
+    const definition = {
+      version: 1 as const,
+      kind: 'implement' as const,
+      input: ['task'],
+      deliverable: ['change'],
+      verdict: ['done'],
+      acceptanceStep: ['check'],
+      requiredCapabilities: [],
+      toolProfile: { disallowedTools: ['Bash'], permission: 'allow' as const },
+      discipline: {
+        method: 'Follow the plan.',
+        outputContract: 'Commit.',
+        returnValue: 'Code.',
+        refusals: 'Report.',
+        escalationProtocol: 'Ask.',
+      },
+    };
+    const started = await h.spawner.start(
+      h.request({
+        phase: {
+          version: 1,
+          kind: 'implement',
+          text: 'Phase discipline: follow the plan.',
+          definition,
+          toolProfile: definition.toolProfile,
+        },
+        skills: [{ name: 'coding', text: 'Run focused checks.' }],
+      }),
+    );
+    if (started.ok) {
+      expect(h.registry.get(started.child.childSessionId)?.toolProfileApplied).toBe(true);
+    } else {
+      throw new Error(`Child start failed: ${started.refusal}`);
+    }
+    expect(h.host.startChildSession.mock.calls[0][0].prompt).not.toContain('Phase discipline: follow the plan.');
+    expect(h.host.startChildSession.mock.calls[0][0].phase).toMatchObject({
+      kind: 'implement', toolProfile: { disallowedTools: ['Bash'] },
+    });
+    expect(h.host.startChildSession.mock.calls[0][0].phase?.skills).toEqual([
+      { name: 'coding', text: 'Run focused checks.' },
+    ]);
+    h.spawner.dispose();
+  });
+  it('refuses a path-only skill outside the workspace', async () => {
+    const h = makeHarness();
+    const directory = mkdtempSync(join(tmpdir(), 'ptah-skill-'));
+    const skillPath = join(directory, 'SKILL.md');
+    try {
+      writeFileSync(skillPath, 'Run the focused check.');
+      const result = await h.spawner.start(
+        h.request({ skills: [{ name: 'coding', path: skillPath }] }),
+      );
+      expect(result).toMatchObject({ ok: false, refusal: 'invalid-arguments' });
+      expect(h.host.startChildSession).not.toHaveBeenCalled();
+    } finally {
+      h.spawner.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  it('reads a relative skill inside the workspace', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ptah-skill-root-'));
+    const h = makeHarness({ root: directory });
+    try {
+      writeFileSync(join(directory, 'SKILL.md'), 'Run focused checks.');
+      const result = await h.spawner.start(h.request({
+        skills: [{ name: 'coding', path: 'SKILL.md' }],
+      }));
+      expect(result.ok).toBe(true);
+      expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain('Run focused checks.');
+    } finally {
+      h.spawner.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  it('refuses an unavailable skill path before host dispatch', async () => {
+    const h = makeHarness();
+    const skillPath = join(ROOT, `missing-skill-${randomUUID()}.md`);
+    const result = await h.spawner.start(
+      h.request({ skills: [{ name: 'coding', path: skillPath }] }),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      refusal: 'invalid-arguments',
+      detail: expect.stringContaining('Skill coding delivery unavailable'),
+    });
+    expect(h.host.startChildSession).not.toHaveBeenCalled();
+    expect(h.provisioner.create).not.toHaveBeenCalled();
+    h.spawner.dispose();
+  });
+  it('starts two separate sessions on one branch and worktree', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = await h.spawner.start(
+      h.request({
+        taskId: 'TASK_2026_584',
+        attachToSessionId: first.child.childSessionId,
+      }),
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.child.childSessionId).not.toBe(first.child.childSessionId);
+    expect(second.child.parentSessionId).toBe(PARENT);
+    expect(second.child.worktreePath).toBe(first.child.worktreePath);
+    expect(second.child.branch).toBe(first.child.branch);
+    expect(h.provisioner.create).toHaveBeenCalledTimes(1);
+    expect(h.provisioner.attach).toHaveBeenCalledTimes(1);
+    expect(h.registry.findByCwd(first.child.worktreePath)?.childSessionId).toBe(first.child.childSessionId);
+    h.spawner.dispose();
+  });
+  it('refuses an attach retry with a different target ID', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    if (!first.ok) throw new Error('first start failed');
+    const attach = h.request({
+      taskId: 'TASK_2026_584',
+      attachToSessionId: first.child.childSessionId,
+    });
+    const second = await h.spawner.start(attach);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const wrongTarget = await h.spawner.start({
+      ...attach,
+      attachToSessionId: randomUUID(),
+    });
+    expect(wrongTarget).toMatchObject({
+      ok: false,
+      refusal: 'branch-exists',
+      detail: expect.stringContaining('registered child'),
+    });
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
+    h.spawner.dispose();
+  });
+
+  it('retains an attached worktree after host failure and rolls back an owned one', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    if (!first.ok) throw new Error('first start failed');
+    h.host.startChildSession.mockResolvedValueOnce({
+      started: false,
+      error: 'spawn failed',
+    } as never);
+    const attached = await h.spawner.start(
+      h.request({
+        taskId: 'TASK_2026_584',
+        attachToSessionId: first.child.childSessionId,
+      }),
+    );
+    expect(attached).toMatchObject({
+      ok: false,
+      refusal: 'session-start-failed',
+    });
+    expect(h.provisioner.rollback).not.toHaveBeenCalled();
+    expect(h.registry.get(first.child.childSessionId)).toBeDefined();
+    h.host.startChildSession.mockResolvedValueOnce({
+      started: false,
+      error: 'spawn failed',
+    } as never);
+    const owned = await h.spawner.start(h.request({ branch: 'feat/owned' }));
+    expect(owned).toMatchObject({ ok: false, refusal: 'session-start-failed' });
+    expect(h.provisioner.rollback).toHaveBeenCalledTimes(1);
+    h.spawner.dispose();
+  });
+
+  it('refuses a different task or unrelated branch', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    if (!first.ok) throw new Error('first start failed');
+    h.active.add(OTHER);
+    for (const changes of [
+      { taskId: 'TASK_2026_585' },
+      { branch: 'feat/unrelated' },
+    ]) {
+      const result = await h.spawner.start(
+        h.request({
+          callerSessionId: OTHER,
+          taskId: 'TASK_2026_584',
+          attachToSessionId: first.child.childSessionId,
+          ...changes,
+        }),
+      );
+      expect(result).toMatchObject({ ok: false, refusal: 'branch-exists' });
+    }
+    expect(h.provisioner.attach).not.toHaveBeenCalled();
+    h.spawner.dispose();
+  });
+
+  it('refuses another caller attaching to an owned child', async () => {
+    const h = makeHarness();
+    const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+    if (!first.ok) throw new Error('first start failed');
+    h.active.add(OTHER);
+    const result = await h.spawner.start(h.request({
+      callerSessionId: OTHER,
+      taskId: 'TASK_2026_584',
+      attachToSessionId: first.child.childSessionId,
+    }));
+    expect(result).toMatchObject({ ok: false, refusal: 'branch-exists' });
+    expect(h.provisioner.attach).not.toHaveBeenCalled();
+    h.spawner.dispose();
+  });
+});
+
 afterEach(() => {
   jest.useRealTimers();
 });
 
 describe('SessionSpawnerService.start — guards in order', () => {
+  it('does not reserve a slot when checking an eligible caller', () => {
+    const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
+    expect(h.spawner.canStart(PARENT)).toEqual({ ok: true });
+    const reservation = h.registry.reserveSlot(1);
+    expect(reservation).not.toBeNull();
+    if (reservation !== null) h.registry.release(reservation);
+  });
+  it('shares read-only eligibility refusals with start', async () => {
+    const cases = [
+      { name: 'no host', setup: (h: ReturnType<typeof makeHarness>) => h.build({ host: null }), caller: PARENT, code: 'chat-runtime-unavailable' },
+      { name: 'unattributed', setup: (h: ReturnType<typeof makeHarness>) => h.spawner, caller: undefined, code: 'unattributed-caller' },
+      { name: 'MCP unavailable', setup: (h: ReturnType<typeof makeHarness>) => h.build({ mcpStatus: { getPort: () => null } }), caller: PARENT, code: 'mcp-unavailable' },
+    ] as const;
+    for (const entry of cases) {
+      const h = makeHarness();
+      const spawner = entry.setup(h);
+      const before = h.registry.liveCount();
+      expect(spawner.canStart(entry.caller)).toMatchObject({ ok: false, code: entry.code });
+      expect(h.registry.liveCount()).toBe(before);
+      expect(h.provisioner.create).not.toHaveBeenCalled();
+      expect(await spawner.start(h.request({ callerSessionId: entry.caller }))).toMatchObject({ ok: false, refusal: entry.code });
+      spawner.dispose();
+    }
+  });
   it('passes the parent permission level captured before worktree provisioning', async () => {
     const h = makeHarness();
     h.provisioner.create.mockImplementationOnce(
@@ -507,6 +776,7 @@ describe('SessionSpawnerService.start — guards in order', () => {
   it('refuses a child calling start as depth-exceeded', async () => {
     const h = makeHarness();
     const child = await h.startChild();
+    expect(h.spawner.canStart(child.childSessionId)).toMatchObject({ ok: false, code: 'depth-exceeded' });
 
     const result = await h.spawner.start(
       h.request({
@@ -521,6 +791,7 @@ describe('SessionSpawnerService.start — guards in order', () => {
   it('refuses mcp-unavailable when the server has no port, before reserving', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     h.mcpStatus.getPort.mockReturnValue(null);
+    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'mcp-unavailable' });
 
     const result = await h.spawner.start(h.request());
 
@@ -539,6 +810,14 @@ describe('SessionSpawnerService.start — guards in order', () => {
     expect(first.ok).toBe(true);
     expect(second).toMatchObject({ ok: false, refusal: 'cap-reached' });
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a full cap without reserving another slot', async () => {
+    const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
+    await h.startChild();
+    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'cap-reached' });
+    expect(h.registry.liveCount()).toBe(1);
+    expect(h.registry.reserveSlot(1)).toBeNull();
   });
 
   it('starts more than five live children with the default unlimited setting', async () => {
@@ -2045,6 +2324,8 @@ describe('SessionSpawnerService.dispose', () => {
 
     h.spawner.dispose();
     h.spawner.dispose();
+
+    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'chat-runtime-unavailable', reason: 'the host is shutting down' });
 
     expect(h.idResolved.size + h.sessionEnd.size).toBe(listenersBefore - 2);
     expect(h.permissionListeners.size).toBe(0);

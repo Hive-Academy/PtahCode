@@ -14,11 +14,13 @@
 
 import { injectable, inject } from 'tsyringe';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
   INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
+  resolveWorkspaceSkillPath,
   type HostKind,
   type IWorkspaceProvider,
   type IMcpCallerCredentials,
@@ -46,6 +48,9 @@ import {
   type McpToolProfile,
   type PermissionLevel,
   type SessionMcpNotice,
+  type PhaseKind,
+  type PhaseDispatchV1,
+  type PhaseSkillV1,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
 import {
@@ -794,6 +799,9 @@ export function buildFlagSettingsArg(
  * Input parameters for building query options
  */
 export interface QueryOptionsInput {
+  /** Validated phase and host-resolved skills for this SDK session. */
+  phase?: PhaseDispatchV1;
+  skills?: readonly PhaseSkillV1[];
   /** Certified account route supplied by admission; omitted preserves ambient auth. */
   accountRoute?: ClaudeAccountRoute;
   /**
@@ -1046,10 +1054,44 @@ function namedRunPolicy(
  */
 export type SdkQueryOptions = Options;
 
+/** Apply the same host-resolved phase and skills to the SDK prompt. */
+export function withPhaseDelivery(
+  systemPrompt: Options['systemPrompt'],
+  cwd: string,
+  phase?: PhaseDispatchV1,
+  skills?: readonly PhaseSkillV1[],
+): Options['systemPrompt'] {
+  if (!phase && !skills?.length) return systemPrompt;
+  if (!systemPrompt || typeof systemPrompt !== 'object' ||
+      Array.isArray(systemPrompt) || systemPrompt.type !== 'preset') {
+    throw new SdkError('Phase delivery requires a preset system prompt.');
+  }
+  const preset = systemPrompt;
+  return {
+    ...preset,
+    append: [preset.append, phase?.text, ...(skills ?? phase?.skills ?? []).map(skill => {
+      if (skill.text) return `Skill ${skill.name}: ${skill.text}`;
+      if (!skill.path?.trim()) return undefined;
+
+      const realCandidate = resolveWorkspaceSkillPath(cwd, skill.path);
+      if (!realCandidate) return undefined;
+      try {
+        return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
+      } catch {
+        // degradation-audit: optional-capability - an unreadable skill file is
+        // skipped like a missing one (decision O-6); the phase text still applies.
+        return undefined;
+      }
+    })].filter(Boolean).join('\n\n'),
+  };
+}
+
 /**
  * Complete query configuration returned by builder
  */
 export interface QueryConfig {
+  /** Phase denials merged into the built options (builder evidence). */
+  readonly toolProfileApplied?: true;
   /** Prompt for SDK: async iterable of user messages */
   prompt: AsyncIterable<SDKUserMessage>;
   /** SDK query options (typed directly as SDK's Options) */
@@ -1212,6 +1254,8 @@ export class SdkQueryOptionsBuilder {
    */
   async build(input: QueryOptionsInput): Promise<QueryConfig> {
     const {
+      phase,
+      skills,
       userMessageStream,
       abortController,
       sessionConfig,
@@ -1347,6 +1391,7 @@ export class SdkQueryOptionsBuilder {
       onWorktreeRemoved,
       activityHold,
       this.ptahUiHintEnabled(sessionConfig),
+      phase?.kind,
     );
     // The SDK may auto-allow SendMessage before canUseTool. PreToolUse still
     // runs for auto-allowed tools and can deny a stopped or near-limit target.
@@ -1436,7 +1481,17 @@ export class SdkQueryOptionsBuilder {
       this.logger,
     );
     const builtinPolicy = resolveClaudeBuiltinPolicy(builtinOptIns);
-    const disallowedTools = [...builtinPolicy.disallowedTools];
+    // Preserve Claude preset denials and apply the phase profile to every route.
+    if (phase && (!phase.toolProfile || !Array.isArray(phase.toolProfile.disallowedTools))) {
+      throw new SdkError('Phase tool profile requires a disallowedTools array.');
+    }
+    const phaseDisallowedTools = phase
+      ? uniqueNames([...phase.toolProfile.disallowedTools])
+      : undefined;
+    const disallowedTools = uniqueNames([
+      ...builtinPolicy.disallowedTools,
+      ...(phaseDisallowedTools ?? []),
+    ]);
     // The host env var wins inside the SDK (it inherits `process.env` below);
     // `sdkValue` still follows the setting so clearing the env restores it.
     const subagentTtl = resolveSubagentPromptCacheTtl({
@@ -1564,6 +1619,8 @@ export class SdkQueryOptionsBuilder {
           sessionConfig.mcpToolProfile,
           cwd,
           abortController.signal,
+          phase,
+          phaseDisallowedTools,
         ),
         mcpServersOverride,
       ),
@@ -1591,13 +1648,17 @@ export class SdkQueryOptionsBuilder {
 
     return {
       prompt: userMessageStream,
+      // Builder evidence: the phase denials were merged into this options set.
+      // This does not certify a later caller's mutations to Options before query().
+      ...(phaseDisallowedTools?.length && phaseDisallowedTools.every(tool => disallowedTools.includes(tool))
+        ? { toolProfileApplied: true as const } : {}),
       options: {
         abortController,
         cwd,
         model,
         resume: resumeSessionId,
         maxTurns: this.calculateMaxTurns(sessionConfig),
-        systemPrompt,
+        systemPrompt: withPhaseDelivery(systemPrompt, cwd, phase, skills),
         // Flag tier. Fresh per session when a style is active; the shared
         // PTAH_DISABLE_SDK_AUTO_MEMORY constant itself is never mutated (G4),
         // and the `outputStyle` key is absent entirely when no style is
@@ -2246,6 +2307,8 @@ export class SdkQueryOptionsBuilder {
     toolProfile?: McpToolProfile,
     cwd?: string,
     signal?: AbortSignal,
+    phase?: PhaseDispatchV1,
+    phaseDisallowedTools?: readonly string[],
   ): Record<string, McpHttpServerConfig> {
     if (!mcpServerRunning) {
       this.logger.info(
@@ -2284,6 +2347,10 @@ export class SdkQueryOptionsBuilder {
         sessionId: routingSessionId,
         workspaceRoot: cwd,
         ...(toolProfile === 'apps' ? { toolProfile: 'apps' as const } : {}),
+        ...(phase ? {
+          phaseKind: phase.kind,
+          disallowedTools: phaseDisallowedTools,
+        } : {}),
         capability: 'privileged',
       },
       subject,
@@ -2365,9 +2432,10 @@ export class SdkQueryOptionsBuilder {
     onWorktreeRemoved?: WorktreeRemovedCallback,
     activityHold?: ActivityHold,
     ptahUiHint = false,
+    phaseKind?: PhaseKind,
   ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     // Root tool lifetime, not child registration, owns watchdog protection.
-    const subagentHooks = this.subagentHookHandler.createHooks(cwd, sessionId);
+    const subagentHooks = this.subagentHookHandler.createHooks(cwd, sessionId, phaseKind);
     const compactionHooks = this.compactionHookHandler.createHooks(
       sessionId,
       cwd,

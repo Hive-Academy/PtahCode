@@ -78,6 +78,7 @@ export const SkillRevertEnhancementParamsSchema = z.object({
 export const SkillRebaseCloneParamsSchema = z.object({
   kind: SkillCloneKindSchema,
   slug: SlugSchema,
+  origin: z.enum(['single', 'bulk']).optional().default('single'),
 });
 
 /**

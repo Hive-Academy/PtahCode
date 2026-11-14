@@ -17,6 +17,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 import type { BulkRebaseProgress } from '../../services/clone-bulk-rebase.service';
 
@@ -24,6 +25,7 @@ import type { BulkRebaseProgress } from '../../services/clone-bulk-rebase.servic
   selector: 'ptah-clone-bulk-toolbar',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PtahButtonDirective],
   template: `
     <div
       class="mb-3 flex flex-wrap items-center justify-between gap-2"
@@ -31,10 +33,11 @@ import type { BulkRebaseProgress } from '../../services/clone-bulk-rebase.servic
     >
       <button
         type="button"
-        class="btn btn-ghost btn-xs"
+        ptahButton
+        variant="ghost"
+        size="xs"
         data-testid="clones-diverged-filter"
-        [class.btn-active]="divergedOnly()"
-        [attr.aria-pressed]="divergedOnly()"
+        [selected]="divergedOnly()"
         (click)="divergedOnlyToggled.emit(!divergedOnly())"
       >
         Show diverged only

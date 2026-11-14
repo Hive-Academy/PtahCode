@@ -17,6 +17,7 @@ import type {
   PluginConfigHomeCandidate,
   PluginConfigHomeStatus,
 } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { MarketplaceInventoryStore } from '../../data/marketplace-inventory.store';
 
 /** One button of the notice. */
@@ -162,6 +163,7 @@ export function configHomeFailure(action: ConfigHomeAction): string {
 @Component({
   selector: 'ptah-plugin-config-home-notice',
   standalone: true,
+  imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block empty:hidden' },
   template: `
@@ -177,8 +179,11 @@ export function configHomeFailure(action: ConfigHomeAction): string {
         <div class="mt-2 flex flex-wrap gap-2">
           @for (action of block.actions; track action.key) {
             <button
+              ptahButton
+              size="xs"
+              align="start"
               type="button"
-              class="btn btn-xs h-auto min-h-6 max-w-full justify-start whitespace-normal py-1 text-left [overflow-wrap:anywhere]"
+              class="h-auto min-h-6 max-w-full whitespace-normal py-1 text-left [overflow-wrap:anywhere]"
               data-testid="plugin-config-home-action"
               [attr.data-action]="action.action"
               [disabled]="busyKey() !== null"

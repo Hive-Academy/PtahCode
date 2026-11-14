@@ -428,7 +428,9 @@ function isProbableServerUrl(value: string): boolean {
                     </button>
                   }
                   <button
-                    class="btn btn-ghost btn-sm text-error"
+                    ptahButton
+                    variant="ghost"
+                    tone="danger"
                     [disabled]="disconnectingKeys().has(card.server.serverKey)"
                     (click)="disconnect(card.server)"
                     type="button"
