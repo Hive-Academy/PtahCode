@@ -4,16 +4,9 @@ import {
   Component,
   computed,
   input,
-  numberAttribute,
 } from '@angular/core';
-import { PtahSectionLevel } from '../../card/card.types';
+import { PtahSectionLevel, toSectionLevel } from '../../card/card.types';
 import { PtahAlertComponent } from '../../foundation/alert.component';
-
-/** Same transform as `PtahSectionHeaderComponent`: 2 and 4 stay, all else is 3. */
-function toSectionLevel(value: unknown): PtahSectionLevel {
-  const level = numberAttribute(value, 3);
-  return level === 2 || level === 4 ? level : 3;
-}
 
 let nextFormSectionId = 0;
 
@@ -84,20 +77,23 @@ const HINT_CLASS =
         </div>
         <div class="mt-[var(--ptah-gap-controls)] empty:hidden"><ng-content select="[aside]" /></div>
       </div>
-      <div
-        class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]"
-        [attr.inert]="disabled() ? '' : null"
-        [attr.aria-disabled]="disabled() ? 'true' : null"
-        [class]="fieldsToggles()"
-        data-testid="form-section-fields"
-      >
+      <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]" data-testid="form-section-body">
+        <!-- The alert stays outside the inert wrapper, so a disabled section still announces it. -->
         @if (error(); as errorText) {
           <ptah-alert tone="error" live="assertive" [id]="errorId" data-testid="form-section-error">
             {{ errorText }}
           </ptah-alert>
         }
-        <ng-content />
-        <div class="mt-[var(--ptah-gap-group)] empty:hidden"><ng-content select="[footer]" /></div>
+        <div
+          class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]"
+          [attr.inert]="disabled() ? '' : null"
+          [attr.aria-disabled]="disabled() ? 'true' : null"
+          [class]="fieldsToggles()"
+          data-testid="form-section-fields"
+        >
+          <ng-content />
+          <div class="mt-[var(--ptah-gap-group)] empty:hidden"><ng-content select="[footer]" /></div>
+        </div>
       </div>
     </section>
   `,
