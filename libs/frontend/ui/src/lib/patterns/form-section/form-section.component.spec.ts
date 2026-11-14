@@ -142,10 +142,26 @@ describe('PtahFormSectionComponent', () => {
   });
 
   it('draws the divider only when divider is set', () => {
-    expect(section().style.borderBottom).toBe('');
+    const divider = '[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)]';
+    expect(section().classList.contains(divider)).toBe(false);
+    expect(section().hasAttribute('style')).toBe(false);
     host.divider.set(true);
     fixture.detectChanges();
-    expect(section().style.borderBottom).toContain('var(--ptah-border-width)');
+    expect(section().classList.contains(divider)).toBe(true);
+    expect(section().classList.contains('grid')).toBe(true);
+    host.divider.set(false);
+    fixture.detectChanges();
+    expect(section().classList.contains(divider)).toBe(false);
+  });
+
+  it('sets the type tokens as classes, with no inline style', () => {
+    const heading = q('h3') as HTMLElement;
+    expect(heading.classList.contains('text-[length:var(--ptah-text-section-title-size)]')).toBe(true);
+    expect(heading.hasAttribute('style')).toBe(false);
+    const hint = q('[data-testid="form-section-description"]') as HTMLElement;
+    expect(hint.classList.contains('text-[length:var(--ptah-text-hint-size)]')).toBe(true);
+    expect(hint.classList.contains('text-base-content-muted')).toBe(true);
+    expect(hint.hasAttribute('style')).toBe(false);
   });
 
   it('projects the aside, default and footer slots into their columns', () => {

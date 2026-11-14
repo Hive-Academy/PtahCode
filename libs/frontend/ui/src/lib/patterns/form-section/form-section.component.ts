@@ -16,6 +16,13 @@ function toSectionLevel(value: unknown): PtahSectionLevel {
 
 let nextFormSectionId = 0;
 
+const DIVIDER_CLASS = '[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)]';
+const DISABLED_CLASS = 'opacity-[var(--ptah-field-disabled-opacity)]';
+const TITLE_CLASS =
+  'text-[length:var(--ptah-text-section-title-size)] leading-[var(--ptah-text-section-title-leading)] font-[number:var(--ptah-text-section-title-weight)]';
+const HINT_CLASS =
+  'text-base-content-muted text-[length:var(--ptah-text-hint-size)] leading-[var(--ptah-text-hint-leading)] font-[number:var(--ptah-text-hint-weight)]';
+
 /**
  * Form section pattern (TASK_2026_1177_9109, `pattern-spec.md` section 1).
  * A two-column row: the title and the description on the left, the fields on
@@ -47,31 +54,26 @@ let nextFormSectionId = 0;
       class="grid grid-cols-1 py-[var(--ptah-gap-group)] gap-[var(--ptah-gap-heading)] [@container(min-width:640px)]:grid-cols-[var(--ptah-form-section-aside-w)_minmax(0,var(--ptah-form-section-fields-max-w))] [@container(min-width:640px)]:gap-x-[var(--ptah-gap-section)]"
       [attr.aria-labelledby]="headingId"
       [attr.aria-describedby]="describedBy()"
-      [style.border-bottom]="
-        divider()
-          ? 'var(--ptah-border-width) solid var(--ptah-border-color)'
-          : null
-      "
+      [class]="sectionToggles()"
       data-testid="form-section"
     >
       <div class="flex min-w-0 flex-col" data-testid="form-section-aside">
         <div class="flex flex-col gap-[var(--ptah-gap-label)]">
           @switch (level()) {
             @case (2) {
-              <h2 [id]="headingId" [style]="titleStyle">{{ heading() }}</h2>
+              <h2 [id]="headingId" [class]="titleClass">{{ heading() }}</h2>
             }
             @case (4) {
-              <h4 [id]="headingId" [style]="titleStyle">{{ heading() }}</h4>
+              <h4 [id]="headingId" [class]="titleClass">{{ heading() }}</h4>
             }
             @default {
-              <h3 [id]="headingId" [style]="titleStyle">{{ heading() }}</h3>
+              <h3 [id]="headingId" [class]="titleClass">{{ heading() }}</h3>
             }
           }
           @if (description(); as descriptionText) {
             <p
-              class="text-base-content-muted"
+              [class]="hintClass"
               [id]="descriptionId"
-              [style]="hintStyle"
               data-testid="form-section-description"
             >
               {{ descriptionText }}
@@ -84,7 +86,7 @@ let nextFormSectionId = 0;
         class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]"
         [attr.inert]="disabled() ? '' : null"
         [attr.aria-disabled]="disabled() ? 'true' : null"
-        [class]="disabled() ? 'opacity-[var(--ptah-field-disabled-opacity)]' : ''"
+        [class]="fieldsToggles()"
         data-testid="form-section-fields"
       >
         @if (error(); as errorText) {
@@ -120,16 +122,11 @@ export class PtahFormSectionComponent {
   protected readonly descriptionId = `${this.baseId}-description`;
   protected readonly errorId = `${this.baseId}-error`;
 
-  protected readonly titleStyle = {
-    'font-size': 'var(--ptah-text-section-title-size)',
-    'line-height': 'var(--ptah-text-section-title-leading)',
-    'font-weight': 'var(--ptah-text-section-title-weight)',
-  };
-  protected readonly hintStyle = {
-    'font-size': 'var(--ptah-text-hint-size)',
-    'line-height': 'var(--ptah-text-hint-leading)',
-    'font-weight': 'var(--ptah-text-hint-weight)',
-  };
+  protected readonly titleClass = TITLE_CLASS;
+  protected readonly hintClass = HINT_CLASS;
+  /** Toggles only. The static layout classes stay on the `class` attribute. */
+  protected readonly sectionToggles = computed(() => ({ [DIVIDER_CLASS]: this.divider() }));
+  protected readonly fieldsToggles = computed(() => ({ [DISABLED_CLASS]: this.disabled() }));
 
   protected readonly describedBy = computed(() => {
     const ids: string[] = [];
