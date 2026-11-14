@@ -7,16 +7,17 @@ import {
 import { CommonModule } from '@angular/common';
 
 import type { CodeSymbolListItem } from '@ptah-extension/shared';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahStatePanelComponent } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-memory-indexed-code',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, PtahInputDirective, CommonModule],
+  imports: [PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahStatePanelComponent, CommonModule],
   template: `
-    <div class="space-y-3" data-testid="memory-indexed-code">
-      <div class="flex flex-wrap items-center gap-3">
+    <div class="flex flex-col gap-[var(--ptah-gap-group)]" data-testid="memory-indexed-code">
+      <div class="flex flex-wrap items-end gap-[var(--ptah-gap-field)]">
+        <ptah-field label="Search indexed code symbols" hint="Filter indexed symbols by name or path" class="w-full max-w-sm">
         <input
           ptahInput
           type="search"
@@ -26,8 +27,9 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
           (input)="onSearchInput($event)"
           aria-label="Search indexed code symbols"
         />
+        </ptah-field>
         <div
-          class="ml-auto flex items-center gap-2 text-xs text-base-content-muted"
+          class="ml-auto flex items-center gap-[var(--ptah-gap-controls)] text-xs text-base-content-muted"
         >
           <span data-testid="symbol-total">{{ total() }} symbols</span>
           <button
@@ -49,7 +51,7 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
 
       @if (error()) {
         <div
-          class="rounded-xl border border-error/40 bg-error/5 px-4 py-3"
+          class="rounded-xl border border-error/40 bg-error/5 p-[var(--ptah-surface-pad)]"
           role="alert"
         >
           <span class="text-sm text-error">{{ error() }}</span>
@@ -57,18 +59,9 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
       }
 
       @if (loading() && items().length === 0) {
-        <div class="overflow-hidden surface-2 rounded-xl">
-          <div class="divide-y divide-surface-border">
-            @for (n of skeletonRows; track n) {
-              <div class="flex items-center gap-3 px-4 py-2.5">
-                <div class="skeleton h-3 w-40"></div>
-                <div class="skeleton h-3 flex-1"></div>
-              </div>
-            }
-          </div>
-        </div>
+        <ptah-state-panel state="loading" title="Loading indexed symbols" />
       } @else if (items().length === 0) {
-        <div class="flex flex-col items-center gap-2 px-6 py-12 text-center">
+        <div class="flex flex-col items-center gap-[var(--ptah-gap-controls)] p-[var(--ptah-surface-pad)] text-center">
           <p class="text-sm font-medium">No indexed code symbols</p>
           <p class="text-xs text-base-content-muted">
             Run the workspace index below to populate symbol search.
@@ -80,7 +73,7 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
         >
           @for (sym of items(); track sym.id) {
             <li
-              class="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 transition-colors duration-150 hover:bg-surface-3"
+              class="flex flex-wrap items-center gap-x-[var(--ptah-gap-field)] gap-y-[var(--ptah-gap-controls)] px-[var(--ptah-surface-pad)] py-[var(--ptah-space-2)] transition-colors duration-150 hover:bg-surface-3"
             >
               <span class="font-mono text-sm text-base-content">
                 {{ sym.symbolName }}
@@ -111,7 +104,10 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
         <div class="join">
           <button
             type="button"
-            class="btn join-item btn-xs"
+            ptahButton
+            variant="secondary"
+            size="xs"
+            class="join-item"
             [disabled]="prevDisabled() || loading()"
             (click)="prev.emit()"
             aria-label="Previous symbol page"
@@ -120,7 +116,10 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
           </button>
           <button
             type="button"
-            class="btn join-item btn-xs"
+            ptahButton
+            variant="secondary"
+            size="xs"
+            class="join-item"
             [disabled]="nextDisabled() || loading()"
             (click)="next.emit()"
             aria-label="Next symbol page"
@@ -148,7 +147,6 @@ export class MemoryIndexedCodeComponent {
   public readonly prev = output<void>();
   public readonly next = output<void>();
 
-  protected readonly skeletonRows = [0, 1, 2, 3, 4] as const;
 
   protected onSearchInput(event: Event): void {
     this.searchInput.emit((event.target as HTMLInputElement).value);

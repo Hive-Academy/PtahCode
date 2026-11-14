@@ -901,18 +901,6 @@
     "alert": 2,
     "alert-error": 2
   },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-entry-list.component.ts": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-square": 2,
-    "btn-xs": 2,
-    "skeleton": 3
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-indexed-code.component.ts": {
-    "btn": 2,
-    "btn-xs": 2,
-    "skeleton": 2
-  },
   "libs/frontend/memory-curator-ui/src/lib/components/memory-search-bar.component.ts": {
     "btn": 2,
     "btn-primary": 2,
