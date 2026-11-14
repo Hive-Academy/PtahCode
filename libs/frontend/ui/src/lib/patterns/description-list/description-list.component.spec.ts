@@ -156,7 +156,7 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
   }
 
   function dd(root: HTMLElement, index: number): HTMLElement {
-    return root.querySelectorAll<HTMLElement>('[ptahDescriptionItem] dd')[index];
+    return root.querySelectorAll<HTMLElement>('[ptahDescriptionItem] dd:not([data-ptah-description-actions])')[index];
   }
 
   it('uses the item host as the row: dl holds only div rows with dt and dd', async () => {
@@ -173,7 +173,11 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
     expect(children.every((child) => child.tagName === 'DIV' && child.hasAttribute('data-ptah-description-row'))).toBe(true);
     expect(children[0].firstElementChild?.tagName).toBe('DT');
     expect(root.querySelectorAll('dl > div > dt')).toHaveLength(6);
-    expect(root.querySelectorAll('dl > div > dd')).toHaveLength(6);
+    expect(root.querySelectorAll('dl > div > dd:not([data-ptah-description-actions])')).toHaveLength(6);
+    // Each row holds only dt and dd elements. The action slot is a second dd.
+    const rowChildren = Array.from(root.querySelectorAll('dl > div > *'));
+    expect(rowChildren.every((child) => child.tagName === 'DT' || child.tagName === 'DD')).toBe(true);
+    expect(root.querySelectorAll('dl > div > dd[data-ptah-description-actions]')).toHaveLength(6);
   });
 
   it('shows projected rich content and no placeholder', async () => {
@@ -209,8 +213,14 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
     expect(value.classList.contains('font-[family-name:var(--ptah-font-mono)]')).toBe(true);
     expect(value.classList.contains('truncate')).toBe(true);
     expect(value.getAttribute('title')).toBe('sk-1');
-    const actions = root.querySelectorAll('[data-ptah-description-actions]')[4];
-    expect(actions.querySelector('button')?.textContent?.trim()).toBe('Copy');
+    const actions = root.querySelectorAll<HTMLElement>('[data-ptah-description-actions]')[4];
+    expect(actions.tagName).toBe('DD');
+    expect(actions.classList.contains('empty:hidden')).toBe(true);
+    const copy = actions.querySelector('button') as HTMLButtonElement;
+    expect(copy.textContent?.trim()).toBe('Copy');
+    expect(copy.disabled).toBe(false);
+    // A row with no action leaves its action dd with no child nodes, so `empty:hidden` removes it.
+    expect(root.querySelectorAll('[data-ptah-description-actions]')[0].childNodes).toHaveLength(0);
   });
 
   it('hides projected content behind the placeholder when the bound value is whitespace', async () => {

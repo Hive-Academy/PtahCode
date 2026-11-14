@@ -128,6 +128,9 @@ describe('PtahEditableSectionComponent', () => {
       expect(id).toMatch(/^ptah-editable-section-\d+-heading$/);
       expect(heading().id).toBe(id);
       expect(heading().textContent?.trim()).toBe('Profile');
+      // The id comes from the header's headingId input, not from a DOM write.
+      const header = q('ptah-section-header') as HTMLElement;
+      expect(header.querySelector(`#${id}`)).toBe(heading());
     });
 
     it.each([
