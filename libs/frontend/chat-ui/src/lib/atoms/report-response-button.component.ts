@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import { LucideAngularModule, Flag } from 'lucide-angular';
 import type { ExecutionChatMessage } from '@ptah-extension/shared';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 import { extractMessageText } from './message-text';
 
 /** Recipient of AI-content reports (Microsoft Store policy 11.16). */
@@ -28,12 +29,16 @@ const REPORT_SUBJECT = 'Report AI response';
 @Component({
   selector: 'ptah-report-response-button',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahIconButtonDirective],
   template: `
     <a
-      [class]="turnActionSize()
-        ? 'inline-grid h-7 w-7 place-items-center rounded-md text-base-content-muted hover:bg-base-content/[.08] hover:text-base-content'
-        : 'btn btn-xs btn-ghost btn-square'"
+      ptahIconButton
+      label="Report this response"
+      variant="ghost"
+      size="xs"
+      density="compact"
+      [class.h-7]="turnActionSize()"
+      [class.w-7]="turnActionSize()"
       [href]="href()"
       target="_blank"
       rel="noopener noreferrer"

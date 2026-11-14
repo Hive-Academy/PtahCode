@@ -6,6 +6,7 @@ import {
   output,
 } from '@angular/core';
 import { AttentionPermissionActionsComponent, type AttentionItem } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import type {
   CompactCallout,
   CompactPermissionCallout,
@@ -16,7 +17,7 @@ import type {
 @Component({
   selector: 'ptah-compact-session-callout',
   standalone: true,
-  imports: [AttentionPermissionActionsComponent],
+  imports: [AttentionPermissionActionsComponent, PtahButtonDirective],
   host: { class: 'block min-h-20 min-w-0 shrink-0' },
   template: `
     @if (permission(); as request) {
@@ -36,13 +37,17 @@ import type {
             >
           }
         </div>
-        <div class="flex min-w-0 flex-wrap items-start gap-1.5">
+        <div class="flex min-w-0 flex-wrap items-start gap-controls">
           @for (item of permissionItems(); track item.key) {
             <ptah-attention-permission-actions class="min-w-0" [item]="item" [compact]="true" (selected)="choose(request, $event.actionId, $event.reason)" />
           }
           <button
+            ptahButton
+            variant="ghost"
+            size="sm"
+            density="compact"
             type="button"
-            class="btn btn-sm btn-ghost min-h-7 h-7 px-2"
+            class="min-h-7 h-7 px-2"
             (click)="openRequest.emit(request)"
           >
             Open
@@ -67,8 +72,12 @@ import type {
           }
         </div>
         <button
+          ptahButton
+          variant="primary"
+          size="xs"
+          density="compact"
           type="button"
-          class="btn btn-xs btn-primary self-start"
+          class="self-start"
           (click)="answer.emit()"
         >
           Answer
@@ -84,19 +93,25 @@ import type {
         <span class="truncate text-error" [title]="issue.text">{{
           issue.text
         }}</span>
-        <div class="flex gap-1.5">
+        <div class="flex gap-controls">
           @if (issue.canRetry) {
             <button
+              ptahButton
+              variant="outline"
+              size="xs"
+              density="compact"
               type="button"
-              class="btn btn-xs btn-outline"
               (click)="retry.emit()"
             >
               Retry
             </button>
           }
           <button
+            ptahButton
+            variant="ghost"
+            size="xs"
+            density="compact"
             type="button"
-            class="btn btn-xs btn-ghost"
             (click)="showOutput.emit()"
           >
             Show output
