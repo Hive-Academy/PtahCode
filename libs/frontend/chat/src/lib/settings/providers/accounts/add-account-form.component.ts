@@ -47,7 +47,6 @@ import { ACCOUNT_COPY, validateAccountName } from './account-presentation';
       [dirty]="!empty()"
       [saving]="pending()"
       [saveLabel]="pending() ? 'Adding…' : 'Add'"
-      cancelLabel="Cancel"
       (save)="submit()"
       (cancelEdit)="cancel()"
       (keydown.escape)="keepEscape($event)"
@@ -118,7 +117,7 @@ export class AddAccountFormComponent {
   }
 
   protected edit(event: Event): void {
-    this.label.set((event.target as HTMLInputElement).value);
+    this.label.set(event.target instanceof HTMLInputElement ? event.target.value : '');
     this.invalid.set(false);
   }
 

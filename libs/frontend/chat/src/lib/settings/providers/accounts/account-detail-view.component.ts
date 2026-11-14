@@ -176,7 +176,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
       <ptah-form-section
         heading="Sign-in"
         description="Connect this account to Claude."
-        level="4"
+        [level]="4"
         divider
         data-testid="account-detail-sign-in-section"
       >
@@ -239,7 +239,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
       <ptah-editable-section
         heading="Details"
         description="The name shows in the account list."
-        level="4"
+        [level]="4"
         data-testid="account-detail-details"
         [editing]="editing()"
         [dirty]="edited()"
@@ -252,7 +252,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         (cancelEdit)="stopEdit()"
       >
         @if (pending()) {
-          <span status class="inline-flex" [attr.title]="copy.signInLocked" data-testid="account-detail-locked">
+          <span status class="inline-flex" role="img" [attr.aria-label]="copy.signInLocked" [attr.title]="copy.signInLocked" data-testid="account-detail-locked">
             <lucide-angular [img]="LockIcon" class="h-3.5 w-3.5 text-base-content-muted" aria-hidden="true" />
           </span>
         }
@@ -275,7 +275,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         </ng-template>
       </ptah-editable-section>
 
-      <ptah-form-section heading="Danger zone" level="4" data-testid="account-detail-danger-zone">
+      <ptah-form-section heading="Danger zone" [level]="4" data-testid="account-detail-danger-zone">
         <button
           footer
           #removeButton
