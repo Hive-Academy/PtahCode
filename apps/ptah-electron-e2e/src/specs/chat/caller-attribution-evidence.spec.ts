@@ -45,6 +45,12 @@ test.describe('@evidence Codex caller attribution', () => {
     // (dist/apps/ptah-electron), and the host refuses sessions in an ancestor
     // of the app installation directory.
     const workspace = path.join(dir, 'workspace');
+    // Evidence run 1 used the repository as workspace and the app deleted tracked
+    // files. Refuse any temp folder that resolves inside the repository.
+    const inside = path.relative(root, dir);
+    if (!inside.startsWith('..') && !path.isAbsolute(inside)) {
+      throw new Error(`Evidence workspace must be outside the repository: ${dir}`);
+    }
     fs.mkdirSync(profile);
     fs.mkdirSync(home);
     fs.mkdirSync(workspace);
