@@ -10,6 +10,7 @@ import {
   PtahButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
+  PtahStatePanelComponent,
 } from '@ptah-extension/ui';
 import { ReviewStateSchema } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from '../review-runs.store';
@@ -41,6 +42,7 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
     PtahButtonDirective,
     PtahInputDirective,
     PtahSelectDirective,
+    PtahStatePanelComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full w-full' },
@@ -65,40 +67,39 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
         </div>
       }
       @if (store.poll()?.status === 'failed' || store.refreshError()) {
-        <div class="alert alert-warning" role="alert">
-          <span
-            >{{ store.refreshErrorMessage() ?? 'The last review poll failed. Review runs may be out of date.' }}</span
-          ><button
-            type="button"
-            ptahButton variant="ghost"
-            aria-label="Retry with Refresh"
-            (click)="store.refresh()"
-          >
-            Retry with Refresh
-          </button>
-        </div>
+        <ptah-state-panel
+          state="partial"
+          [body]="
+            store.refreshErrorMessage() ??
+            'The last review poll failed. Review runs may be out of date.'
+          "
+          actionLabel="Retry with Refresh"
+          (action)="store.refresh()"
+        />
       }
       @if (store.state() === 'offline') {
-        <div class="alert alert-warning" role="alert">
-          <span
-            >Review service is unavailable. Showing cached runs from
-            {{ store.lastRefreshedAt()?.toLocaleString() }}. Live publication
-            status is unavailable.</span
-          ><button ptahButton variant="ghost" (click)="store.load()">
-            Retry connection
-          </button>
-        </div>
+        <ptah-state-panel
+          state="partial"
+          [body]="
+            'Review service is unavailable. Showing cached runs from ' +
+            (store.lastRefreshedAt()?.toLocaleString() ?? 'an earlier poll') +
+            '. Live publication status is unavailable.'
+          "
+          actionLabel="Retry connection"
+          (action)="store.load()"
+        />
       } @else if (store.state() === 'error') {
         <div class="alert alert-error" role="alert">
-          <span>Review history could not be loaded.</span
-          ><button ptahButton variant="ghost" (click)="store.load()">
+          <span>Review history could not be loaded.</span>
+          <button ptahButton variant="ghost" (click)="store.load()">
             Retry
           </button>
         </div>
       } @else if (store.state() === 'no-lanes') {
-        <div class="alert alert-warning" role="alert">
-          No lanes available. Review has not produced a clean result.
-        </div>
+        <ptah-state-panel
+          state="partial"
+          body="No lanes available. Review has not produced a clean result."
+        />
       }
       <ptah-inbox-layout
         class="min-h-0 flex-1"
@@ -172,19 +173,12 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
               (input)="setSearch($event)"
             />
             @if (store.state() === 'loading' && !store.hasCache()) {
-              <div
-                class="space-y-3"
-                role="status"
-                aria-label="Loading review runs"
-              >
-                <div class="skeleton h-12 w-full"></div>
-                <div class="skeleton h-12 w-full"></div>
-                <div class="skeleton h-12 w-full"></div>
-              </div>
+              <ptah-state-panel state="loading" title="Loading review runs" />
             } @else if (store.state() === 'no-lanes') {
-              <div class="py-8 text-center text-sm text-base-content-muted">
-                Check lane availability in settings.
-              </div>
+              <ptah-state-panel
+                state="empty"
+                body="Check lane availability in settings."
+              />
             } @else if (store.filteredRuns().length) {
               <ptah-review-runs-list
                 [runs]="store.filteredRuns()"
@@ -192,35 +186,21 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
                 (open)="store.selectRun($event)"
               />
             } @else if (store.runs().length) {
-              <div class="py-8 text-center">
-                <p class="font-semibold">No matching runs</p>
-                <p class="text-sm text-base-content-muted">
-                  Try another repository or state.
-                </p>
-                <button
-                  ptahButton
-                  variant="ghost"
-                  class="mt-3"
-                  (click)="store.clearFilters()"
-                >
-                  Clear filters
-                </button>
-              </div>
+              <ptah-state-panel
+                state="empty"
+                title="No matching runs"
+                body="Try another repository or state."
+                actionLabel="Clear filters"
+                (action)="store.clearFilters()"
+              />
             } @else if (store.state() !== 'error') {
-              <div class="py-8 text-center">
-                <p class="font-semibold">No review runs yet</p>
-                <p class="text-sm text-base-content-muted">
-                  Runs will appear after the next poll.
-                </p>
-                <button
-                  ptahButton
-                  variant="ghost"
-                  class="mt-3"
-                  (click)="store.load()"
-                >
-                  Refresh
-                </button>
-              </div>
+              <ptah-state-panel
+                state="empty"
+                title="No review runs yet"
+                body="Runs will appear after the next poll."
+                actionLabel="Refresh"
+                (action)="store.load()"
+              />
             }
             @if (
               store.runs().length &&
@@ -260,11 +240,10 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
             />
           </div>
         } @else {
-          <div
-            class="flex min-h-48 items-center justify-center text-sm text-base-content-muted"
-          >
-            Select a run to see its findings.
-          </div>
+          <ptah-state-panel
+            state="empty"
+            body="Select a run to see its findings."
+          />
         }
       </ptah-inbox-layout>
       @if (settingsOpen()) {

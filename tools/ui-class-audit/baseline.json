@@ -1067,17 +1067,8 @@
     "<dynamic>": 1
   },
   "libs/frontend/review-runs-ui/src/lib/components/review-runs-page.component.ts": {
-    "alert": 5,
-    "alert-error": 2,
-    "alert-warning": 3,
-    "skeleton": 3
-  },
-  "libs/frontend/review-runs-ui/src/lib/components/review-settings-drawer.component.html": {
-    "alert": 1,
-    "alert-error": 1,
-    "btn-ghost": 2,
-    "toggle": 1,
-    "toggle-warning": 1
+    "alert": 2,
+    "alert-error": 2
   },
   "libs/frontend/setup-wizard/src/lib/components/agent-preview-dialog.component.ts": {
     "alert": 4,
