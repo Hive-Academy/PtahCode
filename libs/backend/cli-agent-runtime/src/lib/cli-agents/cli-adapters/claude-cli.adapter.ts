@@ -6,6 +6,7 @@ import type {
   EffectiveCapabilitySet,
   CliOutputSegment,
   FlatStreamEventUnion,
+  PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import type {
   ProviderAccountAdmissionPort,
@@ -151,7 +152,9 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
     }
   }
 
-  async runSdk(input: ClaudeCliCommandOptions): Promise<SdkHandle> {
+  async runSdk(
+    input: ClaudeCliCommandOptions & { readonly phase?: PhaseDispatchV1 },
+  ): Promise<SdkHandle> {
     const lanePolicy = translateLaneSpawnPolicy(this.name, this.capabilities(), input);
     const abortController = new AbortController();
     const named = await this.prepareNamed(input, abortController);
@@ -205,11 +208,13 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
               settingSources: named.certified?.settingSources,
             }
           : undefined,
+        input.phase,
       );
       const agentIdHolder = { value: input.agentId };
       const routingId = `claude:${randomUUID()}`;
       const options = buildClaudeSdkLaneOptions({
         assembly,
+        ...(input.phase ? { phase: input.phase } : {}),
         authEnv: {},
         accountRoute: named?.route,
         launch: named?.certified,
@@ -289,7 +294,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
       };
       const lanePlanLimits = this.deps.planLimits();
       try {
-        return this.deps.runner.run({
+        const handle = this.deps.runner.run({
           queryFn,
           named,
           options: { ...options, abortController },
@@ -328,6 +333,16 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
           disposeCallbacks,
           stopProxy: async () => undefined,
         }).handle;
+        return {
+          ...handle,
+          toolProfileApplied: Boolean(
+            input.phase?.toolProfile.disallowedTools.length &&
+              assembly.mcpServers['ptah'] &&
+              input.phase.toolProfile.disallowedTools.every((name) =>
+                options.disallowedTools?.includes(name),
+              ),
+          ),
+        };
       } catch (error: unknown) {
         abortController.abort();
         throw error;

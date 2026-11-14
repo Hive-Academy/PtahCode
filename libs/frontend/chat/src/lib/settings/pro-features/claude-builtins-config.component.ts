@@ -43,7 +43,7 @@ import type {
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective, PtahCheckboxDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahCheckboxDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 export const COULD_NOT_LOAD_CLAUDE_BUILTINS =
   'Could not load the Claude Code tool and skill settings.';
@@ -72,7 +72,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
 @Component({
   selector: 'ptah-claude-builtins-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahSurfaceDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahSurfaceDirective, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -158,7 +158,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                     </td>
                     <td class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ tool.id }}</td>
                     <td class="align-top">
-                      <span class="badge badge-outline badge-xs text-base-content">{{ cost(tool.approxTokens) }}</span>
+                      <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(tool.approxTokens) }}</span>
                     </td>
                     <td class="align-top text-xs text-base-content-muted">{{ tool.description }}</td>
                     <td class="align-top text-xs text-base-content-muted">
@@ -215,13 +215,13 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                     </td>
                     <td class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ skill.id }}</td>
                     <td class="align-top">
-                      <span class="badge badge-outline badge-xs text-base-content">{{ cost(skill.approxTokens) }}</span>
+                      <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(skill.approxTokens) }}</span>
                     </td>
                     <td class="align-top text-xs text-base-content-muted">{{ skill.description }}</td>
                     <td class="align-top text-xs text-base-content-muted">
                       {{ skill.needsTool ?? 'None' }}
                       @if (isDependencyBlocked(skill)) {
-                        <span class="badge badge-warning badge-outline badge-xs block mt-1 whitespace-nowrap"
+                        <span ptahBadge appearance="outline" size="xs" tone="warn" class="block mt-1 whitespace-nowrap"
                           [attr.data-testid]="'claude-skill-dependency-' + skill.id">
                           {{ skill.needsTool }} tool is off
                         </span>
@@ -292,7 +292,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                         {{ skillName(skill) }}
                       </td>
                       <td class="align-top">
-                        <span class="badge badge-outline badge-xs text-base-content">{{ cost(skill.approxTokens) }}</span>
+                        <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(skill.approxTokens) }}</span>
                       </td>
                       <td class="align-top text-xs text-base-content-muted">{{ skill.description }}</td>
                     </tr>

@@ -1,13 +1,9 @@
+import { denySessionSpawnerHandoffAccess } from './__fixtures__/session-spawner-fs-access';
 import { makeHarness, PARENT } from './session-spawner.service.spec';
 
 // The spawner looks for the handoff file with real file I/O, which fake timers
 // and a microtask flush cannot settle. The file is absent in every case here.
-jest.mock('node:fs/promises', () => ({
-  ...jest.requireActual('node:fs/promises'),
-  access: jest.fn(async () => {
-    throw new Error('ENOENT');
-  }),
-}));
+denySessionSpawnerHandoffAccess();
 
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 50; i++) await Promise.resolve();
@@ -891,6 +887,48 @@ describe('SessionSpawnerService succession', () => {
     await flush();
     return { h, child };
   };
+
+  it('does not start a successor that a parent stop ended during the MCP root retain', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    let releaseRetain: (value: { registered: boolean }) => void = () =>
+      undefined;
+    h.registrar.retainRoot.mockImplementationOnce(
+      () =>
+        new Promise<{ registered: boolean }>((resolve) => {
+          releaseRetain = resolve;
+        }),
+    );
+    const starts = (h.host.startChildSession as jest.Mock).mock.calls.length;
+    const pending = h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'continue',
+    });
+    await flush();
+    const successorId = h.registry.get(child.childSessionId)?.succeededBy;
+    expect(successorId).toBeDefined();
+    const stopped = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+      followHandoff: true,
+    });
+    expect(stopped.ok).toBe(true);
+    releaseRetain({ registered: true });
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    expect((h.host.startChildSession as jest.Mock).mock.calls.length).toBe(
+      starts,
+    );
+    // The stop stays a stop: the predecessor is not made live again.
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe(
+      'handed-off',
+    );
+    expect(h.registry.get(successorId as string)?.terminalStatus).toBe(
+      'stopped',
+    );
+  });
 
   it('recovers a child whose session ended during a failed handoff', async () => {
     const { h, child } = await endDuringFailedHandoff('provider-error');

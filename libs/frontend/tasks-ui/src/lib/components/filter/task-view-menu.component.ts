@@ -26,7 +26,11 @@ import {
   MAX_SAVED_VIEW_NAME_LENGTH,
   type SavedTaskView,
 } from '@ptah-extension/shared';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahInputDirective,
+  PtahStatusBadgeComponent,
+} from '@ptah-extension/ui';
 
 /** A rename request: which view, and the new name the user typed. */
 export interface TaskViewRename {
@@ -140,7 +144,12 @@ interface TaskViewRow {
 @Component({
   selector: 'ptah-task-view-menu',
   standalone: true,
-  imports: [PtahButtonDirective, PtahInputDirective, LucideAngularModule],
+  imports: [
+    PtahButtonDirective,
+    PtahInputDirective,
+    PtahStatusBadgeComponent,
+    LucideAngularModule,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'contents' },
   template: `
@@ -165,12 +174,11 @@ interface TaskViewRow {
         }
         @if (modified()) {
           <!-- Not a colour-only signal: the word itself is the affordance. -->
-          <span
-            class="badge badge-outline badge-xs border-warning text-base-content"
+          <ptah-ui-status-badge
+            status="warning"
+            label="Modified"
             data-testid="task-view-modified-badge"
-          >
-            Modified
-          </span>
+          />
         }
       </summary>
 
@@ -433,7 +441,10 @@ interface TaskViewRow {
           @if (activeView() !== null) {
             <button
               type="button"
-              class="btn btn-ghost btn-sm justify-start"
+              ptahButton
+              variant="ghost"
+              size="sm"
+              align="start"
               [disabled]="busy()"
               title="Stop tracking a saved view. The current filters stay as they are."
               data-testid="task-view-clear-active"

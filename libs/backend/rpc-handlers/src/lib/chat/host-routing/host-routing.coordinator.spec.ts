@@ -415,10 +415,10 @@ describe('HostRoutingCoordinator', () => {
       expect(reminder).toContain('Routing: pre-flight taskType=FEATURE');
       expect(reminder).toContain('Available lanes: codex, grok.');
       expect(reminder).toContain(
-        'Available subagents: backend-developer, senior-tester.',
+        // Every host-listed role is a routable candidate (decision O-23).
+        'Available subagents: backend-developer, workspace-only-role, senior-tester.',
       );
       expect(reminder).not.toContain('copilot');
-      expect(reminder).not.toContain('workspace-only-role');
       expect(h.queue.take(SDK)).toBeNull();
       expect(h.hit()).not.toBeNull();
     });

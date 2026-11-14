@@ -2,6 +2,7 @@ import type {
   IDisposable,
   IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
+import { z } from 'zod';
 
 import type { DecisionModelConfig } from '../decision-model/decision-model.config';
 import {
@@ -31,6 +32,20 @@ export class HostRoutingSetting {
     } catch (_error: unknown) {
       // degradation-audit: reported - an unreadable setting disables advisory routing.
       return false;
+    }
+  }
+
+  /** The same live namespace switch that the MCP HTTP dispatcher reads. */
+  disabledMcpNamespaces(): readonly string[] | null {
+    try {
+      const value = this.workspace.getConfiguration<unknown>(
+        'ptah', 'agentOrchestration.disabledMcpNamespaces', [],
+      );
+      const parsed = z.array(z.string()).safeParse(value ?? []);
+      return parsed.success ? parsed.data : null;
+    } catch (_error: unknown) {
+      // degradation-audit: reported - an unreadable host setting makes candidate capability unknown.
+      return null;
     }
   }
 

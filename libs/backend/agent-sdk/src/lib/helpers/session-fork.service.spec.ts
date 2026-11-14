@@ -143,6 +143,21 @@ const baseSessionConfig = {
 
 describe('SessionForkService', () => {
   describe('forkSession()', () => {
+    it('keeps the governing phase when a phase child is forked', async () => {
+      const h = makeService();
+      const phase = { version: 1, kind: 'implement', text: 'phase' };
+      h.metadataStore.get.mockResolvedValueOnce({
+        sessionId: 'src', workspaceId: SOURCE_PROJECT, name: 'Source', phase,
+      } as never);
+      getMockedForkSession().mockResolvedValueOnce({ sessionId: 'fork-phase' });
+
+      await h.service.forkSession({ sessionId: 'src' as SessionId });
+
+      expect(h.metadataStore.create).toHaveBeenCalledWith(
+        'fork-phase', SOURCE_PROJECT, 'Source (fork)', 'forked',
+        undefined, undefined, undefined, phase,
+      );
+    });
     beforeEach(() => {
       getMockedForkSession().mockReset();
     });
@@ -322,6 +337,7 @@ describe('SessionForkService', () => {
         '/ws',
         'Original Session (rewind)',
         'forked',
+        undefined, undefined, undefined, undefined,
       );
     });
 
@@ -349,6 +365,7 @@ describe('SessionForkService', () => {
         '/ws',
         'Original Session (fork)',
         'forked',
+        undefined, undefined, undefined, undefined,
       );
     });
 
@@ -415,6 +432,7 @@ describe('SessionForkService', () => {
           SOURCE_PROJECT,
           'Source (fork)',
           'forked',
+          undefined, undefined, undefined, undefined,
         );
       });
 

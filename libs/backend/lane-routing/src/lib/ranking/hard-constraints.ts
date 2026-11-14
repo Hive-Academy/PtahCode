@@ -5,9 +5,8 @@
  * result, and candidate order is the caller's order.
  *
  * A lane matches the first rule that applies: `at-limit`, then `disabled`,
- * then `not-installed`, then `never-on-a-lane` (phase kinds `visual-review`
- * and `design`), then `reviewer-family`. Subagents are subject only to
- * `reviewer-family`. `pruned` is a later ranking cut (Requirement 12.2), not
+ * then `not-installed`, required capabilities, then `reviewer-family`.
+ * `pruned` is a later ranking cut (Requirement 12.2), not
  * a hard constraint.
  *
  * Reviewer-family compares a `review` or `document-review` phase with the
@@ -20,6 +19,7 @@
  * matches one candidate id, or a `cli` value that belongs to exactly one lane.
  */
 import { PHASE_KINDS } from '../contracts/route-decide-args.schema';
+import { capabilitiesFromTools, requiredCapabilities, type MachineCapability } from './capability';
 import { EXCLUSION_RULES } from '../contracts/route-decide-result.schema';
 import { EXCLUDED_LIMIT_STATE } from '../routing-constants';
 import type { RoutingCandidate } from './candidate.types';
@@ -33,21 +33,13 @@ export const HARD_CONSTRAINT_RULES = [
   'at-limit',
   'disabled',
   'not-installed',
-  'never-on-a-lane',
+  'missing-capability',
+  'capability-unknown',
   'reviewer-family',
   'not-listed',
 ] as const satisfies readonly ExclusionRule[];
 
 export type HardConstraintRule = (typeof HARD_CONSTRAINT_RULES)[number];
-
-/**
- * Phase kinds that take a subagent only (`lane-assignment.md` "Never on a
- * lane": visual-reviewer and ui-ux-designer work).
- */
-export const NEVER_ON_A_LANE_PHASE_KINDS = [
-  'visual-review',
-  'design',
-] as const satisfies readonly PhaseKind[];
 
 /** Phases whose lane must not share an implementer's family (Req 3.3). */
 export const REVIEW_PHASE_KINDS = [
@@ -59,6 +51,7 @@ export const PHASE_EXCLUSION_REASONS = [
   'no-eligible-candidate',
   'reviewer-family',
   'pin-unavailable',
+  'missing-capability',
 ] as const;
 
 export type PhaseExclusionReason = (typeof PHASE_EXCLUSION_REASONS)[number];
@@ -68,6 +61,7 @@ export interface ConstraintPhase {
   readonly kind: PhaseKind;
   /** Implement phase ids this review covers. Empty means every implement phase. */
   readonly reviews?: readonly string[];
+  readonly requiredCapabilities?: readonly MachineCapability[];
 }
 
 export interface KnownPhaseExecutor {
@@ -79,11 +73,13 @@ export interface KnownPhaseExecutor {
 export interface CandidateExclusion {
   readonly candidate: string;
   readonly rule: ExclusionRule;
+  readonly capability?: MachineCapability;
 }
 
 export interface ConstrainPhaseInput {
   readonly phase: ConstraintPhase;
   readonly candidates: readonly RoutingCandidate[];
+  readonly toolNames?: ReadonlyMap<string, readonly string[] | null>;
   /** User pin executor: a candidate id, a unique `cli` value, or `subagent:<role>`. */
   readonly pin?: { readonly executor: string };
   readonly knownExecutors?: readonly KnownPhaseExecutor[];
@@ -141,7 +137,8 @@ function forbiddenReviewerFamilies(
 
 function exclusionRule(
   candidate: RoutingCandidate,
-  phaseKind: PhaseKind,
+  required: readonly MachineCapability[],
+  toolNames: ReadonlyMap<string, readonly string[] | null> | undefined,
   forbiddenFamilies: ReadonlySet<string> | null,
 ): ExclusionRule | null {
   if (candidate.kind === 'lane') {
@@ -154,9 +151,12 @@ function exclusionRule(
     if (!candidate.installed) {
       return 'not-installed';
     }
-    if (includesKind(NEVER_ON_A_LANE_PHASE_KINDS, phaseKind)) {
-      return 'never-on-a-lane';
-    }
+  }
+  if (required.length > 0) {
+    const names = toolNames?.get(candidate.id);
+    if (names == null) return 'capability-unknown';
+    const available = capabilitiesFromTools(names);
+    if (required.some((capability) => !available.has(capability))) return 'missing-capability';
   }
   if (forbiddenFamilies?.has(candidate.family) === true) {
     return 'reviewer-family';
@@ -227,7 +227,8 @@ function unavailable(
 
 function classify(
   candidates: readonly RoutingCandidate[],
-  phaseKind: PhaseKind,
+  required: readonly MachineCapability[],
+  toolNames: ReadonlyMap<string, readonly string[] | null> | undefined,
   forbiddenFamilies: ReadonlySet<string> | null,
 ): {
   readonly eligible: readonly RoutingCandidate[];
@@ -236,11 +237,14 @@ function classify(
   const eligible: RoutingCandidate[] = [];
   const excluded: CandidateExclusion[] = [];
   for (const candidate of candidates) {
-    const rule = exclusionRule(candidate, phaseKind, forbiddenFamilies);
+    const rule = exclusionRule(candidate, required, toolNames, forbiddenFamilies);
     if (rule === null) {
       eligible.push(candidate);
     } else {
-      excluded.push({ candidate: candidate.id, rule });
+      excluded.push({ candidate: candidate.id, rule,
+        ...(rule === 'missing-capability' || rule === 'capability-unknown'
+          ? { capability: required[0] } : {}),
+      });
     }
   }
   return { eligible, excluded };
@@ -249,6 +253,7 @@ function classify(
 export function constrainPhase(
   input: ConstrainPhaseInput,
 ): PhaseConstraintResult {
+  const required = requiredCapabilities(input.phase.kind, input.phase.requiredCapabilities);
   const forbiddenFamilies = forbiddenReviewerFamilies(
     input.phase,
     input.knownExecutors ?? [],
@@ -256,7 +261,8 @@ export function constrainPhase(
   );
   const classified = classify(
     input.candidates,
-    input.phase.kind,
+    required,
+    input.toolNames,
     forbiddenFamilies,
   );
 
@@ -271,7 +277,7 @@ export function constrainPhase(
         'not-listed',
       );
     }
-    const pinRule = exclusionRule(target, input.phase.kind, forbiddenFamilies);
+    const pinRule = exclusionRule(target, required, input.toolNames, forbiddenFamilies);
     if (pinRule) {
       return unavailable(
         input.phase.id,
@@ -290,6 +296,9 @@ export function constrainPhase(
   }
 
   if (classified.eligible.length === 0) {
+    if (classified.excluded.some((entry) => entry.rule === 'missing-capability' || entry.rule === 'capability-unknown')) {
+      return unavailable(input.phase.id, 'missing-capability', classified.excluded, null);
+    }
     const blockedByFamily = classified.excluded.some(
       (entry) => entry.rule === 'reviewer-family',
     );
@@ -324,7 +333,7 @@ function assertConstraintVocabulary(): void {
       throw new Error(`hard constraint rule ${rule} is not an exclusion rule`);
     }
   }
-  for (const kind of [...NEVER_ON_A_LANE_PHASE_KINDS, ...REVIEW_PHASE_KINDS]) {
+  for (const kind of REVIEW_PHASE_KINDS) {
     if (!PHASE_KINDS.includes(kind)) {
       throw new Error(`constraint phase ${kind} is not a phase kind`);
     }

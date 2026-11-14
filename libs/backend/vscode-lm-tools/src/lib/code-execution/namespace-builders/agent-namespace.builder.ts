@@ -11,6 +11,10 @@
  */
 
 import type { AgentNamespace } from '../types';
+import { readFileSync } from 'node:fs';
+import { z } from 'zod';
+import { resolveWorkspaceSkillPath } from '@ptah-extension/platform-core';
+import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
 import {
   MAX_EFFORT_LENGTH,
   agentSpawnAccountRefusal,
@@ -162,10 +166,12 @@ interface PtahCliRegistryLike {
       permission?: SpawnAgentRequest['permission'];
       network?: SpawnAgentRequest['network'];
       parentLevel?: SpawnAgentRequest['parentLevel'];
+      phase?: SpawnAgentRequest['phase'];
     },
   ): Promise<
     | { handle: SdkHandle; agentName: string; setAgentId: (id: string) => void;
-        potentialCapabilities?: CliAdapterManifest; effectivePolicy?: EffectiveLanePolicy }
+        potentialCapabilities?: CliAdapterManifest; effectivePolicy?: EffectiveLanePolicy;
+        toolProfileApplied?: boolean }
     | SpawnAgentFailure
   >;
 }
@@ -323,6 +329,12 @@ function assertOutcomeField(
 const NO_PARENT_NOTICE =
   'No parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.';
 
+const resolvedSkillsSchema = z.array(z.object({
+  name: z.string().min(1),
+  path: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
+}).strict().refine(skill => Boolean(skill.path || skill.text)));
+
 export function buildAgentNamespace(
   deps: AgentNamespaceDependencies,
 ): AgentNamespace {
@@ -346,13 +358,26 @@ export function buildAgentNamespace(
 
   return {
     spawn: async (request: UntypedSpawnRequest) => {
+      if (request.phase) parsePhaseDispatch(request.phase);
       assertEffort(request.effort);
       assertOutcomeField('taskKind', request.taskKind, OUTCOME_TASK_KINDS);
-      assertOutcomeField(
-        'routingSource',
-        request.routingSource,
-        OUTCOME_ROUTING_SOURCES,
+      assertOutcomeField('routingSource', request.routingSource, OUTCOME_ROUTING_SOURCES);
+      const resolvedSkills = resolvedSkillsSchema.parse(
+        request.skills === undefined ? request.phase?.skills ?? [] : request.skills,
       );
+      const skillText = resolvedSkills.map(skill => {
+        if (skill.text) return `### Skill: ${skill.name}\n${skill.text}`;
+        const path = resolveWorkspaceSkillPath(getWorkspaceRoot(), skill.path ?? '');
+        if (!path) throw new Error(`Resolved skill ${skill.name} could not be read`);
+        try {
+          return `### Skill: ${skill.name}\n${readFileSync(path, 'utf8')}`;
+        } catch {
+          // degradation-audit: reported - the caller receives a bounded skill read error.
+          throw new Error(`Resolved skill ${skill.name} could not be read`);
+        }
+      }).join('\n\n');
+      const deliveryText = [request.phase?.text, skillText].filter(Boolean).join('\n\n');
+      const deliveredTask = deliveryText ? `${request.task}\n\n${deliveryText}` : request.task;
       const accountSelection = assertAccountSelection(request);
       if (request.systemPrompt !== undefined) {
         logger.warn(
@@ -443,7 +468,7 @@ export function buildAgentNamespace(
         // rendered here from the SAME function the rival-CLI adapters use
         // (TASK_2026_515). Two call sites, one text.
         const ptahCliTask =
-          `${prepared.task}\n\n` +
+          `${prepared.task}${deliveryText ? `\n\n${deliveryText}` : ''}\n\n` +
           renderLaneCompletionContract({
             taskFolder: request.taskFolder,
             deliverables: request.deliverables,
@@ -464,6 +489,7 @@ export function buildAgentNamespace(
             permission: request.permission,
             network: request.network,
             parentLevel,
+            ...(request.phase ? { phase: request.phase } : {}),
           },
         );
         if ('status' in result) {
@@ -492,6 +518,9 @@ export function buildAgentNamespace(
             ptahCliId: request.ptahCliId,
             potentialCapabilities: result.potentialCapabilities,
             effectivePolicy: result.effectivePolicy,
+            ...(request.phase
+              ? { toolProfileApplied: result.toolProfileApplied }
+              : {}),
             mcpPort: registry.getMcpPort?.(),
             // A registry that cannot say its port cannot say MCP was expected.
             expectsMcp: registry.getMcpPort !== undefined,
@@ -504,6 +533,7 @@ export function buildAgentNamespace(
               ? { originalTask: prepared.originalTask }
               : {}),
             agentId,
+            ...(request.phase ? { phase: request.phase } : {}),
             ...(roleDefinition
               ? {
                   roleStamp: {
@@ -516,7 +546,7 @@ export function buildAgentNamespace(
         );
         result.setAgentId(spawnResult.agentId);
 
-        return markParentless(spawnResult);
+        return { ...markParentless(spawnResult), ...(resolvedSkills.length && { skillDelivery: 'inline' as const }) };
       }
       if (request.cli) {
         const disabledClis = getDisabledClis?.() ?? [];
@@ -559,6 +589,7 @@ export function buildAgentNamespace(
 
       const enrichedRequest = {
         ...requestFields,
+        task: deliveredTask,
         ...(accountSelection && { accountSelection }),
         ...(workingDirectory && { workingDirectory }),
         ...(activeSessionId && { parentSessionId: activeSessionId }),
@@ -567,7 +598,7 @@ export function buildAgentNamespace(
         ...(projectGuidance && { projectGuidance }),
         ...(pluginPaths && pluginPaths.length > 0 && { pluginPaths }),
       };
-      return markParentless(await agentProcessManager.spawn(enrichedRequest));
+      return { ...markParentless(await agentProcessManager.spawn(enrichedRequest)), ...(resolvedSkills.length && { skillDelivery: 'inline' as const }) };
     },
 
     status: async (agentId?) => {

@@ -43,6 +43,7 @@ import {
   safeErrorKind,
   withRestoredOutputLoss,
   type AgentProcessManager,
+  SessionChildRegistry,
 } from '@ptah-extension/cli-agent-runtime';
 import { SMITHERY_API_KEY_SECRET_ID } from '../../handlers/mcp-directory-rpc.schema';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
@@ -99,6 +100,7 @@ import type {
   McpHttpServerOverride,
   PermissionLevel,
   QueuedFollowUpSnapshot,
+  PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import {
   MESSAGE_TYPES,
@@ -186,6 +188,7 @@ interface AutoResumePreflight extends MainSessionAccountSelection {
 
 /** Input of {@link ChatSessionService.startAgentChildSession} (TASK_2026_584). */
 export interface AgentChildSessionStartParams extends MainSessionAccountSelection {
+  readonly phase?: PhaseDispatchV1;
   /** Authoritative parent SDK id, supplied by the host rather than the prompt. */
   readonly sourceSessionId?: SessionId;
   /** Backend-minted child tab id: the stream key and MCP routing id. */
@@ -234,6 +237,7 @@ interface AgentSessionPathLabels {
 
 /** What {@link ChatSessionService.launchSdkSession} needs from its callers. */
 interface SdkSessionLaunch {
+  readonly phase?: PhaseDispatchV1;
   /** Label in the launch log lines (`chat:start` keeps its existing text). */
   readonly logLabel: string;
   readonly tabId: string;
@@ -467,6 +471,8 @@ export class ChatSessionService {
     private readonly followUpQueue: ChatFollowUpQueue | null = null,
     @inject(SDK_TOKENS.SDK_MODEL_SERVICE, { isOptional: true })
     private readonly childModelCatalog: SdkModelService | undefined = undefined,
+    @inject(SessionChildRegistry, { isOptional: true })
+    private readonly sessionChildren: SessionChildRegistry | undefined = undefined,
   ) {
     this.subscribeToMcpStatus();
     this.subscribeToSessionEnd();
@@ -1480,7 +1486,7 @@ export class ChatSessionService {
   async startAgentChildSession(
     params: AgentChildSessionStartParams,
   ): Promise<
-    ChatStartResult | NonNullable<ReturnType<typeof mainSessionAccountFailure>>
+    (ChatStartResult & { readonly toolProfileApplied?: boolean }) | NonNullable<ReturnType<typeof mainSessionAccountFailure>>
   > {
     const {
       tabId,
@@ -1521,8 +1527,9 @@ export class ChatSessionService {
         permissionLevel,
       });
 
-      await this.launchSdkSession({
+      const toolProfileApplied = await this.launchSdkSession({
         logLabel: 'agent child session',
+        phase: params.phase,
         tabId,
         workspaceId: workspaceRoot,
         projectPath: worktreePath,
@@ -1540,7 +1547,7 @@ export class ChatSessionService {
         accountSelection,
       });
 
-      return { success: true };
+      return toolProfileApplied ? { success: true, toolProfileApplied } : { success: true };
     } catch (error) {
       const codexFailure = this.codexFailure(error);
       if (codexFailure) return codexFailure;
@@ -1713,7 +1720,7 @@ export class ChatSessionService {
    * is resolved for; `projectPath` is where it runs. `chat:start` passes the
    * same path for both.
    */
-  private async launchSdkSession(input: SdkSessionLaunch): Promise<void> {
+  private async launchSdkSession(input: SdkSessionLaunch): Promise<true | undefined> {
     const { logLabel, tabId, workspaceId, projectPath, options } = input;
     if (input.pluginConfigAncestorRoots !== undefined) {
       await validateSessionPolicyRoot(
@@ -1824,6 +1831,13 @@ export class ChatSessionService {
     try {
       const startConfig: AgentSessionStartConfig = {
         ...config,
+        ...(input.phase ? { phase: input.phase } : {}),
+        ...(input.phase && execution.runtime !== 'claude-sdk'
+          ? { prompt: [config.prompt, input.phase.text,
+              ...(input.phase.skills ?? []).map(skill => skill.text
+                ? `Skill ${skill.name}:\n${skill.text}` : ''),
+            ].filter(Boolean).join('\n\n') }
+          : {}),
         runtime: execution.runtime,
         ...(execution.runtime === 'claude-sdk'
           ? {
@@ -1870,6 +1884,7 @@ export class ChatSessionService {
         tabId,
         input.surfaceMode,
       );
+      return stream.toolProfileApplied;
     } catch (error) {
       this.pendingLineage.delete(tabId);
       throw error;
@@ -3115,6 +3130,9 @@ export class ChatSessionService {
       );
       const resumeConfig: AgentSessionResumeConfig = {
         ...config,
+        ...(this.sessionChildren?.get(sessionId as string)
+          ? { knownSessionChild: true }
+          : {}),
         ...(execution.runtime === 'claude-sdk'
           ? {
               model: execution.model,
@@ -3156,6 +3174,7 @@ export class ChatSessionService {
       if (nativeId) this.followUpQueue?.commitAdmission(sessionId, nativeId);
       let nativeSucceeded = false;
       let stream: Awaited<ReturnType<IAgentAdapter['resumeSession']>>;
+      const wasActive = this.sdkAdapter.isSessionActive(sessionId);
       try {
         stream = await this.sdkAdapter.resumeSession(
           sessionId,
@@ -3164,6 +3183,12 @@ export class ChatSessionService {
             : resumeConfig,
         );
         nativeSucceeded = true;
+        const child = this.sessionChildren?.get(sessionId as string);
+        if (child && !wasActive) {
+          this.sessionChildren?.update(child.childSessionId, {
+            toolProfileApplied: stream.toolProfileApplied === true,
+          });
+        }
       } finally {
         if (nativeId) {
           if (nativeSucceeded)

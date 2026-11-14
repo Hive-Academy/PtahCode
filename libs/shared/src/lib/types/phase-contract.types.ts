@@ -38,3 +38,29 @@ export interface PhaseDefinitionV1 {
     readonly reviewerStance?: string;
   };
 }
+
+/** Host-resolved skill content. A channel may deliver its path or its text. */
+export interface PhaseSkillV1 {
+  readonly name: string;
+  readonly path?: string;
+  readonly text?: string;
+}
+
+/**
+ * Whether an executor applied the phase tool profile to its own built-in
+ * tools. `unfiltered` means that executor has no built-in deny channel.
+ */
+export interface ToolProfileAdapterResultV1 {
+  readonly executorId: string;
+  readonly toolProfileStatus: 'filtered' | 'unfiltered';
+}
+
+/** Versioned handoff from phase resolution to an executor. */
+export interface PhaseDispatchV1 {
+  readonly version: typeof PHASE_CONTRACT_VERSION;
+  readonly kind: PhaseKind;
+  readonly text: string;
+  readonly definition: PhaseDefinitionV1;
+  readonly toolProfile: PhaseDefinitionV1['toolProfile'];
+  readonly skills?: readonly PhaseSkillV1[];
+}

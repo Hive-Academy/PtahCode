@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { PLATFORM_TOKENS, type SessionUsageContribution } from '@ptah-extension/platform-core';
+import { PHASE_KINDS } from '@ptah-extension/shared';
+import { PLATFORM_TOKENS, type SessionUsageContribution, type UsageExecutorType } from '@ptah-extension/platform-core';
 export type { SessionUsageSink, SessionUsageContribution, SessionUsageModelDelta } from '@ptah-extension/platform-core';
 
 /**
@@ -115,6 +116,8 @@ const sessionUsageModelDeltaSchema = z
  */
 export const sessionUsageContributionSchema = z
   .object({
+    phaseKind: z.enum(PHASE_KINDS).optional(),
+    executorType: (z.enum(['sdk-subagent', 'session', 'lane']) satisfies z.ZodType<UsageExecutorType>).optional(),
     /** The Ptah session the usage belongs to (the lane's own session for lanes). */
     sessionId: Identifier,
     producer: z.enum(SESSION_USAGE_PRODUCERS),

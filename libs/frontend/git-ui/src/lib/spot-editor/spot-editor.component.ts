@@ -38,7 +38,7 @@ import {
 } from '../types/file-view.types';
 // Type-only: erased at build time, so CodeMirror stays out of this chunk.
 import type { SpotEditorHandle } from './codemirror-setup';
-import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui';
 
 /** Same ceiling as the read-only file view (`file-view.component.ts:32`). */
 const MAX_MARKDOWN_PREVIEW_BYTES = 512 * 1024;
@@ -111,6 +111,7 @@ interface DialogCopy {
   imports: [
     PtahBadgeDirective,
     PtahButtonDirective,
+    PtahStatePanelComponent,
     LucideAngularModule,
     MarkdownBlockComponent,
     OpenInButtonComponent,
@@ -119,7 +120,7 @@ interface DialogCopy {
   host: { class: 'flex h-full min-h-0 flex-col' },
   template: `
     <div
-      class="flex h-8 flex-shrink-0 items-center gap-2 border-b border-base-content/10 px-2"
+      class="flex h-8 flex-shrink-0 items-center gap-[var(--ptah-gap-controls)] border-b border-base-content/10 px-2"
     >
       <button
         #backButton
@@ -142,7 +143,7 @@ interface DialogCopy {
       @if (modified()) {
         <!-- Dirty marker (V-7): the word carries it, the dot is decoration. -->
         <span
-          class="inline-flex flex-shrink-0 items-center gap-1 text-xs text-base-content"
+          class="inline-flex flex-shrink-0 items-center gap-[var(--ptah-gap-label)] text-xs text-base-content"
           data-testid="spot-editor-dirty"
           title="This file has unsaved changes"
         >
@@ -174,22 +175,30 @@ interface DialogCopy {
         <div class="join" role="group" aria-label="Markdown view">
           <button
             type="button"
-            class="btn btn-ghost btn-xs join-item"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            [selected]="previewVisible()"
+            selectedAs="pressed"
+            class="join-item"
             data-testid="spot-editor-preview"
             [disabled]="!previewAvailable()"
             [attr.title]="previewSizeBlocked() ? previewLimitNote : null"
-            [attr.aria-pressed]="previewVisible()"
             (click)="showPreview(true)"
           >
             Preview
           </button>
           <button
             type="button"
-            class="btn btn-ghost btn-xs join-item"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            [selected]="!previewVisible()"
+            selectedAs="pressed"
+            class="join-item"
             data-testid="spot-editor-source"
             [disabled]="!previewAvailable()"
             [attr.title]="previewSizeBlocked() ? previewLimitNote : null"
-            [attr.aria-pressed]="!previewVisible()"
             (click)="showPreview(false)"
           >
             Source
@@ -227,7 +236,7 @@ interface DialogCopy {
       <!-- A quiet strip, not a solid warning band (V-7): the same left-accent
            treatment as the shell's stale-status notice. -->
       <div
-        class="flex flex-shrink-0 items-center gap-2 border-b border-l-2 border-base-content/10 border-l-warning bg-base-200 px-3 py-1 text-xs text-base-content"
+        class="flex flex-shrink-0 items-center gap-[var(--ptah-gap-controls)] border-b border-l-2 border-base-content/10 border-l-warning bg-base-200 px-3 py-1 text-xs text-base-content"
         role="status"
         data-testid="spot-editor-stale"
       >
@@ -291,13 +300,11 @@ interface DialogCopy {
           <div
             class="flex h-full flex-col items-center justify-center gap-3 p-6"
           >
-            <div
-              class="alert alert-warning max-w-xl text-xs"
-              role="alert"
+            <ptah-state-panel
+              state="error"
+              [body]="current.failure?.message ?? null"
               data-testid="spot-editor-blocked"
-            >
-              <span>{{ current.failure?.message }}</span>
-            </div>
+            />
             @if (current.failure?.externalOpenAllowed) {
               <ptah-open-in-button
                 mode="full"

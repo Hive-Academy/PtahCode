@@ -46,6 +46,8 @@ import { SubagentStopCallbackRegistry } from './subagent-stop-callback-registry'
 import type { SessionStatsOwnerService } from '../session-stats/session-stats-owner.service';
 import type { SubagentBudgetMonitor } from './compaction/subagent-budget-monitor';
 import { createSubagentBudgetHooks } from './compaction/subagent-budget-hooks';
+import { buildSdkSubagentCompletion } from './sdk-subagent-completion';
+import type { PhaseKind } from '@ptah-extension/shared';
 
 /**
  * SubagentHookHandler Service
@@ -128,6 +130,7 @@ export class SubagentHookHandler {
   createHooks(
     workspacePath: string,
     parentSessionId?: string,
+    phaseKind?: PhaseKind,
   ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     const capturedParentSessionId = parentSessionId;
     this.logger.info('[SubagentHookHandler] Creating hooks for workspace', {
@@ -208,6 +211,7 @@ export class SubagentHookHandler {
                 toolUseId,
                 workspacePath,
                 capturedParentSessionId,
+                phaseKind,
               );
             },
           ],
@@ -438,6 +442,7 @@ export class SubagentHookHandler {
     toolUseId: string | undefined,
     workspacePath: string,
     parentSessionId?: string,
+    phaseKind?: PhaseKind,
   ): Promise<HookJSONOutput> {
     try {
       this.logger.debug('[SubagentHookHandler] SubagentStop received', {
@@ -543,6 +548,12 @@ export class SubagentHookHandler {
           input.session_id,
           parentSessionId,
         );
+        const completion = buildSdkSubagentCompletion({
+          agentId: input.agent_id,
+          agentType: input.agent_type || record?.agentType || null,
+          parentSessionId: resolvedParentSessionId,
+          phaseKind,
+        });
         // Transcript path, parent session and cwd are optional metadata; every
         // stop with an agent id is fanned out.
         try {
@@ -554,6 +565,7 @@ export class SubagentHookHandler {
             agentType: input.agent_type || record?.agentType || null,
             transcriptPath,
             timestamp: Date.now(),
+            completion,
           });
         } catch (notifyError: unknown) {
           this.logger.warn(

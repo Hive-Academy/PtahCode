@@ -223,6 +223,21 @@ describe('subtractRunBase', () => {
 });
 
 describe('SessionStatsOwnerService', () => {
+  it('forwards run dimensions for an SDK phase and defaults ordinary runs to session', () => {
+    const contributions: Array<{ phaseKind?: string; executorType?: string }> = [];
+    const owner = new SessionStatsOwnerService({ recordUsage: (value) => { contributions.push(value); } });
+    const { generation } = owner.startNew(SESSION);
+    owner.beginRun(SESSION, generation, 'phase-run', null,
+      { phaseKind: 'implement', executorType: 'sdk-subagent' });
+    owner.replaceRun(SESSION, generation, 'phase-run', run(1, [{ input: 10 }]));
+    owner.beginRun(SESSION, generation, 'ordinary-run', null);
+    owner.replaceRun(SESSION, generation, 'ordinary-run', run(1, [{ input: 10 }]));
+    expect(contributions).toMatchObject([
+      { phaseKind: 'implement', executorType: 'sdk-subagent' },
+      { executorType: 'session' },
+    ]);
+    expect(contributions[1].phaseKind).toBeUndefined();
+  });
   it('sends an absolute run snapshot when accepted cumulative cost decreases', () => {
     const contributions: unknown[] = [];
     const owner = new SessionStatsOwnerService({ recordUsage: (value) => { contributions.push(value); } });

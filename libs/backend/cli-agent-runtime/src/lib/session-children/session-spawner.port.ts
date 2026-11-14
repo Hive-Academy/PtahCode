@@ -16,9 +16,13 @@ import type {
   AgentSessionOpenedPayload,
   ChildSettingSource,
   EffortLevel,
+  ExecutorCompletionResultV1,
   LaneCompletionRefusalReason,
   LaneCompletionVerdict,
+  PhaseKind,
   SessionChildOutcome,
+  PhaseDispatchV1,
+  PhaseSkillV1,
 } from '@ptah-extension/shared';
 
 export type SessionChildStatus =
@@ -143,6 +147,14 @@ export interface SessionChildStartRequest {
   readonly deliverables?: readonly string[];
   readonly model?: string;
   readonly effort?: SessionChildSnapshot['effort'];
+  /** Host-resolved phase contract delivered through the selected executor. */
+  readonly phase?: PhaseDispatchV1;
+  readonly skills?: readonly PhaseSkillV1[];
+  /**
+   * Existing registered child whose same-task worktree may be shared.
+   * Each attach call starts a new session; retries are not idempotent.
+   */
+  readonly attachToSessionId?: string;
 }
 
 export type SessionSpawnRefusalCode =
@@ -160,6 +172,11 @@ export type SessionSpawnRefusalCode =
   | 'worktree-failed'
   | 'worktree-outside-workspace'
   | 'session-start-failed';
+
+/** Read-only checks shared with start before request-specific checks. */
+export type SessionChildEligibility =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: SessionSpawnRefusalCode; readonly reason: string };
 
 export type SessionChildRollbackStepName =
   | 'remove-worktree'
@@ -373,6 +390,11 @@ export interface SessionChildCompletionSubject {
   readonly startedAt: string;
   readonly reportsDelivered: number;
   readonly lastRecap?: string;
+  /** Set when the child was started with a phase. Absent leaves today's envelope. */
+  readonly phaseKind?: PhaseKind;
+  /** Copied from the phase tool profile. An empty list records no adapter result. */
+  readonly phaseDisallowedTools?: readonly string[];
+  readonly toolProfileApplied?: boolean;
 }
 
 /** One settled turn of a child. */
@@ -390,6 +412,8 @@ export interface SessionChildCompletionEnvelope {
   readonly turn: number;
   readonly verdict: LaneCompletionVerdict;
   readonly text: string;
+  /** Present when this host built the envelope. Older held rows omit it. */
+  readonly completion?: ExecutorCompletionResultV1;
 }
 
 /** Why a child completion was not delivered (the lane refusal reasons, unchanged). */
@@ -415,6 +439,7 @@ export type SessionChildCompletionDelivery =
     };
 
 export interface ISessionSpawner {
+  canStart(callerSessionId: string | undefined): SessionChildEligibility;
   start(request: SessionChildStartRequest): Promise<SessionChildStartResult>;
   /** Replace a live child with a successor in its existing worktree. */
   succeed(

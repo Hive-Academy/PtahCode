@@ -3,14 +3,16 @@
  * started (TASK_2026_584).
  *
  * One instance per host, lifetime = process. Records are plain serialisable
- * objects so TASK_2026_580 can persist them without a shape change; nothing
- * here touches SQLite or the filesystem.
+ * objects so TASK_2026_580 can persist them without a shape change. Path
+ * lookups resolve existing filesystem aliases before comparing records.
  *
  * Records are never mutated in place: every change replaces the record, so a
  * caller holding an older reference never observes a half-applied update.
  */
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { injectable } from 'tsyringe';
+import type { PhaseKind } from '@ptah-extension/shared';
 import type {
   SessionChildCompletionEnvelope,
   SessionChildSnapshot,
@@ -37,6 +39,12 @@ export interface SessionChildRecord extends Omit<
 > {
   /** The task as given to {@link ISessionSpawner.start} (without the contract). */
   readonly task: string;
+  /** Phase kind from start. Kept off the public snapshot. */
+  readonly phaseKind?: PhaseKind;
+  /** Phase tool denials from start. Kept off the public snapshot. */
+  readonly phaseDisallowedTools?: readonly string[];
+  /** SDK start confirmed that its query options contain phase denials. */
+  readonly toolProfileApplied?: boolean;
   /** Set once by {@link SessionChildRegistry.markEnded}; never cleared. */
   readonly terminalStatus?: SessionChildTerminalStatus;
   /**
@@ -89,7 +97,14 @@ function trimTrailingSeparators(path: string): string {
 
 /** Path key for cwd lookups: resolved, no trailing separator, case-folded on Windows. */
 function pathKey(path: string): string {
-  const resolved = trimTrailingSeparators(resolve(path));
+  let resolved = resolve(path);
+  try {
+    resolved = realpathSync(resolved);
+  } catch {
+    // degradation-audit: optional-capability - a pending or removed worktree
+    // may not exist yet; its lexical path still supports registry lookups.
+  }
+  resolved = trimTrailingSeparators(resolved);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
@@ -115,6 +130,16 @@ export class SessionChildRegistry {
   private readonly records = new Map<string, SessionChildRecord>();
   /** SDK session id → child tab id. */
   private readonly bySdkId = new Map<string, string>();
+  /** Canonical keys for stored paths; record updates retain the cached key. */
+  private readonly storedPathKeys = new Map<string, string>();
+  private storedPathKey(record: SessionChildRecord): string {
+    let key = this.storedPathKeys.get(record.childSessionId);
+    if (key === undefined) {
+      key = pathKey(record.worktreePath);
+      this.storedPathKeys.set(record.childSessionId, key);
+    }
+    return key;
+  }
   /** Reservations taken by `reserveSlot` and not yet consumed or released. */
   private readonly reservations = new Set<number>();
   private nextReservationId = 1;
@@ -135,7 +160,8 @@ export class SessionChildRegistry {
    * second one sees the first one's reservation.
    */
   reserveSlot(max: number): SessionChildReservation | null {
-    if (max > 0 && this.liveCount() + this.reservations.size >= max) return null;
+    if (max > 0 && this.liveCount() + this.reservations.size >= max)
+      return null;
     const id = this.nextReservationId++;
     this.reservations.add(id);
     return { id };
@@ -168,6 +194,7 @@ export class SessionChildRegistry {
     this.reservations.delete(reservation.id);
     this.pending.delete(record.childSessionId);
     const stored: SessionChildRecord = { ...record };
+    this.storedPathKeys.set(stored.childSessionId, pathKey(stored.worktreePath));
     this.records.set(stored.childSessionId, stored);
     if (stored.sdkSessionId) {
       this.bySdkId.set(stored.sdkSessionId, stored.childSessionId);
@@ -183,7 +210,9 @@ export class SessionChildRegistry {
   addPending(record: SessionChildRecord): SessionChildRecord {
     const id = record.childSessionId;
     if (this.records.has(id) || this.pending.has(id)) {
-      throw new Error(`SessionChildRegistry.addPending: child ${id} already exists`);
+      throw new Error(
+        `SessionChildRegistry.addPending: child ${id} already exists`,
+      );
     }
     const stored: SessionChildRecord = { ...record };
     this.pending.set(id, stored);
@@ -207,6 +236,7 @@ export class SessionChildRegistry {
     const record = this.records.get(childSessionId);
     if (!record) return false;
     this.records.delete(childSessionId);
+    this.storedPathKeys.delete(childSessionId);
     if (record.sdkSessionId) this.bySdkId.delete(record.sdkSessionId);
     const index = this.endedOrder.indexOf(childSessionId);
     if (index >= 0) this.endedOrder.splice(index, 1);
@@ -233,6 +263,25 @@ export class SessionChildRegistry {
     return tabId ? this.records.get(tabId) : undefined;
   }
 
+  /** Attach is admitted only against a registered task, canonical path and owner. */
+  findAttachTarget(
+    id: string,
+    taskId: string,
+    branch: string,
+    worktreePath: string,
+    callerIds: readonly (string | undefined)[],
+  ): SessionChildRecord | undefined {
+    const record = this.get(id);
+    return record &&
+      record.taskId === taskId &&
+      record.branch === branch &&
+      (callerIds.includes(record.parentSessionId) ||
+        (!!record.parentSdkSessionId && callerIds.includes(record.parentSdkSessionId))) &&
+      this.storedPathKey(record) === pathKey(worktreePath)
+      ? record
+      : undefined;
+  }
+
   /**
    * The child whose worktree is `path`, preferring a live one. Used when a
    * turn event arrives before the SDK id was bound.
@@ -241,12 +290,30 @@ export class SessionChildRegistry {
     if (!path?.trim()) return undefined;
     const key = pathKey(path);
     let ended: SessionChildRecord | undefined;
+    let live: SessionChildRecord | undefined;
     for (const record of this.records.values()) {
-      if (pathKey(record.worktreePath) !== key) continue;
-      if (!record.terminalStatus) return record;
+      if (this.storedPathKey(record) !== key) continue;
+      if (!record.terminalStatus) {
+        // The first live record owns the worktree when several sessions share it.
+        live ??= record;
+        continue;
+      }
       ended = record;
     }
-    return ended;
+    return live ?? ended;
+  }
+
+  /** Bind an early SDK event only when cwd identifies one live, unbound child. */
+  findUniqueUnboundByCwd(path: string | undefined): SessionChildRecord | undefined {
+    if (!path?.trim()) return undefined;
+    const key = pathKey(path);
+    let match: SessionChildRecord | undefined;
+    for (const record of this.records.values()) {
+      if (record.terminalStatus || record.sdkSessionId || this.storedPathKey(record) !== key) continue;
+      if (match) return undefined;
+      match = record;
+    }
+    return match;
   }
 
   /**
@@ -390,13 +457,20 @@ export class SessionChildRegistry {
     successor: SessionChildRecord,
     reason: string,
     endedAt: string = new Date().toISOString(),
-  ): { readonly predecessor: SessionChildRecord; readonly successor: SessionChildRecord } {
+  ): {
+    readonly predecessor: SessionChildRecord;
+    readonly successor: SessionChildRecord;
+  } {
     const prior = this.records.get(predecessorId);
     if (!prior || prior.terminalStatus) {
-      throw new Error(`SessionChildRegistry.succeed: predecessor ${predecessorId} is not live`);
+      throw new Error(
+        `SessionChildRegistry.succeed: predecessor ${predecessorId} is not live`,
+      );
     }
     if (this.records.has(successor.childSessionId)) {
-      throw new Error(`SessionChildRegistry.succeed: successor ${successor.childSessionId} already exists`);
+      throw new Error(
+        `SessionChildRegistry.succeed: successor ${successor.childSessionId} already exists`,
+      );
     }
     const predecessor: SessionChildRecord = {
       ...prior,
@@ -414,7 +488,8 @@ export class SessionChildRegistry {
     delete (predecessor as { pendingPermission?: unknown }).pendingPermission;
     this.replace(predecessor);
     this.replace(next);
-    if (next.sdkSessionId) this.bySdkId.set(next.sdkSessionId, next.childSessionId);
+    if (next.sdkSessionId)
+      this.bySdkId.set(next.sdkSessionId, next.childSessionId);
     this.endedOrder.push(predecessorId);
     this.pruneEnded();
     return { predecessor, successor: next };
@@ -427,13 +502,19 @@ export class SessionChildRegistry {
   ): SessionChildRecord | undefined {
     const predecessor = this.records.get(predecessorId);
     const successor = this.records.get(successorId);
-    if (!predecessor || !successor || predecessor.terminalStatus !== 'handed-off' ||
-      predecessor.succeededBy !== successorId || successor.succeeds !== predecessorId) {
+    if (
+      !predecessor ||
+      !successor ||
+      predecessor.terminalStatus !== 'handed-off' ||
+      predecessor.succeededBy !== successorId ||
+      successor.succeeds !== predecessorId
+    ) {
       return undefined;
     }
     this.remove(successorId);
     const restored: SessionChildRecord = { ...predecessor };
-    delete (restored as { terminalStatus?: SessionChildTerminalStatus }).terminalStatus;
+    delete (restored as { terminalStatus?: SessionChildTerminalStatus })
+      .terminalStatus;
     delete (restored as { endedAt?: string }).endedAt;
     delete (restored as { endReason?: string }).endReason;
     delete (restored as { endCause?: SessionChildEndCause }).endCause;
@@ -474,6 +555,7 @@ export class SessionChildRegistry {
       const record = this.records.get(id);
       if (!record) continue;
       this.records.delete(id);
+      this.storedPathKeys.delete(id);
       if (record.sdkSessionId) this.bySdkId.delete(record.sdkSessionId);
     }
   }
@@ -488,6 +570,9 @@ export class SessionChildRegistry {
   }
 
   private replace(record: SessionChildRecord): SessionChildRecord {
+    if (this.records.get(record.childSessionId)?.worktreePath !== record.worktreePath) {
+      this.storedPathKeys.set(record.childSessionId, pathKey(record.worktreePath));
+    }
     this.records.set(record.childSessionId, record);
     return record;
   }

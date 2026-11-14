@@ -9,6 +9,7 @@
 
 export * from './types/mcp-protocol.types';
 export * from './types/mcp-transport.types';
+export { composeEffectiveToolList, type EffectiveToolListDependencies } from './effective-tool-list';
 
 export {
   buildExecuteCodeTool,

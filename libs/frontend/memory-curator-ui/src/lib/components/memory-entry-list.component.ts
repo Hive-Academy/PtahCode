@@ -6,7 +6,6 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
-  Brain,
   LucideAngularModule,
   Pin,
   PinOff,
@@ -14,45 +13,26 @@ import {
 } from 'lucide-angular';
 
 import type { MemoryWire } from '@ptah-extension/shared';
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahIconButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-memory-entry-list',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, LucideAngularModule, PtahIconButtonDirective],
+  imports: [CommonModule, LucideAngularModule, PtahIconButtonDirective, PtahStatePanelComponent],
   template: `
     <section
       aria-label="Memory entries"
       data-testid="thoth-section-memory-entries"
     >
       @if (loading() && entries().length === 0) {
-        <div class="overflow-hidden surface-2 rounded-xl">
-          <div class="divide-y divide-surface-border">
-            @for (n of skeletonRows; track n) {
-              <div class="flex items-start gap-3 px-4 py-3">
-                <div class="skeleton mt-1.5 size-1.5 rounded-full"></div>
-                <div class="flex flex-1 flex-col gap-2">
-                  <div class="skeleton h-3 w-40"></div>
-                  <div class="skeleton h-3 w-full"></div>
-                </div>
-              </div>
-            }
-          </div>
-        </div>
+        <ptah-state-panel state="loading" title="Loading memories" />
       } @else if (entries().length === 0) {
-        <div class="flex flex-col items-center gap-2 px-6 py-12 text-center">
-          <lucide-angular
-            [img]="BrainIcon"
-            class="size-8 text-base-content-muted"
-            aria-hidden="true"
-          />
-          <p class="text-sm font-medium">No memories yet</p>
-          <p class="text-xs text-base-content-muted">
-            Thoth captures facts and decisions as you chat. Keep working and
-            they'll appear here.
-          </p>
-        </div>
+        <ptah-state-panel
+          state="empty"
+          title="No memories yet"
+          body="Thoth captures facts and decisions as you chat. Keep working and they will appear here."
+        />
       } @else {
         <ul
           class="divide-y divide-surface-border overflow-hidden surface-2 rounded-xl"
@@ -60,7 +40,7 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
           @for (entry of entries(); track entry.id) {
             <li
               data-testid="memory-entry-row"
-              class="group flex items-start gap-3 px-4 py-3 transition-colors duration-150 hover:bg-surface-3"
+              class="group flex items-start gap-[var(--ptah-gap-field)] px-[var(--ptah-surface-pad)] py-[var(--ptah-space-3)] transition-colors duration-150 hover:bg-surface-3"
             >
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -100,12 +80,16 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
               <div
                 class="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
               >
-                <!-- Pin and Unpin stay raw: the icon owner has no muted tone without a danger hover. -->
                 @if (entry.pinned) {
                   <button
                     type="button"
                     data-testid="memory-entry-unpin"
-                    class="btn btn-ghost btn-xs btn-square text-base-content-muted"
+                    ptahIconButton
+                    class="text-base-content-muted"
+                    variant="ghost"
+                    size="xs"
+                    density="compact"
+                    [label]="'Unpin entry ' + entry.id"
                     (click)="unpin.emit(entry.id)"
                     [attr.aria-label]="'Unpin entry ' + entry.id"
                   >
@@ -119,7 +103,12 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
                   <button
                     type="button"
                     data-testid="memory-entry-pin"
-                    class="btn btn-ghost btn-xs btn-square text-base-content-muted"
+                    ptahIconButton
+                    class="text-base-content-muted"
+                    variant="ghost"
+                    size="xs"
+                    density="compact"
+                    [label]="'Pin entry ' + entry.id"
                     (click)="pin.emit(entry.id)"
                     [attr.aria-label]="'Pin entry ' + entry.id"
                   >
@@ -163,9 +152,7 @@ export class MemoryEntryListComponent {
   public readonly unpin = output<string>();
   public readonly forget = output<string>();
 
-  protected readonly BrainIcon = Brain;
   protected readonly PinIcon = Pin;
   protected readonly PinOffIcon = PinOff;
   protected readonly Trash2Icon = Trash2;
-  protected readonly skeletonRows = [0, 1, 2, 3] as const;
 }

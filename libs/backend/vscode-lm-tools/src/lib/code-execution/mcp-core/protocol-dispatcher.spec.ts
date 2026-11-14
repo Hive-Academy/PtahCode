@@ -9260,6 +9260,7 @@ describe('protocol-handlers › caller capability', () => {
     expect(names).toContain('ptah_task_check');
     expect(names).not.toContain('execute_code');
     expect(names).not.toContain('ptah_task_create');
+    expect(names).not.toContain('execute_code');
     expect(names).not.toContain('ptah_browser_status');
   });
 
@@ -9393,5 +9394,190 @@ describe('protocol-handlers › caller capability', () => {
     );
     expect(names).toContain('execute_code');
     expect(names).toContain('ptah_task_create');
+  });
+});
+
+describe('protocol-handlers › phase tool profile', () => {
+  const appsTool = [...APPS_ONLY_TOOL_NAMES][0];
+  const phaseBinding = {
+    kind: 'agent' as const,
+    agentId: 'lane-a',
+    capability: 'privileged' as const,
+    phaseKind: 'implement',
+    disallowedTools: ['ptah_browser_navigate', 'ptah_task_create'],
+  };
+
+  function toolNames(res: MCPResponse): string[] {
+    const result = res.result as { tools: Array<{ name: string }> } | undefined;
+    return (result?.tools ?? []).map((tool) => tool.name);
+  }
+
+  async function listed(
+    request: Partial<MCPRequest>,
+    deps: Partial<ProtocolHandlerDependencies> = {},
+  ): Promise<string[]> {
+    return toolNames(
+      await handleMCPRequest(
+        makeRequest({ id: 'phase-list', method: 'tools/list', ...request }),
+        buildDeps(deps),
+      ),
+    );
+  }
+
+  it('hides phase-denied tools from tools/list', async () => {
+    const names = await listed({
+      _callerAgentId: 'lane-a',
+      _callerBinding: phaseBinding,
+    });
+    expect(names).not.toContain('ptah_browser_navigate');
+    expect(names).not.toContain('ptah_task_create');
+    expect(names).toContain('ptah_workspace_analyze');
+    expect(names).toContain('ptah_browser_screenshot');
+  });
+
+  it('rejects tools/call for a tool the phase profile hides', async () => {
+    const response = await handleMCPRequest(
+      makeRequest({
+        id: 11,
+        method: 'tools/call',
+        _callerAgentId: 'lane-a',
+        _callerBinding: phaseBinding,
+        params: { name: 'ptah_task_create', arguments: { title: 'hidden' } },
+      }),
+      buildDeps(),
+    );
+    expect(response.id).toBe(11);
+    expect(response.error).toEqual({
+      code: MCP_CALLER_FORBIDDEN_CODE,
+      message: MCP_TOOL_DENIED_MESSAGE,
+    });
+  });
+
+  it('refuses execute_code through the same phase credential', async () => {
+    const response = await handleMCPRequest(
+      makeRequest({ id: 12, method: 'tools/call', _callerAgentId: 'lane-a',
+        _callerBinding: phaseBinding,
+        params: { name: 'execute_code', arguments: { code: 'ptah.tasks.create({})' } } }),
+      buildDeps(),
+    );
+    expect(response.error).toEqual({
+      code: MCP_CALLER_FORBIDDEN_CODE, message: MCP_TOOL_DENIED_MESSAGE,
+    });
+  });
+
+  it('still dispatches a tool the phase profile does not name', async () => {
+    const response = await handleMCPRequest(
+      makeRequest({
+        id: 'phase-allowed',
+        method: 'tools/call',
+        _callerAgentId: 'lane-a',
+        _callerBinding: phaseBinding,
+        params: { name: 'ptah_search_files', arguments: {} },
+      }),
+      buildDeps(),
+    );
+    expect(response.error?.code).not.toBe(MCP_CALLER_FORBIDDEN_CODE);
+    expect(response.result).toMatchObject({ isError: true });
+  });
+
+  it('leaves an absent phase and an empty phase list unfiltered, and fails closed on malformed lists', async () => {
+    const open = await listed({ _callerAgentId: 'lane-a' });
+    const empty = await listed({
+      _callerAgentId: 'lane-a',
+      _callerBinding: { ...phaseBinding, disallowedTools: [] },
+    });
+    const blank = await listed({
+      _callerAgentId: 'lane-a',
+      _callerBinding: { ...phaseBinding, disallowedTools: ['', '  '] },
+    });
+    const session = await listed({
+      _callerSessionId: 'tab-1',
+      _callerBinding: {
+        kind: 'session',
+        sessionId: 'tab-1',
+        capability: 'privileged',
+        phaseKind: 'review',
+      },
+    });
+    expect(empty).toEqual(open);
+    expect(blank).not.toContain('execute_code');
+    expect(blank).not.toContain('ptah_task_create');
+    expect(session).not.toContain('execute_code');
+    expect(session).not.toContain('ptah_task_create');
+    expect(empty).toContain('execute_code');
+    expect(open).toContain('execute_code');
+    expect(open).toContain('ptah_browser_navigate');
+    expect(open).toContain('ptah_task_create');
+  });
+
+  it('keeps browser tools callable for visual-review when that profile denies none', async () => {
+    const visualReview = {
+      kind: 'agent' as const,
+      agentId: 'lane-visual',
+      capability: 'privileged' as const,
+      phaseKind: 'visual-review',
+      disallowedTools: [] as const,
+    };
+    const names = await listed({
+      _callerAgentId: 'lane-visual',
+      _callerBinding: visualReview,
+    });
+    expect(names).toContain('ptah_browser_navigate');
+    expect(names).toContain('ptah_browser_screenshot');
+    const response = await handleMCPRequest(
+      makeRequest({
+        id: 'visual-review-browser',
+        method: 'tools/call',
+        _callerAgentId: 'lane-visual',
+        _callerBinding: visualReview,
+        params: { name: 'ptah_browser_navigate', arguments: {} },
+      }),
+      buildDeps(),
+    );
+    expect(response.error?.code).not.toBe(MCP_CALLER_FORBIDDEN_CODE);
+    expect(response.result).toMatchObject({ isError: true });
+  });
+
+  it('keeps namespace, coding-profile, and capability filters beside the phase filter', async () => {
+    const names = await listed(
+      {
+        _callerAgentId: 'lane-a',
+        _callerCapability: 'read-only',
+        _callerBinding: {
+          ...phaseBinding,
+          capability: 'read-only',
+          disallowedTools: ['ptah_task_get', 'ptah_web_search'],
+        },
+      },
+      { disabledMcpNamespaces: ['browser'] },
+    );
+    expect(names).not.toContain('ptah_browser_navigate');
+    expect(names).not.toContain('ptah_browser_screenshot');
+    expect(names).not.toContain('ptah_task_get');
+    expect(names).not.toContain('ptah_web_search');
+    expect(names).not.toContain('execute_code');
+    expect(names).not.toContain(appsTool);
+    expect(names).toContain('ptah_workspace_analyze');
+    expect(names).toContain('ptah_search_files');
+
+    const appsNames = await listed({
+      _callerToolProfile: 'apps',
+      _callerSessionId: 'tab-apps',
+      _callerBinding: {
+        kind: 'session',
+        sessionId: 'tab-apps',
+        capability: 'privileged',
+        toolProfile: 'apps',
+        phaseKind: 'visual-review',
+        disallowedTools: [appsTool],
+      },
+    });
+    expect(appsNames).not.toContain(appsTool);
+    expect(appsNames).toContain('ptah_workspace_analyze');
+    const otherAppsTool = [...APPS_ONLY_TOOL_NAMES].find(
+      (name) => name !== appsTool,
+    );
+    expect(otherAppsTool).toBeDefined();
+    expect(appsNames).toContain(otherAppsTool);
   });
 });
