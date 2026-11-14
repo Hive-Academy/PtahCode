@@ -9,7 +9,7 @@
 -->
 
 <section class="workspace-indexing surface-1 rounded-xl" data-testid="workspace-indexing-section">
-  <div class="p-[var(--ptah-surface-pad)] space-y-[var(--ptah-gap-section)]">
+  <div class="p-[var(--ptah-surface-pad)] space-y-[var(--ptah-gap-group)]">
     <!-- Section header -->
     <div class="flex items-center gap-1.5">
       <lucide-angular [img]="RefreshCwIcon" class="w-4 h-4 text-secondary" />
@@ -201,7 +201,9 @@
             </button>
           </div>
 
-          <ptah-state-panel state="partial" body="You can keep working. Indexing continues in the background." data-testid="callout-indexing" />
+          <div class="alert text-xs p-[var(--ptah-space-2)]" data-testid="callout-indexing">
+You can keep working. Indexing continues in the background.
+</div>
         </div>
       }
 
@@ -238,7 +240,9 @@
             </button>
           </div>
 
-          <ptah-state-panel state="partial" body="Paused indexing means search results may be incomplete until you resume." data-testid="callout-paused" />
+          <div class="alert alert-warning text-xs p-[var(--ptah-space-2)]" data-testid="callout-paused">
+Paused indexing means search results may be incomplete until you resume.
+</div>
         </div>
       }
 
@@ -278,7 +282,9 @@
 
           <!-- Non-git workspace fallback callout -->
           @if (state.isNonGit) {
-            <ptah-state-panel state="partial" body="This workspace is not a git repository. Ptah cannot auto-detect upstream changes — re-index manually after large edits." data-testid="callout-non-git" />
+            <div class="alert text-xs p-[var(--ptah-space-2)]" data-testid="callout-non-git">
+This workspace is not a git repository. Ptah cannot auto-detect upstream changes — re-index manually after large edits.
+</div>
           }
         </div>
       }
@@ -331,7 +337,9 @@
           </div>
 
           <!-- Git-detection-limit warning (mandatory) -->
-          <ptah-state-panel state="partial" body="Uncommitted edits are not detected. Commit or stash, then re-index for accurate results." data-testid="callout-stale-warning" />
+          <div class="alert alert-warning text-xs p-[var(--ptah-space-2)]" data-testid="callout-stale-warning">
+Uncommitted edits are not detected. Commit or stash, then re-index for accurate results.
+</div>
         </div>
       }
 
@@ -412,8 +420,7 @@
         <lucide-angular [img]="CodeIcon" class="w-4 h-4 mt-0.5 text-secondary" />
         <div class="flex-1">
           <ptah-field label="Code symbol index" appearance="stacked"
-            hint="Indexes function and class symbols across your workspace for fast navigation. Disable if you only use chat."
-            [error]="!workspaceRoot() ? 'Open a workspace to change indexing.' : null">
+            [hint]="workspaceRoot() ? 'Indexes function and class symbols across your workspace for fast navigation. Disable if you only use chat.' : 'Open a workspace to change indexing.'">
             <input
               type="checkbox"
               ptahToggle
@@ -443,8 +450,7 @@
         <lucide-angular [img]="BrainIcon" class="w-4 h-4 mt-0.5 text-secondary" />
         <div class="flex-1">
           <ptah-field label="Chat memory extraction" appearance="stacked"
-            hint="Saves useful facts from chats so Ptah remembers them later. Runs only when a chat compacts; never scans your files."
-            [error]="!workspaceRoot() ? 'Open a workspace to change memory extraction.' : null">
+            [hint]="workspaceRoot() ? 'Saves useful facts from chats so Ptah remembers them later. Runs only when a chat compacts; never scans your files.' : 'Open a workspace to change memory extraction.'">
             <input
               type="checkbox"
               ptahToggle

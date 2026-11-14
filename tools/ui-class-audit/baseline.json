@@ -1127,8 +1127,9 @@
     "<dynamic>": 1
   },
   "libs/frontend/workspace-indexing/src/lib/workspace-indexing.component.html": {
-    "alert": 3,
+    "alert": 7,
     "alert-error": 2,
-    "alert-info": 1
+    "alert-info": 1,
+    "alert-warning": 2
   }
 }
