@@ -21,6 +21,7 @@ test.describe('@evidence Codex caller attribution', () => {
   const railCard = 'li[ptah-canvas-rail-card][data-tab-id]:visible';
   const response = z.object({ success: z.boolean(), data: z.unknown().optional(), error: z.string().optional() });
   const models = z.object({ models: z.array(z.object({ id: z.string(), name: z.string() })) });
+  const clis = z.object({ clis: z.array(z.object({ cli: z.string(), installed: z.boolean() })) });
 
   async function rpc(bridge: RpcBridge, method: string, params: Record<string, unknown>): Promise<unknown> {
     const result = response.parse(await bridge.sendRpc('rpc', {
@@ -80,6 +81,12 @@ test.describe('@evidence Codex caller attribution', () => {
   }
 
   async function openCodexTab(page: Page, app: ElectronApplication, bridge: RpcBridge, workspace: string, permission: 'auto-edit' | 'ask'): Promise<string> {
+    // Under memory pressure the boot-time CLI probe can miss Codex (5/8 CLIs),
+    // and then the Codex model catalog stays empty. Probe again until Codex shows.
+    await expect.poll(async () => {
+      const detected = clis.parse(await rpc(bridge, 'agent:detectClis', {}));
+      return detected.clis.some((entry) => entry.cli === 'codex' && entry.installed);
+    }, { timeout: 120_000, intervals: [5_000] }).toBe(true);
     const selected = await rpc(bridge, 'auth:saveSettings', {
       authMethod: 'thirdParty', anthropicProviderId: 'openai-codex', applyTo: 'workspace',
     });
