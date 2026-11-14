@@ -91,3 +91,10 @@ stays. Items 2, 3 and 4 all depend on the line-989 fix.
 **Decision still needed:** (A) the fix plus a manager spec (spawn + resume, Claude and Codex)
 in #1266, then run items 2-4 again; or (B) a follow-up task, and #1266 stays a draft.
 Recommendation: A. No production change was made.
+
+## 2026-11-14 — successor session; decision asked again, report NOT delivered
+
+A successor child session resumed from HANDOFF.md. It sent the A/B decision request again with
+`ptah_agent_report`. The result was `parent-session-not-active`. State is unchanged: HEAD
+`f6d530082` is on `fix/lane-permission-routing-v3`, PR #1266 stays a draft, and no production
+change was made. Items 2, 3 and 4 wait for the decision. Recommendation: A.
