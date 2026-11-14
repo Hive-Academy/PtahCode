@@ -44,6 +44,19 @@ describe('worktreeMainRoot', () => {
     expect(worktreeMainRoot(alias)).toBe(resolve(main));
   });
 
+  it('returns null when the .git marker is a symlink to a real worktree file', () => {
+    const wt = join(main, '.claude-worktrees', 'wt');
+    linkWorktree(wt, join(main, '.git', 'worktrees', 'wt'));
+    const forged = join(base, 'forged');
+    mkdirSync(forged, { recursive: true });
+    try {
+      symlinkSync(join(wt, '.git'), join(forged, '.git'), 'file');
+    } catch {
+      return; // file symlinks need a privilege on Windows; nothing to test.
+    }
+    expect(worktreeMainRoot(forged)).toBeNull();
+  });
+
   it('returns null when the back-pointer file is missing', () => {
     const wt = join(base, 'no-back');
     linkWorktree(wt, join(main, '.git', 'worktrees', 'wt'), false);

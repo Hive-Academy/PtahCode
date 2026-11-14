@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, statSync } from 'fs';
+import { lstatSync, readFileSync, realpathSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
 
 function sameText(a: string, b: string): boolean {
@@ -23,7 +23,11 @@ export function worktreeMainRoot(start: string): string | null {
     const marker = join(dir, '.git');
     let markerIsFile: boolean;
     try {
-      markerIsFile = statSync(marker).isFile();
+      // lstat: a `.git` symlink to another worktree's file must not pass the
+      // real-path back-pointer check below.
+      const stat = lstatSync(marker);
+      if (stat.isSymbolicLink()) return null;
+      markerIsFile = stat.isFile();
     } catch {
       // degradation-audit: optional-capability - a missing or unreadable
       // marker supplies no checkout key at this directory.
