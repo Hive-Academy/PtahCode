@@ -442,9 +442,9 @@ async function handleHttpRequest(
       toolProfile: extractCallerToolProfile(identityUrl),
     };
   } catch (error) {
-    recordRejected(identityUrl, 'invalid-url');
     // degradation-audit: reported - the handler returns a JSON-RPC parse error
     // for a malformed caller identity URL.
+    recordRejected(identityUrl, 'invalid-url');
     discardBody(req);
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error';
@@ -465,9 +465,9 @@ async function handleHttpRequest(
         ? authenticateWithoutRegistry(authInput)
         : authenticate(authInput);
   } catch {
-    recordRejected(identityUrl, 'auth-error');
     // degradation-audit: reported - the fixed 401 response avoids disclosure
     // of credential details when authentication throws.
+    recordRejected(identityUrl, 'auth-error');
     discardBody(req);
     endAuthFailure(res, 401, MCP_AUTH_REQUIRED_CODE, MCP_AUTH_REQUIRED_MESSAGE);
     return;
