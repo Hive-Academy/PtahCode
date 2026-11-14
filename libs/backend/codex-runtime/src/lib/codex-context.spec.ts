@@ -469,25 +469,37 @@ describe('native activity cycle linkage', () => {
     expect(children.has('new')).toBe(true);
   });
 
-  it('preserves active native children when a full cache has no terminal child', () => {
+  it('rejects a 257th child when all 256 have active cycles after earlier terminals', () => {
     const h = harness();
     const children = Reflect.get(h.context, 'nativeChildren') as Map<string, unknown>;
-    for (let index = 0; index < 256; index++) children.set(`old-${index}`, {
-      cardToolCallId: `old-${index}`, parentThreadId: 'root', agentPath: '/old',
-      lastActivityKind: 'started', cycleOrdinal: 1, cycleId: `old-${index}:1`,
-      seenActivityKeys: new Set(), turnCycleByTurnId: new Map(),
-    });
-    Reflect.apply(Reflect.get(h.context, 'applyNativeActivity'), h.context, [{
+    for (let index = 0; index < 256; index++) {
+      const id = `old-${index}`;
+      children.set(id, {
+        cardToolCallId: id, parentThreadId: 'root', agentPath: '/old',
+        lastActivityKind: 'completed', lastTerminalKey: JSON.stringify([id, `${id}:1`, 'completed']),
+        cycleOrdinal: 1, cycleId: `${id}:1`,
+        seenActivityKeys: new Set(), turnCycleByTurnId: new Map(),
+      });
+      Reflect.apply(Reflect.get(h.context, 'applyNativeActivity'), h.context, [{
+        type: 'subagentActivity', contextId: 'ctx', processGeneration: 1,
+        threadId: 'root', turnId: 'parent', sequence: 0, activityId: `restart-${index}`,
+        cardToolCallId: id, agentThreadId: id, agentPath: '/old',
+        kind: 'interacted', cycleId: '', cycleOrdinal: 0,
+      }]);
+    }
+    const admitted = Reflect.apply(Reflect.get(h.context, 'applyNativeActivity'), h.context, [{
       type: 'subagentActivity', contextId: 'ctx', processGeneration: 1,
       threadId: 'root', turnId: 'parent', sequence: 0, activityId: 'new',
       cardToolCallId: 'new', agentThreadId: 'new', agentPath: '/new',
       kind: 'started', cycleId: '', cycleOrdinal: 0,
     }]);
+    expect(admitted).toBeUndefined();
     expect(children.size).toBe(256);
     expect(children.has('old-0')).toBe(true);
+    expect(children.has('old-255')).toBe(true);
     expect(children.has('new')).toBe(false);
-    expect(h.logger.error).toHaveBeenCalledWith('Codex native child cache overflow',
-      { reason: 'No terminal child available for eviction' });
+    expect(h.logger.debug).toHaveBeenCalledWith('Codex native child cache overflow',
+      { reason: 'All children are active; rejecting new child activity' });
   });
 
   it('admits native activity while an unrelated spawn is pending', () => {
@@ -580,6 +592,37 @@ describe('native activity cycle linkage', () => {
       agentPath: '/root/native_vortex', kind: 'completed',
       cycleOrdinal: 0, cycleId: '',
     }])).toBeUndefined();
+  });
+
+  it('seeds nested subAgentActivity from child threads', () => {
+    const h = harness();
+    const history = { rootThreadId: 'root', threads: [
+      { id: 'root', parentThreadId: null, turns: [{
+        id: 'parent-turn', items: [
+          { type: 'subAgentActivity', id: 'spawn-child', agentThreadId: 'child',
+            agentPath: '/root/vortex', kind: 'started' },
+        ],
+      }] },
+      { id: 'child', parentThreadId: 'root', turns: [{
+        id: 'child-turn', items: [
+          { type: 'subAgentActivity', id: 'spawn-grandchild', agentThreadId: 'grandchild',
+            agentPath: '/root/vortex/nested', kind: 'started' },
+          { type: 'subAgentActivity', id: 'done-grandchild', agentThreadId: 'grandchild',
+            agentPath: '/root/vortex/nested', kind: 'completed' },
+        ],
+      }] },
+    ] };
+    Reflect.apply(Reflect.get(h.context, 'seedSubagentActivity'), h.context, [history]);
+    // Verify root child is linked
+    expect(Reflect.get(h.context, 'childTools').get('child')).toBe('spawn-child');
+    // Verify grandchild from nested thread is also seeded
+    const nativeChildren = Reflect.get(h.context, 'nativeChildren') as Map<string, unknown>;
+    expect(nativeChildren.has('grandchild')).toBe(true);
+    const grandchildState = nativeChildren.get('grandchild');
+    expect(grandchildState).toMatchObject({
+      agentPath: '/root/vortex/nested',
+      lastActivityKind: 'completed',
+    });
   });
 });
 

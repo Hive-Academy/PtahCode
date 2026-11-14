@@ -641,14 +641,14 @@ class RuntimeContext implements CodexContext {
     const root = history.threads.find((thread) => thread.id === history.rootThreadId);
     if (!root) return;
     const cycles = new Map<string, string[]>();
-    for (const turn of root.turns) {
+    for (const thread of history.threads) for (const turn of thread.turns) {
       for (const item of turn.items) {
         const parsed = knownItem.safeParse(item);
         if (!parsed.success || parsed.data.type !== 'subAgentActivity') continue;
         const nativeItem = parsed.data;
         const activity: Extract<CodexRuntimeEvent, { type: 'subagentActivity' }> = {
           type: 'subagentActivity', contextId: this.profile.contextId,
-          processGeneration: this.generation, threadId: root.id, turnId: turn.id,
+          processGeneration: this.generation, threadId: thread.id, turnId: turn.id,
           sequence: 0, activityId: nativeItem.id, cardToolCallId: nativeItem.id,
           agentThreadId: nativeItem.agentThreadId, agentPath: nativeItem.agentPath,
           kind: nativeItem.kind, cycleOrdinal: 0, cycleId: '',
@@ -693,8 +693,9 @@ class RuntimeContext implements CodexContext {
       if (this.nativeChildren.size >= 256) {
         const oldest = [...this.nativeChildren].find(([, child]) => child.lastTerminalKey)?.[0];
         if (!oldest) {
-          this.options.logger.error('Codex native child cache overflow',
-            { reason: 'No terminal child available for eviction' });
+          // All children are active; reject new activity rather than evicting active children
+          this.options.logger.debug('Codex native child cache overflow',
+            { reason: 'All children are active; rejecting new child activity' });
           return undefined;
         }
         this.nativeChildren.delete(oldest);
@@ -711,6 +712,7 @@ class RuntimeContext implements CodexContext {
     if (event.kind === 'started' || event.kind === 'interacted') {
       state.cycleOrdinal++;
       state.cycleId = `${event.agentThreadId}:${state.cycleOrdinal}`;
+      state.lastTerminalKey = undefined;
     }
     state.agentPath = event.agentPath;
     if (event.kind === 'completed' || event.kind === 'interrupted')
