@@ -101,7 +101,8 @@ describe('PtahFormSectionComponent', () => {
 
     host.error.set('Save failed');
     fixture.detectChanges();
-    const alert = q('[role="alert"]') as HTMLElement;
+    const alert = q('[data-testid="form-section-error"]') as HTMLElement;
+    expect(alert.querySelector('[role="alert"]')).not.toBeNull();
     expect(section().getAttribute('aria-describedby')).toBe(
       `${desc.id} ${alert.id}`,
     );
@@ -114,12 +115,12 @@ describe('PtahFormSectionComponent', () => {
   });
 
   it('shows the error as an alert at the top of the fields column', () => {
-    expect(q('[role="alert"]')).toBeNull();
+    expect(q('[data-testid="form-section-error"]')).toBeNull();
     host.error.set('Save failed');
     fixture.detectChanges();
-    const alert = q('[role="alert"]') as HTMLElement;
-    expect(alert.classList.contains('alert')).toBe(true);
-    expect(alert.classList.contains('alert-error')).toBe(true);
+    const alert = q('[data-testid="form-section-error"]') as HTMLElement;
+    expect(alert.tagName.toLowerCase()).toBe('ptah-alert');
+    expect(alert.querySelector('.alert-error[role="alert"]')).not.toBeNull();
     expect(alert.textContent?.trim()).toBe('Save failed');
     expect(fields().firstElementChild).toBe(alert);
   });
