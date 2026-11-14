@@ -145,12 +145,21 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
       </div>
       <div class="mb-ptah-group grid gap-ptah-field sm:grid-cols-2">
         <ptah-skeleton />
-        <ptah-skeleton shape="block" height="4rem" />
+        <ptah-skeleton size="sm" [lines]="2" />
+        <ptah-skeleton size="lg" />
+        <ptah-skeleton shape="block" size="sm" />
       </div>
       <div class="mb-ptah-group grid gap-ptah-field sm:grid-cols-2">
         @for (tone of alertTones; track tone) {
           <ptah-alert [tone]="tone" [title]="tone">Sample {{ tone }} message</ptah-alert>
         }
+        <ptah-alert tone="info" title="Saved" live="polite" [headingLevel]="3">
+          Polite live region with an h3 title
+        </ptah-alert>
+        <ptah-alert tone="error" title="Sync failed" live="assertive" [compact]="true">
+          Compact assertive alert with an action
+          <button alertAction type="button" ptahButton>Retry</button>
+        </ptah-alert>
       </div>
       <div class="grid gap-ptah-field sm:grid-cols-2 xl:grid-cols-5">
         @for (state of states; track state) {
