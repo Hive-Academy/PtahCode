@@ -383,7 +383,7 @@ The header uses `ptah-section-header` (existing). The Edit button goes in its `[
 | Disabled | `disabled` input. Edit button gets `aria-disabled="true"` and the `disabledReason` text in `aria-describedby` and `title`. It does not emit `edit`. |
 | Editing | `editing=true`. `[edit]` slot in a `<form>`. Edit button is not rendered. |
 | Dirty | `dirty=true`. The bar shows the dirty indicator. Cancel and Escape ask for confirmation first. |
-| Saving | `saving=true`. Save `busy`. Cancel `disabled`. Form `aria-busy="true"`. Fields in the `[edit]` slot get `inert` through a wrapping `<fieldset [disabled]>`. Escape does nothing. |
+| Saving | `saving=true`. Save `busy`. Cancel `disabled`. Form `aria-busy="true"`. The fields stay focusable: no native `<fieldset [disabled]>`, because it blurs the focused field. The fieldset gets `aria-disabled="true"` and a guard blocks keys (except Tab and Escape), text input, paste, cut, drop and pointer changes. Escape does nothing. After a failed save with no `error`, focus stays on (or goes back to) the last focused field. |
 | Error | `error` is a string. Alert at the top of the form, with `role="alert"`. Focus moves to the alert after a failed save (`saving` true → false with `error` set). The section stays in edit mode. |
 | Empty (view) | When the `[view]` slot has no content, show `emptyText` (default "Nothing set yet") as muted body text. The Edit button label changes to `emptyActionLabel` (default "Add"). |
 | Narrow | Header wraps. Edit button stays on the heading row while room exists, then wraps below. The bar follows the `ptah-form-actions` narrow rule. |

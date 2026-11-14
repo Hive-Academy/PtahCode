@@ -3,6 +3,8 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  ElementRef,
+  inject,
   input,
 } from '@angular/core';
 import { PtahSectionLevel, toSectionLevel } from '../../card/card.types';
@@ -56,13 +58,13 @@ const HINT_CLASS =
         <div class="flex flex-col gap-[var(--ptah-gap-label)]">
           @switch (level()) {
             @case (2) {
-              <h2 [id]="headingId" [class]="titleClass">{{ heading() }}</h2>
+              <h2 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h2>
             }
             @case (4) {
-              <h4 [id]="headingId" [class]="titleClass">{{ heading() }}</h4>
+              <h4 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h4>
             }
             @default {
-              <h3 [id]="headingId" [class]="titleClass">{{ heading() }}</h3>
+              <h3 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h3>
             }
           }
           @if (description(); as descriptionText) {
@@ -125,6 +127,16 @@ export class PtahFormSectionComponent {
   /** Toggles only. The static layout classes stay on the `class` attribute. */
   protected readonly sectionToggles = computed(() => ({ [DIVIDER_CLASS]: this.divider() }));
   protected readonly fieldsToggles = computed(() => ({ [DISABLED_CLASS]: this.disabled() }));
+
+  private readonly hostRef = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  /**
+   * Moves focus to the heading (`tabindex="-1"`, so it is not a Tab stop).
+   * Consumers call it after a change that removes the focused control.
+   */
+  focusHeading(): void {
+    this.hostRef.nativeElement.querySelector<HTMLElement>(`[id="${this.headingId}"]`)?.focus();
+  }
 
   protected readonly describedBy = computed(() => {
     const ids: string[] = [];
