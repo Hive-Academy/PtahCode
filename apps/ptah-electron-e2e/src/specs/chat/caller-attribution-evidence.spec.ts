@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
@@ -39,6 +40,26 @@ test.describe('@evidence Codex caller attribution', () => {
     await target.screenshot({ path: path.join(shots, `${name}-crop.png`) });
   }
 
+  function freePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.once('error', reject);
+      server.listen(0, 'localhost', () => {
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        server.close(() => (port ? resolve(port) : reject(new Error('No free port'))));
+      });
+    });
+  }
+
+  function listening(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = net.connect({ port, host: 'localhost' });
+      socket.once('connect', () => { socket.destroy(); resolve(true); });
+      socket.once('error', () => resolve(false));
+    });
+  }
+
   async function liveApp(): Promise<{ app: ElectronApplication; page: Page; bridge: RpcBridge; workspace: string; cleanup: (failedItem?: string) => void }> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-caller-evidence-'));
     const profile = path.join(dir, 'profile');
@@ -67,6 +88,11 @@ test.describe('@evidence Codex caller attribution', () => {
     git('init', '-q', '-b', 'main');
     git('add', 'README.md');
     git('commit', '-q', '-m', 'evidence fixture');
+    // Other Ptah instances on this machine can hold the default MCP ports
+    // 51820-51822; then the app starts with no MCP server and Codex has no
+    // ptah_* tools ("MCP 0"). Give the temp profile its own free port.
+    const mcpPort = await freePort();
+    fs.writeFileSync(path.join(profile, 'config.json'), JSON.stringify({ ptah: { mcpPort } }));
     const app = await launchPtah({
       args: [workspace], userDataDir: profile, timeout: 180_000,
       env: {
@@ -77,7 +103,10 @@ test.describe('@evidence Codex caller attribution', () => {
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 900 });
-    const cleanup = (failedItem?: string): void => {
+    await expect.poll(() => listening(mcpPort), {
+      timeout: 60_000, message: `Ptah MCP server did not listen on port ${mcpPort}`,
+    }).toBe(true);
+    const cleanup =(failedItem?: string): void => {
       if (failedItem) keepLogs(dir, [profile, home], failedItem);
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     };
