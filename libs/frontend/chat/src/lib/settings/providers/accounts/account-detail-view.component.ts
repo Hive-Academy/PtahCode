@@ -241,6 +241,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         description="The name shows in the account list."
         [level]="4"
         data-testid="account-detail-details"
+        (keydown.escape)="keepEscape($event)"
         [editing]="editing()"
         [dirty]="edited()"
         [saving]="renaming()"
@@ -469,6 +470,11 @@ export class AccountDetailViewComponent {
     this.draftLabel.set(this.account().label);
     this.renameError.set(null);
     this.editing.set(true);
+  }
+
+  /** Escape closes only the edit mode, never the drawer around it. The section handles the Escape itself. */
+  protected keepEscape(event: Event): void {
+    event.stopPropagation();
   }
 
   /** Cancel, Escape or Discard (the section confirms a dirty draft first). */

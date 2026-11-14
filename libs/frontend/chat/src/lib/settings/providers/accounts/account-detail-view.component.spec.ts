@@ -304,6 +304,19 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       host.accounts.set([account('signed-in'), OTHER]);
     });
 
+    it('Escape in the edit mode does not reach the drawer around the panel', () => {
+      render();
+      editButton().click();
+      render();
+      const outer = jest.fn();
+      document.addEventListener('keydown', outer);
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      nameInput().dispatchEvent(escape);
+      document.removeEventListener('keydown', outer);
+      expect(escape.defaultPrevented).toBe(true);
+      expect(outer).not.toHaveBeenCalled();
+    });
+
     it('view mode shows the facts and no Name field; Edit opens the Name field with the committed name', () => {
       render();
       expect(nameInput()).toBeNull();
