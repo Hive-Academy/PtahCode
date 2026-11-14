@@ -322,7 +322,7 @@ export interface SlashCommandConfig {
  * Result of executeQuery method
  */
 export interface ExecuteQueryResult {
-  /** Phase denials observed in the query options. */
+  /** Phase denials merged into the built options (builder evidence). */
   readonly toolProfileApplied?: true;
   /** The SDK query instance */
   sdkQuery: Query;

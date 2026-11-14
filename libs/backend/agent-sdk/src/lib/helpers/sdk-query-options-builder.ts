@@ -1090,7 +1090,7 @@ export function withPhaseDelivery(
  * Complete query configuration returned by builder
  */
 export interface QueryConfig {
-  /** Phase denials observed in the SDK options passed to query(). */
+  /** Phase denials merged into the built options (builder evidence). */
   readonly toolProfileApplied?: true;
   /** Prompt for SDK: async iterable of user messages */
   prompt: AsyncIterable<SDKUserMessage>;
