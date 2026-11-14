@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_1171_7664
-status: backlog
+status: in_review
 type: BUGFIX
-title: "Fix app-server caller attribution, lane MCP handshake, report delivery"
+title: 'Fix app-server caller attribution, lane MCP handshake, report delivery'
 depends_on: []
-created: "2026-11-13T18:09:08.587Z"
-updated: "2026-11-13T18:09:08.587Z"
-description: "Phase B of TASK_2026_1168_7335: caller attribution for ptah_session_start, Codex lane MCP handshake, parent report delivery, completion-notice dedup."
+created: '2026-11-13T18:09:08.587Z'
+updated: '2026-11-14T06:51:18.090Z'
+description: >-
+  Phase B of TASK_2026_1168_7335: caller attribution for ptah_session_start,
+  Codex lane MCP handshake, parent report delivery, completion-notice dedup.
 estimate: L
 labels:
   - agent-lanes
