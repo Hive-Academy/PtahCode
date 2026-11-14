@@ -34,3 +34,22 @@
   Glm, kimi and grok are at limit. Review family: antigravity (different family). Lane
   9444ab05, deliverable code-logic-review.md. Review runs on the uncommitted diff while the
   verify gate waits in the machine-wide lock queue.
+- D11 (resume session, evidence): Lane 9444ab05 has no host record and wrote no review.
+  Antigravity lanes 44dc6f70 and 56df3836 both stopped with no deliverable: headless mode
+  auto-denies `run_command`, even when the brief forbids it. Full auto-approve (yolo) is not
+  used (hard rule). Grok, Glm and kimi are at limit; copilot and opencode are disabled.
+  Fallback reviewer: a fresh codex lane b9b8d639 (same family as the implementers).
+  Review family label: codex, same-family, WEAKER EVIDENCE. Both antigravity lanes also
+  printed `handshake-timeout` (Ptah MCP not connected within 15 s): live evidence that the
+  lane MCP handshake failure from B3 still occurs for antigravity lanes. B3 adds diagnostics
+  only; it does not claim a root-cause fix.
+- D12 (parent): Fix all 5 review findings in one round (lane 90d818e4). The final PR review
+  before push must use a family other than codex. If no non-Claude lane can run, use one
+  Claude reviewer (a `cli: "claude"` lane or a code-logic-reviewer subagent) on
+  `git diff main...HEAD`, scoped to the fix round plus the identity mapping. No yolo.
+- D13 (parent + evidence): Keep the two antigravity `handshake-timeout` lines (sanitized) as
+  PR evidence. Assessment: the running host is built from main, without B3, so the warning
+  has no reason detail. B3 adds the reason (no-request-seen / rejected:<reason> /
+  seen-but-not-initialize) but changes no handshake behavior. So B3 does not explain or fix
+  these lines. The antigravity handshake timeout stays a REMAINING LIMITATION (separate
+  adapter-side issue, root cause not confirmed) and is listed in the PR.

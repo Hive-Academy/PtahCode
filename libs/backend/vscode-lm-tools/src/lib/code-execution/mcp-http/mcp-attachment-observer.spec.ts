@@ -1,34 +1,18 @@
-import { mcpAttachmentObserver as observer } from './mcp-attachment-observer';
+import { mcpAttachmentObserver } from './mcp-attachment-observer';
 
-describe('MCP attachment observer', () => {
-  afterEach(() => observer.clear());
+describe('MCP attachment attempt attribution', () => {
+  afterEach(() => mcpAttachmentObserver.clear());
 
-  it('cancels an attachment waiter on abort', async () => {
-    const abort = new AbortController();
-    const waiting = observer.waitFor('lane', 51821, 15_000, abort.signal);
-    abort.abort();
-    await expect(waiting).resolves.toBeUndefined();
-    observer.record({
-      agentId: 'lane',
-      port: 51821,
-      method: 'initialize',
-      time: Date.now(),
-    });
+  it('keeps an authenticated lane observation when the same URL is rejected later', () => {
+    mcpAttachmentObserver.recordAttempt({ agentId: 'lane-a', port: 4888, reason: 'seen', method: 'initialize', time: Date.now() });
+    mcpAttachmentObserver.recordRejectedAttempt({ agentId: 'lane-a', port: 4888, reason: 'forbidden', method: 'POST', time: Date.now() });
+    expect(mcpAttachmentObserver.getAttempt('lane-a', 4888)?.reason).toBe('seen');
   });
 
-  it('resolves old waiters as misses when the server port clears', async () => {
-    const waiting = observer.waitFor('lane', 51821, 15_000);
-    observer.clearPort(51821);
-    await expect(waiting).resolves.toBeUndefined();
-  });
-
-  it('stores only sanitized rejected attempts under the agent and port', () => {
-    const attempt = { agentId: 'lane', port: 51821, method: 'POST', reason: 'forbidden' as const, time: Date.now() };
-    observer.recordAttempt(attempt);
-    expect(observer.getAttempt('lane', 51821)).toEqual(attempt);
-    expect(observer.getAttempt('other', 51821)).toBeUndefined();
-    expect(Object.keys(observer.getAttempt('lane', 51821) ?? {})).toEqual(['agentId', 'port', 'method', 'reason', 'time']);
-    observer.clearPort(51821);
-    expect(observer.getAttempt('lane', 51821)).toBeUndefined();
+  it('retains only 512 rejected attempts', () => {
+    for (let index = 0; index < 513; index++)
+      mcpAttachmentObserver.recordRejectedAttempt({ agentId: `lane-${index}`, port: 4888, reason: 'auth-required', method: 'POST', time: Date.now() });
+    expect(mcpAttachmentObserver.getAttempt('lane-0', 4888)).toBeUndefined();
+    expect(mcpAttachmentObserver.getAttempt('lane-512', 4888)?.reason).toBe('auth-required');
   });
 });

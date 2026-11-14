@@ -282,6 +282,19 @@ export class AgentReportRouter {
    * over-size body is rejected before any session state is consulted.
    */
   async deliver(input: AgentReportInput): Promise<AgentReportDelivery> {
+    if (isSessionChildInput(input) || !input.agentId || !this.agents.findAgentInfo(input.agentId))
+      return this.deliverOnce(input);
+    try {
+      const result = await this.deliverOnce(input);
+      this.agents.markReportAttempt?.(input.agentId, !result.delivered && !result.pending);
+      return result;
+    } catch (error: unknown) {
+      this.agents.markReportAttempt?.(input.agentId, true);
+      throw error;
+    }
+  }
+
+  private async deliverOnce(input: AgentReportInput): Promise<AgentReportDelivery> {
     // A non-empty string, not mere key presence: an input built as
     // `{ agentId, childSessionId: undefined }` belongs on the agent path.
     if (isSessionChildInput(input)) {

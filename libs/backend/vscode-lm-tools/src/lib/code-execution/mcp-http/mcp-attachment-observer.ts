@@ -16,6 +16,7 @@ export interface McpAttachmentAttempt {
 class McpAttachmentObserver implements IMcpAttachmentProbe {
   private readonly entries = new Map<string, McpAttachment>();
   private readonly attempts = new Map<string, McpAttachmentAttempt>();
+  private readonly rejectedAttempts = new Map<string, McpAttachmentAttempt>();
   private readonly listeners = new Map<
     string,
     Set<(entry?: McpAttachment) => void>
@@ -37,9 +38,10 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
 
   getAttempt(agentId: string, port: number): McpAttachmentAttempt | undefined {
     const key = this.key(agentId, port);
-    const attempt = this.attempts.get(key);
+    const attempt = this.attempts.get(key) ?? this.rejectedAttempts.get(key);
     if (attempt && Date.now() - attempt.time > RETENTION_MS) {
       this.attempts.delete(key);
+      this.rejectedAttempts.delete(key);
       return undefined;
     }
     return attempt;
@@ -50,6 +52,13 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
     if (this.attempts.size >= 512 && !this.attempts.has(key))
       this.attempts.delete(this.attempts.keys().next().value ?? '');
     this.attempts.set(key, attempt);
+  }
+
+  recordRejectedAttempt(attempt: McpAttachmentAttempt): void {
+    const key = this.key(attempt.agentId, attempt.port);
+    if (this.rejectedAttempts.size >= 512 && !this.rejectedAttempts.has(key))
+      this.rejectedAttempts.delete(this.rejectedAttempts.keys().next().value ?? '');
+    this.rejectedAttempts.set(key, attempt);
   }
 
   record(entry: McpAttachment): void {
@@ -97,11 +106,15 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
   clear(): void {
     this.entries.clear();
     this.attempts.clear();
+    this.rejectedAttempts.clear();
     for (const listeners of this.listeners.values()) {
       for (const listener of [...listeners]) listener();
     }
   }
   clearPort(port: number): void {
+    for (const [key, attempt] of this.rejectedAttempts) {
+      if (attempt.port === port) this.rejectedAttempts.delete(key);
+    }
     for (const [key, attempt] of this.attempts) {
       if (attempt.port === port) this.attempts.delete(key);
     }

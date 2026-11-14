@@ -1140,6 +1140,92 @@ describe('terminal read reconciliation', () => {
     drainer.dispose();
   });
 
+  it('a read during checkpoint settles the durable outbox before replay', async () => {
+    const h = createHarness({ sessionActive: false });
+    const storage = new FakeStateStorage();
+    const store = new ParentEnvelopeStoreService(h.logger, storage);
+    const adapter = { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    let release: (() => void) | undefined;
+    let entered: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const checkpointEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const notifier = new LaneCompletionNotifier(h.logger, { exists: h.exists, stat: h.stat } as never,
+      adapter, () => null, drainer, () => ({ checkpoint: async (entry) => {
+        entered?.();
+        await gate;
+        await store.putCompletionOutbox(entry);
+        return 'durable';
+      } }));
+    const info = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174107') });
+    const signaling = notifier.signal(info);
+    await checkpointEntered;
+    await acknowledgeTerminalRead(info, PARENT);
+    release?.();
+    await signaling;
+    expect(await store.listCompletionOutbox(PARENT)).toHaveLength(0);
+    const restarted = new ParentEnvelopeStoreService(h.logger, storage);
+    const restartedDrainer = new ParentDeliveryDrainerService(h.logger, restarted, adapter, null, null);
+    const restartedNotifier = new LaneCompletionNotifier(h.logger, { exists: h.exists, stat: h.stat } as never, adapter, () => null, restartedDrainer);
+    await restartedNotifier.replayOutbox(PARENT);
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+    drainer.dispose();
+    restartedDrainer.dispose();
+  });
+
+  it('an acknowledged outbox stays consumed after 256 newer reads', async () => {
+    const h = createHarness({ sessionActive: false });
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const notifier = new LaneCompletionNotifier(h.logger, { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer);
+    const info = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174108') });
+    await notifier.signal(info);
+    await acknowledgeTerminalRead(info, PARENT);
+    for (let index = 0; index < 256; index++)
+      await acknowledgeTerminalRead(createInfo({ agentId: info.agentId, completedAt: new Date(Date.parse(COMPLETED_AT) + index + 1).toISOString() }), PARENT);
+    await notifier.replayOutbox(PARENT);
+    expect(await store.listCompletionOutbox(PARENT)).toHaveLength(0);
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+    drainer.dispose();
+  });
+
+  it('keeps refused cancellation pending for reconciliation', async () => {
+    const h = createHarness({ sessionActive: false });
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const notifier = new LaneCompletionNotifier(h.logger, { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer);
+    const info = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174109') });
+    await notifier.signal(info);
+    const cancel = jest.spyOn(drainer, 'cancel').mockResolvedValueOnce({ refused: 'parent-session-deleted' });
+    await expect(acknowledgeTerminalRead(info, PARENT)).rejects.toThrow('cancellation refused');
+    expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('Could not cancel'), expect.any(Error));
+    await acknowledgeTerminalRead(info, PARENT);
+    expect(cancel).toHaveBeenCalledTimes(2);
+    drainer.dispose();
+  });
+
+  it('does not reject signaling when cancellation is refused during enqueue', async () => {
+    const h = createHarness({ sessionActive: false });
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const info = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174110') });
+    const cancel = jest.spyOn(drainer, 'cancel').mockResolvedValue({ refused: 'parent-session-deleted' });
+    const enqueue = drainer.enqueue.bind(drainer);
+    jest.spyOn(drainer, 'enqueue').mockImplementation(async (input, onAccepted) => {
+      const saved = await enqueue(input, onAccepted);
+      await acknowledgeTerminalRead(info, PARENT).catch(() => undefined);
+      return saved;
+    });
+    const notifier = new LaneCompletionNotifier(h.logger, { exists: h.exists, stat: h.stat } as never, adapter, () => null, drainer);
+    await expect(notifier.signal(info)).resolves.toMatchObject({ delivered: false, reason: 'already-signalled' });
+    expect(cancel).toHaveBeenCalled();
+    expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('Could not cancel'), expect.any(Error));
+    drainer.dispose();
+  });
+
   it('exit 0 with missing deliverables stays no-deliverable', async () => {
     const h = createHarness();
     const result = await h.notifier.signal(createInfo({
@@ -1158,7 +1244,18 @@ describe('terminal read reconciliation', () => {
     }));
     expect(result.signal?.verdict).toBe('delivered');
     expect(h.envelope()).toContain('MCP attachment: not attached (connection timed out)');
-    expect(h.envelope()).toContain('Report delivery: 0 sent; failed: unavailable');
+    expect(h.envelope()).toContain('Report delivery: 0 sent; 0 failed.');
+  });
+
+  it('exit 0 with a fresh deliverable makes failed reports explicit', async () => {
+    const h = createHarness({ files: { '/ws/report.md': 42 } });
+    const result = await h.notifier.signal(createInfo({
+      agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174106'),
+      deliverables: ['report.md'],
+    }), { reportsDelivered: 0, reportAttempts: 1, reportsFailed: 1 });
+    expect(result.signal?.verdict).toBe('delivered');
+    expect(h.envelope()).toContain('reportsFailed="1"');
+    expect(h.envelope()).toContain('Next: 1 reports were not delivered');
   });
 });
 

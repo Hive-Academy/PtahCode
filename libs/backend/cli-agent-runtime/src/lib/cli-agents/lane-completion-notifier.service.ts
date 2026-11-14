@@ -322,6 +322,8 @@ export interface LaneCompletionContext {
   readonly heldBudgetWarning?: boolean;
   /** Reports this lane delivered through `ptah_agent_report` before it ended. */
   readonly reportsDelivered: number;
+  readonly reportAttempts?: number;
+  readonly reportsFailed?: number;
   readonly reportClaimsCompletion?: boolean;
   /** Provider-reported usage for this lane turn, when available. */
   readonly usage?: CliOutputSegment['usage'];
@@ -411,8 +413,10 @@ export class LaneCompletionNotifier {
 
     const completedAt = info.completedAt ?? new Date().toISOString();
     const key = `${info.agentId}:${completedAt}`;
-    if (this.skipAcknowledged(key, info.agentId))
+    if (this.skipAcknowledged(key, info.agentId)) {
+      await this.consumeAcknowledged(info.parentSessionId, key);
       return { delivered: false, reason: 'already-signalled' };
+    }
     const existing = this.parentDelivery?.find(key);
     if (existing)
       return {
@@ -547,9 +551,24 @@ export class LaneCompletionNotifier {
         originName: `${signal.cli} · ${signal.agentLabel}`,
         createdAt: Date.now(),
       };
+      try {
+        await reconcilePendingCompletionRead(key, async () => {
+          await this.parentDelivery?.consumeCompletion(parentSessionId, key);
+          const queued = this.parentDelivery?.find(key);
+          if (queued) {
+            const cancelled = await this.parentDelivery?.cancel(queued.id);
+            if (cancelled && 'refused' in cancelled)
+              throw new Error(`Completion cancellation refused: ${cancelled.refused}`);
+          }
+        });
+      } catch (error: unknown) {
+        this.logger.warn('[LaneCompletionNotifier] Completion read reconciliation deferred', error instanceof Error ? error : new Error('Completion reconciliation failed'));
+      }
       const checkpoint = await this.checkpoint(entry);
-      if (this.skipAcknowledged(key, info.agentId))
+      if (this.skipAcknowledged(key, info.agentId)) {
+        await this.consumeAcknowledged(parentSessionId, key);
         return { delivered: false, reason: 'already-signalled', signal };
+      }
       // A durable checkpoint owns the report even when envelope indexing fails.
       if (held && fits && checkpoint === 'durable') held.markEnqueued();
       const saved = await this.parentDelivery.enqueue(
@@ -567,16 +586,21 @@ export class LaneCompletionNotifier {
       );
       if (!result.delivered && result.deliveryId) {
         const deliveryId = result.deliveryId;
-        await reconcilePendingCompletionRead(key, async () => {
+        try {
+          await reconcilePendingCompletionRead(key, async () => {
           try {
-            await this.parentDelivery?.cancel(deliveryId);
+            await this.parentDelivery?.consumeCompletion(parentSessionId, key);
+            const cancelled = await this.parentDelivery?.cancel(deliveryId);
+            if (cancelled && 'refused' in cancelled)
+              throw new Error(`Completion cancellation refused: ${cancelled.refused}`);
           } catch (error: unknown) {
-            this.logger.warn('[LaneCompletionNotifier] Could not cancel acknowledged completion', {
-              agentId: info.agentId,
-              detail: error instanceof Error ? error.name : 'UNKNOWN',
-            });
+            this.logger.warn('[LaneCompletionNotifier] Could not cancel acknowledged completion', error instanceof Error ? error : new Error('Completion cancellation failed'));
+            throw error;
           }
-        });
+          });
+        } catch (error: unknown) {
+          this.logger.warn('[LaneCompletionNotifier] Completion cancellation remains pending', error instanceof Error ? error : new Error('Completion cancellation failed'));
+        }
       }
       if (result.reason !== 'storage-unavailable') this.remember(key);
       return {
@@ -665,8 +689,10 @@ export class LaneCompletionNotifier {
   async replay(
     entry: ParentCompletionOutboxEntry,
   ): Promise<LaneCompletionResult> {
-    if (this.skipAcknowledged(entry.dedupeKey, entry.agentId))
+    if (this.skipAcknowledged(entry.dedupeKey, entry.agentId)) {
+      await this.consumeAcknowledged(entry.parentSessionId, entry.dedupeKey);
       return { delivered: false, reason: 'already-signalled' };
+    }
     const parentDelivery = this.parentDelivery;
     if (!parentDelivery)
       return { delivered: false, reason: 'chat-runtime-unavailable' };
@@ -701,8 +727,10 @@ export class LaneCompletionNotifier {
       }
       return this.settleSatisfied(entry);
     }
-    if (this.skipAcknowledged(entry.dedupeKey, entry.agentId))
+    if (this.skipAcknowledged(entry.dedupeKey, entry.agentId)) {
+      await this.consumeAcknowledged(entry.parentSessionId, entry.dedupeKey);
       return { delivered: false, reason: 'already-signalled' };
+    }
     const saved = await parentDelivery.enqueue(completionEnqueueInput(entry));
     if (!('refused' in saved)) {
       const report = this.pendingReportMarks.get(entry.dedupeKey);
@@ -825,6 +853,7 @@ export class LaneCompletionNotifier {
     const deliveryId = completionDeliveryId(entry.dedupeKey);
     this.pendingReplays.delete(entry.dedupeKey);
     parentDelivery?.clearUnsaved(deliveryId);
+    await parentDelivery?.consumeCompletion(entry.parentSessionId, entry.dedupeKey);
     await parentDelivery?.backfillCompletionKeys(entry.parentSessionId);
     const delivered =
       parentDelivery?.find(entry.dedupeKey)?.state === 'delivered';
@@ -845,7 +874,14 @@ export class LaneCompletionNotifier {
   ): Promise<LaneCompletionResult> {
     const parentDelivery = this.parentDelivery;
     if (!('refused' in saved) && wasTerminalReadAcknowledged(entry.dedupeKey)) {
-      await parentDelivery?.cancel(saved.id);
+      try {
+        const cancelled = await parentDelivery?.cancel(saved.id);
+        if (cancelled && 'refused' in cancelled)
+          throw new Error(`Completion cancellation refused: ${cancelled.refused}`);
+      } catch (error: unknown) {
+        this.logger.warn('[LaneCompletionNotifier] Could not cancel acknowledged completion', error instanceof Error ? error : new Error('Completion cancellation failed'));
+        this.pendingReplays.set(entry);
+      }
       this.skipAcknowledged(entry.dedupeKey, entry.agentId);
       return { delivered: false, reason: 'already-signalled' };
     }
@@ -1070,6 +1106,8 @@ export class LaneCompletionNotifier {
         context.reportsDelivered,
       ),
       reportsDelivered: context.reportsDelivered,
+      reportAttempts: context.reportAttempts ?? 0,
+      reportsFailed: context.reportsFailed ?? 0,
       ...(context.heldBudgetWarning ? { heldBudgetWarning: true } : {}),
       ...(info.mcpAttachmentWarning
         ? { mcpAttachmentWarning: info.mcpAttachmentWarning }
@@ -1186,12 +1224,13 @@ export class LaneCompletionNotifier {
     const attachment = info.mcpAttachmentWarning
       ? `MCP attachment: not attached (${info.mcpAttachmentWarning}).`
       : 'MCP attachment: status unavailable.';
-    const reports = `Report delivery: ${signal.reportsDelivered} sent; failed: unavailable.`;
+    const failed = signal.reportsFailed ?? 0;
+    const reports = `Report delivery: ${signal.reportsDelivered} sent; ${failed} failed.`;
     const body = buildLaneCompletionEnvelope(signal).replace(
       `verdict="${signal.verdict}"`,
       `verdict="${signal.verdict}"` +
-        ` report-delivery="${signal.reportsDelivered}-sent"`,
-    ).replace('\nDeliverables:', `\n${attachment}\n${reports}\nDeliverables:`);
+        ` report-delivery="${signal.reportsDelivered}-sent" reportsFailed="${failed}"`,
+    ).replace('\nDeliverables:', `\n${attachment}\n${reports}${failed ? `\nNext: ${failed} reports were not delivered to the parent; inspect the lane output and deliverable.` : ''}\nDeliverables:`);
     if (info.stopReason !== 'usage-limit' && info.stopReason !== 'auth')
       return body;
     const resetDate =
@@ -1296,5 +1335,14 @@ export class LaneCompletionNotifier {
       key,
     });
     return true;
+  }
+
+  private async consumeAcknowledged(parentSessionId: string | undefined, key: string): Promise<void> {
+    if (!parentSessionId) return;
+    try {
+      await this.parentDelivery?.consumeCompletion(parentSessionId, key);
+    } catch (error: unknown) {
+      this.logger.warn('[LaneCompletionNotifier] Could not settle acknowledged completion', error instanceof Error ? error : new Error('Completion settlement failed'));
+    }
   }
 }

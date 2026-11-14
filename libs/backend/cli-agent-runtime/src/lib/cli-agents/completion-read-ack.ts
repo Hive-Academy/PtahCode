@@ -24,8 +24,10 @@ export async function acknowledgeTerminalRead(
     if (oldest !== undefined) acknowledged.delete(oldest);
   }
   const cancel = pendingCancellation.get(key);
-  pendingCancellation.delete(key);
-  await cancel?.();
+  if (cancel) {
+    await cancel();
+    pendingCancellation.delete(key);
+  }
 }
 
 /** Registers a bounded cancellation for a notice already queued before a read. */
@@ -40,8 +42,8 @@ export async function reconcilePendingCompletionRead(
     if (oldest !== undefined) pendingCancellation.delete(oldest);
   }
   if (acknowledged.has(key)) {
-    pendingCancellation.delete(key);
     await cancel();
+    pendingCancellation.delete(key);
   }
 }
 

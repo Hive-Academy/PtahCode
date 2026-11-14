@@ -2205,6 +2205,13 @@ export class AgentProcessManager {
     if (claimsCompletion) this.completionClaims.add(agentId);
   }
 
+  markReportAttempt(agentId: string, failed: boolean): void {
+    const tracked = this.agents.get(agentId);
+    if (!tracked) return;
+    tracked.reportAttempts = Math.min((tracked.reportAttempts ?? 0) + 1, 65535);
+    if (failed) tracked.reportsFailed = Math.min((tracked.reportsFailed ?? 0) + 1, 65535);
+  }
+
   /**
    * Read agent output (stdout + stderr).
    *
@@ -3671,6 +3678,8 @@ export class AgentProcessManager {
     void Promise.resolve(
       this.laneCompletion.signal(info, {
         reportsDelivered,
+        reportAttempts: tracked.reportAttempts ?? 0,
+        reportsFailed: tracked.reportsFailed ?? 0,
         ...(tracked.heldBudgetWarning ? { heldBudgetWarning: true } : {}),
         ...(reportClaimsCompletion ? { reportClaimsCompletion: true } : {}),
         ...(tracked.outcomeUsage ? { usage: tracked.outcomeUsage } : {}),

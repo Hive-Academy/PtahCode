@@ -383,7 +383,7 @@ async function handleHttpRequest(
     try {
       const agentId = extractCallerAgentId(url);
       if (agentId && /^[A-Za-z0-9-]{1,128}$/.test(agentId))
-        mcpAttachmentObserver.recordAttempt({ agentId, port, reason, method: req.method === 'POST' ? 'POST' : 'OTHER', time: Date.now() });
+        mcpAttachmentObserver.recordRejectedAttempt({ agentId, port, reason, method: req.method === 'POST' ? 'POST' : 'OTHER', time: Date.now() });
     } catch {
       // A malformed identity cannot be keyed to a lane.
     }

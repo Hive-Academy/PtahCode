@@ -1449,13 +1449,17 @@ async function handleIndividualTool(
         }
         const { agentId, tail, offset } = parsed.data;
         const result = await ptahAPI.agent.read(agentId, tail, offset);
-        const status = await ptahAPI.agent.status?.(agentId);
-        if (status && !Array.isArray(status)) {
-          const raw = request._callerSessionId;
-          const reader = raw
-            ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
-            : undefined;
-          await acknowledgeTerminalRead(status, reader);
+        try {
+          const status = await ptahAPI.agent.status?.(agentId);
+          if (status && !Array.isArray(status)) {
+            const raw = request._callerSessionId;
+            const reader = raw
+              ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
+              : undefined;
+            await acknowledgeTerminalRead(status, reader);
+          }
+        } catch (error: unknown) {
+          logger.warn('[MCP] Completion read acknowledgment failed', error instanceof Error ? error : new Error('Completion read acknowledgment failed'));
         }
         const view = await renderAgentRead(
           result,
@@ -1723,13 +1727,17 @@ async function handleIndividualTool(
           {
             waitForAgents: async (ids, mode, timeoutMs, signal) => {
               const result = await ptahAPI.agent.waitForAgents(ids, mode, timeoutMs, signal);
-              const raw = request._callerSessionId;
-              const reader = raw
-                ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
-                : undefined;
-              for (const entry of result.entries)
-                if (entry.state === 'exited')
-                  await acknowledgeTerminalRead(entry.info, reader);
+              try {
+                const raw = request._callerSessionId;
+                const reader = raw
+                  ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
+                  : undefined;
+                for (const entry of result.entries)
+                  if (entry.state === 'exited')
+                    await acknowledgeTerminalRead(entry.info, reader);
+              } catch (error: unknown) {
+                logger.warn('[MCP] Completion wait acknowledgment failed', error instanceof Error ? error : new Error('Completion wait acknowledgment failed'));
+              }
               return result;
             },
             readOutput: (agentId, tail) => ptahAPI.agent.read(agentId, tail),

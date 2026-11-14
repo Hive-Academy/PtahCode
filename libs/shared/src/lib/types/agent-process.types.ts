@@ -765,6 +765,8 @@ export interface LaneCompletionSignal {
    * output buffer and whatever it wrote to disk.
    */
   readonly reportsDelivered: number;
+  readonly reportAttempts?: number;
+  readonly reportsFailed?: number;
   /** CLI-native session id, when the adapter reported one. Enables a resume. */
   readonly cliSessionId?: string;
   /** Why the host stopped the lane. Absent when it ended on its own or the caller stopped it. */

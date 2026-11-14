@@ -26,7 +26,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { z } from 'zod';
-import { wasTerminalReadAcknowledged } from '@ptah-extension/cli-agent-runtime';
+import { reconcilePendingCompletionRead, wasTerminalReadAcknowledged } from '@ptah-extension/cli-agent-runtime';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   countTokens,
@@ -278,6 +278,30 @@ describe('terminal lane read acknowledgment', () => {
     }), deps);
     expect(resolveCallerParentId).toHaveBeenCalledWith('wait-tab-alias');
     expect(wasTerminalReadAcknowledged(key)).toBe(true);
+  });
+
+  it.each(['status', 'resolver', 'cancellation'] as const)('read returns output when %s fails', async (failure) => {
+    const info = { ...agent, agentId: `read-failure-${failure}` };
+    const read = jest.fn().mockResolvedValue({ agentId: info.agentId, stdout: 'output', stderr: '', lineCount: 1, totalLines: 1, omittedLines: 0, stdoutTotalLines: 1, stderrTotalLines: 0, truncated: false });
+    const status = jest.fn().mockImplementation(() => failure === 'status' ? Promise.reject(new Error('status failed')) : Promise.resolve(info));
+    const resolveCallerParentId = jest.fn().mockImplementation(() => { if (failure === 'resolver') throw new Error('resolver failed'); return 'dispatcher-parent'; });
+    if (failure === 'cancellation') await reconcilePendingCompletionRead(`${info.agentId}:${info.completedAt}`, async () => { throw new Error('cancel failed'); });
+    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({ agent: { read, status, resolveCallerParentId } }) });
+    const response = await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'tab-alias', params: { name: 'ptah_agent_read', arguments: { agentId: info.agentId } } }), deps);
+    expect(response.result).toBeDefined();
+    expect(JSON.stringify(response.result)).toContain('output');
+  });
+
+  it.each(['resolver', 'cancellation'] as const)('wait processes entries when %s fails', async (failure) => {
+    const info = { ...agent, agentId: `wait-failure-${failure}` };
+    const waitForAgents = jest.fn().mockResolvedValue({ mode: 'all', timedOut: false, cancelled: false, waitedMs: 0, entries: [{ agentId: info.agentId, state: 'exited', info }] });
+    const read = jest.fn().mockResolvedValue({ agentId: info.agentId, stdout: 'wait output', stderr: '', lineCount: 1, totalLines: 1, omittedLines: 0, stdoutTotalLines: 1, stderrTotalLines: 0, truncated: false });
+    const resolveCallerParentId = jest.fn().mockImplementation(() => { if (failure === 'resolver') throw new Error('resolver failed'); return 'dispatcher-parent'; });
+    if (failure === 'cancellation') await reconcilePendingCompletionRead(`${info.agentId}:${info.completedAt}`, async () => { throw new Error('cancel failed'); });
+    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({ agent: { waitForAgents, read, resolveCallerParentId } }) });
+    const response = await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'tab-alias', params: { name: 'ptah_agent_wait', arguments: { agentIds: [info.agentId], timeoutSec: 0 } } }), deps);
+    expect(response.result).toBeDefined();
+    expect(read).toHaveBeenCalled();
   });
 });
 

@@ -77,6 +77,8 @@ export interface TrackedAgent {
    * itself from one that exited without a word (TASK_2026_515).
    */
   reportsDelivered: number;
+  reportAttempts?: number;
+  reportsFailed?: number;
   /** Authentication wording from the failed turn's bounded output. */
   authMatched?: boolean;
   /**
