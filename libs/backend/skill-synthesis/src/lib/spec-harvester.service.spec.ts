@@ -577,7 +577,7 @@ function addGradeTables(db: BetterSqliteDb, agents: readonly string[]): void {
   db.exec(`CREATE TABLE skill_registry (slug TEXT, kind TEXT);
     CREATE TABLE session_task_links (workspace_root TEXT, session_id TEXT, task_id TEXT);
     CREATE TABLE lane_outcome_records (
-      run_id TEXT, subagent_session_id TEXT, final_review TEXT, task_id TEXT,
+      run_id TEXT, subagent_session_id TEXT, parent_session_id TEXT, final_review TEXT, task_id TEXT,
       workspace_root TEXT, role TEXT, executor_kind TEXT, phase_kind TEXT
     );`);
   for (const slug of agents) db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run(slug, 'agent');

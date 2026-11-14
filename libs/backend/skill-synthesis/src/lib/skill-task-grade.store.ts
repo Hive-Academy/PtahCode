@@ -238,7 +238,14 @@ export class SkillTaskGradeStore {
     const phaseRows = this.db.prepare(`SELECT 'phase' AS kind, phase_kind AS slug,
       run_id, subagent_session_id AS session_id, 'run:' || run_id AS attribution_key,
       final_review, workspace_root, phase_kind, executor_kind FROM lane_outcome_records
-      WHERE task_id = ? AND phase_kind IS NOT NULL AND phase_kind <> ''`).all(taskId)
+      WHERE (task_id = ? OR (task_id IS NULL AND parent_session_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM session_task_links s
+        WHERE s.workspace_root = lane_outcome_records.workspace_root
+          AND s.session_id = lane_outcome_records.parent_session_id AND s.task_id = ?
+          AND NOT EXISTS (SELECT 1 FROM session_task_links other
+            WHERE other.workspace_root = s.workspace_root AND other.session_id = s.session_id
+              AND other.task_id <> s.task_id)
+      ))) AND phase_kind IS NOT NULL AND phase_kind <> ''`).all(taskId, taskId)
       .map((row) => this.parseRow(AttributionRowSchema, row))
       .filter((row) => row.phase_kind !== null
         && row.workspace_root !== null && normalizeWorkspaceRoot(row.workspace_root) === normalizedRoot);
@@ -276,10 +283,9 @@ export class SkillTaskGradeStore {
    * Phase scorecard inputs for one workspace. For each phase kind it returns one
    * current row (`subject_kind = 'phase'`) and, when legacy grades exist, one
    * legacy row: role grades whose slug maps to the phase in `ROLE_PHASE_ALIASES`.
-   * A role grade whose task and attribution key also have a phase grade is left
-   * out of the legacy row, so one lane row counts once. The same attribution key
-   * (`run:<id>`) means the same lane row, so that run counts under its real phase
-   * kind, even when the role alias names another phase. Stored rows are not changed.
+   * A role grade is excluded when its run has a phase grade, including a
+   * subagent run stored with either raw or prefixed agent ID. Paired raw and
+   * prefixed agent grades count once in legacy totals; stored rows are unchanged.
    */
   getPhaseAggregates(workspaceRoot: string | null): PhaseGradeAggregate[] {
     if (!workspaceRoot) return [];
@@ -294,7 +300,15 @@ export class SkillTaskGradeStore {
       WHERE g.subject_kind = 'agent' AND g.subject_slug = ? AND g.workspace_root = ?
         AND NOT EXISTS (SELECT 1 FROM skill_task_grades p
           WHERE p.subject_kind = 'phase' AND p.task_id = g.task_id
-            AND p.attribution_key = g.attribution_key AND p.workspace_root = g.workspace_root)`);
+            AND p.workspace_root = g.workspace_root
+            AND (p.attribution_key = g.attribution_key OR
+              (g.attribution_key LIKE 'run:%' AND g.attribution_key NOT LIKE 'run:subagent:%'
+                AND p.attribution_key = 'run:subagent:' || substr(g.attribution_key, 5))))
+        AND NOT EXISTS (SELECT 1 FROM skill_task_grades g2
+          WHERE g.attribution_key LIKE 'run:%' AND g.attribution_key NOT LIKE 'run:subagent:%'
+            AND g2.subject_kind = 'agent' AND g2.task_id = g.task_id
+            AND g2.workspace_root = g.workspace_root AND g2.subject_slug = g.subject_slug
+            AND g2.attribution_key = 'run:subagent:' || substr(g.attribution_key, 5))`);
     const result: PhaseGradeAggregate[] = [];
     for (const phaseKind of PHASE_KINDS) {
       const row = this.parseRow(AggregateRowSchema, current.get(phaseKind, normalizedRoot));

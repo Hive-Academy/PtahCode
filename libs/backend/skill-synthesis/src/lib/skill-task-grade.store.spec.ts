@@ -35,7 +35,7 @@ function setupAttributionTables(db: TestDatabase): void {
   CREATE TABLE skill_registry (slug TEXT, kind TEXT);
   CREATE TABLE session_task_links (workspace_root TEXT, session_id TEXT, task_id TEXT);
   CREATE TABLE lane_outcome_records (
-    run_id TEXT, subagent_session_id TEXT, final_review TEXT, task_id TEXT,
+    run_id TEXT, subagent_session_id TEXT, parent_session_id TEXT, final_review TEXT, task_id TEXT,
     workspace_root TEXT, role TEXT, executor_kind TEXT, phase_kind TEXT
   );`);
   db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run('writer', 'agent');
@@ -239,6 +239,26 @@ maybe('SkillTaskGradeStore', () => {
     } finally { db.close(); }
   });
 
+  it('attributes a taskless phase lane only through a unique parent session task link', () => {
+    const { db, store } = setup();
+    try {
+      setupAttributionTables(db);
+      const insert = db.prepare(`INSERT INTO lane_outcome_records
+        (run_id, parent_session_id, task_id, workspace_root, executor_kind, phase_kind)
+        VALUES (?, ?, NULL, ?, 'cli', 'tests')`);
+      insert.run('unique', 'parent-unique', '/workspace');
+      insert.run('ambiguous', 'parent-ambiguous', '/workspace');
+      insert.run('other-root', 'parent-unique', '/elsewhere');
+      const link = db.prepare('INSERT INTO session_task_links (workspace_root, session_id, task_id) VALUES (?, ?, ?)');
+      link.run('/workspace', 'parent-unique', grade.taskId);
+      link.run('/workspace', 'parent-ambiguous', grade.taskId);
+      link.run('/workspace', 'parent-ambiguous', 'TASK_2026_002');
+      expect(store.findAttributions(grade.taskId, '/workspace')).toEqual([
+        expect.objectContaining({ kind: 'phase', slug: 'tests', attributionKey: 'run:unique' }),
+      ]);
+    } finally { db.close(); }
+  });
+
   it('stores and reads the phase and executor keys on a grade', () => {
     const { db, store } = setup();
     try {
@@ -289,6 +309,44 @@ maybe('SkillTaskGradeStore', () => {
       expect(rows.filter((row) => row.phaseKind === 'review')).toEqual([
         { phaseKind: 'review', legacy: false, aliasedRoles: [], graded: 1, passed: 1, successRate: 1 },
       ]);
+    } finally { db.close(); }
+  });
+
+  it('excludes raw and prefixed subagent agent grades when a phase grade exists', () => {
+    const { db, store } = setup();
+    try {
+      const role = { ...grade, subjectSlug: TESTS_ROLE };
+      store.upsert({ ...role, attributionKey: 'run:A' });
+      store.upsert({ ...role, attributionKey: 'run:subagent:A' });
+      store.upsert({ ...role, subjectKind: 'phase', subjectSlug: 'tests', attributionKey: 'run:subagent:A' });
+      const rows = store.getPhaseAggregates('/workspace').filter((row) => row.phaseKind === 'tests');
+      expect(rows).toEqual([
+        { phaseKind: 'tests', legacy: false, aliasedRoles: [], graded: 1, passed: 1, successRate: 1 },
+      ]);
+    } finally { db.close(); }
+  });
+
+  it('counts a raw and prefixed subagent agent pair once without a phase grade', () => {
+    const { db, store } = setup();
+    try {
+      const role = { ...grade, subjectSlug: TESTS_ROLE };
+      store.upsert({ ...role, attributionKey: 'run:A' });
+      store.upsert({ ...role, attributionKey: 'run:subagent:A' });
+      const legacy = store.getPhaseAggregates('/workspace').find((row) => row.phaseKind === 'tests' && row.legacy);
+      expect(legacy).toMatchObject({ graded: 1, passed: 1 });
+    } finally { db.close(); }
+  });
+
+  it('counts distinct subagent runs separately in legacy totals', () => {
+    const { db, store } = setup();
+    try {
+      const role = { ...grade, subjectSlug: TESTS_ROLE };
+      for (const run of ['A', 'B']) {
+        store.upsert({ ...role, attributionKey: `run:${run}` });
+        store.upsert({ ...role, attributionKey: `run:subagent:${run}` });
+      }
+      const legacy = store.getPhaseAggregates('/workspace').find((row) => row.phaseKind === 'tests' && row.legacy);
+      expect(legacy).toMatchObject({ graded: 2, passed: 2 });
     } finally { db.close(); }
   });
 
