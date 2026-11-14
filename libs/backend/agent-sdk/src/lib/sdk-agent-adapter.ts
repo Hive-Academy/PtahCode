@@ -1372,8 +1372,9 @@ export class SdkAgentAdapter implements IAgentAdapter {
       providerProfile?: ProviderProfile;
       /** See `ExecuteQueryConfig.admissionDeadline` (named admission only). */
       admissionDeadline?: number;
+      knownSessionChild?: boolean;
     },
-  ): Promise<AsyncIterable<FlatStreamEventUnion>> {
+  ): Promise<AsyncIterable<FlatStreamEventUnion> & { readonly toolProfileApplied?: true }> {
     if (!this.initialized) {
       throw this.notInitializedError();
     }
@@ -1444,8 +1445,11 @@ export class SdkAgentAdapter implements IAgentAdapter {
       this.logger.warn('[SdkAgentAdapter] Stored session phase state is malformed; refusing resume', { sessionId });
       throw new SdkError('Cannot resume a session with malformed phase state');
     }
-    if (storedMetadata?.workingDirectory &&
-        storedMetadata.workingDirectory !== storedMetadata.workspaceId &&
+    if (config?.knownSessionChild && !storedMetadata && !config.phase) {
+      this.logger.warn('[SdkAgentAdapter] Child metadata is absent; refusing resume', { sessionId });
+      throw new SdkError('Cannot resume a child without phase metadata');
+    }
+    if ((config?.knownSessionChild || storedMetadata?.isChildSession === true) &&
         storedPhaseState === undefined && !config?.phase &&
         !this.phaseBySession.has(sessionId as string)) {
       this.logger.warn('[SdkAgentAdapter] Legacy child phase cannot be proven; refusing resume', { sessionId });
@@ -1528,6 +1532,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       usageCostSource,
       accountingAuthEnv,
       capacityRoute,
+      toolProfileApplied,
     } = await this.sessionLifecycle.executeQuery({
       phase,
       skills: config?.skills,
@@ -1610,7 +1615,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       });
     };
 
-    return this.streamTransformer.transform({
+    return Object.assign(this.streamTransformer.transform({
       sdkQuery,
       sessionId,
       initialModel,
@@ -1646,7 +1651,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
         onStreamEnd,
         beforeLiveStatsDispose,
       }),
-    });
+    }), toolProfileApplied ? { toolProfileApplied: true as const } : {});
   }
 
   isSessionActive(sessionId: SessionId): boolean {
@@ -1958,6 +1963,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       accountSelection?: ProviderAccountSelection;
       tabId?: string;
       providerProfile?: ProviderProfile;
+      knownSessionChild?: boolean;
     },
   ): Promise<AsyncIterable<FlatStreamEventUnion>> {
     if (!this.initialized) {
@@ -2030,8 +2036,11 @@ export class SdkAgentAdapter implements IAgentAdapter {
       this.logger.warn('[SdkAgentAdapter] Child phase metadata is missing; refusing slash relaunch', { sessionId });
       throw new SdkError('Cannot relaunch a child with missing phase metadata');
     }
-    if (slashMetadata?.workingDirectory &&
-        slashMetadata.workingDirectory !== slashMetadata.workspaceId &&
+    if (config.knownSessionChild && !slashMetadata && !this.phaseBySession.has(sessionId as string)) {
+      this.logger.warn('[SdkAgentAdapter] Child metadata is absent; refusing slash relaunch', { sessionId });
+      throw new SdkError('Cannot relaunch a child without phase metadata');
+    }
+    if ((config.knownSessionChild || slashMetadata?.isChildSession === true) &&
         slashPhaseState === undefined &&
         !this.phaseBySession.has(sessionId as string)) {
       this.logger.warn('[SdkAgentAdapter] Legacy child phase cannot be proven; refusing slash relaunch', { sessionId });

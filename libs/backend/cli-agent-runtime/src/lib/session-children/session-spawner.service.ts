@@ -1928,9 +1928,6 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (!child) {
       const byCwd = this.registry.findUniqueUnboundByCwd(cwd);
       if (!byCwd) return undefined;
-      // Another session opened in the same worktree is not this child.
-      if (byCwd.sdkSessionId && byCwd.sdkSessionId !== sessionId)
-        return undefined;
       child = byCwd;
       if (!byCwd.sdkSessionId && sessionId) {
         child =

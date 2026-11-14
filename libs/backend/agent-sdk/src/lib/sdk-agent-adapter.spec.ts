@@ -1854,6 +1854,44 @@ describe('SdkAgentAdapter', () => {
       expect(h.sessionLifecycle.executeQuery).not.toHaveBeenCalled();
     });
 
+    it('resumes a legacy handoff in another cwd without child evidence', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'legacy-handoff', name: 'Handoff', workspaceId: '/workspace',
+        workingDirectory: '/workspace/handoff',
+      } as never);
+      h.sessionLifecycle.executeQuery.mockResolvedValueOnce({
+        sdkQuery: createFakeQuery(), initialModel: 'claude',
+        abortController: new AbortController(),
+      } as ExecuteQueryResult);
+      await h.adapter.resumeSession('legacy-handoff' as SessionId);
+      expect(h.sessionLifecycle.executeQuery.mock.calls[0][0].phase).toBeUndefined();
+    });
+
+    it('refuses a legacy child with no phase evidence', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'legacy-child', name: 'Child', workspaceId: '/workspace',
+        workingDirectory: '/workspace/child', isChildSession: true,
+      } as never);
+      await expect(h.adapter.resumeSession('legacy-child' as SessionId)).rejects.toThrow(
+        'legacy child without phase evidence',
+      );
+      expect(h.sessionLifecycle.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('refuses a known child with missing metadata before an unphased run', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue(null);
+      await expect(h.adapter.resumeSession('missing-child' as SessionId, {
+        knownSessionChild: true,
+      })).rejects.toThrow('child without phase metadata');
+      expect(h.sessionLifecycle.executeQuery).not.toHaveBeenCalled();
+    });
+
     it('refuses malformed child phase state before a resumed query', async () => {
       const h = makeAdapter();
       await h.adapter.initialize();
@@ -2703,6 +2741,44 @@ describe('SdkAgentAdapter', () => {
   });
 
   describe('executeSlashCommand()', () => {
+    it('restores a saved phase on slash relaunch', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      const phase = {
+        version: 1, kind: 'implement',
+        text: '## Method\nDo.\n\n## Output contract\nWrite.\n\n## Return value\nReturn.\n\n## Refusals\nRefuse.\n\n## Escalation protocol\nAsk.',
+        definition: { version: 1, kind: 'implement', input: ['plan'],
+          deliverable: ['change'], verdict: ['done'], acceptanceStep: ['check'],
+          requiredCapabilities: ['reasoning'],
+          toolProfile: { disallowedTools: ['Bash'], permission: 'allow' },
+          discipline: { method: 'Do.', outputContract: 'Write.', returnValue: 'Return.',
+            refusals: 'Refuse.', escalationProtocol: 'Ask.' } },
+        toolProfile: { disallowedTools: ['Bash'], permission: 'allow' },
+      } as PhaseDispatchV1;
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'phase-slash', name: 'Child', workspaceId: '/workspace',
+        isChildSession: true, phaseState: 'present', phase,
+      } as never);
+      h.sessionLifecycle.executeSlashCommandQuery.mockResolvedValueOnce({
+        sdkQuery: createFakeQuery(), initialModel: 'claude',
+        abortController: new AbortController(),
+      } as ExecuteQueryResult);
+      await h.adapter.executeSlashCommand('phase-slash' as SessionId, '/compact', {});
+      expect(h.sessionLifecycle.executeSlashCommandQuery.mock.calls[0][2].phase).toEqual(phase);
+    });
+
+    it('refuses a legacy child slash relaunch without phase evidence', async () => {
+      const h = makeAdapter();
+      await h.adapter.initialize();
+      h.metadataStore.get.mockResolvedValue({
+        sessionId: 'legacy-child', name: 'Child', workspaceId: '/workspace',
+        isChildSession: true,
+      } as never);
+      await expect(h.adapter.executeSlashCommand('legacy-child' as SessionId, '/compact', {}))
+        .rejects.toThrow('legacy child without phase evidence');
+      expect(h.sessionLifecycle.executeSlashCommandQuery).not.toHaveBeenCalled();
+    });
+
     it('throws SdkError before initialize()', async () => {
       const { adapter } = makeAdapter();
       await expect(

@@ -49,6 +49,8 @@ import {
   type PermissionLevel,
   type SessionMcpNotice,
   type PhaseKind,
+  type PhaseDispatchV1,
+  type PhaseSkillV1,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
 import {
@@ -798,8 +800,8 @@ export function buildFlagSettingsArg(
  */
 export interface QueryOptionsInput {
   /** Validated phase and host-resolved skills for this SDK session. */
-  phase?: import('@ptah-extension/shared').PhaseDispatchV1;
-  skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[];
+  phase?: PhaseDispatchV1;
+  skills?: readonly PhaseSkillV1[];
   /** Certified account route supplied by admission; omitted preserves ambient auth. */
   accountRoute?: ClaudeAccountRoute;
   /**
@@ -1056,8 +1058,8 @@ export type SdkQueryOptions = Options;
 export function withPhaseDelivery(
   systemPrompt: Options['systemPrompt'],
   cwd: string,
-  phase?: import('@ptah-extension/shared').PhaseDispatchV1,
-  skills?: readonly import('@ptah-extension/shared').PhaseSkillV1[],
+  phase?: PhaseDispatchV1,
+  skills?: readonly PhaseSkillV1[],
 ): Options['systemPrompt'] {
   if (!phase && !skills?.length) return systemPrompt;
   if (!systemPrompt || typeof systemPrompt !== 'object' ||
@@ -1646,6 +1648,8 @@ export class SdkQueryOptionsBuilder {
 
     return {
       prompt: userMessageStream,
+      // Builder evidence: the phase denials were merged into this options set.
+      // This does not certify a later caller's mutations to Options before query().
       ...(phaseDisallowedTools?.length && phaseDisallowedTools.every(tool => disallowedTools.includes(tool))
         ? { toolProfileApplied: true as const } : {}),
       options: {
@@ -2303,7 +2307,7 @@ export class SdkQueryOptionsBuilder {
     toolProfile?: McpToolProfile,
     cwd?: string,
     signal?: AbortSignal,
-    phase?: import('@ptah-extension/shared').PhaseDispatchV1,
+    phase?: PhaseDispatchV1,
     phaseDisallowedTools?: readonly string[],
   ): Record<string, McpHttpServerConfig> {
     if (!mcpServerRunning) {

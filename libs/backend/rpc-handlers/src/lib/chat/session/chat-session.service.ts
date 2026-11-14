@@ -42,6 +42,7 @@ import {
   safeErrorKind,
   withRestoredOutputLoss,
   type AgentProcessManager,
+  SessionChildRegistry,
 } from '@ptah-extension/cli-agent-runtime';
 import { SMITHERY_API_KEY_SECRET_ID } from '../../handlers/mcp-directory-rpc.schema';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
@@ -468,6 +469,8 @@ export class ChatSessionService {
     private readonly followUpQueue: ChatFollowUpQueue | null = null,
     @inject(SDK_TOKENS.SDK_MODEL_SERVICE, { isOptional: true })
     private readonly childModelCatalog: SdkModelService | undefined = undefined,
+    @inject(SessionChildRegistry, { isOptional: true })
+    private readonly sessionChildren: SessionChildRegistry | undefined = undefined,
   ) {
     this.subscribeToMcpStatus();
     this.subscribeToSessionEnd();
@@ -2948,6 +2951,9 @@ export class ChatSessionService {
       );
       const resumeConfig: AgentSessionResumeConfig = {
         ...config,
+        ...(this.sessionChildren?.get(sessionId as string)
+          ? { knownSessionChild: true }
+          : {}),
         ...(execution.runtime === 'claude-sdk'
           ? {
               model: execution.model,
@@ -2977,6 +2983,7 @@ export class ChatSessionService {
       if (nativeId) this.followUpQueue?.commitAdmission(sessionId, nativeId);
       let nativeSucceeded = false;
       let stream: Awaited<ReturnType<IAgentAdapter['resumeSession']>>;
+      const wasActive = this.sdkAdapter.isSessionActive(sessionId);
       try {
         stream = await this.sdkAdapter.resumeSession(
           sessionId,
@@ -2985,6 +2992,12 @@ export class ChatSessionService {
             : resumeConfig,
         );
         nativeSucceeded = true;
+        const child = this.sessionChildren?.get(sessionId as string);
+        if (child && !wasActive) {
+          this.sessionChildren?.update(child.childSessionId, {
+            toolProfileApplied: stream.toolProfileApplied === true,
+          });
+        }
       } finally {
         if (nativeId) {
           if (nativeSucceeded) this.followUpQueue?.acceptResumed(sessionId, tabId, nativeId);

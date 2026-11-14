@@ -105,6 +105,7 @@ function makeService(params: {
   getResumableBySession?: jest.Mock;
   getInterruptedBySession?: jest.Mock;
   saveResumeState?: jest.Mock;
+  sessionChildren?: { get: jest.Mock; update: jest.Mock };
   upgradeLegacyPluginConfigAncestorRoots?: jest.Mock;
   sessionEndRegister?: jest.Mock;
   restoreAgents?: jest.Mock;
@@ -267,6 +268,9 @@ function makeService(params: {
       if (!result) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
       return { type: 2 };
     } } as never,
+    undefined,
+    undefined,
+    params.sessionChildren as never,
   );
 }
 
@@ -515,6 +519,38 @@ describe('ChatSessionService — resumeSession activate:true (TS-04)', () => {
       SESSION_ID,
       expect.objectContaining({ mcpServerRunning: true }),
     );
+  });
+
+  it('passes child evidence and records the resumed run tool profile', async () => {
+    const child = { childSessionId: TAB_ID, toolProfileApplied: true };
+    const sessionChildren = {
+      get: jest.fn().mockReturnValue(child),
+      update: jest.fn(),
+    };
+    const stream = (async function* () {
+      /* no events */
+    })();
+    const resumeSession = jest.fn().mockResolvedValue(stream);
+    const svc = makeService({
+      isSessionActive: jest.fn().mockReturnValue(false),
+      resumeSession,
+      sessionChildren,
+    });
+
+    await svc.resumeSession({
+      sessionId: SESSION_ID,
+      tabId: TAB_ID,
+      workspacePath: OPEN_FOLDER,
+      activate: true,
+    });
+
+    expect(resumeSession).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({ knownSessionChild: true }),
+    );
+    expect(sessionChildren.update).toHaveBeenCalledWith(TAB_ID, {
+      toolProfileApplied: false,
+    });
   });
 
   it('omits activation fields when activate:true is not requested', async () => {
