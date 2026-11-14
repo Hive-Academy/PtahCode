@@ -1,5 +1,7 @@
 /** Card family types (TASK_2026_1012_b1dc, `family-card-look.md`). */
 
+import { numberAttribute } from '@angular/core';
+
 /**
  * `card`: the default card (base-200 fill, base-300 border).
  * `subtle`: a quieter plane (surface-1 fill).
@@ -45,6 +47,12 @@ export type PtahCardDensity = 'compact' | 'comfortable';
 
 /** Heading level of `ptah-section-header`. The look does not depend on the level. */
 export type PtahSectionLevel = 2 | 3 | 4;
+
+/** Input transform for a section heading level: 2 and 4 stay, all else is 3. */
+export function toSectionLevel(value: unknown): PtahSectionLevel {
+  const level = numberAttribute(value, 3);
+  return level === 2 || level === 4 ? level : 3;
+}
 
 /** group: 14 px title (default, most used). section: 16 px title. */
 export type PtahSectionSize = 'group' | 'section';

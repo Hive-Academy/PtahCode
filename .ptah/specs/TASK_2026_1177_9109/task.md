@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1177_9109
-status: backlog
+status: in_review
 type: FEATURE
 title: Add UI pattern layer and convert Accounts tab
 depends_on: []

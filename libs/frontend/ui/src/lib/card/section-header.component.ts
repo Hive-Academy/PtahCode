@@ -2,14 +2,8 @@ import {
   ChangeDetectionStrategy,
   Component,
   input,
-  numberAttribute,
 } from '@angular/core';
-import { PtahSectionLevel, PtahSectionSize } from './card.types';
-
-function toSectionLevel(value: unknown): PtahSectionLevel {
-  const level = numberAttribute(value, 3);
-  return level === 2 || level === 4 ? level : 3;
-}
+import { PtahSectionLevel, PtahSectionSize, toSectionLevel } from './card.types';
 
 /**
  * Section header owner (TASK_2026_1012_b1dc). A title row for a card or a
