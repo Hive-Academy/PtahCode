@@ -96,7 +96,6 @@ const TAB_CLASS = [
             role="tablist"
             class="flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] [@container(min-width:768px)]:flex-col [@container(min-width:768px)]:gap-[var(--ptah-gap-label)] [@container(min-width:768px)]:overflow-visible [@container(min-width:768px)]:[border-bottom:none]"
             [attr.aria-orientation]="orientation()"
-            [attr.aria-label]="navLabel()"
             data-testid="settings-layout-tablist"
           >
             @for (tab of tabs(); track tab.id; let i = $index) {

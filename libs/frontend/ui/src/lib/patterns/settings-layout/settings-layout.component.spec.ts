@@ -131,7 +131,10 @@ describe('PtahSettingsLayoutComponent', () => {
 
   it('wires the tabs to the panel', () => {
     const list = tablist();
-    expect(list.getAttribute('aria-label')).toBe('Settings sections');
+    expect(list.getAttribute('aria-label')).toBeNull();
+    expect(
+      list.closest('nav')?.getAttribute('aria-label'),
+    ).toBe('Settings sections');
     expect(tabs()).toHaveLength(4);
     for (const tab of tabs()) {
       expect(tab.tagName).toBe('BUTTON');
