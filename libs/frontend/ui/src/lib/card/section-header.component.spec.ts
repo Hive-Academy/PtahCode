@@ -14,6 +14,7 @@ import { PtahSectionHeaderComponent } from './section-header.component';
       [size]="size()"
       [eyebrow]="eyebrow()"
       [description]="description()"
+      [headingId]="headingId()"
     >
       <span status data-testid="status">3 active</span>
       <button actions type="button" data-testid="action">Add</button>
@@ -25,6 +26,7 @@ class HostComponent {
   readonly size = signal<PtahSectionSize>('group');
   readonly eyebrow = signal<string | null>(null);
   readonly description = signal<string | null>(null);
+  readonly headingId = signal<string | null>(null);
 }
 
 describe('PtahSectionHeaderComponent', () => {
@@ -55,6 +57,22 @@ describe('PtahSectionHeaderComponent', () => {
     fixture.componentInstance.level.set(level);
     fixture.detectChanges();
     expect(full.querySelector('.ptah-section-title')?.tagName).toBe(tag);
+  });
+
+  it('puts no id on the heading by default', () => {
+    const { full } = setup();
+    expect(full.querySelector('.ptah-section-title')?.hasAttribute('id')).toBe(false);
+  });
+
+  it.each<[PtahSectionLevel]>([[2], [3], [4]])('binds headingId as the id of the level %s heading', (level) => {
+    const { fixture, full } = setup();
+    fixture.componentInstance.level.set(level);
+    fixture.componentInstance.headingId.set('providers-heading');
+    fixture.detectChanges();
+    expect(full.querySelector('.ptah-section-title')?.id).toBe('providers-heading');
+    fixture.componentInstance.headingId.set(null);
+    fixture.detectChanges();
+    expect(full.querySelector('.ptah-section-title')?.hasAttribute('id')).toBe(false);
   });
 
   it('accepts a static level attribute', () => {

@@ -127,7 +127,8 @@ export class PtahDescriptionListComponent {
  * `dl` holds only `div` rows with `dt` and `dd` (valid `dl` content). The
  * default slot is the value
  * (text, `ptahBadge`, a status dot and a word, a chip list). The `[actions]`
- * slot is a row action, for example a copy `ptahIconButton`.
+ * slot is a row action, for example a copy `ptahIconButton`. It renders in a
+ * second `dd` of the row, so the row stays `dt` + `dd` only.
  *
  * The placeholder shows when the `value` input holds an empty value, or when
  * `value` is `undefined` and the default slot has no content. A bound
@@ -166,11 +167,12 @@ export class PtahDescriptionListComponent {
         ><ng-content
       /></span>
     </dd>
-    <div
+    <!-- A second dd: a dl row holds only dt and dd. Empty (no action) is display:none. -->
+    <dd
       data-ptah-description-actions
       class="flex items-center gap-[var(--ptah-gap-controls)] justify-self-start empty:hidden [@container(min-width:640px)]:justify-self-end"
       ><ng-content select="[actions]"
-    /></div>
+    /></dd>
   `,
 })
 export class PtahDescriptionItemComponent {

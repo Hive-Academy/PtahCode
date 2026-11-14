@@ -104,7 +104,12 @@ export class PtahEditTemplateDirective {
       [attr.aria-labelledby]="headingId"
       [class]="sectionClass()"
     >
-      <ptah-section-header [heading]="heading()" [description]="description()" [level]="level()">
+      <ptah-section-header
+        [heading]="heading()"
+        [description]="description()"
+        [level]="level()"
+        [headingId]="headingId"
+      >
         <ng-container ngProjectAs="[status]"><ng-content select="[status]" /></ng-container>
         @if (!editing()) {
           <button
@@ -297,11 +302,10 @@ export class PtahEditableSectionComponent {
 
   constructor() {
     afterEveryRender({
-      // The section header owns the heading tag. The pattern gives it the id
-      // that `aria-labelledby` names, and makes it a focus target for step 9.
+      // The section header owns the heading tag and gets its id through `[headingId]`.
+      // The pattern makes the heading a focus target for step 9.
       write: () => {
         const heading = this.headingElement();
-        if (heading && heading.id !== this.headingId) heading.id = this.headingId;
         if (heading && !heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
       },
       // The view slot is read only in view mode. One walk of its direct child nodes per render.
@@ -380,9 +384,7 @@ export class PtahEditableSectionComponent {
   }
 
   private headingElement(): HTMLElement | null {
-    return this.hostRef.nativeElement.querySelector<HTMLElement>(
-      'ptah-section-header .ptah-section-title',
-    );
+    return this.hostRef.nativeElement.querySelector<HTMLElement>(`[id="${this.headingId}"]`);
   }
 
   private focusFirstField(): void {
