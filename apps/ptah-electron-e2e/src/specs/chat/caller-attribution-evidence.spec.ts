@@ -37,14 +37,20 @@ test.describe('@evidence Codex caller attribution', () => {
     await target.screenshot({ path: path.join(shots, `${name}-crop.png`) });
   }
 
-  async function liveApp(): Promise<{ app: ElectronApplication; page: Page; bridge: RpcBridge; cleanup: () => void }> {
+  async function liveApp(): Promise<{ app: ElectronApplication; page: Page; bridge: RpcBridge; workspace: string; cleanup: () => void }> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-caller-evidence-'));
     const profile = path.join(dir, 'profile');
     const home = path.join(dir, 'home');
+    // A separate project folder: the repository root contains the app build
+    // (dist/apps/ptah-electron), and the host refuses sessions in an ancestor
+    // of the app installation directory.
+    const workspace = path.join(dir, 'workspace');
     fs.mkdirSync(profile);
     fs.mkdirSync(home);
+    fs.mkdirSync(workspace);
+    fs.writeFileSync(path.join(workspace, 'README.md'), '# caller attribution evidence\n');
     const app = await launchPtah({
-      args: [root], userDataDir: profile, timeout: 180_000,
+      args: [workspace], userDataDir: profile, timeout: 180_000,
       env: {
         PTAH_DB_PATH: path.join(dir, 'state.sqlite'),
         HOME: home, USERPROFILE: home,
@@ -53,16 +59,16 @@ test.describe('@evidence Codex caller attribution', () => {
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 900 });
-    return { app, page, bridge: new RpcBridge(app), cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }) };
+    return { app, page, bridge: new RpcBridge(app), workspace, cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }) };
   }
 
-  async function openCodexTab(page: Page, app: ElectronApplication, bridge: RpcBridge, permission: 'auto-edit' | 'ask'): Promise<string> {
+  async function openCodexTab(page: Page, app: ElectronApplication, bridge: RpcBridge, workspace: string, permission: 'auto-edit' | 'ask'): Promise<string> {
     const selected = await rpc(bridge, 'auth:saveSettings', {
       authMethod: 'thirdParty', anthropicProviderId: 'openai-codex', applyTo: 'workspace',
     });
     const selection = z.object({ success: z.boolean(), error: z.string().optional() }).parse(selected);
     if (!selection.success) throw new Error(`Codex provider selection failed: ${selection.error ?? 'unknown'}`);
-    const listed = models.parse(await rpc(bridge, 'config:models-list', { workspacePath: root }));
+    const listed = models.parse(await rpc(bridge, 'config:models-list', { workspacePath: workspace }));
     const model = listed.models.find((entry) => /codex|gpt/i.test(entry.name)) ?? listed.models[0];
     if (!model) throw new Error('No Codex model available');
     await rpc(bridge, 'config:model-switch', { model: model.id, applyTo: 'workspace' });
@@ -90,7 +96,7 @@ test.describe('@evidence Codex caller attribution', () => {
     test.setTimeout(600_000);
     const live = await liveApp();
     try {
-      const parent = await openCodexTab(live.page, live.app, live.bridge, 'auto-edit');
+      const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'auto-edit');
       const before = await live.page.locator(railCard).count();
       await ask(live.page, 'Call the Ptah MCP tool ptah_session_start exactly once with a trivial task: "Reply with CHILD-READY." Report its result.');
       await expect.poll(() => live.page.locator(railCard).count(), { timeout: 360_000, intervals: [2_000] }).toBeGreaterThan(before);
@@ -110,7 +116,7 @@ test.describe('@evidence Codex caller attribution', () => {
     test.setTimeout(600_000);
     const live = await liveApp();
     try {
-      const parent = await openCodexTab(live.page, live.app, live.bridge, 'auto-edit');
+      const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'auto-edit');
       await ask(live.page, 'Call ptah_agent_list, then ptah_agent_spawn once for a small available Codex lane. Its sole task: call ptah_agent_report with message "E2E-REPORT-MARKER" and exit. Wait for the report.');
       const report = live.page.locator('[data-testid="chat-peer-message"]', { hasText: 'E2E-REPORT-MARKER' });
       await expect(report).toBeVisible({ timeout: 420_000 });
@@ -126,7 +132,7 @@ test.describe('@evidence Codex caller attribution', () => {
     test.setTimeout(600_000);
     const live = await liveApp();
     try {
-      const parent = await openCodexTab(live.page, live.app, live.bridge, 'ask');
+      const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'ask');
       await ask(live.page, 'Run the harmless shell command `git status` exactly once. Wait for permission if requested.');
       const approval = live.page.locator('ptah-permission-request-card:visible', { hasText: 'git status' }).first();
       await expect(approval).toBeVisible({ timeout: 360_000 });
