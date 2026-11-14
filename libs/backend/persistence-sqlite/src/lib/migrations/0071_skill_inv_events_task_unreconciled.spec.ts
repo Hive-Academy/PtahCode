@@ -17,7 +17,7 @@ describe('migration 0071_skill_inv_events_task_unreconciled', () => {
       name: '0071_skill_inv_events_task_unreconciled',
       sql,
     });
-    expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(74);
+    expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(75);
     expect(sql).not.toContain('${');
   });
 

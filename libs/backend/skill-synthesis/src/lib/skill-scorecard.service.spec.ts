@@ -5,6 +5,7 @@ import { SKILL_SYNTHESIS_TOKENS } from './di/tokens';
 import { SkillInvocationEventStore } from './skill-invocation-event.store';
 import { SkillScorecardService } from './skill-scorecard.service';
 import type {
+  PhaseGradeAggregate,
   SkillTaskGrade,
   SkillTaskGradeAggregate,
 } from './skill-task-grade.store';
@@ -59,6 +60,23 @@ describe('SkillScorecardService', () => {
     });
     expect(events.getUsageStats).toHaveBeenCalledWith('deep-research');
   });
+  it('maps phase aggregates to phase scorecards with a separate role-alias row', () => {
+    const getPhaseAggregates = jest.fn((_root: string | null): PhaseGradeAggregate[] => [
+      { phaseKind: 'tests', legacy: false, aliasedRoles: [], graded: 2, passed: 1, successRate: 0.5 },
+      { phaseKind: 'tests', legacy: true, aliasedRoles: ['senior-tester'], graded: 1, passed: 0, successRate: 0 },
+    ]);
+    const phased = new SkillScorecardService(logger as never, { getPhaseAggregates } as never, null, {} as never);
+    expect(phased.getPhaseScorecards(workspaceRoot)).toEqual([
+      { phaseKind: 'tests', source: 'phase', legacy: false, aliasedRoles: [], gradedCount: 2, passedCount: 1, gradedSuccessRate: 0.5 },
+      { phaseKind: 'tests', source: 'role-alias', legacy: true, aliasedRoles: ['senior-tester'], gradedCount: 1, passedCount: 0, gradedSuccessRate: 0 },
+    ]);
+    expect(getPhaseAggregates).toHaveBeenCalledWith(workspaceRoot);
+    // A store failure degrades to no phase scorecards.
+    getPhaseAggregates.mockImplementation(() => { throw new Error('db closed'); });
+    expect(phased.getPhaseScorecards(workspaceRoot)).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith('[skill-synthesis] getPhaseScorecards failed', { error: 'db closed' });
+  });
+
   it('uses only task grades for the scorecard rate and recent verdicts', () => {
     const { service, grades } = makeService();
     const card = service.getScorecards(['agent-a'], workspaceRoot)['agent-a'];

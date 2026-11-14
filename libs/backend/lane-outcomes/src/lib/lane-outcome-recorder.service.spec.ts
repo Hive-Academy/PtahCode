@@ -295,6 +295,30 @@ describe('LaneOutcomeRecorder task-kind resolution', () => {
     expect(tasks.classify).not.toHaveBeenCalled();
   });
 
+  it('stores the phase kind on the row and maps the task kind from it', async () => {
+    const tasks = kindClassifier();
+    const { store, recorder, pipeline } = harness(undefined, tasks);
+    recorder.recordLaneCompletion(
+      laneInput('lane:phased', { taskKind: null, role: null, phaseKind: 'tests' }),
+      { brief: 'Write the tests' },
+    );
+    await pipeline.flush();
+    await settle();
+    expect(await store.get('lane:phased')).toMatchObject({
+      phaseKind: 'tests',
+      taskKind: 'tests',
+      taskKindSource: 'mapped',
+    });
+    expect(tasks.classify).not.toHaveBeenCalled();
+  });
+
+  it('stores a null phase kind for a lane without a phase', async () => {
+    const { store, recorder, pipeline } = harness();
+    recorder.recordLaneCompletion(laneInput('lane:no-phase', { verdict: 'delivered' }));
+    await pipeline.flush();
+    expect((await store.get('lane:no-phase'))?.phaseKind).toBeNull();
+  });
+
   it('records a mapped role kind with zero classification calls', async () => {
     const tasks = kindClassifier();
     const { store, recorder, pipeline } = harness(undefined, tasks);

@@ -16,6 +16,7 @@ import type {
   DivergedReason,
   LibraryProvenance,
 } from '../library-provenance';
+import type { PhaseKind } from '../phase-contract.types';
 
 export type SkillCloneKind = 'skill' | 'agent' | 'command';
 export type SkillCloneStatus = 'clone' | 'authored' | 'synth' | 'diverged';
@@ -262,6 +263,28 @@ export interface SkillSynthesisInvocationStatsParams {
 export interface SkillSynthesisInvocationStatsResult {
   slug: string;
   stats: SkillCloneInvocationStats;
+}
+
+/**
+ * Phase scorecard row (TASK_2026_1175_2690, migration 0075). Grades key on the
+ * phase kind of the lane row, for every executor kind.
+ *
+ * `source: 'phase'` rows count grades with subject kind `phase`.
+ * `source: 'role-alias'` rows (`legacy: true`) count old role grades whose
+ * role slug maps to this phase in `ROLE_PHASE_ALIASES`. A role grade whose run
+ * also has a phase grade is not in the legacy row. Show the two rows apart; do
+ * not add them into one total. Stored grade rows are never rewritten.
+ */
+export interface PhaseScorecard {
+  phaseKind: PhaseKind;
+  source: 'phase' | 'role-alias';
+  legacy: boolean;
+  /** Role slugs read through the alias table. Empty for `source: 'phase'`. */
+  aliasedRoles: string[];
+  gradedCount: number;
+  passedCount: number;
+  /** `null` when nothing is graded. Never a fake 0. */
+  gradedSuccessRate: number | null;
 }
 
 /**

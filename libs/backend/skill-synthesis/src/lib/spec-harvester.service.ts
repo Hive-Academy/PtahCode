@@ -318,6 +318,7 @@ export class SpecHarvesterService implements SpecFindingsPort {
           sourceFile: batch ? BATCHES_FILE : laneVerdict ? 'lane_outcome_records' : review?.file ?? null,
           sourceDigest: spec.artifactDigest, evidenceSource: batch ? 'batch' : laneVerdict ? 'lane-final-review' : 'task-review',
           workspaceRoot, gradedAt: now, findingsRef: review ? `${spec.taskId}/${review.file}` : null,
+          phaseKind: attribution.phaseKind ?? null, executorKind: attribution.executorKind ?? null,
         };
         if (!this.grades.upsert(grade)) {
           this.logger.warn('[spec-harvester] grade key owned by another workspace', {

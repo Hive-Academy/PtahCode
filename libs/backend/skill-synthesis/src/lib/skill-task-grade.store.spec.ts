@@ -16,6 +16,9 @@ function setup(): { db: TestDatabase; store: SkillTaskGradeStore } {
   const schema = sql?.match(/CREATE TABLE skill_task_grades \([\s\S]*?CREATE INDEX idx_skill_task_grades_run ON skill_task_grades\(run_id\);/)?.[0];
   if (!schema) throw new Error('Migration 0056 grade schema unavailable');
   db.exec(schema);
+  // Migration 0075 grade keys (the lane table is created by setupAttributionTables).
+  db.exec(`ALTER TABLE skill_task_grades ADD COLUMN phase_kind TEXT;
+    ALTER TABLE skill_task_grades ADD COLUMN executor_kind TEXT;`);
   return { db, store: new SkillTaskGradeStore(logger as never, { db, isOpen: true } as never) };
 }
 
@@ -28,9 +31,20 @@ function setupAttributionTables(db: TestDatabase): void {
   CREATE TABLE session_task_links (workspace_root TEXT, session_id TEXT, task_id TEXT);
   CREATE TABLE lane_outcome_records (
     run_id TEXT, subagent_session_id TEXT, final_review TEXT, task_id TEXT,
-    workspace_root TEXT, role TEXT, executor_kind TEXT
+    workspace_root TEXT, role TEXT, executor_kind TEXT, phase_kind TEXT
   );`);
   db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run('writer', 'agent');
+}
+
+function insertLane(db: TestDatabase, lane: {
+  runId: string; role: string | null; executorKind: string; phaseKind: string | null; root: string;
+}): void {
+  db.prepare(`INSERT INTO lane_outcome_records
+    (run_id, subagent_session_id, final_review, task_id, workspace_root, role, executor_kind, phase_kind)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    lane.runId, `session-${lane.runId}`, 'approved', 'TASK_2026_001', lane.root,
+    lane.role, lane.executorKind, lane.phaseKind,
+  );
 }
 
 const grade: SkillTaskGrade = {
@@ -44,11 +58,12 @@ describe('groupGradeAttributions', () => {
   const row = (runId: string | null, sessionId: string | null, key: string) => ({
     kind: 'agent' as const, slug: 'writer', run_id: runId, session_id: sessionId,
     attribution_key: key, final_review: null, workspace_root: '/workspace',
+    phase_kind: null, executor_kind: null,
   });
 
   it('keeps one attribution for duplicate facts from the same run and session', () => {
     expect(groupGradeAttributions([row('run-1', 'session-1', 'run:run-1'), row('run-1', 'session-1', 'run:run-1')]))
-      .toEqual([{ kind: 'agent', slug: 'writer', runId: 'run-1', sessionId: 'session-1', attributionKey: 'run:run-1', finalReview: null }]);
+      .toEqual([{ kind: 'agent', slug: 'writer', runId: 'run-1', sessionId: 'session-1', attributionKey: 'run:run-1', finalReview: null, phaseKind: null, executorKind: null }]);
   });
 
   it('drops ambiguous keys while retaining independent keys', () => {
@@ -58,7 +73,7 @@ describe('groupGradeAttributions', () => {
       row(null, 'session-3', 'event:1'),
       row(null, 'session-3', 'event:1'),
       row('run-2', 'session-4', 'run:run-2'),
-    ])).toEqual([{ kind: 'agent', slug: 'writer', runId: 'run-2', sessionId: 'session-4', attributionKey: 'run:run-2', finalReview: null }]);
+    ])).toEqual([{ kind: 'agent', slug: 'writer', runId: 'run-2', sessionId: 'session-4', attributionKey: 'run:run-2', finalReview: null, phaseKind: null, executorKind: null }]);
   });
 });
 
@@ -195,6 +210,64 @@ maybe('SkillTaskGradeStore', () => {
       expect(store.removeAbsent(grade.taskId, '/workspace', ['agent:other:event:3'])).toBe(1);
       expect(store.listRecent('agent', 'writer', 5, '/workspace')).toHaveLength(1);
       expect(store.listRecent('agent', 'manual', 5, '/workspace')).toHaveLength(0);
+    } finally { db.close(); }
+  });
+
+  it('adds phase attributions for every executor kind and keeps the role attribution (0075)', () => {
+    const { db, store } = setup();
+    try {
+      setupAttributionTables(db);
+      db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run('senior-tester', 'agent');
+      insertLane(db, { runId: 'sub', role: 'senior-tester', executorKind: 'subagent', phaseKind: 'tests', root: '/workspace' });
+      insertLane(db, { runId: 'cli', role: null, executorKind: 'cli', phaseKind: 'review', root: '/workspace' });
+      insertLane(db, { runId: 'old', role: 'senior-tester', executorKind: 'subagent', phaseKind: null, root: '/workspace' });
+      insertLane(db, { runId: 'bad', role: null, executorKind: 'cli', phaseKind: 'not-a-phase', root: '/workspace' });
+      insertLane(db, { runId: 'far', role: null, executorKind: 'cli', phaseKind: 'tests', root: '/elsewhere' });
+      const found = store.findAttributions('TASK_2026_001', '/workspace');
+      expect(found).toHaveLength(4);
+      expect(found).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'agent', slug: 'senior-tester', attributionKey: 'run:sub', phaseKind: 'tests', executorKind: 'subagent' }),
+        expect.objectContaining({ kind: 'phase', slug: 'tests', attributionKey: 'run:sub', phaseKind: 'tests', executorKind: 'subagent' }),
+        expect.objectContaining({ kind: 'phase', slug: 'review', attributionKey: 'run:cli', phaseKind: 'review', executorKind: 'cli' }),
+        expect.objectContaining({ kind: 'agent', slug: 'senior-tester', attributionKey: 'run:old', phaseKind: null }),
+      ]));
+    } finally { db.close(); }
+  });
+
+  it('stores and reads the phase and executor keys on a grade', () => {
+    const { db, store } = setup();
+    try {
+      store.upsert({ ...grade, subjectKind: 'phase', subjectSlug: 'tests', phaseKind: 'tests', executorKind: 'cli' });
+      expect(store.listRecent('phase', 'tests', 5, '/workspace'))
+        .toMatchObject([{ subjectKind: 'phase', phaseKind: 'tests', executorKind: 'cli' }]);
+      store.upsert(grade);
+      expect(store.listRecent('agent', 'writer', 5, '/workspace')).toMatchObject([{ phaseKind: null, executorKind: null }]);
+    } finally { db.close(); }
+  });
+
+  it('reads legacy role grades through the alias table and never counts one lane row twice', () => {
+    const { db, store } = setup();
+    try {
+      const role = { ...grade, subjectSlug: 'senior-tester', evidenceSource: 'task-review' };
+      // Legacy role grade (written before 0075): no phase grade for its run.
+      store.upsert({ ...role, attributionKey: 'run:legacy', verdict: 'fail' });
+      // New lane row with a role and a phase: both subjects are written.
+      store.upsert({ ...role, attributionKey: 'run:new', phaseKind: 'tests', executorKind: 'subagent' });
+      store.upsert({ ...role, subjectKind: 'phase', subjectSlug: 'tests', attributionKey: 'run:new', phaseKind: 'tests', executorKind: 'subagent' });
+      // A CLI lane gives only a phase grade.
+      store.upsert({ ...grade, subjectKind: 'phase', subjectSlug: 'tests', attributionKey: 'run:cli', phaseKind: 'tests', executorKind: 'cli', verdict: 'fail' });
+      // A role that is not in the alias table never shows under a phase.
+      store.upsert({ ...grade, attributionKey: 'run:writer' });
+      const before = JSON.stringify(db.prepare('SELECT * FROM skill_task_grades ORDER BY attribution_key, subject_kind').all());
+      const tests = store.getPhaseAggregates('/workspace').filter((row) => row.phaseKind === 'tests');
+      expect(tests).toEqual([
+        { phaseKind: 'tests', legacy: false, aliasedRoles: [], graded: 2, passed: 1, successRate: 0.5 },
+        { phaseKind: 'tests', legacy: true, aliasedRoles: ['senior-tester'], graded: 1, passed: 0, successRate: 0 },
+      ]);
+      expect(store.getPhaseAggregates('/workspace').filter((row) => row.legacy)).toHaveLength(1);
+      expect(store.getPhaseAggregates(null)).toEqual([]);
+      // The read path does not rewrite stored rows.
+      expect(JSON.stringify(db.prepare('SELECT * FROM skill_task_grades ORDER BY attribution_key, subject_kind').all())).toBe(before);
     } finally { db.close(); }
   });
 

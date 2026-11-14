@@ -50,10 +50,14 @@ export type LaneCompletionOutcomeInput = Omit<
   | 'telemetryJoin'
   | 'skillsLoaded'
   | 'sessionEvidenceClass'
+  | 'phaseKind'
 > & {
   executorKind: Exclude<LaneOutcomeRecord['executorKind'], 'subagent'>;
 } & Pick<LaneFailureClassificationInput, 'status' | 'failureKind' | 'exitCode'> & {
-  /** Phase kind for classification. Never stored on the row. */
+  /**
+   * Phase kind of the lane. It resolves the task kind and is stored on the
+   * row (`phase_kind`, migration 0075) as the phase grade key.
+   */
   readonly phaseKind?: PhaseKind | null;
 };
 
@@ -174,6 +178,7 @@ export class LaneOutcomeRecorder {
     const row: LaneOutcomeRecord = {
       ...facts,
       ...resolveTaskKind(input.taskKind, phaseKind ?? null, input.role),
+      phaseKind: phaseKind ?? null,
       subagentSessionId: null,
       parentSessionId: input.parentSessionId ?? null,
       workspaceRoot: input.workspaceRoot?.trim() || null,

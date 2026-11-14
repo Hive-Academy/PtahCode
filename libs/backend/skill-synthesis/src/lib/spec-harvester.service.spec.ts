@@ -571,11 +571,14 @@ function addGradeTables(db: BetterSqliteDb, agents: readonly string[]): void {
   const schema = sql?.match(/CREATE TABLE skill_task_grades \([\s\S]*?CREATE INDEX idx_skill_task_grades_run ON skill_task_grades\(run_id\);/)?.[0];
   if (!schema) throw new Error('Migration 0056 grade schema unavailable');
   db.exec(schema);
+  // Migration 0075 grade keys.
+  db.exec(`ALTER TABLE skill_task_grades ADD COLUMN phase_kind TEXT;
+    ALTER TABLE skill_task_grades ADD COLUMN executor_kind TEXT;`);
   db.exec(`CREATE TABLE skill_registry (slug TEXT, kind TEXT);
     CREATE TABLE session_task_links (workspace_root TEXT, session_id TEXT, task_id TEXT);
     CREATE TABLE lane_outcome_records (
       run_id TEXT, subagent_session_id TEXT, final_review TEXT, task_id TEXT,
-      workspace_root TEXT, role TEXT, executor_kind TEXT
+      workspace_root TEXT, role TEXT, executor_kind TEXT, phase_kind TEXT
     );`);
   for (const slug of agents) db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run(slug, 'agent');
 }
