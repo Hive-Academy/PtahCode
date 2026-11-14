@@ -39,7 +39,7 @@ test.describe('@evidence Codex caller attribution', () => {
     await target.screenshot({ path: path.join(shots, `${name}-crop.png`) });
   }
 
-  async function liveApp(): Promise<{ app: ElectronApplication; page: Page; bridge: RpcBridge; workspace: string; cleanup: () => void }> {
+  async function liveApp(): Promise<{ app: ElectronApplication; page: Page; bridge: RpcBridge; workspace: string; cleanup: (failedItem?: string) => void }> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-caller-evidence-'));
     const profile = path.join(dir, 'profile');
     const home = path.join(dir, 'home');
@@ -77,7 +77,30 @@ test.describe('@evidence Codex caller attribution', () => {
     });
     const page = await app.firstWindow();
     await page.setViewportSize({ width: 1440, height: 900 });
-    return { app, page, bridge: new RpcBridge(app), workspace, cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }) };
+    const cleanup = (failedItem?: string): void => {
+      if (failedItem) keepLogs(dir, [profile, home], failedItem);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    };
+    return { app, page, bridge: new RpcBridge(app), workspace, cleanup };
+  }
+
+  /**
+   * The app logs live in the temp profile, which cleanup deletes. After a
+   * failure, copy each `.log` file to the git-ignored .ptah/tmp folder so the
+   * cause can be read. Never attach or upload these files: they are raw logs.
+   */
+  function keepLogs(dir: string, sources: string[], item: string): void {
+    const target = path.join(root, '.ptah', 'tmp', 'caller-evidence-logs', item);
+    for (const source of sources) {
+      if (!fs.existsSync(source)) continue;
+      for (const entry of fs.readdirSync(source, { recursive: true, encoding: 'utf8' })) {
+        const file = path.join(source, entry);
+        if (!entry.endsWith('.log') || !fs.statSync(file).isFile()) continue;
+        const copy = path.join(target, path.relative(dir, file));
+        fs.mkdirSync(path.dirname(copy), { recursive: true });
+        fs.copyFileSync(file, copy);
+      }
+    }
   }
 
   async function openCodexTab(page: Page, app: ElectronApplication, bridge: RpcBridge, workspace: string, permission: 'auto-edit' | 'ask'): Promise<string> {
@@ -143,6 +166,7 @@ test.describe('@evidence Codex caller attribution', () => {
   test('item a: Codex tab starts a child session attributed to its parent', async () => {
     test.setTimeout(600_000);
     const live = await liveApp();
+    let passed = false;
     try {
       const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'auto-edit');
       const before = await live.page.locator(railCard).count();
@@ -157,18 +181,20 @@ test.describe('@evidence Codex caller attribution', () => {
       await expect(parentCard.locator('[data-testid="rail-child-count"]')).toBeVisible({ timeout: 60_000 });
       await expect(live.page.locator('[data-testid="chat-tool-output"]', { hasText: 'unattributed-caller' })).toHaveCount(0);
       await capture(live.page, 'caller-item-a-child', railCard);
+      passed = true;
     } finally {
       await live.app.close();
-      live.cleanup();
+      live.cleanup(passed ? undefined : 'item-a');
     }
   });
 
   test('item b: lane report arrives in the Codex parent tab', async () => {
     test.setTimeout(600_000);
     const live = await liveApp();
+    let passed = false;
     try {
       const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'auto-edit');
-      await ask(live.page, 'Call ptah_agent_list, then call ptah_agent_spawn once with cli "codex" and timeout 600000. The lane task: call ptah_agent_report with message "E2E-REPORT-MARKER", then exit. Wait for the report.');
+      await ask(live.page, 'Call ptah_agent_list, then call ptah_agent_spawn once with cli "codex" and timeout 600000. Both tools are on the ptah MCP server; search for a tool there if it is not loaded yet. The lane task: call ptah_agent_report with message "E2E-REPORT-MARKER", then exit. Wait for the report.');
       // The completion notice repeats the task text, so it also contains the
       // marker. Accept only a real lane report envelope.
       const report = live.page.locator('[data-testid="chat-peer-message"]', {
@@ -181,15 +207,17 @@ test.describe('@evidence Codex caller attribution', () => {
       await expect(report.first()).toBeVisible();
       await expect(live.page.locator(`${railCard}[data-tab-id="${parent}"]`)).toBeVisible();
       await capture(live.page, 'caller-item-b-report', report);
+      passed = true;
     } finally {
       await live.app.close();
-      live.cleanup();
+      live.cleanup(passed ? undefined : 'item-b');
     }
   });
 
   test('item c: Codex approval prompt routes to its own session UI; deny it', async () => {
     test.setTimeout(600_000);
     const live = await liveApp();
+    let passed = false;
     try {
       const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'ask');
       // `git status` is on the Codex known-safe list and can run without a prompt.
@@ -208,9 +236,10 @@ test.describe('@evidence Codex caller attribution', () => {
         .getByRole('button', { name: 'Deny', exact: true }).click();
       await expect(approval).toHaveCount(0, { timeout: 60_000 });
       await capture(live.page, 'caller-item-c-approval-denied', `${railCard}[data-tab-id="${parent}"]`);
+      passed = true;
     } finally {
       await live.app.close();
-      live.cleanup();
+      live.cleanup(passed ? undefined : 'item-c');
     }
   });
 });
