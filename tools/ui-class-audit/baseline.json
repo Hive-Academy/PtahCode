@@ -739,28 +739,6 @@
   "libs/frontend/declarative-dashboard/src/lib/components/surface-renderer.component.ts": {
     "<dynamic>": 1
   },
-  "libs/frontend/git-ui/src/lib/branch-picker/branch-picker-dropdown.component.ts": {
-    "btn": 2,
-    "btn-outline": 2,
-    "btn-xs": 2
-  },
-  "libs/frontend/git-ui/src/lib/conflict/conflict-banner.component.ts": {
-    "<dynamic>": 1,
-    "btn": 1,
-    "btn-error": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/git-ui/src/lib/history/history-stash-section.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/git-ui/src/lib/open-in/open-in-button.component.ts": {
-    "btn": 2,
-    "btn-disabled": 1,
-    "btn-ghost": 2,
-    "btn-xs": 2
-  },
   "libs/frontend/git-ui/src/lib/review-canvas/changed-file-row-actions.component.ts": {
     "<dynamic>": 3
   },

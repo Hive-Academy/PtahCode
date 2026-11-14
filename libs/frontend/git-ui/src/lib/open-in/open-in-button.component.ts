@@ -13,6 +13,7 @@ import {
 import { ChevronDown, ExternalLink, LucideAngularModule } from 'lucide-angular';
 import { rpcCall, VSCodeService } from '@ptah-extension/core';
 import type { EditorTarget, EditorTargetId } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { EditorBrandIconComponent } from './editor-brand-icon.component';
 
 export type OpenInButtonMode = 'full' | 'icon-only';
@@ -30,7 +31,7 @@ const NO_EDITOR_TITLE = 'No supported editor found on this machine';
 @Component({
   selector: 'ptah-open-in-button',
   standalone: true,
-  imports: [LucideAngularModule, EditorBrandIconComponent],
+  imports: [PtahButtonDirective, LucideAngularModule, EditorBrandIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:click)': 'onDocumentClick($event)' },
   // The caret is a direct child of daisyUI's `.dropdown`, whose
@@ -54,12 +55,14 @@ const NO_EDITOR_TITLE = 'No supported editor found on this machine';
     <div class="join join-horizontal" data-testid="open-in-button">
       <button
         type="button"
-        class="btn btn-ghost btn-xs join-item gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
+        ptahButton
+        variant="ghost"
+        size="xs"
+        class="join-item gap-[var(--ptah-gap-label)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
         data-testid="open-in-primary"
         [class.w-5]="mode() === 'icon-only'"
         [class.h-5]="mode() === 'icon-only'"
         [class.p-0]="mode() === 'icon-only'"
-        [class.btn-disabled]="available().length === 0"
         [disabled]="available().length === 0"
         [attr.aria-disabled]="available().length === 0"
         [attr.aria-label]="primaryAriaLabel()"
@@ -89,7 +92,10 @@ const NO_EDITOR_TITLE = 'No supported editor found on this machine';
           <button
             #caret
             type="button"
-            class="open-in-caret btn btn-ghost btn-xs join-item px-1"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="open-in-caret join-item px-1"
             data-testid="open-in-caret"
             aria-haspopup="menu"
             aria-label="Choose where to open"
