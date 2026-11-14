@@ -189,10 +189,13 @@ test.describe('@evidence Codex caller attribution', () => {
       await ask(live.page, 'Run the harmless shell command `node --version` exactly once. Wait for permission if requested.');
       const needsYou = '[data-testid="rail-card-needs-you"]';
       const parentPrompt = `${railCard}[data-tab-id="${parent}"] ${needsYou}`;
-      const approval = live.page.locator(parentPrompt, { hasText: /node --version/ });
+      // The command can show as text or as a JSON argument list, so match any
+      // permission prompt on the parent card that is not a Ptah MCP tool prompt.
+      const notPtahTool = { hasNotText: /ptah MCP server/ };
+      const approval = live.page.locator(parentPrompt, notPtahTool);
       await expect(approval).toBeVisible({ timeout: 360_000 });
       // The prompt shows on the parent tab only, not on another session card.
-      await expect(live.page.locator(`${needsYou}:visible`, { hasText: /node --version/ })).toHaveCount(1);
+      await expect(live.page.locator(`${needsYou}:visible`, notPtahTool)).toHaveCount(1);
       await capture(live.page, 'caller-item-c-approval-before-deny', parentPrompt);
       await approval.getByRole('group', { name: 'Permission actions' })
         .getByRole('button', { name: 'Deny', exact: true }).click();
