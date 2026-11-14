@@ -1,3 +1,4 @@
+import { phaseKindForRole } from '@ptah-extension/shared';
 import type {
   OutcomeTaskKind,
   OutcomeTaskKindSource,
@@ -5,11 +6,12 @@ import type {
 } from '@ptah-extension/shared';
 
 /**
- * Known lane roles and subagent types mapped to the task kind they perform
+ * Task kinds and phase kinds mapped to the task kind they perform
  * (Req 2, `taskKindSource: 'mapped'`). Keys are lower case; lookup is a
  * case-insensitive exact match with no fuzzy matching. Phase kinds mirror
- * `lane-routing` `phase-plan.ts` (`taskKindFor`), and the agent slugs are the
- * built-in subagent roles plus the repository's own agents.
+ * `lane-routing` `phase-plan.ts` (`taskKindFor`). Legacy agent slugs are not
+ * listed here: `taskKindForRole` resolves them through the shared alias table
+ * (`phaseKindForRole`) and `TASK_KIND_BY_PHASE`.
  */
 const TASK_KIND_BY_ROLE: ReadonlyMap<string, OutcomeTaskKind> = new Map<
   string,
@@ -29,20 +31,6 @@ const TASK_KIND_BY_ROLE: ReadonlyMap<string, OutcomeTaskKind> = new Map<
   ['tests', 'tests'],
   ['docs', 'docs'],
   ['design', 'docs'],
-  // Agent slugs.
-  ['project-manager', 'plan'],
-  ['software-architect', 'plan'],
-  ['team-leader', 'plan'],
-  ['backend-developer', 'implement'],
-  ['frontend-developer', 'implement'],
-  ['devops-engineer', 'implement'],
-  ['code-logic-reviewer', 'review'],
-  ['code-style-reviewer', 'review'],
-  ['visual-reviewer', 'review'],
-  ['researcher-expert', 'research'],
-  ['senior-tester', 'tests'],
-  ['technical-content-writer', 'docs'],
-  ['ui-ux-designer', 'docs'],
 ]);
 
 const TASK_KIND_BY_PHASE: Readonly<Record<PhaseKind, OutcomeTaskKind>> = {
@@ -58,7 +46,10 @@ const TASK_KIND_BY_PHASE: Readonly<Record<PhaseKind, OutcomeTaskKind>> = {
  */
 export function taskKindForRole(role: string | null): OutcomeTaskKind | null {
   if (role === null) return null;
-  return TASK_KIND_BY_ROLE.get(role.trim().toLowerCase()) ?? null;
+  const direct = TASK_KIND_BY_ROLE.get(role.trim().toLowerCase());
+  if (direct) return direct;
+  const phaseKind = phaseKindForRole(role);
+  return phaseKind ? TASK_KIND_BY_PHASE[phaseKind] : null;
 }
 
 export interface ResolvedTaskKind {

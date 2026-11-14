@@ -23,3 +23,30 @@ it.each(PHASE_KINDS)('maps phase %s directly', kind => {
   expect(result.taskKind).not.toBeNull();
   expect(result.taskKindSource).toBe('mapped');
 });
+
+it.each([
+  ['project-manager', 'plan'],
+  ['software-architect', 'plan'],
+  ['team-leader', 'plan'],
+  ['backend-developer', 'implement'],
+  ['frontend-developer', 'implement'],
+  ['devops-engineer', 'implement'],
+  ['code-logic-reviewer', 'review'],
+  ['code-style-reviewer', 'review'],
+  ['visual-reviewer', 'review'],
+  ['researcher-expert', 'research'],
+  ['modernization-detector', 'research'],
+  ['senior-tester', 'tests'],
+  ['technical-content-writer', 'docs'],
+  ['ui-ux-designer', 'docs'],
+])('maps legacy role %s to %s', (role, kind) => {
+  expect(taskKindForRole(role)).toBe(kind);
+  expect(taskKindForRole(` ${role.toUpperCase()} `)).toBe(kind);
+});
+
+it.each(['general-purpose', 'Explore', 'unknown', 'constructor'])(
+  'returns null for %s',
+  (role) => {
+    expect(taskKindForRole(role)).toBeNull();
+  },
+);
