@@ -158,15 +158,8 @@ export class CodexChatEvents {
       timestamp: this.now(),
     }));
     this.agentState.pending.clear();
-    // Clear native cards that have completed/drained
-    for (const card of this.nativeCards.values()) {
-      if (this.nativeTerminals.has(JSON.stringify([card.cardToolCallId, card.cycleId]))) {
-        this.nativeCards.delete(card.cardToolCallId);
-      }
-    }
     return results;
   }
-
 
   private flushHistoryResults(): FlatStreamEventUnion[] {
     const results = [...this.agentState.pending.values()].map(({ result }) => result);
@@ -390,7 +383,10 @@ export class CodexChatEvents {
           ...this.agentStartEvents(event, base),
         ];
       case 'subagentActivity': {
-        if (event.kind === 'completed' || event.kind === 'interrupted')
+        // A limited child is untracked: no child terminal follows, so it
+        // settles now as failed and does not hold the background drain.
+        const limited = event.limitMessage !== undefined;
+        if (limited || event.kind === 'completed' || event.kind === 'interrupted')
           this.nativeTerminals.add(JSON.stringify([event.cardToolCallId, event.cycleId]));
         const first = event.kind === 'started' && !this.nativeStarts.has(event.cardToolCallId);
         if (first) this.nativeStarts.add(event.cardToolCallId);
@@ -401,8 +397,9 @@ export class CodexChatEvents {
             this.toolStartEvent(event.cardToolCallId, 'Task', true, base, { description: label }),
             this.agentStartEvent(event.cardToolCallId, event.agentThreadId, 'codex', label, base),
           ] : []),
-          this.nativeStatus(event, base,
-            event.kind === 'interrupted' ? 'paused' : event.kind === 'completed' ? 'completed' : 'running'),
+          this.nativeStatus(event, base, limited ? 'failed' :
+            event.kind === 'interrupted' ? 'paused' : event.kind === 'completed' ? 'completed' : 'running',
+          event.limitMessage),
         ];
       }
       case 'toolCompleted': {

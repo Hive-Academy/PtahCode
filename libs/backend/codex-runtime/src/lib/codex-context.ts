@@ -89,6 +89,11 @@ export function childEventParent(
 const MAX_EARLY_CHILD_EVENTS = 512;
 const MAX_EARLY_CHILD_THREADS = 8;
 const MAX_ORPHAN_EVENTS_PER_CHILD = 128;
+const MAX_NATIVE_CHILDREN = 256;
+const NATIVE_CHILD_LIMIT_MESSAGE =
+  `Ptah tracks at most ${MAX_NATIVE_CHILDREN} active Codex subagents. ` +
+  'This subagent still runs, but Ptah cannot show its progress.';
+const TERMINAL_TURN_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'interrupted']);
 
 interface NativeChildState {
   cardToolCallId: string;
@@ -545,14 +550,8 @@ class RuntimeContext implements CodexContext {
       const parsed = codexNotificationSchemas[frame.method].parse(
         frame.params,
       );
-      if (parsed.item.type === 'subAgentActivity' && 'agentThreadId' in parsed.item) {
-        const candidates = this.pendingSpawns.get(parsed.threadId);
-        if (candidates?.size === 1) {
-          const toolId = [...candidates][0];
-          if (toolId && parsed.item.agentThreadId !== parsed.threadId)
-            this.linkChild(parsed.item.agentThreadId, toolId, parsed.threadId);
-        }
-      }
+      // Native activity links its child after admission, under the canonical
+      // card id; a pending spawn guess could flush buffered events to a wrong card.
       if (
         (parsed.threadId === this.identity.threadId &&
           parsed.turnId === this.activeTurn) ||
@@ -599,7 +598,9 @@ class RuntimeContext implements CodexContext {
         const activity = this.applyNativeActivity(event);
         if (!activity) continue;
         event = activity;
-        linkNative = this.childTools.get(event.agentThreadId) !== event.cardToolCallId;
+        // A limited child is not tracked, so its own events stay unlinked.
+        linkNative = activity.limitMessage === undefined &&
+          this.childTools.get(event.agentThreadId) !== event.cardToolCallId;
       }
       let parentToolUseId = childEventParent(
         event.threadId, this.identity.threadId, this.childTools,
@@ -656,7 +657,8 @@ class RuntimeContext implements CodexContext {
           ...(nativeItem.reasoningEffort == null ? {} : { reasoningEffort: nativeItem.reasoningEffort }),
         };
         const applied = this.applyNativeActivity(activity);
-        if (applied && (applied.kind === 'started' || applied.kind === 'interacted')) {
+        if (applied && applied.limitMessage === undefined &&
+          (applied.kind === 'started' || applied.kind === 'interacted')) {
           const childCycles = cycles.get(applied.agentThreadId) ?? [];
           childCycles.push(applied.cycleId);
           cycles.set(applied.agentThreadId, childCycles);
@@ -666,12 +668,18 @@ class RuntimeContext implements CodexContext {
     for (const child of history.threads) {
       const state = this.nativeChildren.get(child.id);
       if (!state) continue;
+      let current: (typeof child.turns)[number] | undefined;
       for (const [index, turn] of child.turns.entries()) {
         const cycle = cycles.get(child.id)?.[index] ?? state.cycleId;
         state.turnCycleByTurnId.set(turn.id, cycle);
-        if (turn.status === 'completed' || turn.status === 'failed' || turn.status === 'interrupted')
-          state.lastTerminalKey = JSON.stringify([child.id, cycle, turn.status, turn.id]);
+        if (cycle === state.cycleId) current = turn;
       }
+      // Only the current cycle decides eviction; an older terminal turn must
+      // not mark a later active cycle terminal.
+      if (current)
+        state.lastTerminalKey = TERMINAL_TURN_STATUSES.has(current.status)
+          ? JSON.stringify([child.id, state.cycleId, current.status, current.id])
+          : undefined;
       this.linkChild(child.id, state.cardToolCallId, state.parentThreadId);
     }
     for (const [childId, state] of this.nativeChildren)
@@ -690,13 +698,17 @@ class RuntimeContext implements CodexContext {
           { agentThreadId: event.agentThreadId, kind: event.kind });
         return undefined;
       }
-      if (this.nativeChildren.size >= 256) {
+      if (this.nativeChildren.size >= MAX_NATIVE_CHILDREN) {
         const oldest = [...this.nativeChildren].find(([, child]) => child.lastTerminalKey)?.[0];
         if (!oldest) {
-          // All children are active; reject new activity rather than evicting active children
-          this.options.logger.debug('Codex native child cache overflow',
-            { reason: 'All children are active; rejecting new child activity' });
-          return undefined;
+          // Every tracked child is active. Keep them, and show the new child
+          // as limited instead of dropping it without a card.
+          this.options.logger.warn('Codex native child cache overflow', {
+            agentThreadId: event.agentThreadId,
+            reason: 'All tracked children are active; the new child is shown as limited',
+          });
+          return { ...event, cardToolCallId: event.activityId, cycleOrdinal: 1,
+            cycleId: `${event.agentThreadId}:1`, limitMessage: NATIVE_CHILD_LIMIT_MESSAGE };
         }
         this.nativeChildren.delete(oldest);
       }

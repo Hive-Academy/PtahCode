@@ -291,6 +291,8 @@ export type CodexRuntimeEvent = CodexEventIdentity &
         readonly reasoningEffort?: string;
         readonly cycleOrdinal: number;
         readonly cycleId: string;
+        /** Set when the runtime cannot track this child; the card shows it as failed. */
+        readonly limitMessage?: string;
       }
     | {
         readonly type: 'toolCompleted';

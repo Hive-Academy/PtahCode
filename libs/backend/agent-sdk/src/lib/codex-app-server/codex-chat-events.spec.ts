@@ -62,21 +62,18 @@ describe('CodexChatEvents', () => {
     expect(projection.hasPendingChildren).toBe(false);
   });
 
-  it('clears drained cards when finishBackground is called after completion', () => {
+  it('shows a limited native child as a failed card that does not hold the drain', () => {
     const { projection } = setup();
-    projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
+    const events = projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
       activityId: 'card', cardToolCallId: 'card', agentThreadId: 'child',
-      agentPath: '/child', kind: 'started', cycleId: 'child:1', cycleOrdinal: 1 });
-    expect(projection.hasPendingChildren).toBe(true);
-    // Completed activity without child terminal arrives
-    projection.map({ ...identity, sequence: 2, type: 'subagentActivity',
-      activityId: 'done', cardToolCallId: 'card', agentThreadId: 'child',
-      agentPath: '/child', kind: 'completed', cycleId: 'child:1', cycleOrdinal: 1 });
-    // Card is still marked as pending until finishBackground clears drained ones
-    expect(projection.hasPendingChildren).toBe(false);
-    // Explicitly call finishBackground and verify drain clears
-    const results = projection.finishBackground();
-    expect(results).toEqual([]);
+      agentPath: '/root/child', kind: 'started', cycleId: 'child:1', cycleOrdinal: 1,
+      limitMessage: 'Ptah tracks at most 256 active Codex subagents.' });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventType: 'tool_start', toolCallId: 'card' }),
+      expect.objectContaining({ eventType: 'agent_start', toolCallId: 'card' }),
+      expect.objectContaining({ eventType: 'agent_status', parentToolUseId: 'card',
+        status: 'failed', errorMessage: 'Ptah tracks at most 256 active Codex subagents.' }),
+    ]));
     expect(projection.hasPendingChildren).toBe(false);
   });
 
