@@ -67,12 +67,12 @@ describe('CodexChatEvents', () => {
     const events = projection.map({ ...identity, sequence: 1, type: 'subagentActivity',
       activityId: 'card', cardToolCallId: 'card', agentThreadId: 'child',
       agentPath: '/root/child', kind: 'started', cycleId: 'child:1', cycleOrdinal: 1,
-      limitMessage: 'Ptah tracks at most 256 active Codex subagents.' });
+      limitMessage: 'Not tracked: native child limit (256) reached; the child may still be running.' });
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ eventType: 'tool_start', toolCallId: 'card' }),
       expect.objectContaining({ eventType: 'agent_start', toolCallId: 'card' }),
       expect.objectContaining({ eventType: 'agent_status', parentToolUseId: 'card',
-        status: 'failed', errorMessage: 'Ptah tracks at most 256 active Codex subagents.' }),
+        status: 'failed', errorMessage: 'Not tracked: native child limit (256) reached; the child may still be running.' }),
     ]));
     expect(projection.hasPendingChildren).toBe(false);
   });

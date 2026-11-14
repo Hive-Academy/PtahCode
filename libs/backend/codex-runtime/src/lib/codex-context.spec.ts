@@ -22,7 +22,7 @@ describe('native child event admission', () => {
       knownChildParents: new Map<string, string>(),
       childParentThreads: new Map<string, string>(),
       pendingChildParents: new Map<string, string>(),
-      childTools: new Map<string, string>(),
+      childTools: new Map<string, string>(), limitedNativeChildren: new Set<string>(),
       earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(), earlyChildCount: 0,
       options: { logger: { info: jest.fn(), debug: jest.fn(), error: jest.fn() } },
     }) as RuntimeContext;
@@ -43,7 +43,7 @@ describe('native child event admission', () => {
       translator: new CodexEventTranslator('context', 1),
       childTools: new Map<string, string>(), childParentThreads: new Map<string, string>(),
       childTurns: new Map<string, string>(), knownChildParents: new Map<string, string>(),
-      nativeChildren: new Map(),
+      nativeChildren: new Map(), limitedNativeChildren: new Set(),
       pendingNativeTerminals: [] as CodexRuntimeEvent[],
       pendingSpawns: new Map<string, Set<string>>(), pendingChildParents: new Map<string, string>(),
       earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(), earlyChildCount: 0,
@@ -136,7 +136,7 @@ describe('native child event admission', () => {
       earlyChildCount: 0, rootTerminalPending: false,
       terminalTurns: new Set<string>(), targets: new Map(),
       asyncQuestionItems: new Set<string>(), subscribers: new Set(),
-      nativeChildren: new Map(),
+      nativeChildren: new Map(), limitedNativeChildren: new Set(),
       pendingNativeTerminals: [] as CodexRuntimeEvent[],
       turnController: new AbortController(), sequence: 0,
       finishCompact: jest.fn(),
@@ -273,7 +273,7 @@ describe('native child event admission', () => {
       state: 'running', activeTurn: 'root-turn',
       profile: { consumer: 'chat', contextId: 'context' },
       translator: new CodexEventTranslator('context', 1),
-      childTools: new Map<string, string>(),
+      childTools: new Map<string, string>(), limitedNativeChildren: new Set<string>(),
       childParentThreads: new Map<string, string>(),
       childTurns: new Map<string, string>(),
       knownChildParents: new Map<string, string>(),
@@ -327,7 +327,7 @@ describe('native activity cycle linkage', () => {
       knownChildParents: new Map<string, string>(), childParentThreads: new Map<string, string>(),
       childTools: new Map<string, string>(), pendingChildParents: new Map<string, string>(),
       earlyChildEvents: new Map<string, CodexRuntimeEvent[]>(), earlyChildCount: 0,
-      nativeChildren: new Map(), childTurns: new Map<string, string>(), options: { logger },
+      nativeChildren: new Map(), limitedNativeChildren: new Set(), unlinkedMethodsLogged: new Set<string>(), childTurns: new Map<string, string>(), options: { logger },
       pendingNativeTerminals: [] as CodexRuntimeEvent[],
       subscribers: new Set(), sequence: 0, terminalTurns: new Set<string>(),
     }) as RuntimeContext;
@@ -501,7 +501,7 @@ describe('native activity cycle linkage', () => {
     }]);
     expect(queue).toContainEqual(expect.objectContaining({ type: 'subagentActivity',
       agentThreadId: 'new', cardToolCallId: 'new-card', kind: 'started',
-      limitMessage: expect.stringContaining('256') }));
+      limitMessage: 'Not tracked: native child limit (256) reached; the child may still be running.' }));
     expect(children.size).toBe(256);
     expect(children.has('old-0')).toBe(true);
     expect(children.has('old-255')).toBe(true);
@@ -509,6 +509,54 @@ describe('native activity cycle linkage', () => {
     expect(Reflect.get(h.context, 'childTools').has('new')).toBe(false);
     expect(h.logger.warn).toHaveBeenCalledWith('Codex native child cache overflow',
       expect.objectContaining({ agentThreadId: 'new' }));
+  });
+
+  it('keeps a limited native child unlinked and settled for later activity and events', () => {
+    const h = harness();
+    Object.assign(h.context, { translator: new CodexEventTranslator('ctx', 1),
+      state: 'running', activeTurn: 'parent', targets: new Map() });
+    const queue: CodexRuntimeEvent[] = [];
+    Reflect.get(h.context, 'subscribers').add({ queue, wake: jest.fn(), release: jest.fn() });
+    const children = Reflect.get(h.context, 'nativeChildren') as Map<string, {
+      lastTerminalKey?: string }>;
+    for (let index = 0; index < 256; index++) children.set(`old-${index}`, {
+      cardToolCallId: `old-${index}`, parentThreadId: 'root', agentPath: '/old',
+      lastActivityKind: 'started', cycleOrdinal: 1, cycleId: `old-${index}:1`,
+      seenActivityKeys: new Set(), turnCycleByTurnId: new Map(),
+    } as never);
+    const childTools = Reflect.get(h.context, 'childTools') as Map<string, string>;
+    // A spawn hint linked the child before its activity arrived.
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['new', 'other-spawn', 'root']);
+    expect(childTools.get('new')).toBe('other-spawn');
+    const activity = (kind: string, turnId: string) => ({
+      method: 'item/started', params: { threadId: 'root', turnId, startedAtMs: 1,
+        item: { type: 'subAgentActivity', id: `new-${kind}`, agentThreadId: 'new',
+          agentPath: '/root/new', kind } },
+    });
+    const notify = (frame: unknown) =>
+      Reflect.apply(Reflect.get(h.context, 'onNotification'), h.context, [frame]);
+    notify(activity('started', 'parent'));
+    expect(childTools.has('new')).toBe(false);
+    expect(Reflect.get(h.context, 'knownChildParents').has('new')).toBe(false);
+    // The child's own events stay unlinked: no self-link, no buffer.
+    Object.assign(h.context, { pendingSpawns: new Map([['root', new Set(['other-spawn'])]]) });
+    notify({ method: 'item/completed', params: { threadId: 'new', turnId: 'new-turn',
+      completedAtMs: 2, item: { type: 'agentMessage', id: 'msg', text: 'hidden' } } });
+    expect(childTools.has('new')).toBe(false);
+    expect(Reflect.get(h.context, 'earlyChildEvents').has('new')).toBe(false);
+    // Room in the cache must not reopen the settled card as a tracked cycle.
+    const freed = children.get('old-0');
+    if (freed) freed.lastTerminalKey = 'done';
+    notify(activity('started', 'parent-2'));
+    notify(activity('completed', 'parent-2'));
+    expect(children.has('new')).toBe(false);
+    expect(children.has('old-0')).toBe(true);
+    expect(queue.filter((event) => event.type === 'subagentActivity')).toEqual([
+      expect.objectContaining({ agentThreadId: 'new', kind: 'started',
+        limitMessage: 'Not tracked: native child limit (256) reached; the child may still be running.' }),
+    ]);
+    expect(queue.some((event) => event.threadId === 'new')).toBe(false);
+    expect(h.logger.warn).toHaveBeenCalledTimes(1);
   });
 
   it('admits native activity while an unrelated spawn is pending', () => {
@@ -689,7 +737,7 @@ it('flushes v1 child notifications once toolStarted supplies agentThreadIds', ()
     committedIdentity: { contextId: 'ctx', processGeneration: 1, threadId: 'root' },
     state: 'running', activeTurn: 'parent', translator: new CodexEventTranslator('ctx', 1),
     childTools: new Map(), childParentThreads: new Map(), knownChildParents: new Map(),
-    pendingChildParents: new Map(), pendingSpawns: new Map(), nativeChildren: new Map(),
+    pendingChildParents: new Map(), pendingSpawns: new Map(), nativeChildren: new Map(), limitedNativeChildren: new Set(),
     earlyChildEvents: new Map(), earlyChildCount: 0, childTurns: new Map(),
     terminalTurns: new Set(), unlinkedMethodsLogged: new Set(), targets: new Map(),
     subscribers: new Set(), sequence: 0, options: { logger },
@@ -822,7 +870,7 @@ describe('RuntimeContext userInputAsync lifecycle', () => {
       turnHistory: true,
       onFailure: jest.fn(),
       translator: new CodexEventTranslator('context', 1),
-      childTools: new Map<string, string>(),
+      childTools: new Map<string, string>(), limitedNativeChildren: new Set<string>(),
       childParentThreads: new Map<string, string>(),
       childTurns: new Map<string, string>(),
       knownChildParents: new Map<string, string>(),

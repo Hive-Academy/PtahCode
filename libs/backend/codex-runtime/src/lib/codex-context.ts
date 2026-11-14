@@ -90,9 +90,10 @@ const MAX_EARLY_CHILD_EVENTS = 512;
 const MAX_EARLY_CHILD_THREADS = 8;
 const MAX_ORPHAN_EVENTS_PER_CHILD = 128;
 const MAX_NATIVE_CHILDREN = 256;
+// The card can only settle as failed with a message, so the text must say
+// that Ptah stopped tracking the child, not that the child failed.
 const NATIVE_CHILD_LIMIT_MESSAGE =
-  `Ptah tracks at most ${MAX_NATIVE_CHILDREN} active Codex subagents. ` +
-  'This subagent still runs, but Ptah cannot show its progress.';
+  `Not tracked: native child limit (${MAX_NATIVE_CHILDREN}) reached; the child may still be running.`;
 const TERMINAL_TURN_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'interrupted']);
 
 interface NativeChildState {
@@ -134,6 +135,8 @@ class RuntimeContext implements CodexContext {
   private readonly unlinkedMethodsLogged = new Set<string>();
   private readonly earlyChildEvents = new Map<string, CodexRuntimeEvent[]>();
   private readonly nativeChildren = new Map<string, NativeChildState>();
+  /** Native children shown as not tracked at the cache limit; never linked. */
+  private readonly limitedNativeChildren = new Set<string>();
   private readonly pendingNativeTerminals: CodexRuntimeEvent[] = [];
   private pendingNativeOverflowLogged = false;
   private earlyChildCount = 0;
@@ -593,6 +596,8 @@ class RuntimeContext implements CodexContext {
         this.bindChildTurn(parsed.threadId, parsed.turn.id);
     }
     for (let event of this.translator.translate(frame)) {
+      // Events of an untracked child are dropped; its card says so.
+      if (this.limitedNativeChildren.has(event.threadId)) continue;
       let linkNative = false;
       if (event.type === 'subagentActivity') {
         const activity = this.applyNativeActivity(event);
@@ -691,6 +696,9 @@ class RuntimeContext implements CodexContext {
     event: Extract<CodexRuntimeEvent, { type: 'subagentActivity' }>,
   ): Extract<CodexRuntimeEvent, { type: 'subagentActivity' }> | undefined {
     const key = JSON.stringify([event.threadId, event.turnId, event.activityId, event.kind]);
+    // The card of a limited child already settled as not tracked; later
+    // activity must not reopen it as a tracked cycle.
+    if (this.limitedNativeChildren.has(event.agentThreadId)) return undefined;
     let state = this.nativeChildren.get(event.agentThreadId);
     if (!state) {
       if (event.kind !== 'started') {
@@ -707,6 +715,7 @@ class RuntimeContext implements CodexContext {
             agentThreadId: event.agentThreadId,
             reason: 'All tracked children are active; the new child is shown as limited',
           });
+          this.markNativeChildLimited(event.agentThreadId);
           return { ...event, cardToolCallId: event.activityId, cycleOrdinal: 1,
             cycleId: `${event.agentThreadId}:1`, limitMessage: NATIVE_CHILD_LIMIT_MESSAGE };
         }
@@ -733,6 +742,25 @@ class RuntimeContext implements CodexContext {
       cycleOrdinal: state.cycleOrdinal, cycleId: state.cycleId };
   }
 
+  /** Remove any tentative link of an untracked child and block later links. */
+  private markNativeChildLimited(threadId: string): void {
+    if (this.limitedNativeChildren.size >= MAX_NATIVE_CHILDREN) {
+      const oldest = this.limitedNativeChildren.values().next().value;
+      if (oldest !== undefined) this.limitedNativeChildren.delete(oldest);
+    }
+    this.limitedNativeChildren.add(threadId);
+    this.childTools.delete(threadId);
+    this.childParentThreads.delete(threadId);
+    this.knownChildParents.delete(threadId);
+    this.pendingChildParents.delete(threadId);
+    this.childTurns.delete(threadId);
+    const buffered = this.earlyChildEvents.get(threadId);
+    if (buffered) {
+      this.earlyChildEvents.delete(threadId);
+      this.earlyChildCount -= buffered.length;
+    }
+  }
+
   private bindChildTurn(threadId: string, turnId: string): void {
     this.childTurns.set(threadId, turnId);
     const state = this.nativeChildren?.get(threadId);
@@ -745,6 +773,7 @@ class RuntimeContext implements CodexContext {
     parentThreadId = this.identity.threadId,
   ): void {
     if (threadId === this.identity.threadId) return;
+    if (this.limitedNativeChildren.has(threadId)) return;
     const native = this.nativeChildren?.get(threadId);
     if (native && toolId === threadId) return;
     if (!this.knownChildParents.has(threadId))
