@@ -1,4 +1,8 @@
-import { provenanceLabel, type CloneSummary } from '@ptah-extension/shared';
+import {
+  provenanceLabel,
+  ROLE_PHASE_ALIASES,
+  type CloneSummary,
+} from '@ptah-extension/shared';
 import { makeLibraryAgreementFixtures } from '@ptah-extension/shared/testing';
 
 import {
@@ -19,6 +23,8 @@ import {
   REBASE_EXPLANATION,
 } from './clone-action-gating';
 
+const [RETIRED_SLUG = 'missing-role', ROLE_SLUG = 'missing-role'] =
+  Object.keys(ROLE_PHASE_ALIASES);
 const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
 
 function clone(overrides: Partial<CloneSummary> = {}): CloneSummary {
@@ -286,13 +292,12 @@ describe('eligibleForBulkRebase', () => {
 describe('role agents (Phase 4 U-D13)', () => {
   const diverged = (overrides: Partial<CloneSummary> = {}): CloneSummary =>
     clone({ diverged: true, cloneStatus: 'diverged', ...overrides });
-  const isBackendRetired = (slug: string): boolean =>
-    slug === 'backend-developer';
+  const isBackendRetired = (slug: string): boolean => slug === RETIRED_SLUG;
 
   it('excludes every role agent from the bulk rebase and counts them', () => {
-    const role = diverged({ slug: 'team-leader', kind: 'agent' });
+    const role = diverged({ slug: ROLE_SLUG, kind: 'agent' });
     const own = diverged({ slug: 'my-agent', kind: 'agent' });
-    const skillWithRoleName = diverged({ slug: 'team-leader', kind: 'skill' });
+    const skillWithRoleName = diverged({ slug: ROLE_SLUG, kind: 'skill' });
     expect(eligibleForBulkRebase([role, own], 'agent')).toEqual([own]);
     expect(bulkSkippedRoleCount([role, own], 'agent')).toBe(1);
     expect(eligibleForBulkRebase([skillWithRoleName], 'skill')).toEqual([
@@ -303,7 +308,7 @@ describe('role agents (Phase 4 U-D13)', () => {
 
   it('keeps single rebase and keep for a role that has not retired', () => {
     const model = cloneActionModel(
-      diverged({ slug: 'team-leader', kind: 'agent' }),
+      diverged({ slug: ROLE_SLUG, kind: 'agent' }),
       NOW,
       isBackendRetired,
     );
@@ -314,7 +319,7 @@ describe('role agents (Phase 4 U-D13)', () => {
 
   it('shows history only for a retired role', () => {
     const model = cloneActionModel(
-      diverged({ slug: 'backend-developer', kind: 'agent' }),
+      diverged({ slug: RETIRED_SLUG, kind: 'agent' }),
       NOW,
       isBackendRetired,
     );
@@ -329,7 +334,7 @@ describe('role agents (Phase 4 U-D13)', () => {
   it('does not treat a skill with a retired role slug as retired', () => {
     expect(
       isRetiredRoleClone(
-        clone({ slug: 'backend-developer', kind: 'skill' }),
+        clone({ slug: RETIRED_SLUG, kind: 'skill' }),
         isBackendRetired,
       ),
     ).toBe(false);

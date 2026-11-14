@@ -1,8 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import type {
-  CloneSummary,
-  SkillCloneKind,
-  SkillSynthesisRebaseCloneResult,
+import {
+  ROLE_PHASE_ALIASES,
+  type CloneSummary,
+  type SkillCloneKind,
+  type SkillSynthesisRebaseCloneResult,
 } from '@ptah-extension/shared';
 
 import { CloneBulkRebaseService } from './clone-bulk-rebase.service';
@@ -91,7 +92,7 @@ describe('CloneBulkRebaseService', () => {
     );
 
     const outcomes = await service.run([
-      clone('team-leader', 'agent'),
+      clone(Object.keys(ROLE_PHASE_ALIASES)[0], 'agent'),
       clone('my-agent', 'agent'),
     ]);
 

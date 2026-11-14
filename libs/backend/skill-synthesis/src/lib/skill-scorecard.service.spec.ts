@@ -9,7 +9,12 @@ import type {
   SkillTaskGrade,
   SkillTaskGradeAggregate,
 } from './skill-task-grade.store';
+import { ROLE_PHASE_ALIASES } from '@ptah-extension/shared';
 import type { ScorecardAggregate } from './types';
+
+const TESTS_ROLE =
+  Object.entries(ROLE_PHASE_ALIASES).find(([, kind]) => kind === 'tests')?.[0] ??
+  'missing-tests-role';
 
 const logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 const workspaceRoot = '/workspace';
@@ -63,12 +68,12 @@ describe('SkillScorecardService', () => {
   it('maps phase aggregates to phase scorecards with a separate role-alias row', () => {
     const getPhaseAggregates = jest.fn((_root: string | null): PhaseGradeAggregate[] => [
       { phaseKind: 'tests', legacy: false, aliasedRoles: [], graded: 2, passed: 1, successRate: 0.5 },
-      { phaseKind: 'tests', legacy: true, aliasedRoles: ['senior-tester'], graded: 1, passed: 0, successRate: 0 },
+      { phaseKind: 'tests', legacy: true, aliasedRoles: [TESTS_ROLE], graded: 1, passed: 0, successRate: 0 },
     ]);
     const phased = new SkillScorecardService(logger as never, { getPhaseAggregates } as never, null, {} as never);
     expect(phased.getPhaseScorecards(workspaceRoot)).toEqual([
       { phaseKind: 'tests', source: 'phase', legacy: false, aliasedRoles: [], gradedCount: 2, passedCount: 1, gradedSuccessRate: 0.5 },
-      { phaseKind: 'tests', source: 'role-alias', legacy: true, aliasedRoles: ['senior-tester'], gradedCount: 1, passedCount: 0, gradedSuccessRate: 0 },
+      { phaseKind: 'tests', source: 'role-alias', legacy: true, aliasedRoles: [TESTS_ROLE], gradedCount: 1, passedCount: 0, gradedSuccessRate: 0 },
     ]);
     expect(getPhaseAggregates).toHaveBeenCalledWith(workspaceRoot);
     // A store failure degrades to no phase scorecards.

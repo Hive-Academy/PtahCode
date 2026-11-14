@@ -1,6 +1,12 @@
 import 'reflect-metadata';
+import { ROLE_PHASE_ALIASES } from '@ptah-extension/shared';
 import { sql } from './0075_phase_grade_keys';
 import { MIGRATIONS } from './index';
+
+const IMPLEMENT_ROLE =
+  Object.entries(ROLE_PHASE_ALIASES).find(
+    ([, kind]) => kind === 'implement',
+  )?.[0] ?? 'missing-implement-role';
 
 interface DatabaseShape {
   exec(statement: string): void;
@@ -48,11 +54,11 @@ describe('migration 0075_phase_grade_keys', () => {
         (run_id, executor_kind, lane_id, agent_id, model, verdict, role, task_id,
          ended_at, created_at, updated_at)
         VALUES ('old-run', 'subagent', 'subagent', 'agent-1', 'm1', 'completed',
-          'backend-developer', 'TASK_A', 1, 1, 1)`).run();
+          '${IMPLEMENT_ROLE}', 'TASK_A', 1, 1, 1)`).run();
       db.prepare(`INSERT INTO skill_task_grades
         (task_id, subject_kind, subject_slug, attribution_key, run_id, verdict,
          evidence_source, workspace_root, graded_at)
-        VALUES ('TASK_A', 'agent', 'backend-developer', 'run:old-run', 'old-run',
+        VALUES ('TASK_A', 'agent', '${IMPLEMENT_ROLE}', 'run:old-run', 'old-run',
           'pass', 'spec:TASK_A', '/ws', 10)`).run();
 
       db.exec(sql);
@@ -63,11 +69,11 @@ describe('migration 0075_phase_grade_keys', () => {
       );
       expect(db.prepare(`SELECT role, phase_kind FROM lane_outcome_records
         WHERE run_id = 'old-run'`).get()).toEqual({
-        role: 'backend-developer', phase_kind: null,
+        role: IMPLEMENT_ROLE, phase_kind: null,
       });
       expect(db.prepare(`SELECT subject_kind, subject_slug, verdict, phase_kind, executor_kind
         FROM skill_task_grades WHERE task_id = 'TASK_A'`).get()).toEqual({
-        subject_kind: 'agent', subject_slug: 'backend-developer', verdict: 'pass',
+        subject_kind: 'agent', subject_slug: IMPLEMENT_ROLE, verdict: 'pass',
         phase_kind: null, executor_kind: null,
       });
     } finally {

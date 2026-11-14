@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { RpcUserError } from '@ptah-extension/vscode-core';
+import { ROLE_PHASE_ALIASES } from '@ptah-extension/shared';
 
 import {
   assertNotBulkRoleRebase,
@@ -7,6 +8,8 @@ import {
   type RoleMutationAction,
 } from './retired-role-guard';
 
+const [RETIRED_SLUG = 'missing-role', ROLE_SLUG = 'missing-role'] =
+  Object.keys(ROLE_PHASE_ALIASES);
 const ACTIONS: readonly RoleMutationAction[] = [
   'enhance',
   'revert',
@@ -14,13 +17,13 @@ const ACTIONS: readonly RoleMutationAction[] = [
   'keep',
   'save',
 ];
-const retiredBackend = (slug: string): boolean => slug === 'backend-developer';
+const retiredBackend = (slug: string): boolean => slug === RETIRED_SLUG;
 
 describe('assertRoleMutable', () => {
   it.each(ACTIONS)('refuses %s for a retired role agent', (action) => {
     let thrown: unknown;
     try {
-      assertRoleMutable(action, 'agent', 'backend-developer', retiredBackend);
+      assertRoleMutable(action, 'agent', RETIRED_SLUG, retiredBackend);
     } catch (error: unknown) {
       thrown = error;
     }
@@ -36,14 +39,14 @@ describe('assertRoleMutable', () => {
 
   it('allows a retired slug of another kind', () => {
     expect(() =>
-      assertRoleMutable('save', 'skill', 'backend-developer', retiredBackend),
+      assertRoleMutable('save', 'skill', RETIRED_SLUG, retiredBackend),
     ).not.toThrow();
   });
 
   it('allows every role while RETIRED_ROLES is empty (default predicate)', () => {
     for (const action of ACTIONS) {
       expect(() =>
-        assertRoleMutable(action, 'agent', 'backend-developer'),
+        assertRoleMutable(action, 'agent', RETIRED_SLUG),
       ).not.toThrow();
     }
   });
@@ -51,14 +54,14 @@ describe('assertRoleMutable', () => {
 
 describe('assertNotBulkRoleRebase', () => {
   it('refuses a bulk rebase of a role agent that has not retired', () => {
-    expect(() =>
-      assertNotBulkRoleRebase('bulk', 'agent', 'team-leader'),
-    ).toThrow(RpcUserError);
+    expect(() => assertNotBulkRoleRebase('bulk', 'agent', ROLE_SLUG)).toThrow(
+      RpcUserError,
+    );
   });
 
   it('allows a single rebase of a role agent', () => {
     expect(() =>
-      assertNotBulkRoleRebase('single', 'agent', 'team-leader'),
+      assertNotBulkRoleRebase('single', 'agent', ROLE_SLUG),
     ).not.toThrow();
   });
 
@@ -67,7 +70,7 @@ describe('assertNotBulkRoleRebase', () => {
       assertNotBulkRoleRebase('bulk', 'agent', 'my-own-agent'),
     ).not.toThrow();
     expect(() =>
-      assertNotBulkRoleRebase('bulk', 'skill', 'team-leader'),
+      assertNotBulkRoleRebase('bulk', 'skill', ROLE_SLUG),
     ).not.toThrow();
   });
 });

@@ -2,8 +2,13 @@ import 'reflect-metadata';
 import { join, sep } from 'node:path';
 import { normalizeWorkspaceRoot } from '@ptah-extension/platform-core';
 import { MIGRATIONS } from '@ptah-extension/persistence-sqlite';
+import { ROLE_PHASE_ALIASES } from '@ptah-extension/shared';
 import { resolveOpener, type TestDatabase } from './queue/queue-db.test-support';
 import { groupGradeAttributions, SkillTaskGradeStore, type SkillTaskGrade } from './skill-task-grade.store';
+
+const TESTS_ROLE =
+  Object.entries(ROLE_PHASE_ALIASES).find(([, kind]) => kind === 'tests')?.[0] ??
+  'missing-tests-role';
 
 const opener = resolveOpener();
 const maybe = opener ? describe : describe.skip;
@@ -217,19 +222,19 @@ maybe('SkillTaskGradeStore', () => {
     const { db, store } = setup();
     try {
       setupAttributionTables(db);
-      db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run('senior-tester', 'agent');
-      insertLane(db, { runId: 'sub', role: 'senior-tester', executorKind: 'subagent', phaseKind: 'tests', root: '/workspace' });
+      db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run(TESTS_ROLE, 'agent');
+      insertLane(db, { runId: 'sub', role: TESTS_ROLE, executorKind: 'subagent', phaseKind: 'tests', root: '/workspace' });
       insertLane(db, { runId: 'cli', role: null, executorKind: 'cli', phaseKind: 'review', root: '/workspace' });
-      insertLane(db, { runId: 'old', role: 'senior-tester', executorKind: 'subagent', phaseKind: null, root: '/workspace' });
+      insertLane(db, { runId: 'old', role: TESTS_ROLE, executorKind: 'subagent', phaseKind: null, root: '/workspace' });
       insertLane(db, { runId: 'bad', role: null, executorKind: 'cli', phaseKind: 'not-a-phase', root: '/workspace' });
       insertLane(db, { runId: 'far', role: null, executorKind: 'cli', phaseKind: 'tests', root: '/elsewhere' });
       const found = store.findAttributions('TASK_2026_001', '/workspace');
       expect(found).toHaveLength(4);
       expect(found).toEqual(expect.arrayContaining([
-        expect.objectContaining({ kind: 'agent', slug: 'senior-tester', attributionKey: 'run:sub', phaseKind: 'tests', executorKind: 'subagent' }),
+        expect.objectContaining({ kind: 'agent', slug: TESTS_ROLE, attributionKey: 'run:sub', phaseKind: 'tests', executorKind: 'subagent' }),
         expect.objectContaining({ kind: 'phase', slug: 'tests', attributionKey: 'run:sub', phaseKind: 'tests', executorKind: 'subagent' }),
         expect.objectContaining({ kind: 'phase', slug: 'review', attributionKey: 'run:cli', phaseKind: 'review', executorKind: 'cli' }),
-        expect.objectContaining({ kind: 'agent', slug: 'senior-tester', attributionKey: 'run:old', phaseKind: null }),
+        expect.objectContaining({ kind: 'agent', slug: TESTS_ROLE, attributionKey: 'run:old', phaseKind: null }),
       ]));
     } finally { db.close(); }
   });
@@ -248,7 +253,7 @@ maybe('SkillTaskGradeStore', () => {
   it('reads legacy role grades through the alias table and never counts one lane row twice', () => {
     const { db, store } = setup();
     try {
-      const role = { ...grade, subjectSlug: 'senior-tester', evidenceSource: 'task-review' };
+      const role = { ...grade, subjectSlug: TESTS_ROLE, evidenceSource: 'task-review' };
       // Legacy role grade (written before 0075): no phase grade for its run.
       store.upsert({ ...role, attributionKey: 'run:legacy', verdict: 'fail' });
       // New lane row with a role and a phase: both subjects are written.
@@ -262,7 +267,7 @@ maybe('SkillTaskGradeStore', () => {
       const tests = store.getPhaseAggregates('/workspace').filter((row) => row.phaseKind === 'tests');
       expect(tests).toEqual([
         { phaseKind: 'tests', legacy: false, aliasedRoles: [], graded: 2, passed: 1, successRate: 0.5 },
-        { phaseKind: 'tests', legacy: true, aliasedRoles: ['senior-tester'], graded: 1, passed: 0, successRate: 0 },
+        { phaseKind: 'tests', legacy: true, aliasedRoles: [TESTS_ROLE], graded: 1, passed: 0, successRate: 0 },
       ]);
       expect(store.getPhaseAggregates('/workspace').filter((row) => row.legacy)).toHaveLength(1);
       expect(store.getPhaseAggregates(null)).toEqual([]);

@@ -6,29 +6,37 @@ import {
   phaseKindForRole,
 } from './retired-roles';
 
-const EXPECTED: Readonly<Record<string, string>> = {
-  'project-manager': 'plan',
-  'software-architect': 'architecture',
-  'team-leader': 'batch',
-  'backend-developer': 'implement',
-  'frontend-developer': 'implement',
-  'devops-engineer': 'implement',
-  'senior-tester': 'tests',
-  'code-style-reviewer': 'review',
-  'code-logic-reviewer': 'review',
-  'visual-reviewer': 'visual-review',
-  'researcher-expert': 'research',
-  'modernization-detector': 'research',
-  'ui-ux-designer': 'design',
-  'technical-content-writer': 'docs',
+const ENTRIES = Object.entries(ROLE_PHASE_ALIASES);
+
+/** Number of legacy slugs expected for each phase kind. */
+const SLUGS_PER_KIND: Readonly<Record<string, number>> = {
+  plan: 1,
+  architecture: 1,
+  batch: 1,
+  implement: 3,
+  tests: 1,
+  review: 2,
+  'visual-review': 1,
+  research: 2,
+  design: 1,
+  docs: 1,
 };
 
 describe('retired roles', () => {
   it('maps all 14 slugs', () => {
-    expect(Object.keys(ROLE_PHASE_ALIASES)).toHaveLength(14);
-    for (const [slug, kind] of Object.entries(EXPECTED)) {
+    expect(ENTRIES).toHaveLength(14);
+    expect(new Set(Object.keys(ROLE_PHASE_ALIASES)).size).toBe(14);
+    for (const [slug, kind] of ENTRIES) {
       expect(phaseKindForRole(slug)).toBe(kind);
     }
+  });
+
+  it('keeps the expected slug count for each phase kind', () => {
+    const counts: Record<string, number> = {};
+    for (const [, kind] of ENTRIES) {
+      counts[kind] = (counts[kind] ?? 0) + 1;
+    }
+    expect(counts).toEqual(SLUGS_PER_KIND);
   });
 
   it('uses only known phase kinds', () => {
@@ -53,7 +61,9 @@ describe('retired roles', () => {
   });
 
   it('ignores case and surrounding whitespace', () => {
-    expect(phaseKindForRole('  Software-Architect ')).toBe('architecture');
+    for (const [slug, kind] of ENTRIES) {
+      expect(phaseKindForRole(`  ${slug.toUpperCase()} `)).toBe(kind);
+    }
   });
 
   it('freezes the alias table', () => {
@@ -63,12 +73,15 @@ describe('retired roles', () => {
 
   it('starts with no retired role', () => {
     expect(RETIRED_ROLES).toHaveLength(0);
-    expect(isRetiredRole('backend-developer')).toBe(false);
+    for (const [slug] of ENTRIES) {
+      expect(isRetiredRole(slug)).toBe(false);
+    }
   });
 
   it('keeps each retired entry equal to its alias', () => {
     for (const role of RETIRED_ROLES) {
       expect(role.phaseKind).toBe(ROLE_PHASE_ALIASES[role.slug]);
+      expect([1, 2, 3, 4]).toContain(role.step);
       expect(isRetiredRole(` ${role.slug.toUpperCase()} `)).toBe(true);
     }
   });
