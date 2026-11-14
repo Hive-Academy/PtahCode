@@ -354,6 +354,11 @@ export interface SkillSynthesisGetScorecardsParams {
 }
 export interface SkillSynthesisGetScorecardsResult {
   scorecards: Record<string, AgentScorecard>;
+  /**
+   * Phase scorecards (migration 0075). Optional: an older host omits it.
+   * Phase rows and legacy role-alias rows are separate entries.
+   */
+  phaseScorecards?: PhaseScorecard[];
 }
 
 export interface SkillSynthesisGetScorecardDetailParams {

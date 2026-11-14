@@ -78,6 +78,7 @@ import {
 import { SkillClonesStateService } from '../../services/skill-clones-state.service';
 import { CloneBulkRebaseService } from '../../services/clone-bulk-rebase.service';
 import { CloneCardComponent } from './clone-card.component';
+import { PhaseScorecardsComponent } from './phase-scorecards.component';
 import {
   CloneBodySaveRequest,
   CloneDetailDrawerComponent,
@@ -163,6 +164,7 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
     PtahButtonDirective,
     NativeTabGroupComponent,
     CloneCardComponent,
+    PhaseScorecardsComponent,
     CloneDetailDrawerComponent,
     CloneBulkToolbarComponent,
     BulkRebaseConfirmComponent,
@@ -390,6 +392,9 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
                 }
               </div>
             } @else {
+              @if (onAgentTab()) {
+                <ptah-phase-scorecards [scorecards]="phaseScorecards()" />
+              }
               <ul
                 class="grid grid-cols-1 gap-3 lg:grid-cols-2"
                 data-testid="clones-grid"
@@ -654,6 +659,7 @@ export class SkillClonesViewComponent implements OnInit {
   public readonly error = this.state.error;
   public readonly detailLoading = this.state.detailLoading;
   public readonly scorecards = this.state.scorecards;
+  protected readonly phaseScorecards = this.state.phaseScorecards;
   public readonly agentOutcomeSignals = this.state.agentOutcomeSignals;
   public readonly outcomeWindowDays = this.state.outcomeWindowDays;
   public readonly outcomeStatus = this.state.outcomeStatus;

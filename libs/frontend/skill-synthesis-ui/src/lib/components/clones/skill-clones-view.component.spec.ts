@@ -10,6 +10,7 @@ import { HarnessHealthStore } from '@ptah-extension/marketplace/services';
 import type {
   AgentOutcomeSignals,
   AgentScorecard,
+  PhaseScorecard,
   CloneSummary,
   HarnessHealth,
   HarnessTargetHealth,
@@ -111,6 +112,7 @@ interface StateStub {
   readonly scorecards: ReturnType<
     typeof signal<Record<string, AgentScorecard>>
   >;
+  readonly phaseScorecards: ReturnType<typeof signal<PhaseScorecard[]>>;
   readonly agentOutcomeSignals: ReturnType<
     typeof signal<Record<string, AgentOutcomeSignals>>
   >;
@@ -138,6 +140,7 @@ function makeStateStub(initial: CloneSummary[] = []): StateStub {
     detailLoading: signal<boolean>(false),
     detail: signal<SkillCloneDetail | null>(null),
     scorecards: signal<Record<string, AgentScorecard>>({}),
+    phaseScorecards: signal<PhaseScorecard[]>([]),
     agentOutcomeSignals: signal<Record<string, AgentOutcomeSignals>>({}),
     outcomeWindowDays: signal<number | null>(null),
     outcomeStatus: signal<
@@ -1539,7 +1542,10 @@ describe('SkillClonesViewComponent — body save', () => {
             clone({ slug: 'beta', kind: 'skill' }),
           ],
         })),
-        getScorecards: jest.fn(async () => ({})),
+        getScorecards: jest.fn(async () => ({
+          scorecards: {},
+          phaseScorecards: [],
+        })),
         getClone: jest.fn(
           (slug: string) =>
             new Promise<Detail>((resolve) => resolvers.set(slug, resolve)),

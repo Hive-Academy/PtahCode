@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
   AgentScorecard,
+  PhaseScorecard,
   ProviderListModelsResult,
   SkillCloneKind,
   SkillSynthesisGetScorecardDetailResult,
@@ -308,14 +309,20 @@ export class SkillSynthesisRpcService {
    */
   public async getScorecards(
     slugs: string[],
-  ): Promise<Record<string, AgentScorecard>> {
+  ): Promise<{
+    scorecards: Record<string, AgentScorecard>;
+    phaseScorecards: PhaseScorecard[];
+  }> {
     const result = await this.rpcService.call(
       'skillSynthesis:getScorecards',
       { slugs },
       { timeout: SKILL_RPC_TIMEOUTS.LIST_MS },
     );
     if (result.isSuccess() && result.data) {
-      return result.data.scorecards;
+      return {
+        scorecards: result.data.scorecards,
+        phaseScorecards: result.data.phaseScorecards ?? [],
+      };
     }
     throw new Error(result.error || 'Failed to load scorecards');
   }

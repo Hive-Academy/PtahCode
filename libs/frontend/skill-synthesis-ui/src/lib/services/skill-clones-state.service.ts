@@ -14,6 +14,7 @@ import { provenanceLabel } from '@ptah-extension/shared';
 import type {
   AgentOutcomeSignals,
   AgentScorecard,
+  PhaseScorecard,
   CloneSummary,
   SkillCloneHistoryEntry,
   SkillCloneKind,
@@ -99,6 +100,12 @@ export class SkillClonesStateService {
    * never as zeros (R6.3).
    */
   public readonly scorecards = signal<Record<string, AgentScorecard>>({});
+  private readonly phaseScorecardsState = signal<readonly PhaseScorecard[]>([]);
+  /**
+   * Phase scorecards from the same `getScorecards` response. Legacy
+   * role-alias rows are separate entries and are never added to phase rows.
+   */
+  public readonly phaseScorecards = this.phaseScorecardsState.asReadonly();
   /**
    * Slug-keyed outcome signals for agent-kind clones, populated by ONE
    * `getAgentOutcomeSignals` call after each `refreshClones`. A slug absent
@@ -277,13 +284,20 @@ export class SkillClonesStateService {
     const slugs = list.filter((c) => c.kind === 'agent').map((c) => c.slug);
     if (slugs.length === 0) {
       this.scorecards.set({});
+      this.phaseScorecardsState.set([]);
       return;
     }
     try {
-      const map = await this.rpc.getScorecards(slugs);
-      if (epoch === this.listEpoch) this.scorecards.set(map);
+      const result = await this.rpc.getScorecards(slugs);
+      if (epoch === this.listEpoch) {
+        this.scorecards.set(result.scorecards);
+        this.phaseScorecardsState.set(result.phaseScorecards);
+      }
     } catch {
-      if (epoch === this.listEpoch) this.scorecards.set({});
+      if (epoch === this.listEpoch) {
+        this.scorecards.set({});
+        this.phaseScorecardsState.set([]);
+      }
     }
   }
 

@@ -1045,7 +1045,7 @@ export class SkillsSynthesisRpcHandlers {
         if (!this.scorecard) {
           // Scorecard service unavailable (non-skill-synthesis runtime): return
           // a typed empty map rather than throwing.
-          return { scorecards: {} };
+          return { scorecards: {}, phaseScorecards: [] };
         }
         // Two passes on purpose: the aggregate and the win rate answer
         // different questions from different joins, and `getWinRates`' `null`
@@ -1068,7 +1068,10 @@ export class SkillsSynthesisRpcHandlers {
             winRate: measured === undefined ? null : measured.winRate,
           };
         }
-        return { scorecards: merged };
+        return {
+          scorecards: merged,
+          phaseScorecards: this.scorecard.getPhaseScorecards(workspaceRoot),
+        };
       } catch (error: unknown) {
         if (error instanceof RpcUserError) throw error;
         this.report(error, 'SkillsSynthesisRpcHandlers.registerGetScorecards');

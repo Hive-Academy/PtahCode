@@ -7,6 +7,7 @@ import {
 import type {
   AgentOutcomeSignals,
   AgentScorecard,
+  PhaseScorecard,
   CloneSummary,
   SkillSynthesisListClonesResult,
 } from '@ptah-extension/shared';
@@ -99,7 +100,10 @@ function makeRpc(): jest.Mocked<RpcSlice> {
       body: '# body',
       history: [{ ts: '20260101T000000', hasBody: true }],
     })),
-    getScorecards: jest.fn(async () => ({ planner: scorecard() })),
+    getScorecards: jest.fn(async () => ({
+      scorecards: { planner: scorecard() },
+      phaseScorecards: [],
+    })),
     getAgentOutcomeSignals: jest.fn(async () => ({
       signals: {},
       windowDays: 30,
@@ -372,6 +376,39 @@ describe('SkillClonesStateService', () => {
     expect(svc.scorecards()['planner']?.slug).toBe('planner');
   });
 
+  it('stores phase scorecards from the same call and keeps legacy rows apart', async () => {
+    const rpc = makeRpc();
+    const phase: PhaseScorecard = {
+      phaseKind: 'implement',
+      source: 'phase',
+      legacy: false,
+      aliasedRoles: [],
+      gradedCount: 4,
+      passedCount: 3,
+      gradedSuccessRate: 0.75,
+    };
+    const legacy: PhaseScorecard = {
+      phaseKind: 'implement',
+      source: 'role-alias',
+      legacy: true,
+      aliasedRoles: ['backend-developer'],
+      gradedCount: 2,
+      passedCount: 1,
+      gradedSuccessRate: 0.5,
+    };
+    rpc.listClones.mockResolvedValueOnce(
+      listed([clone({ slug: 'planner', kind: 'agent' })]),
+    );
+    rpc.getScorecards.mockResolvedValueOnce({
+      scorecards: {},
+      phaseScorecards: [phase, legacy],
+    });
+    const { svc } = setup(rpc);
+    await svc.refreshClones();
+    expect(rpc.getScorecards).toHaveBeenCalledTimes(1);
+    expect(svc.phaseScorecards()).toEqual([phase, legacy]);
+  });
+
   it('skips the scorecard RPC entirely when no agent clones exist', async () => {
     const rpc = makeRpc();
     rpc.listClones.mockResolvedValueOnce(listed([clone({ kind: 'skill' })]));
@@ -402,7 +439,10 @@ describe('SkillClonesStateService', () => {
     rpc.listClones.mockResolvedValueOnce(
       listed([clone({ slug: 'planner', kind: 'agent' })]),
     );
-    rpc.getScorecards.mockResolvedValueOnce({});
+    rpc.getScorecards.mockResolvedValueOnce({
+      scorecards: {},
+      phaseScorecards: [],
+    });
     const { svc } = setup(rpc);
     await svc.refreshClones();
     expect(svc.scorecards()['planner']).toBeUndefined();
@@ -715,8 +755,10 @@ describe('SkillClonesStateService', () => {
     it('drops a scorecard reply from a superseded list request', async () => {
       const rpc = makeRpc();
       rpc.listClones.mockResolvedValue(listed([agent('planner')]));
-      let finishOld: (map: Record<string, AgentScorecard>) => void = () =>
-        undefined;
+      let finishOld: (result: {
+        scorecards: Record<string, AgentScorecard>;
+        phaseScorecards: PhaseScorecard[];
+      }) => void = () => undefined;
       rpc.getScorecards
         .mockImplementationOnce(
           () =>
@@ -725,13 +767,17 @@ describe('SkillClonesStateService', () => {
             }),
         )
         .mockResolvedValueOnce({
-          planner: scorecard({ totalInvocations: 9 }),
+          scorecards: { planner: scorecard({ totalInvocations: 9 }) },
+          phaseScorecards: [],
         });
       const { svc } = setup(rpc);
       const older = svc.refreshClones();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       await svc.refreshClones();
-      finishOld({ planner: scorecard({ totalInvocations: 1 }) });
+      finishOld({
+        scorecards: { planner: scorecard({ totalInvocations: 1 }) },
+        phaseScorecards: [],
+      });
       await older;
       expect(svc.scorecards()['planner']?.totalInvocations).toBe(9);
     });

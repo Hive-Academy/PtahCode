@@ -241,6 +241,7 @@ function makeScorecard() {
     // B4.4.3: `skillSynthesis:getScorecards` now merges the win-rate pass into
     // the aggregate, so the double has to answer both calls.
     getWinRates: jest.fn().mockReturnValue({}),
+    getPhaseScorecards: jest.fn().mockReturnValue([]),
     getScorecardDetail: jest
       .fn()
       .mockResolvedValue({ slug: '', rows: [], findingsExcerpt: null }),
@@ -1479,7 +1480,37 @@ describe('SkillsSynthesisRpcHandlers — skillSynthesis:getScorecards', () => {
     const result = await rpcHandler.call('skillSynthesis:getScorecards', {
       slugs: ['a'],
     });
-    expect(result).toEqual({ scorecards: {} });
+    expect(result).toEqual({ scorecards: {}, phaseScorecards: [] });
+  });
+
+  it('returns the phase scorecards from the service with legacy rows apart', async () => {
+    const { rpcHandler, scorecard } = buildHandlers(['/workspace/active']);
+    const phaseRow = {
+      phaseKind: 'implement',
+      source: 'phase',
+      legacy: false,
+      aliasedRoles: [],
+      gradedCount: 4,
+      passedCount: 3,
+      gradedSuccessRate: 0.75,
+    };
+    const legacyRow = {
+      phaseKind: 'implement',
+      source: 'role-alias',
+      legacy: true,
+      aliasedRoles: ['backend-developer'],
+      gradedCount: 2,
+      passedCount: 1,
+      gradedSuccessRate: 0.5,
+    };
+    scorecard.getPhaseScorecards.mockReturnValue([phaseRow, legacyRow]);
+
+    const result = (await rpcHandler.call('skillSynthesis:getScorecards', {
+      slugs: ['a'],
+    })) as { phaseScorecards: unknown[] };
+
+    expect(scorecard.getPhaseScorecards).toHaveBeenCalledWith('/workspace/active');
+    expect(result.phaseScorecards).toEqual([phaseRow, legacyRow]);
   });
 
   it('rejects a non-array slugs param with INVALID_PARAMS', async () => {
