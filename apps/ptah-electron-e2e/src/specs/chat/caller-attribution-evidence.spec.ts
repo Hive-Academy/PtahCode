@@ -92,6 +92,24 @@ test.describe('@evidence Codex caller attribution', () => {
     await page.locator(send).first().click();
   }
 
+  /**
+   * New Codex tabs start in Manual permission mode, so each Ptah MCP tool call
+   * raises an approval prompt that times out after 60 s. Allow only prompts
+   * for `ptah_*` tools of the Ptah MCP server; leave every other prompt alone.
+   */
+  async function allowPtahTools(page: Page): Promise<void> {
+    const prompts = page.locator('[data-testid="rail-card-needs-you"]:visible', {
+      hasText: /ptah MCP server to run tool\W+ptah_/,
+    });
+    const count = await prompts.count();
+    for (let index = 0; index < count; index += 1) {
+      const allow = prompts.nth(index)
+        .getByRole('group', { name: 'Permission actions' })
+        .getByRole('button', { name: 'Allow', exact: true });
+      if (await allow.isEnabled()) await allow.click({ timeout: 5_000 });
+    }
+  }
+
   test('item a: Codex tab starts a child session attributed to its parent', async () => {
     test.setTimeout(600_000);
     const live = await liveApp();
@@ -99,7 +117,10 @@ test.describe('@evidence Codex caller attribution', () => {
       const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'auto-edit');
       const before = await live.page.locator(railCard).count();
       await ask(live.page, 'Call the Ptah MCP tool ptah_session_start exactly once with a trivial task: "Reply with CHILD-READY." Report its result.');
-      await expect.poll(() => live.page.locator(railCard).count(), { timeout: 360_000, intervals: [2_000] }).toBeGreaterThan(before);
+      await expect.poll(async () => {
+        await allowPtahTools(live.page);
+        return live.page.locator(railCard).count();
+      }, { timeout: 360_000, intervals: [2_000] }).toBeGreaterThan(before);
       const child = live.page.locator(railCard).filter({ has: live.page.locator('[data-testid="rail-child-glyph"]') }).first();
       await expect(child).toBeVisible({ timeout: 60_000 });
       const parentCard = live.page.locator(`${railCard}[data-tab-id="${parent}"]`);
@@ -119,7 +140,11 @@ test.describe('@evidence Codex caller attribution', () => {
       const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'auto-edit');
       await ask(live.page, 'Call ptah_agent_list, then ptah_agent_spawn once for a small available Codex lane. Its sole task: call ptah_agent_report with message "E2E-REPORT-MARKER" and exit. Wait for the report.');
       const report = live.page.locator('[data-testid="chat-peer-message"]', { hasText: 'E2E-REPORT-MARKER' });
-      await expect(report).toBeVisible({ timeout: 420_000 });
+      await expect.poll(async () => {
+        await allowPtahTools(live.page);
+        return report.count();
+      }, { timeout: 420_000, intervals: [2_000] }).toBeGreaterThan(0);
+      await expect(report.first()).toBeVisible();
       await expect(live.page.locator(`${railCard}[data-tab-id="${parent}"]`)).toBeVisible();
       await capture(live.page, 'caller-item-b-report', '[data-testid="chat-peer-message"]');
     } finally {
@@ -133,12 +158,17 @@ test.describe('@evidence Codex caller attribution', () => {
     const live = await liveApp();
     try {
       const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'ask');
-      await ask(live.page, 'Run the harmless shell command `git status` exactly once. Wait for permission if requested.');
-      const approval = live.page.locator('ptah-permission-request-card:visible', { hasText: 'git status' }).first();
+      // `git status` is on the Codex known-safe list and can run without a prompt.
+      await ask(live.page, 'Run the harmless shell command `node --version` exactly once. Wait for permission if requested.');
+      const needsYou = '[data-testid="rail-card-needs-you"]';
+      const parentPrompt = `${railCard}[data-tab-id="${parent}"] ${needsYou}`;
+      const approval = live.page.locator(parentPrompt, { hasText: /node --version/ });
       await expect(approval).toBeVisible({ timeout: 360_000 });
-      await expect(live.page.locator(`${railCard}[data-tab-id="${parent}"]`)).toBeVisible();
-      await capture(live.page, 'caller-item-c-approval-before-deny', 'ptah-permission-request-card:visible');
-      await approval.getByRole('button', { name: 'Deny this request and stop execution' }).click();
+      // The prompt shows on the parent tab only, not on another session card.
+      await expect(live.page.locator(`${needsYou}:visible`, { hasText: /node --version/ })).toHaveCount(1);
+      await capture(live.page, 'caller-item-c-approval-before-deny', parentPrompt);
+      await approval.getByRole('group', { name: 'Permission actions' })
+        .getByRole('button', { name: 'Deny', exact: true }).click();
       await expect(approval).toHaveCount(0, { timeout: 60_000 });
       await capture(live.page, 'caller-item-c-approval-denied', `${railCard}[data-tab-id="${parent}"]`);
     } finally {
