@@ -75,7 +75,7 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
                 <button
                   type="button"
                   data-testid="gateway-approve-btn"
-                  ptahButton variant="outline" size="xs"
+                  class="btn btn-xs btn-success btn-outline"
                   [disabled]="!bindingCodeFor(b.id)"
                   (click)="onApprove(b)"
                 >

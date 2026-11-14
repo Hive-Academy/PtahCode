@@ -247,7 +247,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
           aria-label="Platform configuration"
         >
           <div
-            class="flex flex-wrap items-center justify-between gap-[var(--ptah-gap-controls)] border-b border-surface-border p-[var(--ptah-surface-pad)]"
+            class="flex flex-wrap items-center justify-between gap-[var(--ptah-gap-controls)] border-b border-surface-border px-[var(--ptah-surface-pad)] py-[var(--ptah-space-2)]"
           >
             <ptah-gateway-platform-tabs
               [platforms]="platforms()"
