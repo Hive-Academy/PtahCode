@@ -741,20 +741,12 @@
     "<dynamic>": 1,
     "skeleton": 2
   },
-  "libs/frontend/machines-ui/src/lib/components/add-machine-pane/add-machine-pane.component.ts": {
-    "btn-ghost": 1
-  },
   "libs/frontend/machines-ui/src/lib/components/machine-list/machine-list.component.ts": {
     "<dynamic>": 1,
     "skeleton": 3
   },
   "libs/frontend/machines-ui/src/lib/components/machine-status/machine-status.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/machines-ui/src/lib/components/machines-view/machine-overview.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-sm": 1
   },
   "libs/frontend/machines-ui/src/lib/components/machines-view/machines-view.component.ts": {
     "skeleton": 3

@@ -12,7 +12,7 @@ import {
   type OnInit,
 } from '@angular/core';
 import { MACHINE_SSH_ALIAS_PATTERN } from '@ptah-extension/shared';
-import { SetupActionDirective, PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import { SetupActionDirective, PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import {
   PAIRING_CODE_LENGTH,
   PAIRING_TTL_DEFAULT_SEC,
@@ -60,12 +60,12 @@ let nextId = 0;
 @Component({
   selector: 'ptah-add-machine-pane',
   standalone: true,
-  imports: [PtahButtonDirective, PtahInputDirective, CopyCommandComponent, SetupActionDirective],
+  imports: [PtahButtonDirective, PtahFieldComponent, PtahInputDirective, CopyCommandComponent, SetupActionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     <form
-      class="flex max-w-[640px] flex-col gap-4"
+      class="flex max-w-[640px] flex-col gap-[var(--ptah-gap-field)]"
       novalidate
       [attr.aria-busy]="busy() !== null ? 'true' : null"
       data-testid="add-machine-form"
@@ -100,12 +100,14 @@ let nextId = 0;
         </div>
       }
 
-      <div class="flex flex-col gap-1">
-        <label
-          class="text-sm font-medium text-base-content"
-          [attr.for]="aliasId"
-          >SSH alias</label
-        >
+      <h3 class="text-sm font-semibold text-base-content">Connection settings</h3>
+      <ptah-field
+        label="SSH alias"
+        appearance="stacked"
+        [hint]="'Hosts from your ~/.ssh/config. You can type any alias.'"
+        [error]="aliasError()"
+        [attr.data-testid]="aliasError() ? 'add-machine-alias-error' : null"
+      >
         <input
           ptahInput size="sm" tone="mono"
           type="text"
@@ -114,33 +116,21 @@ let nextId = 0;
           maxlength="64"
           [id]="aliasId"
           [attr.list]="aliasListId"
-          [attr.aria-describedby]="aliasId + '-hint'"
           [attr.aria-invalid]="aliasError() ? 'true' : null"
           [readOnly]="machine() !== null"
           [value]="alias()"
           data-testid="add-machine-alias"
           (input)="onAliasInput($event)"
         />
-        <datalist [id]="aliasListId" data-testid="add-machine-aliases">
-          @for (option of aliasOptions(); track option) {
-            <option [value]="option"></option>
-          }
-        </datalist>
-        @if (aliasError(); as message) {
-          <span
-            class="text-xs text-state-err"
-            data-testid="add-machine-alias-error"
-            >{{ message }}</span
-          >
+      </ptah-field>
+      <datalist [id]="aliasListId" data-testid="add-machine-aliases">
+        @for (option of aliasOptions(); track option) {
+          <option [value]="option"></option>
         }
-        <span class="text-xs text-base-content-muted" [id]="aliasId + '-hint'"
-          >Hosts from your <code class="font-mono">~/.ssh/config</code>. You can
-          type any alias.</span
-        >
-      </div>
+      </datalist>
 
       <fieldset
-        class="flex flex-col gap-3 rounded-box border border-surface-border bg-base-200 px-5 py-4"
+        class="flex flex-col gap-[var(--ptah-gap-heading)] rounded-box border border-surface-border bg-base-200 p-[var(--ptah-surface-pad)]"
       >
         <legend class="sr-only">Pairing code</legend>
         <p class="text-sm font-semibold text-base-content" aria-hidden="true">
@@ -224,7 +214,7 @@ let nextId = 0;
         </p>
       </fieldset>
 
-      <div class="flex gap-2">
+      <div class="flex gap-[var(--ptah-gap-controls)]">
         <button
           type="submit"
           [ptahSetupAction]="'primaryCompact'"
@@ -236,8 +226,8 @@ let nextId = 0;
         </button>
         <button
           type="button"
-          [ptahSetupAction]="'ghost'"
-          class="btn-ghost focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+          ptahButton
+          variant="ghost"
           data-testid="add-machine-cancel"
           (click)="cancel()"
         >
