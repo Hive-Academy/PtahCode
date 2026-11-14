@@ -57,3 +57,8 @@ Evidence runs 2-5 failed on test setup only; no Phase B defect found so far.
   also on main (branch does not touch session-spawner.service.ts). Needs parent decision.
 - git status after every run: only status.md and untracked HANDOFF.md.
 - Fetch 12:44: origin 4759d6007, no foreign commits. Test-only commits pushed; PR stays draft.
+
+2026-11-14 12:50: pushed 4759d6007..085f486a8 (no force), PR body test plan updated, CI watch
+started. Report to parent NOT delivered (parent-session-not-active). Decision needed from the
+parent: fix the Codex child rail link (session-spawner recordOrganization / sdkIdOf) in
+PR #1265, or record it as a follow-up and accept item (a) as partial. PR stays draft until then.
