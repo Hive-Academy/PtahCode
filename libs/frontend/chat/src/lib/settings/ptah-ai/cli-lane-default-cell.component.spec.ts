@@ -41,6 +41,21 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(selects[0].getAttribute('aria-label')).toContain('permission default');
   });
 
+  it('shows the saved choice when the manifest and the saved row arrive together', () => {
+    // Reload path: options render in the same pass as the value. A bound
+    // select value with no matching option yet fell back to the first
+    // option ("plan" / "deny"), so a saved auto-edit looked like Plan.
+    const fixture = TestBed.createComponent(CliLaneDefaultCellComponent);
+    fixture.componentRef.setInput('cli', 'codex');
+    fixture.componentRef.setInput('name', 'Codex');
+    fixture.componentRef.setInput('manifest', manifest);
+    fixture.componentRef.setInput('saved', { permission: 'auto-edit', network: 'allow' });
+    fixture.detectChanges();
+    const selects = fixture.nativeElement.querySelectorAll('select') as NodeListOf<HTMLSelectElement>;
+    expect(selects[0].value).toBe('auto-edit');
+    expect(selects[1].value).toBe('allow');
+  });
+
   it('shows reasons and shared Ptah scope', () => {
     const fixture = setup('ptah-cli');
     expect(fixture.nativeElement.textContent).toContain('Shared by all Ptah CLI providers');
