@@ -49,7 +49,7 @@
         (focus)="partialBadgeFocused.set(true)"
         (blur)="partialBadgeFocused.set(false)"
         data-testid="usage-partial-badge"
-      ><span ptahBadge tone="warning">partial</span></button>
+      ><span ptahBadge tone="warn">partial</span></button>
       <span id="usage-partial-source-description" class="sr-only">{{ sourceTip() }}</span>
     }
     @if (viewModel()?.coverageStartDay; as coverageStartDay) {
@@ -62,9 +62,8 @@
   @if (isLoading() && viewModel() === null) {
     <div role="status" aria-label="Loading usage"><ptah-state-panel state="loading" title="Loading usage" /></div>
   } @else if (loadError() !== null && viewModel() === null) {
-    <div role="alert" data-testid="usage-error">
-      <ptah-state-panel state="error" [body]="loadError()" />
-      <button type="button" ptahButton variant="outline" size="sm" (click)="retry()" aria-label="Retry loading usage">Retry</button>
+    <div data-testid="usage-error">
+      <ptah-state-panel state="error" [body]="loadError()" actionLabel="Retry" (action)="retry()" />
     </div>
   } @else if (viewModel(); as vm) {
     <div
@@ -73,7 +72,7 @@
       data-testid="usage-content"
     >
       @if (loadError() !== null) {
-        <div role="status" data-testid="usage-refresh-failed"><ptah-state-panel state="partial" body="Refresh failed; showing the last loaded data." /></div>
+        <div data-testid="usage-refresh-failed"><ptah-state-panel state="partial" body="Refresh failed; showing the last loaded data." /></div>
       } @else if (isStale()) {
         <div
           class="text-xs text-base-content-muted"
