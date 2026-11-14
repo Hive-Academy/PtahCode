@@ -2,10 +2,16 @@ import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { Listbox, Option } from '@angular/aria/listbox';
 import {
   PtahButtonDirective,
+  PtahAlertComponent,
+  PtahAlertTone,
   PtahListDetailComponent,
   PtahListRowComponent,
   PtahPanelState,
   PtahRichSelectComponent,
+  PtahSkeletonComponent,
+  PtahSpinnerComponent,
+  PtahSpinnerKind,
+  PtahSpinnerSize,
   PtahStatePanelComponent,
   PtahToolbarComponent,
   SurfaceCardComponent,
@@ -22,9 +28,12 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
     Listbox,
     Option,
     PtahButtonDirective,
+    PtahAlertComponent,
     PtahListDetailComponent,
     PtahListRowComponent,
     PtahRichSelectComponent,
+    PtahSkeletonComponent,
+    PtahSpinnerComponent,
     PtahStatePanelComponent,
     PtahToolbarComponent,
     SurfaceCardComponent,
@@ -126,6 +135,32 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
     </ptah-gallery-section>
 
     <ptah-gallery-section id="components-states" title="States">
+      <div class="mb-ptah-group flex flex-wrap items-center gap-ptah-field">
+        @for (size of spinnerSizes; track size) {
+          <ptah-spinner [size]="size" [label]="'Loading ' + size" />
+        }
+        @for (kind of spinnerKinds; track kind) {
+          <ptah-spinner [kind]="kind" [label]="'Loading ' + kind" />
+        }
+      </div>
+      <div class="mb-ptah-group grid gap-ptah-field sm:grid-cols-2">
+        <ptah-skeleton />
+        <ptah-skeleton size="sm" [lines]="2" />
+        <ptah-skeleton size="lg" />
+        <ptah-skeleton shape="block" size="sm" />
+      </div>
+      <div class="mb-ptah-group grid gap-ptah-field sm:grid-cols-2">
+        @for (tone of alertTones; track tone) {
+          <ptah-alert [tone]="tone" [title]="tone">Sample {{ tone }} message</ptah-alert>
+        }
+        <ptah-alert tone="info" title="Saved" live="polite" [headingLevel]="3">
+          Polite live region with an h3 title
+        </ptah-alert>
+        <ptah-alert tone="error" title="Sync failed" live="assertive" [compact]="true">
+          Compact assertive alert with an action
+          <button alertAction type="button" ptahButton>Retry</button>
+        </ptah-alert>
+      </div>
       <div class="grid gap-ptah-field sm:grid-cols-2 xl:grid-cols-5">
         @for (state of states; track state) {
           <ptah-state-panel
@@ -157,6 +192,9 @@ import { InboxLayoutDemoComponent } from './inbox-layout-demo.component';
   </div>`,
 })
 export class GalleryComponentsComponent {
+  public readonly spinnerSizes: PtahSpinnerSize[] = ['xs', 'sm', 'md', 'lg'];
+  public readonly spinnerKinds: PtahSpinnerKind[] = ['spinner', 'dots', 'ring'];
+  public readonly alertTones: PtahAlertTone[] = ['info', 'success', 'warning', 'error'];
   public readonly states: PtahPanelState[] = [
     'loading',
     'empty',

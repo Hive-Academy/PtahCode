@@ -7,6 +7,7 @@ import {
   numberAttribute,
 } from '@angular/core';
 import { PtahSectionLevel } from '../../card/card.types';
+import { PtahAlertComponent } from '../../foundation/alert.component';
 
 /** Same transform as `PtahSectionHeaderComponent`: 2 and 4 stay, all else is 3. */
 function toSectionLevel(value: unknown): PtahSectionLevel {
@@ -44,6 +45,7 @@ const HINT_CLASS =
 @Component({
   selector: 'ptah-form-section',
   standalone: true,
+  imports: [PtahAlertComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     'data-ptah-pattern': 'form-section',
@@ -90,9 +92,9 @@ const HINT_CLASS =
         data-testid="form-section-fields"
       >
         @if (error(); as errorText) {
-          <div class="alert alert-error" role="alert" [id]="errorId" data-testid="form-section-error">
+          <ptah-alert tone="error" live="assertive" [id]="errorId" data-testid="form-section-error">
             {{ errorText }}
-          </div>
+          </ptah-alert>
         }
         <ng-content />
         <div class="mt-[var(--ptah-gap-group)] empty:hidden"><ng-content select="[footer]" /></div>
