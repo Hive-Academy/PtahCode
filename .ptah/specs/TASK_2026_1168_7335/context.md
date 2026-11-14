@@ -44,6 +44,8 @@ visibility, completion-notice dedup. Regression tests plus real Electron UI evid
   worktree `fix-caller-attribution-reports-v2-e06f9653385a`) to coordinate. It is the Phase B
   coordinator again. e919afa2 had already pushed 5d3be6ea9, so the old session fast-forwards and
   reworks the sdkIdOf change.
+- D30 (new): #1265 and #1266 conflicted with main (no CI ran). The user authorized a merge
+  commit of origin/main into both PR branches (no rebase, no force push).
 
 ## Open problems
 
