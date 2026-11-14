@@ -877,7 +877,7 @@ export class PtahAPIBuilder {
         return buildRouteNamespace({
           agent: builtAgent,
           childSession: {
-            canStart: () => this.resolveSessionSpawner()?.canStart(getCallerSessionId()) ??
+            canStart: () => this.resolveSessionSpawner()?.canStart(this.resolveChildSessionCallerId()) ??
               { ok: false, code: 'chat-runtime-unavailable', reason: 'session spawner unavailable' },
           },
           container: this.container,
@@ -1086,10 +1086,7 @@ export class PtahAPIBuilder {
         buildSessionNamespace({
           getSpawner: () => this.resolveSessionSpawner(),
           getHandoff: () => this.resolveSessionHandoff(),
-          getCallerSessionId: () => {
-            const raw = getCallerSessionId();
-            return raw ? this.resolveCodexCallerId(raw) : raw;
-          },
+          getCallerSessionId: () => this.resolveChildSessionCallerId(),
           onWorktreeChanged: this.buildWorktreeChangeHandler(),
         }),
       ),
@@ -1198,6 +1195,16 @@ export class PtahAPIBuilder {
       ...(sessionRoot ? [sessionRoot] : []),
       ...this.workspaceProvider.getWorkspaceFolders(),
     ].filter((root) => typeof root === 'string' && root.trim() !== '');
+  }
+
+  /**
+   * The MCP caller id that child-session start and its route eligibility
+   * check both use: a native Codex tab id becomes its live thread id, and any
+   * other caller id passes through unchanged.
+   */
+  private resolveChildSessionCallerId(): string | undefined {
+    const raw = getCallerSessionId();
+    return raw ? this.resolveCodexCallerId(raw) : raw;
   }
 
   private resolveCodexCallerId(raw: string): string {

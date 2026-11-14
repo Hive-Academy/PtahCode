@@ -98,6 +98,15 @@ jest.mock('./namespace-builders', () => {
   return mocked;
 });
 
+// A pass-through spy: the real route namespace still builds, and the child
+// session eligibility check it receives can be called directly.
+jest.mock('./namespace-builders/route-namespace.builder', () => {
+  const actual = jest.requireActual<
+    typeof import('./namespace-builders/route-namespace.builder')
+  >('./namespace-builders/route-namespace.builder');
+  return { ...actual, buildRouteNamespace: jest.fn(actual.buildRouteNamespace) };
+});
+
 jest.mock('./services/web-search.service', () => ({
   WebSearchService: jest.fn().mockImplementation((deps: unknown) => ({
     __deps: deps,
@@ -199,6 +208,7 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
 }));
 
 import * as namespaceBuilders from './namespace-builders';
+import { buildRouteNamespace } from './namespace-builders/route-namespace.builder';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import { WebSearchService } from './services/web-search.service';
 import { PtahAPIBuilder } from './ptah-api-builder.service';
@@ -416,6 +426,34 @@ describe('PtahAPIBuilder harness proposal wiring', () => {
       expect(spawner.start).toHaveBeenLastCalledWith(
         expect.objectContaining({ callerSessionId: expectedId }),
       );
+    }
+  });
+
+  it('passes the live native thread to the route child-session check', async () => {
+    const spawner = { canStart: jest.fn().mockReturnValue({ ok: true }) };
+    const codexSessions = {
+      getPermissionLevel: jest.fn().mockReturnValue(undefined),
+      resolveLiveSessionId: jest.fn((id: string) =>
+        id === 'codex-tab' ? 'codex-thread-1' : undefined,
+      ),
+    };
+    const builder = buildTestBuilder(
+      makeRawWorkspaceProvider(), makeSessionManager(), undefined, undefined,
+      undefined, undefined, undefined, makeLogger(), codexSessions,
+    );
+    Object.assign(builder, {
+      container: { isRegistered: jest.fn().mockReturnValue(true), resolve: () => spawner },
+    });
+    builder.build();
+    const routeDeps = jest.mocked(buildRouteNamespace).mock.calls.at(-1)?.[0];
+    for (const [callerId, expectedId] of [
+      ['codex-tab', 'codex-thread-1'],
+      ['claude-tab', 'claude-tab'],
+    ]) {
+      await runWithMcpRequestContext({ callerSessionId: callerId }, async () => {
+        expect(routeDeps?.childSession?.canStart()).toEqual({ ok: true });
+      });
+      expect(spawner.canStart).toHaveBeenLastCalledWith(expectedId);
     }
   });
 
