@@ -196,6 +196,25 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     }));
   });
 
+  it('keeps the main behavior for a lane with no spawn argument and no saved row', async () => {
+    // Global level is 'ask'. On main the same spawn already ran with
+    // bypassPermissions + allowDangerouslySkipPermissions (manifest yolo),
+    // and the SDK skips every permission check in that mode, so the global
+    // callback never ran. The lane level must not become more permissive.
+    const { registry, queryFn, createCallback } = buildHarness();
+    await registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+      }),
+    }));
+    expect(queryFn).not.toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ canUseTool: expect.anything() }),
+    }));
+    expect(createCallback).not.toHaveBeenCalled();
+  });
+
   it('does not throw when the spawn has neither a resume nor a parent session', async () => {
     const { registry } = buildHarness();
 
