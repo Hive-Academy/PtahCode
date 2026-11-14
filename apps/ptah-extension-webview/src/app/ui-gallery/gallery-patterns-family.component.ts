@@ -11,14 +11,19 @@ import {
   PtahFormActionsComponent,
   PtahFormSectionComponent,
   PtahInputDirective,
+  PtahSettingsLayoutComponent,
+  PtahSettingsTab,
 } from '@ptah-extension/ui';
+import { Bot, Settings, UserRound, Wallet } from 'lucide-angular';
 import { GallerySectionComponent } from './gallery-section.component';
+
+type GallerySettingsTabId = 'general' | 'accounts' | 'models' | 'billing';
 
 /**
  * Gallery sections of the form patterns family (TASK_2026_1177_9109,
- * pattern-spec.md sections 1 to 4): `ptah-form-section`,
- * `ptah-description-list`, `ptah-form-actions` and `ptah-editable-section`
- * in their states.
+ * pattern-spec.md sections 1 to 5): `ptah-form-section`,
+ * `ptah-description-list`, `ptah-form-actions`, `ptah-editable-section`
+ * and `ptah-settings-layout` in their states.
  */
 @Component({
   selector: 'ptah-gallery-patterns-family',
@@ -35,6 +40,7 @@ import { GallerySectionComponent } from './gallery-section.component';
     PtahFormActionsComponent,
     PtahFormSectionComponent,
     PtahInputDirective,
+    PtahSettingsLayoutComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div class="flex flex-col gap-ptah-section">
@@ -230,6 +236,50 @@ import { GallerySectionComponent } from './gallery-section.component';
         </ptah-editable-section>
       </div>
     </ptah-gallery-section>
+
+    <ptah-gallery-section id="patterns-settings-layout" title="Settings layout pattern">
+      <p class="text-ptah-hint text-base-content-muted">
+        The settings page frame: a side nav of tabs, a page header and one tab panel.
+        Below 768 px of its own width the nav is a strip above the header. Arrow keys
+        move focus. Enter, Space or a click selects.
+      </p>
+
+      <div
+        data-testid="patterns-settings-layout-wide"
+        class="rounded-ptah-surface border border-surface-border"
+      >
+        <ptah-settings-layout
+          title="Settings"
+          description="Accounts, models and billing for this workspace."
+          [tabs]="settingsTabs"
+          [selected]="wideTab()"
+          (selectedChange)="wideTab.set($event)"
+        >
+          <span nav-header class="text-ptah-hint text-base-content-muted">Ptah</span>
+          <span nav-footer class="text-ptah-hint text-base-content-muted">Version 1.0.0</span>
+          <button actions ptahButton type="button" size="xs" variant="ghost">Reset</button>
+          <ptah-form-section [heading]="tabLabel(wideTab())" description="The panel shows the content of the selected tab.">
+            <ptah-field label="Name"><input ptahInput [value]="tabLabel(wideTab())" /></ptah-field>
+          </ptah-form-section>
+        </ptah-settings-layout>
+      </div>
+
+      <div
+        data-testid="patterns-settings-layout-narrow"
+        class="max-w-[480px] rounded-ptah-surface border border-surface-border"
+      >
+        <ptah-settings-layout
+          title="Settings"
+          [tabs]="settingsTabs"
+          [selected]="narrowTab()"
+          (selectedChange)="narrowTab.set($event)"
+        >
+          <ptah-form-section [heading]="tabLabel(narrowTab())" description="Narrow frame: the tabs scroll on the x axis.">
+            <ptah-field label="Name"><input ptahInput [value]="tabLabel(narrowTab())" /></ptah-field>
+          </ptah-form-section>
+        </ptah-settings-layout>
+      </div>
+    </ptah-gallery-section>
   </div>`,
 })
 export class GalleryPatternsFamilyComponent {
@@ -241,6 +291,22 @@ export class GalleryPatternsFamilyComponent {
     { key: 'org', term: 'Organization', value: '  ' },
   ];
   public readonly stickyRows: readonly number[] = [1, 2, 3, 4, 5];
+
+  // Settings layout demo: the parent owns the selected tab.
+  public readonly settingsTabs: readonly PtahSettingsTab<GallerySettingsTabId>[] = [
+    { id: 'general', label: 'General', icon: Settings },
+    { id: 'accounts', label: 'Accounts', icon: UserRound, badge: 2 },
+    { id: 'models', label: 'Models', icon: Bot, badge: 'New' },
+    {
+      id: 'billing',
+      label: 'Billing',
+      icon: Wallet,
+      disabled: true,
+      disabledReason: 'Only an admin can open billing.',
+    },
+  ];
+  public readonly wideTab = signal<GallerySettingsTabId>('general');
+  public readonly narrowTab = signal<GallerySettingsTabId>('accounts');
   public readonly dirty = signal(false);
 
   // Editable section demo: the parent owns every state.
@@ -255,6 +321,10 @@ export class GalleryPatternsFamilyComponent {
 
   public constructor() {
     inject(DestroyRef).onDestroy(() => this.clearSaveTimer());
+  }
+
+  public tabLabel(id: GallerySettingsTabId): string {
+    return this.settingsTabs.find((tab) => tab.id === id)?.label ?? id;
   }
 
   public startEdit(): void {
