@@ -192,7 +192,11 @@ type RequiredKeys<T> = {
 /** The required fields a variant adds to the base the caller checks. */
 type VariantRequiredKeys<K extends EventType> = Exclude<
   RequiredKeys<EventOf<K>>,
-  'id' | 'messageId' | 'timestamp' | 'eventType'
+  | 'id'
+  | 'messageId'
+  | 'timestamp'
+  | 'eventType'
+  | (K extends 'agent_status' ? 'agentId' | 'native' : never)
 >;
 
 /**
@@ -284,6 +288,56 @@ function withoutField(
 }
 
 describe('parseFlatStreamEvent field checks', () => {
+  describe('agent_status variants', () => {
+    const native = {
+      ...base,
+      eventType: 'agent_status',
+      parentToolUseId: 'tc',
+      agentId: 'agent-1',
+      status: 'running',
+      native: {
+        provider: 'codex',
+        agentThreadId: 'thread-1',
+        activityId: 'activity-1',
+        cycleId: 'cycle-1',
+        cycleOrdinal: 0,
+        kind: 'started',
+      },
+    };
+
+    it('accepts SDK status with taskId', () => {
+      expect(parseFlatStreamEvent(VALID.agent_status)).toEqual(
+        VALID.agent_status,
+      );
+    });
+
+    it('rejects SDK status without taskId', () => {
+      expect(parseFlatStreamEvent(withoutField('agent_status', 'taskId'))).toBeNull();
+    });
+
+    it('accepts native Codex status', () => {
+      expect(parseFlatStreamEvent(native)).toEqual(native);
+    });
+
+    it('rejects native status without agentThreadId', () => {
+      const missingThreadId: Record<string, unknown> = { ...native.native };
+      delete missingThreadId['agentThreadId'];
+      expect(parseFlatStreamEvent({ ...native, native: missingThreadId })).toBeNull();
+    });
+
+    it('rejects native status with an invalid kind', () => {
+      expect(parseFlatStreamEvent({ ...native, native: { ...native.native, kind: 'unknown' } })).toBeNull();
+    });
+
+    it.each([-1, 0.5])('rejects native status with cycleOrdinal %p', (cycleOrdinal) => {
+      expect(parseFlatStreamEvent({ ...native, native: { ...native.native, cycleOrdinal } })).toBeNull();
+    });
+
+    it('rejects native status with another provider', () => {
+      expect(parseFlatStreamEvent({ ...native, native: { ...native.native, provider: 'other' } })).toBeNull();
+    });
+  });
+
   it.each(Object.values(VALID))('accepts a valid $eventType', (event) => {
     expect(parseFlatStreamEvent(event)).toEqual(event);
   });

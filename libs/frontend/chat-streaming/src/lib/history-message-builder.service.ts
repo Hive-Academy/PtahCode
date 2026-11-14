@@ -177,9 +177,17 @@ export class HistoryMessageBuilder {
   ): ExecutionChatMessage[] {
     try {
       let allTrees = this.treeBuilder.buildTree(state, options.cacheKey);
+      const nativeToolCallIds = new Set(
+        [...state.events.values()]
+          .flatMap((event) => event.eventType === 'agent_status' && event.native?.provider === 'codex'
+            ? [event.parentToolUseId]
+            : event.eventType === 'agent_start' && event.agentType === 'codex' &&
+              event.parentToolUseId === event.toolCallId ? [event.toolCallId] : []),
+      );
       if (options.resumableSubagents?.length) {
         const resumableToolCallIds = new Set(
-          options.resumableSubagents.map((subagent) => subagent.toolCallId),
+          options.resumableSubagents.map((subagent) => subagent.toolCallId)
+            .filter((toolCallId) => !nativeToolCallIds.has(toolCallId)),
         );
         allTrees = allTrees.map((tree) =>
           this.markResumableAgentsAsInterrupted(tree, resumableToolCallIds),
@@ -257,6 +265,7 @@ export class HistoryMessageBuilder {
         }
         const cleaned = this.markStreamingAgentsAsInterrupted(
           message.streamingState,
+          nativeToolCallIds,
         );
         const capped = capFinalizedTree(cleaned);
         return capped === message.streamingState
@@ -270,11 +279,14 @@ export class HistoryMessageBuilder {
     }
   }
 
-  private markStreamingAgentsAsInterrupted(node: ExecutionNode): ExecutionNode {
+  private markStreamingAgentsAsInterrupted(
+    node: ExecutionNode, nativeToolCallIds: ReadonlySet<string>,
+  ): ExecutionNode {
     const updatedChildren = node.children.map((child) =>
-      this.markStreamingAgentsAsInterrupted(child),
+      this.markStreamingAgentsAsInterrupted(child, nativeToolCallIds),
     );
-    if (node.type === 'agent' && node.status === 'streaming') {
+    if (node.type === 'agent' && node.status === 'streaming' &&
+      (!node.toolCallId || !nativeToolCallIds.has(node.toolCallId))) {
       return { ...node, status: 'interrupted', children: updatedChildren };
     }
     return updatedChildren !== node.children

@@ -33,6 +33,7 @@ import type {
   AgentPermissionRequest,
   AgentProgressEvent,
   AgentStatusEvent,
+  NativeCodexAgentStatusEvent,
   AgentCompletedEvent,
   AgentStartEvent,
   BackgroundAgentStartedEvent,
@@ -69,6 +70,7 @@ import {
 import { BackgroundAgentStore } from './background-agent.store';
 import { agentVisibleInSession, knownSessionId } from './session-scope';
 import { restoredDisplayName } from './restored-display-name';
+import { reduceNativeCodexStatus } from './native-codex-status.reducer';
 import {
   MAX_AGENT_SEGMENTS,
   MAX_FRONTEND_BUFFER,
@@ -657,6 +659,11 @@ export interface SubagentRecord {
   readonly parentToolUseId: string;
   /** SDK task_id, captured on `agent_start` (when present) or `agent_progress`/`agent_status` */
   taskId?: string;
+  /** Latest native Codex child turn, ordered within this child thread. */
+  nativeCycleId?: string;
+  nativeCycleOrdinal?: number;
+  /** Terminal event already applied in the current native cycle. */
+  nativeLastTerminalKey?: string;
   /**
    * Short SDK agent identifier (e.g. `"adcecb2"`), captured from `agent_start`
    * (`AgentStartEvent.agentId`). Distinct from `taskId` (steer/stop routing) and
@@ -2547,6 +2554,9 @@ export class AgentMonitorStore implements OnDestroy {
       const merged: SubagentRecord = {
         parentToolUseId: key,
         taskId: event.taskId ?? existing?.taskId,
+        nativeCycleId: restart ? undefined : existing?.nativeCycleId,
+        nativeCycleOrdinal: restart ? undefined : existing?.nativeCycleOrdinal,
+        nativeLastTerminalKey: restart ? undefined : existing?.nativeLastTerminalKey,
         agentId: event.agentId ?? existing?.agentId,
         teammateName: event.teammateName ?? existing?.teammateName,
         agentType: event.agentType || existing?.agentType,
@@ -2665,6 +2675,9 @@ export class AgentMonitorStore implements OnDestroy {
       const merged: SubagentRecord = {
         parentToolUseId: key,
         taskId: event.taskId ?? existing?.taskId,
+        nativeCycleId: restart ? undefined : existing?.nativeCycleId,
+        nativeCycleOrdinal: restart ? undefined : existing?.nativeCycleOrdinal,
+        nativeLastTerminalKey: restart ? undefined : existing?.nativeLastTerminalKey,
         agentId: event.agentId ?? existing?.agentId,
         teammateName: existing?.teammateName,
         agentType: existing?.agentType,
@@ -2705,16 +2718,27 @@ export class AgentMonitorStore implements OnDestroy {
     const key = event.parentToolUseId;
     if (!key) return;
     if (this.isShellParentWithoutRecord(key, parentToolName)) return;
+    if (
+      event.native !== undefined &&
+      (this._subagents().get(key)?.agentType ?? 'codex') === 'codex'
+    ) {
+      this.onNativeCodexAgentStatus(event);
+      return;
+    }
+    const taskId = event.native === undefined ? event.taskId : undefined;
     const wf = readWorkflowFields(event);
     this._subagents.update((map) => {
       this.claimHistoryCandidate(key);
       const existing = map.get(key);
-      const restart = this.isNewExecution(existing, event.taskId);
-      const status = this.settledStatus(existing, event.status, event.taskId);
+      const restart = this.isNewExecution(existing, taskId);
+      const status = this.settledStatus(existing, event.status, taskId);
       const next = new Map(map);
       const merged: SubagentRecord = {
         parentToolUseId: key,
-        taskId: event.taskId ?? existing?.taskId,
+        taskId: taskId ?? existing?.taskId,
+        nativeCycleId: restart ? undefined : existing?.nativeCycleId,
+        nativeCycleOrdinal: restart ? undefined : existing?.nativeCycleOrdinal,
+        nativeLastTerminalKey: restart ? undefined : existing?.nativeLastTerminalKey,
         agentId: event.agentId ?? existing?.agentId,
         teammateName: existing?.teammateName,
         agentType: existing?.agentType,
@@ -2742,6 +2766,19 @@ export class AgentMonitorStore implements OnDestroy {
         workflowName: wf.workflowName ?? existing?.workflowName,
         ...this.carriedUsageFields(key, existing, event.timestamp),
       };
+      next.set(key, this.withPendingIdentity(key, merged));
+      return next;
+    });
+  }
+
+  private onNativeCodexAgentStatus(event: NativeCodexAgentStatusEvent): void {
+    const key = event.parentToolUseId;
+    this._subagents.update((map) => {
+      const existing = map.get(key);
+      const merged = reduceNativeCodexStatus(existing, event, knownSessionId(event.sessionId));
+      if (!merged) return map;
+      this.claimHistoryCandidate(key);
+      const next = new Map(map);
       next.set(key, this.withPendingIdentity(key, merged));
       return next;
     });
@@ -2780,6 +2817,9 @@ export class AgentMonitorStore implements OnDestroy {
       const merged: SubagentRecord = {
         parentToolUseId: key,
         taskId: event.taskId ?? existing?.taskId,
+        nativeCycleId: restart ? undefined : existing?.nativeCycleId,
+        nativeCycleOrdinal: restart ? undefined : existing?.nativeCycleOrdinal,
+        nativeLastTerminalKey: restart ? undefined : existing?.nativeLastTerminalKey,
         agentId: event.agentId ?? existing?.agentId,
         teammateName: existing?.teammateName,
         agentType: existing?.agentType,

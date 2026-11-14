@@ -176,6 +176,7 @@ export class CodexEventTranslator {
   private readonly asyncMessageItems = new Set<string>();
   /** Deltas that were already visible before completion revealed async delivery. */
   private readonly streamedMessageItems = new Set<string>();
+  private readonly activityItems = new Set<string>();
   private disposed = false;
 
   constructor(
@@ -309,6 +310,11 @@ export class CodexEventTranslator {
         // Future item types are opaque protocol evidence, not runtime failures.
         if (!known.success) return [];
         const item = known.data;
+        if (item.type === 'subAgentActivity') {
+          const key = JSON.stringify([parsed.data.threadId, parsed.data.turnId, item.id, item.kind]);
+          if (this.activityItems.has(key)) return [];
+          this.activityItems.add(key);
+        }
         if (item.type === 'agentMessage') {
           const itemKey = this.key(parsed.data) + ':' + item.id;
           if (method === 'item/started' && item.delivery === 'async')
@@ -496,6 +502,7 @@ export class CodexEventTranslator {
     this.summaryItems.clear();
     this.asyncMessageItems.clear();
     this.streamedMessageItems.clear();
+    this.activityItems.clear();
   }
 
   private key(identity: Identity): string {
@@ -705,6 +712,15 @@ export class CodexEventTranslator {
                 ...(item.tool === 'spawnAgent' ? { agentThreadIds: [...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates)])] } : {}),
               },
             ];
+      case 'subAgentActivity':
+        return [{
+          type: 'subagentActivity', activityId: item.id,
+          cardToolCallId: item.id, agentThreadId: item.agentThreadId,
+          agentPath: item.agentPath, kind: item.kind,
+          ...(item.model == null ? {} : { model: item.model }),
+          ...(item.reasoningEffort == null ? {} : { reasoningEffort: item.reasoningEffort }),
+          cycleOrdinal: 0, cycleId: `${item.agentThreadId}:0`,
+        }];
       case 'webSearch':
         return completed
           ? [

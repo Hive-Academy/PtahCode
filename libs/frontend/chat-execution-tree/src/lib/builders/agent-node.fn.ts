@@ -17,7 +17,7 @@
  * picks the same event.
  */
 
-import type { AgentStartEvent, ExecutionNode } from '@ptah-extension/shared';
+import type { AgentStartEvent, ExecutionNode, NativeCodexAgentStatusEvent } from '@ptah-extension/shared';
 import { createExecutionNode } from '@ptah-extension/shared';
 import type { StreamingState } from '@ptah-extension/chat-types';
 import { MAX_DEPTH } from '../execution-tree.constants';
@@ -80,13 +80,45 @@ export function buildAgentNode(
   const stableAgentId = `agent:${toolCallId}`;
   const stats = deps.agentStats.aggregateAgentStats(toolCallId, state, indexes);
   const hasTaskToolResult = indexes.toolResultByCallId.has(toolCallId);
+  let latestNativeStatus: NativeCodexAgentStatusEvent | undefined;
+  for (const event of indexes.eventsByParent.get(toolCallId) ?? []) {
+    if (event.eventType !== 'agent_status' || event.native === undefined) {
+      continue;
+    }
+    if (
+      !latestNativeStatus ||
+      event.native.cycleOrdinal > latestNativeStatus.native.cycleOrdinal ||
+      (event.native.cycleOrdinal === latestNativeStatus.native.cycleOrdinal &&
+        (event.status === 'failed' ||
+          (latestNativeStatus.status !== 'failed' &&
+            (latestNativeStatus.status !== 'completed' ||
+              event.status === 'completed'))))
+    ) {
+      latestNativeStatus = event;
+    }
+  }
+
+  const status = latestNativeStatus
+    ? latestNativeStatus.status === 'failed'
+      ? 'error'
+      : latestNativeStatus.status === 'completed'
+        ? 'complete'
+        : latestNativeStatus.status === 'paused'
+          ? 'interrupted'
+          : 'streaming'
+    : hasTaskToolResult
+      ? 'complete'
+      : 'streaming';
 
   const isBackground = deps.backgroundAgentStore.isBackgroundAgent(toolCallId);
 
   return createExecutionNode({
     id: stableAgentId,
     type: 'agent',
-    status: hasTaskToolResult ? 'complete' : 'streaming',
+    status,
+    ...(latestNativeStatus?.status === 'failed' && latestNativeStatus.errorMessage
+      ? { error: latestNativeStatus.errorMessage }
+      : {}),
     content: agentStart.agentDescription || '',
     children: [...agentChildren],
     startTime: agentStart.timestamp,
