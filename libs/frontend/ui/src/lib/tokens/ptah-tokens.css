@@ -448,6 +448,32 @@
 }
 /* ---- end ptah-ring tokens ---- */
 
+/* ---- Pattern layer (TASK_2026_1177_9109) ---- */
+/* Layout tokens of libs/frontend/ui/src/lib/patterns. Spec:
+   .ptah/specs/TASK_2026_1177_9109/pattern-spec.md, section 0.5. */
+:root,
+[data-theme] {
+  /* ptah-form-section: title column width at form-split, field column max width. */
+  --ptah-form-section-aside-w: 16rem;
+  --ptah-form-section-fields-max-w: 36rem;
+  /* ptah-description-list: term column width at form-split, row min height, empty ink. */
+  --ptah-dl-term-w: 12rem;
+  --ptah-dl-row-min-h: var(--ptah-control-h-md);
+  --ptah-dl-empty-fg: oklch(var(--bcm, var(--bc)));
+  /* ptah-settings-layout: side nav and content column. */
+  --ptah-settings-nav-w: 13rem;
+  --ptah-settings-content-max-w: 52rem;
+  --ptah-settings-nav-item-h: var(--ptah-control-h-md);
+  --ptah-settings-nav-active-bg: var(--ptah-btn-selected-bg);
+  --ptah-settings-nav-active-edge: oklch(var(--p));
+  /* ptah-form-actions: opaque sticky bar. */
+  --ptah-form-actions-bg: var(--ptah-card-bg-raised);
+  --ptah-form-actions-shadow: var(--ptah-elevation-2);
+  /* Dirty indicator dot and text. */
+  --ptah-dirty-fg: var(--ptah-state-warn);
+}
+/* ---- end pattern layer tokens ---- */
+
 @media (prefers-reduced-motion: reduce) {
   :root,
   [data-theme] {
