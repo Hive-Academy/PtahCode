@@ -2,20 +2,21 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, injec
 import { ArrowUp, ChevronDown, LucideAngularModule, Pencil } from 'lucide-angular';
 import { AgentDeliveryStore, AgentMonitorStore } from '@ptah-extension/chat-streaming';
 import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { COMPOSER_CARD_BORDER_CLASS, COMPOSER_CARD_CLASS, COMPOSER_SEND_BUTTON_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_TOOLBAR_CLASS } from './composer-card';
 
 /** One delivery contract for a lane, shown at full or compact width. */
 @Component({
   selector: 'ptah-lane-composer',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block min-w-0' },
   template: `
     <div class="relative min-w-0 space-y-1.5" (keydown.escape)="closeOverlays()">
       <label class="sr-only" [for]="fieldId()">Message {{ laneLabel() }}</label>
       <div [class]="composerCardClass" data-glass-surface="tile">
-        <textarea [id]="fieldId()" rows="2" style="field-sizing: content" [class]="textareaClass"
+        <textarea [id]="fieldId()" rows="2" [class]="textareaClass + ' [field-sizing:content]'"
           [value]="draft()" [readonly]="confirmLoss()" [placeholder]="'Message ' + laneLabel() + '...'"
           (focus)="refreshPreviews()" (input)="setDraft($event)"
           (keydown.enter)="onEnter($event)" (keydown.control.enter)="onEnter($event)"
@@ -25,21 +26,22 @@ import { COMPOSER_CARD_BORDER_CLASS, COMPOSER_CARD_CLASS, COMPOSER_SEND_BUTTON_C
           <span class="mr-auto min-w-0 truncate text-[11px] text-base-content-muted" [title]="hint()" aria-live="polite">{{ hint() }}</span>
           @if (!stopped()) {
             <div class="relative shrink-0">
-              <button type="button"
-                class="inline-flex h-7 w-7 items-center justify-center rounded-md text-base-content-muted transition-colors hover:bg-surface-2 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
-                [attr.aria-expanded]="menuOpen()" aria-label="Send options"
+              <button type="button" ptahIconButton label="Send options" variant="ghost" size="xs" density="compact"
+                class="h-7 w-7 text-base-content-muted"
+                [attr.aria-expanded]="menuOpen()"
                 (click)="menuOpen.set(!menuOpen()); refreshPreviews()">
                 <lucide-angular [img]="ChevronIcon" class="h-3.5 w-3.5" aria-hidden="true" />
               </button>
               @if (menuOpen()) {
                 <div class="absolute bottom-full right-0 z-20 mb-1 min-w-40 rounded-box border border-base-content/20 bg-base-100 p-1 shadow-lg">
-                  <button #sendNowButton type="button" class="btn btn-ghost btn-sm w-full justify-start"
+                  <button #sendNowButton type="button" ptahButton variant="ghost" size="sm" density="compact" class="w-full justify-start"
                     [disabled]="nowDisabled()" [title]="state().nowDisabledReason ?? ''"
                     (click)="requestNow()">Send now</button>
                 </div>
               }
             </div>
           }
+          <!-- Named raw exception: shared composer send style (COMPOSER_SEND_BUTTON_CLASS), same as agent-steer-input. -->
           <button type="button" [class]="sendButtonClass" [disabled]="queueDisabled()"
             [title]="stopped() ? hint() : (state().queueDisabledReason ?? 'Send message')"
             [attr.aria-label]="stopped() ? 'Resume with message' : 'Send message'"
@@ -49,14 +51,14 @@ import { COMPOSER_CARD_BORDER_CLASS, COMPOSER_CARD_CLASS, COMPOSER_SEND_BUTTON_C
         </div>
       </div>
       @if (error(); as message) { <p class="min-h-4 text-xs text-error" role="alert">{{ message }}</p> }
-      @if (!state().queue || !state().now) { <button type="button" class="btn btn-ghost btn-xs" (click)="refreshPreviews()">Retry message options</button> }
+      @if (!state().queue || !state().now) { <button type="button" ptahButton variant="ghost" size="xs" density="compact" (click)="refreshPreviews()">Retry message options</button> }
 
       @if (confirmLoss()) {
         <div role="alertdialog" aria-modal="true" aria-label="Confirm Send now" class="absolute bottom-full left-0 z-30 rounded-box border border-warning bg-base-100 p-2 text-sm shadow-lg" (keydown.tab)="trapDialog($event)">
           <p class="text-warning">{{ state().now?.lossDisclosure?.text ?? 'Partial work in this turn will be discarded.' }}</p>
-          <div class="mt-2 flex gap-2">
+          <div class="mt-2 flex gap-[var(--ptah-gap-controls)]">
             <button #confirmButton type="button" class="btn btn-warning btn-sm" (click)="confirmNow()">Send now</button>
-            <button #cancelButton type="button" class="btn btn-ghost btn-sm" (click)="closeOverlays()">Keep current turn</button>
+            <button #cancelButton type="button" ptahButton variant="ghost" size="sm" density="compact" (click)="closeOverlays()">Keep current turn</button>
           </div>
         </div>
       }
@@ -65,7 +67,7 @@ import { COMPOSER_CARD_BORDER_CLASS, COMPOSER_CARD_CLASS, COMPOSER_SEND_BUTTON_C
         <div class="border-t border-base-content/20 pt-1 text-xs text-base-content-muted" aria-live="polite">
           {{ queuedReceipts().length }} queued · last: {{ lastReceiptLabel() }}
           @for (receipt of queuedReceipts(); track receipt.id) {
-            <button type="button" class="btn btn-ghost btn-xs ml-1" [disabled]="sending()"
+            <button type="button" ptahButton variant="ghost" size="xs" density="compact" class="ml-1" [disabled]="sending()"
               [attr.aria-label]="'Edit queued message: ' + (receipt.preview ?? '').slice(0, 40)" (click)="cancel(receipt.id)">
               <lucide-angular [img]="EditIcon" class="h-3 w-3" aria-hidden="true" /> Edit
             </button>

@@ -160,6 +160,7 @@ interface RegistryCardView {
             ptahButton
             variant="ghost"
             size="xs"
+            density="compact"
             (click)="notice.set(null)"
             type="button"
           >
@@ -172,7 +173,10 @@ interface RegistryCardView {
         <div class="alert alert-error alert-sm py-1 px-2" role="alert">
           <span class="text-xs" data-testid="mcp-error">{{ error() }}</span>
           <button
-            class="btn btn-ghost btn-xs"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            density="compact"
             (click)="error.set(null)"
             type="button"
           >

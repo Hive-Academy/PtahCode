@@ -47,6 +47,8 @@
 import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
+import type { PhaseKind } from '@ptah-extension/shared';
+import type { UsageExecutorType } from '@ptah-extension/platform-core';
 import {
   calculateMessageCost,
   type ModelPricing,
@@ -361,6 +363,8 @@ export interface RunPreparationLoaders {
 }
 
 interface RunState {
+  phaseKind?: PhaseKind;
+  executorType?: UsageExecutorType;
   /** Restore candidate captured when the run was prepared. */
   readonly candidate: SavedCostState | null;
   /** `undefined` until the run's first accepted result decides it. */
@@ -537,11 +541,12 @@ export class SessionStatsOwnerService {
     generation: number,
     runToken: string,
     candidate: SavedCostState | null,
+    dimensions?: { phaseKind?: PhaseKind; executorType?: UsageExecutorType },
   ): boolean {
     const state = this.currentState(sessionKey, generation);
     if (!state) return false;
     if (!state.runs.has(runToken)) {
-      state.runs.set(runToken, createRun(candidate));
+      state.runs.set(runToken, { ...createRun(candidate), ...dimensions });
     }
     return true;
   }
@@ -736,6 +741,8 @@ export class SessionStatsOwnerService {
         turn.turnCost,
         accepted.providerId ?? null,
         turn.runCostDecreased,
+        run.phaseKind,
+        run.executorType ?? 'session',
       );
       const contribution =
         built === null ? null : parseSessionUsageContribution(built);
@@ -1238,6 +1245,8 @@ function ownerTurnContribution(
   turnCost: number | null,
   providerId: string | null,
   runCostSnapshot: boolean,
+  phaseKind?: PhaseKind,
+  executorType: UsageExecutorType = 'session',
 ): SessionUsageContribution | null {
   const now = subtractRunBase(accepted, base);
   const before = previous === null ? null : subtractRunBase(previous, base);
@@ -1300,6 +1309,8 @@ function ownerTurnContribution(
   return {
     sessionId,
     producer: 'sdk-owner',
+    ...(phaseKind === undefined ? {} : { phaseKind }),
+    executorType,
     runId: runToken,
     turnId: String(turn),
     eventKey: `${runToken}#${turn}`,

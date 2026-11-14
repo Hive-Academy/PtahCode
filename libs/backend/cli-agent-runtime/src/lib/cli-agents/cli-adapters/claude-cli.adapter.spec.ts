@@ -2,7 +2,7 @@ import { PassThrough } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { ClaudeAccountNamedRoute } from '@ptah-extension/auth-providers-tokens';
-import type { ProviderAccountBinding } from '@ptah-extension/shared';
+import type { ProviderAccountBinding, PhaseDispatchV1 } from '@ptah-extension/shared';
 import type { ClaudeLaneAccountPersistence } from '../../claude/claude-sdk-lane-runner';
 import 'reflect-metadata';
 import { createMockLogger } from '@ptah-extension/shared/testing';
@@ -182,6 +182,26 @@ describe('ClaudeCliAdapter constructibility', () => {
 });
 
 describe('ClaudeCliAdapter native SDK execution', () => {
+  it('passes phase denials into MCP assembly and SDK options', async () => {
+    const f = fixture();
+    const toolProfile = { disallowedTools: ['ptah_task_create'], permission: 'allow' as const };
+    const phase: PhaseDispatchV1 = {
+      version: 1, kind: 'implement', text: 'implement', toolProfile,
+      definition: {
+        version: 1, kind: 'implement', input: [], deliverable: [], verdict: [],
+        acceptanceStep: [], requiredCapabilities: [], toolProfile,
+        discipline: {
+          method: 'method', outputContract: 'contract', returnValue: 'return',
+          refusals: 'refusals', escalationProtocol: 'escalation',
+        },
+      },
+    };
+    const handle = await f.adapter.runSdk({ ...f.input, phase });
+    expect(f.assembleSpawnOptions.mock.calls[0]?.at(-1)).toBe(phase);
+    expect(f.run.mock.calls[0]?.[0].options.disallowedTools).toContain('ptah_task_create');
+    expect(handle).toMatchObject({ toolProfileApplied: true });
+    f.finish(0);
+  });
   it('forwards empty native auth, real context and complete policy options to the extracted runner', async () => {
     const f = fixture();
     const parent = '11111111-2222-4333-8444-555555555555';
@@ -206,6 +226,7 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       role,
       f.policy,
       // Ambient lane: the built-in skill guard uses the ambient defaults.
+      undefined,
       undefined,
     );
     const context = f.run.mock.calls[0][0];

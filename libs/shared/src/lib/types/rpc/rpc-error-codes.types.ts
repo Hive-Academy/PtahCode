@@ -88,6 +88,12 @@ export const RPC_USER_ERROR_CODES = [
   'MACHINE_PAIRING_REJECTED',
   /** The worker could not read the session's transcript (attach refresh). */
   'MACHINE_TRANSCRIPT_UNAVAILABLE',
+  /**
+   * A `skillSynthesis:*` write named an agent role that Phase 4 retired. The
+   * file stays readable as history; enhance, revert, rebase, keep and save
+   * are refused.
+   */
+  'ROLE_RETIRED',
 ] as const;
 
 export type RpcUserErrorCode = (typeof RPC_USER_ERROR_CODES)[number];

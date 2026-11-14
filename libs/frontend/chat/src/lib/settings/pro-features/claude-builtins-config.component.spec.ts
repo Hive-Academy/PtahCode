@@ -466,7 +466,8 @@ describe('ClaudeBuiltinsConfigComponent', () => {
 
       const badge = byTestId('claude-skill-dependency-code-review');
       expect(badge.textContent?.trim()).toBe('ReportFindings tool is off');
-      expect(badge.classList).toContain('badge-warning');
+      expect(badge.getAttribute('data-tone')).toBe('warn');
+      expect(badge.getAttribute('data-appearance')).toBe('outline');
       const describedBy = skillBox('code-review').getAttribute('aria-describedby');
       expect(element.querySelector(`#${describedBy}`)?.textContent?.trim()).toBe(
         'This skill is on but unavailable until the ReportFindings tool is on.',

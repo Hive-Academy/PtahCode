@@ -99,10 +99,14 @@ interface OriginChoice {
           @for (choice of originChoices(); track choice.value; let i = $index) {
             <button
               #originRadio
+              ptahButton
+              size="sm"
+              variant="ghost"
+              [selected]="choice.value === currentOrigin()"
+              selectedAs="none"
               type="button"
               role="radio"
-              class="btn join-item btn-sm gap-1 font-normal"
-              [class.btn-active]="choice.value === currentOrigin()"
+              class="join-item gap-1 font-normal"
               [attr.aria-checked]="choice.value === currentOrigin()"
               [attr.tabindex]="choice.value === currentOrigin() ? 0 : -1"
               [attr.data-origin]="choice.value ?? 'all'"

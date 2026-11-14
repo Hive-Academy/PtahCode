@@ -111,7 +111,7 @@ describe('ReviewSettingsDrawerComponent', () => {
       fixture.nativeElement.querySelectorAll(
         'input',
       ) as NodeListOf<HTMLInputElement>,
-    ).find((item) => item.classList.contains('toggle-warning'));
+    ).find((item) => item.getAttribute('role') === 'switch');
     toggle!.checked = false;
     toggle!.dispatchEvent(new Event('change'));
     fixture.detectChanges();

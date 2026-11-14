@@ -192,7 +192,7 @@ export type MachinesPaneMode =
                 <ptah-machines-intro (add)="openAdd()" />
               } @else if (store.loading()) {
                 <div
-                  class="flex flex-col gap-2"
+                  class="flex flex-col gap-[var(--ptah-gap-heading)] p-[var(--ptah-surface-pad)]"
                   role="status"
                   aria-busy="true"
                   data-testid="machines-detail-loading"

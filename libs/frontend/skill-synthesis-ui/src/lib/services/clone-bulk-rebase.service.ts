@@ -22,6 +22,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import type { CloneSummary } from '@ptah-extension/shared';
 
+import { isRoleAgentClone } from '../role-agent-clone';
 import { SkillSynthesisRpcService } from './skill-synthesis-rpc.service';
 
 /** What happened to one member of the batch. */
@@ -78,8 +79,10 @@ export class CloneBulkRebaseService {
    * @returns one outcome per supplied clone, in the order they were attempted
    */
   public async run(
-    clones: readonly CloneSummary[],
+    supplied: readonly CloneSummary[],
   ): Promise<readonly BulkRebaseOutcome[]> {
+    // A role agent is never part of a bulk run, even if the caller passes it.
+    const clones = supplied.filter((c) => !isRoleAgentClone(c));
     const outcomes: BulkRebaseOutcome[] = [];
     this._outcomes.set([]);
     this._progress.set({ done: 0, total: clones.length });
@@ -100,7 +103,11 @@ export class CloneBulkRebaseService {
   /** One attempt. Never throws — both failure channels become an outcome. */
   private async rebaseOne(clone: CloneSummary): Promise<BulkRebaseOutcome> {
     try {
-      const result = await this.rpc.rebaseClone(clone.kind, clone.slug);
+      const result = await this.rpc.rebaseClone(
+        clone.kind,
+        clone.slug,
+        'bulk',
+      );
       if (result.failed) {
         return {
           slug: clone.slug,

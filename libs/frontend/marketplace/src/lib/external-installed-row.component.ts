@@ -9,6 +9,7 @@ import {
   CatalogCardComponent,
   MonogramTileComponent,
   type CatalogCardBadge,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import type { ExternalPluginListing } from '@ptah-extension/shared';
 
@@ -37,7 +38,7 @@ import type { ExternalPluginListing } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-external-installed-row',
   standalone: true,
-  imports: [CatalogCardComponent, MonogramTileComponent],
+  imports: [CatalogCardComponent, MonogramTileComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-catalog-card
@@ -69,7 +70,9 @@ import type { ExternalPluginListing } from '@ptah-extension/shared';
       }
       <div card-actions class="flex items-center gap-2">
         <button
-          class="btn btn-ghost btn-sm text-error"
+          ptahButton
+          variant="ghost"
+          tone="danger"
           type="button"
           [disabled]="uninstalling()"
           [attr.aria-label]="'Uninstall ' + listing().name"

@@ -16,6 +16,7 @@ import {
   ROUTING_UNAVAILABLE_MESSAGE,
   RoutingUnavailableError,
   buildRouteNamespace,
+  buildRouteCandidateSource,
   resolveRouteDecideService,
   type RouteServiceLocator,
 } from './route-namespace.builder';
@@ -135,6 +136,50 @@ function agent(
   };
 }
 
+describe('route candidate effective tools', () => {
+  const phase = { kind: 'visual-review', toolProfile: { disallowedTools: [] } };
+  const sdk = { kind: 'subagent' as const, id: 'subagent:visual-review',
+    phaseKind: 'visual-review' as const, family: 'claude' as const };
+  const child = { kind: 'child-session' as const, id: 'child-session' as const, family: 'claude' as const };
+
+  it('offers a child only when the caller may start one and uses session tools', async () => {
+    const eligible = jest.fn(() => ({ ok: true as const }));
+    const source = buildRouteCandidateSource(agent(), () => ({
+      hasIDECapabilities: false, disabledMcpNamespaces: [],
+    }), { canStart: eligible });
+    expect(source.childSessionEligible?.()).toBe(true);
+    expect(eligible).toHaveBeenCalledTimes(1);
+    expect(await source.tools?.(child, phase)).toContain('ptah_browser_navigate');
+    expect(await source.tools?.(child, { ...phase, toolProfile: { disallowedTools: ['ptah_browser_navigate'] } }))
+      .not.toContain('ptah_browser_navigate');
+    expect(await buildRouteCandidateSource(agent()).tools?.(child, phase)).toBeNull();
+    expect(buildRouteCandidateSource(agent()).childSessionEligible?.()).toBe(false);
+    expect(buildRouteCandidateSource(agent(), undefined, { canStart: () => ({ ok: false, code: 'depth-exceeded', reason: 'child' }) })
+      .childSessionEligible?.()).toBe(false);
+    expect(buildRouteCandidateSource(agent(), undefined, { canStart: () => ({ ok: false, code: 'mcp-unavailable', reason: 'offline' }) })
+      .childSessionEligible?.()).toBe(false);
+  });
+
+  it('uses the same composed browser names and applies phase denials', async () => {
+    const source = buildRouteCandidateSource(agent(), () => ({
+      hasIDECapabilities: false, disabledMcpNamespaces: [],
+    }));
+    const names = await source.tools?.(sdk, phase);
+    expect(names).toContain('ptah_browser_navigate');
+    expect(await source.tools?.(sdk, {
+      ...phase, toolProfile: { disallowedTools: ['ptah_browser_navigate'] },
+    })).not.toContain('ptah_browser_navigate');
+  });
+
+  it('keeps unknown host config unknown and a tokenless lane empty', async () => {
+    const source = buildRouteCandidateSource(agent());
+    expect(await source.tools?.(sdk, phase)).toBeNull();
+    expect(await source.tools?.({ kind: 'lane', id: 'pi', cli: 'pi',
+      family: 'pi', installed: true, disabled: false, limitState: 'unknown',
+    }, phase)).toEqual([]);
+  });
+});
+
 describe('resolveRouteDecideService', () => {
   it('returns undefined when the container is missing', () => {
     expect(resolveRouteDecideService(undefined)).toBeUndefined();
@@ -167,7 +212,7 @@ describe('buildRouteNamespace', () => {
   it('throws F9 and does not touch the agent when the service is absent', async () => {
     const rows = agent();
     const { container, resolve } = locator({ registered: false });
-    const namespace = buildRouteNamespace({ agent: rows, container });
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false, agent: rows, container });
 
     let thrown: unknown;
     try {
@@ -204,7 +249,7 @@ describe('buildRouteNamespace', () => {
     });
     const decide = jest.fn().mockResolvedValue(RESULT);
     const { container } = locator({ registered: true, service: { decide } });
-    const namespace = buildRouteNamespace({ agent: rows, container });
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false, agent: rows, container });
 
     await expect(namespace.decide(ARGS)).resolves.toBe(RESULT);
     expect(decide).toHaveBeenCalledTimes(1);
@@ -233,7 +278,7 @@ describe('buildRouteNamespace', () => {
       listRoles: jest.fn().mockResolvedValue(['code-logic-reviewer']),
     };
     const decide = jest.fn().mockResolvedValue(RESULT);
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: rows,
       container: locator({ registered: true, service: { decide } }).container,
     });
@@ -245,7 +290,7 @@ describe('buildRouteNamespace', () => {
   it('reports limits unavailable when the lookup returns undefined', async () => {
     const decide = jest.fn().mockResolvedValue(RESULT);
     const rows = agent({ limits: jest.fn().mockResolvedValue(undefined) });
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: rows,
       container: locator({ registered: true, service: { decide } }).container,
     });
@@ -258,7 +303,7 @@ describe('buildRouteNamespace', () => {
     const rows = agent({
       listRoles: jest.fn().mockRejectedValue(new Error('roles down')),
     });
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: rows,
       container: locator({ registered: true, service: { decide } }).container,
     });
@@ -271,7 +316,7 @@ describe('buildRouteNamespace', () => {
     const rows = agent({
       list: jest.fn().mockRejectedValue(new Error('agent list down')),
     });
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: rows,
       container: locator({ registered: true, service: { decide } }).container,
     });

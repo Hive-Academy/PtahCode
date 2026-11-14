@@ -5,7 +5,7 @@
  * collapsed Command-line parity `<details>` (P9):
  *  - **A19**: P4 matrix with Active (radio), Name, Tier, Description, Actions columns.
  *    Retains `role="radiogroup"` on the table.
- *  - **A20**: Status/tier badges in outline form (`badge badge-outline badge-xs text-base-content`),
+ *  - **A20**: Status/tier badges use the shared outline badge owner,
  *    preserving deviation #6 (colour on dot/border only).
  *  - **A22**: Edit opens drawer D-OS; Delete opens P8 inline confirm in the row.
  *  - **A23**: Inline alert banners for write error, missing-active, collision and fallback (in
@@ -58,7 +58,7 @@ import {
 import type { OutputStyleFailedOperation } from './output-style.store';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { OutputStyleNoticesComponent } from './output-style-notices.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 
 export { PARITY_TIERS, type ParityTierOption };
 
@@ -102,7 +102,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
 @Component({
   selector: 'ptah-output-style-list',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-output-style-notices
@@ -189,7 +189,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                 <td class="align-middle whitespace-nowrap">
                   <div class="flex items-center gap-1 flex-wrap">
                     <span
-                      class="badge badge-outline badge-xs text-base-content"
+                      ptahBadge appearance="outline" size="xs" class="text-base-content"
                       [class.border-primary]="style.tier === 'project'"
                       [class.border-secondary]="style.tier === 'user'"
                       [attr.title]="style.tier === 'builtin' ? builtInNote : null"
@@ -197,12 +197,12 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                       {{ tierLabel(style.tier) }}
                     </span>
                     @if (style.shadowed) {
-                      <span class="badge badge-outline badge-xs border-warning text-base-content">
+                      <span ptahBadge appearance="outline" size="xs" tone="warn" class="text-base-content">
                         Overridden
                       </span>
                     }
                     @if (!style.keepCodingInstructions) {
-                      <span class="badge badge-outline badge-xs text-base-content">
+                      <span ptahBadge appearance="outline" size="xs" class="text-base-content">
                         Drops default coding instructions
                       </span>
                     }
@@ -229,7 +229,8 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                   <div class="flex items-center justify-end gap-1">
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs btn-square disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
+                      ptahIconButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
+                      [label]="'Edit ' + style.name"
                       [disabled]="!style.editable || saving()"
                       [attr.aria-label]="'Edit ' + style.name"
                       [attr.title]="actionTitle(style, 'Edit')"
@@ -245,7 +246,8 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                     <button
                       #deleteBtn
                       type="button"
-                      class="btn btn-ghost btn-xs btn-square disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
+                      ptahIconButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
+                      [label]="'Delete ' + style.name"
                       [disabled]="!style.deletable || saving()"
                       [attr.aria-label]="'Delete ' + style.name"
                       [attr.title]="actionTitle(style, 'Delete')"
@@ -279,7 +281,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                       </span>
                       <button
                         type="button"
-                        class="btn btn-outline btn-xs border-error text-base-content"
+                        ptahButton variant="outline" size="xs" class="border-error text-base-content"
                         [ptahBusyDisabled]="saving()"
                         (click)="confirmDelete(style)"
                         data-testid="output-style-confirm-delete"
@@ -324,7 +326,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                     aria-hidden="true"
                   />
                   <span class="font-medium text-base-content">{{ entry.fileName }}</span>
-                  <span class="badge badge-outline badge-xs text-base-content">
+                  <span ptahBadge appearance="outline" size="xs" class="text-base-content">
                     {{ tierLabel(entry.tier) }}
                   </span>
                 </div>

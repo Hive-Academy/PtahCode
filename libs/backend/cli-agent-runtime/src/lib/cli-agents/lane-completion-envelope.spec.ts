@@ -1,5 +1,6 @@
 ﻿import type { LaneCompletionSignal } from '@ptah-extension/shared';
 import { buildLaneCompletionEnvelope } from './lane-completion-envelope';
+import { buildLaneCompletionResult } from './lane-completion-result';
 
 const base: LaneCompletionSignal = {
   agentId: 'agent-1', cli: 'claude', agentLabel: 'worker',
@@ -41,7 +42,11 @@ describe('lane completion envelope budget stops', () => {
   );
 
   it('keeps the previous repeat-call envelope unchanged', () => {
-    expect(buildLaneCompletionEnvelope({ ...base, stopReason: 'repeat-call', repeatedCalls: 3 }))
+    const envelope = buildLaneCompletionEnvelope({ ...base, stopReason: 'repeat-call', repeatedCalls: 3 });
+    expect(buildLaneCompletionResult({
+      signal: base, executorId: 'claude', phaseKind: null, parentSignal: envelope,
+    }).parentSignal).toBe(envelope);
+    expect(envelope)
        .toMatchSnapshot();
   });
   it('includes a concrete progress file and the true CLI session on budget stop', () => {

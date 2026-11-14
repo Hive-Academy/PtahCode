@@ -7,6 +7,7 @@ import {
 } from '@ptah-extension/platform-core';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
+import type { PhaseDispatchV1 } from '@ptah-extension/shared';
 import {
   SessionMetadataStore,
   SESSION_METADATA_MIGRATION,
@@ -24,6 +25,27 @@ describe('SessionMetadataStore plugin configuration lineage', () => {
       storage,
       createMockLogger() as unknown as Logger,
     );
+  });
+
+  it('keeps a child phase in session detail', async () => {
+    const toolProfile = { disallowedTools: ['Bash'], permission: 'deny' as const };
+    const phase: PhaseDispatchV1 = {
+      version: 1, kind: 'implement', text: '## Method\nDo.\n\n## Output contract\nWrite.\n\n## Return value\nReturn.\n\n## Refusals\nRefuse.\n\n## Escalation protocol\nAsk.',
+      definition: {
+        version: 1, kind: 'implement', input: ['task'], deliverable: ['change'],
+        verdict: ['done'], acceptanceStep: ['check'], requiredCapabilities: ['reasoning'],
+        toolProfile,
+        discipline: { method: 'Do.', outputContract: 'Write.', returnValue: 'Return.',
+          refusals: 'Refuse.', escalationProtocol: 'Ask.' },
+      },
+      toolProfile,
+    };
+    await store.create('phase-child', root, 'Child', 'created', `${root}/child`, undefined, undefined, phase);
+    const created = await store.get('phase-child');
+    if (!created) throw new Error('Child metadata missing after create');
+    await store.save({ ...created, phase: undefined, phaseState: 'none' });
+    expect((await store.get('phase-child'))?.phase).toEqual(phase);
+    expect((await store.get('phase-child'))?.phaseState).toBe('present');
   });
 
   it('distinguishes absent, explicitly empty, valid, and malformed records', async () => {

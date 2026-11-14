@@ -16,7 +16,7 @@
 <!-- Glass: the page plane clears (component styles) so the blurred chrome pane and its scene show under the cards. -->
 <div class="settings-page h-full overflow-y-auto bg-surface-0">
   <div
-    class="mx-auto w-full max-w-screen-2xl space-y-8 px-3 py-3 md:px-6 lg:px-8"
+    class="mx-auto w-full max-w-screen-2xl space-y-[var(--ptah-gap-section)] px-3 py-3 md:px-6 lg:px-8"
   >
     <!-- Header (prototypes/final/index.html:82-95): Back, title, workspace and app context -->
     <!-- Glass: the header text sits on its own plate (a local text scrim), not on the bare pane. -->
@@ -24,7 +24,7 @@
       <div
         class="flex items-center justify-between gap-3 pb-2 border-b border-base-300"
       >
-        <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-[var(--ptah-gap-controls)]">
           <button
             type="button"
             ptahIconButton label="Back to Chat" class="text-base-content-muted hover:text-base-content"
@@ -66,7 +66,7 @@
       <!-- Tab bar: 4 enabled tabs (D9); buttons keep their names (live-app scripts use getByRole('button')) -->
       <!-- Card tabs. `tab-active` stays on the active button as the e2e hook (settings scenarios assert it). -->
       <nav
-        class="settings-tabs mt-2 border-b border-base-content/10"
+        class="settings-tabs mt-[var(--ptah-gap-heading)] border-b border-base-content/10"
         aria-label="Settings sections"
         data-testid="settings-tabs"
       >
@@ -74,7 +74,7 @@
           @let active = activeSettingsTab() === tab.id;
           <button
             type="button"
-            class="settings-tab relative flex min-w-0 items-center justify-center gap-2 border-b-2 border-transparent px-2.5 py-2.5 text-sm leading-5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            class="settings-tab relative flex min-w-0 items-center justify-center gap-[var(--ptah-gap-controls)] border-b-2 border-transparent px-[var(--ptah-space-2)] py-[var(--ptah-space-2)] text-sm leading-5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             [class.text-base-content-muted]="!active"
             [class.tab-active]="active"
             [class.!border-primary]="active"
@@ -118,7 +118,7 @@
       <!-- D10: one text-xs line; the dot carries the tone, and the full sentence stays in the DOM and the title. -->
       @if (authState.isCustomProviderSelected()) {
         <div
-          class="flex min-w-0 items-center gap-1.5 text-xs text-base-content-muted"
+          class="flex min-w-0 items-center gap-[var(--ptah-space-1)] text-xs text-base-content-muted"
           data-testid="custom-provider-security-copy"
           [attr.title]="
             'Your own endpoint. Credentials and prompts go from this machine to ' +
@@ -144,7 +144,7 @@
         </div>
       } @else {
         <div
-          class="flex min-w-0 items-center gap-1.5 text-xs text-base-content-muted"
+          class="flex min-w-0 items-center gap-[var(--ptah-space-1)] text-xs text-base-content-muted"
           data-testid="builtin-provider-security-copy"
         >
           <span
@@ -187,7 +187,7 @@
         <!-- The boot auth check lands here when no credential is set, so a failed chunk must stay
              recoverable. A remount would fail again (the failure is cached): Reload restarts the renderer. -->
         <div
-          class="flex flex-col items-start gap-3 rounded-lg border border-base-300 p-4"
+          class="flex flex-col items-start gap-[var(--ptah-gap-heading)] rounded-lg border border-base-300 p-[var(--ptah-surface-pad)]"
           data-testid="providers-settings-load-error"
           role="alert"
         >
@@ -243,11 +243,11 @@
         <div class="min-h-24" aria-busy="true"></div>
       }
       <section
-        class="settings-plate mt-3 rounded-xl border border-base-300 bg-base-200 p-4"
+        class="settings-plate mt-[var(--ptah-gap-heading)] rounded-xl border border-base-300 bg-base-200 p-[var(--ptah-surface-pad)]"
         aria-label="Setup"
       >
         <h2 class="mb-2 text-base font-semibold">Setup</h2>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-[var(--ptah-gap-controls)]">
           <button
             type="button"
             ptahButton

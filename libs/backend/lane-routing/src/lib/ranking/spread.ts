@@ -151,7 +151,7 @@ function successor(
 
 function isEligible(candidate: RoutingCandidate): boolean {
   return (
-    candidate.kind === 'subagent' ||
+    candidate.kind !== 'lane' ||
     candidate.limitState !== EXCLUDED_LIMIT_STATE
   );
 }
@@ -180,7 +180,7 @@ function bestLaneRank(band: readonly RankedCandidate[]): number | null {
  * a near-limit lane does not drop them out of the band.
  */
 function poolRank(entry: RankedCandidate, bestLane: number | null): number {
-  if (entry.candidate.kind === 'subagent') return bestLane ?? 0;
+  if (entry.candidate.kind !== 'lane') return bestLane ?? 0;
   return laneLimitRank(entry.candidate);
 }
 

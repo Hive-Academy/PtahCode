@@ -38,7 +38,10 @@ import {
   formatDuration,
   formatRelative,
   PtahButtonDirective,
+  PtahFieldComponent,
+  PtahFieldControlDirective,
   PtahMeterComponent,
+  PtahStatePanelComponent,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
 
@@ -48,7 +51,10 @@ import {
   imports: [
     LucideAngularModule,
     PtahButtonDirective,
+    PtahFieldComponent,
+    PtahFieldControlDirective,
     PtahMeterComponent,
+    PtahStatePanelComponent,
     PtahToggleDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,

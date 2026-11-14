@@ -34,6 +34,8 @@ import {
   type FlagEffortLevel,
   type ICapabilityResolver,
   type McpHttpServerOverride,
+  type PhaseDispatchV1,
+  type PhaseSkillV1,
   type PermissionLevel,
   type SessionBudgetWindow,
 } from '@ptah-extension/shared';
@@ -176,6 +178,9 @@ export interface Query {
  * Configuration for executeQuery method
  */
 export interface ExecuteQueryConfig {
+  /** Host-resolved phase and skills delivered to the SDK query. */
+  phase?: PhaseDispatchV1;
+  skills?: readonly PhaseSkillV1[];
   /** Session ID to use (tabId for new sessions, real UUID for resume) */
   sessionId: SessionId;
   /** Session configuration (model, workspace, etc.) */
@@ -277,6 +282,7 @@ export interface ExecuteQueryConfig {
  * Shared between SessionLifecycleManager and SdkAgentAdapter.
  */
 export interface SlashCommandConfig {
+  phase?: PhaseDispatchV1;
   sessionConfig?: AISessionConfig;
   mcpServerRunning?: boolean;
   enhancedPromptsContent?: string;
@@ -316,6 +322,8 @@ export interface SlashCommandConfig {
  * Result of executeQuery method
  */
 export interface ExecuteQueryResult {
+  /** Phase denials merged into the built options (builder evidence). */
+  readonly toolProfileApplied?: true;
   /** The SDK query instance */
   sdkQuery: Query;
   /** The model being used */
@@ -977,6 +985,7 @@ export class SessionLifecycleManager {
     await this._control.endSession(sessionId, 'parent-stop');
     await config.beforeRelaunch?.();
     return this._queryExecutor.executeQuery({
+      phase: config.phase,
       sessionId,
       sessionConfig: config.sessionConfig,
       resumeSessionId: realSessionId,

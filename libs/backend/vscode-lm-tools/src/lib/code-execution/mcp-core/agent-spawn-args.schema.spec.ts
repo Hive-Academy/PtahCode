@@ -11,6 +11,25 @@ import { buildAgentSpawnTool } from './tool-description.builder';
 import { HELP_DOCS } from '../namespace-builders/system-namespace.builders';
 
 describe('AgentSpawnArgsSchema', () => {
+  it('accepts legacy role and resolved skills while rejecting unresolved skills', () => {
+    expect(AgentSpawnArgsSchema.safeParse({ task: 't', role: 'reviewer' }).success).toBe(true);
+    expect(AgentSpawnArgsSchema.safeParse({ task: 't', skills: [{ name: 'check', text: 'Inspect output' }] }).success).toBe(true);
+    expect(AgentSpawnArgsSchema.safeParse({ task: 't', skills: [{ name: 'check' }] }).success).toBe(false);
+  });
+  it('accepts a matching phase dispatch and refuses mismatched metadata', () => {
+    const toolProfile = { disallowedTools: [], permission: 'allow' as const };
+    const phase = {
+      version: 1, kind: 'batch', text: '## Method\nwork\n\n## Output contract\nfile\n\n## Return value\nreport\n\n## Refusals\nreason\n\n## Escalation protocol\nask', toolProfile,
+      definition: {
+        version: 1, kind: 'batch', input: ['task'], deliverable: ['file'],
+        verdict: ['pass'], acceptanceStep: ['check'], requiredCapabilities: ['files'],
+        toolProfile,
+        discipline: { method: 'work', outputContract: 'file', returnValue: 'report', refusals: 'reason', escalationProtocol: 'ask' },
+      },
+    };
+    expect(AgentSpawnArgsSchema.safeParse({ task: 't', phase }).success).toBe(true);
+    expect(AgentSpawnArgsSchema.safeParse({ task: 't', phase: { ...phase, kind: 'review' } }).success).toBe(false);
+  });
   it('keeps the 100 KiB task ceiling', () => {
     expect(MAX_TASK_LENGTH).toBe(100 * 1024);
     expect(

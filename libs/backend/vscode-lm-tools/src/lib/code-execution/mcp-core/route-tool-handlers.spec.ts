@@ -139,7 +139,7 @@ describe('handleRouteToolCall', () => {
       ): Promise<RouteDecideResult> =>
         context?.sessionKey === cachedSessionKey ? cachedResult : freshResult,
     );
-    const namespace = buildRouteNamespace({
+    const namespace = buildRouteNamespace({ hasIDECapabilities: false,
       agent: {
         list: jest.fn(),
         limits: jest.fn(),

@@ -11,7 +11,6 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   TASK_STATUSES,
@@ -21,6 +20,7 @@ import {
 } from '@ptah-extension/shared';
 import { TASK_STATUS_LABELS } from '../task-presentation';
 import {
+  NativeModalComponent,
   PtahButtonDirective,
   PtahFieldComponent,
   PtahInputDirective,
@@ -37,9 +37,6 @@ export interface TaskCreateDraft {
   readonly description: string;
 }
 
-const FOCUSABLE =
-  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])';
-
 /**
  * TaskCreateDialogComponent
  *
@@ -47,9 +44,7 @@ const FOCUSABLE =
  * validation, Cancel/Create.
  *
  * The parent renders it inside an `@if`, so opening is construction and
- * closing is destruction. Construction captures the element that opened it;
- * destruction gives focus back to that element. Tab is trapped inside the box
- * and Escape cancels, unless a create is in flight.
+ * closing is destruction. The native modal owns focus trapping and restoration.
  *
  * It does not call the store: `submitted` carries the draft and the parent
  * owns the write and closes the dialog only when the host accepted it.
@@ -63,136 +58,126 @@ const FOCUSABLE =
     PtahInputDirective,
     PtahSelectDirective,
     PtahTextareaDirective,
+    NativeModalComponent,
     FormsModule,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(keydown)': 'onKeyDown($event)' },
+  host: { '(click)': 'onClick($event)' },
   template: `
-    <dialog
-      class="modal modal-open"
-      aria-labelledby="task-create-title"
+    <ptah-native-modal
+      [isOpen]="true"
+      ariaLabelledby="task-create-title"
+      size="sm"
       data-testid="tasks-create-dialog"
+      (closed)="cancelIfIdle()"
     >
-      <div
-        #box
-        class="modal-box max-w-md bg-surface-2 border border-surface-border rounded-box p-5 text-base-content shadow-[var(--elev-shadow-raised)]"
+      <h2
+        modal-header
+        id="task-create-title"
+        class="mb-[var(--ptah-gap-heading)] text-lg font-semibold"
       >
-        <h2 id="task-create-title" class="mb-4 text-lg font-semibold">
-          New Task
-        </h2>
+        New Task
+      </h2>
 
-        <form class="flex flex-col gap-3" (ngSubmit)="submit()">
-          <div>
-            <ptah-field label="Title">
-              <input
-                #titleInput
-                type="text"
-                name="title"
-                ptahInput
-                placeholder="Short imperative title"
-                aria-label="Task title"
-                data-testid="tasks-create-title"
-                [invalid]="!!titleError()"
-                [attr.aria-describedby]="
-                  titleError() ? 'task-create-title-error' : null
-                "
-                [ngModel]="title()"
-                (ngModelChange)="title.set($event)"
-                (blur)="touched.set(true)"
-              />
-            </ptah-field>
-            @if (titleError()) {
-              <span
-                id="task-create-title-error"
-                class="mt-1 text-sm text-error"
-                data-testid="tasks-create-title-error"
-              >
-                A task needs a title.
-              </span>
-            }
-          </div>
+      <form
+        class="flex flex-col gap-[var(--ptah-gap-field)]"
+        (ngSubmit)="submit()"
+      >
+        <ptah-field
+          label="Title"
+          [error]="titleError() ? 'A task needs a title.' : null"
+          [attr.data-testid]="titleError() ? 'tasks-create-title-error' : null"
+        >
+          <input
+            #titleInput
+            type="text"
+            name="title"
+            ptahInput
+            placeholder="Short imperative title"
+            aria-label="Task title"
+            data-testid="tasks-create-title"
+            [invalid]="!!titleError()"
+            [ngModel]="title()"
+            (ngModelChange)="title.set($event)"
+            (blur)="touched.set(true)"
+          />
+        </ptah-field>
 
-          <div class="grid grid-cols-2 gap-3">
-            <ptah-field label="Type">
-              <select
-                name="type"
-                ptahSelect
-                aria-label="Task type"
-                data-testid="tasks-create-type"
-                [ngModel]="type()"
-                (ngModelChange)="setType($event)"
-              >
-                @for (option of taskTypes; track option) {
-                  <option [value]="option">{{ option }}</option>
-                }
-              </select>
-            </ptah-field>
-
-            <ptah-field label="Status">
-              <select
-                name="status"
-                ptahSelect
-                aria-label="Task status"
-                data-testid="tasks-create-status"
-                [ngModel]="status()"
-                (ngModelChange)="setStatus($event)"
-              >
-                @for (option of taskStatuses; track option) {
-                  <option [value]="option">{{ statusLabel(option) }}</option>
-                }
-              </select>
-            </ptah-field>
-          </div>
-
-          <ptah-field label="Description (optional)">
-            <textarea
-              name="description"
-              ptahTextarea
-              rows="3"
-              placeholder="One-line summary"
-              aria-label="Task description"
-              [ngModel]="description()"
-              (ngModelChange)="description.set($event)"
-            ></textarea>
+        <div class="grid grid-cols-2 gap-[var(--ptah-gap-controls)]">
+          <ptah-field label="Type">
+            <select
+              name="type"
+              ptahSelect
+              aria-label="Task type"
+              data-testid="tasks-create-type"
+              [ngModel]="type()"
+              (ngModelChange)="setType($event)"
+            >
+              @for (option of taskTypes; track option) {
+                <option [value]="option">{{ option }}</option>
+              }
+            </select>
           </ptah-field>
 
-          <div class="mt-2 flex justify-end gap-2">
-            <button
-              type="button"
-              ptahButton
-              variant="ghost"
-              data-testid="tasks-create-cancel"
-              [disabled]="creating()"
-              (click)="cancelled.emit()"
+          <ptah-field label="Status">
+            <select
+              name="status"
+              ptahSelect
+              aria-label="Task status"
+              data-testid="tasks-create-status"
+              [ngModel]="status()"
+              (ngModelChange)="setStatus($event)"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              ptahButton
-              variant="primary"
-              data-testid="tasks-create-submit"
-              [disabled]="!canCreate() || creating()"
-            >
-              @if (creating()) {
-                <span
-                  class="loading loading-spinner loading-xs"
-                  aria-hidden="true"
-                ></span>
+              @for (option of taskStatuses; track option) {
+                <option [value]="option">{{ statusLabel(option) }}</option>
               }
-              Create
-            </button>
-          </div>
-        </form>
-      </div>
-      <button
-        type="button"
-        class="modal-backdrop"
-        tabindex="-1"
-        aria-label="Close"
-        (click)="cancelIfIdle()"
-      ></button>
-    </dialog>
+            </select>
+          </ptah-field>
+        </div>
+
+        <ptah-field label="Description (optional)">
+          <textarea
+            name="description"
+            ptahTextarea
+            rows="3"
+            placeholder="One-line summary"
+            aria-label="Task description"
+            [ngModel]="description()"
+            (ngModelChange)="description.set($event)"
+          ></textarea>
+        </ptah-field>
+
+        <div
+          class="mt-[var(--ptah-gap-group)] flex justify-end gap-[var(--ptah-gap-controls)]"
+        >
+          <button
+            type="button"
+            ptahButton
+            variant="ghost"
+            data-testid="tasks-create-cancel"
+            [disabled]="creating()"
+            (click)="cancelled.emit()"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            ptahButton
+            variant="primary"
+            data-testid="tasks-create-submit"
+            [disabled]="!canCreate() || creating()"
+          >
+            @if (creating()) {
+              <span
+                class="loading loading-spinner loading-xs"
+                aria-hidden="true"
+              ></span>
+            }
+            Create
+          </button>
+        </div>
+      </form>
+    </ptah-native-modal>
   `,
 })
 export class TaskCreateDialogComponent {
@@ -222,16 +207,34 @@ export class TaskCreateDialogComponent {
     () => this.touched() && !this.canCreate(),
   );
 
-  private readonly box = viewChild.required<ElementRef<HTMLElement>>('box');
   private readonly titleInput =
     viewChild.required<ElementRef<HTMLInputElement>>('titleInput');
 
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly destroyRef = inject(DestroyRef);
+
   public constructor() {
-    const opener = inject(DOCUMENT).activeElement;
-    afterNextRender(() => this.titleInput().nativeElement.focus());
-    inject(DestroyRef).onDestroy(() => {
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    afterNextRender(() => {
+      this.titleInput().nativeElement.focus();
+      this.guardNativeCancel();
     });
+  }
+
+  /**
+   * Escape fires the native `cancel` event on the inner dialog even when focus
+   * has left the form (a disabled submit button drops focus to the body), so
+   * the guard sits on that event and not on a keydown handler.
+   */
+  private guardNativeCancel(): void {
+    const dialog = this.host.nativeElement.querySelector('dialog');
+    if (!dialog) return;
+    const onCancel = (event: Event): void => {
+      if (this.creating()) event.preventDefault();
+    };
+    dialog.addEventListener('cancel', onCancel);
+    this.destroyRef.onDestroy(() =>
+      dialog.removeEventListener('cancel', onCancel),
+    );
   }
 
   protected statusLabel(status: TaskStatus): string {
@@ -263,30 +266,12 @@ export class TaskCreateDialogComponent {
     if (!this.creating()) this.cancelled.emit();
   }
 
-  protected onKeyDown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
+  protected onClick(event: MouseEvent): void {
+    if (
+      this.creating() &&
+      (event.target as HTMLElement).closest('.modal-backdrop')
+    ) {
       event.preventDefault();
-      event.stopPropagation();
-      this.cancelIfIdle();
-      return;
-    }
-    if (event.key === 'Tab') this.trapTab(event);
-  }
-
-  /** Keep Tab and Shift+Tab inside the modal box. */
-  private trapTab(event: KeyboardEvent): void {
-    const focusables = Array.from(
-      this.box().nativeElement.querySelectorAll<HTMLElement>(FOCUSABLE),
-    );
-    if (focusables.length === 0) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (event.shiftKey && event.target === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && event.target === last) {
-      event.preventDefault();
-      first.focus();
     }
   }
 }

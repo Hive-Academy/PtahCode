@@ -27,7 +27,18 @@ export type McpCallerToolProfile = 'coding' | 'apps';
 /** Interactive credentials cover a session's maximum age; teardown revokes them. */
 export const INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Identity and capability bound to one token. No raw secret. */
+/**
+ * Identity and capability bound to one token. No raw secret.
+ *
+ * Phase tool profile (B4c contract for session delivery and B4d lane
+ * credentials). The authenticated caller id is `agentId` when `kind` is
+ * `agent`, otherwise `sessionId` when `kind` is `session`. That id selects
+ * the phase (`phaseKind`). `disallowedTools` is that phase's
+ * `toolProfile.disallowedTools`. The dispatcher hides those names from
+ * `tools/list` and rejects them in `tools/call`. A missing field, a
+ * non-array, or an empty list does not hide tools. `permission` is not part
+ * of this filter.
+ */
 export interface McpCallerBinding {
   readonly kind: McpCallerBindingKind;
   readonly agentId?: string;
@@ -35,6 +46,10 @@ export interface McpCallerBinding {
   readonly workspaceRoot?: string;
   readonly toolProfile?: McpCallerToolProfile;
   readonly capability: McpCallerCapability;
+  /** Phase kind whose tool profile was copied onto this credential. */
+  readonly phaseKind?: string;
+  /** Exact MCP tool names the phase profile disallows. */
+  readonly disallowedTools?: readonly string[];
 }
 
 export interface IMcpCallerCredentials {

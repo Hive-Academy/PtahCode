@@ -7,34 +7,35 @@ import {
 } from '@angular/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { ModelStateService } from '@ptah-extension/core';
-import { SetupFieldDirective } from '@ptah-extension/ui';
+import { PtahFieldComponent, PtahFieldControlDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-generation-model-picker',
   standalone: true,
-  imports: [SetupFieldDirective],
+  imports: [PtahFieldComponent, PtahFieldControlDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-1">
-      <label class="text-sm font-medium" [for]="'generation-model-' + tabId()"
-        >Model for this tab</label
+    <div class="flex flex-col gap-[var(--ptah-space-1)]">
+      <ptah-field
+        label="Model for this tab"
+        hint="This is the tab model used by generation and chat."
+        appearance="stacked"
+        size="md"
       >
-      <select
-        [ptahSetupField]="undefined"
-        [id]="'generation-model-' + tabId()"
-        [value]="selectedModel()"
-        [disabled]="locked()"
-        (change)="choose($event)"
-      >
-        @for (model of models.availableModels(); track model.id) {
-          <option [value]="model.id" [selected]="model.id === selectedModel()">
-            {{ model.name }}
-          </option>
-        }
-      </select>
-      <p class="text-xs text-base-content-muted">
-        This is the tab model used by generation and chat.
-      </p>
+        <select
+          ptahFieldControl
+          [id]="'generation-model-' + tabId()"
+          [value]="selectedModel()"
+          [disabled]="locked()"
+          (change)="choose($event)"
+        >
+          @for (model of models.availableModels(); track model.id) {
+            <option [value]="model.id" [selected]="model.id === selectedModel()">
+              {{ model.name }}
+            </option>
+          }
+        </select>
+      </ptah-field>
       @if (effectiveProvider() && effectiveProvider() !== 'unknown') {
         <p class="text-xs">Workspace provider: {{ effectiveProvider() }}</p>
       }

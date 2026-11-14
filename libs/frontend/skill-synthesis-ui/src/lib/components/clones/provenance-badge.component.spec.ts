@@ -51,7 +51,7 @@ describe('ProvenanceBadgeComponent', () => {
     const cls = q('provenance-badge')?.classList;
     expect(cls).not.toContain('border-primary');
     expect(cls).toContain('border-[color:var(--surface-border-strong)]');
-    expect(cls).toContain('badge');
+    expect(q('provenance-badge')?.hasAttribute('data-ptah-badge')).toBe(true);
     expect(cls).toContain('bg-base-300');
   });
 

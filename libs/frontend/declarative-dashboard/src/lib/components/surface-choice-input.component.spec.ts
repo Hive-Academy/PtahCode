@@ -130,7 +130,7 @@ describe('SurfaceChoiceInputComponent', () => {
       const control = select(element);
       expect(control.selectedIndex).toBe(0);
       expect(control.getAttribute('aria-invalid')).toBe('true');
-      expect(element.querySelector(`#${control.id}-error`)?.textContent).toContain('mars');
+      expect(element.querySelector('.ptah-field__message')?.textContent).toContain('mars');
     });
   });
 
@@ -214,13 +214,13 @@ describe('SurfaceChoiceInputComponent', () => {
       fixture.componentInstance.node.set(node);
       expect(() => fixture.detectChanges()).not.toThrow();
       const element: HTMLElement = fixture.nativeElement;
-      expect(element.querySelector('[id$="-error"]')?.textContent).toContain('staging');
+      expect(element.querySelector(kind === 'select' ? '.ptah-field__message' : '[id$="-error"]')?.textContent).toContain('staging');
       fixture.componentInstance.pending.set(new Map([['form.env', 'preview']]));
       expect(() => fixture.detectChanges()).not.toThrow();
-      expect(element.querySelector('[id$="-error"]')?.textContent).toContain('preview');
+      expect(element.querySelector(kind === 'select' ? '.ptah-field__message' : '[id$="-error"]')?.textContent).toContain('preview');
       fixture.componentInstance.drafts.set({ env: 'production' });
       expect(() => fixture.detectChanges()).not.toThrow();
-      expect(element.querySelector('[id$="-error"]')?.textContent).toContain('production');
+      expect(element.querySelector(kind === 'select' ? '.ptah-field__message' : '[id$="-error"]')?.textContent).toContain('production');
       expect(fixture.componentInstance.commits).toEqual([]);
     });
   });

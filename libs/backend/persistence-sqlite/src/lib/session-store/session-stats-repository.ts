@@ -1,9 +1,14 @@
 import { z } from 'zod';
+import { PHASE_KINDS } from '@ptah-extension/shared';
+import type { UsageExecutorType } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 
 const safeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const text = z.string().min(1);
+export const usagePhaseKindSchema = z.enum(PHASE_KINDS);
+export const usageExecutorTypeSchema: z.ZodType<UsageExecutorType> = z.enum(['sdk-subagent', 'session', 'lane']);
+export type { UsageExecutorType } from '@ptah-extension/platform-core';
 
 export const sessionUsageContributionSchema = z.object({
   sessionId: text,
@@ -26,6 +31,8 @@ export const sessionUsageContributionSchema = z.object({
   runCostSnapshot: z.boolean().optional(),
   workspaceKey: text.nullable().optional(),
   host: text.nullable().optional(),
+  phaseKind: usagePhaseKindSchema.nullable().optional(),
+  executorType: usageExecutorTypeSchema.nullable().optional(),
 });
 
 export type SessionUsageContribution = z.infer<
@@ -72,6 +79,17 @@ const groupedRowSchema = z.object({
   session_count: safeInteger,
 });
 export type SessionUsageGroup = z.infer<typeof groupedRowSchema>;
+
+const dimensionTotalSchema = z.object({
+  dimension: z.string(),
+  input_tokens: safeInteger,
+  output_tokens: safeInteger,
+  cache_read_tokens: safeInteger,
+  cache_write_tokens: safeInteger,
+  known_cost_micro_usd: safeInteger.nullable(),
+  has_unpriced: z.number().int().min(0).max(1),
+});
+export type UsageDimensionTotal = z.infer<typeof dimensionTotalSchema>;
 
 const topSessionSchema = z.object({
   session_id: z.string(),
@@ -158,8 +176,8 @@ export class SessionStatsRepository {
         session_id, producer, run_id, turn_id, model_id, event_key, occurred_at_ms,
         provider_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
         known_cost_micro_usd, cost_authority, source, pricing_version, revision,
-        workspace_key, host
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        workspace_key, host, phase_kind, executor_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const input of inputs) {
         statement.run(
           input.sessionId,
@@ -181,6 +199,8 @@ export class SessionStatsRepository {
           input.revision,
           input.workspaceKey ?? null,
           input.host ?? null,
+          input.phaseKind ?? null,
+          input.executorType ?? null,
         );
       }
       db.prepare(
@@ -426,6 +446,25 @@ export class SessionStatsRepository {
       )
       .all(scope, from, until);
     return rows.map((row) => groupedRowSchema.parse(row));
+  }
+
+  /** Separate totals avoid duplicating tokens across phase and executor views. */
+  async getUsageDimensionTotals(sessionId: string): Promise<{
+    byPhaseKind: UsageDimensionTotal[];
+    byExecutorType: UsageDimensionTotal[];
+  }> {
+    const db = await this.store.ready();
+    const scope = text.parse(sessionId);
+    const totals = (column: 'phase_kind' | 'executor_type'): UsageDimensionTotal[] => {
+      const rows: unknown[] = db.prepare(`SELECT COALESCE(${column}, 'unknown') AS dimension,
+        SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+        SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_write_tokens) AS cache_write_tokens,
+        SUM(known_cost_micro_usd) AS known_cost_micro_usd,
+        MAX(known_cost_micro_usd IS NULL) AS has_unpriced
+        FROM session_usage_turns WHERE session_id = ? GROUP BY ${column} ORDER BY dimension`).all(scope);
+      return rows.map((row) => dimensionTotalSchema.parse(row));
+    };
+    return { byPhaseKind: totals('phase_kind'), byExecutorType: totals('executor_type') };
   }
 
   /** Live capture alone cannot prove complete historical coverage. */

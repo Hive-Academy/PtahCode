@@ -1,4 +1,8 @@
-import type { LaneCompletionDelivery, ParentDeliveryView } from '@ptah-extension/shared';
+import type {
+  ExecutorCompletionResultV1,
+  LaneCompletionDelivery,
+  ParentDeliveryView,
+} from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { NewParentDeliveryEnvelope } from './parent-delivery/parent-envelope-store.service';
 import type { ParentCompletionOutboxEntry } from './parent-delivery/parent-envelope.schema';
@@ -8,6 +12,7 @@ export type LaneCompletionResult = LaneCompletionDelivery & {
   readonly recorded?: boolean;
   readonly pending?: boolean;
   readonly deliveryId?: string;
+  readonly completion?: ExecutorCompletionResultV1;
 };
 
 /** Producer-side retry entries for completions with no durable record; oldest dropped first. */

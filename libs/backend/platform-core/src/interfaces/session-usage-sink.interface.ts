@@ -1,3 +1,7 @@
+import type { PhaseKind } from '@ptah-extension/shared';
+
+export type UsageExecutorType = 'sdk-subagent' | 'session' | 'lane';
+
 /** One model's accepted turn delta. Unknown model or cost is null. */
 export interface SessionUsageModelDelta {
   modelId: string | null;
@@ -11,6 +15,8 @@ export interface SessionUsageModelDelta {
 
 /** Stable identity and accepted usage from one producer event. */
 export interface SessionUsageContribution {
+  phaseKind?: PhaseKind;
+  executorType?: UsageExecutorType;
   sessionId: string;
   producer: 'sdk-owner' | 'codex-checkpoint' | 'cli-lane';
   runId: string;

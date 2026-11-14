@@ -39,6 +39,7 @@ const columns = [
   ['role', 'role'],
   ['taskKind', 'task_kind'],
   ['taskKindSource', 'task_kind_source'],
+  ['phaseKind', 'phase_kind'],
   ['taskId', 'task_id'],
   ['verdict', 'verdict'],
   ['failureClass', 'failure_class'],

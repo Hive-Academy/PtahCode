@@ -43,6 +43,22 @@ Complex
   Gate 1 with the user → commit → push → pull request.
 - First phase after approval: Program Phase 0 (parity inventory and open points).
 
+## Program Phases
+
+The session that changes the state of a phase updates its row in the same pull request.
+
+| Phase | Name | Task ID | Pull request | State |
+|---|---|---|---|---|
+| 0 | Parity inventory | - | #1131 | merged |
+| 1 | Phase contract | - | #1147 | merged |
+| 2 | Executor neutrality | TASK_2026_1161_9efb | #1174 | merged |
+| 3 | Setup skills by stack | - | #1185 | merged |
+| 4 | Retire role subagents | TASK_2026_1175_2690 | #1267 (step 0a) | in review |
+| 5 | Remove agent generation | - | - | not started |
+| 6 | General workflow | - | - | not started |
+
+Bots (Phase 7) is a separate task after the program (U-D8).
+
 ## CLI Lanes
 
 Gate 0.1 (2026-11-12):

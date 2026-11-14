@@ -27,6 +27,7 @@ import {
   PtahIconButtonDirective,
   PtahCheckboxDirective,
   PtahInputDirective,
+  PtahFieldComponent,
 } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
@@ -111,7 +112,7 @@ function providerLabel(provider: ProviderId): string {
 @Component({
   selector: 'ptah-web-search-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahCheckboxDirective, PtahInputDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahCheckboxDirective, PtahInputDirective, PtahFieldComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -215,16 +216,14 @@ function providerLabel(provider: ProviderId): string {
                         {{ apiKeyConfigured()[opt.value] ? 'Update key' : 'Set key' }}
                       </button>
                       <div content class="p-3 w-72 space-y-2 text-left">
-                        <label class="block text-xs font-semibold text-base-content" [for]="'web-search-api-key-' + opt.value">
-                          API key for {{ opt.label }}
-                        </label>
-                        <div class="relative">
+                        <ptah-field [label]="'API key for ' + opt.label" appearance="stacked"
+                          hint="Stored encrypted on this machine. Use Test connection after saving to check it.">
                           <input [id]="'web-search-api-key-' + opt.value" [type]="keyVisible() ? 'text' : 'password'"
                             ptahInput size="sm" tone="mono" class="w-full pr-9 text-xs"
                             placeholder="Paste the API key" autocomplete="off" spellcheck="false"
                             [value]="apiKeyInput()" (input)="onApiKeyInput($event)" (keydown.enter)="saveApiKey()"
                             data-testid="settings-web-search-key-input" />
-                          <span class="absolute right-1 top-1">
+                          <span ptahFieldTrailing>
                             <button type="button" ptahIconButton size="xs"
                               (click)="keyVisible.set(!keyVisible())"
                               [label]="keyVisible() ? 'Hide API key' : 'Show API key'"
@@ -232,12 +231,9 @@ function providerLabel(provider: ProviderId): string {
                               <lucide-angular [img]="keyVisible() ? EyeOffIcon : EyeIcon" class="h-3.5 w-3.5" aria-hidden="true" />
                             </button>
                           </span>
-                        </div>
-                        <p class="text-xs text-base-content-muted">
-                          Stored encrypted on this machine. Use Test connection after saving to check it.
-                          <a [href]="opt.signupUrl" target="_blank" rel="noopener noreferrer"
-                            class="link underline text-base-content">Get a key</a>
-                        </p>
+                        </ptah-field>
+                        <a [href]="opt.signupUrl" target="_blank" rel="noopener noreferrer"
+                          class="link underline text-base-content text-xs">Get a key</a>
                         <div class="flex gap-2">
                           <button type="button" ptahButton variant="primary"
                             [busy]="saving()" [disabled]="!apiKeyInput().trim()" (click)="saveApiKey()"
@@ -270,8 +266,7 @@ function providerLabel(provider: ProviderId): string {
                         Clear the stored {{ opt.label }} key from this machine? Searches through {{ opt.label }} stop until a key is added.
                       </p>
                       <div class="flex gap-2">
-                        <!-- Outline has no owner variant; preserve the destructive confirmation style. -->
-                        <button type="button" class="btn btn-outline btn-sm border-error text-base-content"
+                        <button type="button" ptahButton variant="outline" size="sm" class="border-error text-base-content"
                           [ptahBusyDisabled]="saving()" (click)="deleteApiKey(opt.value)"
                           [attr.data-testid]="'settings-web-search-clear-confirm-' + opt.value">Clear key</button>
                         <button #clearCancel type="button" ptahButton variant="ghost" (click)="cancelClear(opt.value)"

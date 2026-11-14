@@ -309,7 +309,10 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
                       }
                       @if (connection.managedByPtah && connection.serverKey) {
                         <button
-                          class="btn btn-ghost btn-xs text-error"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
+                          tone="danger"
                           type="button"
                           [disabled]="isConnectionBusy(connection)"
                           (click)="removeConnection(connection)"
@@ -381,11 +384,11 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
             @for (cat of categories; track cat.label) {
               <button
                 type="button"
-                class="btn btn-xs rounded-full normal-case font-medium"
-                [class.btn-primary]="isCategoryActive(cat)"
-                [class.btn-ghost]="!isCategoryActive(cat)"
-                [class.border-base-300]="!isCategoryActive(cat)"
-                [attr.aria-pressed]="isCategoryActive(cat)"
+                ptahButton
+                size="xs"
+                shape="pill"
+                [variant]="isCategoryActive(cat) ? 'primary' : 'ghost'"
+                [selected]="isCategoryActive(cat)"
                 (click)="selectCategory(cat)"
               >
                 {{ cat.label }}
@@ -471,11 +474,9 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
                           </button>
                         }
                         <button
-                          class="btn btn-sm"
-                          [class.btn-primary]="!isInstalled(card.server.name)"
-                          [class.btn-ghost]="isInstalled(card.server.name)"
-                          [class.border-base-300]="
-                            isInstalled(card.server.name)
+                          ptahButton
+                          [variant]="
+                            isInstalled(card.server.name) ? 'ghost' : 'primary'
                           "
                           [disabled]="isBusy(card.server.name)"
                           (click)="toggleInstallPanel(card.server)"

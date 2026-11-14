@@ -1,8 +1,10 @@
-import type { ProviderAccountSelection } from '@ptah-extension/shared';
+import type { ProviderAccountSelection, PhaseDispatchV1, PhaseSkillV1 } from '@ptah-extension/shared';
 import { namedAccountRefusal } from './helpers/session-lifecycle/session-query-executor.service';
 import * as path from 'path';
 import * as os from 'os';
 import { existsSync } from 'fs';
+import { PhaseDispatchSchema } from '@ptah-extension/shared/schemas';
+import { z } from 'zod';
 import { injectable, inject } from 'tsyringe';
 import {
   PLATFORM_TOKENS,
@@ -102,6 +104,8 @@ type StreamTap = Pick<
   ExecuteQueryResult,
   'onMessage' | 'onStreamEnd' | 'beforeLiveStatsDispose'
 >;
+
+const storedPhaseStateSchema = z.enum(['none', 'present']);
 
 const SDK_CAPABILITIES: ProviderCapabilities = {
   streaming: true,
@@ -212,6 +216,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
    * session's first prompt and its system `init` message.
    */
   private readonly pendingUserActivity = new Map<string, PendingUserActivity>();
+  /** Phase inherited by later turns of a child session in this host process. */
+  private readonly phaseBySession = new Map<string, PhaseDispatchV1>();
 
   /** An `observe` throw is WARNed once per adapter, never per result. */
   private budgetObserveWarned = false;
@@ -822,6 +828,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
     this.logger.info('[SdkAgentAdapter] Disposing adapter...');
     this.events.emitDisposed({ timestamp: Date.now() });
     this.flushAllPendingUserActivity();
+    this.phaseBySession.clear();
     const endedIds = this.sessionLifecycle
       .getLiveSessionIds()
       .flatMap((id) => this.sessionKeys(id as SessionId));
@@ -991,6 +998,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
 
   async startChatSession(
     config: AISessionConfig & {
+      phase?: PhaseDispatchV1;
+      skills?: readonly PhaseSkillV1[];
       accountSelection?: ProviderAccountSelection;
       tabId: string;
       name?: string;
@@ -1006,7 +1015,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       /** See `ExecuteQueryConfig.admissionDeadline` (named admission only). */
       admissionDeadline?: number;
     },
-  ): Promise<AsyncIterable<FlatStreamEventUnion>> {
+  ): Promise<AsyncIterable<FlatStreamEventUnion> & { readonly toolProfileApplied?: true }> {
     if (!this.initialized) {
       throw this.notInitializedError();
     }
@@ -1076,7 +1085,10 @@ export class SdkAgentAdapter implements IAgentAdapter {
       usageCostSource,
       accountingAuthEnv,
       capacityRoute,
+      toolProfileApplied,
     } = await this.sessionLifecycle.executeQuery({
+      phase: config.phase,
+      skills: config.skills,
       sessionId: trackingId,
       sessionConfig: sessionConfigWithProfileModel,
       initialPrompt: config.prompt
@@ -1099,6 +1111,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       authEnvOverride: effectiveAuthEnv,
       admissionDeadline: config.admissionDeadline,
     });
+    if (config.phase) this.phaseBySession.set(tabId, config.phase);
     // A brand-new session has a known-empty history and nothing saved to
     // restore. It is keyed by the tab id until the SDK reports the canonical
     // id (see createSessionIdCallback).
@@ -1108,6 +1121,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       statsLease.generation,
       sessionToken,
       null,
+      { phaseKind: config.phase?.kind, executorType: 'session' },
     );
 
     const resolvedProjectPath = config?.projectPath || os.homedir();
@@ -1124,13 +1138,14 @@ export class SdkAgentAdapter implements IAgentAdapter {
       config?.tabId,
       providerProfile?.providerId ?? capacityRoute?.providerId ?? undefined,
       config.pluginConfigAncestorRoots,
+      config.phase,
     );
 
     if (config.prompt) {
       this.recordPendingUserActivity(trackingId, resolvedProjectPath);
     }
 
-    return this.streamTransformer.transform({
+    return Object.assign(this.streamTransformer.transform({
       sdkQuery,
       sessionId: trackingId,
       initialModel,
@@ -1166,7 +1181,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
         onStreamEnd,
         beforeLiveStatsDispose,
       }),
-    });
+    }), toolProfileApplied ? { toolProfileApplied: true as const } : {});
   }
 
   endSession(sessionId: SessionId, cause: SessionEndCause = 'unknown'): void {
@@ -1222,6 +1237,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
   private releaseBudget(keys: readonly string[]): void {
     for (const key of keys) {
       this.sessionBudget.release(key);
+      this.phaseBySession.delete(key);
     }
   }
 
@@ -1345,6 +1361,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
   async resumeSession(
     sessionId: SessionId,
     config?: AISessionConfig & {
+      phase?: PhaseDispatchV1;
+      skills?: readonly PhaseSkillV1[];
       accountSelection?: ProviderAccountSelection;
       mcpServerRunning?: boolean;
       enhancedPromptsContent?: string;
@@ -1354,8 +1372,9 @@ export class SdkAgentAdapter implements IAgentAdapter {
       providerProfile?: ProviderProfile;
       /** See `ExecuteQueryConfig.admissionDeadline` (named admission only). */
       admissionDeadline?: number;
+      knownSessionChild?: boolean;
     },
-  ): Promise<AsyncIterable<FlatStreamEventUnion>> {
+  ): Promise<AsyncIterable<FlatStreamEventUnion> & { readonly toolProfileApplied?: true }> {
     if (!this.initialized) {
       throw this.notInitializedError();
     }
@@ -1411,6 +1430,38 @@ export class SdkAgentAdapter implements IAgentAdapter {
     }
 
     const mcpServerRunning = config?.mcpServerRunning ?? true;
+    const storedMetadata = await this.metadataStore.get(sessionId);
+    const storedPhase = storedMetadata?.phase;
+    const restoredPhase = storedPhase === undefined
+      ? undefined
+      : PhaseDispatchSchema.safeParse(storedPhase);
+    if (restoredPhase && !restoredPhase.success) {
+      this.logger.warn('[SdkAgentAdapter] Stored session phase is malformed; refusing resume', { sessionId });
+      throw new SdkError('Cannot resume a session with malformed phase metadata');
+    }
+    const storedPhaseState = storedMetadata?.phaseState;
+    if (storedPhaseState !== undefined &&
+        !storedPhaseStateSchema.safeParse(storedPhaseState).success) {
+      this.logger.warn('[SdkAgentAdapter] Stored session phase state is malformed; refusing resume', { sessionId });
+      throw new SdkError('Cannot resume a session with malformed phase state');
+    }
+    if (config?.knownSessionChild && !storedMetadata && !config.phase) {
+      this.logger.warn('[SdkAgentAdapter] Child metadata is absent; refusing resume', { sessionId });
+      throw new SdkError('Cannot resume a child without phase metadata');
+    }
+    if ((config?.knownSessionChild || storedMetadata?.isChildSession === true) &&
+        storedPhaseState === undefined && !config?.phase &&
+        !this.phaseBySession.has(sessionId as string)) {
+      this.logger.warn('[SdkAgentAdapter] Legacy child phase cannot be proven; refusing resume', { sessionId });
+      throw new SdkError('Cannot resume a legacy child without phase evidence');
+    }
+    if (storedPhaseState === 'present' && !storedPhase && !config?.phase) {
+      this.logger.warn('[SdkAgentAdapter] Child phase metadata is missing; refusing resume', { sessionId });
+      throw new SdkError('Cannot resume a child with missing phase metadata');
+    }
+    const phase = config?.phase ?? (restoredPhase?.success ? restoredPhase.data : undefined) ??
+      this.phaseBySession.get(sessionId as string) ??
+      (config?.tabId ? this.phaseBySession.get(config.tabId) : undefined);
     const enhancedPromptsContent = config?.enhancedPromptsContent;
     const permissionLevel = config?.permissionLevel;
     const includePartialMessages = config?.includePartialMessages;
@@ -1481,7 +1532,10 @@ export class SdkAgentAdapter implements IAgentAdapter {
       usageCostSource,
       accountingAuthEnv,
       capacityRoute,
+      toolProfileApplied,
     } = await this.sessionLifecycle.executeQuery({
+      phase,
+      skills: config?.skills,
       sessionId,
       sessionConfig: sessionConfigWithProfileModel,
       resumeSessionId: sessionId as string,
@@ -1496,11 +1550,13 @@ export class SdkAgentAdapter implements IAgentAdapter {
       authEnvOverride: effectiveAuthEnv,
       admissionDeadline: config?.admissionDeadline,
     });
+    if (config?.phase) this.phaseBySession.set(sessionId as string, config.phase);
     this.statsOwner.beginRun(
       sessionId as string,
       statsRun.generation,
       sessionToken,
       statsRun.candidate,
+      { phaseKind: phase?.kind, executorType: 'session' },
     );
 
     const resumeCallback = async (
@@ -1559,7 +1615,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       });
     };
 
-    return this.streamTransformer.transform({
+    return Object.assign(this.streamTransformer.transform({
       sdkQuery,
       sessionId,
       initialModel,
@@ -1595,7 +1651,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
         onStreamEnd,
         beforeLiveStatsDispose,
       }),
-    });
+    }), toolProfileApplied ? { toolProfileApplied: true as const } : {});
   }
 
   isSessionActive(sessionId: SessionId): boolean {
@@ -1659,6 +1715,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
     tabId?: string,
     providerId?: string,
     pluginConfigAncestorRoots?: readonly string[],
+    phase?: PhaseDispatchV1,
   ): (tabId: string | undefined, realSessionId: string) => void {
     return async (
       _tabIdFromCallback: string | undefined,
@@ -1697,6 +1754,8 @@ export class SdkAgentAdapter implements IAgentAdapter {
         // before any `result`, so the run's first result finds its owner
         // under the canonical id.
         this.statsOwner.rebind(tabId, realSessionId, statsGeneration);
+        const phase = this.phaseBySession.get(tabId);
+        if (phase) this.phaseBySession.set(realSessionId, phase);
       }
 
       const metadataArgs = [
@@ -1707,13 +1766,12 @@ export class SdkAgentAdapter implements IAgentAdapter {
         workingDirectory === workspaceId ? undefined : workingDirectory,
         blankToUndefined(providerId),
       ] as const;
-      if (pluginConfigAncestorRoots === undefined) {
-        await this.metadataStore.create(...metadataArgs);
+      if (phase) {
+        await this.metadataStore.create(...metadataArgs, pluginConfigAncestorRoots, phase);
+      } else if (pluginConfigAncestorRoots !== undefined) {
+        await this.metadataStore.create(...metadataArgs, pluginConfigAncestorRoots);
       } else {
-        await this.metadataStore.create(
-          ...metadataArgs,
-          pluginConfigAncestorRoots,
-        );
+        await this.metadataStore.create(...metadataArgs);
       }
 
       if (tabId) {
@@ -1905,6 +1963,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       accountSelection?: ProviderAccountSelection;
       tabId?: string;
       providerProfile?: ProviderProfile;
+      knownSessionChild?: boolean;
     },
   ): Promise<AsyncIterable<FlatStreamEventUnion>> {
     if (!this.initialized) {
@@ -1959,6 +2018,34 @@ export class SdkAgentAdapter implements IAgentAdapter {
     // restore candidate is read AFTER the previous query has ended (what that
     // process left on disk) and before the new one starts.
     const prepared: { run: RunPreparation | null } = { run: null };
+    const slashMetadata = await this.metadataStore.get(sessionId);
+    const storedSlashPhase = slashMetadata?.phase;
+    const slashPhase = storedSlashPhase === undefined
+      ? undefined : PhaseDispatchSchema.safeParse(storedSlashPhase);
+    if (slashPhase && !slashPhase.success) {
+      this.logger.warn('[SdkAgentAdapter] Stored session phase is malformed; refusing slash relaunch', { sessionId });
+      throw new SdkError('Cannot relaunch a session with malformed phase metadata');
+    }
+    const slashPhaseState = slashMetadata?.phaseState;
+    if (slashPhaseState !== undefined &&
+        !storedPhaseStateSchema.safeParse(slashPhaseState).success) {
+      this.logger.warn('[SdkAgentAdapter] Stored session phase state is malformed; refusing slash relaunch', { sessionId });
+      throw new SdkError('Cannot relaunch a session with malformed phase state');
+    }
+    if (slashPhaseState === 'present' && !slashPhase?.success) {
+      this.logger.warn('[SdkAgentAdapter] Child phase metadata is missing; refusing slash relaunch', { sessionId });
+      throw new SdkError('Cannot relaunch a child with missing phase metadata');
+    }
+    if (config.knownSessionChild && !slashMetadata && !this.phaseBySession.has(sessionId as string)) {
+      this.logger.warn('[SdkAgentAdapter] Child metadata is absent; refusing slash relaunch', { sessionId });
+      throw new SdkError('Cannot relaunch a child without phase metadata');
+    }
+    if ((config.knownSessionChild || slashMetadata?.isChildSession === true) &&
+        slashPhaseState === undefined &&
+        !this.phaseBySession.has(sessionId as string)) {
+      this.logger.warn('[SdkAgentAdapter] Legacy child phase cannot be proven; refusing slash relaunch', { sessionId });
+      throw new SdkError('Cannot relaunch a legacy child without phase evidence');
+    }
     const {
       sdkQuery,
       initialModel,
@@ -1974,6 +2061,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
       sessionId,
       command,
       {
+        phase: slashPhase?.success ? slashPhase.data : this.phaseBySession.get(sessionId as string),
         sessionConfig,
         mcpServerRunning: config.mcpServerRunning,
         enhancedPromptsContent: config.enhancedPromptsContent,

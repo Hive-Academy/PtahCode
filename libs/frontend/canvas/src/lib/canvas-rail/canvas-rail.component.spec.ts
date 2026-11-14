@@ -199,6 +199,7 @@ describe('CanvasRailComponent', () => {
     const emitted = jest.fn();
     fixture.componentInstance.newSession.subscribe(emitted);
     const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="canvas-footer-new-session"]')!;
+    expect(button.hasAttribute('data-ptah-button')).toBe(true);
     expect(button.classList).toContain('btn-outline');
     button.click();
     expect(emitted).toHaveBeenCalledWith(button);

@@ -3,18 +3,14 @@
  * is reported as a failed start, the first-turn watchdog, the early
  * `starting` record and the implicit idempotency of a retried start.
  */
+import { denySessionSpawnerHandoffAccess } from './__fixtures__/session-spawner-fs-access';
 import { makeHarness, PARENT } from './session-spawner.service.spec';
 import { SESSION_CHILD_FIRST_TURN_TIMEOUT_MS } from './session-child-first-turn.watchdog';
 import type { SessionChildStartResult } from './session-spawner.port';
 
 // The succession path looks for a handoff file with real file I/O, which fake
 // timers and a microtask flush cannot settle. The file is absent here.
-jest.mock('node:fs/promises', () => ({
-  ...jest.requireActual('node:fs/promises'),
-  access: jest.fn(async () => {
-    throw new Error('ENOENT');
-  }),
-}));
+denySessionSpawnerHandoffAccess();
 
 const CHILD_SDK_ID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
 

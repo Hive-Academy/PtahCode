@@ -147,10 +147,43 @@ import type {
   CliDetectionResult,
   CliOutputSegment,
   CliSessionReference,
+  PhaseDispatchV1,
   QuotaOwnerRef,
 } from '@ptah-extension/shared';
 
 // ---- Test Helpers ----
+
+function phaseDispatch(
+  disallowedTools: readonly string[],
+): PhaseDispatchV1 {
+  const toolProfile = {
+    disallowedTools,
+    permission: 'allow' as const,
+  };
+  return {
+    version: 1,
+    kind: 'implement',
+    text: 'implement',
+    definition: {
+      version: 1,
+      kind: 'implement',
+      input: [],
+      deliverable: [],
+      verdict: [],
+      acceptanceStep: [],
+      requiredCapabilities: [],
+      toolProfile,
+      discipline: {
+        method: 'method',
+        outputContract: 'contract',
+        returnValue: 'return',
+        refusals: 'refusals',
+        escalationProtocol: 'escalation',
+      },
+    },
+    toolProfile,
+  };
+}
 
 function createMockLogger(): jest.Mocked<Logger> {
   return {
@@ -642,6 +675,107 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(
         (manager.getStatus(handle.agentId) as AgentProcessInfo).turnSeq,
       ).toBe(1);
+    });
+
+    it('records a tool-profile result and stamps the lane credential', async () => {
+      setupVscodeConfig({ maxConcurrentAgents: 8 });
+      getMcpPort.mockReturnValue(51820);
+      const denied = phaseDispatch(['ptah_task_create']);
+      const codex = await manager.spawn({
+        task: 'A',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+        phase: denied,
+      });
+      expect(codex.toolProfileAdapter).toEqual({
+        executorId: 'codex',
+        toolProfileStatus: 'filtered',
+      });
+      expect(manager.getStatus(codex.agentId)).toMatchObject({
+        toolProfileAdapter: codex.toolProfileAdapter,
+        phaseKind: 'implement',
+      });
+      expect(mcpCredentials.issue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'agent',
+          phaseKind: 'implement',
+          disallowedTools: ['ptah_task_create'],
+        }),
+        codex.agentId,
+        expect.any(Number),
+      );
+
+      mcpCredentials.issue.mockClear();
+      const claude = await manager.spawn({
+        task: 'B',
+        cli: 'claude',
+        workingDirectory: '/workspace/root',
+        phase: denied,
+      });
+      expect(claude.toolProfileAdapter).toEqual({
+        executorId: 'claude',
+        toolProfileStatus: 'unfiltered',
+      });
+      expect(manager.getStatus(claude.agentId)).toMatchObject({ phaseKind: 'implement' });
+      expect(mcpCredentials.issue).not.toHaveBeenCalled();
+
+      const open = await manager.spawn({
+        task: 'C',
+        cli: 'pi',
+        workingDirectory: '/workspace/root',
+        phase: phaseDispatch([]),
+      });
+      expect(open.toolProfileAdapter).toBeUndefined();
+      expect(manager.getStatus(open.agentId)).toMatchObject({ phaseKind: 'implement' });
+      expect(manager.getStatus(open.agentId)).not.toHaveProperty(
+        'toolProfileAdapter',
+      );
+      const deniedPi = await manager.spawn({
+        task: 'Pi denied', cli: 'pi', workingDirectory: '/workspace/root', phase: denied,
+      });
+      expect(deniedPi.toolProfileAdapter).toEqual({
+        executorId: 'pi', toolProfileStatus: 'unfiltered',
+      });
+
+      const plain = await manager.spawn({
+        task: 'D',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+      });
+      expect(plain.toolProfileAdapter).toBeUndefined();
+      expect(manager.getStatus(plain.agentId)).not.toHaveProperty('phaseKind');
+      expect(mcpCredentials.issue.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+        'phaseKind',
+      );
+      expect(mcpCredentials.issue.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+        'disallowedTools',
+      );
+
+      const ptahCli = await manager.spawnFromSdkHandle(
+        createMockSdkHandle().handle,
+        {
+          task: 'E',
+          cli: 'ptah-cli',
+          workingDirectory: '/workspace/root',
+          expectsMcp: false,
+          phase: denied,
+        },
+      );
+      expect(ptahCli.toolProfileAdapter).toEqual({
+        executorId: 'ptah-cli',
+        toolProfileStatus: 'unfiltered',
+      });
+      expect(manager.getStatus(ptahCli.agentId)).toMatchObject({ phaseKind: 'implement' });
+      const appliedPtahCli = await manager.spawnFromSdkHandle(
+        createMockSdkHandle().handle,
+        {
+          task: 'F', cli: 'ptah-cli', workingDirectory: '/workspace/root',
+          expectsMcp: true, mcpPort: 51820, phase: denied, toolProfileApplied: true,
+        },
+      );
+      expect(appliedPtahCli.toolProfileAdapter).toEqual({
+        executorId: 'ptah-cli', toolProfileStatus: 'filtered',
+      });
     });
 
     it('keeps predecessor but uses only the current caller as resume owner', async () => {

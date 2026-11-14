@@ -9,6 +9,7 @@
 import {
   laneFamilyOf,
   SUBAGENT_FAMILY,
+  PHASE_KINDS,
   type CliDetectionResult,
   type CliType,
   type LaneFamilyInput,
@@ -33,11 +34,19 @@ export interface SubagentCandidate {
   readonly kind: 'subagent';
   /** `subagent:<role>`. */
   readonly id: string;
-  readonly role: string;
+  readonly role?: string;
+  readonly phaseKind?: (typeof PHASE_KINDS)[number];
   readonly family: typeof SUBAGENT_FAMILY;
 }
 
-export type RoutingCandidate = LaneCandidate | SubagentCandidate;
+/** An eligible new child session; no session id exists until start succeeds. */
+export interface ChildSessionCandidate {
+  readonly kind: 'child-session';
+  readonly id: 'child-session';
+  readonly family: typeof SUBAGENT_FAMILY;
+}
+
+export type RoutingCandidate = LaneCandidate | SubagentCandidate | ChildSessionCandidate;
 
 /**
  * A system CLI lane has one default model and takes a per-call model id.
@@ -118,4 +127,9 @@ export function toSubagentCandidate(role: string): SubagentCandidate {
     role,
     family: SUBAGENT_FAMILY,
   };
+}
+
+export function toPhaseSubagentCandidate(phaseKind: (typeof PHASE_KINDS)[number]): SubagentCandidate {
+  if (phaseKind.trim() === '') throw new Error('subagent phase kind must be non-empty');
+  return { kind: 'subagent', id: `subagent:${phaseKind}`, phaseKind, family: SUBAGENT_FAMILY };
 }

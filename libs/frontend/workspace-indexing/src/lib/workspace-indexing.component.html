@@ -9,7 +9,7 @@
 -->
 
 <section class="workspace-indexing surface-1 rounded-xl" data-testid="workspace-indexing-section">
-  <div class="p-3 space-y-3">
+  <div class="p-[var(--ptah-surface-pad)] space-y-[var(--ptah-gap-group)]">
     <!-- Section header -->
     <div class="flex items-center gap-1.5">
       <lucide-angular [img]="RefreshCwIcon" class="w-4 h-4 text-secondary" />
@@ -46,7 +46,7 @@
       <!-- =========================================================== -->
       @case ('loading') {
         <div class="state-block" data-testid="state-loading">
-          <p class="text-xs text-base-content-muted">Loading status…</p>
+          <ptah-state-panel state="loading" title="Loading status" />
         </div>
       }
 
@@ -55,10 +55,7 @@
       <!-- =========================================================== -->
       @case ('no-workspace') {
         <div class="state-block" data-testid="state-no-workspace">
-          <h3 class="text-sm font-semibold mb-1">No workspace open</h3>
-          <p class="text-xs text-base-content-muted">
-            Open a folder to manage indexing.
-          </p>
+          <ptah-state-panel state="empty" title="No workspace open" body="Open a folder to manage indexing." />
         </div>
       }
 
@@ -82,7 +79,7 @@
             </p>
           }
 
-          <div class="flex flex-wrap gap-2 mb-3">
+          <div class="flex flex-wrap gap-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-heading)]">
             <button
               type="button"
               ptahButton variant="primary" size="xs"
@@ -105,7 +102,7 @@
 
           @if (showFirstRunDisclosure()) {
             <div
-              class="rounded-md border border-base-300 bg-base-200 p-2 text-xs"
+              class="rounded-md border border-base-300 bg-base-200 p-[var(--ptah-space-2)] text-xs"
               data-testid="callout-privacy-disclosure"
             >
               <p class="font-medium mb-1">What Ptah indexes</p>
@@ -171,7 +168,7 @@
           }
           </div>
 
-          <div class="flex flex-wrap gap-2 mb-2">
+          <div class="flex flex-wrap gap-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-heading)]">
             @if (backgroundOnly()) {
               <button
                 type="button"
@@ -204,9 +201,9 @@
             </button>
           </div>
 
-          <div class="alert text-xs p-2" data-testid="callout-indexing">
-            You can keep working. Indexing continues in the background.
-          </div>
+          <div class="alert text-xs p-[var(--ptah-space-2)]" data-testid="callout-indexing">
+You can keep working. Indexing continues in the background.
+</div>
         </div>
       }
 
@@ -222,7 +219,7 @@
             Resume to finish, or cancel to discard progress.
           </p>
 
-          <div class="flex flex-wrap gap-2 mb-2">
+          <div class="flex flex-wrap gap-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-heading)]">
             <button
               type="button"
               ptahButton variant="primary" size="xs"
@@ -243,13 +240,9 @@
             </button>
           </div>
 
-          <div
-            class="alert alert-warning text-xs p-2"
-            data-testid="callout-paused"
-          >
-            Paused indexing means search results may be incomplete until you
-            resume.
-          </div>
+          <div class="alert alert-warning text-xs p-[var(--ptah-space-2)]" data-testid="callout-paused">
+Paused indexing means search results may be incomplete until you resume.
+</div>
         </div>
       }
 
@@ -273,7 +266,7 @@
             </p>
           }
 
-          <div class="flex flex-wrap gap-2 mb-2">
+          <div class="flex flex-wrap gap-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-heading)]">
             <button
               type="button"
               ptahButton variant="primary" size="xs"
@@ -289,13 +282,9 @@
 
           <!-- Non-git workspace fallback callout -->
           @if (state.isNonGit) {
-            <div
-              class="alert text-xs p-2"
-              data-testid="callout-non-git"
-            >
-              This workspace is not a git repository. Ptah cannot auto-detect
-              upstream changes — re-index manually after large edits.
-            </div>
+            <div class="alert text-xs p-[var(--ptah-space-2)]" data-testid="callout-non-git">
+This workspace is not a git repository. Ptah cannot auto-detect upstream changes — re-index manually after large edits.
+</div>
           }
         </div>
       }
@@ -324,7 +313,7 @@
             </p>
           }
 
-          <div class="flex flex-wrap gap-2 mb-2">
+          <div class="flex flex-wrap gap-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-heading)]">
             <button
               type="button"
               ptahButton variant="primary" size="xs"
@@ -348,13 +337,9 @@
           </div>
 
           <!-- Git-detection-limit warning (mandatory) -->
-          <div
-            class="alert alert-warning text-xs p-2"
-            data-testid="callout-stale-warning"
-          >
-            Uncommitted edits are not detected. Commit or stash, then re-index
-            for accurate results.
-          </div>
+          <div class="alert alert-warning text-xs p-[var(--ptah-space-2)]" data-testid="callout-stale-warning">
+Uncommitted edits are not detected. Commit or stash, then re-index for accurate results.
+</div>
         </div>
       }
 
@@ -377,7 +362,7 @@
             </p>
           }
 
-          <div class="flex flex-wrap gap-2 mb-2">
+          <div class="flex flex-wrap gap-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-heading)]">
             <button
               type="button"
               ptahButton variant="primary" size="xs"
@@ -402,6 +387,7 @@
 
           <div
             class="alert alert-error text-xs p-2"
+            role="alert"
             data-testid="callout-error"
           >
             Indexing failed. See the logs for details.
@@ -426,18 +412,20 @@
     <!-- Per-pipeline toggle row (always visible)                    -->
     <!-- =========================================================== -->
     <div
-      class="border-t border-base-300 pt-3 space-y-2"
+      class="border-t border-base-300 pt-[var(--ptah-gap-group)] space-y-[var(--ptah-gap-field)]"
       data-testid="pipeline-toggles"
     >
       <!-- Code symbol index toggle -->
       <div class="flex items-start gap-2">
         <lucide-angular [img]="CodeIcon" class="w-4 h-4 mt-0.5 text-secondary" />
         <div class="flex-1">
-          <label class="flex items-center justify-between gap-2 cursor-pointer">
-            <span class="text-xs font-medium">Code symbol index</span>
+          <ptah-field label="Code symbol index" appearance="stacked"
+            [hint]="workspaceRoot() ? 'Indexes function and class symbols across your workspace for fast navigation. Disable if you only use chat.' : 'Open a workspace to change indexing.'">
             <input
               type="checkbox"
               ptahToggle
+              ptahFieldControl
+              ptahFieldTrailing
               size="xs"
               [checked]="symbolsEnabled()"
               [disabled]="!workspaceRoot()"
@@ -445,11 +433,7 @@
               data-testid="toggle-symbols"
               aria-label="Toggle code symbol indexing"
             />
-          </label>
-          <p class="text-[10px] text-base-content-muted mt-0.5">
-            Indexes function and class symbols across your workspace for fast
-            navigation. Disable if you only use chat.
-          </p>
+          </ptah-field>
           @if (!symbolsEnabled()) {
             <p
               class="text-[10px] text-warning mt-1"
@@ -465,11 +449,13 @@
       <div class="flex items-start gap-2">
         <lucide-angular [img]="BrainIcon" class="w-4 h-4 mt-0.5 text-secondary" />
         <div class="flex-1">
-          <label class="flex items-center justify-between gap-2 cursor-pointer">
-            <span class="text-xs font-medium">Chat memory extraction</span>
+          <ptah-field label="Chat memory extraction" appearance="stacked"
+            [hint]="workspaceRoot() ? 'Saves useful facts from chats so Ptah remembers them later. Runs only when a chat compacts; never scans your files.' : 'Open a workspace to change memory extraction.'">
             <input
               type="checkbox"
               ptahToggle
+              ptahFieldControl
+              ptahFieldTrailing
               size="xs"
               [checked]="memoryEnabled()"
               [disabled]="!workspaceRoot()"
@@ -477,11 +463,7 @@
               data-testid="toggle-memory"
               aria-label="Toggle chat memory extraction"
             />
-          </label>
-          <p class="text-[10px] text-base-content-muted mt-0.5">
-            Saves useful facts from chats so Ptah remembers them later. Runs
-            only when a chat compacts; never scans your files.
-          </p>
+          </ptah-field>
           @if (!memoryEnabled()) {
             <p
               class="text-[10px] text-warning mt-1"

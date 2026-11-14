@@ -33,7 +33,7 @@ export interface MemoryPurgeRequest {
     CommonModule,
   ],
   template: `
-    <div class="rounded-xl border border-error/40 p-4">
+    <div class="rounded-xl border border-error/40 p-[var(--ptah-surface-pad)]">
       <h2 class="text-sm font-semibold text-error">Danger zone</h2>
       <p class="mt-0.5 text-xs text-base-content-muted">
         Permanently delete memory entries whose subject matches a pattern. This
@@ -41,10 +41,10 @@ export interface MemoryPurgeRequest {
       </p>
 
       <section
-        class="mt-3 flex flex-col gap-3 md:flex-row md:items-end"
+        class="mt-[var(--ptah-gap-group)] flex flex-col gap-[var(--ptah-gap-field)] md:flex-row md:items-end"
         aria-label="Purge memory entries by subject pattern"
       >
-        <ptah-field label="Purge by subject pattern" class="flex-1">
+        <ptah-field label="Purge by subject pattern" hint="Match memory subjects in this workspace" class="flex-1">
           <input
             ptahInput
             size="md"
@@ -58,7 +58,7 @@ export interface MemoryPurgeRequest {
             aria-label="Pattern to match against memory subject"
           />
         </ptah-field>
-        <ptah-field label="Mode">
+        <ptah-field label="Mode" hint="Substring or SQL LIKE pattern">
           <select
             ptahSelect
             size="md"
@@ -114,7 +114,7 @@ export interface MemoryPurgeRequest {
 
       @if (error()) {
         <div
-          class="mt-3 rounded-xl border border-error/40 bg-error/5 px-4 py-2"
+          class="mt-[var(--ptah-gap-field)] rounded-xl border border-error/40 bg-error/5 p-[var(--ptah-surface-pad)]"
           role="alert"
         >
           <span class="text-sm text-error">{{ error() }}</span>

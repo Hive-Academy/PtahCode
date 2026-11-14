@@ -48,7 +48,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         [connection]="store.chosen()"
         [settings]="settingsWord()"
       />
-      <div class="flex items-center gap-3 max-[480px]:gap-2.5">
+      <div class="flex items-center gap-[var(--ptah-gap-heading)]">
         <span
           class="grid size-11 flex-none place-items-center rounded-xl border border-base-300 bg-base-200 max-[480px]:size-[38px]"
           data-glass-surface="tile"
@@ -75,7 +75,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
       </p>
       <ptah-connection-choice class="mt-5" />
       <div
-        class="mt-5 grid grid-cols-2 items-start gap-4 max-[720px]:grid-cols-1"
+        class="mt-5 grid grid-cols-2 items-start gap-[var(--ptah-gap-field)] max-[720px]:grid-cols-1"
       >
         <ptah-provider-panel
           [view]="store.claude()"
@@ -97,12 +97,12 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           is ready.
         </p>
       }
-      <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <div class="flex items-center gap-2">
+      <div class="mt-5 flex flex-wrap items-center justify-between gap-[var(--ptah-gap-heading)]">
+        <div class="flex items-center gap-[var(--ptah-gap-controls)]">
           <button
             type="button"
-            class="btn btn-outline min-h-9"
-            [class.btn-ghost]="chosenReady() || choice.changed()"
+            ptahButton
+            [variant]="chosenReady() || choice.changed() ? 'ghost' : 'outline'"
             [attr.aria-disabled]="store.rechecking() ? 'true' : null"
             (click)="recheck()"
           >
@@ -122,9 +122,8 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           <button
             #continueButton
             type="button"
-            class="btn min-h-9"
-            [class.btn-primary]="!choice.changed()"
-            [class.btn-ghost]="choice.changed()"
+            ptahButton
+            [variant]="choice.changed() ? 'ghost' : 'primary'"
             (click)="continue()"
           >
             Continue

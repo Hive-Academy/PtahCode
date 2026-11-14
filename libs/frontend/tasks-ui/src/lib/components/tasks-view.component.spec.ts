@@ -105,6 +105,20 @@ const TWELVE_EXCLUDED: readonly ExcludedTaskFolder[] = [
 
 const ok = <T>(data: T) => ({ success: true, isSuccess: () => true, data });
 
+beforeAll(() => {
+  // jsdom has no HTMLDialogElement.showModal/close; the native modal needs them.
+  if (!HTMLDialogElement.prototype.showModal) {
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.setAttribute('open', '');
+    };
+  }
+  if (!HTMLDialogElement.prototype.close) {
+    HTMLDialogElement.prototype.close = function close() {
+      this.removeAttribute('open');
+    };
+  }
+});
+
 describe('TasksViewComponent', () => {
   let rpcCall: jest.Mock;
 

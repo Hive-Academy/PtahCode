@@ -139,6 +139,10 @@ export class SessionForkService {
         workspaceId,
         forkName,
         'forked',
+        undefined,
+        undefined,
+        undefined,
+        sourceMetadata?.phase,
       );
       // Both ids are SDK session UUIDs: the SDK-issued fork id and the source
       // id the SDK just forked from. The port never throws.

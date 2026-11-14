@@ -76,7 +76,7 @@ const FOCUS_RING =
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
-      class="flex flex-wrap items-center gap-2 border-b border-base-content/10 bg-base-200 px-2 py-1.5 text-xs"
+      class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] border-b border-base-content/10 bg-base-200 px-2 py-1.5 text-xs"
       data-testid="comparison-bar"
     >
       @if (layout.gitRailCollapsed()) {
@@ -133,28 +133,36 @@ const FOCUS_RING =
           @for (kind of simpleKinds; track kind) {
             <button
               type="button"
-              class="btn btn-ghost btn-xs w-full justify-start {{ focusRing }}"
-              [class.btn-active]="scopeKind() === kind"
-              [attr.aria-pressed]="scopeKind() === kind"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              align="start"
+              [selected]="scopeKind() === kind"
+              selectedAs="pressed"
+              class="w-full {{ focusRing }}"
               [attr.data-testid]="'comparison-option-' + kind"
               (click)="pick(kind)"
             >
               {{ label(kind) }}
             </button>
           }
-          <div class="my-1 border-t border-base-content/10"></div>
+          <div class="my-[var(--ptah-space-1)] border-t border-base-content/10"></div>
           <button
             type="button"
-            class="btn btn-ghost btn-xs w-full justify-start {{ focusRing }}"
-            [class.btn-active]="scopeKind() === 'branch'"
-            [attr.aria-pressed]="scopeKind() === 'branch'"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            align="start"
+            [selected]="scopeKind() === 'branch'"
+            selectedAs="pressed"
+            class="w-full {{ focusRing }}"
             data-testid="comparison-option-branch"
             (click)="pick('branch')"
           >
             Branch review…
           </button>
           @if (scopeKind() === 'branch') {
-            <div class="mt-1 flex items-center gap-1 px-1">
+            <div class="mt-[var(--ptah-space-1)] flex items-center gap-[var(--ptah-gap-label)] px-1">
               <select
                 ptahSelect
                 size="xs"
@@ -219,9 +227,12 @@ const FOCUS_RING =
       >
         <button
           type="button"
-          class="btn btn-ghost btn-xs {{ focusRing }}"
-          [class.btn-active]="showsSplit()"
-          [attr.aria-pressed]="showsSplit()"
+          ptahButton
+          variant="ghost"
+          size="xs"
+          [selected]="showsSplit()"
+          selectedAs="pressed"
+          class="{{ focusRing }}"
           [attr.title]="
             autoUnified()
               ? 'The diff list is narrow, so it shows unified. Choose Split to use it anyway.'
@@ -234,9 +245,12 @@ const FOCUS_RING =
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-xs {{ focusRing }}"
-          [class.btn-active]="!showsSplit()"
-          [attr.aria-pressed]="!showsSplit()"
+          ptahButton
+          variant="ghost"
+          size="xs"
+          [selected]="!showsSplit()"
+          selectedAs="pressed"
+          class="{{ focusRing }}"
           data-testid="layout-unified"
           (click)="setSideBySide(false)"
         >

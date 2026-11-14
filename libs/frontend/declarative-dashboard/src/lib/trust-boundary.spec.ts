@@ -110,7 +110,7 @@ describe('trust boundary: producer text renders literally', () => {
     const inputs = Array.from(element.querySelectorAll<HTMLInputElement>('input[type=text]'));
     expect(inputs.map(input => input.getAttribute('placeholder'))).toEqual([markup, markup]);
     expect(inputs[0].value).toBe(markup);
-    expect(texts(element, 'ptah-surface-text-input p.text-base-content-muted')).toEqual([markup]);
+    expect(texts(element, 'ptah-surface-text-input .ptah-field__message')).toEqual([markup]);
     expect(texts(element, 'button.btn-primary')).toEqual([markup]);
     expectInert(element);
   });

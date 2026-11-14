@@ -50,11 +50,14 @@ const PLUGIN_STATE_WORD: Record<LibraryPluginState, PluginStateWord | null> = {
   host: { class: 'contents' },
   template: `
     <span
-      class="badge badge-sm border bg-base-300 text-base-content"
+      ptahBadge
+      size="sm"
+      tone="neutral"
+      class="border bg-base-300"
       [class]="borderClass()"
       [attr.title]="'Origin: ' + label()"
       data-testid="provenance-badge"
-      >{{ label() }}</span
+      ><span class="ptah-badge-text">{{ label() }}</span></span
     >
     @if (stateWord(); as word) {
       <span

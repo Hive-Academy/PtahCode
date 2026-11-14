@@ -41,6 +41,7 @@ function runtime(store: SessionMetadataStore) {
     streamTransformer: { transform },
     streamTaps: new WeakMap(),
     pendingUserActivity: new Map(),
+    phaseBySession: new Map(),
     statsOwner: {
       startNew: () => ({ generation: 1 }),
       prepareRun: jest

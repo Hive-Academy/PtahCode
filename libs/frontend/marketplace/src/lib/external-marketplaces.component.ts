@@ -213,8 +213,11 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
             <div class="flex gap-1 flex-wrap">
               @for (suggestion of suggestions(); track suggestion.source) {
                 <button
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
                   type="button"
-                  class="btn btn-ghost btn-xs h-auto py-1 normal-case font-medium border-base-300 text-left"
+                  class="h-auto py-1 normal-case font-medium border-base-300 text-left"
                   [disabled]="isAdding()"
                   [attr.title]="suggestion.description"
                   [attr.aria-label]="
@@ -344,7 +347,9 @@ const SOURCE_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
                     Browse
                   </button>
                   <button
-                    class="btn btn-ghost btn-sm text-error"
+                    ptahButton
+                    variant="ghost"
+                    tone="danger"
                     type="button"
                     [disabled]="removingSources().has(marketplace.source)"
                     [attr.aria-label]="'Remove ' + marketplace.source"

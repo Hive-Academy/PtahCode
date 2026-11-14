@@ -62,7 +62,10 @@ import {
 } from '@ptah-extension/output-styles';
 import { blankToUndefined } from './ptah-cli-registry.utils';
 import { ptahMcpServerUrl } from '../../cli-agents/cli-adapters/ptah-mcp-url';
-import { issueLaneMcpToken } from '../../cli-agents/cli-adapters/lane-mcp-credentials';
+import {
+  issueLaneMcpToken,
+  type LaneMcpPhaseInput,
+} from '../../cli-agents/cli-adapters/lane-mcp-credentials';
 import {
   renderRoleBlock,
   PTAH_LANE_POLICY,
@@ -214,6 +217,8 @@ export class PtahCliSpawnOptions {
    *   sources, so the built-in skill guard and the synced-skill reader scan
    *   what that child reads. Absent is the `CLAUDE_CONFIG_DIR` of the env
    *   the child gets (or `~/.claude`) and `cwd`; the host env is not read.
+   * @param phase - Phase whose tool denials are copied onto the lane
+   *   credential. Absent leaves the binding without phase fields.
    * @returns Assembled spawn options
    */
   async assembleSpawnOptions(
@@ -225,6 +230,7 @@ export class PtahCliSpawnOptions {
     role?: AgentRoleDefinition,
     capabilityPolicy?: EffectiveCapabilitySet,
     skillScope?: PtahSpawnSkillScope,
+    phase?: LaneMcpPhaseInput,
   ): Promise<PtahSpawnAssembly> {
     const mcpPort = this.resolveMcpPort();
     const mcpServerRunning = mcpPort !== undefined;
@@ -307,7 +313,14 @@ export class PtahCliSpawnOptions {
       builtinPolicy,
     );
     const mcpToken = mcpServerRunning
-      ? issueLaneMcpToken(this.mcpCredentials, this.logger, agentId, cwd)
+      ? issueLaneMcpToken(
+          this.mcpCredentials,
+          this.logger,
+          agentId,
+          cwd,
+          'privileged',
+          phase,
+        )
       : undefined;
     const builtMcpServers: Record<string, McpHttpServerConfig> =
       mcpServerRunning && mcpToken

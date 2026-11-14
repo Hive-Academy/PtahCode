@@ -567,7 +567,7 @@ describe('OutputStyleListComponent — CLI parity control', () => {
       const note = 'Built into the agent — Ptah can select it but not change it.';
       expect((text().match(/Ptah can select it but not change it/g) ?? []).length).toBe(0);
       expect(fixture.nativeElement.querySelectorAll('[data-testid="output-style-builtin-note"]')).toHaveLength(1);
-      const badges = Array.from<HTMLElement>(fixture.nativeElement.querySelectorAll('.badge')).filter(
+      const badges = Array.from<HTMLElement>(fixture.nativeElement.querySelectorAll('[data-ptah-badge]')).filter(
         (badge) => badge.textContent?.trim() === 'Built-in',
       );
       expect(badges).toHaveLength(2);

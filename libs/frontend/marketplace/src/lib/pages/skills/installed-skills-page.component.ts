@@ -438,7 +438,11 @@ const ROW_LINK_SELECTOR = '[data-testid="installed-skill-open"]';
                       } @else {
                         <button
                           type="button"
-                          class="btn btn-ghost btn-xs shrink-0 text-error"
+                          ptahButton
+                          variant="ghost"
+                          size="xs"
+                          tone="danger"
+                          class="shrink-0"
                           data-testid="installed-skill-uninstall"
                           [disabled]="
                             pendingIds().has(row.ref) ||

@@ -36,7 +36,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
   template: `
     <section
       data-glass-surface="content"
-      class="flex flex-col gap-3 text-sm text-base-content"
+      class="flex flex-col gap-[var(--ptah-gap-heading)] text-sm text-base-content"
       aria-labelledby="capability-matrix-heading"
       data-testid="capability-matrix-setting"
     >
@@ -65,7 +65,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
           </p>
         }
         @case ('error') {
-          <div role="alert" class="space-y-1.5">
+          <div role="alert" class="space-y-[var(--ptah-space-1)]">
             <p data-testid="capability-matrix-error">
               The capability matrix could not be read.
             </p>
@@ -92,13 +92,13 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
               <table class="table table-xs min-w-[780px]" data-testid="capability-matrix-table">
                 <thead>
                   <tr>
-                    <th scope="col" class="sticky left-0 bg-base-100">Model</th>
-                    @for (kind of tasks; track kind) { <th scope="col" class="capitalize">{{ kind }}</th> }
+                    <th scope="col" class="sticky left-0 bg-base-100 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]">Model</th>
+                    @for (kind of tasks; track kind) { <th scope="col" class="capitalize px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]">{{ kind }}</th> }
                   </tr>
                 </thead>
                 @for (family of families(); track family) {
                   <tbody [id]="'family-' + family">
-                    <tr><th scope="rowgroup" colspan="7" class="bg-base-content/5">
+                    <tr><th scope="rowgroup" colspan="7" class="bg-base-content/5 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]">
                       <button type="button" [class]="'flex min-h-8 items-center gap-2 rounded text-sm font-semibold ' + focusRing" [attr.aria-expanded]="expanded().has(family)" [attr.aria-controls]="'family-' + family" [title]="family" (click)="toggleFamily(family)">
                         <span aria-hidden="true" class="inline-block w-3 transition-transform" [class.rotate-90]="expanded().has(family)">›</span>
                         <span>{{ names.executor(family).text }}</span>
@@ -111,24 +111,24 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
                     @if (expanded().has(family)) {
                       @for (profile of familyProfiles(family); track profile.model) {
                         <tr>
-                          <th scope="row" class="sticky left-0 bg-base-100" style="overflow-wrap:anywhere">
+                          <th scope="row" class="sticky left-0 bg-base-100 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)] [overflow-wrap:anywhere]">
                             {{ names.model(profile.model).text }}
                             @if (names.model(profile.model).raw; as raw) { <span class="sr-only">Raw model ID {{ raw }}</span> }
                           </th>
                           @for (kind of tasks; track kind) {
                             @let cell = profile.cells[kind];
-                            <td class="min-w-24 p-2 min-[1600px]:p-3" [attr.data-testid]="'matrix-row-' + family + '-' + profile.model + '-' + kind">
+                            <td class="min-w-24 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]" [attr.data-testid]="'matrix-row-' + family + '-' + profile.model + '-' + kind">
                               @if (cell.kind === 'unknown') { <span class="text-base-content-muted">— Unrated</span> }
                               @else {
                                 <span class="font-semibold">{{ cell.score }}/100</span>
                                 <div class="h-1.5 rounded bg-base-content/15" aria-hidden="true"><div class="h-1.5 rounded bg-primary" [style.width.%]="cell.score"></div></div>
-                                <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                                <div class="mt-[var(--ptah-space-1)] flex flex-wrap items-center gap-[var(--ptah-space-1)]">
                                 <span ptahBadge size="xs">{{ cell.source }}</span>
                                 @if (cell.sampleCount !== null) { <span>n={{ cell.sampleCount }}</span> }
                                 @if (cell.stale) { <span ptahBadge tone="warn" size="xs">Stale</span> }
                                 <ptah-native-popover [isOpen]="openCell() === rowId(family, profile.model, kind)" [hasBackdrop]="true" (closed)="openCell.set(null)">
                                   <button trigger type="button" class="min-h-8 underline" [attr.aria-expanded]="openCell() === rowId(family, profile.model, kind)" [attr.aria-controls]="'detail-' + rowId(family, profile.model, kind)" (click)="toggleCell(family, profile.model, kind)">Details</button>
-                                  <div content [id]="'detail-' + rowId(family, profile.model, kind)" class="max-w-64 bg-base-100 p-3 text-xs shadow-lg"><p>As of {{ cell.asOf }}</p><p>Source: {{ cell.sourceRef || 'None' }}</p>@if (cell.note) { <p>{{ cell.note }}</p> }</div>
+                                  <div content [id]="'detail-' + rowId(family, profile.model, kind)" class="max-w-64 bg-base-100 p-[var(--ptah-surface-pad)] text-xs shadow-lg"><p>As of {{ cell.asOf }}</p><p>Source: {{ cell.sourceRef || 'None' }}</p>@if (cell.note) { <p>{{ cell.note }}</p> }</div>
                                 </ptah-native-popover>
                                 </div>
                               }
@@ -148,7 +148,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
   `,
   styles: `
     :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
+      padding: var(--ptah-surface-pad);
     }
   `,
 })

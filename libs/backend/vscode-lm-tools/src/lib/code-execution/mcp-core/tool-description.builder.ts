@@ -778,6 +778,15 @@ export function buildAgentSpawnTool({
             'and the spawn result reports how it was delivered. Do not paste a role ' +
             'template into task; pass its name here instead.',
         },
+        phase: {
+          type: 'object',
+          description: 'Validated phase dispatch from the host: version, kind, rendered text, definition, tool profile and optional resolved skills.',
+        },
+        skills: {
+          type: 'array',
+          items: { type: 'object' },
+          description: 'Host-resolved skills with name and path or text. Resolved skill text is included in the spawn prompt and reported as skillDelivery inline.',
+        },
         effort: {
           type: 'string',
           description:

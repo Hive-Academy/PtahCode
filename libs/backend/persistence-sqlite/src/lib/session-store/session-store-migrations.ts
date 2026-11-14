@@ -116,9 +116,15 @@ CREATE INDEX IF NOT EXISTS idx_host_run_leases_heartbeat
   ON host_run_leases (heartbeat_at);
 `;
 
+const S0005_USAGE_DIMENSIONS = `
+ALTER TABLE session_usage_turns ADD COLUMN phase_kind TEXT;
+ALTER TABLE session_usage_turns ADD COLUMN executor_type TEXT;
+`;
+
 export const SESSION_STORE_MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'S0001_sessions', sql: S0001_SESSIONS },
   { version: 2, name: 'S0002_session_stats', sql: S0002_SESSION_STATS },
   { version: 3, name: 'S0003_session_finalization', sql: S0003_SESSION_FINALIZATION },
   { version: 4, name: 'S0004_host_run_leases', sql: S0004_HOST_RUN_LEASES },
+  { version: 5, name: 'S0005_usage_dimensions', sql: S0005_USAGE_DIMENSIONS },
 ];

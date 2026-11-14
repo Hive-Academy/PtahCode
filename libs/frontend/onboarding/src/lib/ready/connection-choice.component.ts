@@ -11,12 +11,12 @@ import { RouterLink } from '@angular/router';
 import { Code, Terminal, LucideAngularModule } from 'lucide-angular';
 import type { ProviderKind } from './provider-readiness.derive';
 import { ConnectionChoiceStore } from './connection-choice.store';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-connection-choice',
   standalone: true,
-  imports: [RouterLink, LucideAngularModule, PtahButtonDirective],
+  imports: [RouterLink, LucideAngularModule, PtahButtonDirective, PtahStatePanelComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -43,7 +43,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
       </p>
       @if (store.saved().kind === 'loading') {
         <div
-          class="mt-3 grid grid-cols-2 gap-3 max-[480px]:grid-cols-1"
+          class="mt-3 grid grid-cols-2 gap-[var(--ptah-gap-heading)] max-[480px]:grid-cols-1"
           role="status"
         >
           <span class="sr-only">Loading your saved connection</span>
@@ -55,12 +55,12 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           role="radiogroup"
           aria-labelledby="connection-choice-label"
           aria-describedby="connection-choice-help"
-          class="mt-3 grid grid-cols-2 gap-3 max-[480px]:grid-cols-1"
+          class="mt-3 grid grid-cols-2 gap-[var(--ptah-gap-heading)] max-[480px]:grid-cols-1"
           data-testid="connection-choice-cards"
         >
           @for (card of cards; track card.id) {
             <label
-              class="flex cursor-pointer items-center gap-3 rounded-[14px] border bg-base-200 px-4 py-3 focus-within:ring-2 focus-within:ring-base-content focus-within:ring-offset-2"
+              class="flex cursor-pointer items-center gap-[var(--ptah-gap-heading)] rounded-[14px] border bg-base-200 px-[var(--ptah-surface-pad)] py-3 focus-within:ring-2 focus-within:ring-base-content focus-within:ring-offset-2"
               [class.border-primary]="selected() === card.id"
               [class.border-base-300]="selected() !== card.id"
               [attr.aria-disabled]="store.phase() === 'saving'"
@@ -94,7 +94,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
       <div
         role="group"
         aria-label="Confirm main connection change"
-        class="mt-3 rounded-xl border border-primary bg-base-100 p-3 text-sm"
+        class="mt-3 rounded-xl border border-primary bg-base-100 p-[var(--ptah-surface-pad)] text-sm"
       >
         <p class="font-semibold">
           Use {{ store.nameForPending() }} as your main connection?
@@ -124,7 +124,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         @if (store.phase() === 'saving') {
           <p role="status">Saving your main connection...</p>
         }
-        <div class="mt-3 flex gap-2">
+        <div class="mt-3 flex gap-[var(--ptah-gap-controls)]">
           <button
             ptahButton
             variant="primary"
@@ -198,10 +198,13 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         }
       </div>
     } @else if (store.saved().kind === 'unreadable') {
-      <div role="alert" class="mt-3 rounded-xl border border-base-300 p-3">
-        Ptah could not read your saved connection.
-        <button ptahButton type="button" (click)="retry()">Try again</button>
-      </div>
+      <ptah-state-panel
+        class="mt-3"
+        state="error"
+        title="Ptah could not read your saved connection."
+        actionLabel="Try again"
+        (action)="retry()"
+      />
     } @else if (store.saved().kind === 'other') {
       <p class="mt-3 text-sm" aria-live="polite">
         You can manage {{ store.name() }} in Providers.

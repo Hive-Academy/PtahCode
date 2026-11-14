@@ -31,6 +31,7 @@ import {
   PtahFieldComponent,
   PtahInputDirective,
   PtahTextareaDirective,
+  PtahStatePanelComponent,
 } from '@ptah-extension/ui';
 import {
   NEW_PROJECT_AUDIENCE_OPTIONS,
@@ -49,16 +50,17 @@ import {
     PtahFieldComponent,
     PtahInputDirective,
     PtahTextareaDirective,
+    PtahStatePanelComponent,
   ],
   providers: [ComposerAttachmentsService],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
-      class="mx-auto max-w-[760px] space-y-5 p-4"
+      class="mx-auto max-w-[760px] space-y-[var(--ptah-gap-group)] p-[var(--ptah-page-gutter)]"
       aria-labelledby="new-project-intake-title"
       data-testid="new-project-intake"
     >
-      <header class="flex items-center gap-3">
+      <header class="flex items-center gap-[var(--ptah-gap-heading)]">
         <span
           class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-base-300 text-state-need"
           data-glass-surface="tile"
@@ -105,22 +107,16 @@ import {
         </div>
       }
       @if (workspaceEmpty() === false && !confirmedNonEmpty()) {
-        <div class="rounded-xl border border-warning p-3 text-sm" role="alert">
-          <p>
-            Folder is not empty. Starting a new project here may use existing
-            files.
-          </p>
-          <button
-            type="button"
-            class="btn btn-warning btn-sm mt-2"
-            (click)="confirmedNonEmpty.set(true)"
-          >
-            Continue in this folder
-          </button>
-        </div>
+        <ptah-state-panel
+          state="partial"
+          title="Folder is not empty"
+          body="Starting a new project here may use existing files."
+          actionLabel="Continue in this folder"
+          (action)="confirmedNonEmpty.set(true)"
+        />
       }
       <form
-        class="space-y-4 rounded-[22px] border border-base-300 p-4"
+        class="space-y-[var(--ptah-gap-field)] rounded-[22px] border border-base-300 p-[var(--ptah-surface-pad)]"
         data-glass-surface="content"
         (ngSubmit)="submit($event)"
         novalidate
@@ -178,14 +174,14 @@ import {
         </div>
         <fieldset>
           <legend class="text-sm font-semibold">Who is it for?</legend>
-          <div class="mt-2 flex flex-wrap gap-2">
+          <div class="mt-2 flex flex-wrap gap-[var(--ptah-gap-controls)]">
             @for (option of audienceOptions; track option.value) {
               <button
                 type="button"
-                class="btn btn-sm min-h-9"
-                [class.bg-base-content]="audience() === option.value"
-                [class.text-base-100]="audience() === option.value"
-                [attr.aria-pressed]="audience() === option.value"
+                ptahButton
+                variant="outline"
+                size="sm"
+                [selected]="audience() === option.value"
                 (click)="audience.set(option.value)"
               >
                 {{ option.label }}
@@ -195,14 +191,14 @@ import {
         </fieldset>
         <fieldset>
           <legend class="text-sm font-semibold">Platform</legend>
-          <div class="mt-2 flex flex-wrap gap-2">
+          <div class="mt-2 flex flex-wrap gap-[var(--ptah-gap-controls)]">
             @for (option of platformOptions; track option.value) {
               <button
                 type="button"
-                class="btn btn-sm min-h-9"
-                [class.bg-base-content]="platform() === option.value"
-                [class.text-base-100]="platform() === option.value"
-                [attr.aria-pressed]="platform() === option.value"
+                ptahButton
+                variant="outline"
+                size="sm"
+                [selected]="platform() === option.value"
                 (click)="setPlatform(option.value)"
               >
                 {{ option.label }}
@@ -212,14 +208,14 @@ import {
         </fieldset>
         <fieldset>
           <legend class="text-sm font-semibold">Stack</legend>
-          <div class="mt-2 flex flex-wrap gap-2">
+          <div class="mt-2 flex flex-wrap gap-[var(--ptah-gap-controls)]">
             @for (option of stackOptions(); track option.value) {
               <button
                 type="button"
-                class="btn btn-sm min-h-9"
-                [class.bg-base-content]="stack() === option.value"
-                [class.text-base-100]="stack() === option.value"
-                [attr.aria-pressed]="stack() === option.value"
+                ptahButton
+                variant="outline"
+                size="sm"
+                [selected]="stack() === option.value"
                 (click)="setStack(option.value)"
               >
                 {{ option.label }}

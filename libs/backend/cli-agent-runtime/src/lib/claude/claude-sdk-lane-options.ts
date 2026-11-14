@@ -119,6 +119,37 @@ export interface ClaudeSdkLaneOptionsInput {
   processSpawner: ISdkProcessSpawner;
   /** Ambient executable; a named lane uses the certified one instead. */
   executable?: string;
+  /** Phase tool profile. Its denials are appended to the built-in preset. */
+  phase?: {
+    readonly toolProfile?: { readonly disallowedTools?: readonly string[] };
+  };
+}
+
+/**
+ * Preset names stay in their order. Phase names that are not already in the
+ * preset are appended, once each. Blank names are ignored. No phase, or an
+ * empty list, is the preset copy.
+ */
+export function mergePhaseDisallowedTools(
+  preset: readonly string[],
+  phase: ClaudeSdkLaneOptionsInput['phase'],
+): string[] {
+  const merged = [...preset];
+  const seen = new Set(preset);
+  const extra = phase?.toolProfile?.disallowedTools;
+  if (!extra) return merged;
+  for (const name of extra) {
+    if (
+      typeof name !== 'string' ||
+      name.trim().length === 0 ||
+      seen.has(name)
+    ) {
+      continue;
+    }
+    seen.add(name);
+    merged.push(name);
+  }
+  return merged;
 }
 
 /** Complete effective options for both configured and native Claude lanes. */
@@ -206,7 +237,11 @@ export function buildClaudeSdkLaneOptions(
     },
     // Claude built-ins off unless opted in (TASK_2026_853). An SDK option, so
     // it holds on ambient, named and proxied routes and on either policy path.
-    disallowedTools: [...assembly.builtinPolicy.disallowedTools],
+    // Phase denials follow the preset and do not reorder it.
+    disallowedTools: mergePhaseDisallowedTools(
+      assembly.builtinPolicy.disallowedTools,
+      input.phase,
+    ),
     mcpServers: assembly.mcpServers,
     settings: buildFlagSettingsArg(
       { outputStyleName: assembly.outputStyleName },

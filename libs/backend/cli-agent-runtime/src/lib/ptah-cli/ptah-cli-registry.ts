@@ -800,6 +800,7 @@ export class PtahCliRegistry {
       network?: import('@ptah-extension/shared').LaneNetworkMode;
       parentLevel?: import('@ptah-extension/shared').LanePermissionMode;
       resumePolicy?: EffectiveLanePolicy;
+      phase?: import('@ptah-extension/shared').PhaseDispatchV1;
     },
   ): Promise<
     | {
@@ -808,6 +809,7 @@ export class PtahCliRegistry {
         setAgentId: (id: string) => void;
         potentialCapabilities: CliAdapterManifest;
         effectivePolicy: EffectiveLanePolicy;
+        toolProfileApplied?: boolean;
       }
     | SpawnAgentFailure
   > {
@@ -924,6 +926,8 @@ export class PtahCliRegistry {
         options?.agentId,
         options?.role,
         capabilityPolicy,
+        undefined,
+        options?.phase,
       );
       const {
         outputCallbacks,
@@ -960,6 +964,7 @@ export class PtahCliRegistry {
       const mailbox = createPromptMailbox(task);
       const effectiveOptions = buildClaudeSdkLaneOptions({
         assembly,
+        ...(options?.phase ? { phase: options.phase } : {}),
         authEnv,
         abortController,
         model,
@@ -1017,6 +1022,13 @@ export class PtahCliRegistry {
         agentName: agentConfig.name,
         potentialCapabilities: this.capabilities(agentConfig.providerId),
         effectivePolicy: lanePolicy.requested,
+        toolProfileApplied: Boolean(
+          options?.phase?.toolProfile.disallowedTools.length &&
+            assembly.mcpServers['ptah'] &&
+            options.phase.toolProfile.disallowedTools.every((name) =>
+              effectiveOptions.disallowedTools?.includes(name),
+            ),
+        ),
         /** Call this AFTER spawnFromSdkHandle() returns with the agentId.
          *  Populates the lazy resolver used by SdkPermissionHandler to route
          *  CLI agent permissions to the agent monitor panel. */

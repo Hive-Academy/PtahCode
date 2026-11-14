@@ -1,4 +1,4 @@
-import { PhaseDefinitionError, resolvePhaseDefinition } from './phase-definition-resolver';
+import { PhaseDefinitionError, parsePhaseDispatch, resolvePhaseDefinition, resolvePhaseDispatch } from './phase-definition-resolver';
 
 const metadata = `---
 version: 1
@@ -78,4 +78,30 @@ it('rejects duplicate known sections', () => {
 it('rejects reviewer stance on a non-review phase', () => {
   expect(() => resolvePhaseDefinition('batch', () => metadata + body + '\n## Reviewer stance\nCritique.'))
     .toThrow(new PhaseDefinitionError('INVALID_SCHEMA', 'batch'));
+});
+
+it('creates and validates a dispatch payload with host-resolved skills', () => {
+  const payload = resolvePhaseDispatch('batch', () => metadata + body, [
+    { name: 'reviewer', path: '/skills/reviewer/SKILL.md', text: '# Reviewer' },
+  ]);
+  expect(parsePhaseDispatch(payload)).toEqual(payload);
+  expect(payload.kind).toBe('batch');
+  expect(payload.definition.kind).toBe('batch');
+  expect(payload.skills?.[0].text).toBe('# Reviewer');
+});
+
+it('rejects malformed handoffs and skills before spawn', () => {
+  const payload = resolvePhaseDispatch('batch', () => metadata + body);
+  expect(() => parsePhaseDispatch({ ...payload, kind: 'plan' })).toThrow(PhaseDefinitionError);
+  expect(() => parsePhaseDispatch({ ...payload, text: 'unrelated' })).toThrow(PhaseDefinitionError);
+  expect(() => resolvePhaseDispatch('batch', () => metadata + body, [{ name: 'missing' }]))
+    .toThrow(PhaseDefinitionError);
+  expect(() => resolvePhaseDispatch('batch', () => metadata.replace('version: 1', 'version: 2') + body))
+    .toThrow(PhaseDefinitionError);
+});
+
+it('keeps legacy phase resolution without a skill field', () => {
+  const legacy = resolvePhaseDefinition('batch', () => metadata + body);
+  expect(legacy).toEqual({ text: legacy.text, definition: legacy.definition, toolProfile: legacy.toolProfile });
+  expect(resolvePhaseDispatch('batch', () => metadata + body).skills).toBeUndefined();
 });
