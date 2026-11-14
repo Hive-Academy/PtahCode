@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { Clipboard } from '@angular/cdk/clipboard';
 import { Check, Copy, LucideAngularModule, X } from 'lucide-angular';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 
 type CopyState = 'idle' | 'copied' | 'failed';
 
@@ -29,15 +30,18 @@ const FEEDBACK_MS = 2000;
 @Component({
   selector: 'ptah-copy-text-button',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahIconButtonDirective],
   template: `
     <button
+      ptahIconButton
+      [label]="title()"
+      variant="ghost"
+      size="xs"
+      density="compact"
       type="button"
-      class="btn btn-ghost btn-square btn-xs h-7 w-7 min-h-0"
+      class="h-7 w-7 min-h-0"
       [class.text-success]="state() === 'copied'"
       [class.text-error]="state() === 'failed'"
-      [attr.aria-label]="label()"
-      [title]="title()"
       [disabled]="!text()"
       (click)="copy()"
     >

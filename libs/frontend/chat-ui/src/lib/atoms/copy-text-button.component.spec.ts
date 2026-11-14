@@ -50,7 +50,6 @@ describe.each([true, false])(
     it('names the button with the label and has a polite live region', () => {
       expect(button().getAttribute('aria-label')).toBe('Copy command');
       expect(button().getAttribute('type')).toBe('button');
-      expect(button().title).toBe('Copy command');
       expect(liveRegion().getAttribute('aria-live')).toBe('polite');
       expect(liveRegion().textContent?.trim()).toBe('');
     });
@@ -59,7 +58,7 @@ describe.each([true, false])(
       click();
       expect(copyMock).toHaveBeenCalledWith('npm test -- --watch');
       expect(liveRegion().textContent?.trim()).toBe('Copied');
-      expect(button().title).toBe('Copied');
+      expect(button().getAttribute('aria-label')).toBe('Copied');
     });
 
     it('announces "Copy failed" when the clipboard returns false', () => {

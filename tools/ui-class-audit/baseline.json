@@ -39,24 +39,6 @@
   "libs/frontend/chat-ui/src/lib/atoms/agent-avatar/agent-avatar.component.ts": {
     "<dynamic>": 8
   },
-  "libs/frontend/chat-ui/src/lib/atoms/copy-button.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat-ui/src/lib/atoms/copy-text-button.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat-ui/src/lib/atoms/report-response-button.component.ts": {
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat-ui/src/lib/atoms/skeleton-block.component.ts": {
     "<dynamic>": 2,
     "skeleton": 4
@@ -98,14 +80,6 @@
   },
   "libs/frontend/chat-ui/src/lib/molecules/compact-session/compact-session-activity.component.ts": {
     "<dynamic>": 2
-  },
-  "libs/frontend/chat-ui/src/lib/molecules/compact-session/compact-session-callout.component.ts": {
-    "btn": 4,
-    "btn-ghost": 2,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-sm": 1,
-    "btn-xs": 3
   },
   "libs/frontend/chat-ui/src/lib/molecules/compact-session/compact-session-lanes.component.ts": {
     "<dynamic>": 2
