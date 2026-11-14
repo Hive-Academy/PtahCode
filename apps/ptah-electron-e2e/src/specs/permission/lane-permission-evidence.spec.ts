@@ -45,13 +45,24 @@ test.describe('@evidence lane permission routing', () => {
     const app = await launchPtah({
       args: [workspace],
       userDataDir: profile,
-      env: { PTAH_DB_PATH: path.join(dir, 'state.sqlite') },
+      // Both databases stay in the temp folder. The real ~/.ptah/sessions.sqlite
+      // can carry newer migrations than this build, and then Codex lanes fail.
+      env: { PTAH_DB_PATH: path.join(dir, 'state.sqlite'), PTAH_SESSIONS_DB_PATH: path.join(dir, 'sessions.sqlite') },
       timeout: 180_000,
     });
     const page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
     await page.setViewportSize({ width: 1440, height: 900 });
-    return { app, page, ui: new UiDriver(app, page), cleanup: () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }) };
+    const cleanup = (): void => {
+      // Keep the host logs in the test output: the profile is deleted next.
+      // (test.info().status is not set yet inside the test's finally block.)
+      const logs = path.join(profile, 'logs');
+      if (fs.existsSync(logs)) {
+        fs.cpSync(logs, test.info().outputPath('app-logs'), { recursive: true });
+      }
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    };
+    return { app, page, ui: new UiDriver(app, page), cleanup };
   }
 
   async function openClaudeTab(page: Page, ui: UiDriver): Promise<Locator> {
@@ -74,25 +85,37 @@ test.describe('@evidence lane permission routing', () => {
   async function ask(pane: Locator, prompt: string): Promise<void> {
     await pane.locator('ptah-canvas-detail-transcript ptah-chat-input textarea[role="combobox"]').fill(prompt);
     await pane.locator('ptah-canvas-detail-transcript [data-testid="chat-send-btn"]').click();
-    await expect(pane.locator('[data-testid="chat-user-message"]')).toContainText(prompt);
+    // The pane DOM can still hold an earlier session's transcript after a
+    // retry, so match the visible bubble with this prompt only.
+    const sent = pane.locator('[data-testid="chat-user-message"]:visible').filter({ hasText: prompt.slice(0, 60) });
+    await expect(sent.last()).toContainText(prompt);
+  }
+
+  function policyText(pane: Locator, level: string): Locator {
+    return pane
+      .locator('ptah-canvas-detail-transcript')
+      .getByText(new RegExp(`requested ${level}\\s*->\\s*effective ${level}`))
+      .first();
   }
 
   /**
-   * A session that starts before the Ptah MCP server is ready reports no
-   * connected MCP server and has no ptah_* tools. Ask again in a new tab then.
+   * A session that starts before the Ptah MCP server is ready reports
+   * "MCP 0" and has no ptah_* tools. Ask again in a new tab only then: the
+   * chip is absent while a working session runs, so its absence is no signal.
    */
-  async function askWithPtahTools(page: Page, ui: UiDriver, prompt: string): Promise<Locator> {
+  async function askWithPtahTools(page: Page, ui: UiDriver, prompt: string, level: string): Promise<Locator> {
     for (let attempt = 1; attempt <= 3; attempt++) {
       const pane = await openClaudeTab(page, ui);
       await ask(pane, prompt);
-      const chip = pane.locator('ptah-canvas-detail-transcript ptah-mcp-status-chip button').first();
-      const label = async (): Promise<string> =>
-        (await chip.count()) ? ((await chip.textContent()) ?? '').replace(/\s+/g, ' ').trim() : '';
-      const connected = await expect
-        .poll(label, { timeout: 90_000 })
-        .toMatch(/^MCP [1-9]/)
-        .then(() => true, () => false);
-      if (connected) return pane;
+      const policy = policyText(pane, level);
+      const chip = pane.locator('ptah-canvas-detail-transcript:visible ptah-mcp-status-chip button').first();
+      const state = async (): Promise<'policy' | 'no-mcp' | 'waiting'> => {
+        if (await policy.count()) return 'policy';
+        const label = (await chip.count()) ? ((await chip.textContent()) ?? '').replace(/\s+/g, ' ').trim() : '';
+        return label === 'MCP 0' ? 'no-mcp' : 'waiting';
+      };
+      await expect.poll(state, { timeout: 240_000 }).not.toBe('waiting');
+      if ((await state()) === 'policy') return pane;
       await page.waitForTimeout(15_000);
     }
     throw new Error('The Ptah MCP server did not connect to a new session');
@@ -100,7 +123,7 @@ test.describe('@evidence lane permission routing', () => {
 
   async function expectSpawnPolicy(pane: Locator, level: string): Promise<Locator> {
     const transcript = pane.locator('ptah-canvas-detail-transcript');
-    const policy = transcript.getByText(new RegExp(`requested ${level}\\s*->\\s*effective ${level}`)).first();
+    const policy = policyText(pane, level);
     await expect(policy).toBeAttached({ timeout: 180_000 });
     if (!(await policy.isVisible())) {
       const disclosure = transcript.locator('[data-test="turn-disclosure-row"][aria-expanded="false"]').last();
@@ -163,7 +186,7 @@ test.describe('@evidence lane permission routing', () => {
     test.setTimeout(600_000);
     const live = await liveApp();
     try {
-      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli codex, permission auto-edit, and task "Run pwd once, then report the directory." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.');
+      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli codex, permission auto-edit, and task "Run pwd once, then report the directory." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.', 'auto-edit');
       await expectSpawnPolicy(pane, 'auto-edit');
       await capture(live.page, '2-spawn-matched', 'ptah-canvas-rail-board:visible ptah-canvas-detail-transcript:visible');
     } finally {
@@ -176,7 +199,9 @@ test.describe('@evidence lane permission routing', () => {
     test.setTimeout(600_000);
     const live = await liveApp();
     try {
-      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli codex, permission plan, and task "Create a file named ptah-plan-evidence.txt in the workspace. If Plan mode prevents it, do not write; finish with BLOCKED: plan mode and the reason." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.');
+      // A saved Codex default with network allow cannot combine with plan
+      // (UNSUPPORTED_LANE_POLICY), so the spawn also asks for network deny.
+      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli codex, permission plan, network deny, and task "Create a file named ptah-plan-evidence.txt in the workspace. If Plan mode prevents it, do not write; finish with BLOCKED: plan mode and the reason." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.', 'plan');
       await expectSpawnPolicy(pane, 'plan');
       const lane = await openCliLane(pane);
       await expect(lane.getByText('BLOCKED: plan mode', { exact: false })).toBeVisible({ timeout: 180_000 });
@@ -193,7 +218,7 @@ test.describe('@evidence lane permission routing', () => {
     try {
       // Claude Code approves read-only Bash commands (such as pwd) before it
       // asks the permission callback, so the lane task must write a file.
-      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli claude, permission ask, and task "Use the Bash tool to run exactly: echo lane-ask > ask-evidence.txt . Wait for permission if requested; do not choose a different tool." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.');
+      const pane = await askWithPtahTools(live.page, live.ui, 'Call ptah_agent_spawn exactly once with cli claude, permission ask, and task "Use the Bash tool to run exactly: echo lane-ask > ask-evidence.txt . Wait for permission if requested; do not choose a different tool." Do not change settings. In your reply, quote the Permission line of the spawn result verbatim.', 'ask');
       await expectSpawnPolicy(pane, 'ask');
       await capture(live.page, '4-spawn-policy', 'ptah-canvas-rail-board:visible ptah-canvas-detail-transcript:visible');
       const lane = await openCliLane(pane);
