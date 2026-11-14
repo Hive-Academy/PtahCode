@@ -41,8 +41,10 @@ import { COMPOSER_CARD_BORDER_CLASS, COMPOSER_CARD_CLASS, COMPOSER_SEND_BUTTON_C
               }
             </div>
           }
-          <button type="button" ptahIconButton [label]="stopped() ? 'Resume with message' : 'Send message'" variant="primary" size="xs" density="compact" [class]="sendButtonClass" [disabled]="queueDisabled()"
+          <!-- Named raw exception: shared composer send style (COMPOSER_SEND_BUTTON_CLASS), same as agent-steer-input. -->
+          <button type="button" [class]="sendButtonClass" [disabled]="queueDisabled()"
             [title]="stopped() ? hint() : (state().queueDisabledReason ?? 'Send message')"
+            [attr.aria-label]="stopped() ? 'Resume with message' : 'Send message'"
             (click)="send('queue')">
             <lucide-angular [img]="ArrowUpIcon" class="w-4 h-4" aria-hidden="true" />
           </button>
