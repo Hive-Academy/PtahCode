@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { launchPtah } from '../../support/electron-launcher';
 import { RpcBridge } from '../../support/rpc-bridge';
@@ -30,10 +30,10 @@ test.describe('@evidence Codex caller attribution', () => {
     return result.data;
   }
 
-  async function capture(page: Page, name: string, crop: string): Promise<void> {
+  async function capture(page: Page, name: string, crop: string | Locator): Promise<void> {
     fs.mkdirSync(shots, { recursive: true });
     await page.screenshot({ path: path.join(shots, `${name}.png`), fullPage: true });
-    const target = page.locator(crop).first();
+    const target = (typeof crop === 'string' ? page.locator(crop) : crop).first();
     await expect(target).toBeVisible();
     await target.screenshot({ path: path.join(shots, `${name}-crop.png`) });
   }
@@ -161,15 +161,19 @@ test.describe('@evidence Codex caller attribution', () => {
     const live = await liveApp();
     try {
       const parent = await openCodexTab(live.page, live.app, live.bridge, live.workspace, 'auto-edit');
-      await ask(live.page, 'Call ptah_agent_list, then ptah_agent_spawn once for a small available Codex lane. Its sole task: call ptah_agent_report with message "E2E-REPORT-MARKER" and exit. Wait for the report.');
-      const report = live.page.locator('[data-testid="chat-peer-message"]', { hasText: 'E2E-REPORT-MARKER' });
+      await ask(live.page, 'Call ptah_agent_list, then call ptah_agent_spawn once with cli "codex" and timeout 600000. The lane task: call ptah_agent_report with message "E2E-REPORT-MARKER", then exit. Wait for the report.');
+      // The completion notice repeats the task text, so it also contains the
+      // marker. Accept only a real lane report envelope.
+      const report = live.page.locator('[data-testid="chat-peer-message"]', {
+        hasText: /<agent-report[\s\S]*E2E-REPORT-MARKER/,
+      });
       await expect.poll(async () => {
         await allowPtahTools(live.page);
         return report.count();
       }, { timeout: 420_000, intervals: [2_000] }).toBeGreaterThan(0);
       await expect(report.first()).toBeVisible();
       await expect(live.page.locator(`${railCard}[data-tab-id="${parent}"]`)).toBeVisible();
-      await capture(live.page, 'caller-item-b-report', '[data-testid="chat-peer-message"]');
+      await capture(live.page, 'caller-item-b-report', report);
     } finally {
       await live.app.close();
       live.cleanup();
