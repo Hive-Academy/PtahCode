@@ -1108,17 +1108,12 @@
     "btn-warning": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-bulk-toolbar.component.ts": {
-    "btn": 2,
-    "btn-active": 1,
-    "btn-ghost": 1,
+    "btn": 1,
     "btn-warning": 1,
-    "btn-xs": 2
+    "btn-xs": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-card.component.ts": {
-    "<dynamic>": 1,
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-xs": 2
+    "<dynamic>": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/clone-detail-drawer.component.ts": {
     "<dynamic>": 1,
@@ -1132,9 +1127,7 @@
     "alert-error": 2
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/provenance-badge.component.ts": {
-    "<dynamic>": 1,
-    "badge": 1,
-    "badge-sm": 1
+    "<dynamic>": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/quarantined-agents-panel.component.ts": {
     "alert": 1,
