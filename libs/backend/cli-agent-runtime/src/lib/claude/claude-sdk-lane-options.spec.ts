@@ -397,7 +397,9 @@ describe('Claude lane approval routing and policy translation', () => {
       input.permissionHandler.getPermissionLevel = jest.fn(() => 'yolo');
       input.lanePermissionLevel = translated.requested.permission;
       const options = buildClaudeSdkLaneOptions(input);
-      expect(options.permissionMode).toBe(translated.permissionMode);
+      expect('permissionMode' in translated).toBe(true);
+      const expectedMode = 'permissionMode' in translated ? translated.permissionMode : undefined;
+      expect(options.permissionMode).toBe(expectedMode);
       expect(options.permissionMode).not.toBe('bypassPermissions');
       expect(options.allowDangerouslySkipPermissions).not.toBe(true);
     },

@@ -457,7 +457,15 @@ describe('buildAgentNamespace — spawn (ptahCliId)', () => {
       expect.anything(),
       expect.objectContaining({ requestedPolicy: { permission: 'plan', network: 'allow' } }),
     );
-    expect(mocks.registry?.spawnAgent.mock.calls[0]?.[1]).toContain('BLOCKED: plan mode');
+    // The contract renderer is stubbed (see the jest.mock above): pin the
+    // effective level the builder passes on. The "BLOCKED: plan mode" text
+    // itself is pinned by lane-reporting-contract.spec.ts.
+    const { renderLaneCompletionContract } = jest.requireMock<{
+      renderLaneCompletionContract: jest.Mock;
+    }>('@ptah-extension/cli-agent-runtime');
+    expect(renderLaneCompletionContract).toHaveBeenLastCalledWith(
+      expect.objectContaining({ effectivePermission: 'plan' }),
+    );
   });
 
   it('forwards taskKind and routingSource to the SDK handle spawn', async () => {
