@@ -248,6 +248,8 @@ export interface AgentProcessInfo {
   readonly effectiveCapabilities?: EffectiveLaneCapabilities;
   /** Spawn policy requested for this lane; omitted fields use adapter defaults. */
   readonly effectivePolicy?: EffectiveLanePolicy;
+  /** Permission and network explicitly supplied on the spawn call. */
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   /** Workspace role name the agent was spawned as. */
   readonly role?: string;
   /** How the role was delivered (only set when `role` is set). */
@@ -483,6 +485,8 @@ export interface SpawnAgentResult {
   readonly cli: CliType;
   readonly status: AgentStatus;
   readonly startedAt: string;
+  readonly effectivePolicy?: EffectiveLanePolicy;
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   /** CLI-native session ID captured from init event. Null if not yet available. */
   readonly cliSessionId?: string;
   /** Display name of the Ptah CLI agent (only set when cli === 'ptah-cli') */

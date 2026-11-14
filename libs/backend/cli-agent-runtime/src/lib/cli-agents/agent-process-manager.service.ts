@@ -54,6 +54,7 @@ import {
   type IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
 import { issueLaneMcpToken } from './cli-adapters/lane-mcp-credentials';
+import { LANE_PLAN_MODE_INSTRUCTION } from './lane-reporting-contract';
 import {
   claudeModelFamily,
   SDK_TOKENS,
@@ -214,6 +215,7 @@ export interface AgentRoleStamp {
 }
 
 interface SdkSpawnOptions {
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   readonly effectivePolicy?: ReturnType<
     AgentSpawnEnvironment['resolveLanePolicy']
   >;
@@ -607,6 +609,7 @@ export class AgentProcessManager {
       expectsMcp: request.attachMcp !== false && adapter.supportsMcp !== false,
       cliVersion: detection.version,
       effectivePolicy,
+      requestedPolicy: { permission: request.permission, network: request.network },
     });
   }
 
@@ -984,6 +987,7 @@ export class AgentProcessManager {
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
       effectivePolicy: options.effectivePolicy,
+      requestedPolicy: options.requestedPolicy,
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
@@ -1075,7 +1079,8 @@ export class AgentProcessManager {
           admittedReference = snapshot;
           admittedSdkSessionId = sdkSessionId;
         },
-        task,
+        task: options.effectivePolicy?.requested?.permission === 'plan'
+          ? `${task}\n\n${LANE_PLAN_MODE_INSTRUCTION}` : task,
         workingDirectory,
         files: request.files,
         taskFolder: request.taskFolder,
@@ -1204,6 +1209,7 @@ export class AgentProcessManager {
       accountReference?: LaneAccountReference;
       potentialCapabilities?: CliAdapterManifest;
       effectivePolicy?: EffectiveLanePolicy;
+      requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
     },
   ): Promise<SpawnAgentResult> {
     await this.reserveSpawnSlot();
@@ -1243,6 +1249,7 @@ export class AgentProcessManager {
         providerId: sdkHandle.providerId,
         potentialCapabilities: meta.potentialCapabilities,
         effectivePolicy: meta.effectivePolicy,
+        requestedPolicy: meta.requestedPolicy,
         taskKind: meta.taskKind,
         routingSource: meta.routingSource,
         resumedFromAgentId: meta.resumedFromAgentId ?? previous?.agentId,
@@ -1562,6 +1569,8 @@ export class AgentProcessManager {
       cli: info.cli,
       status: 'running',
       startedAt: info.startedAt,
+      effectivePolicy: info.effectivePolicy,
+      requestedPolicy: info.requestedPolicy,
       cliSessionId: info.cliSessionId,
       ptahCliName: info.ptahCliName,
       ptahCliId: info.ptahCliId,

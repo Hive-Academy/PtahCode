@@ -224,6 +224,11 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
         parentSessionId: input.parentSessionId,
         cliAgentResolver: () => agentIdHolder.value,
         permissionHandler: this.deps.permissionHandler,
+        // The callback follows the lane's resolved level, not the global chat level.
+        lanePermissionLevel:
+          lanePolicy.cli === 'claude' && lanePolicy.permissionMode
+            ? lanePolicy.requested.permission
+            : undefined,
         logger: this.logger,
         processSpawner: this.deps.processSpawner,
         executable,

@@ -1,5 +1,5 @@
 import { tmpdir } from 'node:os';
-import { SessionId, type AuthEnv } from '@ptah-extension/shared';
+import { SessionId, type AuthEnv, type LanePermissionMode } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   ClaudeAccountRoute,
@@ -115,6 +115,8 @@ export interface ClaudeSdkLaneOptionsInput {
     SdkPermissionHandler,
     'getPermissionLevel' | 'createCallback'
   >;
+  /** Effective lane permission, when a lane policy was resolved. */
+  lanePermissionLevel?: LanePermissionMode;
   logger: Logger;
   processSpawner: ISdkProcessSpawner;
   /** Ambient executable; a named lane uses the certified one instead. */
@@ -141,6 +143,7 @@ export function buildClaudeSdkLaneOptions(
     parentSessionId,
     cliAgentResolver,
     permissionHandler,
+    lanePermissionLevel,
     logger,
     processSpawner,
     executable,
@@ -224,6 +227,7 @@ export function buildClaudeSdkLaneOptions(
         blankToUndefined(parentSessionId) ??
         routingId,
       cliAgentResolver,
+      lanePermissionLevel,
     ),
     settingSources: certified
       ? [...certified.settingSources]
@@ -252,12 +256,13 @@ export function resolveClaudeLanePermissionOptions(
   logger: Logger,
   routingId: string,
   cliAgentResolver?: () => string | undefined,
+  lanePermissionLevel?: LanePermissionMode,
 ): {
   permissionMode: Options['permissionMode'];
   canUseTool?: ReturnType<SdkPermissionHandler['createCallback']>;
   allowDangerouslySkipPermissions?: boolean;
 } {
-  const level = permissionHandler.getPermissionLevel();
+  const level = lanePermissionLevel ?? permissionHandler.getPermissionLevel();
   const LEVEL_TO_SDK_MODE: Record<
     string,
     NonNullable<Options['permissionMode']>
@@ -304,7 +309,7 @@ export function resolveClaudeLanePermissionOptions(
       routableSessionId,
       cliAgentResolver,
       undefined,
-      undefined,
+      lanePermissionLevel === undefined ? undefined : () => lanePermissionLevel,
       routingId,
     ),
   };

@@ -453,6 +453,11 @@ describe('buildAgentNamespace — spawn (ptahCliId)', () => {
       permission: 'plan', network: 'allow' });
     expect(mocks.registry?.spawnAgent).toHaveBeenCalledWith('agent-a', expect.any(String),
       expect.objectContaining({ permission: 'plan', network: 'allow' }));
+    expect(mocks.processManager.spawnFromSdkHandle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ requestedPolicy: { permission: 'plan', network: 'allow' } }),
+    );
+    expect(mocks.registry?.spawnAgent.mock.calls[0]?.[1]).toContain('BLOCKED: plan mode');
   });
 
   it('forwards taskKind and routingSource to the SDK handle spawn', async () => {

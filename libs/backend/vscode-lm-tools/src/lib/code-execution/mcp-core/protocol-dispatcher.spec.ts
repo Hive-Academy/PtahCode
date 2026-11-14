@@ -3893,6 +3893,21 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
     startedAt: '2026-09-13T00:00:00Z',
   };
 
+  it('reports a parent Plan cap in the spawn tool response', async () => {
+    const spawn = jest.fn().mockResolvedValue({
+      ...spawned,
+      requestedPolicy: { permission: 'auto-edit' },
+      effectivePolicy: { permission: 'plan', permissionSource: 'parent-plan' },
+    });
+    const response = await handleMCPRequest(
+      spawnRequest({ task: 'Edit', cli: 'codex', permission: 'auto-edit' }),
+      spawnDeps(spawn),
+    );
+    const { text } = agentToolResult(response);
+    expect(text).toContain('requested auto-edit -> effective plan (source: Parent plan cap) (Codex sandbox read-only, approvals never)');
+    expect(text).toContain('no approval prompt will appear');
+  });
+
   it('forwards routing fields and leaves them undefined when absent', async () => {
     const spawn = jest.fn().mockResolvedValue(spawned);
     await handleMCPRequest(

@@ -972,6 +972,7 @@ export class PtahCliRegistry {
         parentSessionId: options?.parentSessionId,
         cliAgentResolver: () => agentIdHolder.value,
         permissionHandler: this.permissionHandler,
+        lanePermissionLevel: lanePolicy.requested.permission,
         logger: this.logger,
         processSpawner: this.processSpawner,
         executable: (await this.moduleLoader.getCliJsPath()) ?? undefined,

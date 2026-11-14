@@ -1916,3 +1916,116 @@ describe('SdkPermissionHandler - system abort vs user deny mapping', () => {
     expect(result.message).toMatch(/NOT a user decision/i);
   });
 });
+
+describe('CLI lane callback level override', () => {
+  it('routes a Claude-tab lane prompt only to its parent session scope', async () => {
+    const parentSessionId = '11111111-2222-4333-8444-555555555555';
+    const { handler, sent } = makeHandler(undefined, {
+      findAgentInfo: () => ({ parentSessionId, startedAt: '2026-11-07T10:00:00.000Z', status: 'running' }),
+    });
+    const abort = new AbortController();
+    const pending = handler.createCallback(asSessionId(parentSessionId), () => 'claude-lane')(
+      'Bash', { command: 'ls' }, { signal: abort.signal, toolUseID: 'claude-lane-tool', requestId: 'claude-lane-tool' },
+    );
+    await flushMicrotasks();
+    expect(sent.filter((message) => message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST))
+      .toEqual([expect.objectContaining({ payload: expect.objectContaining({ agentId: 'claude-lane', parentSessionId }) })]);
+    expect(sent.some((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST)).toBe(false);
+    abort.abort();
+    await pending;
+  });
+
+  it('routes a child chat prompt inline to its own session', async () => {
+    const childSessionId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const { handler, sent } = makeHandler();
+    const abort = new AbortController();
+    const pending = handler.createCallback(asSessionId(childSessionId))(
+      'Bash', { command: 'ls' }, { signal: abort.signal, toolUseID: 'child-tool', requestId: 'child-tool' },
+    );
+    await flushMicrotasks();
+    expect(sent.filter((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST))
+      .toEqual([expect.objectContaining({ payload: expect.objectContaining({ sessionId: childSessionId }) })]);
+    expect(sent.some((message) => message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)).toBe(false);
+    abort.abort();
+    await pending;
+  });
+
+  it('denies an ownerless lane without delivering its prompt to another session', async () => {
+    const { handler, sent } = makeHandler(undefined, {
+      findAgentInfo: () => ({ startedAt: '2026-11-07T10:00:00.000Z', status: 'running' }),
+    });
+    await expect(handler.createCallback(asSessionId('11111111-2222-4333-8444-555555555555'), () => 'ownerless-lane')(
+      'Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'ownerless-tool', requestId: 'ownerless-tool' },
+    )).resolves.toMatchObject({ behavior: 'deny' });
+    expect(sent.filter((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST ||
+      message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)).toEqual([]);
+  });
+
+  it('ignores an answer keyed to another request while the lane prompt is pending', async () => {
+    const { handler, sent } = makeHandler();
+    const abort = new AbortController();
+    const pending = handler.createCallback(asSessionId('11111111-2222-4333-8444-555555555555'), () => 'lane-1')(
+      'Bash', { command: 'ls' }, { signal: abort.signal, toolUseID: 'keyed-tool', requestId: 'keyed-tool' },
+    );
+    await flushMicrotasks();
+    const request = sent.find((message) => message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)?.payload;
+    const requestId = request?.['requestId'];
+    if (typeof requestId !== 'string') throw new Error('Missing lane request');
+    expect(handler.handleResponse('different-request', { id: 'different-request', decision: 'allow' })).toBe(false);
+    expect(handler.getPendingCliAgentPermissions()).toEqual([request]);
+    handler.handleResponse(requestId, { id: requestId, decision: 'allow' });
+    await expect(pending).resolves.toMatchObject({ behavior: 'allow' });
+  });
+
+  it('denies a plan-level lane write without emitting an approval prompt', async () => {
+    const { handler, sent } = makeHandler();
+    const abort = new AbortController();
+    const pending = handler.createCallback(
+      asSessionId('11111111-2222-4333-8444-555555555555'), () => 'plan-lane', undefined, () => 'plan',
+    )('Write', { file_path: '/tmp/lane', content: 'x' }, {
+      signal: abort.signal, toolUseID: 'plan-write', requestId: 'plan-write',
+    });
+    await flushMicrotasks();
+    abort.abort();
+    await expect(pending).resolves.toMatchObject({ behavior: 'deny' });
+    expect(sent.filter((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST ||
+      message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)).toEqual([]);
+  });
+  it.each(['plan', 'ask'] as const)(
+    'does not auto-approve Bash for a %s lane under global yolo', async (laneLevel) => {
+      const { handler } = makeHandler();
+      handler.setPermissionLevel('yolo');
+      const abort = new AbortController();
+      const callback = handler.createCallback(
+        asSessionId('11111111-2222-4333-8444-555555555555'),
+        undefined,
+        undefined,
+        () => laneLevel,
+      );
+      const pending = callback('Bash', { command: 'echo test' }, {
+        signal: abort.signal,
+        toolUseID: `lane-${laneLevel}`,
+        requestId: `lane-${laneLevel}`,
+      });
+      await flushMicrotasks();
+      abort.abort();
+      expect(await pending).not.toMatchObject({ behavior: 'allow' });
+    },
+  );
+
+  it('auto-approves a file edit for an auto-edit lane under global ask', async () => {
+    const { handler } = makeHandler();
+    handler.setPermissionLevel('ask');
+    const callback = handler.createCallback(
+      asSessionId('11111111-2222-4333-8444-555555555555'),
+      undefined,
+      undefined,
+      () => 'auto-edit',
+    );
+    await expect(callback('Write', { file_path: '/tmp/lane', content: 'x' }, {
+      signal: new AbortController().signal,
+      toolUseID: 'lane-edit',
+      requestId: 'lane-edit',
+    })).resolves.toMatchObject({ behavior: 'allow' });
+  });
+});
