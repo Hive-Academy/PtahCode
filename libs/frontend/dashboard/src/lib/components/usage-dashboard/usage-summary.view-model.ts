@@ -1,5 +1,5 @@
 /** Dashboard view-model shapes and top-level summary builder. */
-import type { UsageRangeDays, UsageSourceStatus, UsageSummary, UsageTopSession } from '@ptah-extension/shared';
+import type { UsageRangeDays, UsageRepositoryTotals, UsageSourceStatus, UsageSummary, UsageTopSession } from '@ptah-extension/shared';
 import { resolveModelDisplayName } from '@ptah-extension/shared';
 import { providerAccent } from '../provider-account-card/provider-accent';
 import { daySpanLabel, enumerateDays, providerDisplayName } from './usage-formatting';
@@ -118,6 +118,10 @@ export interface UsageSessionRow extends UsageTopSession {
 }
 
 export interface UsageViewModel {
+  readonly repositories: readonly (UsageRepositoryTotals & {
+    readonly recordedTokens: number;
+    readonly knownCostLabel: string;
+  })[];
   readonly topSessions: readonly UsageSessionRow[];
   readonly range: UsageRangeDays | null;
   readonly days: readonly string[];
@@ -281,6 +285,14 @@ export function buildUsageViewModel(
   );
 
   return {
+    repositories: (summary.repositories ?? []).map((repository) => ({
+      ...repository,
+      recordedTokens: (repository.inputTokens ?? 0) + (repository.outputTokens ?? 0) +
+        (repository.cacheReadTokens ?? 0) + (repository.cacheWriteTokens ?? 0),
+      knownCostLabel: repository.knownCostMicroUsd === null
+        ? 'No priced cost recorded'
+        : `$${(repository.knownCostMicroUsd / 1_000_000).toFixed(2)}`,
+    })),
     topSessions: (summary.topSessions ?? []).map((session) => ({
       ...session,
       modelDisplayName: resolveModelDisplayName(session.modelId, availableModels),

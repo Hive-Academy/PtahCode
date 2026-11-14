@@ -836,6 +836,11 @@ export class AntigravityCliAdapter implements CliAdapter {
       const emitTelemetry = (usage?: AgyResult['usage']): void => {
         segment.emit({
           type: 'info', content: 'Antigravity turn telemetry',
+          ...(usage && complete(usage) ? { usage: {
+            inputTokens: usage.input_tokens,
+            outputTokens: usage.output_tokens,
+            cacheReadTokens: usage.cache_read_tokens,
+          } } : {}),
           turnTelemetry: completedTurnTelemetry({
             ...turnIdentity({ provider: 'antigravity', turnId: currentTurnId,
               sessionId: capturedSessionId ?? options.agentId ?? `agy:${child.pid ?? 'unknown'}`,
@@ -1196,6 +1201,8 @@ export class AntigravityCliAdapter implements CliAdapter {
       }
 
       return {
+        outcomeUsageIsTurnTotal: true,
+        usageScope: 'turn',
         abort: abortController,
         done: useStreamInput ? firstTurn.done : done,
         onOutput: output.subscribe,

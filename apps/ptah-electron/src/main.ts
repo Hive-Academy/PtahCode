@@ -509,6 +509,7 @@ if (!gotLock) {
   app.on('will-quit', (event) => {
     if (quitSequenceStarted) return;
     quitSequenceStarted = true;
+    ElectronDIContainer.stopUsageReconciliation();
     handleWillQuit({
       codexSignIn: bootContainer?.isRegistered(CODEX_SIGN_IN_QUIT_HANDLE)
         ? bootContainer.resolve<CodexSignInQuitHandle>(CODEX_SIGN_IN_QUIT_HANDLE)

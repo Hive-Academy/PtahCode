@@ -83,6 +83,29 @@
         </div>
       }
 
+    @if (vm.repositories.length > 0) {
+      <section class="rounded-lg bg-base-200/20 p-3" aria-label="Repository usage" data-testid="usage-repositories">
+        <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content-muted">Repository usage</h4>
+        @for (repository of vm.repositories; track repository.repositoryId) {
+          <div class="mt-2 text-xs" data-testid="usage-repository">
+            <p class="font-medium break-all">{{ repository.repositoryId }}</p>
+            <p>Recorded tokens: {{ repository.recordedTokens }}</p>
+            <p>Partial cost (known priced rows only): {{ repository.knownCostLabel }}</p>
+            @if (repository.hasUnknownTokens) {
+              <p class="text-warning">Token coverage incomplete; some usage is unknown.</p>
+            }
+            @if (repository.worktreePaths.length > 0) {
+              <ul class="mt-1 list-disc ps-4" aria-label="Worktree paths">
+                @for (path of repository.worktreePaths; track path) {
+                  <li class="break-all">{{ path }}</li>
+                }
+              </ul>
+            }
+          </div>
+        }
+      </section>
+    }
+
     @if (!vm.hasUsage) {
       <div data-testid="usage-empty"><ptah-state-panel state="empty" [body]="vm.isPartial ? 'No recorded usage in this range. ' + vm.emptyPartialMessage : 'No usage in this range. Start a chat to see provider usage, tokens and cost.'" /></div>
     } @else {

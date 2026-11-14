@@ -450,6 +450,10 @@ export type {
   SessionUsageSink,
   SessionUsageContribution,
   SessionUsageModelDelta,
+  UsageScope,
+  UsageMissingReason,
+  UsageReconciliationTrigger,
+  RepositoryIdentityResolver,
   UsageExecutorType,
 } from './interfaces/session-usage-sink.interface';
 export type {

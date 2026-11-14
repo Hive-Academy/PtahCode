@@ -2984,7 +2984,7 @@ describe('Codex metadata identity', () => {
       cacheSemanticsAmbiguous: false, lastExceedsTotal: false, diagnostics: [],
     });
     await store.updateCodexUsageCheckpoint(threadId, owner.serialize());
-    const contributions: Array<{ eventKey: string; totalCostMicroUsd: number | null; executorType?: string }> = [];
+    const contributions: Array<{ eventKey: string; totalCostMicroUsd: number | null; executorType?: string | null }> = [];
     const reloaded = new SessionMetadataStore(
       storage, asLogger(createMockLogger()), undefined, undefined, undefined,
       { recordUsage: (value) => { contributions.push(value); } },

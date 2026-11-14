@@ -10,13 +10,14 @@ import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import { ProviderAccountStore } from '../accounts/provider-account.store';
+import { UsageProfileRootsAdapter } from '../accounts/usage-profile-roots.adapter';
 import { ProviderAccountService } from '../accounts/provider-account.service';
 import { ProviderAccountActionsService } from '../accounts/provider-account-actions.service';
 import { accountActionResult, ClaudeAccountCommand } from '../accounts/claude-account-command';
 import { ClaudeRouteCertifier, type ClaudeRouteCertifierFs } from '../accounts/claude-route-certifier';
 import { ClaudeLoginConsole } from '../accounts/claude-login-console';
 import { ClaudeAmbientLoginStatusReader, NODE_AMBIENT_STATUS_HOST } from '../accounts/claude-ambient-login-status';
-import type { ClaudeAccountSelectionReader, ProviderAccountAdmissionPort } from '@ptah-extension/auth-providers-tokens';
+import type { ClaudeAccountSelectionReader, ClaudeUsageProfileRoots, ProviderAccountAdmissionPort } from '@ptah-extension/auth-providers-tokens';
 import { AUTH_PROVIDERS_TOKENS } from './tokens';
 import { ProviderModelsService } from '../provider-models.service';
 import { AuthManager } from '../auth/auth-manager';
@@ -187,6 +188,13 @@ function registerProviderAccountServices(container: DependencyContainer): void {
   container.register(ProviderAccountStore, {
     useClass: ProviderAccountStore,
   }, { lifecycle: Lifecycle.Singleton });
+  container.register(AUTH_PROVIDERS_TOKENS.SDK_CLAUDE_USAGE_PROFILE_ROOTS, {
+    useFactory: instanceCachingFactory<ClaudeUsageProfileRoots>((c) =>
+      c.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)
+        ? new UsageProfileRootsAdapter(c.resolve(ProviderAccountStore))
+        : { listActiveRoots: async () => [] },
+    ),
+  });
   container.register(ProviderAccountService, {
     useClass: ProviderAccountService,
   }, { lifecycle: Lifecycle.Singleton });

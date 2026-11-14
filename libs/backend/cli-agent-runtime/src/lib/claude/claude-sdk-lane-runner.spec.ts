@@ -1273,3 +1273,56 @@ describe('named lane final child init after the first turn (D68)', () => {
     await expect(running).rejects.toMatchObject({ code: 'identity-unproved' });
   });
 });
+
+describe('Claude lane usage scope and native thread ID', () => {
+  function makeContext(providerId: string): ClaudeSdkLaneRunContext {
+    const asyncGen = async function*() {
+      yield {
+        type: 'system', subtype: 'init', session_id: 'session-123',
+      } as never;
+    };
+    return {
+      queryFn: jest.fn(() => asyncGen()) as never,
+      options: {
+        ...optionsInput().assembly,
+        ...optionsInput().authEnv,
+        abortController: new AbortController(),
+      } as never,
+      mailbox: createPromptMailbox('test prompt'),
+      providerId,
+      agentName: 'test-agent',
+      agentIdHolder: {},
+      lanePlanLimits: {
+        attach: jest.fn(),
+        onSystemInit: jest.fn(),
+        onSignal: jest.fn(),
+        end: jest.fn(),
+        settled: Promise.resolve(),
+      },
+      outputCallbacks: [],
+      onSegment: jest.fn(),
+      onStreamEvent: jest.fn(),
+      emitOutput: jest.fn(),
+      emitSegment: jest.fn(),
+      emitStreamEvent: jest.fn(),
+      disposeCallbacks: jest.fn(),
+      stopProxy: jest.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  it.each(['ptah-cli', 'claude'])('declares turn-total usage for the %s provider', (providerId) => {
+    const runner = new ClaudeSdkLaneRunner(logger, {
+      transform: jest.fn(() => []),
+      createIsolated: jest.fn().mockReturnValue({ transform: jest.fn(() => []) }),
+    } as unknown as SdkMessageTransformer);
+    const { handle } = runner.run(makeContext(providerId));
+    expect(handle).toMatchObject({ outcomeUsageIsTurnTotal: true, usageScope: 'turn' });
+  });
+
+  it('exposes getObservedNativeThreadId that returns resolved session ID', () => {
+    const f = runnerFixture();
+    expect(f.handle.getObservedNativeThreadId?.()).toBeUndefined();
+    f.config.onSessionResolved?.('session-123');
+    expect(f.handle.getObservedNativeThreadId?.()).toBe('session-123');
+  });
+});

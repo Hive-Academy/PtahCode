@@ -100,6 +100,7 @@ import { AgentSpawnEnvironment } from './agent-spawn-environment.service';
 import { LaneCompletionNotifier } from './lane-completion-notifier.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { recordLaneUsageOutcome } from './lane-completion-outcome';
+import { LaneUsageNormalizer } from './lane-usage-normalizer';
 import { AgentOutputBuffer } from './agent-output-buffer.service';
 import {
   buildLaneHandoffTask,
@@ -348,6 +349,7 @@ export class LaneModelBlockedError extends Error {
 }
 @injectable()
 export class AgentProcessManager {
+  private readonly laneUsageNormalizer = new LaneUsageNormalizer();
   private readonly agents = new Map<string, TrackedAgent>();
   /** Lanes a restore skipped because another live host run owns them. */
   private readonly foreignLiveAgentIds = new Set<string>();
@@ -455,6 +457,8 @@ export class AgentProcessManager {
     private readonly parentDeliveryDrainer?: ParentDeliveryDrainerService,
     @inject(CLI_AGENT_RUNTIME_TOKENS.AGENT_OUTPUT_JOURNAL, { isOptional: true })
     private readonly outputJournal?: AgentOutputJournal,
+    @inject(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { isOptional: true })
+    private readonly usageReconciliationTrigger?: import('@ptah-extension/platform-core').UsageReconciliationTrigger,
   ) {
     this.budgetTelemetry = new LaneBudgetTelemetry(this.logger,
       async (agentId) => {
@@ -1405,6 +1409,7 @@ export class AgentProcessManager {
       pendingMessages: [],
       reportsDelivered: 0,
       turnSegmentStart: 0,
+      turnStartedAt: info.startedAt,
     };
 
     const previousBudget = info.cliSessionId
@@ -1516,7 +1521,9 @@ export class AgentProcessManager {
         if (this.agents.get(agentId) !== tracked) return;
         if (captureSessionId) updateCliSessionId(captureSessionId());
         if (sdkHandle.outcomeUsageIsTurnTotal && segment.usage) {
-          tracked.outcomeUsage = segment.usage;
+          tracked.outcomeUsage = this.laneUsageNormalizer.accept(
+            String(agentId), sdkHandle.usageScope ?? 'turn', segment.usage,
+          );
         }
         if (segment.turnTelemetry) {
           const observed = observedModelFrom(info.cli, segment.turnTelemetry);
@@ -2660,6 +2667,7 @@ export class AgentProcessManager {
     // This turn's rate-limit match reads only the segments it produces.
     tracked.turnSegmentStart = tracked.accumulatedSegments.length;
     tracked.outcomeUsage = undefined;
+    this.laneUsageNormalizer.settleTurn(String(agentId));
     tracked.rateLimitMatched = undefined;
     // A stop or timeout of this turn never re-reads auth wording, so an
     // earlier turn's match must not label it `auth`.
@@ -2673,6 +2681,7 @@ export class AgentProcessManager {
       tracked.exitEmitHandle = undefined;
     }
     const continuedAt = new Date().toISOString();
+    tracked.turnStartedAt = continuedAt;
     tracked.info = {
       ...tracked.info,
       turnSeq: (tracked.info.turnSeq ?? 1) + 1,
@@ -3668,7 +3677,7 @@ export class AgentProcessManager {
     const toolCalls =
       this.laneGuards.get(info.agentId)?.toolCallCount ??
       tracked.guardToolCalls;
-    if (tracked.outcomeUsage) {
+    {
       // Durable usage capture (TASK_2026_870 Phase 1): the same turn total
       // the outcome recorder reads, recorded before the signal so a lane
       // whose chat parent is gone still lands its usage. Keyed by the same
@@ -3680,6 +3689,9 @@ export class AgentProcessManager {
         info,
         info.completedAt ?? new Date().toISOString(),
         tracked.outcomeUsage,
+        tracked.sdkHandle?.getObservedNativeThreadId?.() ?? null,
+        this.usageReconciliationTrigger,
+        tracked.turnStartedAt,
       );
     }
     void Promise.resolve(

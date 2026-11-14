@@ -102,6 +102,12 @@ export const PLATFORM_TOKENS = {
   /** SessionUsageSink - accepted usage ledger writer. */
   SESSION_USAGE_SINK: Symbol.for('PlatformSessionUsageSink'),
 
+  /** UsageReconciliationTrigger - schedules reconciliation after settled usage. */
+  USAGE_RECONCILIATION_TRIGGER: Symbol.for('PlatformUsageReconciliationTrigger'),
+
+  /** RepositoryIdentityResolver - resolves a worktree's repository identity. */
+  REPOSITORY_IDENTITY_RESOLVER: Symbol.for('PlatformRepositoryIdentityResolver'),
+
   /** ISessionBlobStore — per-session bulk files. Registered with SESSION_RECORD_REPOSITORY. */
   SESSION_BLOB_STORE: Symbol.for('PlatformSessionBlobStore'),
 

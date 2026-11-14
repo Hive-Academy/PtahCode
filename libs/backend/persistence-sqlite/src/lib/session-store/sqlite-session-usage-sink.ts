@@ -17,8 +17,9 @@ const authority = z.enum(['provider-reported', 'model-priced', 'unpriced']);
 const liveContributionSchema = z
   .object({
     sessionId: identifier,
-    producer: z.enum(['sdk-owner', 'codex-checkpoint', 'cli-lane']),
+    producer: z.enum(['sdk-owner', 'codex-checkpoint', 'cli-lane', 'transcript-replay']),
     runId: identifier,
+    nativeThreadId: identifier.nullable().optional(),
     turnId: identifier.nullable(),
     eventKey: identifier,
     parentSessionId: identifier.nullable(),
@@ -31,10 +32,10 @@ const liveContributionSchema = z
         z
           .object({
             modelId: identifier.nullable(),
-            inputTokens: safeInteger,
-            outputTokens: safeInteger,
-            cacheReadTokens: safeInteger,
-            cacheCreationTokens: safeInteger,
+            inputTokens: safeInteger.nullable(),
+            outputTokens: safeInteger.nullable(),
+            cacheReadTokens: safeInteger.nullable(),
+            cacheCreationTokens: safeInteger.nullable(),
             knownCostMicroUsd: safeInteger.nullable(),
             costAuthority: authority,
           })
@@ -46,7 +47,15 @@ const liveContributionSchema = z
     pricingVersion: identifier.nullable(),
     runCostSnapshot: z.boolean().optional(),
     workspaceKey: identifier.nullable().optional(),
+    repositoryId: identifier.nullable().optional(),
+    worktreePath: identifier.nullable().optional(),
     host: identifier.nullable().optional(),
+    source: z.enum(['live', 'replay', 'estimated']).optional(),
+    missingReason: z.enum(['no-usage-event', 'partial-usage', 'invalid-usage', 'aborted-before-result',
+      'failed-before-result', 'sink-unavailable', 'unmatched-provider-event', 'source-unavailable']).nullable().optional(),
+    billable: z.boolean().optional(),
+    coverageStartMs: safeInteger.nullable().optional(),
+    coverageEndMs: safeInteger.nullable().optional(),
     phaseKind: usagePhaseKindSchema.nullable().optional(),
     executorType: usageExecutorTypeSchema.nullable().optional(),
   })
@@ -211,7 +220,8 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
     }
   }
 
-  private toRows(event: z.infer<typeof liveContributionSchema>): SessionUsageContribution[] {
+  private toRows(event: LiveUsageContribution): SessionUsageContribution[] {
+    // Preserve the existing unprefixed live identity for in-flight retries.
     const eventKey = JSON.stringify([event.runId, event.eventKey]);
     const attributed = event.models.reduce((sum, model) => {
       const next = sum + (model.knownCostMicroUsd ?? 0);
@@ -222,7 +232,7 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
       sessionId: event.sessionId,
       producer: event.producer,
       runId: event.runId,
-      turnId: event.turnId ?? event.eventKey,
+      turnId: event.turnId ?? '',
       eventKey,
       modelId: model.modelId ?? '__unattributed__',
       providerId: event.providerId ?? 'unknown',
@@ -233,7 +243,7 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
       cacheWriteTokens: model.cacheCreationTokens,
       knownCostMicroUsd: model.knownCostMicroUsd,
       costAuthority: model.costAuthority,
-      source: 'live',
+      source: event.source ?? 'live',
       pricingVersion: event.pricingVersion,
       workspaceKey: event.workspaceKey ?? null,
       host: event.host ?? null,
@@ -241,24 +251,31 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
       executorType: event.executorType ?? null,
       revision: event.revision,
       runCostSnapshot: event.runCostSnapshot,
+      nativeThreadId: event.nativeThreadId ?? null,
+      repositoryId: event.repositoryId ?? null,
+      worktreePath: event.worktreePath ?? null,
+      missingReason: event.missingReason ?? null,
+      billable: event.billable ?? true,
+      coverageStartMs: event.coverageStartMs ?? null,
+      coverageEndMs: event.coverageEndMs ?? null,
     }));
     if (rows.length === 0) {
       rows.push({
         sessionId: event.sessionId,
         producer: event.producer,
         runId: event.runId,
-        turnId: event.turnId ?? event.eventKey,
+        turnId: event.turnId ?? '',
         eventKey,
         modelId: '__unattributed__',
         providerId: event.providerId ?? 'unknown',
         occurredAtMs: event.occurredAtMs,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
         knownCostMicroUsd: event.totalCostMicroUsd,
         costAuthority: event.totalCostAuthority,
-        source: 'live',
+        source: event.source ?? 'live',
         pricingVersion: event.pricingVersion,
         workspaceKey: event.workspaceKey ?? null,
         host: event.host ?? null,
@@ -266,6 +283,13 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         executorType: event.executorType ?? null,
         revision: event.revision,
         runCostSnapshot: event.runCostSnapshot,
+        nativeThreadId: event.nativeThreadId ?? null,
+        repositoryId: event.repositoryId ?? null,
+        worktreePath: event.worktreePath ?? null,
+        missingReason: event.missingReason ?? null,
+        billable: false,
+        coverageStartMs: event.coverageStartMs ?? null,
+        coverageEndMs: event.coverageEndMs ?? null,
       });
     }
     if (
@@ -277,7 +301,7 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         sessionId: event.sessionId,
         producer: event.producer,
         runId: event.runId,
-        turnId: event.turnId ?? event.eventKey,
+        turnId: event.turnId ?? '',
         eventKey,
         modelId: '__session_residual__',
         providerId: event.providerId ?? 'unknown',
@@ -288,7 +312,7 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         cacheWriteTokens: 0,
         knownCostMicroUsd: event.totalCostMicroUsd - attributed,
         costAuthority: event.totalCostAuthority,
-        source: 'live',
+        source: event.source ?? 'live',
         pricingVersion: event.pricingVersion,
         workspaceKey: event.workspaceKey ?? null,
         host: event.host ?? null,
@@ -296,6 +320,13 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         executorType: event.executorType ?? null,
         revision: event.revision,
         runCostSnapshot: event.runCostSnapshot,
+        nativeThreadId: event.nativeThreadId ?? null,
+        repositoryId: event.repositoryId ?? null,
+        worktreePath: event.worktreePath ?? null,
+        missingReason: event.missingReason ?? null,
+        billable: event.billable ?? true,
+        coverageStartMs: event.coverageStartMs ?? null,
+        coverageEndMs: event.coverageEndMs ?? null,
       });
     }
     return rows;

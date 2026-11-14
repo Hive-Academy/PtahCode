@@ -22,6 +22,34 @@ import { SessionStatsRepository } from '@ptah-extension/persistence-sqlite';
 describe('UsageAnalyticsService', () => {
   afterEach(() => jest.restoreAllMocks());
 
+  it('includes repository totals for identities in the requested workspace', async () => {
+    const repository = new SessionStatsRepository({ ready: async () => { throw new Error('unused'); } });
+    jest.spyOn(repository, 'getWorkspaceCoverage').mockResolvedValue(null);
+    jest.spyOn(repository, 'getWorkspaceUsageGroups').mockResolvedValue([]);
+    jest.spyOn(repository, 'getWorkspaceSessionCount').mockResolvedValue(0);
+    jest.spyOn(repository, 'getWorkspaceMessageCount').mockResolvedValue(0);
+    jest.spyOn(repository, 'getWorkspaceTopSessions').mockResolvedValue([]);
+    const ids = jest.spyOn(repository, 'getWorkspaceRepositoryIds').mockResolvedValue(['repo-a']);
+    jest.spyOn(repository, 'getRepositoryUsageTotals').mockResolvedValue({
+      repositoryId: 'repo-a', worktreePaths: Array.from({ length: 1001 }, (_, index) => `/work/${index}`), inputTokens: 10,
+      outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0,
+      knownCostMicroUsd: 250000, hasUnknownTokens: true,
+    });
+    const empty = { contributions: [], status: { sourceId: 'external', status: 'complete' as const } };
+    for (const source of [CodexSource, OpenCodeSource, GrokSource, CliSessionSource]) {
+      jest.spyOn(source.prototype, 'read').mockResolvedValue(empty);
+    }
+    const service = new UsageAnalyticsService({ read: async () => empty },
+      { price: async () => ({ costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced', priceSource: 'unavailable' }) },
+      { warn: jest.fn() }, repository);
+    const summary = await service.summarize({ range: 7 }, '/work/a');
+    expect(ids).toHaveBeenCalledWith(expect.any(String), expect.any(Number), expect.any(Number));
+    expect(summary.repositories).toEqual([expect.objectContaining({
+      repositoryId: 'repo-a', knownCostMicroUsd: 250000, hasUnknownTokens: true,
+    })]);
+    expect(summary.repositories?.[0].worktreePaths).toHaveLength(1000);
+  });
+
   it('does not start ledger SQL when the budget has expired', async () => {
     const repository = new SessionStatsRepository({ ready: async () => { throw new Error('unused'); } });
     const groups = jest.spyOn(repository, 'getWorkspaceUsageGroups');

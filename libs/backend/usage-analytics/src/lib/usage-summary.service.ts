@@ -3,7 +3,7 @@ import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { UsageSummaryParamsSchema, UsageSummarySchema, UsageTopSessionSchema } from '@ptah-extension/shared';
 import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import { SessionStatsRepository } from '@ptah-extension/persistence-sqlite';
-import type { UsageFact, UsageSummary, UsageSummaryParams, UsageSourceStatus, UsageTopSession } from '@ptah-extension/shared';
+import type { UsageFact, UsageRepositoryTotals, UsageSummary, UsageSummaryParams, UsageSourceStatus, UsageTopSession } from '@ptah-extension/shared';
 import { ClaudeLedgerSource } from './sources/claude-ledger.source';
 import { CliSessionSource } from './cli-session.source';
 import { CodexSource } from './sources/codex.source';
@@ -56,16 +56,19 @@ export class UsageAnalyticsService {
     let workspaceKey: string | undefined;
     let messageCount = 0;
     let priceSource: 'openrouter' | 'bundled' | 'unavailable' = 'unavailable';
+    let repositories: UsageRepositoryTotals[] | undefined;
     if (this.statsRepository) {
       try {
         workspaceKey = normalizeWorkspaceRoot(workspacePath);
         if (signal?.aborted) throw new Error('time-budget');
         const coverage = await this.statsRepository.getWorkspaceCoverage(workspaceKey);
         let factLimitReached = false;
+        let hasReplay = false;
         for (let cursor = since; cursor < until; cursor += signal ? LEDGER_SLICE_MS : until - since) {
           if (signal?.aborted) break;
           const ledgerGroups = await this.statsRepository.getWorkspaceUsageGroups(workspaceKey, cursor, Math.min(until, cursor + (signal ? LEDGER_SLICE_MS : until - since)));
           for (const row of ledgerGroups) {
+          if (row.source === 'replay') hasReplay = true;
           if (signal?.aborted) break;
           const costSource = row.has_unpriced === 0 && (row.cost_authority === 'provider-reported' || row.cost_authority === 'model-priced')
             ? row.cost_authority : 'unpriced';
@@ -116,7 +119,7 @@ export class UsageAnalyticsService {
         }
         statuses.push({ sourceId: 'claude-ledger', status: 'partial', ...(coverage ? { coverageStart: new Date(coverage.first_captured_at_ms).toISOString().slice(0, 10) } : {}), reason: signal?.aborted ? 'time-budget' : factLimitReached
           ? 'fact-limit' : coverage
-            ? `Historical sessions were not backfilled; data starts ${new Date(coverage.first_captured_at_ms).toISOString()}; subagent counts unavailable`
+            ? hasReplay ? 'Historical replay included; coverage may remain incomplete; subagent counts unavailable' : `Historical sessions were not backfilled; data starts ${new Date(coverage.first_captured_at_ms).toISOString()}; subagent counts unavailable`
             : 'Historical sessions were not backfilled; no live usage captured yet' });
       } catch (error: unknown) {
         if (signal?.aborted) {
@@ -125,6 +128,19 @@ export class UsageAnalyticsService {
         this.logger.warn('[UsageAnalytics] Session ledger unavailable', { reason: error instanceof Error ? error.name : 'unknown' });
         statuses.push({ sourceId: 'claude-ledger', status: 'unavailable', reason: 'Session ledger unavailable' });
         }
+      }
+    }
+    if (this.statsRepository && workspaceKey && !signal?.aborted) {
+      try {
+        const ids = await this.statsRepository.getWorkspaceRepositoryIds(workspaceKey, since, until);
+        repositories = [];
+        for (const id of ids) {
+          if (signal?.aborted) break;
+          const totals = await this.statsRepository.getRepositoryUsageTotals(id, since, until);
+          repositories.push({ ...totals, worktreePaths: totals.worktreePaths.slice(0, 1000) });
+        }
+      } catch (error: unknown) {
+        this.logger.warn('[UsageAnalytics] Repository totals unavailable', { reason: error instanceof Error ? error.name : 'unknown' });
       }
     }
     // Start independent disk/SQLite readers together. Consume in source order so
@@ -286,6 +302,7 @@ export class UsageAnalyticsService {
       ).slice(0, 5),
       sessionCount: ledgerSessionCount + sessions.size, messageCount, subagentCount: subagents.size,
       sources: statuses,
+      ...(repositories ? { repositories } : {}),
       pricing: { source: priceSource, asOf: priceSource === 'unavailable' ? null : new Date(now).toISOString() },
     };
     const checked = UsageSummarySchema.parse(summary);

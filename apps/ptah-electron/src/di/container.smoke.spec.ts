@@ -136,6 +136,14 @@ import { UPDATE_MANAGER_TOKEN } from '../services/update/update-tokens';
 import { GitRootWatcherPool } from '../services/git-root-watcher-pool';
 import { createElectronRpcHostProfile } from '../rpc-host-profile';
 
+describe('Electron DI — usage reconciliation guard', () => {
+  it('expects the trigger, reconciler and backfill registrations', () => {
+    for (const name of ['USAGE_RECONCILIATION_TRIGGER', 'USAGE_RECONCILIATION_SERVICE', 'REPOSITORY_IDENTITY_BACKFILL']) {
+      expect(EXPECTED_RESOLVABLE_TOKENS.some(([entry]) => entry === name)).toBe(true);
+    }
+  });
+});
+
 describe('Electron DI — host attention coordinator', () => {
   it('resolves the phase-2 singleton independently of handler classes', () => {
     const c = buildMinimalContainer();

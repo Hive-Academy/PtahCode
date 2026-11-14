@@ -91,6 +91,7 @@ export interface TrackedAgent {
    * earlier turn's 429 out of a later turn's rate-limit match.
    */
   turnSegmentStart?: number;
+  turnStartedAt?: string;
   /**
    * Tool calls the lane guard counted, saved when the guard is released so the
    * completion signal can still report them.

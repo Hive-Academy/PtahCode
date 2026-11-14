@@ -1005,7 +1005,7 @@ describe('OpencodeCliAdapter', () => {
       expect(info).toHaveLength(2);
       expect(info[0].content).toContain('671 input');
       expect(info[0].content).toContain('8 output');
-      expect(info[0].usage).toEqual({ inputTokens: 671, outputTokens: 8 });
+      expect(info[0].usage).toBeUndefined();
       expect(info[1].turnTelemetry).toEqual(expect.objectContaining({
         status: 'reported', usage: expect.objectContaining({ inputTokens: 671, outputTokens: 8, modelId: 'billed-provider/billed-model' }),
       }));
