@@ -983,9 +983,6 @@
     "alert-info": 1,
     "alert-warning": 3
   },
-  "libs/frontend/setup-wizard/src/lib/components/analysis-transcript.component.ts": {
-    "skeleton": 6
-  },
   "libs/frontend/setup-wizard/src/lib/components/community-packs-panel.component.ts": {
     "alert": 1,
     "alert-error": 1
@@ -1006,8 +1003,7 @@
   },
   "libs/frontend/setup-wizard/src/lib/components/confirmation-modal.component.ts": {
     "<dynamic>": 1,
-    "btn": 1,
-    "btn-primary": 1
+    "btn": 1
   },
   "libs/frontend/setup-wizard/src/lib/components/generation-errors.component.ts": {
     "alert": 1,
