@@ -51,7 +51,7 @@ import {
   type HeldReport,
 } from './agent-report-coalescer';
 import { buildLaneCompletionEnvelope } from './lane-completion-envelope';
-import { reconcilePendingCompletionRead, wasTerminalReadAcknowledged } from './completion-read-ack';
+import { clearPendingCompletionRead, reconcilePendingCompletionRead, wasTerminalReadAcknowledged } from './completion-read-ack';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { readReviewDeliverables } from './review-deliverable.reader';
 import type {
@@ -553,9 +553,8 @@ export class LaneCompletionNotifier {
       };
       try {
         await reconcilePendingCompletionRead(key, async () => {
-          await this.parentDelivery?.consumeCompletion(parentSessionId, key);
           const queued = this.parentDelivery?.find(key);
-          if (queued) {
+          if (queued && queued.state !== 'delivered' && queued.state !== 'cancelled') {
             const cancelled = await this.parentDelivery?.cancel(queued.id);
             if (cancelled && 'refused' in cancelled)
               throw new Error(`Completion cancellation refused: ${cancelled.refused}`);
@@ -584,19 +583,23 @@ export class LaneCompletionNotifier {
         saved,
         checkpoint === 'durable',
       );
+      if (result.delivered) clearPendingCompletionRead(key);
       if (!result.delivered && result.deliveryId) {
         const deliveryId = result.deliveryId;
         try {
           await reconcilePendingCompletionRead(key, async () => {
-          try {
-            await this.parentDelivery?.consumeCompletion(parentSessionId, key);
-            const cancelled = await this.parentDelivery?.cancel(deliveryId);
-            if (cancelled && 'refused' in cancelled)
-              throw new Error(`Completion cancellation refused: ${cancelled.refused}`);
-          } catch (error: unknown) {
-            this.logger.warn('[LaneCompletionNotifier] Could not cancel acknowledged completion', error instanceof Error ? error : new Error('Completion cancellation failed'));
-            throw error;
-          }
+            try {
+              await this.parentDelivery?.consumeCompletion(parentSessionId, key);
+              const queued = this.parentDelivery?.find(key);
+              if (queued && queued.state !== 'delivered' && queued.state !== 'cancelled') {
+                const cancelled = await this.parentDelivery?.cancel(deliveryId);
+                if (cancelled && 'refused' in cancelled)
+                  throw new Error(`Completion cancellation refused: ${cancelled.refused}`);
+              }
+            } catch (error: unknown) {
+              this.logger.warn('[LaneCompletionNotifier] Could not cancel acknowledged completion', error instanceof Error ? error : new Error('Completion cancellation failed'));
+              throw error;
+            }
           });
         } catch (error: unknown) {
           this.logger.warn('[LaneCompletionNotifier] Completion cancellation remains pending', error instanceof Error ? error : new Error('Completion cancellation failed'));
@@ -853,7 +856,7 @@ export class LaneCompletionNotifier {
     const deliveryId = completionDeliveryId(entry.dedupeKey);
     this.pendingReplays.delete(entry.dedupeKey);
     parentDelivery?.clearUnsaved(deliveryId);
-    await parentDelivery?.consumeCompletion(entry.parentSessionId, entry.dedupeKey);
+    await this.consumeAcknowledged(entry.parentSessionId, entry.dedupeKey);
     await parentDelivery?.backfillCompletionKeys(entry.parentSessionId);
     const delivered =
       parentDelivery?.find(entry.dedupeKey)?.state === 'delivered';
@@ -1230,7 +1233,7 @@ export class LaneCompletionNotifier {
       `verdict="${signal.verdict}"`,
       `verdict="${signal.verdict}"` +
         ` report-delivery="${signal.reportsDelivered}-sent" reportsFailed="${failed}"`,
-    ).replace('\nDeliverables:', `\n${attachment}\n${reports}${failed ? `\nNext: ${failed} reports were not delivered to the parent; inspect the lane output and deliverable.` : ''}\nDeliverables:`);
+    ).replace('\nDeliverables:', `\n${attachment}\n${reports}${failed ? `\nNext: ${failed} report attempts failed; inspect the lane output and deliverable.` : ''}\nDeliverables:`);
     if (info.stopReason !== 'usage-limit' && info.stopReason !== 'auth')
       return body;
     const resetDate =

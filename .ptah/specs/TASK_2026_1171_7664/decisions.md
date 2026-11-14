@@ -53,3 +53,15 @@
   seen-but-not-initialize) but changes no handshake behavior. So B3 does not explain or fix
   these lines. The antigravity handshake timeout stays a REMAINING LIMITATION (separate
   adapter-side issue, root cause not confirmed) and is listed in the PR.
+- D14 (D12 applied): Fix round committed as 7942e1de6 (lane 90d818e4, codex). Lane Jest gave
+  no verdict (runner hung), so the coordinator runs the related tests. Final PR review: a
+  `cli: "claude"` lane 23b53efd (opus tier), Review family: claude (different from codex).
+  Reason: antigravity cannot run headless without yolo (D11); grok, Glm, kimi at limit;
+  copilot and opencode disabled.
+- D15 (final review 23b53efd, claude family): REVISE 6/10. S1, S3, M1, M2 fixed; S2 partly.
+  New Serious S-NEW-1: a stale pending-cancellation callback cancels an already delivered
+  envelope when the parent reads after the push. Caller identity B1/B2 judged sound. Fix
+  round 2 (last one inside the revise cap): S-NEW-1 plus local Minors m1 (per-entry try in
+  wait loop), m2 (wording "N report attempts failed"), m3 (JSDoc placement, indent), m4
+  (per-map expiry in observer), m5 (single consume path). Starts after the related tests end
+  (no lane edits during a check). Then one short re-review scoped to fix round 2.

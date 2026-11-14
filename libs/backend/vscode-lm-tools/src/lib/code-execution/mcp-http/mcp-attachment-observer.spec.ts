@@ -15,4 +15,10 @@ describe('MCP attachment attempt attribution', () => {
     expect(mcpAttachmentObserver.getAttempt('lane-0', 4888)).toBeUndefined();
     expect(mcpAttachmentObserver.getAttempt('lane-512', 4888)?.reason).toBe('auth-required');
   });
+
+  it('falls back to a fresh rejected attempt after an authenticated attempt expires', () => {
+    mcpAttachmentObserver.recordAttempt({ agentId: 'lane-a', port: 4888, reason: 'seen', method: 'initialize', time: 0 });
+    mcpAttachmentObserver.recordRejectedAttempt({ agentId: 'lane-a', port: 4888, reason: 'forbidden', method: 'POST', time: Date.now() });
+    expect(mcpAttachmentObserver.getAttempt('lane-a', 4888)?.reason).toBe('forbidden');
+  });
 });

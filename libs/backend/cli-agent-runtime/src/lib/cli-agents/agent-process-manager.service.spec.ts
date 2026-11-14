@@ -2549,7 +2549,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         status: 'completed',
         exitCode: 0,
       });
-      expect(context).toEqual({ reportsDelivered: 0, authMatched: false });
+      expect(context).toEqual({ reportsDelivered: 0, reportAttempts: 0, reportsFailed: 0, authMatched: false });
     });
 
     it('signals a failure', async () => {
@@ -2640,6 +2640,8 @@ describe('AgentProcessManager - SDK Execution Path', () => {
 
       expect(laneCompletion.signal.mock.calls[0][1]).toEqual({
         reportsDelivered: 2,
+        reportAttempts: 0,
+        reportsFailed: 0,
         authMatched: false,
       });
     });

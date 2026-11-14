@@ -1727,16 +1727,17 @@ async function handleIndividualTool(
           {
             waitForAgents: async (ids, mode, timeoutMs, signal) => {
               const result = await ptahAPI.agent.waitForAgents(ids, mode, timeoutMs, signal);
-              try {
-                const raw = request._callerSessionId;
-                const reader = raw
-                  ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
-                  : undefined;
-                for (const entry of result.entries)
-                  if (entry.state === 'exited')
+              for (const entry of result.entries) {
+                if (entry.state !== 'exited') continue;
+                try {
+                  const raw = request._callerSessionId;
+                  const reader = raw
+                    ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
+                    : undefined;
                     await acknowledgeTerminalRead(entry.info, reader);
-              } catch (error: unknown) {
-                logger.warn('[MCP] Completion wait acknowledgment failed', error instanceof Error ? error : new Error('Completion wait acknowledgment failed'));
+                } catch (error: unknown) {
+                  logger.warn('[MCP] Completion wait acknowledgment failed', error instanceof Error ? error : new Error('Completion wait acknowledgment failed'));
+                }
               }
               return result;
             },

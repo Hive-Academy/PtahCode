@@ -1088,6 +1088,23 @@ describe('LaneCompletionNotifier.signal', () => {
 });
 
 describe('terminal read reconciliation', () => {
+  it('keeps a delivered completion delivered when the parent reads afterward', async () => {
+    const h = createHarness();
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const adapter = { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never;
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    const cancel = jest.spyOn(drainer, 'cancel');
+    const notifier = new LaneCompletionNotifier(h.logger, { exists: h.exists, stat: h.stat } as never,
+      adapter, () => null, drainer);
+    const info = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174111') });
+    const result = await notifier.signal(info);
+    expect(result.delivered).toBe(true);
+    await acknowledgeTerminalRead(info, PARENT);
+    expect(store.find(`${info.agentId}:${info.completedAt}`)?.state).toBe('delivered');
+    expect(cancel).not.toHaveBeenCalled();
+    drainer.dispose();
+  });
+
   it('read before delayed completion suppresses push; a different terminal transition still pushes', async () => {
     const h = createHarness();
     const first = createInfo({ agentId: AgentId.from('123e4567-e89b-42d3-a456-426614174101') });
@@ -1255,7 +1272,7 @@ describe('terminal read reconciliation', () => {
     }), { reportsDelivered: 0, reportAttempts: 1, reportsFailed: 1 });
     expect(result.signal?.verdict).toBe('delivered');
     expect(h.envelope()).toContain('reportsFailed="1"');
-    expect(h.envelope()).toContain('Next: 1 reports were not delivered');
+    expect(h.envelope()).toContain('Next: 1 report attempts failed');
   });
 });
 

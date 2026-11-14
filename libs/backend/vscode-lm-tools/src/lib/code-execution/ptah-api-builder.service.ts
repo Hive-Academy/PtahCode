@@ -1081,10 +1081,10 @@ export class PtahAPIBuilder {
         buildSessionNamespace({
           getSpawner: () => this.resolveSessionSpawner(),
           getHandoff: () => this.resolveSessionHandoff(),
-           getCallerSessionId: () => {
-             const raw = getCallerSessionId();
-             return raw ? this.resolveCodexCallerId(raw) : raw;
-           },
+          getCallerSessionId: () => {
+            const raw = getCallerSessionId();
+            return raw ? this.resolveCodexCallerId(raw) : raw;
+          },
           onWorktreeChanged: this.buildWorktreeChangeHandler(),
         }),
       ),
@@ -1195,6 +1195,16 @@ export class PtahAPIBuilder {
     ].filter((root) => typeof root === 'string' && root.trim() !== '');
   }
 
+  private resolveCodexCallerId(raw: string): string {
+    try {
+      return this.codexChatSessions?.resolveLiveSessionId?.(raw) ?? raw;
+    } catch (error: unknown) {
+      // degradation-audit: reported - preserve the transport-bound caller when lookup fails.
+      this.logger.debug('[PtahAPIBuilder] Codex caller lookup failed', error);
+      return raw;
+    }
+  }
+
   /**
    * Session id of the session that issued the current MCP call. The request
    * context carries the caller's tab id (or its session id). Only a proved
@@ -1206,16 +1216,6 @@ export class PtahAPIBuilder {
    * a lookup that throws) yields `undefined` and is logged. Never throws:
    * callers treat an unresolved caller as unattributed.
    */
-  private resolveCodexCallerId(raw: string): string {
-    try {
-      return this.codexChatSessions?.resolveLiveSessionId?.(raw) ?? raw;
-    } catch (error: unknown) {
-      // degradation-audit: reported - preserve the transport-bound caller when lookup fails.
-      this.logger.debug('[PtahAPIBuilder] Codex caller lookup failed', error);
-      return raw;
-    }
-  }
-
   private resolveCallerSdkSessionId(): string | undefined {
     const callerId = getCallerSessionId();
     if (!callerId) {

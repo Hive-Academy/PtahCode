@@ -38,13 +38,13 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
 
   getAttempt(agentId: string, port: number): McpAttachmentAttempt | undefined {
     const key = this.key(agentId, port);
-    const attempt = this.attempts.get(key) ?? this.rejectedAttempts.get(key);
-    if (attempt && Date.now() - attempt.time > RETENTION_MS) {
+    const authenticated = this.attempts.get(key);
+    if (authenticated && Date.now() - authenticated.time > RETENTION_MS)
       this.attempts.delete(key);
+    const rejected = this.rejectedAttempts.get(key);
+    if (rejected && Date.now() - rejected.time > RETENTION_MS)
       this.rejectedAttempts.delete(key);
-      return undefined;
-    }
-    return attempt;
+    return this.attempts.get(key) ?? this.rejectedAttempts.get(key);
   }
 
   recordAttempt(attempt: McpAttachmentAttempt): void {

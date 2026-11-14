@@ -297,6 +297,7 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       if (!existing) return { refused: 'storage-unavailable' };
       if (this.isParentFrozen(existing.parentSessionId))
         return { refused: 'parent-session-deleted' };
+      if (existing.state === 'delivered' || existing.state === 'cancelled') return existing;
       return this.cancelLocked(existing);
     });
   }
@@ -377,9 +378,14 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       const keys = await this.readCompletionKeysLocked(parentSessionId);
       if (!keys.some((item) => item.dedupeKey === dedupeKey)) {
         const key = ParentCompletionKeySchema.parse({ dedupeKey, state: 'cancelled', at: Date.now() });
-        await this.storage.update(this.completionKeysKey(parentSessionId), {
-          version: 1, keys: [...keys, key],
-        });
+        try {
+          await this.storage.update(this.completionKeysKey(parentSessionId), {
+            version: 1, keys: [...keys, key],
+          });
+        } catch (error: unknown) {
+          this.logger.error('[ParentEnvelopeStore] Consumed completion key persist failed', this.error(error));
+          return;
+        }
       }
       await this.removeCompletionOutboxLocked(parentSessionId, dedupeKey);
     });

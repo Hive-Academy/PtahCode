@@ -50,3 +50,7 @@ export async function reconcilePendingCompletionRead(
 export function wasTerminalReadAcknowledged(key: string): boolean {
   return acknowledged.has(key);
 }
+
+export function clearPendingCompletionRead(key: string): void {
+  pendingCancellation.delete(key);
+}
