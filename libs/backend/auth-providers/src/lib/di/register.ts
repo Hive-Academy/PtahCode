@@ -222,7 +222,7 @@ function registerProviderAccountServices(container: DependencyContainer): void {
     useFactory: instanceCachingFactory<ClaudeAccountSelectionReader>((c) =>
       c.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)
         ? c.resolve(ProviderAccountService)
-        : { readStoredSelection: async () => ({ profileId: null }) },
+        : { readStoredSelection: async () => ({ profileId: null, revision: -1 }) },
     ),
   });
   container.register(ProviderAccountActionsService, {

@@ -241,7 +241,7 @@ export interface ClaudeAccountSelectionReader {
   readStoredSelection(
     workspaceRoot: string,
     scope: ProviderAccountScope,
-  ): Promise<{ readonly profileId: string | null }>;
+  ): Promise<{ readonly profileId: string | null; readonly revision?: number }>;
 }
 
 /** Safe refusal. `summary` is not validated in this declaration file. */

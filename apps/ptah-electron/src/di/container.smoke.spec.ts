@@ -570,7 +570,10 @@ describe('Electron DI — named Claude account persistence (TASK_2026_719 B17)',
       ProviderAccountService,
       {
         useValue: {
-          readStoredSelection: jest.fn(async () => ({ profileId: null })),
+          readStoredSelection: jest.fn(async () => ({
+            profileId: null,
+            revision: -1,
+          })),
         },
       },
     );

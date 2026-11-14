@@ -798,8 +798,8 @@ describe('ProviderAccountStore transactions', () => {
       add();
       a.select(root, 'lane', profileId, -1, 0);
       const facade = accountService(a);
-      await expect(facade.readStoredSelection(root, 'lane')).resolves.toEqual({ profileId });
-      await expect(facade.readStoredSelection(root, 'main')).resolves.toEqual({ profileId: null });
+      await expect(facade.readStoredSelection(root, 'lane')).resolves.toEqual({ profileId, revision: 0 });
+      await expect(facade.readStoredSelection(root, 'main')).resolves.toEqual({ profileId: null, revision: -1 });
     });
   });
 

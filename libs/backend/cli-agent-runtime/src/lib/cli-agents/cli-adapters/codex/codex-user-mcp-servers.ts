@@ -101,9 +101,10 @@
  * throws: a lane must not fail to start because a user config is odd.
  */
 
-import { readFileSync, realpathSync, statSync } from 'fs';
+import { realpathSync, statSync } from 'fs';
+import { worktreeMainRoot } from '../../git-main-checkout-root';
 import { readFile } from 'fs/promises';
-import { basename, dirname, join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 import {
   CodexTomlMcpFacet,
   codexProjectTrusted,
@@ -273,34 +274,6 @@ function findGitRoot(start: string): string | null {
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
-  }
-}
-
-/**
- * For a git worktree, the main repository's root; otherwise `null`.
- *
- * A worktree's `.git` is a file, `gitdir: <main>/.git/worktrees/<name>`, and
- * that directory's `commondir` names the shared `<main>/.git`. A `.git` file
- * with no `commondir` (a submodule) or anything unreadable gives `null`: the
- * reader then trusts less, never more.
- */
-function worktreeMainRoot(gitRoot: string): string | null {
-  const marker = join(gitRoot, GIT_ENTRY);
-  try {
-    if (!statSync(marker).isFile()) return null;
-    const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(marker, 'utf-8'));
-    if (pointer === null) return null;
-    const gitDir = resolve(gitRoot, pointer[1].trim());
-    const common = resolve(
-      gitDir,
-      readFileSync(join(gitDir, 'commondir'), 'utf-8').trim(),
-    );
-    return basename(common) === GIT_ENTRY ? dirname(common) : null;
-  } catch {
-    // degradation-audit: optional-capability - a worktree pointer that cannot
-    // be followed only loses the main-root trust path; untrusted is the safe
-    // direction (see the file header).
-    return null;
   }
 }
 
