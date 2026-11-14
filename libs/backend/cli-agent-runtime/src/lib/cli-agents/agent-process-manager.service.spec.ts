@@ -1345,6 +1345,66 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     });
   });
 
+  describe('permission routing (TASK_2026_1172, R1.1)', () => {
+    it('stores the requested permission for Claude spawn', async () => {
+      setTimeout(() => sdkControls.resolve(0), 10);
+      const result = await manager.spawn({
+        task: 'Task',
+        cli: 'claude',
+        workingDirectory: '/workspace/root',
+        permission: 'ask',
+      });
+
+      expect(result.effectivePolicy?.permission).toBe('ask');
+    });
+
+    it('stores the requested permission for Codex spawn', async () => {
+      setTimeout(() => sdkControls.resolve(0), 10);
+      const result = await manager.spawn({
+        task: 'Task',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+        permission: 'auto-edit',
+      });
+
+      expect(result.effectivePolicy?.permission).toBe('auto-edit');
+    });
+
+    it('stores the requested permission for spawn with plan mode', async () => {
+      setTimeout(() => sdkControls.resolve(0), 10);
+      const result = await manager.spawn({
+        task: 'Task',
+        cli: 'claude',
+        workingDirectory: '/workspace/root',
+        permission: 'plan',
+      });
+
+      expect(result.effectivePolicy?.permission).toBe('plan');
+    });
+
+    it('preserves the stored permission on resume', async () => {
+      setTimeout(() => sdkControls.resolve(0), 10);
+      const firstSpawn = await manager.spawn({
+        task: 'Initial task',
+        cli: 'claude',
+        workingDirectory: '/workspace/root',
+        permission: 'ask',
+      });
+      const cliSessionId = firstSpawn.cliSessionId ?? 'fallback-session';
+
+      setTimeout(() => {
+        sdkControls.resolve(0);
+      }, 10);
+      const resumed = await manager.spawn({
+        task: 'Resume task',
+        resumeSessionId: cliSessionId,
+        workingDirectory: '/workspace/root',
+      });
+
+      expect(resumed.effectivePolicy?.permission).toBe('ask');
+    });
+  });
+
   describe('resume gate (TASK_2026_597, R9.1)', () => {
     const SESSION = 'thread-1';
 
