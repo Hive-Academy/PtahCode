@@ -281,12 +281,9 @@ export class SkillClonesStateService {
     list: CloneSummary[],
     epoch: number,
   ): Promise<void> {
+    // No early return on an empty slug list: phase scorecards depend only on
+    // the workspace, so the call runs even when no agent clone exists.
     const slugs = list.filter((c) => c.kind === 'agent').map((c) => c.slug);
-    if (slugs.length === 0) {
-      this.scorecards.set({});
-      this.phaseScorecardsState.set([]);
-      return;
-    }
     try {
       const result = await this.rpc.getScorecards(slugs);
       if (epoch === this.listEpoch) {

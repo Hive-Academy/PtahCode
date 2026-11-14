@@ -83,6 +83,14 @@ const AttributionRowSchema = z.object({
   executor_kind: z.string().nullable().optional().transform((value) => value ?? null),
 });
 type RawAttribution = z.infer<typeof AttributionRowSchema>;
+const PhaseAttributionRowSchema = AttributionRowSchema.extend({
+  fallback_session_id: z.string().nullable(),
+});
+const SessionLinkRowSchema = z.object({
+  workspace_root: z.string().nullable(),
+  session_id: z.string(),
+  task_id: z.string().nullable(),
+});
 
 function toPhaseKind(value: string | null): PhaseKind | null {
   return PHASE_KINDS.find((kind) => kind === value) ?? null;
@@ -236,22 +244,37 @@ export class SkillTaskGradeStore {
       if (!rows.some((event) => event.kind === row.kind && event.slug === row.slug && event.run_id === row.run_id)) rows.push(row);
     }
     // Phase rows: every executor kind. An unknown phase kind reads as null and is dropped.
+    // A taskless row is attributed through its parent session link, matched in code so
+    // both workspace roots go through normalizeWorkspaceRoot.
+    const linkedSessions = this.sessionsLinkedOnlyTo(taskId, normalizedRoot);
     const phaseRows = this.db.prepare(`SELECT 'phase' AS kind, phase_kind AS slug,
       run_id, subagent_session_id AS session_id, 'run:' || run_id AS attribution_key,
-      final_review, workspace_root, phase_kind, executor_kind FROM lane_outcome_records
-      WHERE (task_id = ? OR (task_id IS NULL AND parent_session_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM session_task_links s
-        WHERE s.workspace_root = lane_outcome_records.workspace_root
-          AND s.session_id = lane_outcome_records.parent_session_id AND s.task_id = ?
-          AND NOT EXISTS (SELECT 1 FROM session_task_links other
-            WHERE other.workspace_root = s.workspace_root AND other.session_id = s.session_id
-              AND other.task_id <> s.task_id)
-      ))) AND phase_kind IS NOT NULL AND phase_kind <> ''`).all(taskId, taskId)
-      .map((row) => this.parseRow(AttributionRowSchema, row))
+      final_review, workspace_root, phase_kind, executor_kind,
+      CASE WHEN task_id IS NULL THEN parent_session_id ELSE NULL END AS fallback_session_id
+      FROM lane_outcome_records
+      WHERE (task_id = ? OR (task_id IS NULL AND parent_session_id IS NOT NULL
+        AND parent_session_id IN (SELECT session_id FROM session_task_links WHERE task_id = ?)))
+        AND phase_kind IS NOT NULL AND phase_kind <> ''`).all(taskId, taskId)
+      .map((row) => this.parseRow(PhaseAttributionRowSchema, row))
       .filter((row) => row.phase_kind !== null
-        && row.workspace_root !== null && normalizeWorkspaceRoot(row.workspace_root) === normalizedRoot);
+        && row.workspace_root !== null && normalizeWorkspaceRoot(row.workspace_root) === normalizedRoot
+        && (row.fallback_session_id === null || linkedSessions.has(row.fallback_session_id)));
     rows.push(...phaseRows);
     return groupGradeAttributions(rows);
+  }
+
+  /**
+   * Session ids whose task links in this workspace name only `taskId`. Roots are
+   * compared after normalizeWorkspaceRoot, so spelling differences still match.
+   */
+  private sessionsLinkedOnlyTo(taskId: string, normalizedRoot: string): Set<string> {
+    const links = this.db.prepare(`SELECT workspace_root, session_id, task_id FROM session_task_links
+      WHERE session_id IN (SELECT session_id FROM session_task_links WHERE task_id = ?)`).all(taskId)
+      .map((row) => this.parseRow(SessionLinkRowSchema, row))
+      .filter((row) => row.workspace_root !== null && normalizeWorkspaceRoot(row.workspace_root) === normalizedRoot);
+    const linked = new Set(links.filter((row) => row.task_id === taskId).map((row) => row.session_id));
+    for (const row of links) if (row.task_id !== null && row.task_id !== taskId) linked.delete(row.session_id);
+    return linked;
   }
 
   /** Digest the facts that can change a task's grades, independent of query order. */

@@ -409,13 +409,28 @@ describe('SkillClonesStateService', () => {
     expect(svc.phaseScorecards()).toEqual([phase, legacy]);
   });
 
-  it('skips the scorecard RPC entirely when no agent clones exist', async () => {
+  it('still loads phase scorecards when no agent clones exist', async () => {
     const rpc = makeRpc();
+    const phase: PhaseScorecard = {
+      phaseKind: 'tests',
+      source: 'phase',
+      legacy: false,
+      aliasedRoles: [],
+      gradedCount: 1,
+      passedCount: 1,
+      gradedSuccessRate: 1,
+    };
     rpc.listClones.mockResolvedValueOnce(listed([clone({ kind: 'skill' })]));
+    rpc.getScorecards.mockResolvedValueOnce({
+      scorecards: {},
+      phaseScorecards: [phase],
+    });
     const { svc } = setup(rpc);
     await svc.refreshClones();
-    expect(rpc.getScorecards).not.toHaveBeenCalled();
+    expect(rpc.getScorecards).toHaveBeenCalledTimes(1);
+    expect(rpc.getScorecards).toHaveBeenCalledWith([]);
     expect(svc.scorecards()).toEqual({});
+    expect(svc.phaseScorecards()).toEqual([phase]);
     expect(rpc.getAgentOutcomeSignals).not.toHaveBeenCalled();
     expect(svc.agentOutcomeSignals()).toEqual({});
     expect(svc.outcomeWindowDays()).toBeNull();

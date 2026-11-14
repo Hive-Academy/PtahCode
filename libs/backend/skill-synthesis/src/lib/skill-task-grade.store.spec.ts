@@ -277,6 +277,27 @@ maybe('SkillTaskGradeStore', () => {
     } finally { db.close(); }
   });
 
+  it('matches the parent session link of a taskless phase lane after root normalization', () => {
+    const { db, store } = setup();
+    try {
+      setupAttributionTables(db);
+      const insert = db.prepare(`INSERT INTO lane_outcome_records
+        (run_id, parent_session_id, task_id, workspace_root, executor_kind, phase_kind)
+        VALUES (?, ?, NULL, ?, 'cli', 'tests')`);
+      insert.run('slash-lane', 'parent-a', '/workspace/');
+      insert.run('slash-link', 'parent-b', '/workspace');
+      insert.run('ambiguous', 'parent-c', '/workspace/');
+      const link = db.prepare('INSERT INTO session_task_links (workspace_root, session_id, task_id) VALUES (?, ?, ?)');
+      link.run('/workspace', 'parent-a', grade.taskId);
+      link.run('/workspace/', 'parent-b', grade.taskId);
+      link.run('/workspace', 'parent-b', null);
+      link.run('/workspace', 'parent-c', grade.taskId);
+      link.run('/workspace//', 'parent-c', 'TASK_2026_002');
+      const keys = store.findAttributions(grade.taskId, '/workspace').map((row) => row.attributionKey).sort();
+      expect(keys).toEqual(['run:slash-lane', 'run:slash-link']);
+    } finally { db.close(); }
+  });
+
   it('stores and reads the phase and executor keys on a grade', () => {
     const { db, store } = setup();
     try {
