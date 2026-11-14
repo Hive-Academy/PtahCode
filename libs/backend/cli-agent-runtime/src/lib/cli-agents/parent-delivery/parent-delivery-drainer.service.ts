@@ -120,6 +120,10 @@ export class ParentDeliveryDrainerService {
     return result;
   }
 
+  async consumeCompletion(parentSessionId: string, dedupeKey: string): Promise<void> {
+    await this.store.consumeCompletion(parentSessionId, dedupeKey);
+  }
+
   async retry(
     id: string,
     options: { confirmDuplicateRisk?: boolean } = {},

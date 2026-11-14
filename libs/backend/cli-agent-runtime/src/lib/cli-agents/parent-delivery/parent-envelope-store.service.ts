@@ -297,6 +297,7 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       if (!existing) return { refused: 'storage-unavailable' };
       if (this.isParentFrozen(existing.parentSessionId))
         return { refused: 'parent-session-deleted' };
+      if (existing.state === 'delivered' || existing.state === 'cancelled') return existing;
       return this.cancelLocked(existing);
     });
   }
@@ -343,6 +344,8 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
     await this.restore();
     return this.serialize(async () => {
       const validated = ParentCompletionOutboxEntrySchema.parse(entry);
+      const keys = await this.readCompletionKeysLocked(validated.parentSessionId);
+      if (keys.some((item) => item.dedupeKey === validated.dedupeKey)) return;
       const { entries, malformed } = this.readOutboxShardLocked(validated.parentSessionId);
       const next = [...entries.filter((item) => item.dedupeKey !== validated.dedupeKey), validated];
       await this.storage.update(this.outboxKey(validated.parentSessionId), {
@@ -367,6 +370,25 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
   async removeCompletionOutbox(parentSessionId: string, dedupeKey: string): Promise<void> {
     await this.restore();
     return this.serialize(() => this.removeCompletionOutboxLocked(parentSessionId, dedupeKey));
+  }
+
+  async consumeCompletion(parentSessionId: string, dedupeKey: string): Promise<void> {
+    await this.restore();
+    await this.serialize(async () => {
+      const keys = await this.readCompletionKeysLocked(parentSessionId);
+      if (!keys.some((item) => item.dedupeKey === dedupeKey)) {
+        const key = ParentCompletionKeySchema.parse({ dedupeKey, state: 'cancelled', at: Date.now() });
+        try {
+          await this.storage.update(this.completionKeysKey(parentSessionId), {
+            version: 1, keys: [...keys, key],
+          });
+        } catch (error: unknown) {
+          this.logger.error('[ParentEnvelopeStore] Consumed completion key persist failed', this.error(error));
+          return;
+        }
+      }
+      await this.removeCompletionOutboxLocked(parentSessionId, dedupeKey);
+    });
   }
 
   async isCompletionSatisfied(parentSessionId: string, dedupeKey: string): Promise<boolean> {

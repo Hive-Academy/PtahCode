@@ -54,6 +54,7 @@ export {
   sessionChildVerdictOf,
   checkLaneDeliverable,
 } from './lane-completion-notifier.service';
+export { acknowledgeTerminalRead, reconcilePendingCompletionRead, wasTerminalReadAcknowledged } from './completion-read-ack';
 export type {
   LaneCompletionContext,
   DeliverableTarget,

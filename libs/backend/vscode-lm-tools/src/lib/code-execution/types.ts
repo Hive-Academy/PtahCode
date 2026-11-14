@@ -312,6 +312,9 @@ export interface FilesNamespace {
  * Supports fire-and-check async delegation pattern.
  */
 export interface AgentNamespace {
+  /** Resolve a transport caller ID to the parent ID stored on spawned lanes. */
+  resolveCallerParentId?: (rawCallerId: string) => string;
+
   /**
    * Spawn a CLI agent with a task
    * @param request - Spawn configuration (task, cli, timeout, files, taskFolder)

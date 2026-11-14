@@ -771,9 +771,9 @@ export class PtahAPIBuilder {
             try {
               const rec =
                 this.sdkSessionLifecycleManager?.find(tabIdOrSessionId);
-              return rec?.realSessionId ?? tabIdOrSessionId;
+              return rec?.realSessionId ?? this.resolveCodexCallerId(tabIdOrSessionId);
             } catch {
-              return tabIdOrSessionId;
+              return this.resolveCodexCallerId(tabIdOrSessionId);
             }
           },
           getParentLevel: (tabIdOrSessionId: string) =>
@@ -1081,7 +1081,10 @@ export class PtahAPIBuilder {
         buildSessionNamespace({
           getSpawner: () => this.resolveSessionSpawner(),
           getHandoff: () => this.resolveSessionHandoff(),
-          getCallerSessionId,
+          getCallerSessionId: () => {
+            const raw = getCallerSessionId();
+            return raw ? this.resolveCodexCallerId(raw) : raw;
+          },
           onWorktreeChanged: this.buildWorktreeChangeHandler(),
         }),
       ),
@@ -1190,6 +1193,16 @@ export class PtahAPIBuilder {
       ...(sessionRoot ? [sessionRoot] : []),
       ...this.workspaceProvider.getWorkspaceFolders(),
     ].filter((root) => typeof root === 'string' && root.trim() !== '');
+  }
+
+  private resolveCodexCallerId(raw: string): string {
+    try {
+      return this.codexChatSessions?.resolveLiveSessionId?.(raw) ?? raw;
+    } catch (error: unknown) {
+      // degradation-audit: reported - preserve the transport-bound caller when lookup fails.
+      this.logger.debug('[PtahAPIBuilder] Codex caller lookup failed', error);
+      return raw;
+    }
   }
 
   /**

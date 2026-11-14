@@ -1161,6 +1161,10 @@ describe('HTTP caller authentication', () => {
     );
     expect(status).toBe(403);
     expect(body).not.toContain(token);
+    const attempt = mcpAttachmentObserver.getAttempt('other', port);
+    expect(attempt).toMatchObject({ agentId: 'other', port, reason: 'forbidden', method: 'POST' });
+    expect(Object.keys(attempt ?? {})).toEqual(['agentId', 'port', 'reason', 'method', 'time']);
+    expect(JSON.stringify(attempt)).not.toContain(token);
     expect(JSON.parse(body)).toEqual({
       jsonrpc: '2.0',
       id: null,
