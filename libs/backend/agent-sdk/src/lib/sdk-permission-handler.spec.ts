@@ -1987,7 +1987,9 @@ describe('CLI lane callback level override', () => {
     });
     await flushMicrotasks();
     abort.abort();
-    await expect(pending).resolves.toMatchObject({ behavior: 'deny' });
+    await expect(pending).resolves.toMatchObject({
+      behavior: 'deny', message: expect.stringContaining('BLOCKED: plan mode'),
+    });
     expect(sent.filter((message) => message.type === MESSAGE_TYPES.PERMISSION_REQUEST ||
       message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST)).toEqual([]);
   });

@@ -113,6 +113,11 @@ interface PendingRequest {
  */
 const CLI_AGENT_PERMISSION_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** Refusal a Plan-mode CLI lane gets for a write or shell tool. */
+const LANE_PLAN_MODE_REFUSAL =
+  'BLOCKED: plan mode. This lane is read-only and no approval prompt will appear. ' +
+  'Stop and report "BLOCKED: plan mode" with the reason in your final message.';
+
 /**
  * Lifecycle of one user-facing permission prompt, observed out-of-band by
  * hosts that own a surface the webview cannot reach — the messaging gateway
@@ -683,6 +688,26 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       const effectiveLevel = levelResolver
         ? levelResolver()
         : this._permissionLevel;
+
+      // A CLI lane in Plan mode never gets an approval prompt for a write or
+      // shell tool: nobody watches a lane prompt, so it would only look like a
+      // pending approval. Refuse it explicitly. Interactive sessions pass no
+      // cliAgentResolver and keep the SDK's own plan-mode handling.
+      if (
+        effectiveLevel === 'plan' &&
+        cliAgentResolver &&
+        (DANGEROUS_TOOLS.includes(toolName) ||
+          AUTO_EDIT_TOOLS.includes(toolName))
+      ) {
+        this.logger.info(
+          `[SdkPermissionHandler] Plan mode: refused lane tool: ${toolName}`,
+        );
+        return {
+          behavior: 'deny' as const,
+          message: LANE_PLAN_MODE_REFUSAL,
+          interrupt: false,
+        };
+      }
 
       if (effectiveLevel === 'yolo') {
         this.logger.info(
