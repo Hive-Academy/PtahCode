@@ -142,7 +142,7 @@ interface ThothTabSpec {
             <button
               type="button"
               role="tab"
-              class="flex min-w-[8.5rem] flex-col gap-[var(--ptah-gap-controls)] rounded-xl p-[var(--ptah-surface-pad)] text-left transition-colors duration-150 lg:min-w-0"
+              class="flex min-w-[8.5rem] flex-col gap-[var(--ptah-gap-controls)] rounded-xl px-[var(--ptah-surface-pad)] py-[var(--ptah-space-3)] text-left transition-colors duration-150 lg:min-w-0"
               [class.surface-3]="isActive"
               [class.hover:bg-surface-2]="!isActive"
               [class.opacity-70]="!status.available"
@@ -182,7 +182,7 @@ interface ThothTabSpec {
               </div>
 
               @if (status.available) {
-                <div class="flex items-baseline gap-[var(--ptah-gap-controls)] pl-6">
+                <div class="flex items-baseline gap-[var(--ptah-space-1)] pl-6">
                   <span
                     data-testid="dashboard-status-card-value"
                     class="text-xl font-semibold leading-none"
