@@ -68,7 +68,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
   template: `
     @if (!isElectron) {
       <div
-        class="flex flex-col items-center gap-2 px-6 py-16 text-center"
+        class="flex flex-col items-center gap-[var(--ptah-gap-field)] py-16 text-center"
         role="alert"
       >
         <lucide-angular
@@ -89,12 +89,12 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
         >
       </div>
     } @else {
-      <div class="space-y-6" data-testid="messaging-gateway-section">
+      <div class="flex flex-col gap-[var(--ptah-gap-section)]" data-testid="messaging-gateway-section">
         <header
           ptahSurface variant="surface-1" padding="lg"
-          class="flex flex-wrap items-start justify-between gap-3 rounded-2xl"
+          class="flex flex-wrap items-start justify-between gap-[var(--ptah-gap-field)] rounded-2xl"
         >
-          <div class="flex items-start gap-3">
+          <div class="flex items-start gap-[var(--ptah-gap-field)]">
             <span
               class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl border border-surface-border bg-surface-2 text-secondary"
             >
@@ -118,9 +118,9 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
               </p>
             </div>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-[var(--ptah-gap-controls)]">
             <span
-              class="inline-flex items-center gap-1.5 text-xs text-base-content-muted"
+            class="inline-flex items-center gap-[var(--ptah-gap-controls)] text-xs text-base-content-muted"
             >
               <span
                 class="inline-block size-1.5 rounded-full"
@@ -164,14 +164,14 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
           <div
             role="status"
             aria-live="polite"
-            class="rounded-xl border p-3"
+            class="rounded-xl border p-[var(--ptah-surface-pad)]"
             [class.border-base-300]="!v.error"
             [class.bg-base-200/40]="!v.error"
             [class.border-error/40]="!!v.error"
             [class.bg-error/10]="!!v.error"
           >
-            <div class="flex items-start gap-3">
-              <div class="flex flex-1 flex-col gap-1.5">
+            <div class="flex items-start gap-[var(--ptah-gap-field)]">
+              <div class="flex flex-1 flex-col gap-[var(--ptah-gap-heading)]">
                 <span class="text-xs">
                   @if (v.error) {
                     Failed to download Whisper model
@@ -208,7 +208,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
         }
 
         <div
-          class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3"
+          class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-[var(--ptah-gap-field)]"
           aria-label="Gateway statistics"
         >
           <ptah-stat layout="tile" radius="2xl" label="Adapters running" [value]="runningCount()" valueTone="success" data-testid="gateway-stat-running">
@@ -225,7 +225,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
 
           <!-- Raw tile: ptah-stat info maps to state-run, which differs from theme text-info. -->
           <div data-testid="gateway-stat-voice" class="stats surface-2 min-w-0 overflow-hidden rounded-2xl">
-            <div class="stat min-w-0 overflow-hidden p-4">
+            <div class="stat min-w-0 overflow-hidden p-[var(--ptah-surface-pad)]">
               <div class="stat-figure text-info">
                 <lucide-angular
                   [img]="MicIcon"
@@ -247,7 +247,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
           aria-label="Platform configuration"
         >
           <div
-            class="flex flex-wrap items-center justify-between gap-3 border-b border-surface-border px-3 py-2.5 sm:px-4"
+            class="flex flex-wrap items-center justify-between gap-[var(--ptah-gap-controls)] border-b border-surface-border p-[var(--ptah-surface-pad)]"
           >
             <ptah-gateway-platform-tabs
               [platforms]="platforms()"
@@ -256,7 +256,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
             />
           </div>
 
-          <div class="px-5 py-5 sm:px-6 sm:py-6">
+          <div class="p-[var(--ptah-surface-pad)]">
             @for (cfg of platformCards; track cfg.id) {
               <div
                 role="tabpanel"
@@ -271,10 +271,10 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
         </section>
 
         <section
-          class="surface-1 rounded-2xl p-5 sm:p-6"
+          class="surface-1 rounded-2xl p-[var(--ptah-surface-pad)]"
           aria-label="Voice and rate-limit settings"
         >
-          <div class="space-y-1">
+          <div class="flex flex-col gap-[var(--ptah-gap-heading)]">
             <h2 class="text-sm font-semibold">Voice & rate limits</h2>
             <p class="text-xs text-base-content-muted">
               Read-only — configure these in
@@ -282,7 +282,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
             </p>
           </div>
           <div
-            class="mt-4 grid gap-x-8 gap-y-2 rounded-lg border border-surface-border bg-surface-2 p-4 font-mono text-xs sm:grid-cols-2"
+            class="mt-4 grid gap-x-[var(--ptah-gap-group)] gap-y-[var(--ptah-gap-controls)] rounded-lg border border-surface-border bg-surface-2 p-[var(--ptah-surface-pad)] font-mono text-xs sm:grid-cols-2"
           >
             <p>
               gateway.voice.enabled =

@@ -933,12 +933,7 @@
   },
   "libs/frontend/messaging-gateway-ui/src/lib/components/platform-bindings-panel.component.ts": {
     "alert": 1,
-    "alert-error": 1,
-    "btn": 4,
-    "btn-ghost": 3,
-    "btn-outline": 1,
-    "btn-success": 1,
-    "btn-xs": 4
+    "alert-error": 1
   },
   "libs/frontend/notification-center/src/lib/notification-center.component.ts": {
     "btn": 3,

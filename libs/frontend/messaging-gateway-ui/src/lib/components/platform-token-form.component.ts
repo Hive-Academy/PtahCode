@@ -8,17 +8,16 @@ import {
 import type { GatewayPlatformId } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
-import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-platform-token-form',
   standalone: true,
-  imports: [PtahButtonDirective, PtahInputDirective],
+  imports: [PtahButtonDirective, PtahFieldComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <form class="flex flex-col gap-3" (submit)="onSubmit($event)">
-      <label class="flex flex-col gap-1">
-        <span class="text-xs text-base-content-muted">Bot token</span>
+    <form class="flex flex-col gap-[var(--ptah-gap-field)]" (submit)="onSubmit($event)">
+      <ptah-field label="Bot token" appearance="stacked" hint="Paste the bot token for this platform.">
         <input
           type="password"
           autocomplete="new-password"
@@ -34,13 +33,10 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
           (input)="onTokenInput('bot', $event)"
           [attr.aria-label]="label() + ' bot token'"
         />
-      </label>
+      </ptah-field>
 
       @if (hasAppToken()) {
-        <label class="flex flex-col gap-1">
-          <span class="text-xs text-base-content-muted">
-            App-level token (xapp-...)
-          </span>
+        <ptah-field label="App-level token (xapp-...)" appearance="stacked" hint="Required for Slack socket mode.">
           <input
             type="password"
             autocomplete="new-password"
@@ -56,10 +52,10 @@ import { PtahButtonDirective, PtahInputDirective } from '@ptah-extension/ui';
             (input)="onTokenInput('app', $event)"
             [attr.aria-label]="label() + ' app-level token'"
           />
-        </label>
+        </ptah-field>
       }
 
-      <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center justify-between gap-[var(--ptah-gap-controls)]">
         <span class="text-xs text-base-content-muted">
           Tokens are encrypted by the OS keychain and never persisted in the
           renderer.
