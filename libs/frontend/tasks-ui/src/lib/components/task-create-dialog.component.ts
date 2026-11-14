@@ -1,17 +1,14 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  DestroyRef,
   ElementRef,
   afterNextRender,
   computed,
-  inject,
   input,
   output,
   signal,
   viewChild,
 } from '@angular/core';
-import { DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   TASK_STATUSES,
@@ -21,6 +18,7 @@ import {
 } from '@ptah-extension/shared';
 import { TASK_STATUS_LABELS } from '../task-presentation';
 import {
+  NativeModalComponent,
   PtahButtonDirective,
   PtahFieldComponent,
   PtahInputDirective,
@@ -37,9 +35,6 @@ export interface TaskCreateDraft {
   readonly description: string;
 }
 
-const FOCUSABLE =
-  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])';
-
 /**
  * TaskCreateDialogComponent
  *
@@ -47,9 +42,7 @@ const FOCUSABLE =
  * validation, Cancel/Create.
  *
  * The parent renders it inside an `@if`, so opening is construction and
- * closing is destruction. Construction captures the element that opened it;
- * destruction gives focus back to that element. Tab is trapped inside the box
- * and Escape cancels, unless a create is in flight.
+ * closing is destruction. The native modal owns focus trapping and restoration.
  *
  * It does not call the store: `submitted` carries the draft and the parent
  * owns the write and closes the dialog only when the host accepted it.
@@ -63,27 +56,29 @@ const FOCUSABLE =
     PtahInputDirective,
     PtahSelectDirective,
     PtahTextareaDirective,
+    NativeModalComponent,
     FormsModule,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(keydown)': 'onKeyDown($event)' },
+  host: { '(click)': 'onClick($event)' },
   template: `
-    <dialog
-      class="modal modal-open"
-      aria-labelledby="task-create-title"
+    <ptah-native-modal
+      [isOpen]="true"
+      ariaLabelledby="task-create-title"
+      size="sm"
       data-testid="tasks-create-dialog"
+      (closed)="cancelIfIdle()"
     >
-      <div
-        #box
-        class="modal-box max-w-md bg-surface-2 border border-surface-border rounded-box p-5 text-base-content shadow-[var(--elev-shadow-raised)]"
-      >
-        <h2 id="task-create-title" class="mb-4 text-lg font-semibold">
+        <h2 modal-header id="task-create-title" class="mb-[var(--ptah-gap-heading)] text-lg font-semibold">
           New Task
         </h2>
 
-        <form class="flex flex-col gap-3" (ngSubmit)="submit()">
-          <div>
-            <ptah-field label="Title">
+        <form class="flex flex-col gap-[var(--ptah-gap-field)]" (ngSubmit)="submit()" (keydown.escape)="preventBusyEscape($event)">
+            <ptah-field
+              label="Title"
+              [error]="titleError() ? 'A task needs a title.' : null"
+              [attr.data-testid]="titleError() ? 'tasks-create-title-error' : null"
+            >
               <input
                 #titleInput
                 type="text"
@@ -93,26 +88,13 @@ const FOCUSABLE =
                 aria-label="Task title"
                 data-testid="tasks-create-title"
                 [invalid]="!!titleError()"
-                [attr.aria-describedby]="
-                  titleError() ? 'task-create-title-error' : null
-                "
                 [ngModel]="title()"
                 (ngModelChange)="title.set($event)"
                 (blur)="touched.set(true)"
               />
             </ptah-field>
-            @if (titleError()) {
-              <span
-                id="task-create-title-error"
-                class="mt-1 text-sm text-error"
-                data-testid="tasks-create-title-error"
-              >
-                A task needs a title.
-              </span>
-            }
-          </div>
 
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-2 gap-[var(--ptah-gap-controls)]">
             <ptah-field label="Type">
               <select
                 name="type"
@@ -156,7 +138,7 @@ const FOCUSABLE =
             ></textarea>
           </ptah-field>
 
-          <div class="mt-2 flex justify-end gap-2">
+          <div class="mt-[var(--ptah-gap-group)] flex justify-end gap-[var(--ptah-gap-controls)]">
             <button
               type="button"
               ptahButton
@@ -184,15 +166,7 @@ const FOCUSABLE =
             </button>
           </div>
         </form>
-      </div>
-      <button
-        type="button"
-        class="modal-backdrop"
-        tabindex="-1"
-        aria-label="Close"
-        (click)="cancelIfIdle()"
-      ></button>
-    </dialog>
+    </ptah-native-modal>
   `,
 })
 export class TaskCreateDialogComponent {
@@ -222,16 +196,11 @@ export class TaskCreateDialogComponent {
     () => this.touched() && !this.canCreate(),
   );
 
-  private readonly box = viewChild.required<ElementRef<HTMLElement>>('box');
   private readonly titleInput =
     viewChild.required<ElementRef<HTMLInputElement>>('titleInput');
 
   public constructor() {
-    const opener = inject(DOCUMENT).activeElement;
     afterNextRender(() => this.titleInput().nativeElement.focus());
-    inject(DestroyRef).onDestroy(() => {
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
-    });
   }
 
   protected statusLabel(status: TaskStatus): string {
@@ -263,30 +232,13 @@ export class TaskCreateDialogComponent {
     if (!this.creating()) this.cancelled.emit();
   }
 
-  protected onKeyDown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      this.cancelIfIdle();
-      return;
-    }
-    if (event.key === 'Tab') this.trapTab(event);
+  protected preventBusyEscape(event: KeyboardEvent): void {
+    if (this.creating()) event.preventDefault();
   }
 
-  /** Keep Tab and Shift+Tab inside the modal box. */
-  private trapTab(event: KeyboardEvent): void {
-    const focusables = Array.from(
-      this.box().nativeElement.querySelectorAll<HTMLElement>(FOCUSABLE),
-    );
-    if (focusables.length === 0) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (event.shiftKey && event.target === first) {
+  protected onClick(event: MouseEvent): void {
+    if (this.creating() && (event.target as HTMLElement).closest('.modal-backdrop')) {
       event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && event.target === last) {
-      event.preventDefault();
-      first.focus();
     }
   }
 }

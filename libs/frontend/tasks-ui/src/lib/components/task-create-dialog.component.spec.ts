@@ -5,6 +5,19 @@ import {
   type TaskCreateDraft,
 } from './task-create-dialog.component';
 
+beforeAll(() => {
+  if (!HTMLDialogElement.prototype.showModal) {
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.setAttribute('open', '');
+    };
+  }
+  if (!HTMLDialogElement.prototype.close) {
+    HTMLDialogElement.prototype.close = function close() {
+      this.removeAttribute('open');
+    };
+  }
+});
+
 describe('TaskCreateDialogComponent', () => {
   async function render(
     initialStatus: TaskStatus = 'backlog',
@@ -112,9 +125,7 @@ describe('TaskCreateDialogComponent', () => {
       'dialog',
     );
 
-    dialog?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-    );
+    dialog?.dispatchEvent(new Event('cancel'));
     q(fixture, 'tasks-create-cancel')?.click();
 
     expect(cancels).toHaveLength(2);
@@ -124,11 +135,11 @@ describe('TaskCreateDialogComponent', () => {
     const { fixture, drafts, cancels } = await render('backlog', true);
     type(fixture, 'Ship the board');
 
-    (fixture.nativeElement as HTMLElement)
-      .querySelector('dialog')
-      ?.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-      );
+    q(fixture, 'tasks-create-title')?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    (fixture.nativeElement as HTMLElement).querySelector('dialog')?.dispatchEvent(new Event('cancel'));
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.modal-backdrop button')?.click();
     submit(fixture);
 
     expect(cancels).toEqual([]);
@@ -139,6 +150,7 @@ describe('TaskCreateDialogComponent', () => {
   });
 
   it('wraps Tab from the last control back to the first', async () => {
+    jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
     const { fixture } = await render();
     type(fixture, 'Ship the board');
     const submitButton = q<HTMLButtonElement>(fixture, 'tasks-create-submit');
@@ -148,19 +160,21 @@ describe('TaskCreateDialogComponent', () => {
       cancelable: true,
     });
 
+    submitButton?.focus();
     submitButton?.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(q(fixture, 'tasks-create-title'));
+    jest.restoreAllMocks();
   });
 
-  it('uses the dialog surface tokens', async () => {
+  it('uses the native modal with a named title and token spacing', async () => {
     const { fixture } = await render();
-    const box = (fixture.nativeElement as HTMLElement).querySelector(
-      '.modal-box',
-    );
-    expect(box?.className).toContain('bg-surface-2');
-    expect(box?.className).toContain('border-surface-border');
-    expect(box?.className).toContain('shadow-[var(--elev-shadow-raised)]');
+    const modal = q(fixture, 'tasks-create-dialog');
+    const dialog = modal?.querySelector('dialog');
+    expect(dialog?.open).toBe(true);
+    expect(dialog?.getAttribute('aria-labelledby')).toBe('task-create-title');
+    expect(dialog?.querySelector('.modal-box')?.className).toContain('max-w-sm');
+    expect(modal?.querySelector('form.flex')?.className).toContain('gap-[var(--ptah-gap-field)]');
   });
 });
