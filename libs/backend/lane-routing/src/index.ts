@@ -63,7 +63,7 @@ export {
   RouteDecideArgsSchema,
   type RouteDecideArgs,
 } from './lib/contracts/route-decide-args.schema';
-export { resolvePhaseDefinition, PhaseDefinitionError, type PhaseDefinitionErrorCode } from './lib/contracts/phase-definition-resolver';
+export { resolvePhaseDefinition, resolvePhaseDispatch, parsePhaseDispatch, PhaseDefinitionError, type PhaseDefinitionErrorCode } from './lib/contracts/phase-definition-resolver';
 export {
   EXCLUSION_RULES,
   FALLBACK_CAUSES,
@@ -82,7 +82,6 @@ export type {
   LaneModelListing,
 } from './lib/lane-model-listing.port';
 export type { RouteCandidateSource } from './lib/route-candidate-source.port';
-export { BUILTIN_SUBAGENT_ROLES } from './lib/pipeline/phase-plan';
 export { HostRoutingSetting } from './lib/scope/host-routing-setting';
 export { PreflightReuseCache } from './lib/scope/preflight-reuse-cache';
 export {

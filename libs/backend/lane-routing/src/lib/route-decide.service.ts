@@ -67,6 +67,7 @@ import {
   type PhaseResolution,
 } from './pipeline/phase-plan';
 import { isSendable } from './pipeline/phase-resolve';
+import { readCandidateTools } from './pipeline/candidate-tools';
 import type { RoutingCandidate } from './ranking/candidate.types';
 import {
   emptyRotationState,
@@ -242,6 +243,7 @@ export class RouteDecideService implements RotationStateReader {
       nowMs: this.nowMs,
       listingBudgetMs: this.listingBudget,
     });
+    const toolNamesByPhase = await readCandidateTools(args.phases, gathered, source, this.deps.logger);
     const inputRowIds: string[] = [];
     const remember = (candidates: readonly RoutingCandidate[]): void => {
       for (const candidate of candidates) {
@@ -260,6 +262,7 @@ export class RouteDecideService implements RotationStateReader {
       [],
       remember,
       rotate,
+      toolNamesByPhase,
     );
     cursor = pass1.cursor;
     const pass1Run = await this.runPass(
@@ -279,6 +282,7 @@ export class RouteDecideService implements RotationStateReader {
       implementersOf(pass1.plans, resolutions),
       remember,
       rotate,
+      toolNamesByPhase,
     );
     const pass2Run = await this.runPass(
       pass2.plans, args, caller, mode, gathered.matrix.outcomeFigures,

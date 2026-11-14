@@ -16,7 +16,7 @@ import type { GatheredCall } from './gather';
 import type { ModelRequestOutcome } from './model-refine';
 import { usageOf, type UsageTally } from './preflight-answer';
 import type { RoutingCandidate } from '../ranking/candidate.types';
-import type { PhaseConstraintResult } from '../ranking/hard-constraints';
+import type { PhaseConstraintResult, UnavailablePhase } from '../ranking/hard-constraints';
 import type { SpreadResult } from '../ranking/spread';
 import {
   compileGateReasons,
@@ -176,12 +176,16 @@ function choiceFlags(
 }
 
 function executorOf(candidate: RoutingCandidate): ChosenExecutor {
+  if (candidate.kind === 'child-session') {
+    return { kind: 'child-session', id: candidate.id, family: candidate.family };
+  }
   if (candidate.kind === 'subagent') {
     return {
       kind: 'subagent',
       id: candidate.id,
       family: candidate.family,
-      role: candidate.role,
+      ...(candidate.role !== undefined ? { role: candidate.role } : {}),
+      ...(candidate.phaseKind !== undefined ? { phaseKind: candidate.phaseKind } : {}),
     };
   }
   return {
@@ -302,6 +306,13 @@ function reasonAt(
   return reason;
 }
 
+export function missingCapabilityLabel(constraint: UnavailablePhase): string {
+  return constraint.excluded.find(item => item.capability)?.capability
+    ?? constraint.pinRule
+    ?? constraint.exclusionReason
+    ?? 'capability-unknown';
+}
+
 function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
   if (plan.constraint.status !== 'unavailable') {
     throw new Error(`phase ${plan.phaseId} constraint is not unavailable`);
@@ -327,7 +338,11 @@ function unavailableEntry(plan: PhasePlan, reason: string): UnavailableEntry {
     fallbackCause: null,
     reason: orchestratorPhase
       ? `${reason}; No executor; the orchestrator does this phase${plan.constraint.excluded.length ? ` (excluded: ${plan.constraint.excluded.map(item => `${item.candidate}:${item.rule}`).join(', ')})` : ''}`
-      : reason,
+      : plan.constraint.exclusionReason === 'missing-capability' ||
+          plan.constraint.pinRule === 'missing-capability' ||
+          plan.constraint.pinRule === 'capability-unknown'
+        ? `${reason}; missing capability: ${missingCapabilityLabel(plan.constraint)}`
+        : reason,
   };
 }
 

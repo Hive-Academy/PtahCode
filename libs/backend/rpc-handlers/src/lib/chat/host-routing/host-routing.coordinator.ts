@@ -37,7 +37,6 @@ import {
   type SessionIdResolvedPayload,
 } from '@ptah-extension/agent-sdk';
 import {
-  BUILTIN_SUBAGENT_ROLES,
   LANE_ROUTING_TOKENS,
   buildPreflightScopeSummary,
   type DecisionModelConfig,
@@ -50,7 +49,7 @@ import {
   type ScopeCheckService,
   type ScopeConversation,
 } from '@ptah-extension/lane-routing';
-import { buildRouteCandidateSource } from '@ptah-extension/vscode-lm-tools';
+import { buildRouteCandidateSource, IDE_CAPABILITIES_TOKEN } from '@ptah-extension/vscode-lm-tools';
 import type { CliDetectionResult } from '@ptah-extension/shared';
 import { loggableErrorName } from '@ptah-extension/shared';
 import {
@@ -142,7 +141,7 @@ export class HostRoutingCoordinator {
     private readonly setting: Pick<
       HostRoutingSetting,
       'isEnabled' | 'onDidChange' | 'getConfigurationGeneration'
-    >,
+    > & Partial<Pick<HostRoutingSetting, 'disabledMcpNamespaces'>>,
     @inject(LANE_ROUTING_TOKENS.SCOPE_CHECK_SERVICE)
     private readonly scopeCheck: ScopeCheck,
     @inject(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE)
@@ -161,6 +160,8 @@ export class HostRoutingCoordinator {
       isOptional: true,
     })
     sessionIds?: SessionIdRegistry,
+    @inject(IDE_CAPABILITIES_TOKEN, { isOptional: true })
+    private readonly ideCapabilities?: object,
   ) {
     const settingChanges = setting.onDidChange(() => this.onSettingChanged());
     this.releases.push(() => settingChanges.dispose());
@@ -530,6 +531,10 @@ export class HostRoutingCoordinator {
     try {
       this.candidateSource = buildRouteCandidateSource(
         this.apiBuilder.build().agent,
+        () => {
+          const disabledMcpNamespaces = this.setting.disabledMcpNamespaces?.() ?? null;
+          return disabledMcpNamespaces === null ? null : { hasIDECapabilities: this.ideCapabilities !== undefined, disabledMcpNamespaces };
+        },
       );
     } catch (error: unknown) {
       this.reportFailure(null, 'candidates', error);
@@ -685,7 +690,6 @@ async function availableSubagents(
 ): Promise<readonly string[]> {
   const roles = await source.roles();
   return [...new Set(roles)]
-    .filter((role) => BUILTIN_SUBAGENT_ROLES.has(role))
     .slice(0, MAX_CANDIDATE_LABELS);
 }
 

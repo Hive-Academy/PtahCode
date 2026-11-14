@@ -21,7 +21,7 @@
 import { inject, injectable, type DependencyContainer } from 'tsyringe';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 import { isAbsolute, resolve } from 'node:path';
-import { access } from 'node:fs/promises';
+import { access, readFile, realpath } from 'node:fs/promises';
 import {
   SDK_TOKENS,
   SessionAdmissionRefusedError,
@@ -48,6 +48,7 @@ import {
 import {
   PLATFORM_TOKENS,
   isPathWithinRoots,
+  resolveWorkspaceSkillPath,
   type IMcpServerStatus,
   type IMcpSubagentRootRegistrar,
   type IOutputChannel,
@@ -122,6 +123,7 @@ import type {
   SessionChildClearSkipReason,
   SessionChildCompletionDelivery,
   SessionChildCompletionEnvelope,
+  SessionChildEligibility,
   SessionChildLookupRefusal,
   SessionChildQuery,
   SessionChildReadResult,
@@ -207,6 +209,14 @@ interface StartGuardPass {
   readonly host: IChildChatSessionHost;
   readonly settings: SessionChildSettings;
   readonly reservation: SessionChildReservation;
+}
+
+interface StartEligibilityPass {
+  readonly ok: true;
+  readonly caller: SessionId;
+  readonly callerSdkId: string | undefined;
+  readonly adapter: IAgentAdapter;
+  readonly host: IChildChatSessionHost;
 }
 
 @injectable()
@@ -328,47 +338,50 @@ export class SessionSpawnerService implements ISessionSpawner {
     }
   }
 
+  canStart(callerSessionId: string | undefined): SessionChildEligibility {
+    const eligibility = this.checkStartEligibility(callerSessionId);
+    if (!eligibility.ok) return eligibility;
+    const settings = readSessionChildSettings(this.workspace);
+    if (settings.maxConcurrent > 0 && this.registry.liveCount() >= settings.maxConcurrent) {
+      return { ok: false, code: 'cap-reached', reason: `${settings.maxConcurrent} child sessions are already live in this host (agentSessions.maxConcurrent)` };
+    }
+    return { ok: true };
+  }
+
+  /** Shared, read-only checks. Request-specific branch and slot checks follow in start. */
+  private checkStartEligibility(callerSessionId: string | undefined): StartEligibilityPass | Extract<SessionChildEligibility, { ok: false }> {
+    if (this.disposed) {
+      return { ok: false, code: 'chat-runtime-unavailable', reason: 'the host is shutting down' };
+    }
+    const host = this.lookupHost();
+    const adapter = this.adapter;
+    if (!host || !adapter) {
+      return { ok: false, code: 'chat-runtime-unavailable', reason: 'this host has no chat runtime to start a child session in' };
+    }
+    const caller = SessionId.safeParse(callerSessionId?.trim());
+    if (!caller || !adapter.isSessionActive(caller)) {
+      return { ok: false, code: 'unattributed-caller', reason: 'ptah_session_start must be called from a live chat session; this ' +
+        'caller has no live session id' };
+    }
+    const callerSdkId = this.sdkIdOf(caller);
+    if (this.registry.isChild(caller) || this.registry.isChild(callerSdkId)) {
+      return { ok: false, code: 'depth-exceeded', reason: 'a child session cannot start child sessions (depth is limited to 1)' };
+    }
+    if ((this.mcpStatus?.getPort() ?? null) === null) {
+      return { ok: false, code: 'mcp-unavailable', reason: 'the Ptah MCP server is not running in this host, so a child could ' +
+        'not report back or be steered' };
+    }
+    return { ok: true, caller, callerSdkId, adapter, host };
+  }
+
   /** The synchronous guards, in order; the slot is reserved last. */
   private guardStart(
     request: SessionChildStartRequest,
   ): StartGuardPass | SessionChildStartResult {
-    const callerSessionId = request.callerSessionId;
-    if (this.disposed) {
-      return this.refuseStart(
-        'chat-runtime-unavailable',
-        'the host is shutting down',
-      );
-    }
-    const host = this.lookupHost();
-    if (!host || !this.adapter) {
-      return this.refuseStart(
-        'chat-runtime-unavailable',
-        'this host has no chat runtime to start a child session in',
-      );
-    }
-    const caller = SessionId.safeParse(callerSessionId?.trim());
-    if (!caller || !this.adapter.isSessionActive(caller)) {
-      return this.refuseStart(
-        'unattributed-caller',
-        'ptah_session_start must be called from a live chat session; this ' +
-          'caller has no live session id',
-      );
-    }
-    const callerSdkId = this.sdkIdOf(caller);
-    if (this.registry.isChild(caller) || this.registry.isChild(callerSdkId)) {
-      return this.refuseStart(
-        'depth-exceeded',
-        'a child session cannot start child sessions (depth is limited to 1)',
-      );
-    }
-    if ((this.mcpStatus?.getPort() ?? null) === null) {
-      return this.refuseStart(
-        'mcp-unavailable',
-        'the Ptah MCP server is not running in this host, so a child could ' +
-          'not report back or be steered',
-      );
-    }
-    const existing = this.existingStart(
+    const eligibility = this.checkStartEligibility(request.callerSessionId);
+    if (!eligibility.ok) return this.refuseStart(eligibility.code, eligibility.reason);
+    const { caller, callerSdkId, adapter, host } = eligibility;
+    const existing = !request.attachToSessionId && this.existingStart(
       [caller, callerSdkId],
       request.branch?.trim() ?? '',
     );
@@ -402,7 +415,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       ok: true,
       caller,
       permissionLevel: this.lifecycle.find(caller)?.permissionLevel,
-      adapter: this.adapter,
+      adapter,
       host,
       settings,
       reservation,
@@ -447,8 +460,50 @@ export class SessionSpawnerService implements ISessionSpawner {
     // The path the provisioner will create: the same deterministic function,
     // so task folder and deliverables are checked before any git work.
     const plannedPath = resolveWorktreePath(root, branch);
+    if (request.attachToSessionId && !request.taskId) {
+      return this.refuseStart(
+        'invalid-arguments',
+        'attachToSessionId requires taskId',
+      );
+    }
     const paths = resolveChildPaths(plannedPath, request);
     if (!paths.ok) return this.refuseStart('invalid-arguments', paths.detail);
+
+    const skillPrompts: string[] = [];
+    const resolvedSkills: { name: string; text: string }[] = [];
+    for (const skill of request.skills ?? request.phase?.skills ?? []) {
+      if (skill.text !== undefined) {
+        skillPrompts.push(`Skill ${skill.name}:\n${skill.text}`);
+        resolvedSkills.push({ name: skill.name, text: skill.text });
+        continue;
+      }
+      if (!skill.path?.trim()) {
+        return this.refuseStart(
+          'invalid-arguments',
+          `Skill ${skill.name} delivery unavailable: no text or path was provided`,
+        );
+      }
+      let skillPath: string | undefined;
+      try {
+        skillPath = resolveWorkspaceSkillPath(root, skill.path);
+      } catch (error: unknown) {
+        // degradation-audit: reported - the skill path refusal is returned to the caller.
+        return this.refuseStart('invalid-arguments', errorMessage(error));
+      }
+      if (!skillPath) {
+        return this.refuseStart('invalid-arguments', `Skill ${skill.name} delivery unavailable: file not found`);
+      }
+      try {
+        const text = await readFile(skillPath, 'utf8');
+        skillPrompts.push(`Skill ${skill.name}:\n${text}`);
+        resolvedSkills.push({ name: skill.name, text });
+      } catch (error: unknown) {
+        return this.refuseStart(
+          'invalid-arguments',
+          `Skill ${skill.name} delivery unavailable: cannot read ${skillPath}: ${errorMessage(error)}`,
+        );
+      }
+    }
 
     this.registry.addPending(
       this.pendingRecordOf(childTabId, request, guard, {
@@ -464,6 +519,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       branch,
       task,
       paths,
+      skillPrompts,
+      resolvedSkills,
     });
     this.pendingStarts.set(childTabId, run);
     try {
@@ -521,7 +578,10 @@ export class SessionSpawnerService implements ISessionSpawner {
     childTabId: string,
     request: SessionChildStartRequest,
     guard: StartGuardPass,
-    { root, branch, task, paths }: PreparedStart,
+    { root, branch, task, paths, skillPrompts, resolvedSkills }: PreparedStart & {
+      readonly skillPrompts: readonly string[];
+      readonly resolvedSkills: readonly { name: string; text: string }[];
+    },
   ): Promise<SessionChildStartResult> {
     // After the cheap argument checks, still before any git work: a refused
     // model leaves no worktree, branch or registry record behind.
@@ -597,11 +657,45 @@ export class SessionSpawnerService implements ISessionSpawner {
       }
     }
 
-    const provisioned = await this.provisioner.create(
-      root,
-      branch,
-      request.baseRef,
-    );
+    let provisioned;
+    if (request.attachToSessionId) {
+      // Real paths close the symlink gap between a registered path and the
+      // deterministic path a fresh start would otherwise create.
+      let canonical: string;
+      try {
+        canonical = await realpath(resolveWorktreePath(root, branch));
+      } catch {
+        return this.refuseStart(
+          'branch-exists',
+          'registered attach worktree no longer exists',
+        );
+      }
+      const target = this.registry.findAttachTarget(
+        request.attachToSessionId,
+        request.taskId ?? '',
+        branch,
+        canonical,
+        [guard.caller, this.sdkIdOf(guard.caller)],
+      );
+      // degradation-audit: reported - an unresolvable registered path never
+      // equals the canonical path, so the start is refused with the reason below.
+      if (
+        !target ||
+        (await realpath(target.worktreePath).catch(() => '')) !== canonical
+      ) {
+        return this.refuseStart(
+          'branch-exists',
+          'attach requires a registered child with the same taskId, canonical worktree and branch',
+        );
+      }
+      provisioned = await this.provisioner.attach(root, branch, canonical);
+    } else {
+      provisioned = await this.provisioner.create(
+        root,
+        branch,
+        request.baseRef,
+      );
+    }
     if (!provisioned.ok) {
       this.log(`start refused (${provisioned.refusal}): ${provisioned.detail}`);
       return {
@@ -615,6 +709,18 @@ export class SessionSpawnerService implements ISessionSpawner {
     // older, so it never reads as this child's deliverable.
     const startedAt = new Date().toISOString();
     const { worktree } = provisioned;
+    let canonicalWorktreePath: string;
+    try {
+      canonicalWorktreePath = await realpath(worktree.worktreePath);
+    } catch (error: unknown) {
+      // degradation-audit: reported - a vanished worktree is rolled back and refused.
+      return {
+        ok: false,
+        refusal: 'session-start-failed',
+        detail: `Could not resolve the child worktree: ${errorMessage(error)}`,
+        rollback: worktree.owned === false ? [] : await this.provisioner.rollback(worktree),
+      };
+    }
 
     const parentSdkSessionId = this.sdkIdOf(guard.caller);
     const label = request.label?.trim() || branch;
@@ -631,7 +737,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       branch,
       baseRef: worktree.baseSha,
       workspaceRoot: root,
-      worktreePath: worktree.worktreePath,
+      worktreePath: canonicalWorktreePath,
       ...(paths.taskFolder ? { taskFolder: paths.taskFolder } : {}),
       deliverables: paths.deliverables,
       subagentPtahTools: 'unavailable',
@@ -640,6 +746,12 @@ export class SessionSpawnerService implements ISessionSpawner {
       reportsDelivered: 0,
       reportsRefused: 0,
       task,
+      ...(request.phase
+        ? {
+            phaseKind: request.phase.kind,
+            phaseDisallowedTools: [...request.phase.toolProfile.disallowedTools],
+          }
+        : {}),
     };
 
     const runtime: ChildRuntime = {
@@ -677,7 +789,15 @@ export class SessionSpawnerService implements ISessionSpawner {
         tabId: childTabId,
         workspaceRoot: root,
         worktreePath: worktree.worktreePath,
-        prompt: composeSessionChildPrompt(contract, task),
+        prompt: composeSessionChildPrompt(
+          contract,
+          [
+            ...(!request.phase ? skillPrompts : []),
+            task,
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+        ),
         descriptor: this.descriptorOf(stored),
         sessionName: label,
         ...(guard.permissionLevel
@@ -685,6 +805,7 @@ export class SessionSpawnerService implements ISessionSpawner {
           : {}),
         ...(resolvedModel ? { model: resolvedModel } : {}),
         ...(resolvedEffort ? { effort: resolvedEffort } : {}),
+        ...(request.phase ? { phase: { ...request.phase, skills: resolvedSkills } } : {}),
       });
       if (!outcome.started) {
         return await this.failStart(
@@ -693,6 +814,9 @@ export class SessionSpawnerService implements ISessionSpawner {
           outcome.error,
           outcome.accountRefusal,
         );
+      }
+      if (outcome.toolProfileApplied === true) {
+        this.registry.update(childTabId, { toolProfileApplied: true });
       }
 
       this.armRuntimeCap(runtime, childTabId, guard.settings.maxRuntimeMinutes);
@@ -806,7 +930,9 @@ export class SessionSpawnerService implements ISessionSpawner {
         ok: removed,
         ...(removed ? {} : { detail: 'the child link was never recorded' }),
       },
-      ...(await this.provisioner.rollback(runtime.worktree)),
+      ...(runtime.worktree.owned === false
+        ? []
+        : await this.provisioner.rollback(runtime.worktree)),
     );
     for (const step of rollback) {
       this.log(`rollback ${step.step}: ${rollbackStepOutcome(step)}`);
@@ -1708,6 +1834,11 @@ export class SessionSpawnerService implements ISessionSpawner {
           startedAt: child.startedAt,
           reportsDelivered: child.reportsDelivered,
           ...(child.lastRecap ? { lastRecap: child.lastRecap } : {}),
+          ...(child.phaseKind ? { phaseKind: child.phaseKind } : {}),
+          ...(child.phaseDisallowedTools
+            ? { phaseDisallowedTools: child.phaseDisallowedTools }
+            : {}),
+          ...(child.toolProfileApplied ? { toolProfileApplied: true } : {}),
         },
         { turn, status, completedAt: new Date(timestampMs).toISOString() },
       );
@@ -1833,11 +1964,8 @@ export class SessionSpawnerService implements ISessionSpawner {
   ): SessionChildRecord | undefined {
     let child = this.registry.get(sessionId);
     if (!child) {
-      const byCwd = this.registry.findByCwd(cwd);
+      const byCwd = this.registry.findUniqueUnboundByCwd(cwd);
       if (!byCwd) return undefined;
-      // Another session opened in the same worktree is not this child.
-      if (byCwd.sdkSessionId && byCwd.sdkSessionId !== sessionId)
-        return undefined;
       child = byCwd;
       if (!byCwd.sdkSessionId && sessionId) {
         child =
@@ -1949,6 +2077,9 @@ export class SessionSpawnerService implements ISessionSpawner {
     delete snapshot['terminalStatus'];
     delete snapshot['endCause'];
     delete snapshot['heldCompletion'];
+    delete snapshot['phaseKind'];
+    delete snapshot['phaseDisallowedTools'];
+    delete snapshot['toolProfileApplied'];
     const held = record.heldCompletion;
     const latest =
       record.terminalStatus === 'handed-off'
@@ -2325,6 +2456,11 @@ export class SessionSpawnerService implements ISessionSpawner {
       reportsDelivered: 0,
       reportsRefused: 0,
       task: child.task,
+      ...(child.phaseKind ? { phaseKind: child.phaseKind } : {}),
+      ...(child.phaseDisallowedTools
+        ? { phaseDisallowedTools: child.phaseDisallowedTools }
+        : {}),
+      ...(child.toolProfileApplied ? { toolProfileApplied: true } : {}),
     };
     const nextRuntime: ChildRuntime = {
       worktree: runtime.worktree,

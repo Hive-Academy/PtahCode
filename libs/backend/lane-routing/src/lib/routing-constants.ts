@@ -68,7 +68,7 @@ export type TieBreakStep = (typeof TIE_BREAK_STEPS)[number];
 export const PREFERRED_RANK_MIN_RANKED = 1;
 export const PREFERRED_RANK_UNRANKED = 0;
 
-export const TIE_BREAK_EXECUTOR_KIND_ORDER = ['lane', 'subagent'] as const;
+export const TIE_BREAK_EXECUTOR_KIND_ORDER = ['lane', 'subagent', 'child-session'] as const;
 
 export type TieBreakExecutorKind =
   (typeof TIE_BREAK_EXECUTOR_KIND_ORDER)[number];

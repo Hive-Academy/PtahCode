@@ -27,4 +27,14 @@ describe('recordLaneUsageOutcome model attribution', () => {
     expect(records).toHaveLength(1);
     expect(records[0].models[0].modelId).toBe(expected);
   });
+
+  it('records lane executor and phase dimensions', () => {
+    const records: SessionUsageContribution[] = [];
+    const sink: SessionUsageSink = { recordUsage: (value) => { records.push(value); } };
+    const phasedInfo: AgentProcessInfo = { ...info, phaseKind: 'implement' };
+    recordLaneUsageOutcome(sink, logger, phasedInfo, '2026-11-08T00:01:00.000Z', {
+      inputTokens: 1, outputTokens: 1,
+    });
+    expect(records[0]).toMatchObject({ executorType: 'lane', phaseKind: 'implement' });
+  });
 });

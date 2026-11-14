@@ -15,8 +15,10 @@
 import * as path from 'node:path';
 import { z } from 'zod';
 import { SESSION_READ_MAX_TAIL_KIB } from '@ptah-extension/cli-agent-runtime';
-import { TaskIdSchema } from '@ptah-extension/shared/schemas';
-import { EFFORT_LEVELS } from '@ptah-extension/shared';
+import { TaskIdSchema, PhaseDispatchSchema } from '@ptah-extension/shared/schemas';
+import {
+  EFFORT_LEVELS,
+} from '@ptah-extension/shared';
 import { MAX_AGENT_MESSAGE_LENGTH } from './tool-description.builder';
 
 /** Deliverable paths one child may declare (same bound as `ptah_agent_spawn`). */
@@ -34,6 +36,11 @@ function isAbsolutePath(value: string): boolean {
 }
 
 const sessionId = z.string().min(1).max(200);
+const phaseSkill = z.object({
+  name: z.string().min(1),
+  path: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
+}).strict().refine(skill => !!(skill.path || skill.text));
 
 export const SessionStartArgsSchema = z
   .object({
@@ -58,6 +65,9 @@ export const SessionStartArgsSchema = z
       .optional(),
     model: z.string().min(1).max(200).optional(),
     effort: z.enum(EFFORT_LEVELS).optional(),
+    phase: PhaseDispatchSchema.optional(),
+    skills: z.array(phaseSkill).optional(),
+    attachToSessionId: sessionId.optional(),
   })
   .strict();
 

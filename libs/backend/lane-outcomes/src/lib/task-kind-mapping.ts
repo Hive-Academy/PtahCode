@@ -1,6 +1,7 @@
 import type {
   OutcomeTaskKind,
   OutcomeTaskKindSource,
+  PhaseKind,
 } from '@ptah-extension/shared';
 
 /**
@@ -44,6 +45,13 @@ const TASK_KIND_BY_ROLE: ReadonlyMap<string, OutcomeTaskKind> = new Map<
   ['ui-ux-designer', 'docs'],
 ]);
 
+const TASK_KIND_BY_PHASE: Readonly<Record<PhaseKind, OutcomeTaskKind>> = {
+  plan: 'plan', architecture: 'plan', batch: 'plan', completion: 'plan',
+  implement: 'implement', review: 'review', 'document-review': 'review',
+  'visual-review': 'review', research: 'research',
+  tests: 'tests', docs: 'docs', design: 'docs',
+};
+
 /**
  * The task kind a known role or subagent type performs, or null when the role
  * is absent or unknown (including `general-purpose`, `Explore` and `unknown`).
@@ -59,14 +67,20 @@ export interface ResolvedTaskKind {
 }
 
 /**
- * The row's task kind before any classification: explicit, then mapped from
- * the role, then unclassified. Classification happens after insert.
+ * The row's task kind before any classification: explicit task kind, then
+ * the phase kind, then the legacy role alias, then unclassified.
+ * Classification happens after insert. A phase kind is also still readable
+ * through {@link taskKindForRole} when a caller only has the old alias.
  */
 export function resolveTaskKind(
   explicit: OutcomeTaskKind | null,
+  phaseKind: PhaseKind | null,
   role: string | null,
 ): ResolvedTaskKind {
   if (explicit) return { taskKind: explicit, taskKindSource: 'explicit' };
+  if (phaseKind) {
+    return { taskKind: TASK_KIND_BY_PHASE[phaseKind], taskKindSource: 'mapped' };
+  }
   const mapped = taskKindForRole(role);
   if (mapped) return { taskKind: mapped, taskKindSource: 'mapped' };
   return { taskKind: null, taskKindSource: 'unclassified' };

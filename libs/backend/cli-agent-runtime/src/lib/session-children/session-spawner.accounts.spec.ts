@@ -1,5 +1,8 @@
 import 'reflect-metadata';
 import { resolve } from 'node:path';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { container } from 'tsyringe';
 import { SessionChildRegistry } from './session-child.registry';
 import { SessionSpawnerService } from './session-spawner.service';
@@ -9,7 +12,9 @@ import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-
 
 const PARENT = '11111111-2222-4333-8444-555555555555';
 const PARENT_SDK = '22222222-3333-4444-8555-666666666666';
-const ROOT = resolve('/repo');
+const ROOT = mkdtempSync(join(tmpdir(), 'ptah-child-account-'));
+mkdirSync(resolve(ROOT, '.worktrees/child'), { recursive: true });
+afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
 
 function harness(refusal?: ProviderAccountPortRefusal) {
   const registry = new SessionChildRegistry();

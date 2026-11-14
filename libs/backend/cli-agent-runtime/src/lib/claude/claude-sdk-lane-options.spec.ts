@@ -149,6 +149,32 @@ function certifiedLaunch(): ClaudeCertifiedLaunchContext {
   };
 }
 
+describe('buildClaudeSdkLaneOptions — phase tool profile', () => {
+  it('appends phase denials after the preset and drops duplicates and blanks', () => {
+    const options = buildClaudeSdkLaneOptions({
+      ...laneInput(assemblyFor(verifiedPolicy())),
+      phase: {
+        toolProfile: {
+          disallowedTools: ['Workflow', 'Bash', 'Workflow', '  ', 'Bash'],
+        },
+      },
+    });
+    expect(options.disallowedTools).toEqual([...DEFAULT_TOOLS, 'Bash']);
+  });
+
+  it('keeps the preset list when the phase denies nothing', () => {
+    const bare = buildClaudeSdkLaneOptions(
+      laneInput(assemblyFor(verifiedPolicy())),
+    );
+    const empty = buildClaudeSdkLaneOptions({
+      ...laneInput(assemblyFor(verifiedPolicy())),
+      phase: { toolProfile: { disallowedTools: [] } },
+    });
+    expect(empty.disallowedTools).toEqual(bare.disallowedTools);
+    expect(empty.disallowedTools).toEqual(DEFAULT_TOOLS);
+  });
+});
+
 describe('buildClaudeSdkLaneOptions — Claude built-in policy (TASK_2026_853)', () => {
   it('ambient lane: denies the default tools and hides the terminal skills', () => {
     const options = buildClaudeSdkLaneOptions(

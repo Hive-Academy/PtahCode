@@ -7,6 +7,9 @@
  */
 import 'reflect-metadata';
 
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { resolve } from 'path';
 
 import {
@@ -52,6 +55,44 @@ function addChild(
 }
 
 describe('SessionChildRegistry', () => {
+  it('matches attach only by registered task, branch and canonical path', () => {
+    const registry = new SessionChildRegistry();
+    const child = addChild(registry, 'attached', { taskId: 'TASK_2026_584', branch: 'feat/shared', parentSdkSessionId: PARENT_SDK });
+    expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/shared', child.worktreePath, [PARENT])).toBe(child);
+    expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/shared', child.worktreePath, [PARENT_SDK])).toBe(child);
+    expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/shared', child.worktreePath, ['other'])).toBeUndefined();
+    expect(registry.findAttachTarget('attached', 'TASK_2026_585', 'feat/shared', child.worktreePath, [PARENT])).toBeUndefined();
+    expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/other', child.worktreePath, [PARENT])).toBeUndefined();
+    expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/shared', resolve('/another/path'), [PARENT])).toBeUndefined();
+  });
+  it('matches an alias of a registered worktree by its real path', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'ptah-child-registry-'));
+    const alias = `${workspace}-alias`;
+    let linked = false;
+    try {
+      symlinkSync(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      linked = true;
+      const registry = new SessionChildRegistry();
+      const child = addChild(registry, 'alias', {
+        taskId: 'TASK_2026_584',
+        branch: 'feat/shared',
+        worktreePath: realpathSync(workspace),
+      });
+      expect(registry.findAttachTarget('alias', 'TASK_2026_584', 'feat/shared', alias, [PARENT])).toBe(child);
+      expect(registry.findByCwd(alias)).toBe(child);
+    } finally {
+      if (linked) unlinkSync(alias);
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+  it('refreshes the cached cwd key if a record moves', () => {
+    const registry = new SessionChildRegistry();
+    addChild(registry, 'moving');
+    const movedPath = resolve('/ws-worktrees/moved');
+    registry.update('moving', { worktreePath: movedPath });
+    expect(registry.findUniqueUnboundByCwd(movedPath)?.childSessionId).toBe('moving');
+    expect(registry.findUniqueUnboundByCwd(resolve('/ws-worktrees/moving'))).toBeUndefined();
+  });
   describe('succession', () => {
     it('replaces a live child without consuming another slot and preserves links', () => {
       const registry = new SessionChildRegistry();
@@ -250,6 +291,17 @@ describe('SessionChildRegistry', () => {
       addChild(registry, 'new', { worktreePath: shared });
 
       expect(registry.findByCwd(shared)?.childSessionId).toBe('new');
+    });
+
+    it('returns the owner when two live children share one worktree', () => {
+      const registry = new SessionChildRegistry();
+      const shared = resolve('/ws-worktrees/shared');
+      addChild(registry, 'owner', { worktreePath: shared });
+      addChild(registry, 'attached', { worktreePath: shared });
+      expect(registry.findByCwd(shared)?.childSessionId).toBe('owner');
+      expect(registry.findUniqueUnboundByCwd(shared)).toBeUndefined();
+      registry.bindSdkSessionId('owner', 'sdk-owner');
+      expect(registry.findUniqueUnboundByCwd(shared)?.childSessionId).toBe('attached');
     });
 
     it('treats a live child as a child for the depth guard, by either id', () => {
