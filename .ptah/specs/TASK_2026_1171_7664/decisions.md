@@ -65,3 +65,9 @@
   wait loop), m2 (wording "N report attempts failed"), m3 (JSDoc placement, indent), m4
   (per-map expiry in observer), m5 (single consume path). Starts after the related tests end
   (no lane edits during a check). Then one short re-review scoped to fix round 2.
+- D16: Fix round 2 committed 555efd364 (lane 9a4602f3). Scoped re-review (claude lane
+  f1de35ed, resumed reviewer session): APPROVED 8/10, 0 Blocking, 0 Serious. Accepted minor
+  residuals, listed in the PR: (a) a shard outage plus a host restart before backfill can
+  replay a notice the parent already read; (b) a rejected pre-auth reason can be replaced
+  when no authenticated attempt exists (low impact, by design); (c) the drainer emits an
+  update for an unchanged entry; (d) one extra indent at protocol-dispatcher.ts:1737.
