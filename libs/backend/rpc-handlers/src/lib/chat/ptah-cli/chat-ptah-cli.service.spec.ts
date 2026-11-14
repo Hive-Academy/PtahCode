@@ -504,6 +504,7 @@ describe('ChatPtahCliService', () => {
 
       const out = await s.service.handleAbort({
         sessionId: SESSION_UUID as SessionId,
+        source: 'stop-button',
       } as ChatAbortParams);
 
       expect(s.agentAdapter.endSession).toHaveBeenCalledWith(SESSION_UUID, 'user-stop');
@@ -512,6 +513,24 @@ describe('ChatPtahCliService', () => {
       // The lease was taken under the tab id at start; abort arrives under
       // the real session id and must release that same lease.
       expect(s.registry.releaseProfile).toHaveBeenCalledWith(TAB_UUID);
+    });
+
+    it('ends an unspecified abort as internal-abort', async () => {
+      const s = makeSuite();
+      await s.service.handleStart({
+        prompt: 'hi',
+        tabId: TAB_UUID,
+        workspacePath: '/tmp/ws',
+        ptahCliId: AGENT_ID,
+      } as ChatStartParams);
+      s.service.trackSession(TAB_UUID, SESSION_UUID);
+
+      await s.service.handleAbort({ sessionId: SESSION_UUID as SessionId });
+
+      expect(s.agentAdapter.endSession).toHaveBeenCalledWith(
+        SESSION_UUID,
+        'internal-abort',
+      );
     });
   });
 

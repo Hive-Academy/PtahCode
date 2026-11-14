@@ -66,6 +66,24 @@ describe('GithubReviewStatusAdapter', () => {
     await expect(adapter.findOwnStatus(target)).rejects.toMatchObject({ code });
   });
 
+  it('names the missing commit statuses permission on a 403', async () => {
+    const fetcher = jest.fn().mockResolvedValue(new Response('', { status: 403 }));
+    const adapter = new GithubReviewStatusAdapter(secrets as ISecretStorage, fetcher);
+    await expect(adapter.findOwnStatus(target)).rejects.toMatchObject({
+      code: 'permission', message: expect.stringContaining('Commit statuses: Read and write') });
+  });
+
+  it('carries the reset time as a Date, which the review-core coordinator reads by name', async () => {
+    const fetcher = jest.fn().mockResolvedValue(new Response('', { status: 429, headers: { 'retry-after': '120' } }));
+    const adapter = new GithubReviewStatusAdapter(secrets as ISecretStorage, fetcher);
+    const before = Date.now();
+    const error: unknown = await adapter.findOwnStatus(target).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'rate-limit', retryAt: expect.any(Date) });
+    const at = (error as { retryAt: Date }).retryAt.getTime();
+    expect(at).toBeGreaterThanOrEqual(before + 120_000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 120_000);
+  });
+
   it('rejects malformed JSON and bounds the posted description', async () => {
     const malformed = new GithubReviewStatusAdapter(secrets as ISecretStorage,
       jest.fn().mockResolvedValue(new Response('{invalid')));

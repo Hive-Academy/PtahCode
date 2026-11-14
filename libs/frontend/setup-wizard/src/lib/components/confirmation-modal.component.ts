@@ -102,13 +102,15 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
               {{ cancelText() }}
             </button>
           }
-          <button
-            class="btn"
-            [ngClass]="mode() === 'alert' ? 'btn-primary' : confirmClass()"
-            (click)="onConfirm()"
-          >
-            {{ confirmText() }}
-          </button>
+          @if (mode() === 'alert' || confirmClass() === 'btn-primary') {
+            <button ptahButton variant="primary" type="button" (click)="onConfirm()">
+              {{ confirmText() }}
+            </button>
+          } @else {
+            <button class="btn" [ngClass]="confirmClass()" type="button" (click)="onConfirm()">
+              {{ confirmText() }}
+            </button>
+          }
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">

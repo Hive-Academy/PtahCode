@@ -1,0 +1,137 @@
+<section
+  class="mx-auto max-w-[760px] space-y-5 p-4"
+  aria-labelledby="team-builder-start-title"
+  data-testid="team-builder-start"
+>
+  <header class="flex items-center gap-3">
+    <span
+      class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-base-300 text-state-need"
+      data-glass-surface="tile"
+      ><lucide-angular [img]="icons.users" class="size-5" aria-hidden="true"
+    /></span>
+    <div>
+      <h1
+        id="team-builder-start-title"
+        class="text-2xl font-semibold"
+        tabindex="-1"
+      >
+        AI team builder
+      </h1>
+      <p class="text-sm text-base-content-muted">
+        Describe the work, choose skills, and launch your team.
+      </p>
+    </div>
+  </header>
+  <ptah-workspace-header [canSwitch]="true" />
+  @if (state.stage() === 'intent') {
+  <form
+    class="space-y-4 rounded-[22px] border border-base-300 p-4"
+    data-glass-surface="content"
+    (ngSubmit)="submit($event)"
+    novalidate
+  >
+    <p class="text-xs text-base-content-muted">
+      Workspace
+      <span class="font-mono"
+        >{{ launcher.workspaceRoot() || 'Open a workspace' }}</span
+      >
+    </p>
+    <ptah-field label="What should the team do?" appearance="stacked">
+      <textarea
+        id="team-intent"
+        name="intent"
+        ptahTextarea
+        [invalid]="invalid()"
+        class="min-h-[140px] w-full"
+        placeholder="Describe the work for your team"
+        [ngModel]="intent()"
+        (ngModelChange)="intent.set($event)"
+        (blur)="touched.set(true)"
+        (paste)="attachments.onPaste($event)"
+        (dragover)="$event.preventDefault()"
+        (drop)="attachments.onDrop($event)"
+        [attr.aria-describedby]="invalid() ? 'team-attachment-hint team-intent-error' : 'team-attachment-hint'"
+      ></textarea>
+    </ptah-field>
+    <ptah-attachment-tray />
+    <p id="team-attachment-hint" class="text-xs text-base-content-muted">
+      Required. Attachments are kept while you review skills.
+    </p>
+    @if (invalid()) {
+    <p id="team-intent-error" class="text-sm text-state-err">
+      Describe the team you want.
+    </p>
+    } @if (actionError()) {
+    <p role="alert" class="text-sm text-state-err">{{ actionError() }}</p>
+    }
+    <div class="flex justify-between gap-2">
+      <button ptahButton variant="ghost" type="button" (click)="back()">
+        Back</button
+      ><button
+        ptahButton
+        variant="primary"
+        type="submit"
+        [disabled]="attachments.pendingReads() > 0"
+      >
+        Review skills
+      </button>
+    </div>
+  </form>
+  } @else {
+  <div
+    class="space-y-4 rounded-[22px] border border-base-300 p-4"
+    data-glass-surface="content"
+  >
+    @if (state.stage() === 'launching') {
+    <button ptahButton variant="ghost" type="button" (click)="back()">
+      Back
+    </button>
+    <p role="status" aria-live="polite">
+      {{ launched() ? 'Chat opened. Use Back to leave this page.' : 'Launching chat…' }}
+    </p>
+    @if (state.guidanceNote()) {
+    <p role="status" class="text-sm text-base-content-muted">{{ state.guidanceNote() }}</p>
+    }
+    } @else { @if (state.stage() === 'installing') {
+    <p role="status" aria-live="polite">Installing skills...</p>
+    }
+    <div [attr.inert]="state.stage() === 'installing' ? '' : null">
+      <ptah-team-builder-skill-review
+        [recommendations]="state.recommendations()"
+        [searchResults]="state.searchResults()"
+        [guidanceFacts]="state.guidanceFacts()"
+        [ownerDecisionPrompt]="state.ownerDecisionPrompt()"
+        [decisionRequired]="ownerDecisionRequired()"
+        [ownerDecision]="state.ownerDecision()"
+        [ownerDecisionError]="ownerDecisionError()"
+        [guidanceNote]="state.guidanceNote()"
+        [busy]="starting()"
+        [selectedIds]="state.selectedIds()"
+        [loading]="state.loading()"
+        [searching]="searching()"
+        [error]="actionError()"
+        [searchError]="searchError()"
+        [query]="state.searchQuery()"
+        (queryChange)="state.searchQuery.set($event)"
+        (ownerDecisionChange)="state.ownerDecision.set($event); ownerDecisionError.set(false)"
+        (selectionToggled)="state.toggle($event)"
+        (searchRequested)="search($event)"
+        (continueRequested)="reviewSelection()"
+        (skip)="launchChat()"
+        (back)="backToIntent()"
+      />
+    </div>
+    }
+  </div>
+  }
+  <ptah-team-builder-skill-consent
+    [open]="state.stage() === 'consent' || state.stage() === 'installing'"
+    [previews]="state.preview()"
+    [approvedIds]="state.approvedIds()"
+    [busy]="state.stage() === 'installing'"
+    [error]="actionError()"
+    (approve)="state.approve($event)"
+    (install)="install()"
+    (cancelRequested)="closeConsent()"
+  />
+</section>

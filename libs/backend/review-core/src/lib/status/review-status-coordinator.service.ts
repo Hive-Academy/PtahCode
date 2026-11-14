@@ -9,11 +9,29 @@ import { sanitizeReviewFailureMessage } from '../review-failure-sanitizer';
 import { reviewStatusConclusion, type ReviewOutcome, type ReviewSeverity } from './review-status-conclusion';
 
 const RETRY_MS = 60_000;
+/** A token that lacks permission stays that way until the operator changes it, so retry rarely. */
+const BLOCKED_RETRY_MS = 30 * 60_000;
+const MAX_RATE_LIMIT_MS = 60 * 60_000;
+/** The same failure for the same repository is logged at most once in this window. */
+const LOG_QUIET_MS = 10 * 60_000;
+const BLOCKING_CODES: ReadonlySet<string> = new Set(['permission', 'authentication', 'missing-token', 'rate-limit']);
+
+interface StatusWriteFailure { code: string | null; retryAt: number | null }
+
+function describeFailure(error: unknown): StatusWriteFailure {
+  if (error === null || typeof error !== 'object') return { code: null, retryAt: null };
+  const code = 'code' in error && typeof error.code === 'string' ? error.code : null;
+  const at = 'retryAt' in error && error.retryAt instanceof Date ? error.retryAt.getTime() : NaN;
+  return { code, retryAt: Number.isFinite(at) ? at : null };
+}
 
 @injectable()
 export class ReviewStatusCoordinatorService {
   readonly machineId = hostname();
   private readonly writes = new Map<string, Promise<void>>();
+  /** Per repository: GitHub refused the status write, so later rows wait instead of repeating the call. */
+  private readonly blocked = new Map<string, { until: number; summary: string }>();
+  private readonly lastLogged = new Map<string, number>();
   constructor(
     @inject(REVIEW_CORE_TOKENS.REVIEW_REPOSITORY) private readonly repository: IReviewRepository,
     @inject(REVIEW_CORE_TOKENS.STATUS_PORT) private readonly port: IReviewStatusPort,
@@ -73,6 +91,12 @@ export class ReviewStatusCoordinatorService {
     }
   }
 
+  /** Keeps both throttle maps bounded by dropping entries that can no longer change a decision. */
+  private prune(now: number): void {
+    for (const [key, entry] of this.blocked) if (entry.until <= now) this.blocked.delete(key);
+    for (const [key, at] of this.lastLogged) if (now - at >= LOG_QUIET_MS) this.lastLogged.delete(key);
+  }
+
   /** Reads, saves and publishes in one serialized section, so that writes of one attempt cannot interleave. */
   private async update(attempt: ReviewQueueAttempt, state: ReviewStatusSyncRecord['state'], description: string): Promise<void> {
     await this.serialize(attempt.repo, attempt.headSha, async () => {
@@ -104,6 +128,16 @@ export class ReviewStatusCoordinatorService {
       catch (_error: unknown) { this.logger.error('Review status supersession persistence failed', new Error('Review status supersession persistence failed')); }
       return;
     }
+    const repoKey = `${target.repo.owner.toLowerCase()}/${target.repo.name.toLowerCase()}`;
+    const block = this.blocked.get(repoKey);
+    if (block && block.until > Date.now()) {
+      // GitHub refused a status write for this repository a moment ago. Keep the row pending
+      // for the block window, without another request and without another log line.
+      try { await this.repository.saveStatusSync({ ...record, syncPending: true,
+        retryAt: new Date(block.until).toISOString(), errorSummary: block.summary }); }
+      catch (_error: unknown) { this.logger.error('Review status retry persistence failed', new Error('Review status retry persistence failed')); }
+      return;
+    }
     const progress = /^Reviewing… (\d+)\/(\d+) lenses$/.exec(record.description);
     const update: ReviewStatusUpdate = record.state === 'pending'
       ? record.description === 'Review queued'
@@ -114,6 +148,7 @@ export class ReviewStatusCoordinatorService {
         conclusion: record.state === 'success' ? 'success' : record.state === 'failure' ? 'failure' : 'cancelled' };
     try {
       const receipt = await this.port.upsertStatus(update, record.externalId ? { target, provider: 'commit_status', externalId: record.externalId } : null);
+      this.blocked.delete(repoKey);
       await this.repository.saveStatusSync({ ...record, externalId: receipt.externalId, syncPending: false,
         retryAt: null, errorSummary: null, syncedState: record.state, syncedDescription: record.description });
       if (record.state === 'pending' && record.description !== 'Review queued') {
@@ -122,10 +157,27 @@ export class ReviewStatusCoordinatorService {
       }
     } catch (error: unknown) {
       const summary = sanitizeReviewFailureMessage(error instanceof Error ? error.message : 'GitHub status write failed');
+      const failure = describeFailure(error);
+      const now = Date.now();
+      let retryAt = now + RETRY_MS;
+      if (failure.code !== null && BLOCKING_CODES.has(failure.code)) {
+        retryAt = failure.code === 'rate-limit'
+          ? Math.min(now + MAX_RATE_LIMIT_MS, Math.max(retryAt, failure.retryAt ?? retryAt))
+          : now + BLOCKED_RETRY_MS;
+        // A later, shorter refusal (a rate limit) must not shorten a longer block that still holds.
+        const held = this.blocked.get(repoKey);
+        if (held && held.until > retryAt) retryAt = held.until;
+        this.blocked.set(repoKey, { until: retryAt, summary });
+      }
+      this.prune(now);
       try { await this.repository.saveStatusSync({ ...record, syncPending: true,
-        retryAt: new Date(Date.now() + RETRY_MS).toISOString(), errorSummary: summary }); }
+        retryAt: new Date(retryAt).toISOString(), errorSummary: summary }); }
       catch (_error: unknown) { this.logger.error('Review status retry persistence failed', new Error('Review status retry persistence failed')); }
-      this.logger.error('Review status sync failed', new Error(summary));
+      const logKey = `${repoKey}|${summary}`;
+      if (now - (this.lastLogged.get(logKey) ?? -Infinity) >= LOG_QUIET_MS) {
+        this.lastLogged.set(logKey, now);
+        this.logger.error('Review status sync failed', new Error(summary));
+      }
     }
   }
 }

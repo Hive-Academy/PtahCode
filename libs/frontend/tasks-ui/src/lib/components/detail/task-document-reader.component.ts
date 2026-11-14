@@ -12,6 +12,7 @@ import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahStatePanelComponent,
 } from '@ptah-extension/ui';
 
 /** A reader state that names a file (everything but `idle`). */
@@ -71,6 +72,7 @@ const STATE_REASONS: Record<
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahStatePanelComponent,
     LucideAngularModule,
     MarkdownBlockComponent,
   ],
@@ -102,7 +104,6 @@ const STATE_REASONS: Record<
             type="button"
             ptahButton
             variant="primary"
-            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             [attr.aria-label]="'Open ' + state().file + ' in the editor'"
             data-testid="task-doc-open-editor"
             (click)="openInEditor.emit(state().file)"
@@ -119,7 +120,6 @@ const STATE_REASONS: Record<
           type="button"
           ptahIconButton
           [label]="'Close ' + state().file"
-          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
           data-testid="task-doc-close"
           (click)="closed.emit()"
         >
@@ -135,10 +135,10 @@ const STATE_REASONS: Record<
             [attr.aria-label]="'Loading ' + state().file"
             data-testid="task-doc-loading"
           >
-            <span class="skeleton h-4 w-2/3"></span>
-            <span class="skeleton h-3 w-full"></span>
-            <span class="skeleton h-3 w-5/6"></span>
-            <span class="skeleton h-3 w-3/4"></span>
+            <ptah-state-panel
+              state="loading"
+              [title]="'Loading ' + state().file"
+            />
           </div>
         }
         @case ('ready') {

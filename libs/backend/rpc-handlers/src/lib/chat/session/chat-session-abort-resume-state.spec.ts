@@ -348,11 +348,28 @@ describe('ChatSessionService.abortSession — durable resumable-subagent list', 
     h.registry.remove(stale.toolCallId);
     h.live.add(SESSION as string);
 
-    await h.service.abortSession({ sessionId: SESSION });
+    await h.service.abortSession({ sessionId: SESSION, source: 'stop-button' });
 
     expect(h.interruptSession).toHaveBeenCalledWith(SESSION, 'user-stop');
     expect(await durableList(h.store)).toEqual([]);
   });
+
+  it.each([
+    ['tab-close', 'tab-close'],
+    [undefined, 'internal-abort'],
+    ['stop-button', 'user-stop'],
+  ] as const)(
+    'passes source %s as cause %s to the adapter',
+    async (source, cause) => {
+      const h = makeHarness();
+      h.live.add(SESSION as string);
+      await h.service.abortSession({
+        sessionId: SESSION,
+        ...(source ? { source } : {}),
+      });
+      expect(h.interruptSession).toHaveBeenCalledWith(SESSION, cause);
+    },
+  );
 
   it('a live abort on a cold registry keeps the durable list it never restored', async () => {
     const h = makeHarness();

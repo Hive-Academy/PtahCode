@@ -20,6 +20,8 @@ interface PlatformTileSpec {
   readonly icon: typeof Gamepad2;
 }
 
+// Not a ptah-surface-card: each tile is a role="tab" button with roving tabindex,
+// which the card activator (aria-pressed button) cannot express.
 const TILES: readonly PlatformTileSpec[] = [
   { id: 'discord', label: 'Discord', icon: Gamepad2 },
   { id: 'slack', label: 'Slack', icon: Hash },

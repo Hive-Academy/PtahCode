@@ -106,7 +106,7 @@ interface ThothTabSpec {
         class="surface-1 flex shrink-0 flex-col lg:w-64"
         data-testid="thoth-section-nav"
       >
-        <div class="flex items-center gap-2 px-3 pb-3 pt-4 lg:px-4">
+        <div class="flex items-center gap-[var(--ptah-gap-controls)] px-[var(--ptah-surface-pad)] pb-3 pt-4">
           <button
             type="button"
             ptahIconButton
@@ -134,7 +134,7 @@ interface ThothTabSpec {
         <nav
           role="tablist"
           aria-label="Thoth feature tabs"
-          class="flex gap-1.5 overflow-x-auto px-3 pb-3 lg:flex-col lg:overflow-visible lg:pb-4"
+          class="flex gap-[var(--ptah-gap-controls)] overflow-x-auto px-[var(--ptah-surface-pad)] pb-3 lg:flex-col lg:overflow-visible lg:pb-4"
         >
           @for (tab of visibleTabs(); track tab.id) {
             @let status = pillars()[tab.id];
@@ -142,7 +142,7 @@ interface ThothTabSpec {
             <button
               type="button"
               role="tab"
-              class="flex min-w-[8.5rem] flex-col gap-1.5 rounded-xl px-3 py-3 text-left transition-colors duration-150 lg:min-w-0"
+              class="flex min-w-[8.5rem] flex-col gap-[var(--ptah-gap-controls)] rounded-xl px-[var(--ptah-surface-pad)] py-[var(--ptah-space-3)] text-left transition-colors duration-150 lg:min-w-0"
               [class.surface-3]="isActive"
               [class.hover:bg-surface-2]="!isActive"
               [class.opacity-70]="!status.available"
@@ -153,7 +153,7 @@ interface ThothTabSpec {
               [attr.data-pillar]="tab.id"
               (click)="selectTab(tab.id)"
             >
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-[var(--ptah-gap-controls)]">
                 <lucide-angular
                   [img]="tab.icon"
                   class="size-4 shrink-0"
@@ -182,7 +182,7 @@ interface ThothTabSpec {
               </div>
 
               @if (status.available) {
-                <div class="flex items-baseline gap-1 pl-6">
+                <div class="flex items-baseline gap-[var(--ptah-space-1)] pl-6">
                   <span
                     data-testid="dashboard-status-card-value"
                     class="text-xl font-semibold leading-none"
@@ -196,7 +196,7 @@ interface ThothTabSpec {
                   }
                 </div>
                 @if (tab.id === 'gateway' && status.platforms.length > 0) {
-                  <div class="flex flex-wrap items-center gap-1 pl-6">
+                  <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] pl-6">
                     @for (
                       platform of status.platforms;
                       track platform.platform

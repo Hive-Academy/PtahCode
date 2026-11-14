@@ -364,6 +364,26 @@ describe('SkillsShRpcHandlers — detectRecommended', () => {
 type ActionResult = { success: boolean; error?: string };
 
 describe('SkillsShRpcHandlers — install lands in the source root and propagates', () => {
+  it('passes staged verification through the shared pipeline', async () => {
+    const h = makeHarness({ workspaceRoot: '/repo' });
+    const verifyStaged = jest.fn();
+    await h.handlers.install(
+      {
+        source: 'anthropics/skills',
+        skillId: 'frontend-design',
+        scope: 'workspace',
+      },
+      verifyStaged,
+    );
+    expect(h.sourceRoots.install).toHaveBeenCalledWith(
+      { source: 'anthropics/skills', skillId: 'frontend-design' },
+      { scope: 'workspace', workspaceRoot: '/repo' },
+      { verifyStaged },
+    );
+    expect(h.sourceRoots.adoptLegacyInstalls).toHaveBeenCalled();
+    expect(h.api.invalidateInstallCaches).toHaveBeenCalled();
+    expect(h.propagation.propagateWithReport).toHaveBeenCalled();
+  });
   it('installs through the source-root service, never the CLI directly', async () => {
     const h = makeHarness({ workspaceRoot: '/repo' });
 
@@ -736,9 +756,12 @@ describe('SkillsShRpcHandlers — list and uninstall resolve the true scope', ()
     const failure = new Error('scan failed');
     h.sourceRoots.listInstalled.mockRejectedValueOnce(failure);
 
-    await expect(h.rpc.call('skillsSh:listInstalled', {})).rejects.toBe(failure);
+    await expect(h.rpc.call('skillsSh:listInstalled', {})).rejects.toBe(
+      failure,
+    );
     expect(h.logger.error).toHaveBeenCalledWith(
-      'RPC: skillsSh:listInstalled failed', failure,
+      'RPC: skillsSh:listInstalled failed',
+      failure,
     );
   });
 
@@ -916,7 +939,7 @@ describe('SkillsShRpcHandlers — makeGlobal delegates to the proven service', (
     expect(await hooks.isDiscovered(dir)).toBe(true);
   });
 
-  it('keepSelected hook records the moved slugs in this workspace\'s selection', async () => {
+  it("keepSelected hook records the moved slugs in this workspace's selection", async () => {
     const h = makeHarness({ workspaceRoot: '/repo' });
     await h.rpc.call('skillsSh:makeGlobal', { name: 'frontend-design' });
     const hooks = h.sourceRoots.makeGlobal.mock.calls[0][2];

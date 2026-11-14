@@ -166,10 +166,12 @@ export interface MachinesActionError {
           >Deletes the stored token and stops the tunnel. Sessions on
           {{ machineName() }} keep running there.</span
         >
-        <div class="flex gap-2">
+        <div class="flex gap-[var(--ptah-gap-controls)]">
           <button
             type="button"
-            class="btn btn-ghost btn-sm text-state-err border border-state-err focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            ptahButton
+            variant="danger"
+            size="sm"
             data-testid="machine-remove-confirm-yes"
             [disabled]="busy()"
             (click)="removeMachine.emit()"

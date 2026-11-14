@@ -745,9 +745,9 @@ describe('ProvidersSettingsComponent', () => {
       button('Clear filter').click(); await render();
       expect(element.querySelectorAll('ptah-provider-connection-card')).toHaveLength(2);
     });
-    it('the list takes its columns from the container width (22rem rows, never wider than the container), and the catalog caption is one passive row under the header', async () => {
+    it('the list takes its columns from the container width (22rem minimum, empty tracks collapse), and the catalog caption is one passive row under the header', async () => {
       await render();
-      expect(element.querySelector('[data-testid="connections-grid"]')?.className).toContain('grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))]');
+      expect(element.querySelector('[data-testid="connections-grid"]')?.className).toContain('grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))]');
       expect(element.querySelector('[data-testid="connections-grid"]')?.className).toContain('items-start');
       const hint = element.querySelector('[data-testid="catalog-hint"]');
       // Directly under the header row (the row holding "Connect provider").

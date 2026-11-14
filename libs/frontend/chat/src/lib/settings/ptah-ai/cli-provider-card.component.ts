@@ -5,6 +5,7 @@ import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
+  PtahSurfaceDirective,
 } from '@ptah-extension/ui';
 import type { CliLaneDefaults, CliType } from '@ptah-extension/shared';
 import { cliModelDisplay, type SystemCliMatrixRow } from './cli-matrix-rows';
@@ -32,10 +33,11 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
     PtahButtonDirective,
     PtahBadgeDirective,
     PtahCheckboxDirective,
+    PtahSurfaceDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrl: './cli-provider-card.component.css',
-  template: `<article class="provider-card rounded-lg border border-base-content/10 bg-base-100 text-base-content"
+  template: `<article ptahSurface variant="inset" border="faint" padding="none" class="provider-card rounded-lg text-base-content"
       data-glass-surface="tile" [attr.data-testid]="'cli-provider-card-' + row().id">
     <header class="flex min-w-0 items-center gap-2 border-b border-base-content/10 px-3 py-2">
       <ptah-provider-mark [providerId]="row().cli" fallback="Terminal" size="sm" />
@@ -69,21 +71,21 @@ export type CliProviderDefaultChoice = NonNullable<CliLaneDefaults[CliType]>;
         <span class="text-base-content-muted">Provider</span><span class="truncate" [title]="row().provider ?? 'CLI default'">{{ row().provider ?? 'CLI default' }}</span>
         <span class="text-base-content-muted">Model</span>
         <ptah-native-popover [isOpen]="openKind() === 'model'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="popoverClosed.emit()">
-          <button trigger type="button" class="btn btn-ghost btn-xs min-w-0 justify-start truncate" data-popover-kind="model" [disabled]="!row().interactive"
+          <button trigger type="button" ptahButton variant="ghost" size="xs" density="compact" align="start" class="min-w-0 truncate" data-popover-kind="model" [disabled]="!row().interactive"
             [class.opacity-60]="busy()" [class.cursor-wait]="busy()" [attr.aria-disabled]="busy() ? 'true' : null" [attr.aria-busy]="busy() ? 'true' : null" [title]="modelTitle()" [attr.aria-expanded]="openKind() === 'model'" (click)="!busy() && requestPopover('model')">{{ modelText() }}</button>
           @if (openKind() === 'model') { <ptah-cli-model-effort-popover content [row]="row()" field="model" (closed)="popoverClosed.emit()" /> }
         </ptah-native-popover>
         <span class="text-base-content-muted">Effort</span>
         @if (row().effort) {
           <ptah-native-popover [isOpen]="openKind() === 'effort'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="popoverClosed.emit()">
-            <button trigger type="button" class="btn btn-ghost btn-xs min-w-0 justify-start truncate" data-popover-kind="effort" [disabled]="!row().interactive"
+            <button trigger type="button" ptahButton variant="ghost" size="xs" density="compact" align="start" class="min-w-0 truncate" data-popover-kind="effort" [disabled]="!row().interactive"
               [class.opacity-60]="busy()" [class.cursor-wait]="busy()" [attr.aria-disabled]="busy() ? 'true' : null" [attr.aria-busy]="busy() ? 'true' : null" [attr.aria-expanded]="openKind() === 'effort'" (click)="!busy() && requestPopover('effort')">{{ row().effort?.value || 'default' }}</button>
             @if (openKind() === 'effort') { <ptah-cli-model-effort-popover content [row]="row()" field="effort" (closed)="popoverClosed.emit()" /> }
           </ptah-native-popover>
         } @else { <span class="text-base-content-muted">n/a</span> }
         <span class="text-base-content-muted">Safety</span>
         <ptah-native-popover [isOpen]="openKind() === 'permission'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="popoverClosed.emit()">
-          <button trigger type="button" class="btn btn-ghost btn-xs min-w-0 justify-start truncate" data-popover-kind="permission" [title]="row().permission.detail"
+          <button trigger type="button" ptahButton variant="ghost" size="xs" density="compact" align="start" class="min-w-0 truncate" data-popover-kind="permission" [title]="row().permission.detail"
             [attr.aria-expanded]="openKind() === 'permission'" (click)="popoverRequested.emit('permission')">{{ row().permission.badge }}</button>
           @if (openKind() === 'permission') { <ptah-cli-provider-card-popovers content [row]="row()" kind="permission" (closed)="popoverClosed.emit()" /> }
         </ptah-native-popover>

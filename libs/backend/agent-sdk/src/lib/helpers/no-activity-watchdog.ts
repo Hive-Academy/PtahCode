@@ -19,6 +19,12 @@ import { COMPACTION_MAX_DWELL_MS } from './compaction/compaction-state.types';
  * Otherwise only unaccounted root silence invokes the recovery callback.
  * Idle/permission holds remain reference counted; operation ownership is keyed
  * and idempotent instead. Child registration never owns a parent hold.
+ *
+ * A backgrounded root-owned SDK task (`task_id`) releases its root tool but is
+ * still accounted: its own progress, updates and child messages refresh it,
+ * and root silence only times out once every such task has also been quiet
+ * for {@link BACKGROUND_TASK_QUIET_TIMEOUT_MS}. Unknown, ambient and stale-run
+ * task traffic never extends the deadline.
  */
 export class NoActivityWatchdog {
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -50,7 +56,8 @@ export class NoActivityWatchdog {
   private readonly tools = new Map<string, string>();
   /** Monotonic time the open compaction began; null while none is open. */
   private compactingSinceMs: number | null = null;
-  private readonly tasks = new Map<string, string>();
+  /** Root-owned SDK tasks by `task_id`; cleared at every turn boundary. */
+  private readonly tasks = new Map<string, TaskRecord>();
 
   constructor(
     private readonly timeoutMs: number,
@@ -163,10 +170,19 @@ export class NoActivityWatchdog {
     this.kick();
   }
 
-  /** Only root activity extends the root deadline. Background chatter cannot. */
+  /**
+   * Only root activity extends the root deadline. Child chatter only refreshes
+   * a known background task that owns its parent tool.
+   */
   observe(message: SDKMessage): void {
     if (this.stopped || this.fired) return;
-    if ('parent_tool_use_id' in message && message.parent_tool_use_id) return;
+    if ('parent_tool_use_id' in message && message.parent_tool_use_id) {
+      const parentToolId = message.parent_tool_use_id;
+      for (const record of this.tasks.values()) {
+        if (record.toolUseId === parentToolId) this.touch(record);
+      }
+      return;
+    }
     if (
       message.type === 'tool_progress' &&
       !this.tools.has(message.tool_use_id)
@@ -179,14 +195,15 @@ export class NoActivityWatchdog {
     this.kick();
   }
 
-  /** Task chatter only extends the deadline when it releases a root tool. */
+  /**
+   * Task chatter extends the deadline only when it releases a root tool or
+   * refreshes a known background task.
+   */
   private observeSystem(
     message: Extract<SDKMessage, { type: 'system' }>,
   ): boolean {
     if (message.subtype === 'task_started') {
-      if (message.tool_use_id && this.tools.has(message.tool_use_id)) {
-        this.tasks.set(message.task_id, message.tool_use_id);
-      }
+      this.observeTaskStarted(message);
       return true;
     }
     if (message.subtype === 'task_updated') {
@@ -194,12 +211,20 @@ export class NoActivityWatchdog {
       return true;
     }
     if (message.subtype === 'task_notification') {
-      const toolId = message.tool_use_id ?? this.tasks.get(message.task_id);
-      if (toolId && this.tools.delete(toolId)) this.kick();
+      const record = this.tasks.get(message.task_id);
+      if (record && !sameRun(record, message.run_id)) return true;
+      const toolId = message.tool_use_id ?? record?.toolUseId;
+      const released = toolId !== undefined && this.tools.delete(toolId);
       this.tasks.delete(message.task_id);
+      // A terminal notification restores a full normal window.
+      if (released || (record?.background && record.keepsAlive)) this.kick();
       return true;
     }
-    if (message.subtype === 'task_progress') return true;
+    if (message.subtype === 'task_progress') {
+      const record = this.tasks.get(message.task_id);
+      if (record && sameRun(record, message.run_id)) this.touch(record);
+      return true;
+    }
     this.observeCompaction(message);
     return false;
   }
@@ -235,24 +260,70 @@ export class NoActivityWatchdog {
     if (this.compactingSinceMs === null || !this.enforceCompactionDwell()) {
       return null;
     }
-    return (
-      this.compactingSinceMs + COMPACTION_MAX_DWELL_MS - performance.now()
-    );
+    return this.compactingSinceMs + COMPACTION_MAX_DWELL_MS - performance.now();
+  }
+
+  /** Only a task started by an open root tool is recorded. */
+  private observeTaskStarted(
+    message: Extract<SDKMessage, { subtype: 'task_started' }>,
+  ): void {
+    const toolUseId = message.tool_use_id;
+    if (!toolUseId || !this.tools.has(toolUseId)) return;
+    this.tasks.set(message.task_id, {
+      toolUseId,
+      runId: message.run_id,
+      keepsAlive:
+        !message.parent_task_id && !message.ambient && !message.skip_transcript,
+      background: message.is_backgrounded === true,
+      lastActivityMs: performance.now(),
+    });
   }
 
   private observeTaskUpdate(
     message: Extract<SDKMessage, { subtype: 'task_updated' }>,
   ): void {
-    const toolId = this.tasks.get(message.task_id);
-    if (
-      toolId &&
-      (message.patch.is_backgrounded ||
-        ['completed', 'failed', 'killed'].includes(message.patch.status ?? ''))
-    ) {
-      const wasWaiting = this.tools.delete(toolId);
-      this.tasks.delete(message.task_id);
-      if (wasWaiting) this.kick();
+    const record = this.tasks.get(message.task_id);
+    if (!record || !sameRun(record, message.run_id)) return;
+    const terminal = ['completed', 'failed', 'killed'].includes(
+      message.patch.status ?? '',
+    );
+    if (!terminal && !message.patch.is_backgrounded) {
+      this.touch(record);
+      return;
     }
+    const wasWaiting = this.tools.delete(record.toolUseId);
+    if (terminal) {
+      this.tasks.delete(message.task_id);
+      if (wasWaiting || (record.background && record.keepsAlive)) this.kick();
+      return;
+    }
+    // Backgrounded: the root tool is released but the task stays accounted.
+    record.background = true;
+    if (wasWaiting) this.kick();
+    this.touch(record);
+  }
+
+  /** Refreshes a live background task's quiet window and the root deadline. */
+  private touch(record: TaskRecord): void {
+    if (!record.background || !record.keepsAlive) return;
+    record.lastActivityMs = performance.now();
+    this.kick();
+  }
+
+  /**
+   * Milliseconds left before every live background task has been quiet for
+   * {@link BACKGROUND_TASK_QUIET_TIMEOUT_MS}; null while none is live.
+   */
+  private backgroundQuietRemainingMs(): number | null {
+    let latestMs: number | null = null;
+    for (const record of this.tasks.values()) {
+      if (record.background && record.keepsAlive) {
+        latestMs = Math.max(latestMs ?? 0, record.lastActivityMs);
+      }
+    }
+    return latestMs === null
+      ? null
+      : latestMs + BACKGROUND_TASK_QUIET_TIMEOUT_MS - performance.now();
   }
 
   /**
@@ -273,7 +344,10 @@ export class NoActivityWatchdog {
     if (!Array.isArray(content)) return;
     for (const block of content) {
       if (block.type === 'tool_use' && typeof block.id === 'string') {
-        this.tools.set(block.id, typeof block.name === 'string' ? block.name : 'tool');
+        this.tools.set(
+          block.id,
+          typeof block.name === 'string' ? block.name : 'tool',
+        );
       }
     }
   }
@@ -286,7 +360,7 @@ export class NoActivityWatchdog {
     }
   }
 
-  private arm(): void {
+  private arm(windowMs = this.timeoutMs): void {
     this.clear();
     if (this.holds > 0 || this.stopped || this.fired || !this.started) return;
     // While an enforced compaction is open the deadline never runs past its
@@ -294,8 +368,8 @@ export class NoActivityWatchdog {
     const dwellRemainingMs = this.compactionDwellRemainingMs();
     const delayMs =
       dwellRemainingMs === null
-        ? this.timeoutMs
-        : Math.min(this.timeoutMs, Math.max(0, dwellRemainingMs));
+        ? windowMs
+        : Math.min(windowMs, Math.max(0, dwellRemainingMs));
     this.timer = setTimeout(() => {
       this.timer = null;
       if (this.stopped || this.fired) return;
@@ -313,6 +387,18 @@ export class NoActivityWatchdog {
           this.onOverdue(operations);
         } finally {
           this.arm();
+        }
+        return;
+      }
+      // Root silence past the normal window while a background task is still
+      // inside its quiet window: report it and check again at the earlier of
+      // the next window and the quiet bound. Never earlier than today's rule.
+      const quietRemainingMs = this.backgroundQuietRemainingMs();
+      if (!dwellExceeded && quietRemainingMs !== null && quietRemainingMs > 0) {
+        try {
+          this.onOverdue(['background task']);
+        } finally {
+          this.arm(Math.min(this.timeoutMs, quietRemainingMs));
         }
         return;
       }
@@ -343,6 +429,28 @@ export type WatchdogTimeoutCause = 'no-activity' | 'compaction-dwell';
  * `COMPACTION_MAX_DWELL_MS` from when it opened.
  */
 export const NO_ACTIVITY_TIMEOUT_MS = 180_000;
+
+/**
+ * Quiet bound for a backgrounded root-owned SDK task with no open root tool:
+ * root silence times out once every such task has had no qualifying activity
+ * for this long. Sustained real progress can run longer.
+ */
+export const BACKGROUND_TASK_QUIET_TIMEOUT_MS = 600_000;
+
+/** A root-owned SDK task, kept after backgrounding releases its root tool. */
+interface TaskRecord {
+  readonly toolUseId: string;
+  readonly runId?: string;
+  /** Nested, ambient and skip_transcript tasks only release their root tool. */
+  readonly keepsAlive: boolean;
+  background: boolean;
+  lastActivityMs: number;
+}
+
+/** A late event of another run of the same task must not change this run. */
+function sameRun(record: TaskRecord, runId: string | undefined): boolean {
+  return !record.runId || !runId || record.runId === runId;
+}
 
 export interface ActivityHold {
   hold(): void;

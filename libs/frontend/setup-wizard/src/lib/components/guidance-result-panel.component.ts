@@ -15,7 +15,7 @@ import { PtahButtonDirective, PtahToggleDirective } from '@ptah-extension/ui';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
-      class="rounded-lg border border-base-300 bg-base-200 p-4"
+      class="rounded-lg border border-base-300 bg-base-200 p-[var(--ptah-surface-pad)]"
       aria-labelledby="guidance-result-title"
     >
       <h2 id="guidance-result-title" class="font-semibold">Saved guidance</h2>

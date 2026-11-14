@@ -211,7 +211,7 @@ describe('UsageDashboardComponent', () => {
     expect(text('usage-cost-donut')).toContain('unpriced');
     clickButton('Model');
     expect(el().querySelectorAll('[data-testid="usage-donut-arc"]')).toHaveLength(2);
-    expect(el().querySelector('[aria-label="Cost share view"] .btn-active')?.textContent).toContain('Model');
+    expect(el().querySelector('[aria-label="Cost share view"] [aria-pressed="true"]')?.textContent).toContain('Model');
   });
 
   it('shows the savings multiple when cost and savings are both fully known', async () => {

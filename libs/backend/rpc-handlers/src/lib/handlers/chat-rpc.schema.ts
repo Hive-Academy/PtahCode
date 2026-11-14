@@ -27,6 +27,7 @@
  */
 
 import { z } from 'zod';
+import { CHAT_ABORT_SOURCES } from '@ptah-extension/shared';
 import {
   HISTORY_PAGE_MAX_EVENTS,
   MCP_TOOL_PROFILES,
@@ -84,12 +85,25 @@ export const ChatStartParamsSchema = z
  * event routing).
  */
 const QueuedPayloadSchema = z.object({
-  prompt: z.string({ error: 'prompt must be a string' }).min(1).max(1024 * 1024),
+  prompt: z
+    .string({ error: 'prompt must be a string' })
+    .min(1)
+    .max(1024 * 1024),
   files: z.array(z.string().min(1).max(4096)).max(64).optional(),
-  images: z.array(z.object({
-    data: z.string().min(1).max(20 * 1024 * 1024),
-    mediaType: z.string().min(1).max(128),
-  }).strict()).max(16).optional(),
+  images: z
+    .array(
+      z
+        .object({
+          data: z
+            .string()
+            .min(1)
+            .max(20 * 1024 * 1024),
+          mediaType: z.string().min(1).max(128),
+        })
+        .strict(),
+    )
+    .max(16)
+    .optional(),
 });
 
 export const ChatContinueParamsSchema = z
@@ -114,8 +128,13 @@ export const ChatContinueParamsSchema = z
   .superRefine((value, ctx) => {
     if (value.queueIntent !== undefined) {
       const parsed = QueuedPayloadSchema.safeParse(value);
-      if (!parsed.success) for (const issue of parsed.error.issues)
-        ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+      if (!parsed.success)
+        for (const issue of parsed.error.issues)
+          ctx.addIssue({
+            code: 'custom',
+            path: issue.path,
+            message: issue.message,
+          });
     }
     // A held follow-up is addressed by its id for its whole life (state
     // events, withdraw, steer), so a queued send must carry a real UUID.
@@ -243,14 +262,15 @@ export const ChatCarryOverParamsSchema = z
   .strict();
 
 /**
- * `chat:abort` params — `sessionId` is required. The current
- * `ChatAbortParams` shape only carries `sessionId`; we still validate it
+ * `chat:abort` params — `sessionId` is required and `source` is optional.
+ * We still validate the shared `ChatAbortParams` shape
  * with `.passthrough()` so any future addition of `tabId` (Unit-B territory)
  * does not lose its validation when wired in.
  */
 export const ChatAbortParamsSchema = z
   .object({
     sessionId: uuidString('sessionId'),
+    source: z.enum(CHAT_ABORT_SOURCES).optional(),
   })
   .passthrough();
 

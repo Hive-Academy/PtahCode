@@ -1,0 +1,200 @@
+<section class="space-y-[var(--ptah-gap-group)]" aria-labelledby="skill-review-title">
+  <div>
+    <h2 id="skill-review-title" class="text-xl font-semibold" tabindex="-1">
+      Skills and project guidance
+    </h2>
+    <p class="text-sm text-base-content-muted">
+      Choose skills for this team. You can continue without installing any.
+    </p>
+  </div>
+  @if (error()) {
+    <p role="alert" class="text-sm text-state-err">{{ error() }}</p>
+  }
+  @if (loading()) {
+    <div role="status" aria-live="polite">
+      <ptah-state-panel state="loading" title="Finding recommended skills" />
+    </div>
+  } @else {
+    <section aria-labelledby="recommended-title" class="space-y-3">
+      <h3 id="recommended-title" class="font-semibold">
+        Recommended for this workspace
+      </h3>
+      @if (recommendations().length === 0) {
+        <ptah-state-panel
+          state="empty"
+          title="No recommendations yet"
+          body="Search for skills or continue without them."
+        />
+      }
+      @for (row of recommendations(); track key(row.skill)) {
+        <ptah-native-card>
+          <label class="flex cursor-pointer gap-[var(--ptah-gap-heading)] p-[var(--ptah-surface-pad)]">
+            <input
+              type="checkbox"
+              ptahCheckbox
+              [checked]="selected(row.skill)"
+              [attr.aria-label]="'Select ' + row.skill.name"
+              (change)="selectionToggled.emit(key(row.skill))"
+            />
+            <span class="min-w-0"
+              ><strong class="block">{{ row.skill.name }}</strong
+              ><span class="block break-all text-xs text-base-content-muted">{{
+                key(row.skill)
+              }}</span>
+              <span class="block text-sm">{{ row.skill.description }}</span>
+              @if (row.evidence) {
+                <span class="block text-xs text-base-content-muted"
+                  >Why: {{ row.evidence }}</span
+                >
+              }
+              @if (row.score !== null && row.score !== undefined) {
+                <span class="block text-xs text-base-content-muted"
+                  >Relevance score: {{ row.score }}</span
+                >
+              }
+            </span>
+          </label>
+        </ptah-native-card>
+      }
+    </section>
+  }
+  <section class="space-y-3" aria-labelledby="search-title">
+    <h3 id="search-title" class="font-semibold">Find more skills</h3>
+    <form
+      class="flex flex-wrap items-end gap-[var(--ptah-gap-controls)]"
+      (submit)="submitSearch($event)"
+    >
+      <ptah-field
+        label="Search skills"
+        appearance="stacked"
+        class="min-w-0 grow"
+        ><input
+          ptahInput
+          name="skill-search"
+          [ngModel]="query()"
+          (ngModelChange)="queryChange.emit($event)"
+      /></ptah-field>
+      <button
+        ptahButton
+        type="submit"
+        [disabled]="searching() || !query().trim()"
+      >
+        Search
+      </button>
+    </form>
+    @if (searching()) {
+      <p role="status" aria-live="polite">Searching skills…</p>
+    }
+    @if (searchError()) {
+      <p role="alert" class="text-sm text-state-err">{{ searchError() }}</p>
+    }
+    @for (skill of searchResults(); track key(skill)) {
+      @if (!recommendationIds().has(key(skill))) {
+        <ptah-native-card
+          ><label class="flex cursor-pointer gap-[var(--ptah-gap-heading)] p-[var(--ptah-surface-pad)]"
+            ><input
+              type="checkbox"
+              ptahCheckbox
+              [checked]="selected(skill)"
+              [attr.aria-label]="'Select ' + skill.name"
+              (change)="selectionToggled.emit(key(skill))"
+            />
+            <span class="min-w-0"
+              ><strong class="block">{{ skill.name }}</strong
+              ><span class="block break-all text-xs text-base-content-muted">{{
+                key(skill)
+              }}</span
+              ><span class="block text-sm">{{ skill.description }}</span></span
+            >
+          </label></ptah-native-card
+        >
+      }
+    }
+  </section>
+  @if (guidanceFacts().length) {
+    <section aria-labelledby="guidance-title" class="space-y-2">
+      <h3 id="guidance-title" class="font-semibold">Project guidance</h3>
+      @for (fact of guidanceFacts(); track $index) {
+        <div
+          class="rounded-[14px] border border-base-300 p-3"
+          data-glass-surface="tile"
+        >
+          <span class="text-xs font-semibold"
+            >{{ fact.category }} · {{ label(fact.label) }}</span
+          >
+          <p class="text-sm">{{ fact.fact }}</p>
+          @if (fact.evidence) {
+            <p class="text-xs text-base-content-muted">{{ fact.evidence }}</p>
+          }
+        </div>
+      }
+    </section>
+  }
+  @if (guidanceNote()) {
+    <p role="status" class="text-sm">{{ guidanceNote() }}</p>
+  }
+  <fieldset class="space-y-2" [disabled]="busy()">
+    <legend class="font-semibold">
+      {{
+        ownerDecisionPrompt() ||
+          'How should the team handle existing practices?'
+      }}
+      @if (!decisionRequired()) { (optional) }
+    </legend>
+    <label class="flex items-center gap-2"
+      ><input
+        type="radio"
+        ptahCheckbox
+        name="owner-decision"
+        value="match"
+        [checked]="ownerDecision() === 'match'"
+        (change)="ownerDecisionChange.emit('match')"
+      />Match the repository</label
+    >
+    <label class="flex items-center gap-2"
+      ><input
+        type="radio"
+        ptahCheckbox
+        name="owner-decision"
+        value="raise"
+        [checked]="ownerDecision() === 'raise'"
+        (change)="ownerDecisionChange.emit('raise')"
+      />Raise the standard</label
+    >
+  </fieldset>
+  @if (ownerDecisionError()) {
+    <p role="alert" class="text-sm text-state-err">
+      Choose how to handle existing practices before continuing or skipping.
+    </p>
+  }
+  <div class="flex flex-wrap justify-between gap-[var(--ptah-gap-controls)]">
+    <button
+      ptahButton
+      variant="ghost"
+      type="button"
+      [disabled]="busy()"
+      (click)="back.emit()"
+    >
+      Back to intent
+    </button>
+    <div class="flex gap-2">
+      <button
+        ptahButton
+        variant="ghost"
+        type="button"
+        [disabled]="busy() || loading()"
+        (click)="skip.emit()"
+      >
+        Skip skills</button
+      ><button
+        ptahButton
+        variant="primary"
+        type="button"
+        [disabled]="!selectedIds().size || loading() || busy()"
+        (click)="continueRequested.emit()"
+      >
+        Review selected skills ({{ selectedIds().size }})
+      </button>
+    </div>
+  </div>
+</section>

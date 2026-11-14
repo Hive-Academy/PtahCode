@@ -2195,6 +2195,10 @@ describe('ElectronLayoutService — removeFolder()', () => {
 
       expect(coordinator.confirm).not.toHaveBeenCalled();
       expect(abortedIds()).toEqual(['s-1', 's-2']);
+      expect(callsOf('chat:abort').map((c) => c[1])).toEqual([
+        { sessionId: 's-1', source: 'workspace-remove' },
+        { sessionId: 's-2', source: 'workspace-remove' },
+      ]);
       const removeAt = orderOf('workspace:removeFolder');
       expect(removeAt).toBeGreaterThanOrEqual(0);
       expect(orderOf('chat:abort', 's-1')).toBeGreaterThan(removeAt);

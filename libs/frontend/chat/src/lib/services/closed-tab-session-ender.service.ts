@@ -54,7 +54,7 @@ export class ClosedTabSessionEnderService {
     const sessionId = closed.sessionId as SessionId;
     if (this.isStillDisplayed(sessionId, closed.tabId)) return;
 
-    const params = { sessionId };
+    const params = { sessionId, source: 'tab-close' as const };
     try {
       this.claudeRpcService.call('chat:abort', params).catch((error) => {
         this.warn(closed.tabId, sessionId, error);
@@ -69,10 +69,7 @@ export class ClosedTabSessionEnderService {
    * closed tab is excluded explicitly, so this remains correct regardless of
    * whether StreamRouter has unbound it yet.
    */
-  private isStillDisplayed(
-    sessionId: SessionId,
-    closedTabId: string,
-  ): boolean {
+  private isStillDisplayed(sessionId: SessionId, closedTabId: string): boolean {
     if (
       this.tabManager
         .findTabsBySessionId(sessionId)

@@ -257,7 +257,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
                 {{ keyUnreadableText }}
               </span>
               <button type="button"
-                ptahButton variant="link" size="xs" class="!px-0 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton variant="link" noPadding size="xs"
                 aria-label="Retry reading the stored key" (click)="keyRetryRequested.emit()" data-testid="credentials-local-key-unreadable-retry">Retry</button>
             </div>
           }
@@ -302,7 +302,7 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
                 {{ keyUnreadableText }}
               </span>
               <button type="button"
-                ptahButton variant="link" size="xs" class="!px-0 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                ptahButton variant="link" noPadding size="xs"
                 aria-label="Retry reading the stored key" (click)="keyRetryRequested.emit()" data-testid="credentials-key-unreadable-retry">Retry</button>
             } @else {
               <!-- The host's masked hint (bullets + last 4) when it sent one, else a fixed mask. Display only:

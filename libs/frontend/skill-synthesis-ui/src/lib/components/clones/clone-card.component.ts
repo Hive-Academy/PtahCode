@@ -59,7 +59,7 @@ import {
   KEEP_MINE_EXPLANATION,
   cloneActionModel,
   cloneStatusLabel,
-  formatRelative,
+  formatCloneAge,
   formatSuccessRate,
 } from './clone-action-gating';
 import type { AgentSyncChip, AgentSyncChipState } from './agent-sync-chips';
@@ -417,7 +417,10 @@ function cloneStatusHint(clone: CloneSummary): string {
         @if (actions().rebase; as rebaseAction) {
           <button
             type="button"
-            class="btn btn-ghost btn-xs text-warning transition-colors duration-150"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="text-warning transition-colors duration-150"
             data-testid="clones-rebase-btn"
             [disabled]="!rebaseAction.enabled || busy()"
             title="Replace your local copy with the current upstream version."
@@ -430,7 +433,10 @@ function cloneStatusHint(clone: CloneSummary): string {
         @if (actions().keep) {
           <button
             type="button"
-            class="btn btn-ghost btn-xs text-warning transition-colors duration-150"
+            ptahButton
+            variant="ghost"
+            size="xs"
+            class="text-warning transition-colors duration-150"
             data-testid="clones-keep-btn"
             [disabled]="busy()"
             [title]="keepMineExplanation"
@@ -594,7 +600,7 @@ export class CloneCardComponent {
     if (c.lastEnhancedAt !== null) {
       out.push({
         label: 'Last enhanced',
-        value: formatRelative(c.lastEnhancedAt),
+        value: formatCloneAge(c.lastEnhancedAt),
         testId: 'clone-metric-last-enhanced',
       });
     }

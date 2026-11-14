@@ -11,6 +11,7 @@
 export {
   TabManagerService,
   ABORT_REASON_SUPERSEDED,
+  ABORT_REASON_TAB_RESET,
   type ClosedTabEvent,
   type AgentSessionAdoptionMode,
   type AgentSessionAdoptionResult,

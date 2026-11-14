@@ -1,16 +1,16 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import type { Lens, ReviewFinding, Severity } from '@ptah-extension/review-contracts';
-import { PtahButtonDirective, PtahFieldControlDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldControlDirective, PtahStatePanelComponent, PtahSurfaceDirective } from '@ptah-extension/ui';
 import { ReviewFindingCardComponent } from './review-finding-card.component';
 import { ReviewFindingsStore } from './review-findings.store';
 import { filterAndSortFindings, openTriage, summarizeFindings, toFindingViews, type SortField, type TriageState } from './review-finding-view';
 
 @Component({
   selector: 'ptah-review-findings-panel', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReviewFindingCardComponent, PtahButtonDirective, PtahFieldControlDirective],
+  imports: [ReviewFindingCardComponent, PtahButtonDirective, PtahFieldControlDirective, PtahStatePanelComponent, PtahSurfaceDirective],
   template: `
-    <section aria-label="Findings" class="space-y-4">
-      <div class="rounded-lg border border-base-300 bg-base-200 p-3 text-sm">
+    <section aria-label="Findings" class="space-y-6">
+      <div ptahSurface padding="sm" class="text-sm">
         <p class="font-medium">{{ summary().total }} findings</p>
         <p>Critical {{ summary().severity.Critical }} · Major {{ summary().severity.Major }} · Minor {{ summary().severity.Minor }} · Nitpick {{ summary().severity.Nitpick }}</p>
         <p>Open {{ summary().states.open }} · Accepted {{ summary().states.accepted }} · Dismissed {{ summary().states.dismissed }}</p>
@@ -30,8 +30,8 @@ import { filterAndSortFindings, openTriage, summarizeFindings, toFindingViews, t
       @if (store.openError()) { <p role="alert" class="text-sm text-error">{{ store.openError() }}</p> }
       @if (store.copyError()) { <p role="alert" class="text-sm text-error">{{ store.copyError() }}</p> }
       @if (store.copied()) { <p role="status" class="text-sm">Fix prompt copied.</p> }
-      @if (!views().length) { <p class="text-sm text-base-content-muted">No accepted findings for this run.</p> }
-      @else if (!visible().length) { <p class="text-sm text-base-content-muted">No matching findings.</p><button ptahButton variant="ghost" size="sm" type="button" (click)="clearFilters()">Clear filters</button> }
+      @if (!views().length) { <ptah-state-panel state="empty" body="No accepted findings for this run." /> }
+      @else if (!visible().length) { <ptah-state-panel state="empty" body="No matching findings." actionLabel="Clear filters" (action)="clearFilters()" /> }
       @else { <div class="space-y-3">@for (view of visible(); track view.key) {
         <ptah-review-finding-card [view]="view" [triage]="store.triage()[view.key] ?? openTriage" (openEvidence)="store.openEvidence($event.path, $event.line)" (respond)="store.respond(view, $event.action, $event.body)" (sendToLane)="store.sendToLane(view)" />
       }</div> }

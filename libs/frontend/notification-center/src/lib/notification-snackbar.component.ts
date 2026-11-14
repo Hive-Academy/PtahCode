@@ -33,6 +33,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
             (click)="$event.stopPropagation(); openNotifications.emit()">+{{ overflow() }} more</button>
         }
         @for (item of visible(); track item.key) {
+          <!-- Left raw: overlay glass plane with surface-3 fill and its own elevation; the owner would change the look. -->
           <section data-glass-surface="overlay" class="snackbar-card surface-3 relative rounded-xl border border-[color:var(--surface-border)] shadow-[var(--elev-shadow-raised)] p-1.5 pl-2.5 text-base-content hover:bg-[color:var(--surface-highlight)]"
             [attr.aria-label]="kindLabel(item) + ' for ' + sessionName(item) + ' in ' + workspaceName(item)"
             [attr.aria-describedby]="item.permissionPreview ? 'snackbar-preview-' + item.key + '-' + item.generation : null"
@@ -55,8 +56,7 @@ import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui
               } @else if (item.actions.length) {
               <div class="flex shrink-0 items-center gap-1">
                 @for (action of item.actions; track action.id) {
-                   <button type="button" class="btn btn-sm min-h-7 h-7 px-2 disabled:opacity-100 disabled:bg-base-200 disabled:text-base-content-muted disabled:border-[color:var(--surface-border)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                    [class.btn-primary]="isPrimary(item, action.id)" [class.btn-ghost]="!isPrimary(item, action.id)"
+                   <button type="button" ptahButton [variant]="isPrimary(item, action.id) ? 'primary' : 'ghost'" size="sm" class="min-h-7 h-7 px-2 disabled:opacity-100 disabled:bg-base-200 disabled:text-base-content-muted disabled:border-[color:var(--surface-border)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                      [disabled]="!!actionReason(item, action.id) || pending().has(item.key) || stale().has(item.key + ':' + item.generation)"
                     [attr.title]="actionReason(item, action.id)"
                     [attr.aria-describedby]="actionReason(item, action.id) ? 'snackbar-reason-' + item.key + '-' + action.id : pending().has(item.key) ? 'snackbar-pending-' + item.key : null"

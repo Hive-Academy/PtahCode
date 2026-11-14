@@ -5,6 +5,8 @@
 //   npm run verify -- -p shared,chat       nx run-many for those projects only
 //   npm run verify -- -t test -p shared    selected targets only
 //   npm run verify -- --base origin/main   another base for nx affected
+//   npm run verify -- --related -p shared  inner loop: only the tests related
+//                                          to the files changed since the base
 //   npm run verify -- -p shared -- --skip-nx-cache   extra args go to nx
 //   npm run verify -- --status             show the slot holders, the queue
 //                                          and the free memory
@@ -39,17 +41,11 @@ import {
   recordChild,
   slotCount,
 } from './verify-lock.mjs';
+import { planPhases } from './verify-args.mjs';
 
 const require = createRequire(import.meta.url);
 const log = (message) =>
   console.log(`[verify ${new Date().toISOString()}] ${message}`);
-
-function splitList(values) {
-  return (values ?? [])
-    .flatMap((v) => v.split(','))
-    .map((v) => v.trim())
-    .filter(Boolean);
-}
 
 function parse(argv) {
   const separator = argv.indexOf('--');
@@ -62,6 +58,7 @@ function parse(argv) {
       targets: { type: 'string', short: 't', multiple: true },
       base: { type: 'string', default: 'main' },
       head: { type: 'string' },
+      related: { type: 'boolean', default: false },
       task: { type: 'string' },
       exec: { type: 'boolean', default: false },
       status: { type: 'boolean', default: false },
@@ -77,36 +74,15 @@ function nxCommands(values, passthrough) {
     path.dirname(require.resolve('nx/package.json')),
     require('nx/package.json').bin.nx,
   );
-  const targets = splitList(values.targets);
-  const projects = splitList(values.projects);
-  const requested = targets.length ? targets : ['lint', 'test', 'typecheck'];
-  const nonTest = requested.filter((target) => target !== 'test');
-  const phases = requested.includes('test') && nonTest.length
-    ? [nonTest, ['test']]
-    : [requested];
   const rawParallel = process.env.PTAH_VERIFY_LINT_PARALLEL;
   const lintParallel = rawParallel === undefined ? 2 : Number(rawParallel);
   if (!Number.isInteger(lintParallel) || lintParallel < 1)
     throw new Error('PTAH_VERIFY_LINT_PARALLEL must be a positive integer');
-  const label = projects.length
-    ? projects.join(',')
-    : `affected vs ${values.base}`;
-  return phases.map((phase) => {
-    const targetList = phase.join(',');
-    const args = projects.length
-      ? ['run-many', '-t', targetList, '-p', projects.join(',')]
-      : ['affected', '-t', targetList, `--base=${values.base}`];
-    if (!projects.length && values.head) args.push(`--head=${values.head}`);
-    args.push(
-      `--parallel=${phase.includes('test') ? 1 : lintParallel}`,
-      ...passthrough,
-    );
-    return {
-      command: process.execPath,
-      args: [nxBin, ...args],
-      task: `verify ${targetList} (${label})`,
-    };
-  });
+  return planPhases(values, passthrough, lintParallel).map((phase) => ({
+    command: process.execPath,
+    args: [nxBin, ...phase.args],
+    task: `verify ${phase.targetList} (${phase.label})`,
+  }));
 }
 
 // cmd.exe quoting for one argument. Windows needs a shell to start .cmd
@@ -190,6 +166,7 @@ async function main() {
   if (values.help) {
     console.log(
       'usage: npm run verify -- [-p a,b] [-t lint,test,typecheck] [--base main] [--head ref] [-- nx args]\n' +
+        '       npm run verify -- --related -p a,b [--base main] [-- jest args]\n' +
         '       node scripts/verify.mjs --status\n' +
         '       node scripts/verify.mjs --exec --task <name> -- <command> [args...]',
     );

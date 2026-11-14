@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { ModelStateService } from '@ptah-extension/core';
+import { PtahMeterComponent, type PtahMeterTone } from '@ptah-extension/ui';
 import {
   resolveModelDisplayName,
   type SessionBudgetStage,
@@ -39,7 +40,7 @@ let nextSessionId = 0;
 @Component({
   selector: 'ptah-inspector-session-stats',
   standalone: true,
-  imports: [NgTemplateOutlet, InspectorCacheTileComponent],
+  imports: [NgTemplateOutlet, InspectorCacheTileComponent, PtahMeterComponent],
   template: `
     @let s = stats();
     <section
@@ -84,14 +85,17 @@ let nextSessionId = 0;
             <p class="mt-0.5 min-h-4 text-[10.5px] text-base-content-muted">&nbsp;</p>
           }
           @if (s.context.known && s.context.percent !== null) {
-            <div
-              class="mt-auto h-1 shrink-0 rounded-full bg-[var(--surface-border-strong)]"
-              role="progressbar"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              [attr.aria-valuenow]="clampPercent(s.context.percent)"
-              [attr.aria-labelledby]="contextLabelId"
-              [attr.aria-valuetext]="
+            <ptah-meter
+              class="mt-auto shrink-0"
+              [value]="clampPercent(s.context.percent)"
+              [max]="100"
+              label="Context"
+              size="xs"
+              tone="gold"
+              [animate]="false"
+              barRole="progressbar"
+              [ariaLabelledby]="contextLabelId"
+              [valueText]="
                 s.context.usedTokens !== null
                   ? s.context.label +
                     ' of the context window, ' +
@@ -99,12 +103,9 @@ let nextSessionId = 0;
                     ' tokens used'
                   : s.context.label + ' of the context window'
               "
-            >
-              <span
-                class="block h-full rounded-full bg-[var(--ptah-gold)]"
-                [style.width.%]="clampPercent(s.context.percent)"
-              ></span>
-            </div>
+              [hideLabel]="true"
+              [showValue]="false"
+            />
           }
         </div>
         <div class="flex min-h-[4rem] min-w-0 flex-col border-l border-surface-border px-2">
@@ -142,26 +143,24 @@ let nextSessionId = 0;
             <p class="text-[10.5px] text-base-content-muted">all agents</p>
           }
           @if (s.budget?.measure === 'tokens' && s.budget?.percent !== null) {
-            <div
-              role="progressbar"
-              aria-label="Session token budget"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              [attr.aria-valuenow]="clampPercent(s.budget!.percent!)"
-              [attr.aria-valuetext]="
+            <ptah-meter
+              class="mt-auto shrink-0"
+              [value]="clampPercent(s.budget!.percent!)"
+              [max]="100"
+              label="Session token budget"
+              size="xs"
+              [tone]="budgetTone(s.budget!.stage)"
+              [animate]="false"
+              barRole="progressbar"
+              [valueText]="
                 floor(s.budget!.percent!) +
                 '% of the ' +
                 formatTokens(s.budget!.limit) +
                 ' token budget'
               "
-              class="mt-auto h-1 shrink-0 rounded-full bg-[var(--surface-border-strong)]"
-            >
-              <span
-                class="block h-full rounded-full"
-                [style.width.%]="clampPercent(s.budget!.percent!)"
-                [style.background-color]="budgetInk(s.budget!.stage)"
-              ></span>
-            </div>
+              [hideLabel]="true"
+              [showValue]="false"
+            />
           }
         </div>
         <div class="flex min-h-[4rem] min-w-0 flex-col border-l border-surface-border pl-2">
@@ -203,26 +202,24 @@ let nextSessionId = 0;
             <p class="text-[10.5px] text-base-content-muted">this session</p>
           }
           @if (s.budget?.measure === 'cost' && s.budget?.percent !== null) {
-            <div
-              role="progressbar"
-              aria-label="Session cost budget"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              [attr.aria-valuenow]="clampPercent(s.budget!.percent!)"
-              [attr.aria-valuetext]="
+            <ptah-meter
+              class="mt-auto shrink-0"
+              [value]="clampPercent(s.budget!.percent!)"
+              [max]="100"
+              label="Session cost budget"
+              size="xs"
+              [tone]="budgetTone(s.budget!.stage)"
+              [animate]="false"
+              barRole="progressbar"
+              [valueText]="
                 floor(s.budget!.percent!) +
                 '% of the ' +
                 costBudgetSuffix(s.budget)!.slice(2) +
                 ' cost budget'
               "
-              class="mt-auto h-1 shrink-0 rounded-full bg-[var(--surface-border-strong)]"
-            >
-              <span
-                class="block h-full rounded-full"
-                [style.width.%]="clampPercent(s.budget!.percent!)"
-                [style.background-color]="budgetInk(s.budget!.stage)"
-              ></span>
-            </div>
+              [hideLabel]="true"
+              [showValue]="false"
+            />
           }
         </div>
       </div>
@@ -497,11 +494,11 @@ export class InspectorSessionStatsComponent {
   protected clampPercent(percent: number): number {
     return Math.min(100, Math.max(0, Math.floor(percent)));
   }
-  protected budgetInk(stage: SessionBudgetStage): string {
+  protected budgetTone(stage: SessionBudgetStage): PtahMeterTone {
     return stage === 'limit'
-      ? 'var(--state-ink-err)'
+      ? 'err'
       : stage === 'tighten' || stage === 'handoff'
-        ? 'var(--state-ink-need)'
-        : 'var(--ptah-gold)';
+        ? 'warn'
+        : 'gold';
   }
 }

@@ -81,7 +81,6 @@ export type TaskBoardStateKind =
           <button
             type="button"
             ptahButton
-            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             data-testid="tasks-no-workspace-retry"
             [disabled]="busy()"
             (click)="retry.emit()"
@@ -118,7 +117,6 @@ export type TaskBoardStateKind =
             type="button"
             ptahButton
             variant="primary"
-            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             data-testid="tasks-empty-create"
             (click)="create.emit()"
           >
@@ -154,7 +152,6 @@ export type TaskBoardStateKind =
           <button
             type="button"
             ptahButton
-            class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             data-testid="tasks-filtered-empty-clear"
             (click)="clearFilter.emit()"
           >

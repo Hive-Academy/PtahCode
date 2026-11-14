@@ -357,111 +357,127 @@ export class SkillsShRpcHandlers {
         kept?: KeptItem[];
         libraryPass?: LibraryPassStatus;
       }
-    >('skillsSh:install', async (params) => {
-      try {
-        this.logger.debug('RPC: skillsSh:install called', {
+    >('skillsSh:install', (params) => this.install(params));
+  }
+
+  public async install(
+    params: SkillsShInstallParams,
+    verifyStaged?: (
+      staged: { slug: string; dir: string }[],
+    ) => Promise<void> | void,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    scope?: CapabilityScope;
+    kept?: KeptItem[];
+    libraryPass?: LibraryPassStatus;
+  }> {
+    try {
+      this.logger.debug('RPC: skillsSh:install called', {
+        source: params.source,
+        skillId: params.skillId,
+        scope: params.scope,
+      });
+
+      // TWO checks, and neither is the other's duplicate. The schema settles
+      // SHAPE and the historical allowlists on values that arrive off the
+      // wire as `unknown`; `rejectUnsafeInstallRequest` settles the PATH
+      // rule, because `SAFE_SOURCE_PATTERN` accepts the literal `../..` and
+      // `SAFE_SKILL_ID_PATTERN` accepts `..` — harmless while these were only
+      // CLI arguments, not harmless now that they are also directory names.
+      //
+      // Calling the shared rule rather than restating it is the point: the
+      // service re-checks via `skillsShRootId` and `stageSkillsInstall`
+      // re-checks right before the spawn, and all three must agree because
+      // each guards a call site another caller can reach directly.
+      const parsed = SkillsShInstallParamsSchema.safeParse(params);
+      if (!parsed.success) {
+        const error = `Invalid install request for source "${String(params.source)}".`;
+        this.logger.warn('RPC: skillsSh:install rejected', {
           source: params.source,
           skillId: params.skillId,
-          scope: params.scope,
+          error,
         });
-
-        // TWO checks, and neither is the other's duplicate. The schema settles
-        // SHAPE and the historical allowlists on values that arrive off the
-        // wire as `unknown`; `rejectUnsafeInstallRequest` settles the PATH
-        // rule, because `SAFE_SOURCE_PATTERN` accepts the literal `../..` and
-        // `SAFE_SKILL_ID_PATTERN` accepts `..` — harmless while these were only
-        // CLI arguments, not harmless now that they are also directory names.
-        //
-        // Calling the shared rule rather than restating it is the point: the
-        // service re-checks via `skillsShRootId` and `stageSkillsInstall`
-        // re-checks right before the spawn, and all three must agree because
-        // each guards a call site another caller can reach directly.
-        const parsed = SkillsShInstallParamsSchema.safeParse(params);
-        if (!parsed.success) {
-          const error = `Invalid install request for source "${String(params.source)}".`;
-          this.logger.warn('RPC: skillsSh:install rejected', {
-            source: params.source,
-            skillId: params.skillId,
-            error,
-          });
-          return { success: false, error };
-        }
-
-        const rejection = rejectUnsafeInstallRequest(parsed.data);
-        if (rejection !== null) {
-          this.logger.warn('RPC: skillsSh:install rejected', {
-            source: parsed.data.source,
-            skillId: parsed.data.skillId,
-            error: rejection,
-          });
-          return { success: false, error: rejection };
-        }
-
-        // The default is THIS workspace (Phase D). With no folder open there
-        // is no workspace root to write, so the request is refused before the
-        // legacy sweep or any write; only an explicit `'global'` proceeds.
-        const workspaceRoot = this.getWorkspaceRoot();
-        if (parsed.data.scope === 'workspace' && workspaceRoot === '') {
-          throw new RpcUserError(
-            SKILLS_SH_NO_WORKSPACE_ERROR,
-            'WORKSPACE_NOT_OPEN',
-          );
-        }
-        const location: SkillsShLocation =
-          parsed.data.scope === 'global'
-            ? { scope: 'global' }
-            : { scope: 'workspace', workspaceRoot };
-
-        await this.adoptLegacyInstalls();
-
-        const result = await this.sourceRoots.install(
-          { source: parsed.data.source, skillId: parsed.data.skillId },
-          location,
-        );
-
-        if (!result.success) {
-          this.logger.warn('RPC: skillsSh:install failed', {
-            source: parsed.data.source,
-            skillId: parsed.data.skillId,
-            error: result.error,
-          });
-          return { success: false, error: result.error };
-        }
-
-        this.invalidateCaches();
-        const pass = await this.propagate('skillsSh:install');
-        const kept = await this.keptForInstall(
-          result.rootId,
-          result.slugs,
-          pass.health,
-        );
-
-        this.logger.info('RPC: skillsSh:install success', {
-          source: params.source,
-          rootId: result.rootId,
-          scope: result.scope,
-          slugs: result.slugs,
-          kept: kept.length,
-        });
-        return {
-          success: true,
-          scope: result.scope,
-          kept,
-          libraryPass: pass.libraryPass,
-        };
-      } catch (error: unknown) {
-        // A user-facing refusal carries its own fixed copy; let RpcHandler
-        // deliver it as a structured error rather than flatten it here.
-        if (error instanceof RpcUserError) throw error;
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        this.logger.error(
-          'RPC: skillsSh:install failed',
-          error instanceof Error ? error : new Error(errorMessage),
-        );
-        return { success: false, error: errorMessage };
+        return { success: false, error };
       }
-    });
+
+      const rejection = rejectUnsafeInstallRequest(parsed.data);
+      if (rejection !== null) {
+        this.logger.warn('RPC: skillsSh:install rejected', {
+          source: parsed.data.source,
+          skillId: parsed.data.skillId,
+          error: rejection,
+        });
+        return { success: false, error: rejection };
+      }
+
+      // The default is THIS workspace (Phase D). With no folder open there
+      // is no workspace root to write, so the request is refused before the
+      // legacy sweep or any write; only an explicit `'global'` proceeds.
+      const workspaceRoot = this.getWorkspaceRoot();
+      if (parsed.data.scope === 'workspace' && workspaceRoot === '') {
+        throw new RpcUserError(
+          SKILLS_SH_NO_WORKSPACE_ERROR,
+          'WORKSPACE_NOT_OPEN',
+        );
+      }
+      const location: SkillsShLocation =
+        parsed.data.scope === 'global'
+          ? { scope: 'global' }
+          : { scope: 'workspace', workspaceRoot };
+
+      await this.adoptLegacyInstalls();
+
+      const request = {
+        source: parsed.data.source,
+        skillId: parsed.data.skillId,
+      };
+      const result = verifyStaged
+        ? await this.sourceRoots.install(request, location, { verifyStaged })
+        : await this.sourceRoots.install(request, location);
+
+      if (!result.success) {
+        this.logger.warn('RPC: skillsSh:install failed', {
+          source: parsed.data.source,
+          skillId: parsed.data.skillId,
+          error: result.error,
+        });
+        return { success: false, error: result.error };
+      }
+
+      this.invalidateCaches();
+      const pass = await this.propagate('skillsSh:install');
+      const kept = await this.keptForInstall(
+        result.rootId,
+        result.slugs,
+        pass.health,
+      );
+
+      this.logger.info('RPC: skillsSh:install success', {
+        source: params.source,
+        rootId: result.rootId,
+        scope: result.scope,
+        slugs: result.slugs,
+        kept: kept.length,
+      });
+      return {
+        success: true,
+        scope: result.scope,
+        kept,
+        libraryPass: pass.libraryPass,
+      };
+    } catch (error: unknown) {
+      // A user-facing refusal carries its own fixed copy; let RpcHandler
+      // deliver it as a structured error rather than flatten it here.
+      if (error instanceof RpcUserError) throw error;
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        'RPC: skillsSh:install failed',
+        error instanceof Error ? error : new Error(errorMessage),
+      );
+      return { success: false, error: errorMessage };
+    }
   }
 
   /**

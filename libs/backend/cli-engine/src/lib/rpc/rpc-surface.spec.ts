@@ -151,8 +151,14 @@ describe('CLI RPC surface', () => {
       'gitWindow:getScope',
       'gitWindow:setMode',
     ];
-    expect(surface.registered.filter((method) => method.startsWith('gitWindow:')).sort()).toEqual([...methods].sort());
-    expect(surface.excluded.some((method) => method.startsWith('gitWindow:'))).toBe(false);
+    expect(
+      surface.registered
+        .filter((method) => method.startsWith('gitWindow:'))
+        .sort(),
+    ).toEqual([...methods].sort());
+    expect(
+      surface.excluded.some((method) => method.startsWith('gitWindow:')),
+    ).toBe(false);
   });
 
   it('serves bound guidance and generation recovery methods', () => {
@@ -162,6 +168,11 @@ describe('CLI RPC surface', () => {
         'enhancedPrompts:cancel',
         'enhancedPrompts:getRunState',
         'wizard:get-generation-run-state',
+        'wizard:recommend-skills',
+        'wizard:search-skills',
+        'wizard:get-project-guidance',
+        'wizard:preview-skills-for-consent',
+        'wizard:install-skills-with-consent',
       ]),
     );
   });

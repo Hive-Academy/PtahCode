@@ -20,12 +20,21 @@ import { Router } from '@angular/router';
 import { LucideAngularModule, FolderOpen, FolderPlus, X } from 'lucide-angular';
 import { ElectronLayoutService, VSCodeService } from '@ptah-extension/core';
 import { SessionLivenessRegistry } from '@ptah-extension/chat-state';
+import {
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+} from '@ptah-extension/ui';
 import { McpServersCardComponent } from '../molecules/mcp-servers-card.component';
 
 @Component({
   selector: 'ptah-workspace-sidebar',
   standalone: true,
-  imports: [LucideAngularModule, McpServersCardComponent],
+  imports: [
+    LucideAngularModule,
+    McpServersCardComponent,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     :host {
@@ -56,7 +65,11 @@ import { McpServersCardComponent } from '../molecules/mcp-servers-card.component
       </div>
 
       <!-- Folder list -->
-      <div class="overflow-y-auto px-3 py-3" style="flex: 0 1 auto" data-glass-surface="plate">
+      <div
+        class="overflow-y-auto px-3 py-3"
+        style="flex: 0 1 auto"
+        data-glass-surface="plate"
+      >
         @for (
           folder of layout.workspaceFolders();
           track folder.path;
@@ -87,10 +100,14 @@ import { McpServersCardComponent } from '../molecules/mcp-servers-card.component
             }
             <!-- Remove button (hover reveal) -->
             <button
-              class="remove-btn opacity-0 btn btn-ghost btn-xs btn-square p-0 min-h-0 w-5 h-5 text-base-content-muted hover:text-error transition-opacity duration-200"
+              ptahIconButton
+              label="Remove workspace"
+              variant="ghost"
+              size="xs"
+              density="compact"
+              tone="muted-danger"
+              class="remove-btn opacity-0 transition-opacity duration-200"
               (click)="onRemoveFolder($event, i)"
-              title="Remove workspace"
-              aria-label="Remove workspace"
             >
               <lucide-angular [img]="XIcon" class="w-3 h-3" />
             </button>
@@ -114,7 +131,12 @@ import { McpServersCardComponent } from '../molecules/mcp-servers-card.component
       <!-- Add folder button -->
       <div class="mt-auto px-3 py-3 border-t border-surface-border">
         <button
-          class="btn btn-ghost btn-sm w-full gap-2 text-base-content-muted hover:text-base-content justify-start"
+          ptahButton
+          variant="ghost"
+          size="sm"
+          density="compact"
+          align="start"
+          class="w-full gap-2 text-base-content-muted hover:text-base-content"
           (click)="layout.addFolder()"
           aria-label="Add workspace folder"
         >
@@ -129,7 +151,12 @@ import { McpServersCardComponent } from '../molecules/mcp-servers-card.component
         <!-- Dev instance only (electron:serve): link to the design-system gallery. -->
         <div class="px-3 pb-3">
           <button
-            class="btn btn-ghost btn-sm w-full justify-start"
+            ptahButton
+            variant="ghost"
+            size="sm"
+            density="compact"
+            align="start"
+            class="w-full"
             data-testid="workspace-sidebar-ui-gallery-link"
             (click)="openUiGallery()"
           >

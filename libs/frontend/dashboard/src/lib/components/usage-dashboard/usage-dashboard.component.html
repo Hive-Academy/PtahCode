@@ -1,4 +1,4 @@
-<div class="usage-dashboard flex flex-col gap-4" data-testid="usage-dashboard">
+<div class="usage-dashboard flex flex-col gap-[var(--ptah-gap-group)]" data-testid="usage-dashboard">
   <div class="flex flex-wrap items-center gap-3">
     <h3 class="text-sm font-semibold">Usage</h3>
     <div class="min-w-0">
@@ -6,14 +6,14 @@
         {{ viewModel()?.dateSpanLabel }}
       </p>
     </div>
-    <div class="join" role="group" aria-label="Usage range in days">
+    <div class="flex gap-[var(--ptah-gap-controls)]" role="group" aria-label="Usage range in days">
       @for (option of rangeOptions; track option.value) {
         <button
           type="button"
-          class="join-item btn btn-xs"
-          [class.btn-active]="range() === option.value"
-          [class.btn-primary]="range() === option.value"
-          [attr.aria-pressed]="range() === option.value"
+          ptahButton
+          size="xs"
+          [variant]="range() === option.value ? 'primary' : 'ghost'"
+          [selected]="range() === option.value"
           [disabled]="isLoading()"
           (click)="setRange(option.value)"
         >
@@ -41,7 +41,7 @@
     @if (viewModel()?.isPartial) {
       <button
         type="button"
-        class="badge badge-warning badge-sm tooltip tooltip-top cursor-help"
+        class="tooltip tooltip-top cursor-help"
         [class.tooltip-open]="partialBadgeFocused()"
         [attr.data-tip]="sourceTip()"
         aria-describedby="usage-partial-source-description"
@@ -49,7 +49,7 @@
         (focus)="partialBadgeFocused.set(true)"
         (blur)="partialBadgeFocused.set(false)"
         data-testid="usage-partial-badge"
-      >partial</button>
+      ><span ptahBadge tone="warn">partial</span></button>
       <span id="usage-partial-source-description" class="sr-only">{{ sourceTip() }}</span>
     }
     @if (viewModel()?.coverageStartDay; as coverageStartDay) {
@@ -60,40 +60,19 @@
   </div>
 
   @if (isLoading() && viewModel() === null) {
-    <div
-      class="flex flex-col items-center justify-center py-10"
-      role="status"
-      aria-label="Loading usage"
-    >
-      <span class="loading loading-spinner loading-md" aria-hidden="true"></span>
-      <p class="mt-3 text-xs text-base-content-muted">Loading usage...</p>
-    </div>
+    <div role="status" aria-label="Loading usage"><ptah-state-panel state="loading" title="Loading usage" /></div>
   } @else if (loadError() !== null && viewModel() === null) {
-    <div class="alert alert-error" role="alert" data-testid="usage-error">
-      <span>{{ loadError() }}</span>
-      <button
-        type="button"
-        class="btn btn-sm"
-        (click)="retry()"
-        aria-label="Retry loading usage"
-      >
-        Retry
-      </button>
+    <div data-testid="usage-error">
+      <ptah-state-panel state="error" [body]="loadError()" actionLabel="Retry" (action)="retry()" />
     </div>
   } @else if (viewModel(); as vm) {
     <div
-      class="flex flex-col gap-4"
+      class="flex flex-col gap-[var(--ptah-gap-group)]"
       [class.opacity-60]="isStale()"
       data-testid="usage-content"
     >
       @if (loadError() !== null) {
-        <div
-          class="alert alert-warning py-2 text-xs"
-          role="status"
-          data-testid="usage-refresh-failed"
-        >
-          <span>Refresh failed; showing the last loaded data.</span>
-        </div>
+        <div data-testid="usage-refresh-failed"><ptah-state-panel state="partial" body="Refresh failed; showing the last loaded data." /></div>
       } @else if (isStale()) {
         <div
           class="text-xs text-base-content-muted"
@@ -128,18 +107,7 @@
     }
 
     @if (!vm.hasUsage) {
-      <div
-        class="flex flex-col items-center justify-center py-10 text-base-content-muted"
-        data-testid="usage-empty"
-      >
-        <p class="text-xs">
-          @if (vm.isPartial) {
-            No recorded usage in this range. {{ vm.emptyPartialMessage }}
-          } @else {
-            No usage in this range. Start a chat to see provider usage, tokens and cost.
-          }
-        </p>
-      </div>
+      <div data-testid="usage-empty"><ptah-state-panel state="empty" [body]="vm.isPartial ? 'No recorded usage in this range. ' + vm.emptyPartialMessage : 'No usage in this range. Start a chat to see provider usage, tokens and cost.'" /></div>
     } @else {
       <ptah-usage-kpi-strip
         [kpis]="vm.kpis"
@@ -148,28 +116,24 @@
         [totalUnpricedTokens]="vm.totalCostUnpricedTokens"
       />
 
-      <section class="min-w-0 rounded-lg bg-base-200/20 p-3" aria-label="Daily usage">
+      <section ptahSurface class="min-w-0" aria-label="Daily usage">
           <div class="flex items-center justify-between gap-2">
-            <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content-muted">
-              Daily usage
-            </h4>
-            <div class="join" role="group" aria-label="Chart metric">
+            <ptah-section-header heading="Daily usage" [level]="4" />
+            <div class="flex gap-[var(--ptah-gap-controls)]" role="group" aria-label="Chart metric">
               <button
                 type="button"
-                class="join-item btn btn-xs"
-                [class.btn-active]="chartMode() === 'cost'"
-                [class.btn-primary]="chartMode() === 'cost'"
-                [attr.aria-pressed]="chartMode() === 'cost'"
+                ptahButton size="xs"
+                [variant]="chartMode() === 'cost' ? 'primary' : 'ghost'"
+                [selected]="chartMode() === 'cost'"
                 (click)="setChartMode('cost')"
               >
                 Cost
               </button>
               <button
                 type="button"
-                class="join-item btn btn-xs"
-                [class.btn-active]="chartMode() === 'tokens'"
-                [class.btn-primary]="chartMode() === 'tokens'"
-                [attr.aria-pressed]="chartMode() === 'tokens'"
+                ptahButton size="xs"
+                [variant]="chartMode() === 'tokens' ? 'primary' : 'ghost'"
+                [selected]="chartMode() === 'tokens'"
                 (click)="setChartMode('tokens')"
               >
                 Tokens
@@ -185,7 +149,7 @@
           />
       </section>
 
-      <div class="usage-share-grid grid grid-cols-1 gap-5">
+      <div class="usage-share-grid grid grid-cols-1 gap-[var(--ptah-gap-group)]">
         <ptah-usage-cost-donut
           [providers]="vm.providers"
           [models]="vm.modelRows"
@@ -198,7 +162,7 @@
         />
       </div>
 
-      <div class="usage-table-grid grid grid-cols-1 gap-5">
+      <div class="usage-table-grid grid grid-cols-1 gap-[var(--ptah-gap-group)]">
         <ptah-usage-breakdown-table
           [modelRows]="vm.modelRows"
           [dayRows]="vm.dayRows"

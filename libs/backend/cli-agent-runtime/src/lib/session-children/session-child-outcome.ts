@@ -22,10 +22,7 @@ import type {
 
 /** Machine causes the spawner records on a terminal child. */
 export type SessionChildEndCause =
-  | SessionEndCause
-  | 'runtime-cap'
-  | 'handed-off'
-  | 'first-turn-not-started';
+  SessionEndCause | 'runtime-cap' | 'handed-off' | 'first-turn-not-started';
 
 export interface SessionChildOutcomeInput {
   readonly parentSessionId?: string;
@@ -40,7 +37,10 @@ export interface SessionChildOutcomeInput {
 const CAUSE_WORDS: Readonly<
   Record<Exclude<SessionChildEndCause, 'parent-stop' | 'handed-off'>, string>
 > = {
-  'user-stop': 'stopped by the user (stop button or tab closed)',
+  'user-stop': 'stopped by the user (Stop button or /clear)',
+  'tab-close': 'its tab was closed (by the user or by the app)',
+  'internal-abort':
+    'an internal abort ended the session; this was not a user stop',
   'host-shutdown': 'host exit or restart',
   'workspace-close': 'workspace closed',
   'stream-exit': 'the agent stream exited',
@@ -75,7 +75,11 @@ export function childOutcomeOf(
   }
   if (!cause) {
     return status === 'ended'
-      ? { kind: 'unknown', reason: SESSION_CHILD_OUTCOME_UNKNOWN_REASON, endedAt }
+      ? {
+          kind: 'unknown',
+          reason: SESSION_CHILD_OUTCOME_UNKNOWN_REASON,
+          endedAt,
+        }
       : {
           kind: status,
           reason: record.endReason || SESSION_CHILD_OUTCOME_UNKNOWN_REASON,
@@ -97,11 +101,19 @@ function kindOf(
 ): SessionChildOutcomeKind {
   // A host exit or a closed workspace interrupts the child, whatever status
   // the shutdown path recorded (TASK_2026_932 review m1).
-  if (cause === 'host-shutdown' || cause === 'workspace-close') {
+  if (
+    cause === 'host-shutdown' ||
+    cause === 'workspace-close' ||
+    cause === 'internal-abort'
+  ) {
     return 'interrupted';
   }
   if (status !== 'ended') return status;
-  if (cause === 'user-stop' || cause === 'parent-stop') {
+  if (
+    cause === 'user-stop' ||
+    cause === 'tab-close' ||
+    cause === 'parent-stop'
+  ) {
     return delivered ? 'completed' : 'stopped';
   }
   return 'interrupted';

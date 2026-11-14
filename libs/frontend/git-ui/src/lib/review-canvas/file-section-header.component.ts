@@ -167,6 +167,7 @@ const FOCUS_RING =
       class="fsh-row flex flex-nowrap items-center gap-2 px-2 py-1.5 text-xs"
       data-testid="file-section-row"
     >
+      <!-- Keep raw: this file toggle is 16 px high; compact ptahIconButton fixes its height at 20 px. -->
       <button
         #toggle
         type="button"

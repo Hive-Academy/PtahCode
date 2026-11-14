@@ -147,8 +147,13 @@ import {
         </button>
         <button
           type="button"
-          class="btn btn-ghost btn-xs btn-square text-base-content-muted transition-colors duration-150 hover:text-error"
-          aria-label="Delete job"
+          ptahIconButton
+          variant="ghost"
+          size="xs"
+          density="compact"
+          tone="muted-danger"
+          class="transition-colors duration-150"
+          label="Delete job"
           title="Delete job"
           (click)="removed.emit()"
         >

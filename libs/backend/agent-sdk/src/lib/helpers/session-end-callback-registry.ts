@@ -20,9 +20,18 @@ import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { z } from 'zod';
 
 export const SESSION_END_CAUSES = [
-  'user-stop', 'parent-stop', 'stream-exit', 'provider-error',
-  'config-reinit', 'workspace-close', 'compaction-abort',
-  'no-activity-timeout', 'host-shutdown', 'unknown',
+  'user-stop',
+  'tab-close',
+  'internal-abort',
+  'parent-stop',
+  'stream-exit',
+  'provider-error',
+  'config-reinit',
+  'workspace-close',
+  'compaction-abort',
+  'no-activity-timeout',
+  'host-shutdown',
+  'unknown',
 ] as const;
 export const SessionEndCauseSchema = z.enum(SESSION_END_CAUSES);
 export type SessionEndCause = z.infer<typeof SessionEndCauseSchema>;
@@ -73,7 +82,11 @@ export class SessionEndCallbackRegistry {
    * started but NOT awaited — fire-and-forget with per-callback `.catch()`
    * so a single failure does not affect the others or the SDK.
    */
-  notifyAll(data: { sessionId: string; workspaceRoot: string; cause?: unknown }): void {
+  notifyAll(data: {
+    sessionId: string;
+    workspaceRoot: string;
+    cause?: unknown;
+  }): void {
     const payload: SessionEndPayload = {
       sessionId: data.sessionId,
       workspaceRoot: data.workspaceRoot,

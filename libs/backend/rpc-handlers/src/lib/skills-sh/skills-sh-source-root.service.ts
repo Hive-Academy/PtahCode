@@ -286,6 +286,11 @@ export class SkillsShSourceRootService {
   async install(
     request: SkillInstallRequest,
     location: SkillsShLocation = { scope: 'global' },
+    options?: {
+      verifyStaged?: (
+        staged: { slug: string; dir: string }[],
+      ) => Promise<void> | void;
+    },
   ): Promise<SkillsShInstallOutcome> {
     const rootId = skillsShRootId(request.source);
     if (rootId === null) {
@@ -324,6 +329,10 @@ export class SkillsShSourceRootService {
         );
         Object.assign(writtenHashes, hashed.files);
       }
+
+      await options?.verifyStaged?.(
+        slugs.map((slug) => ({ slug, dir: path.join(stagedSkillsDir, slug) })),
+      );
 
       const targetSkillsDir = path.join(rootDir, 'skills');
       await fs.mkdir(targetSkillsDir, { recursive: true });

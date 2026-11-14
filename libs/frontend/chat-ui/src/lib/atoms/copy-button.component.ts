@@ -8,6 +8,7 @@ import {
 import { Clipboard } from '@angular/cdk/clipboard';
 import { LucideAngularModule, Copy, Check } from 'lucide-angular';
 import type { ExecutionChatMessage } from '@ptah-extension/shared';
+import { PtahIconButtonDirective } from '@ptah-extension/ui';
 import { extractMessageText } from './message-text';
 
 /**
@@ -22,16 +23,18 @@ import { extractMessageText } from './message-text';
 @Component({
   selector: 'ptah-copy-button',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahIconButtonDirective],
   template: `
     <button
-      [class]="turnActionSize()
-        ? 'inline-grid h-7 w-7 place-items-center rounded-md text-base-content-muted hover:bg-base-content/[.08] hover:text-base-content'
-        : 'btn btn-xs btn-ghost btn-square'"
+      ptahIconButton
+      [label]="isCopied() ? 'Copied' : 'Copy message'"
+      variant="ghost"
+      size="xs"
+      density="compact"
+      [class.h-7]="turnActionSize()"
+      [class.w-7]="turnActionSize()"
       [class.text-success]="isCopied()"
       type="button"
-      aria-label="Copy message"
-      [title]="isCopied() ? 'Copied!' : 'Copy'"
       (click)="copyMessage()"
     >
       <lucide-angular

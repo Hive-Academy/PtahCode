@@ -12,9 +12,6 @@ import type { GitDockScope } from '../services/git-dock-scope.store';
 import { worktreeFolderName } from '../review-shell/worktree-scope-bar.component';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[oklch(var(--s))]';
-
 const SOURCE_HINTS: Record<SessionWorkingRootSource, string> = {
   'organization-worktree': 'session worktree',
   'agent-origin-worktree': 'agent worktree',
@@ -93,7 +90,7 @@ const SOURCE_HINTS: Record<SessionWorkingRootSource, string> = {
         ptahButton
         variant="ghost"
         size="xs"
-        class="shrink-0 {{ focusRing }}"
+        class="shrink-0"
         [attr.aria-pressed]="pinned()"
         [attr.aria-label]="toggleTitle()"
         [title]="toggleTitle()"
@@ -123,7 +120,6 @@ export class GitDockScopeHeaderComponent {
   /** true = pin the current scope, false = follow the active session again. */
   readonly pinToggled = output<boolean>();
 
-  protected readonly focusRing = FOCUS_RING;
   protected readonly PinIcon = Pin;
   protected readonly PinOffIcon = PinOff;
 

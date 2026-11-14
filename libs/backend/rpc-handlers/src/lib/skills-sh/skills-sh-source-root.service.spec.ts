@@ -34,15 +34,22 @@ import * as path from 'path';
 function mockFileLinkEntry(dir: string, name: string): jest.SpyInstance {
   const fsModule: typeof fs = jest.requireActual('fs/promises');
   const realReaddir = fsModule.readdir;
-  return jest.spyOn(fsModule, 'readdir').mockImplementation((async (target: string, options: { withFileTypes: true }) => {
+  return jest.spyOn(fsModule, 'readdir').mockImplementation((async (
+    target: string,
+    options: { withFileTypes: true },
+  ) => {
     const entries = await realReaddir(target, options);
     if (target !== dir) return entries;
-    return entries.map((entry) => path.join(String(target), entry.name) === path.join(dir, name)
-      ? new Proxy(entry, { get(value, key, receiver) {
-          if (key === 'isFile' || key === 'isDirectory') return () => false;
-          return Reflect.get(value, key, receiver);
-        } })
-      : entry);
+    return entries.map((entry) =>
+      path.join(String(target), entry.name) === path.join(dir, name)
+        ? new Proxy(entry, {
+            get(value, key, receiver) {
+              if (key === 'isFile' || key === 'isDirectory') return () => false;
+              return Reflect.get(value, key, receiver);
+            },
+          })
+        : entry,
+    );
   }) as typeof fsModule.readdir);
 }
 
@@ -161,6 +168,44 @@ afterEach(async () => {
 
 describe('SkillsShSourceRootService — install lands in the source root', () => {
   jest.setTimeout(30_000);
+  it('keeps the old slug and metadata when staged verification rejects', async () => {
+    stageWrites(['frontend-design'], 'old');
+    await service.install({
+      source: 'anthropics/skills',
+      skillId: 'frontend-design',
+    });
+    const previousSkill = await fs.readFile(
+      path.join(slugPath('frontend-design'), 'SKILL.md'),
+    );
+    const metadataPath = path.join(
+      homeDir,
+      '.ptah',
+      'plugins',
+      ROOT_ID,
+      SKILLS_SH_METADATA_FILE,
+    );
+    const previousMetadata = await fs.readFile(metadataPath);
+    stageWrites(['frontend-design'], 'new');
+    const rejection = new Error('not approved');
+    await expect(
+      service.install(
+        { source: 'anthropics/skills', skillId: 'frontend-design' },
+        { scope: 'global' },
+        {
+          verifyStaged: (staged) => {
+            expect(staged).toEqual([
+              { slug: 'frontend-design', dir: expect.any(String) },
+            ]);
+            throw rejection;
+          },
+        },
+      ),
+    ).rejects.toBe(rejection);
+    await expect(
+      fs.readFile(path.join(slugPath('frontend-design'), 'SKILL.md')),
+    ).resolves.toEqual(previousSkill);
+    await expect(fs.readFile(metadataPath)).resolves.toEqual(previousMetadata);
+  });
   it('writes the skill under ~/.ptah/plugins/ptah-skillssh-<owner>-<repo>/skills/<slug>', async () => {
     stageWrites(['frontend-design']);
 
@@ -801,9 +846,13 @@ describe('verifyOwnedRoot — ownership is proven only by v2 metadata and every 
     } else await fs.symlink(path.join(dir, 'SKILL.md'), link);
     try {
       await expect(verifyOwnedRoot(workspaceRootDir())).resolves.toEqual({
-        status: 'unproven', reason: 'not-regular-file', path: 'skills/a/link.md',
+        status: 'unproven',
+        reason: 'not-regular-file',
+        path: 'skills/a/link.md',
       });
-    } finally { nonRegular?.mockRestore(); }
+    } finally {
+      nonRegular?.mockRestore();
+    }
   });
 
   it('is unproven when a listed file was replaced by a symlink with identical content', async () => {
@@ -819,14 +868,22 @@ describe('verifyOwnedRoot — ownership is proven only by v2 metadata and every 
     }
     try {
       await expect(verifyOwnedRoot(workspaceRootDir())).resolves.toEqual({
-        status: 'unproven', reason: 'not-regular-file', path: 'skills/a/SKILL.md',
+        status: 'unproven',
+        reason: 'not-regular-file',
+        path: 'skills/a/SKILL.md',
       });
-    } finally { nonRegular?.mockRestore(); }
+    } finally {
+      nonRegular?.mockRestore();
+    }
   });
 
   it('is unproven when the root itself is a symlink to an owned root', async () => {
     const linked = path.join(homeDir, 'linked-root');
-    await fs.symlink(workspaceRootDir(), linked, process.platform === 'win32' ? 'junction' : 'dir');
+    await fs.symlink(
+      workspaceRootDir(),
+      linked,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     await expect(verifyOwnedRoot(linked)).resolves.toEqual({
       status: 'unproven',
       reason: 'root-not-directory',
@@ -1135,9 +1192,9 @@ describe('SkillsShSourceRootService.makeGlobal — D-D9 order, rollback and resu
     );
     expect(h.phases).toEqual(['register']);
     await expectWorkspaceIntact();
-    await expect(
-      verifyOwnedRoot(globalRootDir()),
-    ).resolves.toEqual(expect.objectContaining({ status: 'owned' }));
+    await expect(verifyOwnedRoot(globalRootDir())).resolves.toEqual(
+      expect.objectContaining({ status: 'owned' }),
+    );
 
     const retry = await service.makeGlobal('a', workspaceDir(), hooks());
     expect(retry).toEqual(

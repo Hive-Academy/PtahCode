@@ -85,7 +85,7 @@ let nextDialogId = 0;
         (cancel)="onCancel($event)"
       >
         <section
-          class="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-xl flex-col rounded-xl border border-base-300 bg-base-100 p-4 shadow-xl"
+          class="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-xl flex-col rounded-xl border border-base-300 bg-base-100 p-[var(--ptah-surface-pad)] shadow-xl"
         >
           <h2 id="preview-title" class="shrink-0 text-lg font-bold">
             Review generation targets

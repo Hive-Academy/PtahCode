@@ -23,6 +23,12 @@ import {
   ReviewRpcHandlers,
 } from '@ptah-extension/rpc-handlers';
 import { CHAT_TOKENS } from '@ptah-extension/rpc-handlers';
+import {
+  SKILL_RECOMMENDATION_SERVICE,
+  SKILL_PROJECT_GUIDANCE_SERVICE,
+  SKILL_SELECTION_SERVICE,
+  SKILL_CONSENT_SERVICE,
+} from '@ptah-extension/rpc-handlers';
 import { LANE_ROUTING_TOKENS } from '@ptah-extension/lane-routing';
 import { LANE_OUTCOME_TOKENS } from '@ptah-extension/lane-outcomes';
 import {
@@ -57,6 +63,10 @@ export const EXPECTED_RESOLVABLE = [
 
 /** Lib-owned tokens composed by Electron in addition to handler classes. */
 export const EXPECTED_RESOLVABLE_TOKENS = [
+  ['SKILL_RECOMMENDATION_SERVICE', SKILL_RECOMMENDATION_SERVICE],
+  ['SKILL_PROJECT_GUIDANCE_SERVICE', SKILL_PROJECT_GUIDANCE_SERVICE],
+  ['SKILL_SELECTION_SERVICE', SKILL_SELECTION_SERVICE],
+  ['SKILL_CONSENT_SERVICE', SKILL_CONSENT_SERVICE],
   ['HOST_ROUTING_COORDINATOR', CHAT_TOKENS.HOST_ROUTING_COORDINATOR],
   ['SESSION_USAGE_SINK', PLATFORM_TOKENS.SESSION_USAGE_SINK],
   ['SESSION_DRIVER_LOCK', PLATFORM_TOKENS.SESSION_DRIVER_LOCK],

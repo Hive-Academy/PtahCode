@@ -144,7 +144,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                 <button
                   #discardConfirmButton
                   type="button"
-                  class="btn btn-outline btn-xs border-error bg-error/10 text-base-content
+                  ptahButton
+                  variant="outline"
+                  size="xs"
+                  class="border-error bg-error/10 text-base-content
                          focus:!outline focus:!outline-2 focus:!outline-offset-2
                          focus:!outline-[oklch(var(--s))]"
                   data-testid="confirm-discard"
@@ -196,7 +199,10 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
                        it secondary to the filled Stash & switch. -->
                   <button
                     type="button"
-                    class="btn btn-outline btn-xs border-error text-base-content"
+                    ptahButton
+                    variant="outline"
+                    size="xs"
+                    class="border-error text-base-content"
                     data-testid="discard-switch"
                     [disabled]="busy()"
                     (click)="confirmingDiscard.set(true)"
@@ -259,7 +265,12 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
           }
           @for (name of recent(); track name) {
             <button
-              class="btn btn-ghost btn-xs w-full justify-start"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              density="compact"
+              align="start"
+              class="w-full"
               [disabled]="busy()"
               (click)="switchTo(name)"
             >
@@ -269,7 +280,12 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
           <p class="px-2 text-[10px] uppercase opacity-50">Local</p>
           @for (branch of local(); track branch.name) {
             <button
-              class="btn btn-ghost btn-xs w-full justify-start"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              density="compact"
+              align="start"
+              class="w-full"
               [disabled]="branch.isCurrent || busy()"
               (click)="switchTo(branch.name)"
             >
@@ -285,7 +301,12 @@ type SwitchMode = Pick<GitCheckoutParams, 'stash' | 'force'>;
           <p class="px-2 text-[10px] uppercase opacity-50">Remote</p>
           @for (branch of remote(); track branch.name) {
             <button
-              class="btn btn-ghost btn-xs w-full justify-start"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              density="compact"
+              align="start"
+              class="w-full"
               [disabled]="busy()"
               (click)="switchTo(branch.name, true)"
             >

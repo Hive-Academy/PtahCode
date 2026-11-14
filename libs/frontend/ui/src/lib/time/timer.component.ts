@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, linkedSignal } from '@angular/core';
 import { injectPtahClock } from './clock.token';
 import { DurationStyle, formatDuration, toIsoDuration } from './format-duration';
 import { formatAbsolute } from './format-relative';
@@ -11,7 +11,7 @@ export type PtahTimerState = 'running' | 'frozen';
  * Elapsed-time owner (TASK_2026_975_b61e). The value is
  * `(endedAt ?? now) - startedAt`, always derived from the timestamps, never
  * from a tick count. It holds the shared clock only while it is not frozen.
- * `role="timer"` is silent. The polite live region says "Stopped" once.
+ * `role="timer"` is silent. The polite live region says "Stopped" once, when it freezes.
  */
 @Component({
   selector: 'ptah-timer',
@@ -55,5 +55,10 @@ export class PtahTimerComponent {
     const started = formatAbsolute(this.startedAt());
     return started ? `Started ${started}` : '';
   });
-  readonly liveText = computed(() => (this.state() === 'frozen' ? 'Stopped' : ''));
+  /** "Stopped" only on a running-to-frozen change, never at first render. */
+  readonly liveText = linkedSignal<PtahTimerState, string>({
+    source: this.state,
+    computation: (state, previous) =>
+      previous?.source === 'running' && state === 'frozen' ? 'Stopped' : '',
+  });
 }

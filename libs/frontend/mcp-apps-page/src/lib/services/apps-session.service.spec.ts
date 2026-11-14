@@ -525,6 +525,7 @@ describe('AppsSessionService', () => {
         expect(callsOf('chat:abort').map((call) => call.params)).toEqual([
           {
             sessionId: release === 'discard' ? routingId : 'late-host-session',
+            source: 'apps-reset',
           },
         ]);
         expect(service['_slices']()).toBe(afterRelease);
@@ -782,6 +783,7 @@ describe('AppsSessionService', () => {
       ]);
       expect(callsOf('chat:abort')[0].params).toEqual({
         sessionId: 'session-1',
+        source: 'apps-stop',
       });
       expect(markIdle).toHaveBeenCalledWith('session-1', '/ws-a');
     });
@@ -880,6 +882,10 @@ describe('AppsSessionService', () => {
       await expect(service.resetConversation()).resolves.toBe(true);
 
       expect(abortedIds()).toEqual(['host-session']);
+      expect(callsOf('chat:abort')[0].params).toEqual({
+        sessionId: 'host-session',
+        source: 'apps-reset',
+      });
       expect(markIdle).toHaveBeenCalledWith('host-session', '/ws-a');
       expect(service.isActive()).toBe(false);
       expect(inbox.isClaimed(routingId)).toBe(false);
@@ -912,6 +918,10 @@ describe('AppsSessionService', () => {
       await service.abort();
 
       expect(abortedIds()).toEqual([routingId]);
+      expect(callsOf('chat:abort')[0].params).toEqual({
+        sessionId: routingId,
+        source: 'apps-stop',
+      });
       expect(markIdle).toHaveBeenCalledWith(routingId, '/ws-a');
       expect(service.isProcessing()).toBe(false);
       expect(startedSessionId()).toBeNull();

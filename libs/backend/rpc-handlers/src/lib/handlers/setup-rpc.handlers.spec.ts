@@ -159,6 +159,7 @@ import {
 } from '@ptah-extension/shared/testing';
 
 import { SetupRpcHandlers, type PackInstaller } from './setup-rpc.handlers';
+import { SKILL_PROJECT_GUIDANCE_SERVICE } from '../di/tokens';
 
 // ---------------------------------------------------------------------------
 // Token re-declaration (via Symbol.for) — avoids transitively loading the
@@ -285,6 +286,10 @@ function makeHarness(opts: { workspaceFolders?: string[] } = {}): Harness {
     container as unknown as DependencyContainer,
     sentry as unknown as SentryService,
     packInstall,
+    {
+      search: jest.fn(),
+      invalidateInstallCaches: jest.fn(),
+    } as unknown as ConstructorParameters<typeof SetupRpcHandlers>[7],
   );
 
   return {
@@ -337,6 +342,40 @@ async function callRaw(
 // ---------------------------------------------------------------------------
 
 describe('SetupRpcHandlers', () => {
+  it('passes only supplied analysis fields and the host root to guidance', async () => {
+    const h = makeHarness();
+    const getGuidance = jest.fn().mockResolvedValue({ facts: [], ownerDecisionPrompt: '' });
+    h.container.__register(SKILL_PROJECT_GUIDANCE_SERVICE, { getGuidance });
+    h.handlers.register();
+    await call(h, 'wizard:get-project-guidance', {
+      analysis: { projectType: 'unknown', frameworks: [] },
+      ownerDecision: 'raise',
+    });
+    expect(getGuidance).toHaveBeenCalledWith(
+      { frameworks: [] },
+      WORKSPACE,
+      'raise',
+    );
+  });
+  it('rejects an invalid project guidance owner decision at the RPC boundary', async () => {
+    const h = makeHarness();
+    h.handlers.register();
+    const response = await callRaw(h, 'wizard:get-project-guidance', {
+      analysis: { projectType: 'unknown', frameworks: [] },
+      ownerDecision: 'ignore',
+    });
+    expect(response.success).toBe(false);
+  });
+  it('does not pass empty code conventions as detected', async () => {
+    const h = makeHarness();
+    const getGuidance = jest.fn().mockResolvedValue({ facts: [], ownerDecisionPrompt: '' });
+    h.container.__register(SKILL_PROJECT_GUIDANCE_SERVICE, { getGuidance });
+    h.handlers.register();
+    await call(h, 'wizard:get-project-guidance', {
+      analysis: { projectType: 'unknown', frameworks: [], codeConventions: {} },
+    });
+    expect(getGuidance.mock.calls[0][0]).toEqual({ frameworks: [] });
+  });
   describe('register()', () => {
     it('registers all setup RPC methods', () => {
       const h = makeHarness();
@@ -348,14 +387,19 @@ describe('SetupRpcHandlers', () => {
           'setup-wizard:launch',
           'wizard:cancel-analysis',
           'wizard:deep-analyze',
+          'wizard:get-project-guidance',
           'wizard:get-resumable-run',
           'wizard:analysis-status',
           'wizard:install-pack-agents',
+          'wizard:install-skills-with-consent',
           'wizard:list-agent-packs',
           'wizard:plan-pack-install',
+          'wizard:preview-skills-for-consent',
           'wizard:list-analyses',
           'wizard:load-analysis',
           'wizard:recommend-agents',
+          'wizard:recommend-skills',
+          'wizard:search-skills',
         ].sort(),
       );
     });

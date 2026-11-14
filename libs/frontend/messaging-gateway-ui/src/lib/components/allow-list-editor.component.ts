@@ -8,21 +8,16 @@ import {
 import type { GatewayPlatformId } from '@ptah-extension/shared';
 
 import { GatewayStateService } from '../services/gateway-state.service';
-import { PtahButtonDirective, PtahTextareaDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFieldComponent, PtahTextareaDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-allow-list-editor',
   standalone: true,
-  imports: [PtahButtonDirective, PtahTextareaDirective],
+  imports: [PtahButtonDirective, PtahFieldComponent, PtahTextareaDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <label class="flex flex-col gap-1.5">
-      <span class="text-xs text-base-content-muted">
-        Allow-list ({{ label() }})
-        <span class="text-base-content-muted">
-          — one ID per line. Empty = accept any sender it can see.
-        </span>
-      </span>
+    <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+      <ptah-field [label]="'Allow-list (' + label() + ')'" appearance="stacked" hint="One ID per line. Empty = accept any sender it can see.">
       <textarea
         ptahTextarea
         size="sm"
@@ -34,7 +29,8 @@ import { PtahButtonDirective, PtahTextareaDirective } from '@ptah-extension/ui';
         [value]="allowListValue()"
         (input)="onAllowListInput($event)"
       ></textarea>
-      <div class="flex items-center gap-2">
+      </ptah-field>
+      <div class="flex items-center gap-[var(--ptah-gap-controls)]">
         <button
           type="button"
           ptahButton
@@ -47,7 +43,7 @@ import { PtahButtonDirective, PtahTextareaDirective } from '@ptah-extension/ui';
           <span class="text-xs text-base-content-muted">{{ fb }}</span>
         }
       </div>
-    </label>
+    </div>
   `,
 })
 export class AllowListEditorComponent {

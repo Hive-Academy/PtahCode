@@ -13,15 +13,16 @@
           (keydown)="onMenuKeydown($event)">
           @if (sessionId()) {
             <button type="button" role="menuitem" data-inspector-menu-action="rename"
-              class="btn btn-ghost btn-sm w-full justify-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content"
+              ptahButton variant="ghost" size="sm" density="compact" align="start" class="w-full"
               (click)="select('rename', true)">Rename</button>
             @if (organizer.available()) {
               <button type="button" role="menuitem" data-inspector-menu-action="organize"
-                class="btn btn-ghost btn-sm w-full justify-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content"
+                ptahButton variant="ghost" size="sm" density="compact" align="start" class="w-full"
                 (click)="select('organize', true)">Organize</button>
             }
           }
           @if (running()) {
+            <!-- Raw: the owner danger hover fill differs from hover:bg-error/10. -->
             <button type="button" role="menuitem" data-inspector-menu-action="stop"
               class="btn btn-ghost btn-sm w-full justify-start text-state-err hover:bg-error/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content"
               [disabled]="!sessionId()" [title]="sessionId() ? 'Stop session' : 'Session not yet saved'"

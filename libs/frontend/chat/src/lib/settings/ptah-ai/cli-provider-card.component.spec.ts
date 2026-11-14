@@ -25,6 +25,16 @@ describe('CliProviderCardComponent', () => {
     fixture.detectChanges();
     return fixture;
   }
+  it('uses the inset surface with a faint border and no outer padding', () => {
+    const article = (setup().nativeElement as HTMLElement).querySelector('article');
+    expect(article?.classList.contains('ptah-card')).toBe(true);
+    expect(article?.classList.contains('rounded-lg')).toBe(true);
+    expect(article?.getAttribute('data-variant')).toBe('inset');
+    expect(article?.getAttribute('data-border')).toBe('faint');
+    expect(article?.getAttribute('data-padding')).toBe('none');
+    expect(article?.classList.contains('bg-base-100')).toBe(false);
+    expect(article?.classList.contains('border-base-content/10')).toBe(false);
+  });
   it('emits toggle, test and Codex settings actions', () => {
     const fixture = setup();
     const component = fixture.componentInstance;

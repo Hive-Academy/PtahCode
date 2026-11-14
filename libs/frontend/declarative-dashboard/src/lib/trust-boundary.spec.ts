@@ -98,8 +98,8 @@ describe('trust boundary: producer text renders literally', () => {
     expect(texts(element, 'header p')).toEqual([markup]);
     expect(texts(element, 'section > h3')).toEqual([markup]);
     expect(texts(element, 'section > p')).toEqual([markup]);
-    expect(texts(element, '.card > h3')).toEqual([markup]);
-    expect(texts(element, '.card > p')).toEqual([markup]);
+    expect(texts(element, '[data-ptah-surface] > h3')).toEqual([markup]);
+    expect(texts(element, '[data-ptah-surface] > p')).toEqual([markup]);
     // Text and select labels, the radio legend and the checkbox label span.
     expect(texts(element, 'label[for^="ptah-surface-text"], label[for^="ptah-surface-choice"]:not([for*="option"])'))
       .toEqual([markup, markup, markup]);
@@ -110,7 +110,7 @@ describe('trust boundary: producer text renders literally', () => {
     const inputs = Array.from(element.querySelectorAll<HTMLInputElement>('input[type=text]'));
     expect(inputs.map(input => input.getAttribute('placeholder'))).toEqual([markup, markup]);
     expect(inputs[0].value).toBe(markup);
-    expect(texts(element, 'ptah-surface-text-input p.text-base-content-muted')).toEqual([markup]);
+    expect(texts(element, 'ptah-surface-text-input .ptah-field__message')).toEqual([markup]);
     expect(texts(element, 'button.btn-primary')).toEqual([markup]);
     expectInert(element);
   });

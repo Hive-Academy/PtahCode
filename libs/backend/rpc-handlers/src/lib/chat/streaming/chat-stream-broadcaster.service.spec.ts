@@ -32,7 +32,10 @@ import type {
   SdkAgentAdapter,
   SessionMetadataStore,
 } from '@ptah-extension/agent-sdk';
-import { SessionTurnStateRegistry, toTurnStateEvent } from '@ptah-extension/agent-sdk';
+import {
+  SessionTurnStateRegistry,
+  toTurnStateEvent,
+} from '@ptah-extension/agent-sdk';
 import type { PtahCliRegistry } from '@ptah-extension/cli-agent-runtime';
 import type { CodeExecutionMCP } from '@ptah-extension/vscode-lm-tools';
 import {
@@ -412,7 +415,8 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
       'provider-error',
     );
     expect(h.webviewManager.broadcastMessage).toHaveBeenCalledWith(
-      MESSAGE_TYPES.CHAT_SESSION_ENDED, { tabId: TAB_ID, sessionId: SESSION_ID },
+      MESSAGE_TYPES.CHAT_SESSION_ENDED,
+      { tabId: TAB_ID, sessionId: SESSION_ID },
     );
   });
 
@@ -427,20 +431,24 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
 
     await h.broadcaster.streamEventsToWebview(SESSION_ID, stream(), TAB_ID);
     expect(h.webviewManager.broadcastMessage).toHaveBeenCalledWith(
-      MESSAGE_TYPES.CHAT_SESSION_ENDED, { tabId: TAB_ID, sessionId: SESSION_ID },
+      MESSAGE_TYPES.CHAT_SESSION_ENDED,
+      { tabId: TAB_ID, sessionId: SESSION_ID },
     );
 
     expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(
       SESSION_ID,
       'T1',
-      'user-stop',
+      'internal-abort',
     );
   });
 
   it('classifies a watchdog timeout separately from a generic user abort', async () => {
     for (const [message, cause] of [
-      ['No stream activity from the provider in time. Stopped for recovery; retry the turn.', 'no-activity-timeout'],
-      ['Operation aborted', 'user-stop'],
+      [
+        'No stream activity from the provider in time. Stopped for recovery; retry the turn.',
+        'no-activity-timeout',
+      ],
+      ['Operation aborted', 'internal-abort'],
     ] as const) {
       const h = makeHarness();
       h.sdkAdapter.getSessionToken.mockReturnValue('T1');
@@ -449,7 +457,11 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
         throw new Error(message);
       }
       await h.broadcaster.streamEventsToWebview(SESSION_ID, stream(), TAB_ID);
-      expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(SESSION_ID, 'T1', cause);
+      expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(
+        SESSION_ID,
+        'T1',
+        cause,
+      );
     }
   });
 
@@ -459,7 +471,11 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
     async function* stream(): AsyncGenerator<FlatStreamEventUnion> {
       yield { ...makeEvent('message_start'), sessionId: SESSION_ID };
     }
-    await h.broadcaster.streamEventsToWebview(TAB_ID as SessionId, stream(), TAB_ID);
+    await h.broadcaster.streamEventsToWebview(
+      TAB_ID as SessionId,
+      stream(),
+      TAB_ID,
+    );
     expect(h.webviewManager.broadcastMessage).toHaveBeenCalledWith(
       MESSAGE_TYPES.CHAT_SESSION_ENDED,
       { tabId: TAB_ID, sessionId: SESSION_ID },
@@ -471,12 +487,16 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
     const failure = new Error('webview gone');
     h.sdkAdapter.getSessionToken.mockReturnValue('T1');
     h.webviewManager.broadcastMessage.mockImplementation((type) =>
-      type === MESSAGE_TYPES.CHAT_SESSION_ENDED ? Promise.reject(failure) : Promise.resolve(),
+      type === MESSAGE_TYPES.CHAT_SESSION_ENDED
+        ? Promise.reject(failure)
+        : Promise.resolve(),
     );
     async function* stream(): AsyncGenerator<FlatStreamEventUnion> {
       yield makeEvent('message_start');
     }
-    await expect(h.broadcaster.streamEventsToWebview(SESSION_ID, stream(), TAB_ID)).resolves.toBeUndefined();
+    await expect(
+      h.broadcaster.streamEventsToWebview(SESSION_ID, stream(), TAB_ID),
+    ).resolves.toBeUndefined();
     expect(h.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Failed to broadcast session end'),
       failure,
@@ -558,7 +578,7 @@ describe('ChatStreamBroadcaster.streamEventsToWebview — session teardown', () 
     expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(
       SESSION_ID,
       'T1',
-      'user-stop',
+      'internal-abort',
     );
     expect(h.sdkAdapter.endSession).not.toHaveBeenCalled();
     expect(
@@ -626,7 +646,10 @@ describe('ChatStreamBroadcaster zero-event failures', () => {
     expect(h.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('failed to start (0 events)'),
     );
-    expect(h.sdkAdapter.endSession).toHaveBeenCalledWith(SESSION_ID, 'provider-error');
+    expect(h.sdkAdapter.endSession).toHaveBeenCalledWith(
+      SESSION_ID,
+      'provider-error',
+    );
   });
 
   it('keeps the resume message for a different session id', async () => {
@@ -1116,12 +1139,9 @@ describe('ChatStreamBroadcaster.streamEventsToWebview - turn state (TASK_2026_36
     ]);
     const chunks = broadcastsFor(h, 'chat:chunk');
     expect(chunks).toHaveLength(4);
-    expect(chunks.map((chunk) => (chunk['event'] as FlatStreamEventUnion).eventType)).toEqual([
-      'message_start',
-      'message_start',
-      'text_delta',
-      'turn_state',
-    ]);
+    expect(
+      chunks.map((chunk) => (chunk['event'] as FlatStreamEventUnion).eventType),
+    ).toEqual(['message_start', 'message_start', 'text_delta', 'turn_state']);
     expect(chunks[3]).toMatchObject({ tabId: TAB_ID, sessionId: SESSION_ID });
     expect(broadcastsFor(h, 'chat:error')).toHaveLength(0);
     expect(broadcastsFor(h, 'chat:complete')).toHaveLength(0);
@@ -1152,10 +1172,9 @@ describe('ChatStreamBroadcaster.streamEventsToWebview - turn state (TASK_2026_36
       expect.stringContaining('Error streaming flat events'),
       failure,
     );
-    expect(h.sentryService.captureException).toHaveBeenCalledWith(
-      failure,
-      { errorSource: 'ChatRpcHandlers.streamExecutionNodesToWebview' },
-    );
+    expect(h.sentryService.captureException).toHaveBeenCalledWith(failure, {
+      errorSource: 'ChatRpcHandlers.streamExecutionNodesToWebview',
+    });
   });
   it('pushes an idle turn_state AFTER the chunks and BEFORE chat:error when the stream throws', async () => {
     const h = makeHarness();
@@ -1421,7 +1440,11 @@ describe('ChatStreamBroadcaster handoff flush hook (TASK_2026_876)', () => {
       yield makeEvent('message_complete');
     }
 
-    const running = h.broadcaster.streamEventsToWebview(SESSION_ID, stream(), TAB_ID);
+    const running = h.broadcaster.streamEventsToWebview(
+      SESSION_ID,
+      stream(),
+      TAB_ID,
+    );
     await new Promise((resolve) => setImmediate(resolve));
     expect(hook.onCallerTurnFlushed).not.toHaveBeenCalled();
     release();
@@ -1457,7 +1480,11 @@ describe('ChatStreamBroadcaster handoff flush hook (TASK_2026_876)', () => {
       throw new Error('stream exploded');
     }
 
-    const running = h.broadcaster.streamEventsToWebview(SESSION_ID, stream(), TAB_ID);
+    const running = h.broadcaster.streamEventsToWebview(
+      SESSION_ID,
+      stream(),
+      TAB_ID,
+    );
     await new Promise((resolve) => setImmediate(resolve));
     expect(hook.onCallerTurnFlushed).not.toHaveBeenCalled();
     release();
@@ -1475,7 +1502,9 @@ describe('ChatStreamBroadcaster handoff flush hook (TASK_2026_876)', () => {
     ];
     const found = candidates.find((candidate) => existsSync(candidate));
     if (!found) {
-      throw new Error(`session-lifecycle-notifier.ts not in ${candidates.join(', ')}`);
+      throw new Error(
+        `session-lifecycle-notifier.ts not in ${candidates.join(', ')}`,
+      );
     }
     const source = readFileSync(found, 'utf8');
     expect(source).not.toContain('onCallerTurnFlushed');

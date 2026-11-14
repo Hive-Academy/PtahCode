@@ -305,6 +305,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       idResolved.register((payload) => this.onSessionIdResolved(payload)),
       sessionEnd.register((payload) => this.onSessionEnd(payload)),
       permissions.onPromptLifecycle((event) => this.onPromptLifecycle(event)),
+      turnState.onGeneratingChange(() => this.onGeneratingChange()),
     );
   }
 
@@ -838,6 +839,21 @@ export class SessionSpawnerService implements ISessionSpawner {
       };
     }
     const { child, caller } = owned;
+    const runtime = this.runtimes.get(child.childSessionId);
+    if (runtime?.capReached && this.isIdleWithoutPendingWork(child)) {
+      const result = await this.hostSucceed(
+        child,
+        'runtime-cap',
+        request.message,
+      );
+      if (!result.ok)
+        return {
+          delivered: false,
+          reason: 'session-ended',
+          detail: result.detail,
+        };
+      return this.sent(child, request.mode, 'started-turn');
+    }
     const target = this.activeIdOf(child);
     if (child.terminalStatus || !target || !this.adapter) {
       return {
@@ -1570,11 +1586,15 @@ export class SessionSpawnerService implements ISessionSpawner {
     runtime.runtimeTimer = undefined;
     if (runtime.succeeding) {
       runtime.capReached = true;
-      runtime.handoffGraceTimer = this.armTimer(
-        runtime.settings.handoffGraceMinutes * 60_000,
-        () => {
-          void this.onHandoffGraceExpired(childSessionId);
-        },
+      this.armHandoffGrace(runtime, childSessionId);
+      return;
+    }
+    // An idle child is not ended or replaced for idle wall time. New work
+    // (a parent message or a turn start) applies the cap and the succession limit.
+    if (this.isIdleWithoutPendingWork(child)) {
+      runtime.capReached = true;
+      this.log(
+        `${childSessionId} runtime cap reached while idle; deferring handoff until next message`,
       );
       return;
     }
@@ -1583,15 +1603,33 @@ export class SessionSpawnerService implements ISessionSpawner {
       return;
     }
     runtime.capReached = true;
-    if (this.statusOf(child) === 'idle') {
-      void this.hostSucceed(child, 'runtime-cap');
-    } else {
-      runtime.handoffGraceTimer = this.armTimer(
-        runtime.settings.handoffGraceMinutes * 60_000,
-        () => {
-          void this.onHandoffGraceExpired(childSessionId);
-        },
+    this.armHandoffGrace(runtime, childSessionId);
+  }
+
+  private armHandoffGrace(runtime: ChildRuntime, childSessionId: string): void {
+    runtime.handoffGraceTimer = this.armTimer(
+      runtime.settings.handoffGraceMinutes * 60_000,
+      () => {
+        void this.onHandoffGraceExpired(childSessionId);
+      },
+    );
+  }
+
+  /**
+   * A turn that starts in the child tab after a deferred cap gets the normal
+   * handoff grace, so that it cannot run without a bound.
+   */
+  private onGeneratingChange(): void {
+    for (const [childSessionId, runtime] of this.runtimes) {
+      if (!runtime.capReached || runtime.handoffGraceTimer) continue;
+      if (runtime.succeeding || runtime.stopping) continue;
+      const child = this.registry.get(childSessionId);
+      if (!child || child.terminalStatus) continue;
+      if (this.phaseOf(child) !== 'generating') continue;
+      this.log(
+        `${childSessionId} turn started after the deferred runtime cap; handoff grace armed`,
       );
+      this.armHandoffGrace(runtime, childSessionId);
     }
   }
 
@@ -1842,6 +1880,16 @@ export class SessionSpawnerService implements ISessionSpawner {
     );
   }
 
+  private isIdleWithoutPendingWork(child: SessionChildRecord): boolean {
+    const target = this.activeIdOf(child);
+    return (
+      this.statusOf(child) === 'idle' &&
+      !this.hasRunningLane(child) &&
+      (!target ||
+        (this.adapter?.listQueuedFollowUps?.(target)?.length ?? 0) === 0)
+    );
+  }
+
   /** A Ptah CLI lane the child spawned is still running. */
   private hasRunningLane(child: SessionChildRecord): boolean {
     const ids = new Set(
@@ -2077,6 +2125,12 @@ export class SessionSpawnerService implements ISessionSpawner {
     const runtime = this.runtimes.get(childSessionId);
     if (!child || child.terminalStatus || !runtime || runtime.stopping) return;
     runtime.warnTimer = undefined;
+    if (this.isIdleWithoutPendingWork(child)) {
+      this.log(
+        `${childSessionId} runtime warning skipped: idle without pending work`,
+      );
+      return;
+    }
     const target = this.activeIdOf(child);
     if (!target || !this.adapter) {
       this.log(`${childSessionId} runtime warning skipped: no live session`);
@@ -2158,8 +2212,9 @@ export class SessionSpawnerService implements ISessionSpawner {
   private async hostSucceed(
     child: SessionChildRecord,
     cause: SessionChildSuccessionCause,
-  ): Promise<void> {
-    const result = await this.succeedChild(child, cause);
+    prompt?: string,
+  ): Promise<SessionChildSuccessionResult> {
+    const result = await this.succeedChild(child, cause, prompt);
     if (
       !result.ok &&
       result.refusal !== 'succession-in-progress' &&
@@ -2167,6 +2222,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     ) {
       this.runtimeSafetyNet(child, result.detail);
     }
+    return result;
   }
 
   /** Called by the child itself from its handoff tool. */
@@ -2283,6 +2339,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     };
     runtime.succeeding = true;
     let adopted: string[] = [];
+    let stoppedMidSuccession = false;
     try {
       this.registry.succeed(
         child.childSessionId,
@@ -2299,6 +2356,15 @@ export class SessionSpawnerService implements ISessionSpawner {
         nextRuntime,
         successor.worktreePath,
       );
+      // A parent stop can run during the awaited retain. It ends the successor
+      // and releases its runtime, so the host must not start it afterwards.
+      if (
+        nextRuntime.stopping ||
+        this.runtimes.get(successorId) !== nextRuntime
+      ) {
+        stoppedMidSuccession = true;
+        throw new Error('successor was stopped before it started');
+      }
       adopted = this.agents.adoptLanes(
         [child.childSessionId, child.sdkSessionId].filter(
           (id): id is string => !!id,
@@ -2393,8 +2459,14 @@ export class SessionSpawnerService implements ISessionSpawner {
       this.agents.settleLaneAdoption(adopted, 'reverted');
       nextRuntime.releasePolicy?.();
       if (nextRuntime.mcpRoot) await this.releaseMcpRoot(nextRuntime.mcpRoot);
-      this.runtimes.delete(successorId);
-      this.registry.revertSuccession(child.childSessionId, successorId);
+      if (stoppedMidSuccession) {
+        // The parent stopped the successor: keep that stop. The predecessor
+        // stays handed off and is retired, never made live again.
+        this.retirePredecessor(child.childSessionId);
+      } else {
+        this.runtimes.delete(successorId);
+        this.registry.revertSuccession(child.childSessionId, successorId);
+      }
       this.log(
         `${child.childSessionId} successor start failed: ${errorMessage(error)}`,
       );

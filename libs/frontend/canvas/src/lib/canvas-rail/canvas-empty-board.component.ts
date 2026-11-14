@@ -205,7 +205,6 @@ export const LOAD_STEPS_MAX_MS = 12_000;
               <span>Readiness unavailable</span>
               <button ptahButton variant="ghost" size="xs"
                 type="button"
-                class="gap-1"
                 (click)="retryReadiness()"
               >
                 <lucide-angular
@@ -230,6 +229,7 @@ export const LOAD_STEPS_MAX_MS = 12_000;
           }
         </div>
 
+        <!-- Stays raw: compact density would cut the 24 px pill padding to 8 px. -->
         <button
           type="button"
           class="ptah-empty-board__new btn btn-primary gap-2 rounded-full px-6"

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import { PtahButtonDirective, PtahSectionHeaderComponent } from '@ptah-extension/ui';
 import type { ModelBreakdownRow, ProviderUsageRow } from './usage-summary.view-model';
 import { formatPercent, formatUsd } from './usage-formatting';
 import { buildCostSlices, type CostSliceInput } from './usage-cost-donut.geometry';
@@ -8,14 +9,15 @@ const MODEL_COLORS = ['#b583ed', '#56bfc1', '#e8aa67', '#7b9aeb', '#d77fa8'];
 @Component({
   selector: 'ptah-usage-cost-donut',
   standalone: true,
+  imports: [PtahButtonDirective, PtahSectionHeaderComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="flex flex-col gap-2" data-testid="usage-cost-donut">
       <div class="flex items-center justify-between gap-2">
-        <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content-muted">Cost share</h4>
-        <div class="join" role="group" aria-label="Cost share view">
-          <button type="button" class="join-item btn btn-xs" [class.btn-active]="mode() === 'provider'" [class.btn-primary]="mode() === 'provider'" [attr.aria-pressed]="mode() === 'provider'" (click)="mode.set('provider')">Provider</button>
-          <button type="button" class="join-item btn btn-xs" [class.btn-active]="mode() === 'model'" [class.btn-primary]="mode() === 'model'" [attr.aria-pressed]="mode() === 'model'" (click)="mode.set('model')">Model</button>
+        <ptah-section-header heading="Cost share" [level]="4" />
+        <div class="flex gap-[var(--ptah-gap-controls)]" role="group" aria-label="Cost share view">
+          <button type="button" ptahButton size="xs" [variant]="mode() === 'provider' ? 'primary' : 'ghost'" [selected]="mode() === 'provider'" (click)="mode.set('provider')">Provider</button>
+          <button type="button" ptahButton size="xs" [variant]="mode() === 'model' ? 'primary' : 'ghost'" [selected]="mode() === 'model'" (click)="mode.set('model')">Model</button>
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-3">

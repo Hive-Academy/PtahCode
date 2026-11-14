@@ -9,6 +9,7 @@ import {
   CatalogCardComponent,
   MonogramTileComponent,
   type CatalogCardBadge,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 import type { ExternalPluginListing } from '@ptah-extension/shared';
 
@@ -36,7 +37,7 @@ import type { ExternalPluginListing } from '@ptah-extension/shared';
 @Component({
   selector: 'ptah-external-plugin-row',
   standalone: true,
-  imports: [CatalogCardComponent, MonogramTileComponent],
+  imports: [CatalogCardComponent, MonogramTileComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-catalog-card
@@ -55,7 +56,9 @@ import type { ExternalPluginListing } from '@ptah-extension/shared';
       <div card-actions class="flex items-center gap-2">
         @if (listing().installed) {
           <button
-            class="btn btn-ghost btn-sm text-error"
+            ptahButton
+            variant="ghost"
+            tone="danger"
             type="button"
             [disabled]="uninstalling()"
             [attr.aria-label]="'Uninstall ' + listing().name"
@@ -69,12 +72,10 @@ import type { ExternalPluginListing } from '@ptah-extension/shared';
           </button>
         }
         <button
-          class="btn btn-sm"
+          ptahButton
+          [variant]="listing().installed ? 'ghost' : 'primary'"
           type="button"
           data-testid="external-install"
-          [class.btn-primary]="!listing().installed"
-          [class.btn-ghost]="listing().installed"
-          [class.border-base-300]="listing().installed"
           [disabled]="installing()"
           [attr.aria-label]="
             (listing().installed ? 'Reinstall ' : 'Install ') + listing().name

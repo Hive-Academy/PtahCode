@@ -1,4 +1,4 @@
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -20,16 +20,16 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
 @Component({
   selector: 'ptah-canvas-focus-header',
   standalone: true,
-  imports: [PtahIconButtonDirective, LucideAngularModule],
+  imports: [PtahButtonDirective, PtahIconButtonDirective, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:pointerdown)': 'onDocumentPointerDown($event)' },
   template: `
     <div role="group" aria-label="Pane controls"
       class="relative flex items-center"
       (keydown.escape)="escape($event)">
-      <button ptahIconButton variant="ghost" size="xs"
+      <!-- Keep size-7: the pane actions control is 28 px; owner xs square is 24 px. -->
+      <button ptahIconButton variant="ghost" size="xs" class="size-7"
         type="button"
-        class="size-7 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
         data-header-menu
         label="Pane actions"
         aria-haspopup="menu"
@@ -49,7 +49,8 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
             type="button"
             role="menuitem"
             data-action="swap-panes"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            ptahButton variant="ghost" size="sm" density="compact" align="start"
+            class="flex-nowrap whitespace-nowrap font-normal"
             (click)="choose(swapPanesRequested)"
           >
             Swap panes
@@ -58,7 +59,8 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
             type="button"
             role="menuitem"
             data-action="close-pane"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            ptahButton variant="ghost" size="sm" density="compact" align="start"
+            class="flex-nowrap whitespace-nowrap font-normal"
             (click)="choose(closePaneRequested)"
           >
             Close pane
@@ -67,7 +69,8 @@ import { focusMenuItem, handleMenuKeydown } from './canvas-rail-keyboard';
             type="button"
             role="menuitem"
             data-action="close-split"
-            class="btn btn-ghost btn-sm flex-nowrap justify-start whitespace-nowrap font-normal"
+            ptahButton variant="ghost" size="sm" density="compact" align="start"
+            class="flex-nowrap whitespace-nowrap font-normal"
             (click)="choose(closeSplitRequested)"
           >
             Close split

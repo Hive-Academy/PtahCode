@@ -121,6 +121,7 @@ describe('ClosedTabSessionEnderService', () => {
     expect(h.rpcCall).toHaveBeenCalledTimes(1);
     expect(h.rpcCall).toHaveBeenCalledWith('chat:abort', {
       sessionId: SESSION_B,
+      source: 'tab-close',
     });
   });
 
@@ -132,6 +133,7 @@ describe('ClosedTabSessionEnderService', () => {
     expect(h.rpcCall).toHaveBeenCalledTimes(1);
     expect(h.rpcCall).toHaveBeenCalledWith('chat:abort', {
       sessionId: SESSION_A,
+      source: 'tab-close',
     });
     expect(h.findTabsBySessionId).toHaveBeenCalledWith(SESSION_A);
   });
@@ -143,8 +145,14 @@ describe('ClosedTabSessionEnderService', () => {
     h.emitClosedTab({ tabId: 't2', sessionId: SESSION_B, kind: 'close' });
 
     expect(h.rpcCall).toHaveBeenCalledTimes(2);
-    expect(h.rpcCall).toHaveBeenNthCalledWith(1, 'chat:abort', { sessionId: SESSION_A });
-    expect(h.rpcCall).toHaveBeenNthCalledWith(2, 'chat:abort', { sessionId: SESSION_B });
+    expect(h.rpcCall).toHaveBeenNthCalledWith(1, 'chat:abort', {
+      sessionId: SESSION_A,
+      source: 'tab-close',
+    });
+    expect(h.rpcCall).toHaveBeenNthCalledWith(2, 'chat:abort', {
+      sessionId: SESSION_B,
+      source: 'tab-close',
+    });
   });
 
   it('streamAbortDispatched: true sends no RPC (the abort listener already did)', () => {
@@ -217,6 +225,7 @@ describe('ClosedTabSessionEnderService', () => {
 
     expect(h.rpcCall).toHaveBeenCalledWith('chat:abort', {
       sessionId: SESSION_A,
+      source: 'tab-close',
     });
   });
 
@@ -260,6 +269,7 @@ describe('ClosedTabSessionEnderService', () => {
     expect(h.rpcCall).toHaveBeenCalledTimes(2);
     expect(h.rpcCall).toHaveBeenLastCalledWith('chat:abort', {
       sessionId: SESSION_B,
+      source: 'tab-close',
     });
   });
 
@@ -282,6 +292,7 @@ describe('ClosedTabSessionEnderService', () => {
     expect(h.rpcCall).toHaveBeenCalledTimes(2);
     expect(h.rpcCall).toHaveBeenLastCalledWith('chat:abort', {
       sessionId: SESSION_B,
+      source: 'tab-close',
     });
   });
 
@@ -364,6 +375,7 @@ describe('ClosedTabSessionEnderService with the real TabManagerService', () => {
     expect(rpcCall).toHaveBeenCalledTimes(1);
     expect(rpcCall).toHaveBeenCalledWith('chat:abort', {
       sessionId: sessClose,
+      source: 'tab-close',
     });
     expect(tabManager.tabs().map((t) => t.id)).toEqual([keepTab]);
   });

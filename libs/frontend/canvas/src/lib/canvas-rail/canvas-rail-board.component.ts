@@ -196,7 +196,7 @@ export interface CanvasBoardNotice {
                 <div class="w-full max-w-[588px]"><ng-container [ngTemplateOutlet]="noticeTemplate" /></div>
               }
               <p class="text-sm text-base-content" role="alert">The workspace overview could not load.</p>
-              <button ptahButton variant="primary" size="sm" type="button" class="gap-1.5" (click)="reloadWindow()">
+              <button ptahButton variant="primary" size="sm" type="button" (click)="reloadWindow()">
                 <lucide-angular [img]="reloadIcon" class="size-3.5" aria-hidden="true" />
                 Reload
               </button>

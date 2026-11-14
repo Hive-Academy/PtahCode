@@ -771,7 +771,10 @@ export class ElectronLayoutService implements MessageHandler {
    */
   private async dispatchSessionAbort(sessionId: SessionId): Promise<void> {
     try {
-      const result = await this.rpcService.call('chat:abort', { sessionId });
+      const result = await this.rpcService.call('chat:abort', {
+        sessionId,
+        source: 'workspace-remove',
+      });
       if (!result.isSuccess()) {
         console.warn(
           `[ElectronLayout] Backend did not abort session ${sessionId}:`,
@@ -1014,7 +1017,10 @@ export class ElectronLayoutService implements MessageHandler {
         );
       }
     } catch (error: unknown) {
-      console.error('[ElectronLayout] Fallback workspace:switch failed:', error);
+      console.error(
+        '[ElectronLayout] Fallback workspace:switch failed:',
+        error,
+      );
     }
   }
 

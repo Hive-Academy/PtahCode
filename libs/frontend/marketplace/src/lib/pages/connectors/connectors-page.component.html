@@ -218,10 +218,12 @@
           data-testid="connectors-categories"
         >
           <button
+            ptahButton
             type="button"
-            class="btn btn-xs rounded-full font-medium"
-            [class.btn-primary]="category() === null"
-            [class.btn-ghost]="category() !== null"
+            size="xs"
+            shape="pill"
+            [variant]="category() === null ? 'primary' : 'ghost'"
+            class="font-medium"
             [class.border-base-300]="category() !== null"
             [attr.aria-pressed]="category() === null"
             data-category="all"
@@ -231,10 +233,12 @@
           </button>
           @for (item of categories; track item) {
             <button
+              ptahButton
               type="button"
-              class="btn btn-xs rounded-full font-medium"
-              [class.btn-primary]="category() === item"
-              [class.btn-ghost]="category() !== item"
+              size="xs"
+              shape="pill"
+              [variant]="category() === item ? 'primary' : 'ghost'"
+              class="font-medium"
               [class.border-base-300]="category() !== item"
               [attr.aria-pressed]="category() === item"
               [attr.data-category]="item"

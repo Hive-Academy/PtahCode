@@ -605,6 +605,7 @@ it(
     await worker.stop();
     expect(worker.engine.call).toHaveBeenCalledWith('chat:abort', {
       sessionId: 'sess-new-1',
+      source: 'worker',
     });
     expect(requestRelease).toHaveBeenCalledWith('sess-new-1');
     expect(worker.engine.lock.release).toHaveBeenCalledWith(
@@ -837,6 +838,7 @@ describe('turn lifecycle (Batch 20)', () => {
       });
       expect(worker.engine.call).toHaveBeenCalledWith('chat:abort', {
         sessionId: 'sess-new-1',
+        source: 'worker',
       });
       const next = await client.call('session.start', {
         workspaceId: worker.inside.workspaceId,

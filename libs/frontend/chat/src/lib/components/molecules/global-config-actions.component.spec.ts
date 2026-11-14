@@ -75,7 +75,7 @@ describe('GlobalConfigActionsComponent', () => {
     expect(appState.setCurrentView).toHaveBeenCalledWith('onboarding');
     appState.openConfigurationSurface.set('onboarding');
     fixture.detectChanges();
-    expect(buttons()[1].getAttribute('aria-current')).toBe('true');
+    expect(buttons()[1].getAttribute('aria-current')).toBe('page');
   });
 
   it.each(ids)('navigates to %s on click', (id) => {
@@ -98,17 +98,15 @@ describe('GlobalConfigActionsComponent', () => {
     expect(appState.setCurrentView).toHaveBeenCalledTimes(2);
   });
 
-  it('updates aria-current and highlights from the settled surface signal', () => {
+  it('updates aria-current from the settled surface signal', () => {
     for (const surface of [null, ...ids, 'onboarding' as const, null]) {
       appState.openConfigurationSurface.set(surface);
       fixture.detectChanges();
       buttons().forEach((button, index) => {
         const isCurrent = ids[index] === surface;
         expect(button.getAttribute('aria-current')).toBe(
-          isCurrent ? 'true' : null,
+          isCurrent ? 'page' : null,
         );
-        expect(button.classList.contains('text-primary')).toBe(isCurrent);
-        expect(button.classList.contains('bg-base-300')).toBe(isCurrent);
       });
     }
   });

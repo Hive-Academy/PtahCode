@@ -92,6 +92,7 @@ export type TerminalTurnClassification = 'success' | 'error';
  * tab id / session id, so a `chat:abort` would end the new turn instead.
  */
 export const ABORT_REASON_SUPERSEDED = 'superseded-by-new-send';
+export const ABORT_REASON_TAB_RESET = 'tab-reset';
 
 /**
  * How an agent-started child tab arrived (TASK_2026_584).
@@ -1644,11 +1645,19 @@ export class TabManagerService {
    * Await the same close path used by the UI, without a programmatic confirmation.
    * Only AutoHandoffSourceCloserService may call this after checking all close blockers.
    */
-  async closeHandoffPredecessor(tabId: string, expectedSessionId: string | null, predecessorStopped = false): Promise<boolean> {
+  async closeHandoffPredecessor(
+    tabId: string,
+    expectedSessionId: string | null,
+    predecessorStopped = false,
+  ): Promise<boolean> {
     const lookup = this.findTabByIdAcrossWorkspaces(tabId);
-    if (!lookup || (expectedSessionId === null
-      ? lookup.tab.claudeSessionId != null
-      : lookup.tab.claudeSessionId !== expectedSessionId)) return false;
+    if (
+      !lookup ||
+      (expectedSessionId === null
+        ? lookup.tab.claudeSessionId != null
+        : lookup.tab.claudeSessionId !== expectedSessionId)
+    )
+      return false;
     if (lookup.workspacePath === this.activeWorkspacePath) {
       await this.closeTab(tabId, true);
       return this.findTabByIdAcrossWorkspaces(tabId) === null;
@@ -1680,7 +1689,7 @@ export class TabManagerService {
     const tab = this._tabs().find((t) => t.id === tabId);
     if (!tab) return;
 
-    this.abortStreamingForTab(tabId);
+    this.abortStreamingForTab(tabId, ABORT_REASON_TAB_RESET);
     this._streamingTabIds.update((set) => {
       if (!set.has(tabId)) return set;
       const next = new Set(set);
@@ -2031,8 +2040,17 @@ export class TabManagerService {
     state: SessionTurnState,
     sessionId?: string,
   ): void {
-    if ((state.phase !== 'idle' && state.phase !== 'failed') ||
-        !this.canApplyTurnState(tabId, sessionId, state.revision, state.phase, false)) return;
+    if (
+      (state.phase !== 'idle' && state.phase !== 'failed') ||
+      !this.canApplyTurnState(
+        tabId,
+        sessionId,
+        state.revision,
+        state.phase,
+        false,
+      )
+    )
+      return;
     this.updateTabInternal(tabId, {
       status: 'loaded',
       lastTerminalReason: state.terminalReason,
@@ -2442,7 +2460,13 @@ export class TabManagerService {
         !message.nativeUuid,
     );
     if (index === -1) return;
-    if (messages.some((message) => message.id === nativeUuid || message.nativeUuid === nativeUuid)) return;
+    if (
+      messages.some(
+        (message) =>
+          message.id === nativeUuid || message.nativeUuid === nativeUuid,
+      )
+    )
+      return;
     this.updateTabInternal(tabId, {
       messages: messages.map((message, i) =>
         i === index ? { ...message, nativeUuid } : message,
@@ -3463,12 +3487,12 @@ export class TabManagerService {
    *   when no controller is registered or it was already aborted — in the
    *   latter case no new abort is dispatched here.
    */
-  abortStreamingForTab(tabId: string): boolean {
+  abortStreamingForTab(tabId: string, reason?: string): boolean {
     const controller = this.abortControllers.get(tabId);
     if (!controller) return false;
     this.abortControllers.delete(tabId);
     if (controller.signal.aborted) return false;
-    controller.abort();
+    controller.abort(reason);
     return true;
   }
 

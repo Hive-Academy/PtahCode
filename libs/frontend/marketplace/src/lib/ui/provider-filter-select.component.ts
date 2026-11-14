@@ -19,6 +19,7 @@ import {
   KeyboardNavigationService,
   NativeDropdownComponent,
   NativeOptionComponent,
+  PtahButtonDirective,
 } from '@ptah-extension/ui';
 
 /** One choice of a filter select. `value: null` is "any". */
@@ -69,6 +70,7 @@ let nextFilterSelectId = 0;
     LucideAngularModule,
     NativeDropdownComponent,
     NativeOptionComponent,
+    PtahButtonDirective,
   ],
   providers: [KeyboardNavigationService],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -82,8 +84,10 @@ let nextFilterSelectId = 0;
     >
       <button
         trigger
+        ptahButton
+        variant="ghost"
         type="button"
-        class="btn btn-sm btn-ghost gap-1 border border-base-300 font-normal"
+        class="gap-1 border border-base-300 font-normal"
         [class.border-primary]="value() !== null"
         aria-haspopup="listbox"
         [disabled]="inactive()"

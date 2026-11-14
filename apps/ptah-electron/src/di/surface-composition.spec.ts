@@ -4,6 +4,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ELECTRON_CODEX_BOUND_TOKENS, EXPECTED_RESOLVABLE_TOKENS } from './expected-resolvable';
 import { UsageReconciliationService } from '@ptah-extension/usage-analytics';
+import {
+  SKILL_RECOMMENDATION_SERVICE,
+  SKILL_PROJECT_GUIDANCE_SERVICE,
+  SKILL_SELECTION_SERVICE,
+  SKILL_CONSENT_SERVICE,
+} from '@ptah-extension/rpc-handlers';
 
 describe('Electron usage reconciliation composition', () => {
   it('binds the producer and starts once after all phases', () => {
@@ -81,6 +87,22 @@ import { IpcBridge } from '../ipc/ipc-bridge';
 import { ElectronWebviewManagerAdapter } from '../ipc/webview-manager-adapter';
 import { createElectronRpcHostProfile } from '../rpc-host-profile';
 import { registerArtifactNotification } from './phase-3-storage';
+
+it('includes the shared skill services in the Electron composition guard', () => {
+  for (const token of [
+    SKILL_RECOMMENDATION_SERVICE,
+    SKILL_PROJECT_GUIDANCE_SERVICE,
+    SKILL_SELECTION_SERVICE,
+    SKILL_CONSENT_SERVICE,
+  ]) {
+    expect(EXPECTED_RESOLVABLE_TOKENS.some(([, registered]) => registered === token)).toBe(true);
+  }
+  const registration = readFileSync(
+    join(__dirname, '../../../../libs/backend/rpc-handlers/src/lib/register-shared-rpc-handlers.ts'),
+    'utf8',
+  );
+  expect(registration).toContain('registerSkillServices(container)');
+});
 
 describe('Electron session driver lock composition', () => {
   it('binds the platform lock for the Electron host', async () => {

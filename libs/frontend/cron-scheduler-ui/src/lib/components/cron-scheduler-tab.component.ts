@@ -34,10 +34,14 @@ import { CronJobCardComponent } from './cron-job-card.component';
 import { CronJobDetailDrawerComponent } from './cron-job-detail-drawer.component';
 import {
   PtahButtonDirective,
+  PtahStatComponent,
   PtahFieldComponent,
   PtahIconButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
+  PtahSectionHeaderComponent,
+  PtahStatePanelComponent,
+  PtahSurfaceDirective,
   PtahTextareaDirective,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
@@ -88,6 +92,7 @@ function emptyForm(timezone: string): CronJobFormState {
   };
 }
 
+// Left raw: the Next run tile uses the theme text-info color, but ptah-stat maps info to the state color.
 @Component({
   selector: 'ptah-cron-scheduler-tab',
   standalone: true,
@@ -100,10 +105,14 @@ function emptyForm(timezone: string): CronJobFormState {
     CronJobCardComponent,
     CronJobDetailDrawerComponent,
     PtahButtonDirective,
+    PtahStatComponent,
     PtahIconButtonDirective,
     PtahFieldComponent,
     PtahInputDirective,
     PtahSelectDirective,
+    PtahSectionHeaderComponent,
+    PtahStatePanelComponent,
+    PtahSurfaceDirective,
     PtahTextareaDirective,
     PtahToggleDirective,
   ],
@@ -132,9 +141,10 @@ function emptyForm(timezone: string): CronJobFormState {
         >
       </div>
     } @else {
-      <div class="space-y-6" data-testid="cron-scheduler-section">
+      <div class="flex flex-col gap-[var(--ptah-gap-section)]" data-testid="cron-scheduler-section">
         <header
-          class="surface-1 flex flex-wrap items-start justify-between gap-3 rounded-xl p-5"
+          ptahSurface variant="surface-1" padding="lg"
+          class="flex flex-wrap items-start justify-between gap-[var(--ptah-gap-group)] rounded-xl"
         >
           <div class="flex items-start gap-3">
             <span
@@ -153,7 +163,7 @@ function emptyForm(timezone: string): CronJobFormState {
               </p>
             </div>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
             @if (reviewAvailable()) {
               <a
                 routerLink="/review-runs"
@@ -221,79 +231,23 @@ function emptyForm(timezone: string): CronJobFormState {
         </header>
 
         <div
-          class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3"
+          class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-[var(--ptah-gap-field)]"
           aria-label="Cron statistics"
         >
-          <div class="stats surface-2 min-w-0 overflow-hidden">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-primary">
-                <lucide-angular
-                  [img]="CalendarClockIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div
-                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
-              >
-                Jobs
-              </div>
-              <div
-                class="stat-value text-2xl text-primary"
-                data-testid="cron-stat-total"
-              >
-                {{ stats().total }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="none" label="Jobs" [value]="stats().total" valueTone="primary" data-testid="cron-stat-total">
+            <lucide-angular ptahStatIcon [img]="CalendarClockIcon" class="w-6 h-6 text-primary" aria-hidden="true" />
+          </ptah-stat>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-success">
-                <lucide-angular
-                  [img]="CirclePlayIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div
-                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
-              >
-                Enabled
-              </div>
-              <div
-                class="stat-value text-2xl text-success"
-                data-testid="cron-stat-enabled"
-              >
-                {{ stats().enabled }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="none" label="Enabled" [value]="stats().enabled" valueTone="success" data-testid="cron-stat-enabled">
+            <lucide-angular ptahStatIcon [img]="CirclePlayIcon" class="w-6 h-6 text-success" aria-hidden="true" />
+          </ptah-stat>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-base-content-muted">
-                <lucide-angular
-                  [img]="CirclePauseIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div
-                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
-              >
-                Disabled
-              </div>
-              <div
-                class="stat-value text-2xl text-base-content-muted"
-                data-testid="cron-stat-disabled"
-              >
-                {{ stats().disabled }}
-              </div>
-            </div>
-          </div>
+          <ptah-stat layout="tile" radius="none" label="Disabled" [value]="stats().disabled" valueTone="muted" data-testid="cron-stat-disabled">
+            <lucide-angular ptahStatIcon [img]="CirclePauseIcon" class="w-6 h-6 text-base-content-muted" aria-hidden="true" />
+          </ptah-stat>
 
-          <div class="stats surface-2 min-w-0 overflow-hidden">
+          <!-- Raw tile: ptah-stat info maps to state-run, which differs from theme text-info. -->
+          <div data-testid="cron-stat-next-run" class="stats surface-2 min-w-0 overflow-hidden">
             <div class="stat min-w-0 overflow-hidden p-4">
               <div class="stat-figure text-info">
                 <lucide-angular
@@ -327,63 +281,48 @@ function emptyForm(timezone: string): CronJobFormState {
           </div>
         }
 
-        @if (jobs().length === 0) {
-          <div
-            class="flex flex-col items-center gap-2 px-6 py-16 text-center"
-            data-testid="cron-empty-state"
-          >
-            <lucide-angular
-              [img]="CalendarClockIcon"
-              class="size-8 text-base-content-muted"
-              aria-hidden="true"
+        <div class="flex flex-col gap-[var(--ptah-gap-heading)]">
+          <ptah-section-header heading="Scheduled jobs" level="2" size="section" />
+          @if (jobs().length === 0) {
+            <ptah-state-panel
+              state="empty"
+              title="No scheduled jobs yet"
+              body="Cron jobs run a prompt on a recurring schedule as a headless PtahCode session — perfect for nightly builds, digests, or maintenance."
+              actionLabel="New job"
+              data-testid="cron-empty-state"
+              (action)="newJob()"
             />
-            <p class="text-sm font-medium">No scheduled jobs yet</p>
-            <p class="max-w-sm text-xs text-base-content-muted">
-              Cron jobs run a prompt on a recurring schedule as a headless
-              PtahCode session — perfect for nightly builds, digests, or
-              maintenance.
-            </p>
-            <button
-              type="button"
-              ptahButton
-              variant="primary"
-              class="mt-1"
-              (click)="newJob()"
+          } @else {
+            <section
+              class="grid gap-[var(--ptah-gap-field)] sm:grid-cols-2 xl:grid-cols-3"
+              aria-label="Scheduled jobs"
             >
-              New job
-            </button>
-          </div>
-        } @else {
-          <section
-            class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
-            aria-label="Scheduled jobs"
-          >
-            @for (job of jobs(); track job.id) {
-              <ptah-cron-job-card
-                [job]="job"
-                [description]="describeExpr(job.cronExpr)"
-                [selected]="selectedJobId() === job.id"
-                (opened)="selectJob(job.id)"
-                (runNow)="runNow(job.id)"
-                (edit)="editJob(job)"
-                (toggled)="toggleEnabled(job)"
-                (removed)="confirmDelete(job)"
-              />
-            }
-          </section>
-        }
+              @for (job of jobs(); track job.id) {
+                <ptah-cron-job-card
+                  [job]="job"
+                  [description]="describeExpr(job.cronExpr)"
+                  [selected]="selectedJobId() === job.id"
+                  (opened)="selectJob(job.id)"
+                  (runNow)="runNow(job.id)"
+                  (edit)="editJob(job)"
+                  (toggled)="toggleEnabled(job)"
+                  (removed)="confirmDelete(job)"
+                />
+              }
+            </section>
+          }
+        </div>
 
         @if (formOpen()) {
           <section
-            class="surface-1 overflow-hidden rounded-xl p-5"
+            ptahSurface variant="surface-1" padding="lg"
+            class="overflow-hidden rounded-xl"
             aria-label="Job editor"
             data-testid="cron-form"
           >
-            <h2 class="text-sm font-semibold">
-              {{ form().id ? 'Edit job' : 'New job' }}
-            </h2>
-            <div class="mt-4 grid max-w-2xl gap-4 sm:grid-cols-2">
-              <ptah-field label="Name">
+            <ptah-section-header [heading]="form().id ? 'Edit job' : 'New job'" level="2" />
+            <div class="mt-[var(--ptah-gap-heading)] grid max-w-2xl gap-[var(--ptah-gap-field)] sm:grid-cols-2">
+              <ptah-field label="Name" appearance="stacked">
                 <input
                   type="text"
                   ptahInput
@@ -393,8 +332,13 @@ function emptyForm(timezone: string): CronJobFormState {
                 />
               </ptah-field>
 
-              <div class="flex flex-col gap-1">
-                <ptah-field label="Cron expression">
+              <div>
+                <ptah-field
+                  label="Cron expression"
+                  appearance="stacked"
+                  [hint]="exprPreview().valid ? (exprPreview().description ?? null) : null"
+                  [error]="!exprPreview().valid && form().cronExpr.length > 0 ? (exprPreview().error ?? null) : null"
+                >
                   <input
                     type="text"
                     ptahInput
@@ -405,19 +349,14 @@ function emptyForm(timezone: string): CronJobFormState {
                     (input)="patchForm({ cronExpr: inputValue($event) })"
                   />
                 </ptah-field>
-                @if (exprPreview().valid) {
-                  <span class="text-xs text-success">
-                    {{ exprPreview().description }}
-                  </span>
-                } @else if (form().cronExpr.length > 0) {
-                  <span class="text-xs text-error">
-                    {{ exprPreview().error }}
-                  </span>
-                }
               </div>
 
-              <div class="flex flex-col gap-1 sm:col-span-2">
-                <ptah-field label="Prompt / handler">
+              <div class="sm:col-span-2">
+                <ptah-field
+                  label="Prompt / handler"
+                  appearance="stacked"
+                  hint='Reserved internal handlers (prefixed "handler:") are rejected by the backend.'
+                >
                   <textarea
                     ptahTextarea
                     class="font-mono"
@@ -427,13 +366,9 @@ function emptyForm(timezone: string): CronJobFormState {
                     (input)="patchForm({ prompt: inputValue($event) })"
                   ></textarea>
                 </ptah-field>
-                <span class="text-xs text-base-content-muted">
-                  Reserved internal handlers (prefixed "handler:") are rejected
-                  by the backend.
-                </span>
               </div>
 
-              <ptah-field label="Workspace root (optional)">
+              <ptah-field label="Workspace root (optional)" appearance="stacked">
                 <input
                   type="text"
                   ptahInput
@@ -442,8 +377,8 @@ function emptyForm(timezone: string): CronJobFormState {
                 />
               </ptah-field>
 
-              <div class="flex flex-col gap-1">
-                <ptah-field label="Timezone">
+              <div>
+                <ptah-field label="Timezone" appearance="stacked" [hint]="'Detected timezone: ' + detectedTimezone">
                   <select
                     ptahSelect
                     [value]="form().timezone"
@@ -456,12 +391,9 @@ function emptyForm(timezone: string): CronJobFormState {
                     }
                   </select>
                 </ptah-field>
-                <span class="text-xs text-base-content-muted">
-                  Detected timezone: {{ detectedTimezone }}
-                </span>
               </div>
 
-              <label class="flex cursor-pointer items-center gap-2">
+              <label class="flex cursor-pointer items-center gap-[var(--ptah-gap-controls)]">
                 <input
                   type="checkbox"
                   ptahToggle
@@ -473,7 +405,7 @@ function emptyForm(timezone: string): CronJobFormState {
               </label>
             </div>
 
-            <div class="mt-5 flex gap-2">
+            <div class="mt-[var(--ptah-gap-group)] flex flex-wrap gap-[var(--ptah-gap-controls)]">
               <button
                 type="button"
                 ptahButton

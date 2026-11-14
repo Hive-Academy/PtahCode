@@ -21,8 +21,8 @@
           </div>
           <button
             type="button"
-            [ptahSetupAction]="'ghost'"
-            class="btn-ghost"
+            ptahButton
+            variant="ghost"
             aria-label="Close review settings"
             (click)="closed.emit()"
           >
@@ -30,21 +30,17 @@
           </button>
         </header>
         @if (loadState() === 'loading') {
-          <p class="mt-5" role="status">Loading review settings…</p>
+          <ptah-state-panel class="mt-6 block" state="loading" title="Loading review settings" />
         } @else if (loadState() === 'error') {
-          <div class="alert alert-error mt-5" role="alert">
-            Review settings are unavailable.
-            <button
-              type="button"
-              [ptahSetupAction]="'ghost'"
-              class="btn-ghost"
-              (click)="retry.emit()"
-            >
-              Retry
-            </button>
-          </div>
+          <ptah-state-panel
+            class="mt-6 block"
+            state="error"
+            title="Review settings are unavailable."
+            actionLabel="Retry"
+            (action)="retry.emit()"
+          />
         } @else {
-          <div class="mt-6 space-y-5">
+          <div class="mt-6 space-y-6">
             <ptah-review-repositories-editor
               [draft]="draft()" [hasToken]="hasToken()"
               [botConnected]="!!store.botIdentity()"
@@ -142,7 +138,7 @@
               <label class="flex items-center gap-2 text-sm"
                 ><input
                   type="checkbox"
-                  class="toggle toggle-warning"
+                  ptahToggle
                   [checked]="draft().globalPublicationPaused"
                   (change)="setGlobalPause($event)"
                 />Pause all publication</label
