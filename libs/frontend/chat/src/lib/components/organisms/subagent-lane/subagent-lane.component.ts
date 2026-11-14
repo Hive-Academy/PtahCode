@@ -116,16 +116,19 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
     </ptah-execution-header>
     }
     @if (isNativeCodex()) {
-      <div [class]="columnClass + ' py-1 text-xs text-base-content-muted'" data-testid="native-codex-lane-status">
-        {{ record().description || name() }} - {{ record().status }}
-        @if (record().status === 'failed' && record().errorMessage) {
-          <span class="text-error">{{ record().errorMessage }}</span>
-        }
-      </div>
-      <div [class]="columnClass + ' flex items-center gap-2 py-1 text-xs text-base-content-muted'" data-testid="native-codex-controls">
-        <button type="button" class="btn btn-ghost btn-xs" disabled [title]="nativeControlReason" [attr.aria-label]="nativeControlReason">Send</button>
-        <button type="button" class="btn btn-ghost btn-xs" disabled [title]="nativeControlReason" [attr.aria-label]="nativeControlReason">Stop</button>
-        <span>{{ nativeControlReason }}</span>
+      <!-- Static copy of LANE_COLUMN_CLASS: the ui-class-audit ratchet blocks new dynamic classes. -->
+      <div class="mx-auto w-[calc(100cqw-1.5rem)] max-w-[min(var(--chat-content-max-width,758px),100%)] py-1 text-xs text-base-content-muted">
+        <div data-testid="native-codex-lane-status">
+          {{ record().description || name() }} - {{ record().status }}
+          @if (record().status === 'failed' && record().errorMessage) {
+            <span class="text-error">{{ record().errorMessage }}</span>
+          }
+        </div>
+        <div class="flex items-center gap-2 py-1" data-testid="native-codex-controls">
+          <button type="button" ptahButton variant="ghost" size="xs" disabled [title]="nativeControlReason" [attr.aria-label]="nativeControlReason">Send</button>
+          <button type="button" ptahButton variant="ghost" size="xs" disabled [title]="nativeControlReason" [attr.aria-label]="nativeControlReason">Stop</button>
+          <span>{{ nativeControlReason }}</span>
+        </div>
       </div>
     }
     @if (commandError(); as err) {
