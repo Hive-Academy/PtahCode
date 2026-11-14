@@ -986,8 +986,7 @@ export class AgentProcessManager {
       taskKind: request.taskKind,
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
-      effectivePolicy: options.effectivePolicy,
-      requestedPolicy: options.requestedPolicy,
+      effectivePolicy: options.effectivePolicy?.requested,
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
