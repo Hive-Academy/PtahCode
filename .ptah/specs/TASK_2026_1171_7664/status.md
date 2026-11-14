@@ -22,3 +22,11 @@
 2026-11-13 18:39: pause cleared by parent (D: 15.7 GB free). D4 ownership recorded.
 Lanes running (codex, parallel, disjoint write sets): L1 512c89ab (B1+B2), L2 1eb38520 (B3),
 L3 08c4ebec (B4). Waiting for completion signals. No checks run while lanes edit.
+
+2026-11-14 07:35: PR #1265 head 4759d6007. CI: all pass except electron-e2e shard 2
+(conflict-and-history-axe.spec.ts:55 contrast, pre-existing, accepted by parent).
+Parent: Electron UI evidence is REQUIRED before ready-for-review: (a) Codex-tab parent starts
+a child session, (b) lane report arrives at the real parent, (c) Codex-tab approval routing.
+Free memory 3.1 GB (< 5 GB). Codex lane ed84e86d writes the opt-in evidence spec
+apps/ptah-electron-e2e/src/specs/chat/caller-attribution-evidence.spec.ts and
+.ptah/tmp/caller-evidence-chain.sh. The coordinator runs the chain under the verify lock.
