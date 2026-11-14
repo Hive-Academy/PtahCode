@@ -27,6 +27,7 @@ import {
 import { join, relative, isAbsolute } from 'node:path';
 import * as os from 'node:os';
 import { inject, injectable } from 'tsyringe';
+import { z } from 'zod';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
@@ -113,10 +114,20 @@ export interface ClearStaleResult {
 interface HarvestMarker {
   readonly version: number;
   readonly artifactDigest: string;
+  readonly attributionDigest?: string;
   readonly taskId: string;
   readonly harvestedAt: number;
   readonly reconciledCount: number;
 }
+
+const HarvestMarkerSchema = z.object({
+  taskId: z.string(),
+  harvestedAt: z.number(),
+  reconciledCount: z.number(),
+  version: z.number().optional(),
+  artifactDigest: z.string().optional(),
+  attributionDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+});
 
 /**
  * Version 3: task-level reconciliation (P3/P4). A marker from an older version
@@ -253,7 +264,18 @@ export class SpecHarvesterService implements SpecFindingsPort {
     });
     const marker = await this.readMarker(spec.dir);
     const current = marker?.version === MARKER_VERSION;
-    if (current && marker?.artifactDigest === spec.artifactDigest) {
+    let attributionDigest: string | undefined;
+    if (this.grades) {
+      try {
+        attributionDigest = this.grades.attributionFingerprint(spec.taskId, workspace);
+      } catch {
+        // degradation-audit: reported - logged at warn; artifact-only matching keeps harvesting available.
+        this.logger.warn('[spec-harvester] attribution fingerprint unavailable', { taskId: spec.taskId });
+      }
+    }
+    const retryDigest = `${spec.artifactDigest}:${attributionDigest ?? ''}`;
+    if (current && marker?.artifactDigest === spec.artifactDigest
+      && (attributionDigest === undefined || marker.attributionDigest === attributionDigest)) {
       return { exit: 'already-harvested', reconciled: count };
     }
     for (const diagnostic of spec.diagnostics) {
@@ -261,19 +283,19 @@ export class SpecHarvesterService implements SpecFindingsPort {
     }
     if (this.grades) {
       const failure = this.gradeFailures.get(spec.dir);
-      if (failure?.digest === spec.artifactDigest && failure.attempts >= 3) {
+      if (failure?.digest === retryDigest && failure.attempts >= 3) {
         return { exit: 'grades-held', reconciled: count };
       }
       if (!this.writeGrades(spec, workspace, now)) {
         this.gradeFailures.set(spec.dir, {
-          digest: spec.artifactDigest,
-          attempts: failure?.digest === spec.artifactDigest ? failure.attempts + 1 : 1,
+          digest: retryDigest,
+          attempts: failure?.digest === retryDigest ? failure.attempts + 1 : 1,
         });
         return { exit: 'grades-failed', reconciled: count };
       }
       this.gradeFailures.delete(spec.dir);
     }
-    const written = await this.writeMarker(spec, now, (current ? marker?.reconciledCount ?? 0 : 0) + count);
+    const written = await this.writeMarker(spec, now, (current ? marker?.reconciledCount ?? 0 : 0) + count, attributionDigest);
     return { exit: written ? 'harvested' : 'marker-failed', reconciled: count };
   }
 
@@ -539,10 +561,12 @@ export class SpecHarvesterService implements SpecFindingsPort {
     spec: HarvestedSpec,
     harvestedAt: number,
     reconciledCount: number,
+    attributionDigest?: string,
   ): Promise<boolean> {
     const marker: HarvestMarker = {
       version: MARKER_VERSION,
       artifactDigest: spec.artifactDigest,
+      ...(attributionDigest === undefined ? {} : { attributionDigest }),
       taskId: spec.taskId,
       harvestedAt,
       reconciledCount,
@@ -582,13 +606,14 @@ export class SpecHarvesterService implements SpecFindingsPort {
         await handle.close();
       }
       const value: unknown = JSON.parse(raw);
-      if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-      const data = value as Record<string, unknown>;
-      if (typeof data['taskId'] !== 'string' || typeof data['harvestedAt'] !== 'number' || typeof data['reconciledCount'] !== 'number') return null;
+      const parsed = HarvestMarkerSchema.safeParse(value);
+      if (!parsed.success) return null;
+      const data = parsed.data;
       return {
-        taskId: data['taskId'], harvestedAt: data['harvestedAt'], reconciledCount: data['reconciledCount'],
-        version: typeof data['version'] === 'number' ? data['version'] : 0,
-        artifactDigest: typeof data['artifactDigest'] === 'string' ? data['artifactDigest'] : '',
+        taskId: data.taskId, harvestedAt: data.harvestedAt, reconciledCount: data.reconciledCount,
+        version: data.version ?? 0,
+        artifactDigest: data.artifactDigest ?? '',
+        attributionDigest: data.attributionDigest,
       };
     } catch {
       // degradation-audit: optional-capability - The harvest marker is cache

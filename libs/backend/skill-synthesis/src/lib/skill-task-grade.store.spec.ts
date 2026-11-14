@@ -83,6 +83,24 @@ describe('groupGradeAttributions', () => {
 });
 
 maybe('SkillTaskGradeStore', () => {
+  it('fingerprints attribution content independent of row order and detects late lane rows', () => {
+    const { db, store } = setup();
+    try {
+      setupAttributionTables(db);
+      const empty = store.attributionFingerprint(grade.taskId, '/workspace');
+      insertLane(db, { runId: 'a', role: null, executorKind: 'cli', phaseKind: 'tests', root: '/workspace' });
+      const first = store.attributionFingerprint(grade.taskId, '/workspace');
+      expect(first).toMatch(/^[a-f0-9]{64}$/);
+      expect(first).not.toBe(empty);
+      insertLane(db, { runId: 'b', role: null, executorKind: 'cli', phaseKind: 'review', root: '/workspace' });
+      const second = store.attributionFingerprint(grade.taskId, '/workspace');
+      expect(second).not.toBe(first);
+      db.exec(`DELETE FROM lane_outcome_records WHERE run_id IN ('a', 'b')`);
+      insertLane(db, { runId: 'b', role: null, executorKind: 'cli', phaseKind: 'review', root: '/workspace' });
+      insertLane(db, { runId: 'a', role: null, executorKind: 'cli', phaseKind: 'tests', root: '/workspace' });
+      expect(store.attributionFingerprint(grade.taskId, '/workspace')).toBe(second);
+    } finally { db.close(); }
+  });
   it('matches trailing-separator roots and excludes a different workspace', () => {
     const { db, store } = setup();
     try {

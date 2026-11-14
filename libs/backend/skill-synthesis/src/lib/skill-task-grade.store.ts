@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
@@ -251,6 +252,16 @@ export class SkillTaskGradeStore {
         && row.workspace_root !== null && normalizeWorkspaceRoot(row.workspace_root) === normalizedRoot);
     rows.push(...phaseRows);
     return groupGradeAttributions(rows);
+  }
+
+  /** Digest the facts that can change a task's grades, independent of query order. */
+  attributionFingerprint(taskId: string, workspaceRoot: string): string {
+    const rows = this.findAttributions(taskId, workspaceRoot).map((row) => JSON.stringify([
+      row.kind, row.slug, row.attributionKey, row.runId, row.sessionId,
+      row.finalReview, row.phaseKind, row.executorKind,
+    ]));
+    rows.sort();
+    return createHash('sha256').update(JSON.stringify(rows)).digest('hex');
   }
 
   removeAbsent(taskId: string, workspaceRoot: string, keys: readonly string[]): number {
