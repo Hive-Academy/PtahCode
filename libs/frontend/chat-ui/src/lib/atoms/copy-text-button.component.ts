@@ -34,7 +34,7 @@ const FEEDBACK_MS = 2000;
   template: `
     <button
       ptahIconButton
-      [label]="label()"
+      [label]="title()"
       variant="ghost"
       size="xs"
       density="compact"
@@ -42,8 +42,6 @@ const FEEDBACK_MS = 2000;
       class="h-7 w-7 min-h-0"
       [class.text-success]="state() === 'copied'"
       [class.text-error]="state() === 'failed'"
-      [attr.aria-label]="label()"
-      [title]="title()"
       [disabled]="!text()"
       (click)="copy()"
     >

@@ -27,7 +27,7 @@ import { extractMessageText } from './message-text';
   template: `
     <button
       ptahIconButton
-      label="Copy message"
+      [label]="isCopied() ? 'Copied' : 'Copy message'"
       variant="ghost"
       size="xs"
       density="compact"
@@ -35,8 +35,6 @@ import { extractMessageText } from './message-text';
       [class.w-7]="turnActionSize()"
       [class.text-success]="isCopied()"
       type="button"
-      aria-label="Copy message"
-      [title]="isCopied() ? 'Copied!' : 'Copy'"
       (click)="copyMessage()"
     >
       <lucide-angular

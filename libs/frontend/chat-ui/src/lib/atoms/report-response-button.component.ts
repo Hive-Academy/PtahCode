@@ -42,8 +42,6 @@ const REPORT_SUBJECT = 'Report AI response';
       [href]="href()"
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Report this response"
-      title="Report response"
       data-testid="report-response-button"
     >
       <lucide-angular [img]="FlagIcon" class="w-3.5 h-3.5" aria-hidden="true" />

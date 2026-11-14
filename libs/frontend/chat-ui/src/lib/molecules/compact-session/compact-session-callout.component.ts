@@ -37,7 +37,7 @@ import type {
             >
           }
         </div>
-        <div class="flex min-w-0 flex-wrap items-start gap-controls">
+        <div class="flex min-w-0 flex-wrap items-start gap-[var(--ptah-gap-controls)]">
           @for (item of permissionItems(); track item.key) {
             <ptah-attention-permission-actions class="min-w-0" [item]="item" [compact]="true" (selected)="choose(request, $event.actionId, $event.reason)" />
           }
@@ -93,7 +93,7 @@ import type {
         <span class="truncate text-error" [title]="issue.text">{{
           issue.text
         }}</span>
-        <div class="flex gap-controls">
+        <div class="flex gap-[var(--ptah-gap-controls)]">
           @if (issue.canRetry) {
             <button
               ptahButton
