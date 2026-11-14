@@ -221,6 +221,9 @@ export class CodexLaneEvents {
         return { segments: [] };
       case 'error':
         return { segments: this.error() };
+      case 'subagentActivity':
+        // Native Codex subagent cards render in the chat UI, not in lane output.
+        return { segments: [] };
       case 'terminal': {
         this.terminal = true;
         const usage = event.usage ?? this.usage;
