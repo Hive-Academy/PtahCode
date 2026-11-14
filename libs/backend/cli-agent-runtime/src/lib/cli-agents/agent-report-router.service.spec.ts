@@ -56,6 +56,7 @@ interface Harness {
   findAgentInfo: jest.Mock;
   recordAgentNote: jest.Mock<void, [string, CliOutputSegment]>;
   markReportDelivered: jest.Mock<void, [string]>;
+  markReportAttempt: jest.Mock<void, [string, boolean]>;
   isSessionActive: jest.Mock;
   sendMessageToSession: jest.Mock;
 }
@@ -72,10 +73,12 @@ function createHarness(
   const findAgentInfo = jest.fn(() => options.info ?? createInfo());
   const recordAgentNote = jest.fn();
   const markReportDelivered = jest.fn();
+  const markReportAttempt = jest.fn();
   const manager = {
     findAgentInfo,
     recordAgentNote,
     markReportDelivered,
+    markReportAttempt,
   } as unknown as AgentProcessManager;
 
   const isSessionActive = jest.fn(() => options.sessionActive !== false);
@@ -93,12 +96,19 @@ function createHarness(
     findAgentInfo,
     recordAgentNote,
     markReportDelivered,
+    markReportAttempt,
     isSessionActive,
     sendMessageToSession,
   };
 }
 
 describe('AgentReportRouter.deliver', () => {
+  it('records a failed lane report without retaining its message', async () => {
+    const h = createHarness({ sendImpl: async () => { throw new Error('send failed'); } });
+    const result = await h.router.deliver({ agentId: AGENT_ID, message: 'private report' });
+    expect(result.delivered).toBe(false);
+    expect(h.markReportAttempt).toHaveBeenCalledWith(AGENT_ID, true);
+  });
   it('holds only final reports and keeps the tile truthful until delivery', async () => {
     const h = createHarness();
     const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());

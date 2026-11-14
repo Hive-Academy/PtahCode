@@ -335,6 +335,21 @@ describe('SessionOrganizationCaptureService', () => {
   });
 
   describe('rekey on session id resolved (G1)', () => {
+    it('does not rewrite a Claude row on a Codex first bind', async () => {
+      h.store.seed(KEY, OLD_ID);
+      h.capture.start();
+      h.registry.notifyAll({
+        tabId: 'codex-tab',
+        realSessionId: NEW_ID,
+        isNewSession: true,
+        timestamp: 1,
+      });
+      await flush();
+      expect(h.store.rekeySession).not.toHaveBeenCalled();
+      expect(h.store.has(KEY, OLD_ID)).toBe(true);
+      expect(h.store.has(KEY, NEW_ID)).toBe(false);
+    });
+
     it('moves the rows from previousSessionId to realSessionId', async () => {
       h.store.seed(KEY, OLD_ID);
       h.capture.start();

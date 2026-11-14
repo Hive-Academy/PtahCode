@@ -27,6 +27,7 @@ import {
 import { SessionApprovalRouter } from './session-approval-router';
 import { CodexChatApprovalSink } from './codex-chat-approval-sink';
 import { SessionTurnStateRegistry } from '../helpers/session-turn-state.registry';
+import { SessionIdResolvedCallbackRegistry } from '../helpers/session-id-resolved-callback-registry';
 import { SessionAdmissionRefusedError } from '../errors/session-admission-refused.error';
 
 const id = SessionId.from('11111111-1111-4111-8111-111111111111');
@@ -64,7 +65,10 @@ function mockLogger(): Logger {
   return Object.assign(Object.create(Logger.prototype), createMockLogger());
 }
 
-function setup(resolveRuntime?: CodexChatAdapterPorts['resolveRuntime']) {
+function setup(
+  resolveRuntime?: CodexChatAdapterPorts['resolveRuntime'],
+  registry?: SessionIdResolvedCallbackRegistry,
+) {
   const logger = mockLogger();
   const setUserInputAnswerHandler = jest.fn<
     void,
@@ -187,7 +191,11 @@ function setup(resolveRuntime?: CodexChatAdapterPorts['resolveRuntime']) {
     publishNotice: jest.fn(async () => undefined),
   };
   return {
-    adapter: new CodexChatAdapter(ports, new SessionTurnStateRegistry()),
+    adapter: new CodexChatAdapter(
+      ports,
+      new SessionTurnStateRegistry(),
+      registry,
+    ),
     ports,
     context,
     open,
@@ -207,20 +215,31 @@ describe('CodexChatAdapter', () => {
   it('isolates a throwing follow-up listener from other listeners and queue settlement', async () => {
     const h = setup();
     const release = deferred<void>();
-    h.context.events.mockImplementation(() => (async function* () {
-      yield { ...identity, turnId: 'turn', sequence: 1, type: 'textDelta' as const,
-        itemId: 'item', delta: 'working' };
-      await release.promise;
-      yield terminal;
-    })());
-    h.adapter.onQueuedFollowUpState(() => { throw new Error('listener failed'); });
+    h.context.events.mockImplementation(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn',
+          sequence: 1,
+          type: 'textDelta' as const,
+          itemId: 'item',
+          delta: 'working',
+        };
+        await release.promise;
+        yield terminal;
+      })(),
+    );
+    h.adapter.onQueuedFollowUpState(() => {
+      throw new Error('listener failed');
+    });
     const states: string[] = [];
     h.adapter.onQueuedFollowUpState((change) => states.push(change.state));
     const stream = await h.adapter.startChatSession({ tabId });
     const iterator = stream[Symbol.asyncIterator]();
     await iterator.next();
     await h.adapter.sendMessageToSession(id, 'next', {
-      clientMessageId: 'listener-1', queueIntent: 'next-turn',
+      clientMessageId: 'listener-1',
+      queueIntent: 'next-turn',
     });
     expect(states).toEqual(['queued']);
     release.resolve();
@@ -233,19 +252,28 @@ describe('CodexChatAdapter', () => {
   it('accepts a busy next-turn follow-up and admits it only after idle', async () => {
     const h = setup();
     const release = deferred<void>();
-    h.context.events.mockImplementation(() => (async function* () {
-      yield { ...identity, turnId: 'turn', sequence: 1, type: 'textDelta' as const,
-        itemId: 'item', delta: 'working' };
-      await release.promise;
-      yield terminal;
-    })());
+    h.context.events.mockImplementation(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn',
+          sequence: 1,
+          type: 'textDelta' as const,
+          itemId: 'item',
+          delta: 'working',
+        };
+        await release.promise;
+        yield terminal;
+      })(),
+    );
     const states: string[] = [];
     h.adapter.onQueuedFollowUpState((change) => states.push(change.state));
     const stream = await h.adapter.startChatSession({ tabId });
     const iterator = stream[Symbol.asyncIterator]();
     await iterator.next();
     await h.adapter.sendMessageToSession(id, 'next', {
-      clientMessageId: 'next-1', queueIntent: 'next-turn',
+      clientMessageId: 'next-1',
+      queueIntent: 'next-turn',
     });
     expect(states).toEqual(['queued']);
     expect(h.adapter.listQueuedFollowUps(id)).toEqual([
@@ -263,28 +291,45 @@ describe('CodexChatAdapter', () => {
   it('removes a steered item when the successful receipt has a different turn ID', async () => {
     const h = setup();
     const release = deferred<void>();
-    h.context.events.mockImplementation(() => (async function* () {
-      yield { ...identity, turnId: 'turn', sequence: 1, type: 'textDelta' as const,
-        itemId: 'item', delta: 'working' };
-      await release.promise;
-      yield terminal;
-    })());
+    h.context.events.mockImplementation(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn',
+          sequence: 1,
+          type: 'textDelta' as const,
+          itemId: 'item',
+          delta: 'working',
+        };
+        await release.promise;
+        yield terminal;
+      })(),
+    );
     const states: string[] = [];
     h.adapter.onQueuedFollowUpState((change) => states.push(change.state));
     const stream = await h.adapter.startChatSession({ tabId });
     const iterator = stream[Symbol.asyncIterator]();
     await iterator.next();
     await h.adapter.sendMessageToSession(id, 'steer me', {
-      clientMessageId: 'steer-1', queueIntent: 'next-turn',
+      clientMessageId: 'steer-1',
+      queueIntent: 'next-turn',
     });
-    h.context.steer.mockResolvedValueOnce({ threadId: id, turnId: 'other', revision: 2 });
-    expect(await h.adapter.steerQueuedFollowUp(id, 'steer-1'))
-      .toEqual({ ok: true });
+    h.context.steer.mockResolvedValueOnce({
+      threadId: id,
+      turnId: 'other',
+      revision: 2,
+    });
+    expect(await h.adapter.steerQueuedFollowUp(id, 'steer-1')).toEqual({
+      ok: true,
+    });
     expect(h.adapter.listQueuedFollowUps(id)).toEqual([]);
     expect(states).toEqual(['queued', 'steered']);
     expect(h.ports.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Steer turn ID mismatch'),
-      expect.objectContaining({ expectedTurnId: 'turn', receiptTurnId: 'other' }),
+      expect.objectContaining({
+        expectedTurnId: 'turn',
+        receiptTurnId: 'other',
+      }),
     );
     expect(h.context.startTurn).toHaveBeenCalledTimes(1);
     release.resolve();
@@ -298,32 +343,49 @@ describe('CodexChatAdapter', () => {
   it('logs a failed steer and keeps the follow-up queued for the next turn', async () => {
     const h = setup();
     const release = deferred<void>();
-    h.context.events.mockImplementation(() => (async function* () {
-      yield { ...identity, turnId: 'turn', sequence: 1, type: 'textDelta' as const,
-        itemId: 'item', delta: 'working' };
-      await release.promise;
-      yield terminal;
-    })());
+    h.context.events.mockImplementation(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn',
+          sequence: 1,
+          type: 'textDelta' as const,
+          itemId: 'item',
+          delta: 'working',
+        };
+        await release.promise;
+        yield terminal;
+      })(),
+    );
     const stream = await h.adapter.startChatSession({ tabId });
     const iterator = stream[Symbol.asyncIterator]();
     await iterator.next();
     await h.adapter.sendMessageToSession(id, 'steer me', {
-      clientMessageId: 'steer-throws', queueIntent: 'next-turn',
+      clientMessageId: 'steer-throws',
+      queueIntent: 'next-turn',
     });
     // A definite server refusal keeps the follow-up queued for the next turn.
     h.context.steer.mockRejectedValueOnce(
-      new CodexRequestRejectedError('turn/steer', -32600, 'codexTurnNoLongerActive'),
+      new CodexRequestRejectedError(
+        'turn/steer',
+        -32600,
+        'codexTurnNoLongerActive',
+      ),
     );
-    expect(await h.adapter.steerQueuedFollowUp(id, 'steer-throws'))
-      .toEqual({ ok: false, code: 'TURN_CHANGED' });
+    expect(await h.adapter.steerQueuedFollowUp(id, 'steer-throws')).toEqual({
+      ok: false,
+      code: 'TURN_CHANGED',
+    });
     expect(h.adapter.listQueuedFollowUps(id)).toEqual([
       expect.objectContaining({ clientMessageId: 'steer-throws' }),
     ]);
     // An uncertain outcome (transport/timeout) consumes it: never sent twice.
     const failure = new Error('steer transport lost');
     h.context.steer.mockRejectedValueOnce(failure);
-    expect(await h.adapter.steerQueuedFollowUp(id, 'steer-throws'))
-      .toEqual({ ok: false, code: 'DELIVERY_UNCERTAIN' });
+    expect(await h.adapter.steerQueuedFollowUp(id, 'steer-throws')).toEqual({
+      ok: false,
+      code: 'DELIVERY_UNCERTAIN',
+    });
     expect(h.ports.logger.warn).toHaveBeenCalledWith(
       '[CodexChatAdapter] Steer outcome uncertain; consuming follow-up to prevent duplicate delivery.',
       failure,
@@ -1240,7 +1302,13 @@ describe('CodexChatAdapter', () => {
   });
 
   it('opens through the DS1 gate, persists native identity and emits one terminal result', async () => {
-    const { adapter, context, ports, callbacks, lifecycle } = setup();
+    const registry = new SessionIdResolvedCallbackRegistry(mockLogger());
+    const onResolved = jest.fn();
+    registry.register(onResolved);
+    const { adapter, context, ports, callbacks, lifecycle } = setup(
+      undefined,
+      registry,
+    );
     const resolved = jest.fn();
     const stats = jest.fn();
     adapter.setSessionIdResolvedCallback(resolved);
@@ -1259,6 +1327,14 @@ describe('CodexChatAdapter', () => {
       jest.mocked(ports.metadata.save).mock.invocationCallOrder[0],
     );
     expect(resolved).toHaveBeenCalledWith(tabId, id);
+    expect(onResolved).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tabId,
+        realSessionId: id,
+        isNewSession: true,
+        timestamp: expect.any(Number),
+      }),
+    );
     expect(output.map((event) => event.eventType)).toEqual([
       'turn_state',
       'message_start',
@@ -2942,8 +3018,7 @@ it.each(['end', 'interrupt'] as const)(
 it('starts a follow-up turn and publishes its stream when an async question is answered after turn completion', async () => {
   const { adapter, context, ports, setUserInputAnswerHandler } = setup();
   let answerHandler:
-    | ((answer: CodexUserInputAnswer) => Promise<void>)
-    | undefined;
+    ((answer: CodexUserInputAnswer) => Promise<void>) | undefined;
   setUserInputAnswerHandler.mockImplementation((handler) => {
     answerHandler = handler;
   });
@@ -3090,8 +3165,7 @@ it('steers the active turn when an async question is answered before the turn fi
     cancelPendingUserInput,
   } = setup();
   let answerHandler:
-    | ((answer: CodexUserInputAnswer) => Promise<void>)
-    | undefined;
+    ((answer: CodexUserInputAnswer) => Promise<void>) | undefined;
   setUserInputAnswerHandler.mockImplementation((handler) => {
     answerHandler = handler;
   });
@@ -3141,8 +3215,7 @@ it('steers the active turn when an async question is answered before the turn fi
 it('publishes a visible notice when delivery of an async answer fails', async () => {
   const { adapter, context, ports, setUserInputAnswerHandler } = setup();
   let answerHandler:
-    | ((answer: CodexUserInputAnswer) => Promise<void>)
-    | undefined;
+    ((answer: CodexUserInputAnswer) => Promise<void>) | undefined;
   setUserInputAnswerHandler.mockImplementation((handler) => {
     answerHandler = handler;
   });
@@ -3179,7 +3252,10 @@ it('publishes a visible notice when delivery of an async answer fails', async ()
     id,
     expect.arrayContaining([
       expect.objectContaining({ eventType: 'message_complete' }),
-      expect.objectContaining({ eventType: 'text_delta', delta: expect.stringContaining('could not be delivered') }),
+      expect.objectContaining({
+        eventType: 'text_delta',
+        delta: expect.stringContaining('could not be delivered'),
+      }),
     ]),
   );
   expect(adapter.canSendFollowUp(id)).toBe(false);
@@ -3195,8 +3271,7 @@ it('publishes a visible notice when delivery of an async answer fails', async ()
 it('shows the failure notice and starts no new turn when Codex refuses a steer for a live turn', async () => {
   const { adapter, context, ports, setUserInputAnswerHandler } = setup();
   let answerHandler:
-    | ((answer: CodexUserInputAnswer) => Promise<void>)
-    | undefined;
+    ((answer: CodexUserInputAnswer) => Promise<void>) | undefined;
   setUserInputAnswerHandler.mockImplementation((handler) => {
     answerHandler = handler;
   });
@@ -3239,7 +3314,10 @@ it('shows the failure notice and starts no new turn when Codex refuses a steer f
   expect(ports.publishNotice).toHaveBeenCalledWith(
     id,
     expect.arrayContaining([
-      expect.objectContaining({ eventType: 'text_delta', delta: expect.stringContaining('could not be delivered') }),
+      expect.objectContaining({
+        eventType: 'text_delta',
+        delta: expect.stringContaining('could not be delivered'),
+      }),
     ]),
   );
   expect(context.startTurn).toHaveBeenCalledTimes(1);
@@ -3249,8 +3327,7 @@ it('shows the failure notice and starts no new turn when Codex refuses a steer f
 it('discards a queued async answer when the user stops the turn before delivery', async () => {
   const { adapter, context, ports, setUserInputAnswerHandler } = setup();
   let answerHandler:
-    | ((answer: CodexUserInputAnswer) => Promise<void>)
-    | undefined;
+    ((answer: CodexUserInputAnswer) => Promise<void>) | undefined;
   setUserInputAnswerHandler.mockImplementation((handler) => {
     answerHandler = handler;
   });
@@ -3271,7 +3348,11 @@ it('discards a queued async answer when the user stops the turn before delivery'
   );
   // The turn ended on the server side, so the answer waits for a new turn.
   context.steer.mockRejectedValueOnce(
-    new CodexRequestRejectedError('turn/steer', -32600, 'codexTurnNoLongerActive'),
+    new CodexRequestRejectedError(
+      'turn/steer',
+      -32600,
+      'codexTurnNoLongerActive',
+    ),
   );
 
   const stream = await adapter.startChatSession({ tabId });
@@ -3310,8 +3391,7 @@ it('discards a queued async answer when the user stops the turn before delivery'
 it('does not start an answer turn when Stop arrives before stream admission', async () => {
   const { adapter, context, ports, setUserInputAnswerHandler } = setup();
   let answerHandler:
-    | ((answer: CodexUserInputAnswer) => Promise<void>)
-    | undefined;
+    ((answer: CodexUserInputAnswer) => Promise<void>) | undefined;
   setUserInputAnswerHandler.mockImplementation((handler) => {
     answerHandler = handler;
   });

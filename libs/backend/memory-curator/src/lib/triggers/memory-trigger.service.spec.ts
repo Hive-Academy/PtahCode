@@ -788,7 +788,11 @@ describe('MemoryTriggerService', () => {
       timestamp: 1,
     });
     expect(jest.getTimerCount()).toBe(1);
-    sessionEnd.endActive.current?.({ sessionId: 's1', workspaceRoot: '/ws', cause: 'user-stop' });
+    sessionEnd.endActive.current?.({
+      sessionId: 's1',
+      workspaceRoot: '/ws',
+      cause: 'user-stop',
+    });
     expect(jest.getTimerCount()).toBe(0);
     jest.advanceTimersByTime(200);
     expect(curator.curate).not.toHaveBeenCalled();
@@ -1646,7 +1650,11 @@ describe('MemoryTriggerService — episode / failure / session-end', () => {
     });
     service.start();
     stop.fire(stopPayload());
-    sessionEnd.endActive.current?.({ sessionId: 's1', workspaceRoot: '/ws', cause: 'user-stop' });
+    sessionEnd.endActive.current?.({
+      sessionId: 's1',
+      workspaceRoot: '/ws',
+      cause: 'user-stop',
+    });
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(curator.pushEvent).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'session-end-trigger' }),
@@ -2598,6 +2606,28 @@ describe('MemoryTriggerService — rekeySession (TASK_2026_296)', () => {
     expect(h.sessionIdResolved.registry.size).toBe(0);
   });
 
+  it("rekeys a Codex tab without moving another tab's armed state", async () => {
+    const h = armed(100_000);
+    const codexTab = 'd6596760-14ac-4961-bb50-3f13893e60d1';
+    const codexThread = '99728cd0-f06d-47b0-b83c-575c1797f094';
+    arm(h, TAB_ID);
+    arm(h, codexTab);
+    h.sessionIdResolved.fire({
+      tabId: codexTab,
+      realSessionId: codexThread,
+      isNewSession: true,
+      timestamp: Date.now(),
+    });
+    jest.advanceTimersByTime(100_001);
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(h.curator.pushEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'idle-trigger', sessionId: TAB_ID }),
+    );
+    expect(h.curator.pushEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'idle-trigger', sessionId: codexThread }),
+    );
+  });
+
   // The literal context.md acceptance criterion (plan §6e spec 2).
   it('a SessionEnd under the UUID clears state registered under the tabId, timer included', async () => {
     const h = armed();
@@ -3210,8 +3240,7 @@ describe('MemoryTriggerService — a failed curation pass keeps its input, bound
 });
 
 describe('MemoryTriggerService — failure events carry fixed sentences (TASK_2026_878)', () => {
-  const SENTINEL =
-    'upstream 401 key=sk-SENTINEL-7f3a https://internal.example';
+  const SENTINEL = 'upstream 401 key=sk-SENTINEL-7f3a https://internal.example';
 
   beforeEach(() => {
     jest.useFakeTimers({ now: FAKE_CLOCK_EPOCH });

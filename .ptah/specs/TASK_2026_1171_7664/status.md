@@ -1,0 +1,137 @@
+# Status — TASK_2026_1171_7664 (Phase B)
+
+2026-11-13: PAUSED by parent — drive D: full (12 MB free). No new lanes, checks or commits.
+
+- Done: task created, context.md written (initial trace + lead H-B1).
+- H-B1 (code-backed, not runtime-confirmed): codex-chat-host-ports.ts:392 lets a user MCP
+  server named `ptah` replace the per-tab `/session/{tabId}` URL -> no caller session id ->
+  session-spawner.service.ts:349 refuses `unattributed-caller`.
+- Running: codex research lane e4223b79-e958-444e-93c2-2a12fd669896, deliverable
+  research-report.md (its write may fail while the disk is full).
+- Next after disk space returns: read research-report.md, plan fix batches, codex lanes.
+
+2026-11-13: research batch COMPLETE (research-report.md, lane e4223b79, verdict delivered).
+- Root cause: Codex tab id used where the native adapter needs the live thread id
+  (guardStart, agent-namespace resolveSessionId/getParentLevel, drainer). Second defect:
+  user `ptah` MCP entry overrides the host session URL (codex-chat-host-ports.ts:392).
+- Batch report sent to parent with ptah_agent_report: Delivered yes (child-session report
+  path receipt evidence #1).
+- Planned: B1 resolver, B2 reserve `ptah`, B3 handshake diagnostics, B4 completion read-ack.
+- Still PAUSED: wait for the parent's disk-space clearance before lanes, checks, commits.
+
+2026-11-13 18:39: pause cleared by parent (D: 15.7 GB free). D4 ownership recorded.
+Lanes running (codex, parallel, disjoint write sets): L1 512c89ab (B1+B2), L2 1eb38520 (B3),
+L3 08c4ebec (B4). Waiting for completion signals. No checks run while lanes edit.
+
+2026-11-14 07:35: PR #1265 head 4759d6007. CI: all pass except electron-e2e shard 2
+(conflict-and-history-axe.spec.ts:55 contrast, pre-existing, accepted by parent).
+Parent: Electron UI evidence is REQUIRED before ready-for-review: (a) Codex-tab parent starts
+a child session, (b) lane report arrives at the real parent, (c) Codex-tab approval routing.
+Free memory 3.1 GB (< 5 GB). Codex lane ed84e86d writes the opt-in evidence spec
+apps/ptah-electron-e2e/src/specs/chat/caller-attribution-evidence.spec.ts and
+.ptah/tmp/caller-evidence-chain.sh. The coordinator runs the chain under the verify lock.
+
+2026-11-14 10:15 (report to parent not delivered: parent-session-not-active).
+Evidence runs 2-5 failed on test setup only; no Phase B defect found so far.
+- a run 2: Codex called ptah_session_start; the approval prompt on its own rail card was not
+  clicked and timed out (60 s). Not "MCP 0". a run 4: caller check passed (guardStart), then
+  the worktree provisioner refused: temp workspace had no commit at HEAD.
+- b run 4: false pass on the completion notice (it repeats the task text); the lane stopped
+  after 2 s with no report. b run 5: parent said ptah_agent_spawn was not available.
+- a/c run 5: model catalog empty when the boot CLI probe missed Codex (5/8 CLIs).
+- Test-only fixes: 513761fae, 1b2b5c02b (workspace must be outside the repo), fb3c8a41b,
+  40fb98519, c087d1eb9, 286918a23, 96e2b7939, 7d829dec0, 57c6ab31c.
+- git status after every run: only untracked HANDOFF.md. Run 6 (a, b, c) started.
+- Not pushed; origin head 4759d6007 had no foreign commits at 09:08. PR #1265 stays draft.
+
+2026-11-14 12:45: evidence runs 6-7.
+- b PASS (run 6): `<agent-report>E2E-REPORT-MARKER` in the Codex parent tab, inside the
+  completion notice (report-delivery 1-sent, held-for-completion).
+- c PASS (run 6): `node --version` prompt only on the parent's own rail card; Deny closed it.
+- a run 6 FAIL: other Ptah instances held MCP ports 51820-51822, the app had no MCP server
+  ("MCP 0"). Test fix f3eb68915 writes a free `ptah.mcpPort` to the temp profile config.json.
+- a run 7 PARTIAL: child "child-ready" started for the Codex parent thread id (no
+  unattributed-caller), ran to Done. No rail parent/child link: spawner never logged
+  `bound to SDK session` for the Codex child, so recordOrganization stored no parentSessionId;
+  sdkIdOf(guard.caller) looks up a tab id but the Codex caller is a thread id. Production gap,
+  also on main (branch does not touch session-spawner.service.ts). Needs parent decision.
+- git status after every run: only status.md and untracked HANDOFF.md.
+- Fetch 12:44: origin 4759d6007, no foreign commits. Test-only commits pushed; PR stays draft.
+
+2026-11-14 12:50: pushed 4759d6007..085f486a8 (no force), PR body test plan updated, CI watch
+started. Report to parent NOT delivered (parent-session-not-active). Decision needed from the
+parent: fix the Codex child rail link (session-spawner recordOrganization / sdkIdOf) in
+PR #1265, or record it as a follow-up and accept item (a) as partial. PR stays draft until then.
+
+2026-11-14 (successor session): fetch showed no foreign commits; pushed 085f486a8..1ebd6ed85
+(no force). CI at that time: 6 pass, 10 pending, 3 skipping, no failure. Report to parent sent
+again (same text as 12:45/12:50 plus CI state): NOT delivered (parent-session-not-active).
+Decision on item (a) still open. Assumption: no production change to session-spawner without
+the parent's decision; PR #1265 stays draft.
+- CI final at 1ebd6ed85: all pass except electron-e2e shard 2 (1 failed, 57 passed): only the
+  accepted pre-existing `conflict-and-history-axe.spec.ts:55` contrast failure. Review state:
+  REVIEW_REQUIRED (draft, no review comments). Third report: NOT delivered (parent not active).
+
+2026-11-14 (second successor session): CI at 27a173020 (docs only): all pass except
+(1) the accepted electron-e2e shard 2 axe failure `conflict-and-history-axe.spec.ts:55`, and
+(2) test shard 1: `libs/frontend/core` `message-router.service.spec.ts:512` (burst coalescing
+order, timing). The branch does not change `libs/frontend/core`; the same test passed at
+1ebd6ed85. Treated as a flake: rerun of the failed job started (`gh run rerun --failed`).
+Fourth report to the parent (decision on item (a) plus CI state): NOT delivered
+(parent-session-not-active). No production change; PR #1265 stays draft.
+- Rerun 1 of test shard 1: failed again, another test in the same group
+  (`requeues undispatched messages when a zone drain throws`). Local direct Jest run of
+  `message-router.service.spec.ts`: 33/33 pass. Cause: `MessageRouterService` uses a real-time
+  drain budget (`DRAIN_BUDGET_MS = 8`, `performance.now()`, message-router.service.ts:90,118),
+  so on a slow runner a drain stops early. Pre-existing flake, outside Phase B scope. Follow-up
+  candidate: stub `performance.now` in the burst-coalescing specs. Rerun 2 started.
+- Rerun 2 of test shard 1: PASS (`main` aggregate job: success). CI at 27a173020: all pass
+  except the accepted pre-existing electron-e2e shard 2 axe failure. Decision on item (a)
+  still open; PR #1265 stays draft.
+
+2026-11-14 (third successor session): fetch showed no foreign commits (origin 651f27eeb).
+PR #1265: draft, REVIEW_REQUIRED, 0 reviews, no new comments. Fifth report to the parent
+(decision on item (a): A = fix rail link in PR #1265, B = follow-up task + accept (a) as
+partial, then `gh pr ready 1265`): NOT delivered (parent-session-not-active). No production
+change; PR #1265 stays draft. This commit stays local until the next real change.
+Superseded by session e919afa2 on 2026-11-14
+Correction 2026-11-14 15:10Z: the program coordinator (session agent-permissions-pr-ece2) stopped
+e919afa2 and made this session the Phase B coordinator again. Decision on item (a): OPTION A.
+- Fast-forwarded to origin 5d3be6ea9 (e919afa2 commit, sdkIdOf fallback to isSessionActive).
+- Defect in 5d3be6ea9: for a Claude tab, SdkAgentAdapter.isSessionActive = lifecycle.find(id)
+  defined, so a tab with no resolved SDK id returns its tab id as parentSdkSessionId.
+- Root cause of the missing child bind: CodexChatAdapter calls only its single-slot resolved
+  callback (codex-chat-adapter.ts:477), never SessionIdResolvedCallbackRegistry.notifyAll, so
+  SessionSpawner.onSessionIdResolved never runs for a Codex child (log a-7: "Session ID
+  resolved" for the child, no "bound to SDK session").
+- Codex lane 57f46235 started: confirmed-only sdkIdOf, Codex adapter notifies the registry,
+  regression specs. Deliverable lane-report-rail-link-fix.md.
+- 16:20Z lane 57f46235 done (listener audit in lane-report-rail-link-fix.md, listener specs in
+  lane-report-listener-specs.md). Inner loop `--related` 3/3 pass. lint+typecheck 6/6 pass.
+- Codex review lane 9464d778: REJECT, one High finding (review-rail-link-fix.md): the new
+  host-routing alias guard blocked a resume of the same session in a new tab. Fixed: guard
+  removed (host-routing.coordinator.ts has no diff from main), spec now pins the move of the
+  alias to the resuming tab. Other review results: sdkIdOf call sites, registry listeners and
+  double-handling OK.
+- 2026-11-14 ~17:40Z successor session: gate 1 (all 5 projects) failed only on 0xC0000142
+  process start failures. Rerun `-t test -p cli-agent-runtime,rpc-handlers,memory-curator,
+  session-organization`: 4/4 pass. agent-sdk: 227 suites pass in Nx; the failed probe suite
+  (auto-compact-argv, unchanged) passed with direct Jest under the lock, 16/16.
+- Commit 9aa561471 (rail-link fix) pushed; pre-push gate passed.
+- Evidence (a) run 8 at 9aa561471: PASS (4.3 min). rail-child-glyph + rail-child-count shown,
+  no unattributed-caller. Screenshot .ptah/tmp/electron-evidence/caller-item-a-child.png
+  (checked: no secrets). git status clean after the run (only untracked HANDOFF.md).
+- PR body updated (rail-link row, gate, evidence (a), follow-up for the getAttempt cast in
+  agent-process-manager.service.ts, per the coordinator: no more edits to that file).
+  `gh pr ready 1265` done. CI for 9aa561471 pending.
+- 2026-11-14 ~19:45Z successor session (merge of main, D30): 7e8e3d6e2 merges origin/main.
+  One conflict (lane-completion-notifier.service.ts), both sides kept. Lint+typecheck 16/16.
+  Codex review merge-resolution-review.md: REJECT, 1 Medium (route canStart got the raw
+  caller id). Fixed in 66549cd66 (resolveChildSessionCallerId + spec); Codex review
+  route-caller-review.md: APPROVE (1 Low: throwing lookup not tested, unchanged fallback).
+- Test gate for the 8 touched projects: 7/8 pass; cli-agent-runtime 4035 pass, 1 fail
+  (lane-terminal-outcomes.integration.spec.ts:220, fixed 30 ms wait under load). That spec
+  and the notifier spec pass alone under the lock, 108/108.
+- 90403a6ee merges origin/main again for #1273 (axe fix); clean, only webview + libs/frontend/ui.
+  chat-streaming lint, typecheck and test pass. Evidence (a)/(b) are from 9aa561471; the merge
+  and 66549cd66 do not change the session-start or report-delivery path.

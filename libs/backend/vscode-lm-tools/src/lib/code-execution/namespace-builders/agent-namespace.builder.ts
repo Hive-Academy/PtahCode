@@ -356,7 +356,11 @@ export function buildAgentNamespace(
     logger,
   } = deps;
 
+  const resolveCallerParentId = (rawCallerId: string) =>
+    resolveSessionId?.(rawCallerId) ?? rawCallerId;
+
   return {
+    resolveCallerParentId,
     spawn: async (request: UntypedSpawnRequest) => {
       if (request.phase) parsePhaseDispatch(request.phase);
       assertEffort(request.effort);
@@ -392,7 +396,7 @@ export function buildAgentNamespace(
         ? getCallerSessionId()?.trim() || undefined
         : request.parentSessionId?.trim() || undefined;
       const activeSessionId = rawSessionId
-        ? (resolveSessionId?.(rawSessionId) ?? rawSessionId)
+        ? resolveCallerParentId(rawSessionId)
         : undefined;
       const parentLevel = rawSessionId ? getParentLevel?.(rawSessionId) : undefined;
       // An HTTP MCP caller (execute_code) without session identity gets an
