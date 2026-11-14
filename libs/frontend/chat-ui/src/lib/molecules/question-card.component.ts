@@ -8,7 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { injectWallClock, WallClockService } from '@ptah-extension/core';
-import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahCheckboxDirective, PtahInputDirective } from '@ptah-extension/ui';
 import { FormsModule } from '@angular/forms';
 import {
   LucideAngularModule,
@@ -46,7 +46,7 @@ import type {
 @Component({
   selector: 'ptah-question-card',
   standalone: true,
-  imports: [FormsModule, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective],
+  imports: [FormsModule, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahCheckboxDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -93,11 +93,11 @@ import type {
       }
 
       <!-- Current question -->
-      <div class="py-2 px-2">
+      <fieldset class="py-2 px-2">
         @if (currentQuestion(); as question) {
-          <p class="text-[11px] font-medium text-base-content-muted mb-1.5">
+          <legend class="text-[11px] font-medium text-base-content-muted mb-1.5">
             {{ question.question }}
-          </p>
+          </legend>
 
           <!-- Options list - single column for clarity -->
           <div class="space-y-0.5">
@@ -115,6 +115,8 @@ import type {
                 >
                   <input
                     type="checkbox"
+                    ptahCheckbox
+                    size="xs"
                     [value]="option.label"
                     [checked]="
                       isOptionSelected(question.question, option.label)
@@ -122,7 +124,7 @@ import type {
                     (change)="
                       onOptionToggle(question.question, option.label, $event)
                     "
-                    class="checkbox checkbox-xs checkbox-info mt-0.5"
+                    class="mt-0.5"
                   />
                   <div class="flex-1 min-w-0">
                     <span class="font-medium">{{ option.label }}</span>
@@ -202,12 +204,16 @@ import type {
               <div class="flex gap-1 mt-1 px-1.5">
                 <input
                   type="text"
+                  ptahInput
+                  size="xs"
+                  label="Custom response"
                   [value]="customText()"
                   (input)="onCustomTextInput($event)"
                   (keydown.enter)="onCustomTextConfirm(question.question)"
                   placeholder="Type your response..."
-                  class="input input-xs input-bordered input-info flex-1 text-[10px] bg-base-100/50"
+                  class="flex-1 text-[10px] bg-base-100/50"
                 />
+                <!-- Named raw exception: btn-info has no color-equivalent ptahButton variant. -->
                 <button
                   (click)="onCustomTextConfirm(question.question)"
                   [disabled]="!customText().trim()"
@@ -221,7 +227,7 @@ import type {
             }
           </div>
         }
-      </div>
+      </fieldset>
 
       <!-- Navigation buttons -->
       <div
@@ -249,6 +255,7 @@ import type {
 
         <!-- Next or Submit button -->
         @if (isLastStep()) {
+          <!-- Named raw exception: keep the info tone for the submit action. -->
           <button
             (click)="onSubmit()"
             [disabled]="!canSubmit()"
@@ -259,6 +266,7 @@ import type {
             Submit
           </button>
         } @else {
+          <!-- Named raw exception: keep the info tone for step navigation. -->
           <button
             (click)="nextStep()"
             [disabled]="!isCurrentStepAnswered()"

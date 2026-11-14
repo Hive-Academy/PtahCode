@@ -89,11 +89,9 @@
   },
   "libs/frontend/chat-ui/src/lib/molecules/lane-composer.component.ts": {
     "<dynamic>": 4,
-    "btn": 5,
-    "btn-ghost": 4,
-    "btn-sm": 3,
-    "btn-warning": 1,
-    "btn-xs": 2
+    "btn": 1,
+    "btn-sm": 1,
+    "btn-warning": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/lane-result/lane-result-card.component.ts": {
     "<dynamic>": 1
@@ -114,14 +112,7 @@
     "btn": 3,
     "btn-info": 3,
     "btn-outline": 2,
-    "btn-xs": 3,
-    "checkbox": 1,
-    "checkbox-info": 1,
-    "checkbox-xs": 1,
-    "input": 1,
-    "input-bordered": 1,
-    "input-info": 1,
-    "input-xs": 1
+    "btn-xs": 3
   },
   "libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/lane-subtotal-tile.component.ts": {
     "<dynamic>": 4
@@ -152,9 +143,6 @@
     "alert-error": 1,
     "alert-info": 1,
     "alert-sm": 2,
-    "btn": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
     "skeleton": 2
   },
   "libs/frontend/chat-ui/src/lib/molecules/setup-plugins/plugin-catalog-panel.component.ts": {
