@@ -50,7 +50,7 @@ describe('OnboardingFocusRouter', () => {
   });
 
   it.each([
-    ['generation', ['analyze', 'agents']],
+    ['generation', ['analyze', 'skills']],
     ['guidance', ['guidance']],
   ] as const)(
     'focuses %s on its owning step with tab identity',

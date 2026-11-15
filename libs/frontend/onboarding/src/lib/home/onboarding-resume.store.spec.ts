@@ -49,7 +49,7 @@ describe('OnboardingResumeStore', () => {
       'generation:tab-generation',
     ]);
     expect(store.items()[1].target).toEqual({
-      subPath: ['analyze', 'agents'],
+      subPath: ['analyze', 'skills'],
       queryParams: { tab: 'tab-generation', run: 'latest-run' },
     });
   });
