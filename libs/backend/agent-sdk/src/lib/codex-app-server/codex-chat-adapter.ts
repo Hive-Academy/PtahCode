@@ -31,6 +31,7 @@ import {
   type ProviderInfo,
   type QueuedFollowUpStateChange,
   type QueuedFollowUpSnapshot,
+  type SessionEndCause,
   type SteerQueuedFollowUpResult,
 } from '@ptah-extension/shared';
 import type {
@@ -1248,9 +1249,9 @@ export class CodexChatAdapter implements NativeChatAdapter {
   interruptCurrentTurn(id: SessionId): Promise<boolean> {
     return this.controls.interruptCurrentTurn(id);
   }
-  interruptSession(id: SessionId): Promise<void> {
+  interruptSession(id: SessionId, cause?: SessionEndCause): Promise<void> {
     this.cancelQueuedAnswers(id);
-    return this.controls.interruptSession(id);
+    return this.controls.interruptSession(id, cause);
   }
   executeSlashCommand(
     ...args: Parameters<IAgentAdapter['executeSlashCommand']>
