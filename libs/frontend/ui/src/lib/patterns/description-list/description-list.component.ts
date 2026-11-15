@@ -36,7 +36,7 @@ const ROW_CLASS = [
 ].join(' ');
 
 const COMPACT_ROW_CLASS =
-  'grid grid-cols-[var(--ptah-dl-compact-term-w,7.5rem)_minmax(0,1fr)_auto] items-center min-h-[calc(var(--ptah-control-h-xs)+var(--ptah-space-1))] py-[var(--ptah-gap-label)] gap-x-[var(--ptah-gap-inline)]';
+  'grid grid-cols-[minmax(0,var(--ptah-dl-compact-term-w,7.5rem))_minmax(0,1fr)_auto] items-center min-h-[calc(var(--ptah-control-h-xs)+var(--ptah-space-1))] py-[var(--ptah-gap-label)] gap-x-[var(--ptah-gap-inline)]';
 
 const TERM_CLASS =
   'min-w-0 text-[length:var(--ptah-text-label-size)] leading-[var(--ptah-text-label-leading)] font-[number:var(--ptah-text-label-weight)] text-base-content-muted';

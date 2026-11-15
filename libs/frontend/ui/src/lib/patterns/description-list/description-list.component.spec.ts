@@ -126,7 +126,7 @@ describe('PtahDescriptionListComponent (data API)', () => {
     const row = host.querySelector('[data-ptah-description-row]') as HTMLElement;
     expect(host.hasAttribute('data-density')).toBe(false);
     expect(row.classList.contains('[@container(min-width:640px)]:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]')).toBe(true);
-    expect(row.classList.contains('grid-cols-[var(--ptah-dl-compact-term-w,7.5rem)_minmax(0,1fr)_auto]')).toBe(false);
+    expect(row.classList.contains('grid-cols-[minmax(0,var(--ptah-dl-compact-term-w,7.5rem))_minmax(0,1fr)_auto]')).toBe(false);
   });
 
   it('renders compact terms and wrapping values in columns at every width', () => {
@@ -136,7 +136,7 @@ describe('PtahDescriptionListComponent (data API)', () => {
     const host = fixture.nativeElement as HTMLElement;
     const row = host.querySelector('[data-ptah-description-row]') as HTMLElement;
     expect(host.getAttribute('data-density')).toBe('compact');
-    expect(row.classList.contains('grid-cols-[var(--ptah-dl-compact-term-w,7.5rem)_minmax(0,1fr)_auto]')).toBe(true);
+    expect(row.classList.contains('grid-cols-[minmax(0,var(--ptah-dl-compact-term-w,7.5rem))_minmax(0,1fr)_auto]')).toBe(true);
     expect(row.classList.contains('items-center')).toBe(true);
     expect(row.classList.contains('min-h-[calc(var(--ptah-control-h-xs)+var(--ptah-space-1))]')).toBe(true);
     expect(row.querySelector('dt')?.classList.contains('break-words')).toBe(true);
@@ -185,7 +185,7 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
     fixture.detectChanges();
     const row = (fixture.nativeElement as HTMLElement).querySelector('[ptahDescriptionItem]') as HTMLElement;
     expect(row.getAttribute('data-density')).toBe('compact');
-    expect(row.classList.contains('grid-cols-[var(--ptah-dl-compact-term-w,7.5rem)_minmax(0,1fr)_auto]')).toBe(true);
+    expect(row.classList.contains('grid-cols-[minmax(0,var(--ptah-dl-compact-term-w,7.5rem))_minmax(0,1fr)_auto]')).toBe(true);
     expect(row.querySelector('dt')?.classList.contains('break-words')).toBe(true);
     const value = row.querySelector('dd') as HTMLElement;
     expect(value.classList.contains('break-words')).toBe(true);
