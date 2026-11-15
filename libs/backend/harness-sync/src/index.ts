@@ -234,6 +234,7 @@ export {
 } from './lib/targets/mcp/mcp-json-format';
 
 // Sources.
+export { createOrchestrationPhaseSources, type OrchestrationPhaseSourceOptions } from './lib/sources/orchestration-phase-sources';
 export type {
   HarnessSourceLayout,
   HarnessSourceState,

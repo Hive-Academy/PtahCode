@@ -67,6 +67,11 @@ import {
   registerHarnessSyncServices,
   createPluginConfigSourceResolver,
   HARNESS_SYNC_TOKENS,
+  type IHarnessSourceResolver,
+  SkillSyncGate,
+  ManagedManifestStore,
+  createOrchestrationPhaseSources,
+  resolveHarnessWorkspaceRoot,
   type HarnessPluginConfigReader,
 } from '@ptah-extension/harness-sync';
 import {
@@ -360,11 +365,31 @@ export function registerPhase2Libraries(
   // Before phase 3 registerVsCodeLmToolsServices and wire-runtime
   // registerRpcSurface. AgentRpcHandlers injects DECISION_MODEL_CONFIG.
   container.register(LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER, {
-    useFactory: (c) => new PhaseDefinitionFileReader(
-      c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER),
-      join(resolvePtahHomeDir(), 'user', 'skills'),
-      c.resolve<ContentDownloadService>(PLATFORM_TOKENS.CONTENT_DOWNLOAD).getPluginsPath(),
-    ),
+    useFactory: (c) => {
+      const userSkillsRoot = join(resolvePtahHomeDir(), 'user', 'skills');
+      const pluginsRoot = c.resolve<ContentDownloadService>(PLATFORM_TOKENS.CONTENT_DOWNLOAD).getPluginsPath();
+      const workspaceRoot = () => resolveHarnessWorkspaceRoot(
+        c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER).getWorkspaceRoot() ?? process.cwd(),
+      );
+      const sources = createOrchestrationPhaseSources({
+        resolveWorkspaceRoot: workspaceRoot,
+        userSkillsRoot,
+        pluginsRoot,
+        sourceResolver: c.resolve<IHarnessSourceResolver>(HARNESS_SYNC_TOKENS.SOURCE_RESOLVER),
+        skillSyncGate: c.resolve<SkillSyncGate>(HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE),
+        manifestStore: c.resolve<ManagedManifestStore>(HARNESS_SYNC_TOKENS.MANIFEST_STORE),
+      });
+      return new PhaseDefinitionFileReader(
+        c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER),
+        userSkillsRoot,
+        pluginsRoot,
+        sources.isCloneActive,
+        () => c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER).getWorkspaceRoot() == null
+          ? undefined
+          : sources.workspaceSkillsRoot(),
+        sources.isWorkspaceOwned,
+      );
+    },
   });
   registerLaneRoutingServices(container, logger);
   registerLaneOutcomeServices(container, logger);
