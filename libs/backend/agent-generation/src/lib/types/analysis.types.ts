@@ -143,7 +143,7 @@ export interface DeepProjectAnalysis {
 
   /**
    * Monorepo type if the project is a monorepo.
-   * Influences team-leader agent relevance and batching strategies.
+   * Influences reviewer agent relevance and batching strategies.
    */
   monorepoType?: MonorepoType;
 

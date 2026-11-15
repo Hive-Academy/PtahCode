@@ -34,7 +34,7 @@ Resolve every supplied task ID against an existing `.ptah/specs/<id>/task.md` an
    orchestration skill's own directory:
    - `references/strategies.md` - Strategy details and flows
    - `references/agent-catalog.md` - Agent profiles and invocation
-   - `references/team-leader-modes.md` - MODE 1/2/3 integration
+   - `references/phase-mode-compatibility.md` - legacy Mode 1/2/3 integration
    - `references/task-tracking.md` - Folder structure and registry
    - `references/checkpoints.md` - User validation templates
    - `references/git-standards.md` - Commit rules and hook handling
@@ -45,7 +45,7 @@ Resolve every supplied task ID against an existing `.ptah/specs/<id>/task.md` an
 
 **Strategies**: FEATURE, BUGFIX, REFACTORING, DOCUMENTATION, RESEARCH, DEVOPS, CREATIVE
 
-**Active agent**: team-leader. Requirements, architecture, research, design and docs use the `plan`, `architecture`, `research`, `design` and `docs` phase kinds. Verification uses the `review`, `tests` and `visual-review` phase kinds. Implementation uses the `implement` phase kind.
+**Active phases**: `batch` decomposes and accepts batches; `completion` audits final evidence. Requirements, architecture, research, design and docs use the `plan`, `architecture`, `research`, `design` and `docs` phase kinds. Verification uses the `review`, `tests` and `visual-review` phase kinds. Implementation uses the `implement` phase kind.
 
 **Checkpoints**: Scope Clarification, Requirements Validation, Architecture Validation, QA Selection
 

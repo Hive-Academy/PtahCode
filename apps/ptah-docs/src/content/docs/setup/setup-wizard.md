@@ -1,9 +1,9 @@
 ---
 title: Analyze current project
-description: Let Ptah read your workspace, recommend agents, write them, and prepare project guidance.
+description: Let Ptah read your workspace and prepare project guidance.
 ---
 
-**Analyze current project** is the Setup path for a project that already has code. Ptah reads your workspace, recommends agents, writes them to `.claude/agents/`, and prepares project guidance.
+**Analyze current project** is the Setup path for a project that already has code. Ptah reads your workspace and prepares project guidance. There are no built-in agent roles to recommend.
 
 ![Setup analysis overview](/screenshots/agents-setup-wizard.webp)
 
@@ -11,7 +11,7 @@ description: Let Ptah read your workspace, recommend agents, write them, and pre
 
 - The first time that you open a project in Ptah.
 - After a large change to the stack of the project.
-- When you want to refresh the agents against the current code.
+- When you want to refresh project guidance against the current code.
 
 ## Start the analysis
 
@@ -28,11 +28,11 @@ Ptah scans the workspace and detects the stack. It shows the progress of each ph
 
 ### 2. Choose agents
 
-Ptah recommends agents for the detected stack. Turn agents on or off.
+The built-in catalog is empty. Custom agents in `.claude/agents/` remain available.
 
 ### 3. Generate agents
 
-Ptah writes the selected agents to `.claude/agents/`. The page shows the status of each agent and any generation errors.
+Built-in generation is unavailable while the catalog is empty. Custom-agent generation remains available through its own workflow.
 
 ### 4. Project guidance
 
@@ -46,18 +46,18 @@ A summary of what happened, with any items that need attention.
 
 The **Analyze current project** card also has two links:
 
-- **Only generate agents** — run agent generation again.
+- **Only generate agents** — review the empty built-in catalog.
 - **Only regenerate guidance** — write the project guidance again.
 
 ## What gets written
 
-Each agent is a Markdown file with YAML frontmatter in `.claude/agents/`:
+Custom agents are Markdown files with YAML frontmatter in `.claude/agents/`:
 
 ```
 <workspace-root>/
   .claude/
     agents/
-      team-leader.md
+      reviewer.md
       ...
 ```
 
@@ -67,4 +67,4 @@ Commit `.claude/agents/` to source control. Your team then gets the same agents,
 
 ## Analyze current project or AI team builder
 
-**Analyze current project** is the fast path: Ptah recommends agents from a scan. The [AI team builder](/setup/ai-team-builder/) is the hands-on path: you describe the team and tune agents, skills, prompts, and MCP servers with the agent.
+**Analyze current project** scans the workspace and prepares guidance. The [AI team builder](/setup/ai-team-builder/) lets you describe a custom team and tune agents, skills, prompts, and MCP servers.

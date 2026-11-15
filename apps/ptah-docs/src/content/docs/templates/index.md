@@ -3,7 +3,7 @@ title: Templates
 description: The agent templates that PtahCode uses to generate project agents.
 ---
 
-**Templates** in PtahCode are Markdown files for built-in agents. The [setup wizard](/setup/setup-wizard/) uses the active `team-leader` template to write an agent for your project. Planning, architecture, research, docs, and design use phase workflows.
+**Templates** in PtahCode are Markdown files for agent generation. No built-in agent role remains, so the [setup wizard](/setup/setup-wizard/) has no built-in template to offer. Work runs as `plan`, `research`, `design`, `architecture`, `batch`, `implement`, `tests`, `review`, and `completion` phases.
 
 ## Where templates come from
 
@@ -11,7 +11,7 @@ The installer does not include the templates. The [content download](/plugins/pl
 
 ## Shipped templates
 
-The active orchestration template is `team-leader`. The `plan`, `architecture`, `research`, `docs`, and `design` phases cover the former definition and knowledge roles. Testing and review use `tests`, `review`, and `visual-review`.
+There are no shipped role templates. The `docs` and `visual-review` phases remain available alongside the main workflow phases.
 
 The folder `_shared/` holds blocks that many templates include, for example the clarification protocol and the tool rules.
 

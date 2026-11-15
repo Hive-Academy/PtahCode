@@ -46,13 +46,16 @@ describe('assertRoleMutable', () => {
   it('allows a non-retired agent with the default predicate', () => {
     for (const action of ACTIONS) {
       expect(() =>
-        assertRoleMutable(action, 'agent', 'team-leader'),
+        assertRoleMutable(action, 'agent', 'reviewer'),
       ).not.toThrow();
     }
   });
 
   it('refuses a retired agent with the default predicate', () => {
     expect(() => assertRoleMutable('save', 'agent', RETIRED_SLUG)).toThrow(
+      RpcUserError,
+    );
+    expect(() => assertRoleMutable('save', 'agent', 'team-leader')).toThrow(
       RpcUserError,
     );
   });

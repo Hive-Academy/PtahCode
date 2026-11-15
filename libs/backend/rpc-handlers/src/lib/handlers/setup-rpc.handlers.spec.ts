@@ -956,14 +956,8 @@ describe('SetupRpcHandlers', () => {
           matchedCriteria: string[];
         }>
       >(h, 'wizard:recommend-agents', { mode: 'workspace-catalog' });
-      expect(result.map((agent) => agent.agentId)).toEqual(
-        expect.arrayContaining([
-          'team-leader',
-        ]),
-      );
-      expect(result.map((agent) => agent.category)).toEqual(
-        ['planning'],
-      );
+      expect(result.map((agent) => agent.agentId)).toEqual([]);
+      expect(result.map((agent) => agent.category)).toEqual([]);
       expect(result.every((agent) => agent.relevanceScore === 100)).toBe(true);
       expect(
         result.every(
@@ -1027,7 +1021,7 @@ describe('SetupRpcHandlers', () => {
       >(h, 'wizard:recommend-agents', { isMultiPhase: true });
 
       // Every catalog agent is recommended at relevanceScore=100.
-      expect(result.length).toBe(1);
+      expect(result.length).toBe(0);
       expect(result.every((r) => r.relevanceScore === 100)).toBe(true);
       expect(
         result.every(
@@ -1048,7 +1042,7 @@ describe('SetupRpcHandlers', () => {
       ]) {
         expect(ids.has(retired)).toBe(false);
       }
-      expect(ids.has('team-leader')).toBe(true);
+      expect(ids.has('team-leader')).toBe(false);
       for (const retired of [
         'senior-tester',
         'code-style-reviewer',

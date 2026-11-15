@@ -571,7 +571,7 @@ describe('GeneratedSectionValidator', () => {
         ['libs/backend/agent-generation/src/index.ts'],
       );
     });
-    it('accepts code-style-reviewer / REVIEW_FOCUS', async () => {
+    it('accepts code-style-reviewer / CUSTOM_SECTION', async () => {
       // @nx/enforce-module-boundaries, expected-resolvable.ts, expected-absent.ts, container.smoke.spec.ts, tokens.ts, register.ts, kebab-case.ts, src/index.ts, provide-markdown-rendering.ts, markdown-block.component.ts, ChangeDetectionStrategy.OnPush
       const result = await logVerdict(
         '@nx/enforce-module-boundaries, expected-resolvable.ts, expected-absent.ts, container.smoke.spec.ts, tokens.ts, register.ts, kebab-case.ts, src/index.ts, provide-markdown-rendering.ts, markdown-block.component.ts, ChangeDetectionStrategy.OnPush',
@@ -581,18 +581,18 @@ describe('GeneratedSectionValidator', () => {
         violations: [],
       });
     });
-    it('accepts code-style-reviewer / REVIEW_FOCUS without kebab-case.ts', async () => {
+    it('accepts code-style-reviewer / CUSTOM_SECTION without kebab-case.ts', async () => {
       await accepts(
         '@nx/enforce-module-boundaries, expected-resolvable.ts, expected-absent.ts, container.smoke.spec.ts, tokens.ts, register.ts, src/index.ts, provide-markdown-rendering.ts, markdown-block.component.ts, ChangeDetectionStrategy.OnPush',
       );
     });
-    it('accepts code-logic-reviewer / REVIEW_FOCUS', async () => {
+    it('accepts code-logic-reviewer / CUSTOM_SECTION', async () => {
       // register.ts, .message, error.message, run.store.ts, task.md
       await accepts(
         'register.ts, .message, error.message, run.store.ts, task.md',
       );
     });
-    it('accepts visual-reviewer / REVIEW_FOCUS', async () => {
+    it('accepts visual-reviewer / CUSTOM_SECTION', async () => {
       // src/support/global-setup.ts, src/lib/postmessage-bridge.ts, page.evaluate, base-content-muted.spec.ts, src/index.html
       await accepts(
         'src/support/global-setup.ts, src/lib/postmessage-bridge.ts, page.evaluate, base-content-muted.spec.ts, src/index.html',

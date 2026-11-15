@@ -110,5 +110,5 @@ Before asking, inspect state with `git status`, `git log`, and `git stash list`,
 ## Related references
 
 - [Fleet mode](fleet.md#commit-window-and-lane-mechanics) uses a quiet window after all fleet work stops.
-- [Team-leader modes](team-leader-modes.md) describes who requests and records commits.
+- [Phase mode compatibility](phase-mode-compatibility.md) describes who requests and records commits.
 - [Task tracking](task-tracking.md) defines the task status and batch record.

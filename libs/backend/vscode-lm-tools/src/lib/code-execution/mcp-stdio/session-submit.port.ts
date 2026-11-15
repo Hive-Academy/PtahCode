@@ -38,7 +38,7 @@ export interface ISessionSubmitHandler {
    *
    *   1. Validates `args` through its own Zod schema (returns
    *      `mcp_invalid_tool_args` on failure).
-   *   2. Builds a Team Leader prompt from the supplied `task`.
+   *   2. Builds an orchestration workflow prompt from the supplied `task`.
    *   3. Issues `chat:start` over the in-process transport with a
    *      synthesized `tabId`.
    *   4. Listens on the push adapter for matching `chat:chunk` /

@@ -3,7 +3,7 @@ title: Glossary
 description: Terms used in the Ptah docs.
 ---
 
-**Agent** — A configured AI worker with a system prompt, tools, and permissions. Ptah has built-in agents, and you can add your own in `.claude/agents/`.
+**Agent** — A configured AI worker with a system prompt, tools, and permissions. You can add custom agents in `.claude/agents/`; no built-in role remains.
 
 **Autopilot** — The approval mode of the agent: ask, Auto-edit, Plan Mode, or Full Auto. See [Autopilot](/settings/autopilot/).
 

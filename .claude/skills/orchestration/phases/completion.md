@@ -18,6 +18,8 @@ Audit the task against the original request and every acceptance criterion. Requ
 For a lane preserve list, check each listed capability in the build with a passing test or a user-approved removal in `## Proposed Removals`. Do not require inventory decision markers in a preserve list. An unapproved missing capability blocks completion.
 
 ## Output contract
+Include verified batch, task and commit counts; a Batch / Name / Commit table; row-by-row parity evidence or `N/A` only if no surface was replaced, consolidated, rebuilt or redesigned; visual and persisted write-path evidence; and a Validation risk / Resolution table. Confirm every due phase review accepted. Recommend the applicable QA option and reason without asking the user during the audit.
+
 Write `completion-report.md` in the task folder with criterion-by-criterion evidence, parity table and approved removals, batch/task status and verified commit SHA ledger, plan-risk resolutions, scoped-check ledger, review verdicts, visual evidence paths, persisted write-path trace, unresolved risks, and a Gate 3 recommendation. Distinguish observed evidence from inference and name missing evidence explicitly.
 
 The after-QA modernization scan is a separate `research` phase and writes `future-enhancements.md`; this audit writes `completion-report.md`.
@@ -26,6 +28,8 @@ The after-QA modernization scan is a separate `research` phase and writes `futur
 Return `WROTE: <absolute path>` and `TASK COMPLETE` with Gate 3 options, or `COMPLETION BLOCKED` with numbered gaps and owners by phase.
 
 ## Refusals
+Verify every batch and task is `COMPLETE`, every batch SHA resolves in git history, every listed file exists, every scoped check passed before its commit, every due phase review accepted, and every plan risk has a recorded resolution. For a replaced surface, compare the inventory or preserve list with the old surface at the base commit before checking the shipped behavior. A `keep` or `move` capability needs a passing test; a proposed removal needs recorded user approval. For UI, inspect rendered dark and light evidence against the approved prototype, or before and after pairs captured from the base state if no new surface was designed. Trace each persisted write to its runtime reader, including key, scope, value format and side effects. A missing commit, capability, screenshot or write-path trace blocks `TASK COMPLETE`.
+
 Do not infer parity from passing tests alone, accept a UI change without rendered evidence, report an unobserved gate as passed, silently drop a capability, or bypass an unapproved removal. Do not perform batch acceptance, commits or status updates in this audit.
 
 ## Escalation protocol

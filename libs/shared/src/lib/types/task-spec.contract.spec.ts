@@ -477,7 +477,7 @@ describe('renderTaskSpecAgentBlock', () => {
       const block = renderTaskSpecAgentBlock(audience);
       const oneLine = block.replace(/\s+/g, ' ');
       expect(oneLine).toContain(
-        `\`${BATCHES_FILE}\` holds the team-leader batch breakdown`,
+        `\`${BATCHES_FILE}\` holds the batch phase breakdown`,
       );
       expect(oneLine).toContain(
         `its former name \`${LEGACY_BATCHES_FILE}\` is still read`,
@@ -556,9 +556,9 @@ describe('renderTaskSpecAgentBlock', () => {
       expect(oneLine).toContain('Never rename an existing folder');
     });
 
-    it('reserves batch task states to the team-leader', () => {
+    it('reserves batch task states to the batch phase owner', () => {
       expect(oneLine).toContain(
-        `The team-leader alone sets task states in \`${BATCHES_FILE}\``,
+        `The batch phase owner sets task states in \`${BATCHES_FILE}\``,
       );
     });
   });
@@ -586,7 +586,7 @@ describe('renderTaskSpecAgentBlock', () => {
         'Never create, allocate or rename a task folder.',
       );
       expect(oneLine).toContain(
-        `task states in \`${BATCHES_FILE}\` belong to the team-leader alone`,
+        `task states in \`${BATCHES_FILE}\` belong to the batch phase owner`,
       );
     });
 

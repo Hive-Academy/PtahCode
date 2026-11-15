@@ -15,6 +15,7 @@ describe('roleIconFor', () => {
     'code-style-reviewer',
     'code-logic-reviewer',
     'visual-reviewer',
+    'team-leader',
   ])('uses the Bot fallback for the retired %s role', (role) => {
     expect(roleIconFor(role)).toBe(Bot);
   });

@@ -5,12 +5,5 @@
   "description": "Core development agent pack for PtahCode",
   "contentHash": "",
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/.claude/agents",
-  "agents": [
-    {
-      "file": "team-leader.md",
-      "name": "Team Leader",
-      "description": "Task Decomposition and Batch Orchestration Specialist",
-      "category": "planning"
-    }
-  ]
+  "agents": []
 }

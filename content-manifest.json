@@ -1,8 +1,8 @@
 {
   "$schema": "https://ptah.live/schemas/content-manifest.json",
   "version": "1.0.0",
-  "contentHash": "sha256:53232238bb3ba7ccfaa80819cfdb6ff90939842198505af8cfd8533cf1479dc5",
-  "generatedAt": "2026-11-15T14:44:36.021Z",
+  "contentHash": "sha256:dbe90241159cd836f39b1a8c82f6465b421a3eb10a05a5f7455cb79acb516057",
+  "generatedAt": "2026-11-15T16:48:38.601Z",
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main",
   "plugins": {
     "basePath": "plugins",
@@ -76,9 +76,9 @@
       "ptah-core/skills/orchestration/references/fleet.md",
       "ptah-core/skills/orchestration/references/git-standards.md",
       "ptah-core/skills/orchestration/references/lane-assignment.md",
+      "ptah-core/skills/orchestration/references/phase-mode-compatibility.md",
       "ptah-core/skills/orchestration/references/strategies.md",
       "ptah-core/skills/orchestration/references/task-tracking.md",
-      "ptah-core/skills/orchestration/references/team-leader-modes.md",
       "ptah-core/skills/ptah-surface-authoring/SKILL.md",
       "ptah-core/skills/ptah-surface-authoring/references/catalog.md",
       "ptah-core/skills/ptah-surface-authoring/references/ptah-ui.md",
@@ -234,8 +234,7 @@
       "_shared/cli-delegation.md",
       "_shared/replacement-policy.md",
       "_shared/reviewer-stance.md",
-      "_shared/tooling-precedence.md",
-      "team-leader.template.md"
+      "_shared/tooling-precedence.md"
     ]
   }
 }

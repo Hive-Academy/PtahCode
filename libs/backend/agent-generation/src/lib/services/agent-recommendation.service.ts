@@ -6,10 +6,9 @@
  * is in how the LLM customizes each agent's template with the project analysis,
  * not in whether an agent gets selected.
  *
- * NOTE: this catalog is the wizard's picker source and MUST stay in sync with
- * `libs/backend/agent-generation/templates/agents/*.template.md`. An agent that
- * exists as a template but is missing here is never offered in the wizard and
- * therefore never generated.
+ * NOTE: this catalog is the wizard's picker source. It is empty while the
+ * built-in agent roles are retired. Custom agents remain available through
+ * their separate workflow.
  *
  * @module @ptah-extension/agent-generation/services
  */
@@ -39,18 +38,9 @@ interface AgentMetadata {
  * Every agent is always recommended — customization happens
  * at the template level via LLM-driven analysis.
  *
- * Keep in sync with the `templates/agents/*.template.md` set.
+ * Built-in catalog is empty after role retirement.
  */
-const AGENT_CATALOG: AgentMetadata[] = [
-  {
-    id: 'team-leader',
-    name: 'Team Leader',
-    description:
-      'Decomposes plans into tasks, coordinates developers, and manages batches',
-    category: 'planning',
-    icon: 'team',
-  },
-];
+const AGENT_CATALOG: AgentMetadata[] = [];
 
 /**
  * Agent Recommendation Service

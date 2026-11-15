@@ -113,9 +113,7 @@ const REQUIRED_STRATEGIES: readonly string[] = [
  * here — they are not part of the /orchestrate workflow and must not be forced
  * into agent-catalog.md or the shipped agent templates by this validator.
  */
-const REQUIRED_AGENTS: readonly string[] = [
-  'team-leader',
-] as const;
+const REQUIRED_AGENTS: readonly string[] = [];
 
 /** Each retired role must remain documented as an alias of its phase kind. */
 const RETIRED_ALIASES = RETIRED_ROLES.map(({ slug, phaseKind }) => ({
@@ -136,7 +134,7 @@ const SKILL_REQUIRED_SECTIONS: readonly RequiredSection[] = [
 const REQUIRED_REFERENCES: readonly string[] = [
   'strategies.md',
   'agent-catalog.md',
-  'team-leader-modes.md',
+  'phase-mode-compatibility.md',
   'task-tracking.md',
   'checkpoints.md',
   'git-standards.md',
@@ -166,7 +164,6 @@ const LANE_SKILL_FILE = path.join(
   'agent-lanes',
   'SKILL.md',
 );
-const TEAM_LEADER_TEMPLATE = path.join(AGENTS_DIR, 'team-leader.template.md');
 const REFERENCES_DIR: string = path.join(SKILL_ROOT, 'references');
 const MIRROR_ROOT = path.join(
   process.cwd(),
@@ -970,7 +967,7 @@ function validateRuleMarkers(
   return errors;
 }
 
-/** Validates the lanes-first rules in the shipped plugin and team-leader template. */
+/** Validates the lanes-first rules in the shipped plugin. */
 function validateLanesFirstRules(): ValidationError[] {
   const checkpoints = path.join(REFERENCES_DIR, 'checkpoints.md');
   const assignment = path.join(REFERENCES_DIR, 'lane-assignment.md');
@@ -997,14 +994,11 @@ function validateLanesFirstRules(): ValidationError[] {
       'CLI lane',
       'Subagent reason',
     ]),
-    ...validateRuleMarkers(TEAM_LEADER_TEMPLATE, 'Mode 1 — Decomposition', [
-      'Recommended executor: CLI lane',
-      'Subagent reason:',
-    ]),
-    ...validateRuleMarkers(TEAM_LEADER_TEMPLATE, 'Batch', [
-      'Recommend `CLI lane` for every bounded batch by default',
-      'Put that reason in `Subagent reason`',
-    ]),
+    ...validateRuleMarkers(
+      path.join(SKILL_ROOT, 'phases', 'batch.md'),
+      'Method',
+      ['Recommend a capable CLI lane by default'],
+    ),
     ...validateRuleMarkers(LANE_SKILL_FILE, '4. Run', [
       'one `<agent-lane-completed>` signal per lane turn',
       'queued',
