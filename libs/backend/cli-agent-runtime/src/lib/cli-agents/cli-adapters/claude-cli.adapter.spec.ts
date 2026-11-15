@@ -189,7 +189,7 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       version: 1, kind: 'implement', text: 'implement', toolProfile,
       definition: {
         version: 1, kind: 'implement', input: [], deliverable: [], verdict: [],
-        acceptanceStep: [], requiredCapabilities: [], toolProfile,
+        acceptanceStep: [], requiredCapabilities: [], machineCapabilities: [], toolProfile,
         discipline: {
           method: 'method', outputContract: 'contract', returnValue: 'return',
           refusals: 'refusals', escalationProtocol: 'escalation',

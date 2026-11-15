@@ -56,7 +56,6 @@ import type {
   IWorkspaceProvider,
   IWorkspaceLifecycleProvider,
   IHostAttentionIngress,
-    IFileSystemProvider,
 } from '@ptah-extension/platform-core';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
 import type {

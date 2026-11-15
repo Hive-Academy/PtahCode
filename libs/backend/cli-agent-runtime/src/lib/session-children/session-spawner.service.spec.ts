@@ -425,7 +425,7 @@ describe('registered same-task attach', () => {
       deliverable: ['change'],
       verdict: ['done'],
       acceptanceStep: ['check'],
-      requiredCapabilities: [],
+      requiredCapabilities: [], machineCapabilities: [],
       toolProfile: { disallowedTools: ['Bash'], permission: 'allow' as const },
       discipline: {
         method: 'Follow the plan.',

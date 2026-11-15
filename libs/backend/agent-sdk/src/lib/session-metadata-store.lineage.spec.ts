@@ -33,7 +33,7 @@ describe('SessionMetadataStore plugin configuration lineage', () => {
       version: 1, kind: 'implement', text: '## Method\nDo.\n\n## Output contract\nWrite.\n\n## Return value\nReturn.\n\n## Refusals\nRefuse.\n\n## Escalation protocol\nAsk.',
       definition: {
         version: 1, kind: 'implement', input: ['task'], deliverable: ['change'],
-        verdict: ['done'], acceptanceStep: ['check'], requiredCapabilities: ['reasoning'],
+        verdict: ['done'], acceptanceStep: ['check'], requiredCapabilities: ['reasoning'], machineCapabilities: [],
         toolProfile,
         discipline: { method: 'Do.', outputContract: 'Write.', returnValue: 'Return.',
           refusals: 'Refuse.', escalationProtocol: 'Ask.' },

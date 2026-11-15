@@ -31,7 +31,6 @@ import {
   type IProcessSpawner,
   type IWorkspaceProvider,
   type ISecretStorage,
-  type IFileSystemProvider,
 } from '@ptah-extension/platform-core';
 import { registerReviewCore, REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS, ReviewWorktreeService, ReviewPolicyService, ReviewStatusCoordinatorService, type IReviewSettingsStore, type ReviewOrchestratorService, type ReviewStageEnvironment } from '@ptah-extension/review-core';
 import { registerReviewGithubServices, REVIEW_GITHUB_TOKENS, REVIEW_GITHUB_TOKEN_KEY, type ReviewPublicationGuard } from '@ptah-extension/review-github';

@@ -324,7 +324,7 @@ it('forwards the resolved phase and skills to the SDK options builder', async ()
       deliverable: [],
       verdict: [],
       acceptanceStep: [],
-      requiredCapabilities: [],
+      requiredCapabilities: [], machineCapabilities: [],
       toolProfile,
       discipline: {
         method: '',

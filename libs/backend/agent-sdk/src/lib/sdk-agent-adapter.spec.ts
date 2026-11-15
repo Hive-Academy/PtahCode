@@ -1811,7 +1811,7 @@ describe('SdkAgentAdapter', () => {
         definition: {
           version: 1,
           kind: 'implement',
-          input: ['plan'], deliverable: ['change'], verdict: ['done'], acceptanceStep: ['check'], requiredCapabilities: ['reasoning'],
+          input: ['plan'], deliverable: ['change'], verdict: ['done'], acceptanceStep: ['check'], requiredCapabilities: ['reasoning'], machineCapabilities: [],
           toolProfile,
           discipline: {
             method: 'Do.', outputContract: 'Write.', returnValue: 'Return.', refusals: 'Refuse.', escalationProtocol: 'Ask.',
@@ -2749,7 +2749,7 @@ describe('SdkAgentAdapter', () => {
         text: '## Method\nDo.\n\n## Output contract\nWrite.\n\n## Return value\nReturn.\n\n## Refusals\nRefuse.\n\n## Escalation protocol\nAsk.',
         definition: { version: 1, kind: 'implement', input: ['plan'],
           deliverable: ['change'], verdict: ['done'], acceptanceStep: ['check'],
-          requiredCapabilities: ['reasoning'],
+          requiredCapabilities: ['reasoning'], machineCapabilities: [],
           toolProfile: { disallowedTools: ['Bash'], permission: 'allow' },
           discipline: { method: 'Do.', outputContract: 'Write.', returnValue: 'Return.',
             refusals: 'Refuse.', escalationProtocol: 'Ask.' } },
