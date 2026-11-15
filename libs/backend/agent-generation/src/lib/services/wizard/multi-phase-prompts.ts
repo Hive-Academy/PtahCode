@@ -65,6 +65,9 @@ The file MUST be a markdown document with these sections:
 - Dev dependencies (build tools, testing, linting)
 - Dependency count summary
 
+### Stack Summary
+After the factual sections, include exactly one fenced block starting with \`\`\`stack-summary and ending with \`\`\`. Its body must be JSON with shape {"items":[{"kind":"language|framework|library|test-tool|pattern","name":"short technology name","evidence":"specific file or dependency that proves it","sourcePhase":"project-profile"}]}. Include only verified facts, at most 30 items; keep names under 100 characters and evidence under 300 characters. Use an empty items array if nothing is verified. Do not include speculative technologies.
+
 ### File Structure
 - High-level directory tree (depth 2-3)
 - Total file count by type
@@ -151,6 +154,9 @@ The file MUST be a markdown document with these sections:
 - Name each pattern (Layered, DDD, MVC, Component-Based, Hexagonal, etc.)
 - Cite specific file paths as evidence (not just folder names)
 - Confidence assessment per pattern
+
+### Stack Summary
+Include one \`\`\`stack-summary fenced JSON block with {"items":[{"kind":"pattern","name":"short observed pattern name","evidence":"specific file path proving it","sourcePhase":"architecture-assessment"}]}. Include only observed patterns, at most 30 items, names under 100 characters and evidence under 300 characters. Use an empty array when none are verified.
 
 ### Pattern Consistency
 - Where patterns are applied correctly (with evidence)

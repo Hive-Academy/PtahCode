@@ -1,8 +1,7 @@
 import { inject } from '@angular/core';
 import { Router, type RedirectFunction, type Routes } from '@angular/router';
 import { AnalyzeWorkspacePage } from './analyze/analyze-workspace.page';
-import { ChooseAgentsPage } from './analyze/choose-agents.page';
-import { GenerateAgentsPage } from './analyze/generate-agents.page';
+import { AnalyzeSkillsPage } from './analyze/analyze-skills.page';
 import { ProjectGuidancePage } from './analyze/project-guidance.page';
 import { AnalyzeDonePage } from './analyze/analyze-done.page';
 import { OnboardingHomeComponent } from './home/onboarding-home.component';
@@ -57,14 +56,17 @@ export const ONBOARDING_ROUTES: Routes = [
         data: { crumb: 'Analyze workspace' },
       },
       {
+        path: 'analyze/skills',
+        component: AnalyzeSkillsPage,
+        data: { crumb: 'Review skills' },
+      },
+      {
         path: 'analyze/agents',
-        component: ChooseAgentsPage,
-        data: { crumb: 'Choose agents' },
+        redirectTo: 'analyze/skills',
       },
       {
         path: 'analyze/generate',
-        component: GenerateAgentsPage,
-        data: { crumb: 'Generate agents' },
+        redirectTo: 'analyze/skills',
       },
       {
         path: 'analyze/guidance',

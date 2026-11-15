@@ -148,7 +148,7 @@ describe('AgentBehaviourSectionComponent', () => {
       handlers['enhancedPrompts:getStatus'] = () => rpcSuccess({ enabled: false, hasGeneratedPrompt: false });
       await render();
       expect(isDisabledControl(checkbox('Toggle Enhanced System Prompt'))).toBe(true);
-      expect(element.querySelector('#agent-behaviour-prompt-note')?.textContent).toContain('Run the Setup Wizard');
+      expect(element.querySelector('#agent-behaviour-prompt-note')?.textContent).toContain('Run Setup');
     });
 
     it('saves on selection, re-reads the status and toasts with Undo', async () => {
@@ -247,7 +247,7 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(alert?.textContent).toContain('Could not load the system prompt status.');
       expect(alert?.textContent).not.toContain('EPERM');
       const note = element.querySelector('#agent-behaviour-prompt-note')?.textContent ?? '';
-      expect(note).not.toContain('Run the Setup Wizard');
+      expect(note).not.toContain('Run Setup');
       expect(note).toContain('not loaded');
 
       handlers['enhancedPrompts:getStatus'] = () => rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
@@ -487,4 +487,5 @@ describe('AgentBehaviourSectionComponent', () => {
     });
   });
 });
+
 

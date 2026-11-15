@@ -128,16 +128,16 @@ const agentBehaviour: readonly ReachabilityEntry[] = [
         await closeDrawers(page);
       }
     } },
-  { id: 'ADV-8', capability: 'No generated prompt: mode locked with the Setup Wizard guidance, drawer empty state', status: 'restored',
+  { id: 'ADV-8', capability: 'No generated prompt: mode locked with Setup guidance, drawer empty state', status: 'restored',
     reach: (page) => withAsvChange(page, 'Advanced', (state) => {
       const previous = { ...state.prompt };
       state.prompt = { enabled: false, hasGeneratedPrompt: false };
       return () => { state.prompt = previous; };
     }, async () => {
       await expect(page.getByLabel('Toggle Enhanced System Prompt')).toBeDisabled();
-      await expect(page.locator('[data-testid="agent-behaviour-row-prompt"]')).toContainText('Run the Setup Wizard');
+      await expect(page.locator('[data-testid="agent-behaviour-row-prompt"]')).toContainText('Run Setup');
       await page.locator('[data-testid="agent-behaviour-prompt-details"]').click();
-      await expect(page.locator('[data-testid="system-prompt-empty-state"]')).toContainText('Run the Setup Wizard');
+      await expect(page.locator('[data-testid="system-prompt-empty-state"]')).toContainText('Run Setup');
       await expect(page.locator('[data-testid="system-prompt-regenerate-button"]')).toBeDisabled();
     }) },
   { id: 'ADV-9', capability: 'Chat reasoning effort: popover with 6 choices (incl. SDK default), save on selection, Undo', status: 'restored',
@@ -395,3 +395,4 @@ const claudeBuiltins: readonly ReachabilityEntry[] = [
 
 /** Every Advanced entry, in tab order. */
 export const ADVANCED_ENTRIES: readonly ReachabilityEntry[] = [...membership, ...agentBehaviour, ...outputStyle, ...mcpAndLm, ...claudeBuiltins];
+

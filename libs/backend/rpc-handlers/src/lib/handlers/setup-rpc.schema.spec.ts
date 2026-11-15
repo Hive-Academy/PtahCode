@@ -29,6 +29,7 @@ jest.mock('@ptah-extension/workspace-intelligence', () => ({
 
 import {
   WizardDeepAnalyzeParamsSchema,
+  WizardRecommendAnalysisSkillsParamsSchema,
   WizardGetResumableRunParamsSchema,
   WizardInstallPackAgentsParamsSchema,
   WizardListAnalysesParamsSchema,
@@ -37,6 +38,11 @@ import {
 } from './setup-rpc.schema';
 
 describe('setup-rpc.schema', () => {
+  it('requires a bounded runId and rejects paths', () => {
+    expect(WizardRecommendAnalysisSkillsParamsSchema.safeParse({ runId: 'run-1' }).success).toBe(true);
+    expect(WizardRecommendAnalysisSkillsParamsSchema.safeParse({ runId: '' }).success).toBe(false);
+    expect(WizardRecommendAnalysisSkillsParamsSchema.safeParse({ runId: 'run-1', workspacePath: '/tmp' }).success).toBe(false);
+  });
   describe('WizardDeepAnalyzeParamsSchema', () => {
     it('accepts an empty object (backend root, fresh run)', () => {
       const result = WizardDeepAnalyzeParamsSchema.safeParse({});

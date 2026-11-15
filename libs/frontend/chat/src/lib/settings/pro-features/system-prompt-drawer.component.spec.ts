@@ -154,7 +154,7 @@ describe('SystemPromptDrawerComponent', () => {
       const emptyState = element.querySelector('[data-testid="system-prompt-empty-state"]');
       expect(emptyState).not.toBeNull();
       expect(emptyState?.textContent).toContain(
-        'Run the Setup Wizard to generate an AI-enhanced system prompt tailored to your project.',
+        'Run Setup to analyze your project, review skills, and prepare project guidance.',
       );
 
       const regenerateBtn = element.querySelector<HTMLButtonElement>(
@@ -605,3 +605,4 @@ describe('SystemPromptDrawerComponent', () => {
     });
   });
 });
+

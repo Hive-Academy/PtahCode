@@ -1,9 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { TeamBuilderSkillReviewComponent } from './team-builder-skill-review.component';
+import { StackSkillReviewComponent } from './stack-skill-review.component';
 
-describe('TeamBuilderSkillReviewComponent', () => {
+describe('StackSkillReviewComponent', () => {
   it('disables Skip during loading', () => {
-    const fixture = TestBed.createComponent(TeamBuilderSkillReviewComponent);
+    const fixture = TestBed.createComponent(StackSkillReviewComponent);
     fixture.componentRef.setInput('recommendations', []);
     fixture.componentRef.setInput('searchResults', []);
     fixture.componentRef.setInput('guidanceFacts', []);
@@ -15,7 +15,7 @@ describe('TeamBuilderSkillReviewComponent', () => {
     expect(buttons.find((button) => button.textContent?.includes('Skip skills'))?.disabled).toBe(true);
   });
   it('shows the owner decision and disables navigation while busy', () => {
-    const fixture = TestBed.createComponent(TeamBuilderSkillReviewComponent);
+    const fixture = TestBed.createComponent(StackSkillReviewComponent);
     fixture.componentRef.setInput('recommendations', []);
     fixture.componentRef.setInput('searchResults', []);
     fixture.componentRef.setInput('guidanceFacts', [
@@ -45,7 +45,7 @@ describe('TeamBuilderSkillReviewComponent', () => {
     ).toBe(true);
   });
   it('renders untrusted skill text as text and emits the canonical selection key', () => {
-    const fixture = TestBed.createComponent(TeamBuilderSkillReviewComponent);
+    const fixture = TestBed.createComponent(StackSkillReviewComponent);
     const skill = {
       source: 'owner/repo',
       skillId: 'example',
@@ -71,3 +71,4 @@ describe('TeamBuilderSkillReviewComponent', () => {
     expect(toggled).toHaveBeenCalledWith('owner/repo/example');
   });
 });
+

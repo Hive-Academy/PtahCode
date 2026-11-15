@@ -451,17 +451,7 @@ export class ProjectGuidancePage implements OnInit {
         ]
       : [
           { id: 'analyze', label: 'Analyze', state: 'completed' },
-          { id: 'agents', label: 'Choose agents', state: 'completed' },
-          {
-            id: 'generate',
-            label: 'Generate agents',
-            state: 'completed',
-            link: onboardingStepLink(
-              'guidance',
-              'generate',
-              this.route.snapshot.queryParams,
-            ),
-          },
+          { id: 'skills', label: 'Review skills', state: 'completed' },
           { id: 'guidance', label: 'Project guidance', state: 'current' },
           { id: 'done', label: 'Done', state: 'upcoming' },
         ],
@@ -763,3 +753,4 @@ export class ProjectGuidancePage implements OnInit {
     if (this.destroyed) return;
   }
 }
+

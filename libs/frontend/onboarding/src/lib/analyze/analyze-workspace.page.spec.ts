@@ -83,9 +83,9 @@ describe('AnalyzeWorkspacePage', () => {
   it('carries the selected analysis and clears explicitBack on forward navigation', async () => {
     selected.set('saved');
     const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
-    await fixture.componentInstance['chooseAgents']();
+    await fixture.componentInstance['reviewSkills']();
     expect(navigate).toHaveBeenCalledWith(
-      ['/onboarding', 'analyze', 'agents'],
+      ['/onboarding', 'analyze', 'skills'],
       expect.objectContaining({
         queryParams: { analysis: 'saved' },
         state: { explicitBack: false },
@@ -124,3 +124,4 @@ describe('AnalyzeWorkspacePage', () => {
     fixture.destroy();
   });
 });
+

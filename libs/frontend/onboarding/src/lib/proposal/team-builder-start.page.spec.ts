@@ -14,7 +14,7 @@ import {
 } from '../launcher/harness-chat-launcher.service';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
 import { TeamBuilderStartPage } from './team-builder-start.page';
-import { TeamBuilderSkillStore } from './team-builder-skill.store';
+import { StackSkillStore } from './stack-skill.store';
 
 const attachment = (path: string) => ({
   path,
@@ -68,7 +68,7 @@ describe('TeamBuilderStartPage', () => {
         },
         { provide: Router, useValue: { navigate } },
         ComposerAttachmentsService,
-        TeamBuilderSkillStore,
+        StackSkillStore,
         {
           provide: ClaudeRpcService,
           useValue: { call },
@@ -435,3 +435,4 @@ describe('TeamBuilderStartPage', () => {
     await pending;
   });
 });
+

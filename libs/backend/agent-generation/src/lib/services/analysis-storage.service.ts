@@ -39,6 +39,7 @@ import {
   type GenerationCheckpointManifest,
 } from '../types/generation-checkpoint.types';
 import type { EnhancedPromptTraceMetadata } from '../types/enhanced-prompts.types';
+import { extractStackSummary } from './wizard/stack-summary.extractor';
 
 const SERVICE_TAG = '[AnalysisStorage]';
 const MANIFEST_FILE = 'manifest.json';
@@ -722,10 +723,15 @@ export class AnalysisStorageService {
     manifest: MultiPhaseManifest,
     phaseContents: Record<string, string>,
   ): MultiPhaseAnalysisResponse {
+    const extraction = extractStackSummary(phaseContents);
+    if (extraction.warning) {
+      this.logger.warn(`${SERVICE_TAG} ${extraction.warning}`, { runId: manifest.runId });
+    }
     return {
       isMultiPhase: true,
       manifest,
       phaseContents,
+      stackSummary: extraction.summary,
       analysisDir: slugDir,
     };
   }

@@ -1,10 +1,10 @@
 <section class="space-y-[var(--ptah-gap-group)]" aria-labelledby="skill-review-title">
   <div>
     <h2 id="skill-review-title" class="text-xl font-semibold" tabindex="-1">
-      Skills and project guidance
+      Review skills
     </h2>
     <p class="text-sm text-base-content-muted">
-      Choose skills for this team. You can continue without installing any.
+      Choose skills for this project. You can continue without installing any.
     </p>
   </div>
   @if (error()) {
@@ -23,7 +23,7 @@
         <ptah-state-panel
           state="empty"
           title="No recommendations yet"
-          body="Search for skills or continue without them."
+          body="Search for skills or skip this step."
         />
       }
       @for (row of recommendations(); track key(row.skill)) {
@@ -133,6 +133,7 @@
   @if (guidanceNote()) {
     <p role="status" class="text-sm">{{ guidanceNote() }}</p>
   }
+  @if (showOwnerDecision()) {
   <fieldset class="space-y-2" [disabled]="busy()">
     <legend class="font-semibold">
       {{
@@ -167,6 +168,7 @@
       Choose how to handle existing practices before continuing or skipping.
     </p>
   }
+  }
   <div class="flex flex-wrap justify-between gap-[var(--ptah-gap-controls)]">
     <button
       ptahButton
@@ -175,7 +177,7 @@
       [disabled]="busy()"
       (click)="back.emit()"
     >
-      Back to intent
+      Back
     </button>
     <div class="flex gap-2">
       <button
@@ -198,3 +200,4 @@
     </div>
   </div>
 </section>
+

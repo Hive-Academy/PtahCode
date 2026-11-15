@@ -56,7 +56,7 @@ const ULTRACODE_OFF_FAILED =
 /** M1: every row description is one clamped line; the full text is its `title` and stays in the DOM for readers. */
 const PROMPT_NOTE_ON = "Ptah's project-specific prompt, used for all sessions when on.";
 const PROMPT_NOTE_WIZARD =
-  'Run the Setup Wizard to generate an AI-enhanced system prompt tailored to your project.';
+  'Run Setup to analyze your project, review skills, and prepare project guidance.';
 const PROMPT_NOTE_UNKNOWN = 'The system prompt status is not loaded yet.';
 const WORKFLOWS_NOTE =
   'Let the agent plan and run a multi-step workflow per task instead of a single-shot reply.';
@@ -461,3 +461,4 @@ export class AgentBehaviourSectionComponent implements OnInit {
     return { ok: false, message: enabled ? ULTRACODE_ON_FAILED : ULTRACODE_OFF_FAILED };
   }
 }
+

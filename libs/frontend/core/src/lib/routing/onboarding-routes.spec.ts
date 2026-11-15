@@ -35,10 +35,10 @@ describe('onboarding routes', () => {
   });
 
   describe('onboardingGenerationTarget', () => {
-    it('sends agent generation to Choose agents with the tab', () => {
+    it('sends legacy agent generation to Review skills with the tab', () => {
       expect(
         onboardingGenerationTarget('setup-agent-generation', 'tab-1'),
-      ).toEqual({ subPath: ['analyze', 'agents'], queryParams: { tab: 'tab-1' } });
+      ).toEqual({ subPath: ['analyze', 'skills'], queryParams: { tab: 'tab-1' } });
     });
 
     it('sends project guidance to the guidance-only entry with the tab', () => {
@@ -79,6 +79,7 @@ describe('onboarding routes', () => {
     const tab = { [ONBOARDING_QUERY.tab]: 'tab-1' };
 
     it.each([
+      [['onboarding', 'analyze', 'skills'], 'setup-agent-generation'],
       [['onboarding', 'analyze', 'agents'], 'setup-agent-generation'],
       [['onboarding', 'analyze', 'generate'], 'setup-agent-generation'],
       [['onboarding', 'analyze', 'guidance'], 'setup-project-prompt'],
@@ -194,3 +195,4 @@ describe('onboarding routes', () => {
     });
   });
 });
+

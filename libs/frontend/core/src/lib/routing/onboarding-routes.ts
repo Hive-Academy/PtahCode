@@ -112,7 +112,7 @@ export function onboardingGenerationTarget(
   tabId: string,
 ): OnboardingTarget {
   const subPath =
-    workflow === 'setup-agent-generation' ? ['analyze', 'agents'] : ['guidance'];
+    workflow === 'setup-agent-generation' ? ['analyze', 'skills'] : ['guidance'];
   return { subPath, queryParams: { [ONBOARDING_QUERY.tab]: tabId } };
 }
 
@@ -168,8 +168,9 @@ function generationWorkflowForPath(
     return 'setup-project-prompt';
   }
   if (segments.length !== 3 || first !== 'analyze') return null;
-  if (second === 'agents' || second === 'generate') {
+  if (second === 'skills' || second === 'agents' || second === 'generate') {
     return 'setup-agent-generation';
   }
   return second === 'guidance' ? 'setup-project-prompt' : null;
 }
+

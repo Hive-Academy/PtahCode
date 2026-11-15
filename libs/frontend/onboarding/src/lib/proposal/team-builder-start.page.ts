@@ -26,9 +26,9 @@ import {
   PtahFieldComponent,
   PtahTextareaDirective,
 } from '@ptah-extension/ui';
-import { TeamBuilderSkillStore } from './team-builder-skill.store';
-import { TeamBuilderSkillReviewComponent } from './team-builder-skill-review.component';
-import { TeamBuilderSkillConsentComponent } from './team-builder-skill-consent.component';
+import { StackSkillStore } from './stack-skill.store';
+import { StackSkillReviewComponent } from './stack-skill-review.component';
+import { StackSkillConsentComponent } from './stack-skill-consent.component';
 import { teamBuilderGuidanceBrief } from './team-builder-guidance-brief';
 
 @Component({
@@ -42,10 +42,10 @@ import { teamBuilderGuidanceBrief } from './team-builder-guidance-brief';
     PtahButtonDirective,
     PtahFieldComponent,
     PtahTextareaDirective,
-    TeamBuilderSkillReviewComponent,
-    TeamBuilderSkillConsentComponent,
+    StackSkillReviewComponent,
+    StackSkillConsentComponent,
   ],
-  providers: [ComposerAttachmentsService, TeamBuilderSkillStore],
+  providers: [ComposerAttachmentsService, StackSkillStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './team-builder-start.page.html',
 })
@@ -56,7 +56,7 @@ export class TeamBuilderStartPage {
   private readonly router = inject(Router);
   private readonly rpc = inject(ClaudeRpcService);
   private readonly destroyRef = inject(DestroyRef);
-  readonly state = inject(TeamBuilderSkillStore);
+  readonly state = inject(StackSkillStore);
   /** Cancels a pending launch when the user leaves this page. */
   private launch: AbortController | null = null;
   readonly intent = this.state.intent;
@@ -484,3 +484,4 @@ export class TeamBuilderStartPage {
     await this.router.navigate(['/onboarding']);
   }
 }
+

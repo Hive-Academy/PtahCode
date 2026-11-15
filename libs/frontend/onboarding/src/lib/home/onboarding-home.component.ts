@@ -9,7 +9,7 @@ import {
 import { RouterLink } from '@angular/router';
 import { Router } from '@angular/router';
 import { SetupStatusStore } from '@ptah-extension/chat-ui';
-import { AppStateManager, ONBOARDING_QUERY } from '@ptah-extension/core';
+import { AppStateManager } from '@ptah-extension/core';
 import {
   BookOpen,
   CircleCheck,
@@ -163,7 +163,7 @@ interface StatusChip {
           class="min-[721px]:row-span-2"
           testId="analyze"
           title="Analyze current project"
-          description="Best when you already have code. Ptah reads your workspace, recommends agents, writes them and prepares project guidance."
+          description="Best when you already have code. Ptah reads your workspace, recommends project skills and prepares project guidance."
           callToAction="Start analysis"
           [icon]="icons.scanSearch"
           [link]="analyzeLink"
@@ -186,7 +186,7 @@ interface StatusChip {
                 class="size-4 text-base-content"
                 aria-hidden="true"
               />
-              Choose agents
+              Review skills
             </li>
             <li class="flex items-center gap-2">
               <lucide-angular
@@ -194,7 +194,7 @@ interface StatusChip {
                 class="size-4 text-base-content"
                 aria-hidden="true"
               />
-              Generate agents
+              Install skills
             </li>
             <li class="flex items-center gap-2">
               <lucide-angular
@@ -264,8 +264,8 @@ interface StatusChip {
                 class="link link-hover"
                 [routerLink]="agentsOnlyLink.commands"
                 [queryParams]="agentsOnlyLink.queryParams"
-                data-testid="onboarding-link-agents-only"
-                >Only generate agents</a
+                data-testid="onboarding-link-skills"
+                >Analyze and review skills</a
               >
               <a
                 class="link link-hover"
@@ -362,8 +362,8 @@ export class OnboardingHomeComponent {
 
   protected readonly analyzeLink = onboardingStepLink('analyze', 'analyze', {});
   protected readonly agentsOnlyLink = {
-    commands: ['/onboarding', 'analyze', 'agents'],
-    queryParams: { [ONBOARDING_QUERY.source]: 'catalog' },
+    commands: ['/onboarding', 'analyze'],
+    queryParams: {},
   };
   protected readonly guidanceOnlyLink = onboardingStepLink(
     'guidance-only',
@@ -469,3 +469,4 @@ export class OnboardingHomeComponent {
     this.appState.setCurrentView('chat');
   }
 }
+

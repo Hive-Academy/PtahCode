@@ -1,18 +1,12 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
-  AgentRecommendation,
   MultiPhaseAnalysisResponse,
   SavedAnalysisMetadata,
-  SetupGenerationRejection,
-  SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
 import {
-  GenerationWorkflowStore,
   SetupWizardStateService,
   WizardAnalysisRunner,
   WizardRpcService,
-  type BoundAgentDecisions,
 } from '@ptah-extension/setup-wizard';
 
 export type PhaseStatus =
@@ -48,30 +42,23 @@ const phaseStatuses: readonly PhaseStatus[] = [
 @Injectable({ providedIn: 'root' })
 export class AnalysisStepStore {
   private readonly rpc = inject(WizardRpcService);
-  private readonly catalogRpc = inject(ClaudeRpcService);
   private readonly wizard = inject(SetupWizardStateService);
   private readonly runner = inject(WizardAnalysisRunner);
-  private readonly generation = inject(GenerationWorkflowStore);
   private readonly savedValue = signal<readonly SavedAnalysisMetadata[]>([]);
   private readonly hiddenValue = signal<ReadonlySet<string>>(new Set());
   private readonly selectedValue = signal<string | null>(null);
   private readonly loadedValue = signal<MultiPhaseAnalysisResponse | null>(
     null,
   );
-  private readonly recommendationsValue = signal<
-    readonly AgentRecommendation[]
-  >([]);
-  private readonly selectionValue = signal<ReadonlySet<string>>(new Set());
   private readonly attachedValue = signal(false);
   private workspaceRevision = 0;
+  private selectionRevision = 0;
   readonly saved = this.savedValue.asReadonly();
   readonly hidden = this.hiddenValue.asReadonly();
   readonly selected = this.selectedValue.asReadonly();
   readonly loaded = computed(() =>
     this.selectedValue() ? this.loadedValue() : this.completedLiveResult(),
   );
-  readonly recommendations = this.recommendationsValue.asReadonly();
-  readonly selection = this.selectionValue.asReadonly();
   readonly phaseRows = computed<readonly PhaseRow[]>(() => {
     const result = this.loaded();
     const phases = result?.manifest.phases;
@@ -149,9 +136,10 @@ export class AnalysisStepStore {
     if (!this.savedValue().some((item) => item.filename === filename))
       return 'not-found';
     const revision = this.workspaceRevision;
+    const selectionRevision = ++this.selectionRevision;
     try {
       const result = await this.rpc.loadAnalysis(filename);
-      if (revision !== this.workspaceRevision) return 'not-found';
+      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'not-found';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
       this.selectedValue.set(filename);
       this.loadedValue.set(result);
@@ -164,9 +152,10 @@ export class AnalysisStepStore {
   async useAnalysis(slug: string): Promise<'loaded' | 'not-found' | 'failed'> {
     if (!slug || slug.includes('/') || slug.includes('\\')) return 'not-found';
     const revision = this.workspaceRevision;
+    const selectionRevision = ++this.selectionRevision;
     try {
       const result = await this.rpc.loadAnalysis(slug);
-      if (revision !== this.workspaceRevision) return 'not-found';
+      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'not-found';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
       this.selectedValue.set(slug);
       this.loadedValue.set(result);
@@ -178,135 +167,18 @@ export class AnalysisStepStore {
   }
   resetForWorkspace(): void {
     this.workspaceRevision++;
+    this.selectionRevision++;
     this.savedValue.set([]);
     this.hiddenValue.set(new Set());
     this.selectedValue.set(null);
     this.loadedValue.set(null);
-    this.recommendationsValue.set([]);
-    this.selectionValue.set(new Set());
     this.attachedValue.set(false);
   }
   clearSelection(): void {
+    this.selectionRevision++;
     this.selectedValue.set(null);
     this.loadedValue.set(null);
   }
-  toggleAgent(id: string): void {
-    this.selectionValue.update((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-  selectRecommended(): void {
-    this.selectionValue.set(
-      new Set(
-        this.recommendationsValue()
-          .filter((agent) => agent.recommended)
-          .map((agent) => agent.agentId),
-      ),
-    );
-  }
-  clearAgents(): void {
-    this.selectionValue.set(new Set());
-  }
-  async loadRecommendations(
-    binding: SetupGenerationTabBinding,
-    source: 'analysis' | 'catalog',
-  ): Promise<void> {
-    const revision = this.workspaceRevision;
-    this.recommendationsValue.set([]);
-    const result = source === 'analysis' ? this.loaded() : null;
-    if (source === 'analysis' && !result)
-      throw new Error('Choose a completed analysis first.');
-    const recommendations =
-      source === 'analysis'
-        ? await this.rpc.recommendAgents(result!)
-        : await this.loadCatalog(binding);
-    if (revision !== this.workspaceRevision) return;
-    this.recommendationsValue.set(recommendations);
-    this.selectRecommended();
-  }
-  private async loadCatalog(
-    binding: SetupGenerationTabBinding,
-  ): Promise<AgentRecommendation[]> {
-    const response = await this.catalogRpc.call(
-      'wizard:recommend-agents',
-      { mode: 'workspace-catalog', tabBinding: binding },
-      { timeout: 60_000 },
-    );
-    if (!response.isSuccess() || !Array.isArray(response.data))
-      throw new Error('Catalog unavailable');
-    return response.data.flatMap((value: unknown): AgentRecommendation[] => {
-      if (typeof value !== 'object' || value === null) return [];
-      const row = value as Record<string, unknown>;
-      if (
-        typeof row['agentId'] !== 'string' ||
-        typeof row['agentName'] !== 'string' ||
-        typeof row['relevanceScore'] !== 'number' ||
-        typeof row['recommended'] !== 'boolean' ||
-        !['planning', 'development', 'qa', 'specialist', 'creative'].includes(
-          String(row['category']),
-        )
-      )
-        return [];
-      return [
-        {
-          agentId: row['agentId'],
-          agentName: row['agentName'],
-          relevanceScore: row['relevanceScore'],
-          recommended: row['recommended'],
-          category: row['category'] as AgentRecommendation['category'],
-          matchedCriteria: Array.isArray(row['matchedCriteria'])
-            ? row['matchedCriteria'].filter(
-                (item): item is string => typeof item === 'string',
-              )
-            : [],
-          ...(typeof row['description'] === 'string'
-            ? { description: row['description'] }
-            : {}),
-          ...(typeof row['icon'] === 'string' ? { icon: row['icon'] } : {}),
-        },
-      ];
-    });
-  }
-  async submit(
-    binding: SetupGenerationTabBinding,
-    decisions?: BoundAgentDecisions,
-    agentIds: readonly string[] = [...this.selectionValue()],
-  ): Promise<
-    | { runId: string }
-    | { rejection: SetupGenerationRejection }
-    | { error: string }
-  > {
-    this.generation.bind(binding);
-    const bound = this.generation.binding();
-    if (
-      bound?.tabId !== binding.tabId ||
-      bound.workspacePath !== binding.workspacePath ||
-      bound.workflow !== binding.workflow
-    )
-      return { error: 'Generation tab is unavailable. Try again.' };
-    const previous = this.generation.acceptedRun();
-    const previousRejection = this.generation.rejection();
-    const previousError = this.generation.startError();
-    await this.generation.startAgents([...agentIds], decisions);
-    const accepted = this.generation.acceptedRun();
-    if (
-      accepted &&
-      (!previous ||
-        accepted.runId !== previous.runId ||
-        accepted.revision !== previous.revision)
-    )
-      return { runId: accepted.runId };
-    const rejection = this.generation.rejection();
-    if (rejection && rejection !== previousRejection) return { rejection };
-    const error = this.generation.startError();
-    return {
-      error:
-        error && error !== previousError
-          ? error
-          : 'Generation could not start. Try again.',
-    };
-  }
 }
+
+

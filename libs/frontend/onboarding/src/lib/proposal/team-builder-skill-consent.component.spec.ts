@@ -1,9 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { TeamBuilderSkillConsentComponent } from './team-builder-skill-consent.component';
+import { StackSkillConsentComponent } from './stack-skill-consent.component';
 
-describe('TeamBuilderSkillConsentComponent', () => {
+describe('StackSkillConsentComponent', () => {
   it('explains hooks when a flagged skill has no listed scripts', () => {
-    const fixture = TestBed.createComponent(TeamBuilderSkillConsentComponent);
+    const fixture = TestBed.createComponent(StackSkillConsentComponent);
     fixture.componentRef.setInput('open', true);
     fixture.componentRef.setInput('previews', [{
       skillName: 'owner/repo/skill', files: ['SKILL.md'], scriptFiles: [],
@@ -16,7 +16,7 @@ describe('TeamBuilderSkillConsentComponent', () => {
     );
   });
   it('reopens a native dialog closed during installation', async () => {
-    const fixture = TestBed.createComponent(TeamBuilderSkillConsentComponent);
+    const fixture = TestBed.createComponent(StackSkillConsentComponent);
     fixture.componentRef.setInput('open', true);
     fixture.componentRef.setInput('previews', []);
     fixture.componentRef.setInput('approvedIds', new Set());
@@ -32,7 +32,7 @@ describe('TeamBuilderSkillConsentComponent', () => {
     expect(cancelled).not.toHaveBeenCalled();
   });
   it('requires explicit approval for scripts and shows previewed files as text', () => {
-    const fixture = TestBed.createComponent(TeamBuilderSkillConsentComponent);
+    const fixture = TestBed.createComponent(StackSkillConsentComponent);
     fixture.componentRef.setInput('open', true);
     fixture.componentRef.setInput('previews', [
       {
@@ -54,3 +54,4 @@ describe('TeamBuilderSkillConsentComponent', () => {
     expect(root.textContent).toContain('<img src=x>');
   });
 });
+
