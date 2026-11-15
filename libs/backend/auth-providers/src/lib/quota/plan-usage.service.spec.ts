@@ -285,7 +285,7 @@ describe('PlanUsageService', () => {
       });
       const snapshot = await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
       expect(snapshot.windows[0].exhaustion).toBeUndefined();
-      expect(snapshot.ownerEvidence).toEqual([{ observedAt: T0, source: 'provider-api', resetsAt: RESET_SECONDS * 1000 }]);
+      expect(snapshot.ownerEvidence).toEqual([{ observedAt: T0, source: 'provider-api' }]);
       h.getAccountUsage.mockResolvedValue({
         status: 'available', providerId: 'openai-codex', fetchedAt: T0 + 1,
         ordinaryUsageAllowed: true,
@@ -303,7 +303,7 @@ describe('PlanUsageService', () => {
         quota: { primary: { usedPercent: 7, resetsAt: RESET_SECONDS } },
       });
       const denied = await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
-      expect(denied.ownerEvidence).toEqual([{ observedAt: T0, source: 'provider-api', resetsAt: RESET_SECONDS * 1000 }]);
+      expect(denied.ownerEvidence).toEqual([{ observedAt: T0, source: 'provider-api' }]);
       h.getAccountUsage.mockResolvedValue({
         status: 'available', providerId: 'openai-codex', fetchedAt: T0 + 1,
         ordinaryUsageAllowed: false,

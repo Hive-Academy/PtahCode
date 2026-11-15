@@ -356,13 +356,14 @@ describe('Codex plan-usage reader', () => {
       expect(reading.providerOwnerEvidence).toBeUndefined();
     });
 
-    it('provides bounded owner evidence for a denied gate without an exhausted window', () => {
+    it('keeps denied gate evidence beyond an unrelated near-future window reset', () => {
       const reading = mapCodexAccountUsage(result({ ordinaryUsageAllowed: false, quota: {
         primary: { usedPercent: 7, windowDurationMins: 300, resetsAt: Math.floor((FETCHED + 3_600_000) / 1000) },
         rateLimitReachedType: 'workspace_member_usage_limit_reached',
       } }), NOW);
       expect(reading.windows[0].exhaustion).toBeUndefined();
-      expect(reading.providerOwnerEvidence).toEqual({ observedAt: FETCHED, source: 'provider-api', resetsAt: FETCHED + 3_600_000 });
+      expect(reading.windows[0].resetsAt).toBe(FETCHED + 3_600_000);
+      expect(reading.providerOwnerEvidence).toEqual({ observedAt: FETCHED, source: 'provider-api' });
     });
 
     it.each([{ balance: '2', hasCredits: true, unlimited: false }, { balance: 'unknown', hasCredits: true, unlimited: false }, { balance: '', hasCredits: true, unlimited: false }, { hasCredits: false, unlimited: true }])('does not block usable or uncertain credits %#', (credits) => {

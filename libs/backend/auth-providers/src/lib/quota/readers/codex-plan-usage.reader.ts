@@ -14,6 +14,7 @@
  * - Safe account plan, activity and optional allowances pass through.
  * - A bucket reached type exhausts windows at 100%. A denied ordinary-usage
  *   gate supplies owner evidence only without an exhausted window or usable credits.
+ *   Window resets do not expire that owner evidence because no window explains the gate.
  * - Every non-`available` status passes through. A `stale` answer (the
  *   service's own cache after a failed read) keeps its windows at the time
  *   they were originally read, never the time they were re-served.
@@ -158,9 +159,6 @@ export function mapCodexAccountUsage(
   const noUsableCredits = !active?.creditsUnparsed && (creditsDepleted || (active !== undefined && credits?.unlimited !== true &&
     !(credits?.hasCredits === true && (balance === undefined || !Number.isFinite(balance) || balance > 0))));
   const ownerGateDenied = denied && !windows.some((window) => window.exhaustion) && noUsableCredits;
-  const nextReset = windows.map((window) => window.resetsAt)
-    .filter((reset): reset is number => reset !== undefined && reset > readAt)
-    .sort((left, right) => left - right)[0];
   return {
     status: result.status,
     fetchedAt: observedAt,
@@ -168,8 +166,7 @@ export function mapCodexAccountUsage(
     windows,
     ...(result.status === 'available' && !ownerGateDenied && { providerOwnerClear: true as const }),
     ...(ownerGateDenied && {
-      providerOwnerEvidence: { observedAt, source: 'provider-api' as const,
-        ...(nextReset !== undefined && { resetsAt: nextReset }) },
+      providerOwnerEvidence: { observedAt, source: 'provider-api' as const },
     }),
     ...(allowances.length > 0 && { allowances }),
     ...(active?.credits && { credits: active.credits }),
