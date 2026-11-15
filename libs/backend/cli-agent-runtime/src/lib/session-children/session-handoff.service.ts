@@ -313,6 +313,7 @@ export class SessionHandoffService
           {
             successorSdkId: resolvedSdkId,
           },
+          record.successorTabId,
         );
         record =
           (await this.ackStore.findByPredecessor(record.predecessorTabId)) ??
@@ -393,7 +394,10 @@ export class SessionHandoffService
           record.predecessorTabId,
           'recorded',
           { state: 'closePending' },
+          record.successorTabId,
         );
+        if (transition === 'superseded')
+          return refused('handoff record superseded by a newer handoff');
         if (transition === 'missing') {
           this.logger?.warn(
             `${LOG_PREFIX} handoff acknowledgement record disappeared for predecessor ${record.predecessorTabId} in workspace ${record.workspaceRoot}`,
@@ -687,6 +691,7 @@ export class SessionHandoffService
                     saved.predecessorTabId,
                     saved.state,
                     { successorSdkId: pending.resolvedSdkId },
+                    saved.successorTabId,
                   );
               } catch (error: unknown) {
                 this.reportError('handoff successor binding failed', error);
@@ -749,6 +754,7 @@ export class SessionHandoffService
             state: 'recorded',
             successorSdkId: ackRecord.successorSdkId,
           },
+          ackRecord.successorTabId,
         );
         if (!settled)
           throw new Error('handoff starting record changed before settlement');
@@ -774,6 +780,7 @@ export class SessionHandoffService
               saved.predecessorTabId,
               saved.state,
               { successorSdkId: pending.resolvedSdkId },
+              saved.successorTabId,
             );
           }
         } catch (error: unknown) {
@@ -1179,6 +1186,7 @@ export class SessionHandoffService
                 record.predecessorTabId,
                 record.state,
                 { successorSdkId },
+                record.successorTabId,
               ).then(() => undefined)
             : undefined,
         )
@@ -1255,6 +1263,7 @@ export class SessionHandoffService
               successorSdkId: record.successorSdkId,
               ...(record.keepPredecessor ? { keepPredecessor: true } : {}),
             },
+            record.successorTabId,
           );
           if (!settled)
             throw new Error(

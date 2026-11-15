@@ -54,3 +54,25 @@ Open: no known functional issue. The store is 335 formatted lines after extracti
 - D: Root matching treats backslashes as separators and folds case only for Windows or drive-letter roots. POSIX roots retain literal backslashes. The POSIX branch uses `path.posix.resolve` so the platform-mocked spec also behaves correctly on a Windows test host; this has the same normalization behavior as `normalizeWorkspaceRoot` on a POSIX host.
 
 Checks: Prettier passed on the three changed source/spec files. Jest passed (3 suites, 99 tests). `tsc --noEmit` passed for both lib and spec configs. ESLint passed on the three changed files. `git diff --check` passed. An initial Jest run found the mocked-POSIX path issue; it was corrected before the passing run. No commit or push was made.
+
+## PR review round 2 (#1312)
+
+- E: `storageCandidates` appends a workspace-scoped proxy after registered delegates when no default storage exists, deduplicated by identity. With a default document, the proxy stays out. A spec writes an unregistered-root record through the proxy, then finds, enumerates, and transitions it.
+- F: A private `readCandidates` helper catches and logs each failed candidate read, continues across available documents, and rethrows the last failure if all reads fail. Specs cover a rejecting first delegate with a usable second delegate and an all-failing set.
+- G: Records now accept optional nonnegative integer `recordedAt`; `record()` stamps writes with `Date.now()`. A pure comparator selects the highest timestamp, then a pinned document, then first found. Lookup and enumeration share it, and transitions mutate the selected document. A spec puts older and newer copies in two pinned documents and checks lookup, enumeration, and transition. `session-handoff.service.ts` and its spec required no adjustment for returned record equality.
+- H: Stale cleanup after a successful primary write now logs and resolves on read or write failure; the new timestamp keeps the new record authoritative. A spec forces cleanup write failure and verifies the new record is returned. Primary write errors remain uncaught.
+
+Checks: Prettier passed on the three changed source/spec files. Targeted Jest passed (3 suites, 103 tests); its first run exposed a test fixture missing `getReadinessState`, corrected before the passing run. `tsc --noEmit` passed for both lib and spec configs. ESLint passed on the three changed files. `git diff --check` passed. No commit or push was made.
+## Review round 3 fixes
+
+- Monotonic replacement: removed the unreleased `recordedAt` field and added optional `generation`. Each `record()` write uses one more than the highest generation for that predecessor across available documents. Lookup and enumeration compare generation first, then pinned location, then candidate order. A failed-cleanup regression leaves two pinned copies and verifies the replacement wins.
+- Mutation race: `transition` and `compareAndSet` accept an optional expected successor tab ID. A mismatch prevents writing; `transition` returns `superseded`. Acknowledgement passes its validated successor and refuses a superseded handoff before closing the predecessor. Successor-binding updates also pass the successor they found. Store and service specs exercise stale mutations and replacement during acknowledgement.
+- Stale successor lookup: `findBySuccessor` gathers matching predecessor IDs, resolves each authoritative predecessor record, and returns only a current successor match. The failed-cleanup spec verifies the old successor is absent and the replacement is found.
+
+Checks: Prettier passed on five changed source/spec files. Targeted Jest passed (3 suites, 104 tests). Both `tsc --noEmit` project checks passed. ESLint passed with 0 errors and 6 warnings in the existing large service file. `git diff --check` passed. No commit or push was made.
+## Review round 4 fixes (coordinator)
+
+- Settlement guard: the normal and the late settlement `compareAndSet('starting' -> 'recorded')` calls in `session-handoff.service.ts` pass the expected successor tab ID, so an old start cannot settle a replacement record.
+- Complete read for ordering: `readCandidates(complete)` rejects on any unreadable candidate when `complete` is set. `record()` uses it for the generation maximum, so a hidden record can never tie with a new write. New spec: "refuses to record while a candidate document is unreadable".
+
+Checks: targeted Jest 3 suites, 105 tests passed. `npm run verify -- -p cli-agent-runtime` passed. Review round 5 (codex): APPROVED.

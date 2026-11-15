@@ -8,6 +8,7 @@ import {
   type IStateStorage,
 } from '@ptah-extension/platform-core';
 import {
+  compareAckMatches,
   defaultStorage,
   storageCandidates,
   storageForRoot,
@@ -26,6 +27,7 @@ const RecordSchema = z
     state: z.enum(['starting', 'recorded', 'closePending', 'closeCompleted']),
     /** Set when the predecessor holds results the successor never adopted: an ack must not close it. */
     keepPredecessor: z.boolean().optional(),
+    generation: z.number().int().nonnegative().optional(),
   })
   .strict();
 const DocumentSchema = z
@@ -43,6 +45,14 @@ interface AckDocumentState {
   invalid: unknown[];
   /** The raw document when it was invalid as a whole, quarantined on the next write. */
   quarantine?: unknown;
+}
+
+interface AckMatch {
+  record: HandoffAckRecord;
+  state: AckDocumentState;
+  storage: IStateStorage;
+  index: number;
+  pinned: boolean;
 }
 
 @injectable()
@@ -137,33 +147,54 @@ export class SessionHandoffAckStore {
 
   private async locate(
     predicate: (record: HandoffAckRecord) => boolean,
-  ): Promise<
-    | {
-        record: HandoffAckRecord;
-        state: AckDocumentState;
-        storage: IStateStorage;
-      }
-    | undefined
-  > {
+  ): Promise<AckMatch | undefined> {
     if (!this.storage)
       throw new Error('handoff acknowledgement storage unavailable');
-    let first:
-      | {
-          record: HandoffAckRecord;
-          state: AckDocumentState;
-          storage: IStateStorage;
-        }
-      | undefined;
-    for (const candidate of storageCandidates(this.storage)) {
-      const state = await this.readState(candidate);
-      const record = state.records.find(predicate);
-      if (!record) continue;
-      const match = { record, state, storage: candidate };
-      if (storageForRoot(this.storage, record.workspaceRoot) === candidate)
-        return match;
-      first ??= match;
+    const rootStorage = this.storage;
+    let best: AckMatch | undefined;
+    for (const { storage, state } of await this.readCandidates()) {
+      state.records.forEach((record, index) => {
+        if (!predicate(record)) return;
+        const match = {
+          record,
+          state,
+          storage,
+          index,
+          pinned: storageForRoot(rootStorage, record.workspaceRoot) === storage,
+        };
+        if (!best || compareAckMatches(match, best) > 0) best = match;
+      });
     }
-    return first;
+    return best;
+  }
+
+  /**
+   * Reads every candidate document. A failed read is logged and skipped,
+   * unless `complete` is set: then any failure rejects, because a partial
+   * read cannot order a replacement above a hidden record.
+   */
+  private async readCandidates(
+    complete = false,
+  ): Promise<{ storage: IStateStorage; state: AckDocumentState }[]> {
+    if (!this.storage)
+      throw new Error('handoff acknowledgement storage unavailable');
+    const available: { storage: IStateStorage; state: AckDocumentState }[] = [];
+    let lastError: unknown;
+    let failed = false;
+    for (const storage of storageCandidates(this.storage)) {
+      try {
+        available.push({ storage, state: await this.readState(storage) });
+      } catch (error) {
+        failed = true;
+        lastError = error;
+        this.logger?.error(
+          'Handoff acknowledgement lookup skipped an unavailable storage',
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
+    if (failed && (complete || available.length === 0)) throw lastError;
+    return available;
   }
 
   private async stateForPredecessor(id: string): Promise<
@@ -174,23 +205,9 @@ export class SessionHandoffAckStore {
       }
     | undefined
   > {
-    const byId = (record: HandoffAckRecord): boolean =>
-      record.predecessorTabId === id;
-    const found = await this.locate(byId);
+    const found = await this.locate((record) => record.predecessorTabId === id);
     if (!found) return undefined;
-    const pinned = this.storageFor(found.record.workspaceRoot);
-    if (pinned && pinned !== found.storage) {
-      const pinnedState = await this.readState(pinned);
-      const pinnedIndex = pinnedState.records.findIndex(byId);
-      if (pinnedIndex >= 0)
-        return { state: pinnedState, storage: pinned, index: pinnedIndex };
-    }
-    // The record lives where it was found (for example an older write to the
-    // active document): mutate it in place instead of reporting it missing.
-    const index = found.state.records.findIndex(byId);
-    return index < 0
-      ? undefined
-      : { state: found.state, storage: found.storage, index };
+    return { state: found.state, storage: found.storage, index: found.index };
   }
 
   async findByPredecessor(id: string): Promise<HandoffAckRecord | undefined> {
@@ -206,15 +223,26 @@ export class SessionHandoffAckStore {
   }
 
   async findBySuccessor(id: string): Promise<HandoffAckRecord | undefined> {
-    return this.serialized(
-      async () =>
-        (
-          await this.locate(
-            (record) =>
-              record.successorTabId === id || record.successorSdkId === id,
-          )
-        )?.record,
-    );
+    return this.serialized(async () => {
+      const predecessors = new Set<string>();
+      for (const { state } of await this.readCandidates()) {
+        for (const record of state.records) {
+          if (record.successorTabId === id || record.successorSdkId === id)
+            predecessors.add(record.predecessorTabId);
+        }
+      }
+      for (const predecessor of predecessors) {
+        const current = await this.locate(
+          (record) => record.predecessorTabId === predecessor,
+        );
+        if (
+          current?.record.successorTabId === id ||
+          current?.record.successorSdkId === id
+        )
+          return current.record;
+      }
+      return undefined;
+    });
   }
 
   async records(): Promise<readonly HandoffAckRecord[]> {
@@ -225,13 +253,12 @@ export class SessionHandoffAckStore {
         string,
         { record: HandoffAckRecord; pinned: boolean }
       >();
-      for (const candidate of storageCandidates(this.storage)) {
-        const state = await this.readState(candidate);
+      for (const { storage: candidate, state } of await this.readCandidates()) {
         for (const record of state.records) {
           const existing = found.get(record.predecessorTabId);
           const pinned =
             candidate === storageForRoot(this.storage, record.workspaceRoot);
-          if (!existing || (pinned && !existing.pinned))
+          if (!existing || compareAckMatches({ record, pinned }, existing) > 0)
             found.set(record.predecessorTabId, { record, pinned });
         }
       }
@@ -270,6 +297,18 @@ export class SessionHandoffAckStore {
       const index = state.records.findIndex(
         (entry) => entry.predecessorTabId === value.predecessorTabId,
       );
+      const generations = (await this.readCandidates(true)).flatMap(
+        ({ state }) =>
+          state.records
+            .filter(
+              (entry) => entry.predecessorTabId === value.predecessorTabId,
+            )
+            .map((entry) => entry.generation ?? 0),
+      );
+      const written = RecordSchema.parse({
+        ...value,
+        generation: Math.max(0, ...generations) + 1,
+      });
       if (index >= 0) {
         const existing = state.records[index];
         // A `starting` record of another successor is left by a host stop
@@ -280,25 +319,32 @@ export class SessionHandoffAckStore {
         if (!replaceable || existing.successorTabId === value.successorTabId) {
           throw new Error('handoff predecessor already recorded');
         }
-        state.records[index] = RecordSchema.parse(value);
+        state.records[index] = written;
       } else {
-        state.records.push(RecordSchema.parse(value));
+        state.records.push(written);
       }
       // Write the new record first: a failure between the two writes leaves a
       // recoverable duplicate instead of losing the handoff.
       await this.write(state, storage);
       if (previous && previous.storage !== storage) {
-        // Re-read the previous concrete document and remove only the replaced successor.
-        const stale = previous.record.successorTabId;
-        const prior = await this.readState(previous.storage);
-        const kept = prior.records.filter(
-          (entry) =>
-            entry.predecessorTabId !== value.predecessorTabId ||
-            entry.successorTabId !== stale,
-        );
-        if (kept.length !== prior.records.length) {
-          prior.records = kept;
-          await this.write(prior, previous.storage);
+        try {
+          // Remove only the replaced successor from its concrete document.
+          const stale = previous.record.successorTabId;
+          const prior = await this.readState(previous.storage);
+          const kept = prior.records.filter(
+            (entry) =>
+              entry.predecessorTabId !== value.predecessorTabId ||
+              entry.successorTabId !== stale,
+          );
+          if (kept.length !== prior.records.length) {
+            prior.records = kept;
+            await this.write(prior, previous.storage);
+          }
+        } catch (error) {
+          this.logger?.error(
+            'Handoff acknowledgement stale record cleanup failed; newer record wins',
+            error instanceof Error ? error : new Error(String(error)),
+          );
         }
       }
     });
@@ -310,12 +356,18 @@ export class SessionHandoffAckStore {
     patch: Partial<
       Pick<HandoffAckRecord, 'state' | 'successorSdkId' | 'keepPredecessor'>
     >,
+    expectedSuccessorTabId?: string,
   ): Promise<boolean> {
     return this.serialized(async () => {
       const located = await this.stateForPredecessor(predecessorTabId);
       if (!located || located.state.records[located.index].state !== expected)
         return false;
       const { state, storage, index } = located;
+      if (
+        expectedSuccessorTabId !== undefined &&
+        state.records[index].successorTabId !== expectedSuccessorTabId
+      )
+        return false;
       state.records[index] = RecordSchema.parse({
         ...state.records[index],
         ...patch,
@@ -331,11 +383,17 @@ export class SessionHandoffAckStore {
     patch: Partial<
       Pick<HandoffAckRecord, 'state' | 'successorSdkId' | 'keepPredecessor'>
     >,
-  ): Promise<'moved' | 'already' | 'missing'> {
+    expectedSuccessorTabId?: string,
+  ): Promise<'moved' | 'already' | 'missing' | 'superseded'> {
     return this.serialized(async () => {
       const located = await this.stateForPredecessor(predecessorTabId);
       if (!located) return 'missing';
       const { state, storage, index } = located;
+      if (
+        expectedSuccessorTabId !== undefined &&
+        state.records[index].successorTabId !== expectedSuccessorTabId
+      )
+        return 'superseded';
       if (state.records[index].state !== from) return 'already';
       state.records[index] = RecordSchema.parse({
         ...state.records[index],

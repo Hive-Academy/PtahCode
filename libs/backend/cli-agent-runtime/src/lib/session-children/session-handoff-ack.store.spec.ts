@@ -8,6 +8,235 @@ import {
 import { storageForRoot } from './session-handoff-ack.storage-candidates';
 
 describe('SessionHandoffAckStore', () => {
+  const baseRecord = {
+    predecessorTabId: 'before',
+    predecessorSdkId: null,
+    successorTabId: 'old',
+    successorSdkId: null,
+    workspaceRoot: '/a',
+    handoffPath: '/a/HANDOFF.md',
+    state: 'recorded' as const,
+  };
+
+  function scopedFixture() {
+    const documents = new Map<string, Map<string, unknown>>([
+      ['/a', new Map()],
+      ['/b', new Map()],
+      ['proxy', new Map()],
+    ]);
+    const delegate = (root: string): IStateStorage => ({
+      get: <T>(key: string) => documents.get(root)?.get(key) as T | undefined,
+      update: async (key, value) => {
+        documents.get(root)?.set(key, value);
+      },
+      keys: () => [...(documents.get(root)?.keys() ?? [])],
+    });
+    const a = delegate('/a');
+    const b = delegate('/b');
+    const proxy = delegate('proxy');
+    const storage = {
+      get: <T>(key: string) => proxy.get<T>(key),
+      update: (key: string, value: unknown) => proxy.update(key, value),
+      keys: () => proxy.keys(),
+      getAllWorkspacePaths: () => ['/a', '/b'],
+      getStorageForWorkspace: (root: string) =>
+        root === '/a' ? a : root === '/b' ? b : undefined,
+    };
+    const setRecords = (root: string, records: unknown[]) =>
+      documents
+        .get(root)
+        ?.set(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records });
+    const getRecords = (root: string) =>
+      (
+        documents.get(root)?.get(HANDOFF_ACK_STORAGE_KEY) as
+          { records: { state: string }[] } | undefined
+      )?.records;
+    return { documents, a, b, storage, setRecords, getRecords };
+  }
+
+  it('finds and transitions an unregistered-root write through a scoped proxy without default storage', async () => {
+    const fixture = scopedFixture();
+    const store = new SessionHandoffAckStore(fixture.storage);
+    await store.record({
+      ...baseRecord,
+      workspaceRoot: '/unregistered',
+      successorTabId: 'proxy-new',
+    });
+    expect(await store.findByPredecessor('before')).toMatchObject({
+      successorTabId: 'proxy-new',
+      generation: expect.any(Number),
+    });
+    expect(await store.records()).toMatchObject([
+      { successorTabId: 'proxy-new' },
+    ]);
+    expect(
+      await store.transition('before', 'recorded', { state: 'closePending' }),
+    ).toBe('moved');
+    expect(fixture.getRecords('proxy')?.[0].state).toBe('closePending');
+  });
+
+  it('skips an unavailable delegate and rethrows when every candidate is unavailable', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/b', [
+      { ...baseRecord, workspaceRoot: '/b', successorTabId: 'good' },
+    ]);
+    const unavailable = new Error('delegate unavailable');
+    const failing = {
+      ...fixture.a,
+      getReadinessState: () => ({ status: 'not-ready' as const }),
+      whenReady: async () => {
+        throw unavailable;
+      },
+    };
+    const logger = { error: jest.fn() };
+    const storage = {
+      ...fixture.storage,
+      getStorageForWorkspace: (root: string) =>
+        root === '/a' ? failing : root === '/b' ? fixture.b : undefined,
+    };
+    const store = new SessionHandoffAckStore(storage, logger as never);
+    expect(await store.findByPredecessor('before')).toMatchObject({
+      successorTabId: 'good',
+    });
+    expect((await store.records())[0].successorTabId).toBe('good');
+    expect(logger.error).toHaveBeenCalledWith(
+      'Handoff acknowledgement lookup skipped an unavailable storage',
+      unavailable,
+    );
+    const allFail = {
+      ...storage,
+      getReadinessState: () => ({ status: 'not-ready' as const }),
+      whenReady: async () => {
+        throw unavailable;
+      },
+      getStorageForWorkspace: () => failing,
+    };
+    const failedStore = new SessionHandoffAckStore(allFail, logger as never);
+    await expect(failedStore.findByPredecessor('before')).rejects.toBe(
+      unavailable,
+    );
+    await expect(failedStore.records()).rejects.toBe(unavailable);
+  });
+
+  it('refuses to record while a candidate document is unreadable, so no generation tie is written', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/a', [{ ...baseRecord, generation: 1 }]);
+    const unavailable = new Error('delegate unavailable');
+    const failing = {
+      ...fixture.a,
+      getReadinessState: () => ({ status: 'not-ready' as const }),
+      whenReady: async () => {
+        throw unavailable;
+      },
+    };
+    const logger = { error: jest.fn() };
+    const storage = {
+      ...fixture.storage,
+      getStorageForWorkspace: (root: string) =>
+        root === '/a' ? failing : root === '/b' ? fixture.b : undefined,
+    };
+    const store = new SessionHandoffAckStore(storage, logger as never);
+    await expect(
+      store.record({
+        ...baseRecord,
+        workspaceRoot: '/b',
+        successorTabId: 'new',
+      }),
+    ).rejects.toBe(unavailable);
+    expect(fixture.getRecords('/b')).toBeUndefined();
+  });
+
+  it('prefers the newer pinned duplicate for lookup, enumeration, and transition', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/a', [{ ...baseRecord, generation: 10 }]);
+    fixture.setRecords('/b', [
+      {
+        ...baseRecord,
+        workspaceRoot: '/b',
+        successorTabId: 'new',
+        generation: 20,
+      },
+    ]);
+    const store = new SessionHandoffAckStore(fixture.storage);
+    expect(await store.findByPredecessor('before')).toMatchObject({
+      successorTabId: 'new',
+    });
+    expect(await store.findBySuccessor('new')).toMatchObject({
+      generation: 20,
+    });
+    expect(await store.records()).toMatchObject([{ successorTabId: 'new' }]);
+    expect(
+      await store.transition('before', 'recorded', { state: 'closePending' }),
+    ).toBe('moved');
+    expect(fixture.getRecords('/a')?.[0].state).toBe('recorded');
+    expect(fixture.getRecords('/b')?.[0].state).toBe('closePending');
+  });
+
+  it('keeps a new record authoritative when stale cleanup fails', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/a', [{ ...baseRecord, generation: 7 }]);
+    const cleanupError = new Error('cleanup failed');
+    const a = {
+      ...fixture.a,
+      update: async () => {
+        throw cleanupError;
+      },
+    };
+    const storage = {
+      ...fixture.storage,
+      getStorageForWorkspace: (root: string) =>
+        root === '/a' ? a : root === '/b' ? fixture.b : undefined,
+    };
+    const logger = { error: jest.fn() };
+    const store = new SessionHandoffAckStore(storage, logger as never);
+    await expect(
+      store.record({
+        ...baseRecord,
+        workspaceRoot: '/b',
+        successorTabId: 'new',
+      }),
+    ).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith(
+      'Handoff acknowledgement stale record cleanup failed; newer record wins',
+      cleanupError,
+    );
+    expect(await store.findByPredecessor('before')).toMatchObject({
+      successorTabId: 'new',
+      generation: 8,
+    });
+    expect(await store.findBySuccessor('old')).toBeUndefined();
+    expect(await store.findBySuccessor('new')).toMatchObject({ generation: 8 });
+    expect(await store.records()).toMatchObject([
+      { successorTabId: 'new', generation: 8 },
+    ]);
+    expect(
+      await store.transition(
+        'before',
+        'recorded',
+        { state: 'closePending' },
+        'old',
+      ),
+    ).toBe('superseded');
+    expect(
+      await store.compareAndSet(
+        'before',
+        'recorded',
+        { successorSdkId: 'stale' },
+        'old',
+      ),
+    ).toBe(false);
+    expect(fixture.getRecords('/a')?.[0].state).toBe('recorded');
+    expect(fixture.getRecords('/b')?.[0].state).toBe('recorded');
+    expect(
+      await store.transition(
+        'before',
+        'recorded',
+        { state: 'closePending' },
+        'new',
+      ),
+    ).toBe('moved');
+    expect(fixture.getRecords('/b')?.[0].state).toBe('closePending');
+  });
   it('replaces a stale recorded successor after restart and acknowledges the new one', async () => {
     const old = {
       predecessorTabId: 'before',

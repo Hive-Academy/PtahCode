@@ -60,5 +60,17 @@ export function storageCandidates(storage: IStateStorage): IStateStorage[] {
   }
   const fallback = defaultStorage(storage);
   if (fallback && !candidates.includes(fallback)) candidates.push(fallback);
-  return candidates.length ? candidates : [storage];
+  if (!fallback && !candidates.includes(storage)) candidates.push(storage);
+  return candidates;
+}
+
+/** Positive when left has precedence; ties retain the first match. */
+export function compareAckMatches(
+  left: { record: { generation?: number }; pinned: boolean },
+  right: { record: { generation?: number }; pinned: boolean },
+): number {
+  return (
+    (left.record.generation ?? 0) - (right.record.generation ?? 0) ||
+    Number(left.pinned) - Number(right.pinned)
+  );
 }
