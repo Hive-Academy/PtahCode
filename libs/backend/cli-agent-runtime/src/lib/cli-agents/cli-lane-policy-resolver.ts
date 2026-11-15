@@ -95,5 +95,14 @@ export function resolveCliLanePolicy(input: {
     ? { permission: 'plan', network: input.cli === 'codex' ? 'deny' : network,
         permissionSource: 'parent-plan', networkSource: input.cli === 'codex' ? 'parent-plan' : networkSource }
     : { permission, network, permissionSource, networkSource };
+  if ('unsupported' in pair && selectedPermission === undefined) {
+    throw new LaneSpawnPolicyError({
+      code: 'UNSUPPORTED_LANE_POLICY',
+      field: 'permission',
+      cli: input.cli,
+      requested,
+      reason: `The ${input.cli} adapter does not support plan and no explicit permission was provided.`,
+    });
+  }
   return validateResolvedPolicy(input.cli, input.manifest, requested);
 }
