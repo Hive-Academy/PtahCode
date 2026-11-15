@@ -65,6 +65,7 @@ import {
   createClaudePlanUsageReader,
   type ClaudePlanUsageProbe,
 } from './readers/claude-plan-usage.reader';
+import { createClaudeOauthPlanUsageReader } from './readers/claude-oauth-plan-usage.reader';
 import {
   createCodexPlanUsageReader,
   type CodexPlanUsageSource,
@@ -165,6 +166,19 @@ export class PlanUsageService {
   private nextReadSequence = 0;
   private readonly failingSince = new Map<string, number>();
   private readonly flights = new Map<string, Flight>();
+  private readonly claudeOauthFailures = new Map<string, { until: number; rateLimited: boolean }>();
+
+  private recordClaudeOauthFailure(ownerKey: string, retryAfterMs?: number): void {
+    this.claudeOauthFailures.delete(ownerKey);
+    this.claudeOauthFailures.set(ownerKey, {
+      until: this.now() + (retryAfterMs ?? 60_000),
+      rateLimited: retryAfterMs !== undefined,
+    });
+    if (this.claudeOauthFailures.size > PLAN_USAGE_MAX_OWNERS) {
+      const oldest = this.claudeOauthFailures.keys().next().value;
+      if (oldest !== undefined) this.claudeOauthFailures.delete(oldest);
+    }
+  }
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -180,9 +194,42 @@ export class PlanUsageService {
     private readonly now: () => number = Date.now,
     @inject(AUTH_PROVIDERS_TOKENS.SDK_KIMI_CODE_AUTH, { isOptional: true })
     kimiAuth?: Pick<IKimiCodeAuthService, 'resolveRequestCredential' | 'forceRefresh'>,
+    /** Test seam; defaults to the local Claude OAuth source. */
+    claudeOauthReader: PlanUsageReader = createClaudeOauthPlanUsageReader(logger, now),
   ) {
+    const claudeLiveReader = createClaudePlanUsageReader(probe, logger, now);
     this.readers = {
-      anthropic: createClaudePlanUsageReader(probe, logger, now),
+      anthropic: async (request) => {
+        const live = await claudeLiveReader(request);
+        if (live.unavailableReason !== 'no-open-session' || request.target.claudeRoute?.kind === 'named' || request.target.ownerRef.identityKind !== 'account')
+          return live;
+        const ownerKey = request.target.ownerRef.key;
+        const failure = this.claudeOauthFailures.get(ownerKey);
+        if (failure && this.now() < failure.until && (failure.rateLimited || !request.refresh)) return live;
+        try {
+          const oauth = await claudeOauthReader(request);
+          if (request.signal?.aborted) return live;
+          if (oauth.sourceInvalid) {
+            // An unverified owner is not cached, and an earlier reading for it is dropped.
+            // The cooldown stops a re-read on each snapshot.
+            this.cache.delete(ownerKey);
+            this.failingSince.delete(ownerKey);
+            this.recordClaudeOauthFailure(ownerKey, oauth.retryAfterMs);
+            return oauth;
+          }
+          if (oauth.status === 'available' && oauth.windows.length > 0) {
+            this.claudeOauthFailures.delete(ownerKey);
+            return oauth;
+          }
+          this.recordClaudeOauthFailure(ownerKey, oauth.retryAfterMs);
+          return live;
+        } catch (error: unknown) {
+          if (request.signal?.aborted) return live;
+          this.recordClaudeOauthFailure(ownerKey);
+          logger.warn('[PlanUsage] Claude OAuth source failed', { reason: error instanceof Error ? error.name : 'invalid' });
+          return live;
+        }
+      },
       'openai-codex': createCodexPlanUsageReader(codexUsage, now),
       'ollama-cloud': createOllamaCloudPlanUsageReader(logger, now),
       antigravity: createAntigravityPlanUsageReader(logger, now),
