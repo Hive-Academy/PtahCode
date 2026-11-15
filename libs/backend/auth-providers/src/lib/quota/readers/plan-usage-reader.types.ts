@@ -12,6 +12,7 @@
  */
 import type {
   PlanLimitOwnerSnapshot,
+  OwnerLimitEvidence,
   PlanLimitStatusReason,
   QuotaOwnerRef,
   UsageSourceLabel,
@@ -82,6 +83,10 @@ export type PlanUsageReading = Omit<
 > & {
   /** Failed source proof must not read or update the owner's cached windows. */
   readonly sourceInvalid?: boolean;
+  /** Provider gate evidence with no named rate window. */
+  readonly providerOwnerEvidence?: OwnerLimitEvidence;
+  /** A fresh provider API reading clears older provider owner evidence. */
+  readonly providerOwnerClear?: true;
 };
 
 /** Reads one provider's plan usage. A throw maps to `service-unavailable`. */

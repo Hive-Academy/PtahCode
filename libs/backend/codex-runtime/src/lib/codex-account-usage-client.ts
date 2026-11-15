@@ -79,6 +79,7 @@ const fields = z.object({
   credits: z.unknown().optional(),
 });
 const responseFields = z.object({
+  ordinaryUsageAllowed: z.unknown().optional(),
   rateLimits: z.unknown().optional(),
   rateLimitsByLimitId: z.unknown().optional(),
   rateLimitResetCredits: z.unknown().optional(),
@@ -181,6 +182,10 @@ function bucket(
         ...(!unlimited.data && balance?.success && { balance: balance.data }),
       }),
     }),
+    ...(raw?.credits != null && (!hasCredits || !unlimited || !hasCredits.success || !unlimited.success ||
+      (credits.success && credits.data.balance != null && !balance?.success)) && {
+      creditsUnparsed: true as const,
+    }),
   });
 }
 
@@ -191,6 +196,7 @@ export function usageResult(
 ): CodexAccountUsageResult {
   const parsed = responseFields.safeParse(response);
   const data = parsed.success ? parsed.data : undefined;
+  const ordinaryUsageAllowed = z.boolean().safeParse(data?.ordinaryUsageAllowed);
   const nativeBuckets = z.record(z.string(), z.unknown()).safeParse(
     data?.rateLimitsByLimitId,
   );
@@ -243,6 +249,7 @@ export function usageResult(
     status: 'available',
     providerId: PROVIDER,
     fetchedAt,
+    ...(ordinaryUsageAllowed.success && { ordinaryUsageAllowed: ordinaryUsageAllowed.data }),
     ...(buckets.length > 0 && { buckets: Object.freeze(buckets) }),
     ...(z.record(z.string(), z.unknown()).safeParse(
       data?.rateLimitResetCredits,

@@ -40,6 +40,10 @@ export const RETIRED_ROLES: readonly RetiredRoleV1[] = Object.freeze([
   { slug: 'backend-developer', phaseKind: 'implement', step: 1 },
   { slug: 'frontend-developer', phaseKind: 'implement', step: 1 },
   { slug: 'devops-engineer', phaseKind: 'implement', step: 1 },
+  { slug: 'code-logic-reviewer', phaseKind: 'review', step: 2 },
+  { slug: 'code-style-reviewer', phaseKind: 'review', step: 2 },
+  { slug: 'senior-tester', phaseKind: 'tests', step: 2 },
+  { slug: 'visual-reviewer', phaseKind: 'visual-review', step: 2 },
 ]);
 
 function normalize(slug: string): string {
@@ -59,6 +63,6 @@ export function isRetiredRole(slug: string): boolean {
 export function phaseKindForRole(slug: string): PhaseKind | null {
   const key = normalize(slug);
   return Object.prototype.hasOwnProperty.call(ROLE_PHASE_ALIASES, key)
-    ? ROLE_PHASE_ALIASES[key]
+    ? (ROLE_PHASE_ALIASES[key] ?? null)
     : null;
 }

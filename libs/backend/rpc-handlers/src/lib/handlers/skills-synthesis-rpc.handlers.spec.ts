@@ -1288,24 +1288,24 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       registry.getBySlug.mockReturnValue({
         ...sampleRow,
         kind: 'agent' as const,
-        slug: 'senior-tester',
+        slug: 'software-architect',
         originPluginId: 'ptah-core',
       });
-      mirror.rebaseClone.mockResolvedValue(okRebase('agent', 'senior-tester'));
+      mirror.rebaseClone.mockResolvedValue(okRebase('agent', 'software-architect'));
 
       await rpcHandler.call('skillSynthesis:rebaseClone', {
         kind: 'agent',
-        slug: 'senior-tester',
+        slug: 'software-architect',
       });
 
       expect(mirror.rebaseClone).toHaveBeenCalledWith({
         kind: 'agent',
-        slug: 'senior-tester',
+        slug: 'software-architect',
         sourceDir: join(
           '/home/.ptah/plugins',
           'ptah-core',
           'agents',
-          'senior-tester.md',
+          'software-architect.md',
         ),
         workspaceRoot: SCOPE,
       });

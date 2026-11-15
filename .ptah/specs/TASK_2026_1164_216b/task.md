@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1164_216b
-status: in_review
+status: done
 type: FEATURE
 title: Record all token usage in the usage ledger
 depends_on: []

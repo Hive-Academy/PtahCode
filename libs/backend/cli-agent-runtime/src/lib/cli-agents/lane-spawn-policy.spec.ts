@@ -3,6 +3,8 @@ import {
   applyLaneArgvPolicy,
   LaneSpawnPolicyError,
   translateLaneSpawnPolicy,
+  resolveLaneEffort,
+  isReviewerOrTester,
 } from './lane-spawn-policy';
 
 const codex: CliAdapterManifest = {
@@ -14,10 +16,26 @@ const codex: CliAdapterManifest = {
   },
   roleChannel: 'developer-instructions',
   permissionModes: {
-    plan: { state: 'supported', nativeMode: 'read-only', networkModes: ['allow', 'deny'] },
-    ask: { state: 'unsupported', reason: 'No approval route.', networkModes: [] },
-    'auto-edit': { state: 'supported', nativeMode: 'workspace-write', networkModes: ['allow', 'deny'] },
-    yolo: { state: 'supported', nativeMode: 'danger-full-access', networkModes: ['allow'] },
+    plan: {
+      state: 'supported',
+      nativeMode: 'read-only',
+      networkModes: ['allow', 'deny'],
+    },
+    ask: {
+      state: 'unsupported',
+      reason: 'No approval route.',
+      networkModes: [],
+    },
+    'auto-edit': {
+      state: 'supported',
+      nativeMode: 'workspace-write',
+      networkModes: ['allow', 'deny'],
+    },
+    yolo: {
+      state: 'supported',
+      nativeMode: 'danger-full-access',
+      networkModes: ['allow'],
+    },
   },
   networkModes: {
     allow: { state: 'supported' },
@@ -28,25 +46,66 @@ const codex: CliAdapterManifest = {
 };
 
 describe('lane spawn policy', () => {
+  it.each(['review', 'visual-review', 'tests'] as const)(
+    'defaults %s phase effort to medium',
+    (phaseKind) => {
+      expect(
+        resolveLaneEffort({ cli: 'codex', phaseKind, chatEffort: 'high' }),
+      ).toMatchObject({ effort: 'medium', step: 4 });
+      expect(isReviewerOrTester(undefined, phaseKind)).toBe(true);
+    },
+  );
+
+  it('uses ordinary phase kind before a reviewer name', () => {
+    expect(
+      resolveLaneEffort({
+        cli: 'codex',
+        phaseKind: 'implement',
+        roleName: 'custom-reviewer',
+        chatEffort: 'high',
+      }),
+    ).toMatchObject({ effort: 'high', step: 5 });
+  });
+
+  it.each(['custom-reviewer', 'senior-tester'])(
+    'keeps the no-phase user agent name fallback for %s',
+    (roleName) => {
+      expect(
+        resolveLaneEffort({ cli: 'codex', roleName, chatEffort: 'high' }),
+      ).toMatchObject({ effort: 'medium', step: 4 });
+    },
+  );
   it('maps Codex workspace writes with native network denial', () => {
-    expect(translateLaneSpawnPolicy('codex', codex, {
-      permission: 'auto-edit', network: 'deny',
-    })).toMatchObject({
-      cli: 'codex', sandboxMode: 'workspace-write', networkAccess: false,
+    expect(
+      translateLaneSpawnPolicy('codex', codex, {
+        permission: 'auto-edit',
+        network: 'deny',
+      }),
+    ).toMatchObject({
+      cli: 'codex',
+      sandboxMode: 'workspace-write',
+      networkAccess: false,
     });
   });
 
   it('refuses Codex yolo with network denial before launch', () => {
-    expect(() => translateLaneSpawnPolicy('codex', codex, {
-      permission: 'yolo', network: 'deny',
-    })).toThrow(LaneSpawnPolicyError);
+    expect(() =>
+      translateLaneSpawnPolicy('codex', codex, {
+        permission: 'yolo',
+        network: 'deny',
+      }),
+    ).toThrow(LaneSpawnPolicyError);
     try {
-      translateLaneSpawnPolicy('codex', codex, { permission: 'yolo', network: 'deny' });
+      translateLaneSpawnPolicy('codex', codex, {
+        permission: 'yolo',
+        network: 'deny',
+      });
     } catch (error: unknown) {
       expect(error).toBeInstanceOf(LaneSpawnPolicyError);
       if (error instanceof LaneSpawnPolicyError) {
         expect(error.refusal).toMatchObject({
-          code: 'UNSUPPORTED_LANE_POLICY', field: 'combination',
+          code: 'UNSUPPORTED_LANE_POLICY',
+          field: 'combination',
         });
       }
     }
@@ -60,13 +119,18 @@ describe('lane spawn policy', () => {
         deny: { state: 'unsupported' as const, reason: 'No native sandbox.' },
       },
     };
-    expect(() => translateLaneSpawnPolicy('claude', claude, {
-      permission: 'plan', network: 'deny',
-    })).toThrow(LaneSpawnPolicyError);
+    expect(() =>
+      translateLaneSpawnPolicy('claude', claude, {
+        permission: 'plan',
+        network: 'deny',
+      }),
+    ).toThrow(LaneSpawnPolicyError);
   });
 
   it('leaves omitted argv options byte identical', () => {
     const args = ['run', '--auto', '--model', 'fixture'];
-    expect(applyLaneArgvPolicy(args, { addArgs: [], removeArgs: [] })).toEqual(args);
+    expect(applyLaneArgvPolicy(args, { addArgs: [], removeArgs: [] })).toEqual(
+      args,
+    );
   });
 });

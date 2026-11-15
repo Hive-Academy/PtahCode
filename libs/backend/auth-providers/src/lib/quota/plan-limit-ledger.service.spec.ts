@@ -266,6 +266,18 @@ describe('PlanLimitLedgerService — window and owner evidence', () => {
     expect(evidence).toHaveLength(2);
     expect(evidence.map((e) => e.observedAt).sort()).toEqual([T0, T0 + 1]);
   });
+
+  it('clears only older provider API evidence for all models', () => {
+    const { ledger } = harness();
+    ledger.recordOwnerEvidence(OWNER_A, { observedAt: T0, source: 'provider-api' });
+    ledger.clearProviderOwnerEvidence(OWNER_A, T0);
+    expect(ledger.snapshotFor(OWNER_A.key)?.ownerEvidence).toHaveLength(1);
+    ledger.clearProviderOwnerEvidence(OWNER_A, T0 + 1);
+    expect(ledger.snapshotFor(OWNER_A.key)?.ownerEvidence ?? []).toEqual([]);
+    ledger.recordOwnerEvidence(OWNER_A, unknownEvidence(T0 + 2));
+    ledger.clearProviderOwnerEvidence(OWNER_A, T0 + 3);
+    expect(ledger.snapshotFor(OWNER_A.key)?.ownerEvidence).toHaveLength(1);
+  });
 });
 
 describe('PlanLimitLedgerService — removeProviderWindowEvidence', () => {

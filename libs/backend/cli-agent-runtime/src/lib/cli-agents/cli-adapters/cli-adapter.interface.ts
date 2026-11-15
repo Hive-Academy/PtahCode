@@ -109,6 +109,8 @@ export type LanePolicyDelivery =
   | 'instruction-file';
 
 export interface CliCommandOptions extends LaneAccountBindingFields {
+  /** Phase identity for effort policy; retained when a lane resumes. */
+  readonly phaseKind?: import('@ptah-extension/shared').PhaseKind;
   /** Adapters MUST await this checkpoint before releasing a named prompt. */
   readonly onAccountBinding?: (
     reference: LaneAccountReference,

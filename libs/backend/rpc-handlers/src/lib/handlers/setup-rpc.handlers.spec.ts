@@ -344,7 +344,9 @@ async function callRaw(
 describe('SetupRpcHandlers', () => {
   it('passes only supplied analysis fields and the host root to guidance', async () => {
     const h = makeHarness();
-    const getGuidance = jest.fn().mockResolvedValue({ facts: [], ownerDecisionPrompt: '' });
+    const getGuidance = jest
+      .fn()
+      .mockResolvedValue({ facts: [], ownerDecisionPrompt: '' });
     h.container.__register(SKILL_PROJECT_GUIDANCE_SERVICE, { getGuidance });
     h.handlers.register();
     await call(h, 'wizard:get-project-guidance', {
@@ -368,7 +370,9 @@ describe('SetupRpcHandlers', () => {
   });
   it('does not pass empty code conventions as detected', async () => {
     const h = makeHarness();
-    const getGuidance = jest.fn().mockResolvedValue({ facts: [], ownerDecisionPrompt: '' });
+    const getGuidance = jest
+      .fn()
+      .mockResolvedValue({ facts: [], ownerDecisionPrompt: '' });
     h.container.__register(SKILL_PROJECT_GUIDANCE_SERVICE, { getGuidance });
     h.handlers.register();
     await call(h, 'wizard:get-project-guidance', {
@@ -955,12 +959,12 @@ describe('SetupRpcHandlers', () => {
       expect(result.map((agent) => agent.agentId)).toEqual(
         expect.arrayContaining([
           'project-manager',
-          'senior-tester',
+          'software-architect',
           'ui-ux-designer',
         ]),
       );
       expect(result.map((agent) => agent.category)).toEqual(
-        expect.arrayContaining(['planning', 'qa', 'creative']),
+        expect.arrayContaining(['planning', 'specialist', 'creative']),
       );
       expect(result.every((agent) => agent.relevanceScore === 100)).toBe(true);
       expect(
@@ -1025,7 +1029,7 @@ describe('SetupRpcHandlers', () => {
       >(h, 'wizard:recommend-agents', { isMultiPhase: true });
 
       // Every catalog agent is recommended at relevanceScore=100.
-      expect(result.length).toBeGreaterThanOrEqual(11);
+      expect(result.length).toBe(7);
       expect(result.every((r) => r.relevanceScore === 100)).toBe(true);
       expect(
         result.every(
@@ -1039,12 +1043,22 @@ describe('SetupRpcHandlers', () => {
       // Spot-check: anchor agents from each category, including the agents
       // that historically drifted out of the catalog.
       const ids = new Set(result.map((r) => r.agentId));
-      for (const retired of ['backend-developer', 'frontend-developer', 'devops-engineer']) {
+      for (const retired of [
+        'backend-developer',
+        'frontend-developer',
+        'devops-engineer',
+      ]) {
         expect(ids.has(retired)).toBe(false);
       }
       expect(ids.has('ui-ux-designer')).toBe(true);
-      expect(ids.has('senior-tester')).toBe(true);
-      expect(ids.has('visual-reviewer')).toBe(true);
+      for (const retired of [
+        'senior-tester',
+        'code-style-reviewer',
+        'code-logic-reviewer',
+        'visual-reviewer',
+      ]) {
+        expect(ids.has(retired)).toBe(false);
+      }
     });
 
     it('throws "Invalid analysis input" for malformed single-phase input', async () => {

@@ -20,6 +20,8 @@ let nextTooltipId = 0;
 export class PtahTooltipDirective {
   /** Text shown to pointer and keyboard users. Empty text closes the tooltip. */
   readonly ptahTooltip = input.required<string>();
+  /** Use for controls whose focus is restored programmatically after a dialog closes. */
+  readonly tooltipOnFocus = input(true);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly overlay = inject(Overlay);
   private readonly id = `ptah-tooltip-${++nextTooltipId}`;
@@ -55,7 +57,7 @@ export class PtahTooltipDirective {
   }
 
   protected onFocus(): void {
-    if (this.isFocusVisible()) this.show(true);
+    if (this.tooltipOnFocus() && this.isFocusVisible()) this.show(true);
   }
 
   private isFocusVisible(): boolean {

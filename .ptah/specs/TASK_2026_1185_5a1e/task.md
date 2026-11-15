@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1185_5a1e
-status: in_review
+status: done
 type: BUGFIX
 title: "Stop chat:start from waiting on the MCP registration queue"
 depends_on: []
