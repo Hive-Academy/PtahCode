@@ -94,6 +94,8 @@ export type McpRegistrationFailure =
    * later is expected to succeed.
    */
   | 'lock-timeout'
+  /** Registration is still queued or in progress after the chat deadline. */
+  | 'timeout'
   /** The read-modify-write itself failed (permissions, unparseable JSON, …). */
   | 'write-failed';
 
@@ -114,6 +116,7 @@ export interface McpSubagentRegistration {
 }
 
 const REGISTERED: McpSubagentRegistration = { registered: true };
+export const MCP_CHAT_REGISTRATION_DEADLINE_MS = 3000;
 
 /**
  * Duplicated from SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER (agent-sdk) to avoid
@@ -290,6 +293,15 @@ export class CodeExecutionMCP
    *    bumps the generation as well, which is what cancels (b).
    */
   private mcpOpQueue: Promise<void> = Promise.resolve();
+  /** A re-point that is queued or running; the chat fast path waits for it. */
+  private pendingRepoint: Promise<void> | null = null;
+  /**
+   * A re-point that is queued and has NOT started. Only this one is joined by
+   * later requests: a running pass captured its desired slots already, so a
+   * change that arrives during it needs a new pass.
+   */
+  private queuedRepoint: Promise<void> | null = null;
+  private registrationNeedsReconcile = false;
 
   /** Monotonic request counter; only the newest re-point is allowed to run. */
   private repointGeneration = 0;
@@ -419,8 +431,12 @@ export class CodeExecutionMCP
    * RUNS, and drop the job if a newer request has landed in the meantime.
    */
   private queueRepoint(): Promise<void> {
+    if (this.queuedRepoint) return this.queuedRepoint;
     const generation = ++this.repointGeneration;
-    return this.enqueueMcpOp(async () => {
+    const run: Promise<void> = this.enqueueMcpOp(async () => {
+      // The job starts now: a later request must queue a new pass, because
+      // this one may have read the workspace before that change.
+      if (this.queuedRepoint === run) this.queuedRepoint = null;
       // Superseded while queued — a later workspace change, or a `stop()`, has
       // already asked for a different final state. Writing the intermediate one
       // here is exactly the entry that gets stranded.
@@ -436,6 +452,15 @@ export class CodeExecutionMCP
         );
       }
     });
+    this.pendingRepoint = run;
+    this.queuedRepoint = run;
+    void run.finally(() => {
+      if (this.pendingRepoint === run) this.pendingRepoint = null;
+      if (this.queuedRepoint === run) this.queuedRepoint = null;
+    }).catch((error: unknown) => {
+      this.logger.warn(`[CodeExecutionMCP] Repoint cleanup failed: ${String(error)}`, 'CodeExecutionMCP');
+    });
+    return run;
   }
 
   /**
@@ -535,7 +560,48 @@ export class CodeExecutionMCP
    * to the session.
    */
   async ensureRegisteredForSubagents(): Promise<McpSubagentRegistration> {
-    return this.enqueueMcpOp(() => this.ensureRegisteredNow());
+    if (this.stopped || !this.port) return notRegistered('not-started');
+    const activeTarget = this.getMcpJsonPath();
+    if (!activeTarget) return notRegistered('no-workspace');
+    const owned = this.registrations.get(activeTarget);
+    if (!this.registrationNeedsReconcile && !this.pendingRepoint &&
+        owned?.port === this.port && this.hasCurrentClaudeEntry(activeTarget, this.port)) {
+      return REGISTERED;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<McpSubagentRegistration>((resolve) => {
+      timer = setTimeout(() => {
+        this.logger.warn('[CodeExecutionMCP] Chat MCP registration exceeded deadline', 'CodeExecutionMCP');
+        resolve(notRegistered('timeout'));
+      }, MCP_CHAT_REGISTRATION_DEADLINE_MS);
+    });
+    try {
+      return await Promise.race([this.enqueueMcpOp(() => this.ensureRegisteredNow()), deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private hasCurrentClaudeEntry(configPath: string, port: number): boolean {
+    try {
+      const config: unknown = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (typeof config !== 'object' || config === null || !('mcpServers' in config)) return false;
+      const servers = config.mcpServers;
+      if (typeof servers !== 'object' || servers === null || !('ptah' in servers)) return false;
+      const entry = servers.ptah;
+      if (typeof entry !== 'object' || entry === null || !('type' in entry) || !('url' in entry)) return false;
+      const url = entry.url;
+      if (entry.type !== 'http' || typeof url !== 'string' ||
+          !url.startsWith(`http://localhost:${port}/auth/`)) return false;
+      const token = /\/auth\/([A-Za-z0-9_-]{43})\//.exec(url)?.[1];
+      if (!token) return false;
+      const auth = this.callerCredentials.authorize({ token, workspaceRoot: path.dirname(configPath) });
+      return auth.ok && auth.binding.capability === this.externalCallerAccess();
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - an unreadable config falls through to the queued repair.
+      this.logger.warn(`[CodeExecutionMCP] Could not inspect ${configPath}: ${String(error)}`, 'CodeExecutionMCP');
+      return false;
+    }
   }
 
   /** The body of {@link ensureRegisteredForSubagents}, already serialized. */
@@ -595,16 +661,32 @@ export class CodeExecutionMCP
   ): Promise<Map<string, McpSubagentRegistration>> {
     const desired = await this.desiredSlots();
     const outcomes = new Map<string, McpSubagentRegistration>();
+    let needsRetry = false;
 
     for (const owned of [...this.registrations.keys()]) {
       if (desired.has(owned)) continue;
-      await this.unregisterFromSlot(owned);
+      if (await this.unregisterFromSlot(owned)) needsRetry = true;
     }
 
     for (const [configPath, slot] of desired) {
-      outcomes.set(configPath, await this.registerInSlot(slot, port));
+      const outcome = await this.registerInSlot(slot, port);
+      outcomes.set(configPath, outcome);
+      if (!outcome.registered) needsRetry = true;
     }
 
+    this.registrationNeedsReconcile = needsRetry;
+    return outcomes;
+  }
+
+  private async registerRootSlots(root: string, port: number): Promise<Map<string, McpSubagentRegistration>> {
+    const slots = await planPtahMcpSlots({
+      workspaceRoots: [root],
+      isInstalled: (target) => this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
+    });
+    const outcomes = new Map<string, McpSubagentRegistration>();
+    for (const slot of slots) {
+      if (slot.workspaceRoot === root) outcomes.set(slot.configPath, await this.registerInSlot(slot, port));
+    }
     return outcomes;
   }
 
@@ -635,7 +717,7 @@ export class CodeExecutionMCP
     this.retainedRoots.add(root);
     let outcome: McpSubagentRegistration;
     try {
-      const outcomes = await this.reconcileRegistrations(this.port);
+      const outcomes = await this.registerRootSlots(root, this.port);
       outcome =
         outcomes.get(path.join(root, '.mcp.json')) ??
         notRegistered('write-failed');
@@ -669,7 +751,12 @@ export class CodeExecutionMCP
       // here would write the open folders' entries for a port about to close.
       if (this.stopped || this.port === null) return;
       try {
-        await this.reconcileRegistrations(this.port);
+        for (const [configPath, owned] of this.registrations) {
+          if (owned.slot.workspaceRoot !== root) continue;
+          if (this.workspaceProvider.getWorkspaceFolders().includes(root) ||
+              this.workspaceProvider.getWorkspaceRoot() === root) continue;
+          await this.unregisterFromSlot(configPath);
+        }
       } catch (error: unknown) {
         this.logger.warn(
           `[CodeExecutionMCP] Failed to release ${root}: ${
@@ -916,8 +1003,10 @@ export class CodeExecutionMCP
     slot: PtahMcpSlot,
     port: number,
   ): Promise<McpSubagentRegistration> {
+    const started = Date.now();
     try {
       const credential = await this.persistentCredential(slot);
+      const prepared = Date.now();
       const wrote =
         slot.target === CLAUDE_TARGET
           ? await this.writeMcpJsonEntry(
@@ -927,7 +1016,15 @@ export class CodeExecutionMCP
               credential.token,
             )
           : await this.writeFacetEntry(slot, port, credential.token);
+      const written = Date.now();
       await credential.commit();
+      const committed = Date.now();
+      if (committed - started > 1000) {
+        this.logger.warn(
+          `[CodeExecutionMCP] Slow registration for ${slot.target} in ${slot.configPath}: prepare=${prepared - started}ms write=${written - prepared}ms commit=${committed - written}ms total=${committed - started}ms`,
+          'CodeExecutionMCP',
+        );
+      }
 
       this.registrations.set(slot.configPath, { port, slot });
       if (wrote) {

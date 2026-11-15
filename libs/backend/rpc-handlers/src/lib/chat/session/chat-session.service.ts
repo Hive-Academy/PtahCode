@@ -1250,7 +1250,16 @@ export class ChatSessionService {
         // the SDK path already supports it.
         const registration =
           await this.codeExecutionMcp.ensureRegisteredForSubagents();
-        if (!registration.registered) {
+        if (!registration.registered && registration.reason === 'timeout') {
+          // The registration is still queued and lands in the background. The
+          // session's own Ptah MCP config is built per session and does not read
+          // `.mcp.json`, so only subagents started before the write miss the
+          // entry. Disabling MCP for the whole session would cost far more.
+          this.logger.warn(
+            '[ptah.main] chat:start - .mcp.json registration still pending; starting with session MCP',
+            { reason: registration.reason },
+          );
+        } else if (!registration.registered) {
           mcpServerRunning = false;
           this.logger.warn(
             '[ptah.main] chat:start - .mcp.json entry absent, starting session without MCP',
