@@ -9,7 +9,7 @@ import { CodexSandboxSettingComponent } from '../../advanced/codex-sandbox-setti
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [AdvancedSettingsGroupComponent, CodexSandboxSettingComponent],
   template: `
-    <section class="flex flex-col gap-4" data-testid="codex-agent-behavior">
+    <section class="flex flex-col gap-[var(--ptah-gap-field)]" data-testid="codex-agent-behavior">
       <ptah-advanced-settings-group groupId="codex-agents" />
       <ptah-codex-sandbox-setting />
     </section>
