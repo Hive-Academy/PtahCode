@@ -56,7 +56,7 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
     >
       <div
         section-header
-        class="mb-[var(--ptah-gap-heading)] border-b border-base-content/10 pb-[var(--ptah-space-2)]"
+        class="border-b border-base-content/10 pb-[var(--ptah-space-2)]"
       >
         <h3
           id="subagent-cache-ttl-heading"

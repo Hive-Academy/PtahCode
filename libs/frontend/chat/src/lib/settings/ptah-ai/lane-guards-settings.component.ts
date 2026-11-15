@@ -63,7 +63,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
       aria-labelledby="lane-guards-heading"
       data-testid="settings-section-lane-guards"
     >
-      <div section-header class="mb-3 border-b border-base-content/10 pb-2">
+      <div section-header class="border-b border-base-content/10 pb-2">
         <h3 id="lane-guards-heading" class="text-base font-semibold text-base-content">
           Lane guards
         </h3>
