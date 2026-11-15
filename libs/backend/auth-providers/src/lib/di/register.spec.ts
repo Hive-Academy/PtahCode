@@ -113,7 +113,7 @@ describe('required auth registration without the memory curator', () => {
     const reader = c.resolve<ClaudeAccountSelectionReader>(AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_ACCOUNT_SELECTION_READER);
     expect(reader).not.toBeInstanceOf(ProviderAccountService);
     expect(c.resolve(AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_ACCOUNT_SELECTION_READER)).toBe(reader);
-    await expect(reader.readStoredSelection('workspace', 'main')).resolves.toEqual({ profileId: null });
+    await expect(reader.readStoredSelection('workspace', 'main')).resolves.toEqual({ profileId: null, revision: -1 });
   });
 
   it('returns typed busy refusals through every account port surface with an injected busy database', async () => {

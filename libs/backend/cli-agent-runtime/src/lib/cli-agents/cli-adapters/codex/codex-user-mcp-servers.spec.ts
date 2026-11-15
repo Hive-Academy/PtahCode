@@ -333,6 +333,7 @@ describe('readCodexUserMcpServerNames', () => {
       const worktree = join(root, 'wt');
       mkdirSync(worktree, { recursive: true });
       writeFileSync(join(worktree, '.git'), `gitdir: ${gitDir}\n`, 'utf-8');
+      writeFileSync(join(gitDir, 'gitdir'), `${join(worktree, '.git')}\n`, 'utf-8');
       writeLayer(worktree, 'wtsrv');
       writeHome(trust(repo));
 

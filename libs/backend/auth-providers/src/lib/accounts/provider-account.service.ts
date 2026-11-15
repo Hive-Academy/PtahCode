@@ -79,10 +79,10 @@ export class ProviderAccountService implements ProviderAccountAdmissionPort, Cla
    * Fails closed: a storage error throws `unavailable-storage` (or `busy`)
    * instead of returning null, which would silently pick the default account.
    */
-  async readStoredSelection(workspaceRoot: string, scope: ProviderAccountScope): Promise<{ readonly profileId: string | null }> {
+  async readStoredSelection(workspaceRoot: string, scope: ProviderAccountScope): Promise<{ readonly profileId: string | null; readonly revision: number }> {
     if (this.disposed) throw new ProviderAccountStoreError('unavailable-storage');
     try {
-      return { profileId: this.store.selection(workspaceRoot, scope).profileId };
+      return this.store.selection(workspaceRoot, scope);
     } catch (error: unknown) {
       throw new ProviderAccountStoreError(storeCode(error));
     }

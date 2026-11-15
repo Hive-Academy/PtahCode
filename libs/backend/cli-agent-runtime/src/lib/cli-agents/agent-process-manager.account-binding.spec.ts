@@ -1,4 +1,7 @@
-﻿import 'reflect-metadata';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import 'reflect-metadata';
 import {
   AgentId,
   type CliType,
@@ -714,16 +717,67 @@ describe('Claude lane account selection precedence', () => {
     const { manager, admission } = precedence(stored);
     await manager.spawn({ cli: CLAUDE, task: 'task', timeout: 0, ...(accountSelection ? { accountSelection } : {}) });
     expect(stored.readStoredSelection).toHaveBeenCalledWith(ROOT, 'lane');
+    expect(stored.readStoredSelection).toHaveBeenCalledTimes(1);
     expect(admission()).toEqual(admitted({ kind: 'named', profileId: 'stored-profile' }));
   });
 
   it('stays ambient when the stored lane selection is the default route', async () => {
-    const stored = reader(Promise.resolve({ profileId: null }));
+    const stored = reader(Promise.resolve({ profileId: null, revision: -1 }));
     const { manager, runSdk, admission } = precedence(stored);
     await manager.spawn({ cli: CLAUDE, task: 'task', timeout: 0 });
     expect(stored.readStoredSelection).toHaveBeenCalledTimes(1);
     expect(runSdk).toHaveBeenCalledTimes(1);
     expect(admission()).toBeUndefined();
+  });
+
+  describe('worktree selection lookup', () => {
+    let root: string;
+    let worktree: string;
+
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), 'ptah-lane-account-'));
+      worktree = join(root, '.claude-worktrees', 'lane');
+      const gitDir = join(root, '.git', 'worktrees', 'lane');
+      mkdirSync(gitDir, { recursive: true });
+      mkdirSync(worktree, { recursive: true });
+      writeFileSync(join(worktree, '.git'), `gitdir: ${gitDir}\n`);
+      writeFileSync(join(gitDir, 'commondir'), '../..\n');
+      writeFileSync(join(gitDir, 'gitdir'), `${join(worktree, '.git')}\n`);
+    });
+
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it('uses the main checkout selection when the worktree has no row', async () => {
+      const stored = { readStoredSelection: jest.fn()
+        .mockResolvedValueOnce({ profileId: null, revision: -1 })
+        .mockResolvedValueOnce({ profileId: 'main-profile', revision: 0 }) };
+      const { manager, environment, admission } = precedence(stored);
+      jest.spyOn(environment, 'workspaceRoot').mockReturnValue(worktree);
+      await manager.spawn({ cli: CLAUDE, task: 'task', timeout: 0 });
+      expect(stored.readStoredSelection.mock.calls).toEqual([[worktree, 'lane'], [root, 'lane']]);
+      expect(admission()).toEqual({ ...admitted({ kind: 'named', profileId: 'main-profile' }), workingDirectory: worktree });
+    });
+
+    it('keeps an explicit null worktree row', async () => {
+      const stored = reader(Promise.resolve({ profileId: null, revision: 0 }));
+      const { manager, environment, admission } = precedence(stored);
+      jest.spyOn(environment, 'workspaceRoot').mockReturnValue(worktree);
+      await manager.spawn({ cli: CLAUDE, task: 'task', timeout: 0 });
+      expect(stored.readStoredSelection).toHaveBeenCalledTimes(1);
+      expect(admission()).toBeUndefined();
+    });
+
+    it('refuses when the fallback read fails', async () => {
+      const stored = { readStoredSelection: jest.fn()
+        .mockResolvedValueOnce({ profileId: null, revision: -1 })
+        .mockRejectedValueOnce(new Error('private path')) };
+      const { manager, environment, runSdk } = precedence(stored);
+      jest.spyOn(environment, 'workspaceRoot').mockReturnValue(worktree);
+      await expect(manager.spawn({ cli: CLAUDE, task: 'task', timeout: 0 }))
+        .rejects.toMatchObject({ code: 'unavailable-storage' });
+      expect(stored.readStoredSelection.mock.calls).toEqual([[worktree, 'lane'], [root, 'lane']]);
+      expect(runSdk).not.toHaveBeenCalled();
+    });
   });
 
   it('stays ambient when the host has no selection reader', async () => {
