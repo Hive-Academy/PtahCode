@@ -33,7 +33,7 @@ import { PtahTooltipDirective } from './tooltip.directive';
     '[attr.data-density]': "density() === 'compact' ? 'compact' : null",
   },
   hostDirectives: [
-    { directive: PtahTooltipDirective, inputs: ['ptahTooltip: label'] },
+    { directive: PtahTooltipDirective, inputs: ['ptahTooltip: label', 'tooltipOnFocus'] },
   ],
 })
 export class PtahIconButtonDirective {

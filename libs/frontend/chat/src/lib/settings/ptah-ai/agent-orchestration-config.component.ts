@@ -175,16 +175,18 @@ const DETECT_FAILED =
               class="shrink-0"
               [isOpen]="orderOpen()"
               placement="bottom-end"
+              [keepInViewport]="true"
               [hasBackdrop]="true"
               backdropClass="transparent"
               (closed)="closeOrder()"
-              (opened)="focusFirstMove()"
+              (opened)="focusOrderTitle()"
             >
               <button
                 trigger
                 type="button"
                 ptahIconButton
                 [label]="orderSummary() + '. Edit order'"
+                [tooltipOnFocus]="!orderFocusReturning()"
                 aria-haspopup="dialog"
                 [attr.aria-expanded]="orderOpen()"
                 (click)="toggleOrder()"
@@ -201,7 +203,7 @@ const DETECT_FAILED =
                   content
                   role="dialog"
                   aria-labelledby="policy-order-title"
-                  class="flex w-[16rem] max-w-[calc(100vw-2rem)] flex-col gap-[var(--ptah-gap-controls)] p-[var(--ptah-gap-heading)]"
+                  class="flex w-[16rem] max-w-[calc(100vw-2rem)] max-h-[calc(100vh_-_var(--ptah-space-8))] flex-col gap-[var(--ptah-gap-controls)] overflow-y-auto p-[var(--ptah-gap-heading)]"
                   data-testid="policy-order-popover"
                 >
                   <div
@@ -210,6 +212,7 @@ const DETECT_FAILED =
                     <!-- A plain title, not a heading: the popover sits in the page outline below the tab heading (axe heading-order). -->
                     <p
                       id="policy-order-title"
+                      tabindex="-1"
                       class="text-xs font-bold text-base-content"
                     >
                       Preferred order
@@ -422,17 +425,21 @@ export class AgentOrchestrationConfigComponent {
     this.orderOpen.update((open) => !open);
   }
 
+  /** True while the closed popover returns focus to the trigger: no tooltip then. */
+  protected readonly orderFocusReturning = signal(false);
+
   /** Esc, the backdrop and Close end here; the popover returns focus to the trigger. */
   protected closeOrder(): void {
+    this.orderFocusReturning.set(true);
     this.orderOpen.set(false);
+    // The popover restores focus in the next change detection; a later Tab shows the tooltip.
+    setTimeout(() => this.orderFocusReturning.set(false));
   }
 
-  /** The panel takes focus when positioned; then its first enabled move button does. */
-  protected focusFirstMove(): void {
+  /** Focus the dialog title without opening a move-button tooltip. */
+  protected focusOrderTitle(): void {
     this.element.nativeElement
-      .querySelector<HTMLButtonElement>(
-        '[data-testid="policy-order-popover"] li button:not([disabled])',
-      )
+      .querySelector<HTMLElement>('#policy-order-title')
       ?.focus();
   }
 
