@@ -586,7 +586,7 @@
   "libs/frontend/command-center/src/lib/components/command-work-list.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/core/src/lib/components/attention-permission-actions.component.ts": {
+  "libs/frontend/notification-center/src/lib/components/attention-permission-actions.component.ts": {
     "btn": 3,
     "btn-ghost": 3,
     "btn-primary": 1,
