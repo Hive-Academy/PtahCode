@@ -57,7 +57,8 @@ import { GALLERY_ICON_PATHS, MODEL_OPTIONS, PROVIDER_OPTIONS } from './gallery-f
         <span ptahFieldLeading aria-hidden="true">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path [attr.d]="icons['key']" /></svg>
         </span>
-        <input #keyInput ptahInput type="password" autocomplete="off" [value]="apiKey()" (input)="apiKey.set(keyInput.value)" />
+<<<<<<< HEAD
+        <input ptahInput type="password" autocomplete="off" [value]="apiKey()" (input)="updateApiKey($event)" />
       </ptah-field>
     }
     <ptah-field label="Default model" hint="Type to search. Groups show the tier.">
@@ -93,4 +94,9 @@ export class GalleryProviderFormComponent {
   protected readonly keyError = computed(() =>
     this.apiKey().length > 0 && this.apiKey().length < 20 ? 'The key is too short. Paste the full key.' : null,
   );
+
+  protected updateApiKey(event: Event): void {
+    const target = event.target as HTMLInputElement;
+    this.apiKey.set(target.value);
+  }
 }

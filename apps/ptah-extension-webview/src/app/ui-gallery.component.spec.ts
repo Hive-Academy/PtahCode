@@ -280,8 +280,8 @@ describe('UiGalleryComponent', () => {
     `,
   })
   class ButtonOwnershipHost {
-    readonly public busy = signal(false);
-    readonly public selected = signal<boolean | undefined>(undefined);
+    public readonly busy = signal(false);
+    public readonly selected = signal<boolean | undefined>(undefined);
   }
 
   it('preserves consumer busy ARIA and cleans up only owner values', () => {

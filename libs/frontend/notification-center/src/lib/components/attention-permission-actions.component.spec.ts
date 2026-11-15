@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import type { AttentionItem } from '../services/attention.types';
+import type { AttentionItem } from '@ptah-extension/core';
 import { AttentionPermissionActionsComponent } from './attention-permission-actions.component';
 
 describe('AttentionPermissionActionsComponent', () => {
