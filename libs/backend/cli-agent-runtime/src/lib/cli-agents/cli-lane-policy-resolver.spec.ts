@@ -151,4 +151,35 @@ describe('CLI lane policy resolver', () => {
     } });
     expect(codexLaneSandboxMode(workspace)).toBe('read-only');
   });
+
+  describe('D24: no-row lane default — three paths', () => {
+    it('path 1: explicit permission returns exactly that (requested == effective)', () => {
+      const result = resolveCliLanePolicy({ cli: 'codex', manifest,
+        saved: {},
+        request: { permission: 'auto-edit', network: 'allow' },
+      });
+      expect(result).toMatchObject({
+        permission: 'auto-edit', network: 'allow', permissionSource: 'spawn', networkSource: 'spawn',
+      });
+    });
+
+    it('path 2: restore with no row uses snapshot (not silent default)', () => {
+      const snapshot = { permission: 'auto-edit' as const, network: 'deny' as const,
+        permissionSource: 'saved' as const, networkSource: 'saved' as const };
+      const result = resolveCliLanePolicy({ cli: 'codex', manifest,
+        saved: {},
+        request: {}, resumePolicy: snapshot });
+      expect(result).toMatchObject(snapshot);
+    });
+
+    it('path 3: plain spawn with no permission defaults to plan (most restrictive)', () => {
+      const result = resolveCliLanePolicy({ cli: 'codex', manifest,
+        saved: {},
+        request: {},
+      });
+      expect(result).toMatchObject({
+        permission: 'plan', network: 'deny', permissionSource: 'built-in', networkSource: 'built-in',
+      });
+    });
+  });
 });
