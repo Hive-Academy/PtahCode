@@ -2,12 +2,8 @@ import {
   Bot,
   ClipboardList,
   DraftingCompass,
-  Eye,
-  FlaskConical,
   Palette,
-  ScanEye,
   ScrollText,
-  SearchCheck,
   Sparkles,
   Telescope,
   Users,
@@ -120,13 +116,9 @@ export const AGENT_ROLE_ICONS: Readonly<Record<string, LucideIconData>> = {
   'team-leader': Users,
   'project-manager': ClipboardList,
   'ui-ux-designer': Palette,
-  'senior-tester': FlaskConical,
-  'code-logic-reviewer': SearchCheck,
-  'code-style-reviewer': ScanEye,
   'researcher-expert': Telescope,
   'technical-content-writer': ScrollText,
   'modernization-detector': Sparkles,
-  'visual-reviewer': Eye,
 };
 
 /** The glyph of a sub-agent or background agent type; `Bot` when unknown. */

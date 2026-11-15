@@ -366,16 +366,27 @@ async function codex(): Promise<ProbeResult & { delivery?: CodexDelivery }> {
     // classes and still read the logged-in machine's actual plan limits.
     const codexTarget = target('openai-codex');
     const windowsByOwner = new Map<string, readonly unknown[]>();
+    const ownerEvidenceByOwner = new Map<string, { observedAt: number; source: string }>();
     const ledger = {
       snapshotFor: (ownerKey: string) => {
         const windows = windowsByOwner.get(ownerKey);
-        return windows ? { windows, ownerEvidence: [] } : undefined;
+        const evidence = ownerEvidenceByOwner.get(ownerKey);
+        return windows || evidence ? { windows: windows ?? [], ownerEvidence: evidence ? [evidence] : [] } : undefined;
       },
       recordWindowEvidence: (owner: { key: string }, window: unknown) => {
         windowsByOwner.set(owner.key, [
           ...(windowsByOwner.get(owner.key) ?? []),
           window,
         ]);
+      },
+      recordOwnerEvidence: (owner: { key: string }, evidence: { observedAt: number; source: string }) => {
+        ownerEvidenceByOwner.set(owner.key, evidence);
+      },
+      clearProviderOwnerEvidence: (owner: { key: string }, observedAt: number) => {
+        const evidence = ownerEvidenceByOwner.get(owner.key);
+        if (evidence?.source === 'provider-api' && evidence.observedAt < observedAt) {
+          ownerEvidenceByOwner.delete(owner.key);
+        }
       },
       sessionOwners: () => ({}),
     };

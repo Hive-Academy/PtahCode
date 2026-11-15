@@ -733,7 +733,10 @@ export class AgentProcessManager {
     if (explicit && explicit.kind !== 'omitted') {
       if (explicit.kind === 'named') selection = explicit;
     } else if (!request.resumeSessionId && this.accountSelections) {
-      let stored: { readonly profileId: string | null; readonly revision?: number };
+      let stored: {
+        readonly profileId: string | null;
+        readonly revision?: number;
+      };
       const workspaceRoot = this.spawnEnvironment.workspaceRoot();
       try {
         stored = await this.accountSelections.readStoredSelection(
@@ -743,7 +746,10 @@ export class AgentProcessManager {
         if (stored.revision === -1) {
           const mainRoot = worktreeMainRoot(workspaceRoot);
           if (mainRoot !== null && mainRoot !== workspaceRoot) {
-            stored = await this.accountSelections.readStoredSelection(mainRoot, 'lane');
+            stored = await this.accountSelections.readStoredSelection(
+              mainRoot,
+              'lane',
+            );
           }
         }
       } catch (error: unknown) {
@@ -1018,9 +1024,11 @@ export class AgentProcessManager {
     // record, no event, no adapter call.
     this.assertLaneModelAllowed(cli, resolvedModel);
     const roleDefinition = request.roleDefinition;
+    const phaseKind = request.phase?.kind ?? previous?.phaseKind;
     const laneEffort = this.spawnEnvironment.resolveReasoningEffort(cli, {
       effort: request.effort,
       roleName: roleDefinition?.name,
+      phaseKind,
     });
     const laneBudgets =
       cli === 'codex' ? this.spawnEnvironment.resolveLaneBudgets() : undefined;
@@ -1059,11 +1067,7 @@ export class AgentProcessManager {
       // formatter and `SystemCliLaneResumer` read `permission` directly.
       effectivePolicy: options.effectivePolicy?.requested,
       requestedPolicy: options.requestedPolicy,
-      ...(request.phase
-        ? { phaseKind: request.phase.kind }
-        : previous?.phaseKind
-          ? { phaseKind: previous.phaseKind }
-          : {}),
+      ...(phaseKind ? { phaseKind } : {}),
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
@@ -1174,6 +1178,7 @@ export class AgentProcessManager {
         resumeSessionId: request.resumeSessionId,
         projectGuidance: request.projectGuidance,
         reasoningEffort: laneEffort.effort,
+        phaseKind,
         autoApprove: this.spawnEnvironment.resolveAutoApprove(cli),
         permission: request.permission,
         network: request.network,

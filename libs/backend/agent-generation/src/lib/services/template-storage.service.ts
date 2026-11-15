@@ -225,12 +225,12 @@ export class TemplateStorageService implements ITemplateStorageService {
    * Template ID must match the filename without the .template.md extension.
    * Results are cached for subsequent calls.
    *
-   * @param templateId - Unique template identifier (e.g., 'senior-tester')
+   * @param templateId - Unique template identifier (e.g., 'software-architect')
    * @returns Result containing the template, or Error if not found or invalid
    *
    * @example
    * ```typescript
-   * const result = await service.loadTemplate('senior-tester');
+   * const result = await service.loadTemplate('software-architect');
    * if (result.isOk()) {
    *   console.log(`Loaded template: ${result.value.name}`);
    * }
@@ -343,7 +343,7 @@ export class TemplateStorageService implements ITemplateStorageService {
    * Load a template file from disk and parse it.
    *
    * @param templateId - Template identifier for error messages
-   * @param fileName - Filename to read (e.g., 'senior-tester.template.md')
+   * @param fileName - Filename to read (e.g., 'software-architect.template.md')
    * @returns Result containing parsed template, or Error if loading/parsing fails
    */
   private async loadTemplateFromDisk(

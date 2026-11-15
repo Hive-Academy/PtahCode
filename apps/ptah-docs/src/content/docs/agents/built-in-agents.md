@@ -5,7 +5,7 @@ description: The built-in agent templates in PtahCode, their roles, and when to 
 
 # Built-in Agents
 
-PtahCode has 11 built-in agent templates for planning, review, research, design, and visual QA. The [setup wizard](/setup/setup-wizard/) selects the templates that apply to your project and writes them to `<workspace-root>/.claude/agents/`. Implementation work runs as the `implement` phase on a subagent, CLI lane, or session.
+PtahCode has 7 built-in agent templates for planning, research, and design. The [setup wizard](/setup/setup-wizard/) selects the templates that apply to your project and writes them to `<workspace-root>/.claude/agents/`. Implementation, testing, code review, and visual review run as phase kinds on a subagent, CLI lane, or session.
 
 ## The catalog
 
@@ -14,10 +14,6 @@ PtahCode has 11 built-in agent templates for planning, review, research, design,
 | **project-manager**          | Breaks work into tasks, tracks status, coordinates handoffs    | You have a vague goal and need it turned into actionable tickets |
 | **software-architect**       | Designs systems, picks patterns, authors ADRs                  | You're starting a new module or making a cross-cutting change    |
 | **team-leader**              | Recommends batch executors, verifies work, records batch state | A plan needs batches, executor recommendations, and review gates |
-| **senior-tester**            | Unit, integration, and e2e test strategy                       | You need coverage for new code or a regression suite             |
-| **code-style-reviewer**      | Lint, formatting, naming, idioms, readability                  | Pre-merge style pass or cleanup sprint                           |
-| **code-logic-reviewer**      | Business logic, edge cases, state transitions, concurrency     | Critical paths, payment flows, auth, anything load-bearing       |
-| **visual-reviewer**          | UI/UX visual bugs, responsive breakpoints, accessibility       | Verifying a UI change looks right across viewports and states    |
 | **researcher-expert**        | Evaluates libraries, patterns, API docs, RFCs                  | Choosing a dependency or exploring an unfamiliar domain          |
 | **modernization-detector**   | Spots outdated patterns, deprecated APIs, legacy idioms        | Before a refactor sprint or framework upgrade                    |
 | **ui-ux-designer**           | Visual design, design systems, component specs                 | Creating landing pages, brand assets, design tokens              |
@@ -40,9 +36,9 @@ A provider copy is kept after its source is removed only when the workspace agen
 
 ### Quality & Review
 
-`senior-tester`, `code-style-reviewer`, `code-logic-reviewer`, `visual-reviewer`
+Use `tests` for test coverage, `review` for code style and logic, and `visual-review` for browser-based UI checks. Old role names map to these phase kinds: `senior-tester` to `tests`; `code-style-reviewer` and `code-logic-reviewer` to `review`; `visual-reviewer` to `visual-review`.
 
-`visual-reviewer` adds a browser-based pass for UI work — responsive breakpoints, interaction states, and accessibility.
+Custom agents with these names still map to the corresponding phase kind in routing. Lane spawn role resolution, mirror, and sync retire only unchanged wizard agents proven by the setup wizard origin store and matching workspace file hash. User-authored or edited agents with these names remain available for lane spawn.
 
 ### Research & Design
 
@@ -56,7 +52,7 @@ The model selects its own sub-agents. For a coordinated task, use [orchestration
 
 ## Delegation and task state
 
-The orchestrator spawns sub-agents, batch executors, and phase lanes. Other eligible specialists may delegate focused sub-tasks to CLI lanes when lane mode is enabled or auto and the tools are available. **`team-leader`, `visual-reviewer`, and `ui-ux-designer` do not delegate to CLI lanes.** The team-leader spawns no agents at all.
+The orchestrator spawns sub-agents, batch executors, and phase lanes. Other eligible specialists may delegate focused sub-tasks to CLI lanes when lane mode is enabled or auto and the tools are available. **`team-leader` and `ui-ux-designer` do not delegate to CLI lanes.** The `visual-review` phase uses browser tools. The team-leader spawns no agents at all.
 
 Specialist templates receive a task-spec block for their assigned role: no task-ID allocation and no edits to `task.md` or `batches.md`. They report completion with evidence. The team-leader alone records batch states; task status belongs to the orchestrator, project-manager, and team-leader.
 

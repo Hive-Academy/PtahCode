@@ -15,14 +15,14 @@ The `orchestration` skill in `ptah-core` coordinates development work: classify 
 
 ## Who does what
 
-| Role | Responsibility |
-| --- | --- |
-| **Orchestrator** | Owns the conversation and checkpoints; spawns sub-agents, batch executors, and phase lanes; verifies what returns. |
-| **Team-leader** | Decomposes the plan into batches, recommends executors, verifies and gates batches behind review, and records their states in `batches.md`. It spawns nothing. |
-| **Specialists** | Work within their assigned scope and return deliverables with evidence. Eligible specialists may use CLI lanes for focused sub-tasks when lanes are enabled or in auto mode. |
-| **CLI lanes** | Run self-contained tasks through `ptah_agent_spawn`, using an installed CLI or a configured Ptah CLI provider. |
+| Role             | Responsibility                                                                                                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Orchestrator** | Owns the conversation and checkpoints; spawns sub-agents, batch executors, and phase lanes; verifies what returns.                                                           |
+| **Team-leader**  | Decomposes the plan into batches, recommends executors, verifies and gates batches behind review, and records their states in `batches.md`. It spawns nothing.               |
+| **Specialists**  | Work within their assigned scope and return deliverables with evidence. Eligible specialists may use CLI lanes for focused sub-tasks when lanes are enabled or in auto mode. |
+| **CLI lanes**    | Run self-contained tasks through `ptah_agent_spawn`, using an installed CLI or a configured Ptah CLI provider.                                                               |
 
-`visual-reviewer` and `ui-ux-designer` do not delegate to CLI lanes: visual review needs browser tools, and design needs interactive discovery. The team-leader recommends work for the orchestrator to assign.
+The `visual-review` phase uses browser tools. `ui-ux-designer` does not delegate to CLI lanes because design needs interactive discovery. The team-leader recommends work for the orchestrator to assign.
 
 Specialists do not allocate task IDs or edit `task.md` or `batches.md`. They report completion and blockers; the team-leader records batch state. In a Relay run without a team-leader, the conductor verifies the implementation report and records `batches.md`.
 

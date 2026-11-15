@@ -535,7 +535,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
     if (defaults.effort && defaults.effort !== 'inherit')
       candidates.push(defaults.effort);
     if (defaults.effort === 'inherit') candidates.push(defaults.chatEffort);
-    if (isReviewerOrTester(input.role?.name)) candidates.push('medium');
+    if (isReviewerOrTester(input.role?.name, input.phaseKind)) candidates.push('medium');
     candidates.push(defaults.chatEffort);
     if (!candidates.some(Boolean)) return undefined;
     try {

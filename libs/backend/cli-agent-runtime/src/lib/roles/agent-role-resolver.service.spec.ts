@@ -267,10 +267,36 @@ describe('AgentRoleResolver', () => {
       },
     );
 
-    it.each(['no origin entry', 'hash mismatch'])(
-      'lists and resolves a custom retired slug with %s',
-      async (origin) => {
-        const role = 'backend-developer';
+    it.each([
+      ['code-logic-reviewer', 'review'],
+      ['code-style-reviewer', 'review'],
+      ['senior-tester', 'tests'],
+      ['visual-reviewer', 'visual-review'],
+    ])('rejects retired role %s with a %s phase hint', async (role, kind) => {
+      recordRetiredRole(role, '# wizard role');
+      const fs = createFakeFileSystem(
+        { [agentsDir]: [file(`${role}.md`), file('team-leader.md')] },
+        {},
+      );
+      const resolver = new AgentRoleResolver(fs.provider);
+      await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
+        'team-leader',
+      ]);
+      const error = await expectRoleError(
+        resolver.resolve(workspaceRoot, role),
+        'unknown_role',
+      );
+      expect(error.message).toContain(`Use the "${kind}" phase instead.`);
+      expect(error.availableRoles).toEqual(['team-leader']);
+    });
+
+    it.each([
+      ['backend-developer', 'no origin entry'],
+      ['backend-developer', 'hash mismatch'],
+      ['senior-tester', 'no origin entry'],
+    ])(
+      'lists and resolves a custom retired slug %s with %s',
+      async (role, origin) => {
         if (origin === 'hash mismatch')
           recordRetiredRole(role, '# wizard role');
         else {

@@ -25,24 +25,6 @@
       "category": "planning"
     },
     {
-      "file": "code-logic-reviewer.md",
-      "name": "Code Logic Reviewer",
-      "description": "Ensures business logic correctness and complete implementations",
-      "category": "qa"
-    },
-    {
-      "file": "code-style-reviewer.md",
-      "name": "Code Style Reviewer",
-      "description": "Focuses on coding standards, patterns, and best practices",
-      "category": "qa"
-    },
-    {
-      "file": "senior-tester.md",
-      "name": "Senior Tester",
-      "description": "Comprehensive quality assurance and test mastery",
-      "category": "qa"
-    },
-    {
       "file": "researcher-expert.md",
       "name": "Research Expert",
       "description": "Deep technical analysis and strategic insights",

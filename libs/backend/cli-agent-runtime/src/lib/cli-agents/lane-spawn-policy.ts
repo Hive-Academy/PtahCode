@@ -16,6 +16,7 @@ import type {
   LaneNetworkMode,
   LanePermissionMode,
   LaneSpawnPolicyRefusal,
+  PhaseKind,
 } from '@ptah-extension/shared';
 import type { LaneModelSource } from './cli-adapters/cli-adapter.interface';
 
@@ -40,12 +41,14 @@ export type LaneSpawnPolicyTranslation = {
 } & (
   | {
       readonly cli: 'codex';
-      readonly sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+      readonly sandboxMode?:
+        'read-only' | 'workspace-write' | 'danger-full-access';
       readonly networkAccess?: boolean;
     }
   | {
       readonly cli: 'claude' | 'ptah-cli';
-      readonly permissionMode?: 'plan' | 'default' | 'acceptEdits' | 'bypassPermissions';
+      readonly permissionMode?:
+        'plan' | 'default' | 'acceptEdits' | 'bypassPermissions';
       readonly allowDangerouslySkipPermissions?: boolean;
     }
   | {
@@ -67,34 +70,53 @@ export function validateLaneSpawnPolicy(
     ? manifest.permissionModes[permission]
     : undefined;
   if (permission && permissionCapability?.state !== 'supported') {
-    refuse(cli, 'permission', requested,
-      permissionCapability?.reason ?? `The ${permission} permission mode is not declared.`);
+    refuse(
+      cli,
+      'permission',
+      requested,
+      permissionCapability?.reason ??
+        `The ${permission} permission mode is not declared.`,
+    );
   }
   const networkCapability = network
     ? manifest.networkModes[network]
     : undefined;
   if (network && networkCapability?.state !== 'supported') {
-    refuse(cli, 'network', requested,
-      networkCapability?.reason ?? `The ${network} network mode is not declared.`);
+    refuse(
+      cli,
+      'network',
+      requested,
+      networkCapability?.reason ??
+        `The ${network} network mode is not declared.`,
+    );
   }
   if (
-    permission && network &&
+    permission &&
+    network &&
     !permissionCapability?.networkModes.includes(network)
   ) {
-    refuse(cli, 'combination', requested,
-      `${permission} with network ${network} is unsupported: ${permissionCapability?.nativeMode ?? permission} does not enforce that combination.`);
+    refuse(
+      cli,
+      'combination',
+      requested,
+      `${permission} with network ${network} is unsupported: ${permissionCapability?.nativeMode ?? permission} does not enforce that combination.`,
+    );
   }
   if (network === 'deny' && !permission) {
-    refuse(cli, 'combination', requested,
-      'Network denial requires an explicit permission mode with native network enforcement.');
+    refuse(
+      cli,
+      'combination',
+      requested,
+      'Network denial requires an explicit permission mode with native network enforcement.',
+    );
   }
   const nativeDescription = [
     permissionCapability?.nativeMode,
     network === 'deny' ? 'network disabled' : undefined,
-  ].filter((part): part is string => part !== undefined).join(', ');
-  return nativeDescription
-    ? { ...requested, nativeDescription }
-    : requested;
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(', ');
+  return nativeDescription ? { ...requested, nativeDescription } : requested;
 }
 
 /** Translate only values that the manifest and Tier 1 evidence support. */
@@ -125,11 +147,26 @@ export function translateLaneSpawnPolicy(
           validated.permission === 'yolo' ? true : undefined,
       };
     case 'copilot':
-      return { cli, requested: validated, nativeDescription, argv: copilotArgv(validated.permission) };
+      return {
+        cli,
+        requested: validated,
+        nativeDescription,
+        argv: copilotArgv(validated.permission),
+      };
     case 'antigravity':
-      return { cli, requested: validated, nativeDescription, argv: antigravityArgv(validated.permission) };
+      return {
+        cli,
+        requested: validated,
+        nativeDescription,
+        argv: antigravityArgv(validated.permission),
+      };
     case 'opencode':
-      return { cli, requested: validated, nativeDescription, argv: opencodeArgv(validated.permission) };
+      return {
+        cli,
+        requested: validated,
+        nativeDescription,
+        argv: opencodeArgv(validated.permission),
+      };
     case 'cursor':
     case 'grok':
     case 'pi':
@@ -144,7 +181,11 @@ function refuse(
   reason: string,
 ): never {
   throw new LaneSpawnPolicyError({
-    code: 'UNSUPPORTED_LANE_POLICY', field, cli, requested, reason,
+    code: 'UNSUPPORTED_LANE_POLICY',
+    field,
+    cli,
+    requested,
+    reason,
   });
 }
 
@@ -152,10 +193,14 @@ function codexSandboxMode(
   permission: LanePermissionMode | undefined,
 ): 'read-only' | 'workspace-write' | 'danger-full-access' | undefined {
   switch (permission) {
-    case 'plan': return 'read-only';
-    case 'auto-edit': return 'workspace-write';
-    case 'yolo': return 'danger-full-access';
-    default: return undefined;
+    case 'plan':
+      return 'read-only';
+    case 'auto-edit':
+      return 'workspace-write';
+    case 'yolo':
+      return 'danger-full-access';
+    default:
+      return undefined;
   }
 }
 
@@ -163,15 +208,22 @@ function claudePermissionMode(
   permission: LanePermissionMode | undefined,
 ): 'plan' | 'default' | 'acceptEdits' | 'bypassPermissions' | undefined {
   switch (permission) {
-    case 'plan': return 'plan';
-    case 'ask': return 'default';
-    case 'auto-edit': return 'acceptEdits';
-    case 'yolo': return 'bypassPermissions';
-    default: return undefined;
+    case 'plan':
+      return 'plan';
+    case 'ask':
+      return 'default';
+    case 'auto-edit':
+      return 'acceptEdits';
+    case 'yolo':
+      return 'bypassPermissions';
+    default:
+      return undefined;
   }
 }
 
-function copilotArgv(permission: LanePermissionMode | undefined): LaneArgvPolicyTranslation {
+function copilotArgv(
+  permission: LanePermissionMode | undefined,
+): LaneArgvPolicyTranslation {
   if (!permission) return { addArgs: [], removeArgs: [] };
   const removeArgs = ['--allow-all-tools', '--allow-all'];
   switch (permission) {
@@ -180,8 +232,12 @@ function copilotArgv(permission: LanePermissionMode | undefined): LaneArgvPolicy
     case 'auto-edit':
       return {
         addArgs: [
-          '--allow-tool=write_file', '--allow-tool=edit', '--allow-tool=replace',
-          '--allow-tool=create_file', '--allow-tool=patch_file', '--allow-tool=write',
+          '--allow-tool=write_file',
+          '--allow-tool=edit',
+          '--allow-tool=replace',
+          '--allow-tool=create_file',
+          '--allow-tool=patch_file',
+          '--allow-tool=write',
           '--allow-tool=insert',
         ],
         removeArgs,
@@ -193,20 +249,30 @@ function copilotArgv(permission: LanePermissionMode | undefined): LaneArgvPolicy
   }
 }
 
-function antigravityArgv(permission: LanePermissionMode | undefined): LaneArgvPolicyTranslation {
+function antigravityArgv(
+  permission: LanePermissionMode | undefined,
+): LaneArgvPolicyTranslation {
   if (!permission) return { addArgs: [], removeArgs: [] };
   const removeArgs = ['--dangerously-skip-permissions'];
   switch (permission) {
-    case 'plan': return { addArgs: ['--mode', 'plan'], removeArgs };
-    case 'auto-edit': return { addArgs: ['--mode', 'accept-edits'], removeArgs };
-    case 'yolo': return { addArgs: ['--dangerously-skip-permissions'], removeArgs };
-    default: return { addArgs: [], removeArgs };
+    case 'plan':
+      return { addArgs: ['--mode', 'plan'], removeArgs };
+    case 'auto-edit':
+      return { addArgs: ['--mode', 'accept-edits'], removeArgs };
+    case 'yolo':
+      return { addArgs: ['--dangerously-skip-permissions'], removeArgs };
+    default:
+      return { addArgs: [], removeArgs };
   }
 }
 
-function opencodeArgv(permission: LanePermissionMode | undefined): LaneArgvPolicyTranslation {
-  if (permission === 'plan') return { addArgs: ['--agent', 'plan'], removeArgs: ['--auto'] };
-  if (permission === 'yolo') return { addArgs: ['--auto'], removeArgs: ['--agent', 'plan'] };
+function opencodeArgv(
+  permission: LanePermissionMode | undefined,
+): LaneArgvPolicyTranslation {
+  if (permission === 'plan')
+    return { addArgs: ['--agent', 'plan'], removeArgs: ['--auto'] };
+  if (permission === 'yolo')
+    return { addArgs: ['--auto'], removeArgs: ['--agent', 'plan'] };
   return { addArgs: [], removeArgs: ['--auto'] };
 }
 
@@ -283,6 +349,8 @@ export interface LaneEffortInput {
   readonly chatEffort?: string;
   /** The resolved role name, for the reviewer/tester default (step 4). */
   readonly roleName?: string;
+  /** From the validated spawn request's optional `phase.kind`. */
+  readonly phaseKind?: PhaseKind;
 }
 
 export interface LaneEffortResolution {
@@ -294,10 +362,20 @@ export interface LaneEffortResolution {
 }
 
 /**
- * A spawn counts as a reviewer or tester when its role name ends in
- * `-reviewer` or equals `senior-tester` (R2.4). No role is neither.
+ * A `review`, `visual-review` or `tests` phase kind wins. Without a phase
+ * kind, a role ending in `-reviewer` or equal to `senior-tester` counts.
  */
-export function isReviewerOrTester(roleName: string | undefined): boolean {
+export function isReviewerOrTester(
+  roleName: string | undefined,
+  phaseKind?: PhaseKind,
+): boolean {
+  if (phaseKind !== undefined) {
+    return (
+      phaseKind === 'review' ||
+      phaseKind === 'visual-review' ||
+      phaseKind === 'tests'
+    );
+  }
   if (roleName === undefined) return false;
   return roleName.endsWith('-reviewer') || roleName === 'senior-tester';
 }
@@ -354,7 +432,7 @@ export function resolveLaneEffort(
     if (fromSetting) return result(fromSetting, 2);
   }
 
-  if (isReviewerOrTester(input.roleName)) {
+  if (isReviewerOrTester(input.roleName, input.phaseKind)) {
     return result(mapEffort(REVIEWER_DEFAULT_EFFORT), 4);
   }
   if (setting !== INHERIT) {

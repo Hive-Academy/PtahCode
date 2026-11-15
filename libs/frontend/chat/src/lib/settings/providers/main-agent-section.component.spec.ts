@@ -79,6 +79,7 @@ describe('MainAgentSectionComponent', () => {
   it('shows the next request\'s provider, model and effort, and the projected D16 badges in its header', () => {
     expect(query('routing-main-provider')?.textContent?.trim()).toBe('Claude (Subscription)');
     expect(query('routing-main-model')?.textContent?.trim()).toBe('Default (chosen by Claude)');
+    expect(query('routing-main-model')?.classList.contains('font-mono')).toBe(false);
     expect(query('routing-node-footer')?.textContent?.trim()).toBe('medium');
     // One description list: the rows Provider, Model and Effort, in that order.
     const list = element.querySelector('[data-ptah-pattern="description-list"] dl');
@@ -108,6 +109,7 @@ describe('MainAgentSectionComponent', () => {
     state.route.set(ready({ ...ROUTE, resolvedModel }));
     fixture.detectChanges();
     expect(query('routing-main-model')?.textContent?.trim()).toBe(text);
+    expect(query('routing-main-model')?.classList.contains('font-mono')).toBe(resolvedModel.kind === 'model');
   });
 
   it('a driver that is not ready "Needs attention"; no driver says to choose one', () => {

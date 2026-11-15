@@ -120,6 +120,32 @@ describe('PtahDescriptionListComponent (data API)', () => {
     expect(row.classList.contains('[@container(min-width:640px)]:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]')).toBe(true);
   });
 
+  it('keeps the default row and host unchanged', () => {
+    const fixture = renderList([{ key: 'name', term: 'Name', value: 'Ada' }]);
+    const host = fixture.nativeElement as HTMLElement;
+    const row = host.querySelector('[data-ptah-description-row]') as HTMLElement;
+    expect(host.hasAttribute('data-density')).toBe(false);
+    expect(row.classList.contains('[@container(min-width:640px)]:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]')).toBe(true);
+    expect(row.classList.contains('grid-cols-[minmax(0,var(--ptah-dl-compact-term-w,7.5rem))_minmax(0,1fr)_auto]')).toBe(false);
+  });
+
+  it('renders compact terms and wrapping values in columns at every width', () => {
+    const fixture = renderList([{ key: 'name', term: 'Name', value: 'A long value that must wrap' }]);
+    fixture.componentRef.setInput('density', 'compact');
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const row = host.querySelector('[data-ptah-description-row]') as HTMLElement;
+    expect(host.getAttribute('data-density')).toBe('compact');
+    expect(row.classList.contains('grid-cols-[minmax(0,var(--ptah-dl-compact-term-w,7.5rem))_minmax(0,1fr)_auto]')).toBe(true);
+    expect(row.classList.contains('items-center')).toBe(true);
+    expect(row.classList.contains('min-h-[calc(var(--ptah-control-h-xs)+var(--ptah-space-1))]')).toBe(true);
+    expect(row.querySelector('dt')?.classList.contains('break-words')).toBe(true);
+    expect(row.querySelector('dt')?.classList.contains('text-xs')).toBe(true);
+    expect(row.querySelector('dd')?.classList.contains('break-words')).toBe(true);
+    expect(row.querySelector('dd')?.classList.contains('text-xs')).toBe(true);
+    expect(row.querySelector('dd')?.classList.contains('truncate')).toBe(false);
+  });
+
   it('uses no raw spacing utility', () => {
     const fixture = renderList(items);
     expect(rawSpacingClasses(fixture.nativeElement as HTMLElement)).toEqual([]);
@@ -146,7 +172,28 @@ class ProjectionHost {
   readonly email = signal<string | null>(null);
 }
 
+@Component({
+  standalone: true,
+  imports: [PtahDescriptionListComponent, PtahDescriptionItemComponent],
+  template: `<ptah-description-list density="compact"><div ptahDescriptionItem term="Key" value="A long value" mono truncate></div></ptah-description-list>`,
+})
+class CompactProjectionHost {}
+
 describe('PtahDescriptionItemComponent (projection API)', () => {
+  it('reads compact density from the parent list', () => {
+    const fixture = TestBed.createComponent(CompactProjectionHost);
+    fixture.detectChanges();
+    const row = (fixture.nativeElement as HTMLElement).querySelector('[ptahDescriptionItem]') as HTMLElement;
+    expect(row.getAttribute('data-density')).toBe('compact');
+    expect(row.classList.contains('grid-cols-[minmax(0,var(--ptah-dl-compact-term-w,7.5rem))_minmax(0,1fr)_auto]')).toBe(true);
+    expect(row.querySelector('dt')?.classList.contains('break-words')).toBe(true);
+    const value = row.querySelector('dd') as HTMLElement;
+    expect(value.classList.contains('break-words')).toBe(true);
+    expect(value.classList.contains('text-xs')).toBe(true);
+    expect(value.classList.contains('truncate')).toBe(false);
+    expect(value.classList.contains('font-[family-name:var(--ptah-font-mono)]')).toBe(true);
+  });
+
   async function render(): Promise<{ fixture: ComponentFixture<ProjectionHost>; root: HTMLElement }> {
     const fixture = TestBed.createComponent(ProjectionHost);
     fixture.detectChanges();

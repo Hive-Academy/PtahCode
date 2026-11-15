@@ -12,12 +12,9 @@
  * - `resetsAt` goes through `normaliseInstant` (the App Server reports epoch
  *   seconds).
  * - Safe account plan, activity and optional allowances pass through.
- * - `quota.rateLimitReachedType` is window evidence (Component 7): the
- *   window it names carries `exhaustion {observedAt, source:'provider-api'}`.
- *   No reached type the App Server defines today names a window (they name
- *   the cause: rate limit, credits, workspace usage), so it lands on every
- *   window at or over 100%; with none, no window is marked. The ledger's
- *   `supersedes` keeps newer live evidence over this reading.
+ * - A bucket reached type exhausts windows at 100%. A denied ordinary-usage
+ *   gate supplies owner evidence only without an exhausted window or usable credits.
+ *   Window resets do not expire that owner evidence because no window explains the gate.
  * - Every non-`available` status passes through. A `stale` answer (the
  *   service's own cache after a failed read) keeps its windows at the time
  *   they were originally read, never the time they were re-served.
@@ -125,6 +122,7 @@ export function mapCodexAccountUsage(
     ...result.quota,
   }];
   const qualified = result.buckets !== undefined;
+  const denied = result.ordinaryUsageAllowed === false;
   const windows = buckets.flatMap((bucket) => [
     toWindow(bucket, bucket.primary, 1, observedAt, qualified),
     toWindow(bucket, bucket.secondary, 2, observedAt, qualified),
@@ -154,11 +152,22 @@ export function mapCodexAccountUsage(
   });
   const active = buckets.find((bucket) => bucket.id === 'codex');
   const activeIndividual = allowances.find((allowance) => allowance.bucketId === 'codex')?.individual;
+  const credits = active?.credits;
+  const creditsDepleted = active?.rateLimitReachedType === 'workspace_owner_credits_depleted' ||
+    active?.rateLimitReachedType === 'workspace_member_credits_depleted';
+  const balance = credits?.balance?.trim() ? Number(credits.balance) : undefined;
+  const noUsableCredits = !active?.creditsUnparsed && (creditsDepleted || (active !== undefined && credits?.unlimited !== true &&
+    !(credits?.hasCredits === true && (balance === undefined || !Number.isFinite(balance) || balance > 0))));
+  const ownerGateDenied = denied && !windows.some((window) => window.exhaustion) && noUsableCredits;
   return {
     status: result.status,
     fetchedAt: observedAt,
     windowSetEstablished: true,
     windows,
+    ...(result.status === 'available' && !ownerGateDenied && { providerOwnerClear: true as const }),
+    ...(ownerGateDenied && {
+      providerOwnerEvidence: { observedAt, source: 'provider-api' as const },
+    }),
     ...(allowances.length > 0 && { allowances }),
     ...(active?.credits && { credits: active.credits }),
     ...(activeIndividual && { individualAllowance: activeIndividual }),
@@ -205,10 +214,9 @@ function toWindow(
       resetsAt,
       resetSource: 'provider-api',
     }),
-    ...(bucket.rateLimitReachedType !== undefined &&
-      atLimit && {
+    ...(bucket.rateLimitReachedType !== undefined && atLimit ? {
         exhaustion: { observedAt, source: 'provider-api' },
-      }),
+      } : {}),
     observedAt,
   };
 }

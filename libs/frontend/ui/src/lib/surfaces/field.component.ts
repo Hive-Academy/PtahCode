@@ -6,6 +6,8 @@ import {
   computed,
   contentChild,
   DestroyRef,
+  Directive,
+  ElementRef,
   effect,
   inject,
   input,
@@ -17,11 +19,33 @@ import { PtahFieldControlRef } from './field-control-ref';
 
 /** `floating`: a notch label. It rests in the box and moves onto the top border. `stacked`: the label is above the box. */
 export type PtahFieldAppearance = 'floating' | 'stacked';
-/** Box height: md 48 px (default), lg 56 px. */
-export type PtahFieldSize = 'md' | 'lg';
+/** Box height: sm 40 px, md 48 px (default), lg 56 px. */
+export type PtahFieldSize = 'sm' | 'md' | 'lg';
 
 const CONTROLS =
-  'input[ptahFieldControl], select[ptahFieldControl], textarea[ptahFieldControl], input[ptahInput], textarea[ptahTextarea], select[ptahSelect], ptah-select';
+  'input[ptahFieldControl], select[ptahFieldControl], textarea[ptahFieldControl], input[ptahInput], textarea[ptahTextarea], select[ptahSelect], ptah-select, button[ptahFieldTrigger], ptah-native-popover';
+
+/** A select-like button, including a button projected into a native popover trigger. */
+@Directive({
+  selector: 'button[ptahFieldTrigger]',
+  standalone: true,
+  providers: [{ provide: PtahFieldControlRef, useExisting: PtahFieldTriggerDirective }],
+  host: { class: 'ptah-field__trigger' },
+})
+export class PtahFieldTriggerDirective implements PtahFieldControlRef {
+  readonly element = inject<ElementRef<HTMLButtonElement>>(ElementRef);
+
+  setFieldInvalid(invalid: boolean): void {
+    if (invalid) this.element.nativeElement.setAttribute('aria-invalid', 'true');
+    else this.element.nativeElement.removeAttribute('aria-invalid');
+  }
+
+  setFieldLabel(labelId: string): void {
+    const button = this.element.nativeElement;
+    // Self-reference includes the visible button text after the field label.
+    button.setAttribute('aria-labelledby', `${labelId} ${button.id}`);
+  }
+}
 
 let fieldId = 0;
 
@@ -127,7 +151,7 @@ export class PtahFieldComponent {
   /** Shows the character count, with `maxlength` when the control has one. */
   readonly counter = input(false, { transform: booleanAttribute });
 
-  readonly control = contentChild(PtahFieldControlRef);
+  readonly control = contentChild(PtahFieldControlRef, { descendants: true });
   readonly controlId = `ptah-field-control-${++fieldId}`;
   readonly labelId = `ptah-field-label-${fieldId}`;
   readonly descriptionId = `ptah-field-description-${fieldId}`;
@@ -220,6 +244,7 @@ export class PtahFieldComponent {
     this.descriptionObserver = new MutationObserver(() => {
       this.syncId(control, this.control()?.controlId);
       this.syncDescription(control);
+      this.control()?.setFieldLabel?.(this.labelId);
     });
     this.descriptionObserver.observe(control, {
       attributes: true,

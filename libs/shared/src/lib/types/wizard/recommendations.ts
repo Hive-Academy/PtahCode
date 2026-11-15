@@ -17,11 +17,7 @@ import type { CodeConventions } from './conventions';
  * Agent category for grouping and display.
  */
 export type AgentCategory =
-  | 'planning'
-  | 'development'
-  | 'qa'
-  | 'specialist'
-  | 'creative';
+  'planning' | 'development' | 'qa' | 'specialist' | 'creative';
 
 /**
  * Agent recommendation based on deep project analysis.
@@ -32,8 +28,8 @@ export type AgentCategory =
  * @example
  * ```typescript
  * const recommendation: AgentRecommendation = {
- *   agentId: 'senior-tester',
- *   agentName: 'Backend Developer',
+ *   agentId: 'software-architect',
+ *   agentName: 'Software Architect',
  *   relevanceScore: 92,
  *   matchedCriteria: [
  *     'NestJS framework detected',
