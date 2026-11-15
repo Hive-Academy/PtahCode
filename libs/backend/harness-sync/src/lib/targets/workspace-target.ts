@@ -38,7 +38,6 @@ import type {
   HarnessTargetHealth,
   HarnessTargetId,
 } from '@ptah-extension/shared';
-import { isRetiredRole } from '@ptah-extension/shared';
 import { isRetiredPtahAgent } from './retired-agent-origin';
 import { throwIfPassAborted } from '../abort/pass-abort';
 import {
@@ -268,6 +267,7 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       retired?.mcpServerKeys ?? [],
     );
     const removals = this.planRemovals(
+      workspaceRoot,
       baseEntries,
       desiredEntries,
       mcpPlan,
@@ -652,6 +652,7 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
    * that root's item id (D-2).
    */
   private planRemovals(
+    workspaceRoot: string,
     baseEntries: ManagedEntries,
     desiredEntries: Map<string, DesiredEntry>,
     mcpPlan: McpFacetPlan,
@@ -665,8 +666,15 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       if (
         entry.kind === 'agent' &&
         this.options.agentTransformer !== undefined &&
-        isRetiredRole(
+        isRetiredPtahAgent(
+          workspaceRoot,
           basenameWithoutSuffix(relPath, this.options.agentTransformer),
+          join(
+            workspaceRoot,
+            '.claude',
+            'agents',
+            `${basenameWithoutSuffix(relPath, this.options.agentTransformer)}.md`,
+          ),
         )
       )
         continue;

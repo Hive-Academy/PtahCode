@@ -35,8 +35,8 @@ Use this trio when you're kicking off something non-trivial. The project manager
 
 The `implement` phase covers backend, frontend, and operations changes. It runs on an assigned executor: a subagent, [CLI lane](/agents/cli-agents/), or session. Older records that name `backend-developer`, `frontend-developer`, or `devops-engineer` map to `implement`.
 
-A custom agent with one of these retired names is treated as the retired role in routing and lane spawn role resolution; rename it to route or spawn it explicitly. Mirror and sync use the setup wizard origin store and the file hash to preserve user-authored or edited files.
-A provider copy of an agent with a retired name is not deleted when the source is removed.
+A custom agent with one of these retired names still maps to `implement` in routing. Lane spawn role resolution, mirror, and sync use the setup wizard origin store and matching workspace file hash, so user-authored or edited agents with these names remain available for lane spawn.
+A provider copy is kept after its source is removed only when the workspace agent file proves it is an unchanged wizard-written agent.
 
 ### Quality & Review
 

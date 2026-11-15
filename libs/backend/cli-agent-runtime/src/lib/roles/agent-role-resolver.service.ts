@@ -7,13 +7,11 @@ import {
 } from '@ptah-extension/platform-core';
 import {
   extractFrontmatterDescription,
+  isRetiredPtahAgent,
   resolveHarnessWorkspaceRoot,
   stripFrontmatter,
 } from '@ptah-extension/harness-sync';
-import {
-  isRetiredRole,
-  type AgentRoleDefinition,
-} from '@ptah-extension/shared';
+import { type AgentRoleDefinition } from '@ptah-extension/shared';
 
 export const MAX_ROLE_BYTES = 64 * 1024;
 
@@ -52,11 +50,10 @@ export class AgentRoleResolver {
 
   async listRoles(workspaceRoot: string): Promise<string[]> {
     this.assertWorkspaceRoot(workspaceRoot);
-    const agentsDir = this.agentsDirFor(
-      resolveHarnessWorkspaceRoot(workspaceRoot),
-    );
+    const harnessRoot = resolveHarnessWorkspaceRoot(workspaceRoot);
+    const agentsDir = this.agentsDirFor(harnessRoot);
     return (await this.listRoleFiles(agentsDir))
-      .filter((file) => !isRetiredRole(file.role))
+      .filter((file) => !this.isRetiredAgent(harnessRoot, agentsDir, file))
       .map((file) => file.role);
   }
 
@@ -76,10 +73,16 @@ export class AgentRoleResolver {
     const agentsDir = this.agentsDirFor(harnessRoot);
     const roleFiles = await this.listRoleFiles(agentsDir);
     const availableRoles = roleFiles
-      .filter((file) => !isRetiredRole(file.role))
+      .filter((file) => !this.isRetiredAgent(harnessRoot, agentsDir, file))
       .map((file) => file.role);
 
-    if (isRetiredRole(role)) {
+    if (
+      roleFiles.some(
+        (file) =>
+          file.role === role &&
+          this.isRetiredAgent(harnessRoot, agentsDir, file),
+      )
+    ) {
       throw new AgentRoleError(
         'unknown_role',
         `Role "${role}" is retired. Use the "implement" phase instead.`,
@@ -155,6 +158,18 @@ export class AgentRoleResolver {
 
   private agentsDirFor(harnessRoot: string): string {
     return join(harnessRoot, '.claude', 'agents');
+  }
+
+  private isRetiredAgent(
+    harnessRoot: string,
+    agentsDir: string,
+    file: { role: string; fileName: string },
+  ): boolean {
+    return isRetiredPtahAgent(
+      harnessRoot,
+      file.role,
+      join(agentsDir, file.fileName),
+    );
   }
 
   private async listRoleFiles(
