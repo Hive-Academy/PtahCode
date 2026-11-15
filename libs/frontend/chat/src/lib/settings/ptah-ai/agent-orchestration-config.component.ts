@@ -186,7 +186,7 @@ const DETECT_FAILED =
                 type="button"
                 ptahIconButton
                 [label]="orderSummary() + '. Edit order'"
-                [tooltipOnFocus]="false"
+                [tooltipOnFocus]="!orderFocusReturning()"
                 aria-haspopup="dialog"
                 [attr.aria-expanded]="orderOpen()"
                 (click)="toggleOrder()"
@@ -425,9 +425,15 @@ export class AgentOrchestrationConfigComponent {
     this.orderOpen.update((open) => !open);
   }
 
+  /** True while the closed popover returns focus to the trigger: no tooltip then. */
+  protected readonly orderFocusReturning = signal(false);
+
   /** Esc, the backdrop and Close end here; the popover returns focus to the trigger. */
   protected closeOrder(): void {
+    this.orderFocusReturning.set(true);
     this.orderOpen.set(false);
+    // The popover restores focus in the next change detection; a later Tab shows the tooltip.
+    setTimeout(() => this.orderFocusReturning.set(false));
   }
 
   /** Focus the dialog title without opening a move-button tooltip. */

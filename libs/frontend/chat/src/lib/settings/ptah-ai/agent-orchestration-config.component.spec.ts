@@ -387,6 +387,23 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
       expect(popover()?.querySelector('button:focus')).toBeNull();
       expect(button('policy-order-edit')?.getAttribute('aria-label')).toContain('Edit order');
     });
+    it('turns off the trigger focus tooltip only while the closed popover returns focus', async () => {
+      await openOrder();
+      jest.useFakeTimers();
+      try {
+        const cmp = fixture.componentInstance as unknown as {
+          closeOrder(): void;
+          orderFocusReturning(): boolean;
+        };
+        expect(cmp.orderFocusReturning()).toBe(false);
+        cmp.closeOrder();
+        expect(cmp.orderFocusReturning()).toBe(true);
+        jest.runOnlyPendingTimers();
+        expect(cmp.orderFocusReturning()).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
     it('opens a dialog listing the installed agents in the matrix order, with 24 px ▲/▼ per row', async () => {
       await openOrder();
       expect(popover()?.getAttribute('role')).toBe('dialog');
