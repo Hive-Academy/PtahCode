@@ -190,7 +190,10 @@ export function buildTaskUpdateTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
-        worktreePath: { type: 'string', description: 'Registered worktree path.' },
+        worktreePath: {
+          type: 'string',
+          description: 'Registered worktree path.',
+        },
         taskId: {
           type: 'string',
           description: 'Task folder name, e.g. TASK_2026_179',
@@ -258,7 +261,10 @@ export function buildTaskGetTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
-        worktreePath: { type: 'string', description: 'Registered worktree path.' },
+        worktreePath: {
+          type: 'string',
+          description: 'Registered worktree path.',
+        },
         taskId: {
           type: 'string',
           description: 'Task folder name, e.g. TASK_2026_179',
@@ -291,7 +297,10 @@ export function buildTaskListTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
-        worktreePath: { type: 'string', description: 'Registered worktree path.' },
+        worktreePath: {
+          type: 'string',
+          description: 'Registered worktree path.',
+        },
         status: {
           type: 'array',
           items: { type: 'string', enum: [...TASK_STATUSES] },
@@ -334,9 +343,15 @@ export function buildTaskCheckTool(): MCPToolDefinition {
       `and invalidTotal giving the full counts; healthy is judged on the ` +
       `full set. Run this when a task folder you expect is missing from the ` +
       `board.`,
-    inputSchema: { type: 'object', properties: {
-      worktreePath: { type: 'string', description: 'Registered worktree path.' },
-    } },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worktreePath: {
+          type: 'string',
+          description: 'Registered worktree path.',
+        },
+      },
+    },
     annotations: { readOnlyHint: true },
   };
 }
@@ -763,12 +778,14 @@ export function buildAgentSpawnTool({
         permission: {
           type: 'string',
           enum: ['plan', 'ask', 'auto-edit', 'yolo'],
-          description: 'Requested lane permission mode. Unsupported choices are refused before spawn.',
+          description:
+            'Requested lane permission mode. Unsupported choices are refused before spawn.',
         },
         network: {
           type: 'string',
           enum: ['allow', 'deny'],
-          description: 'Requested network mode. Unsupported choices are refused before spawn.',
+          description:
+            'Requested network mode. Unsupported choices are refused before spawn.',
         },
         role: {
           type: 'string',
@@ -780,12 +797,14 @@ export function buildAgentSpawnTool({
         },
         phase: {
           type: 'object',
-          description: 'Validated phase dispatch from the host: version, kind, rendered text, definition, tool profile and optional resolved skills.',
+          description:
+            'Validated phase dispatch from the host: version, kind, rendered text, definition, tool profile and optional resolved skills.',
         },
         skills: {
           type: 'array',
           items: { type: 'object' },
-          description: 'Host-resolved skills with name and path or text. Resolved skill text is included in the spawn prompt and reported as skillDelivery inline.',
+          description:
+            'Host-resolved skills with name and path or text. Resolved skill text is included in the spawn prompt and reported as skillDelivery inline.',
         },
         effort: {
           type: 'string',
@@ -809,7 +828,16 @@ export function buildAgentSpawnTool({
           type: 'boolean',
           description:
             'Spawn even when ptah_agent_list shows this lane at its plan limit ' +
-            'or in a cooldown. Use only when the limit is known to be wrong.',
+            'or in a cooldown. Use only when the limit is known to be wrong. ' +
+            'force: true always starts a new lane, even with an idempotencyKey.',
+        },
+        idempotencyKey: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          description:
+            'A retry with the same key replays the first spawn and starts no second lane. ' +
+            'force: true always starts a new lane.',
         },
       },
       required: ['task'],
@@ -935,15 +963,18 @@ export function buildAgentMessageTool(): MCPToolDefinition {
         delivery: {
           type: 'string',
           enum: ['queue', 'now', 'steer'],
-          description: 'queue (default) waits for the next turn; now requests immediate delivery; steer requires live steering.',
+          description:
+            'queue (default) waits for the next turn; now requests immediate delivery; steer requires live steering.',
         },
         allowPartialTurnLoss: {
           type: 'boolean',
-          description: 'Confirm loss of partial turn work when immediate delivery requires interrupt and resume.',
+          description:
+            'Confirm loss of partial turn work when immediate delivery requires interrupt and resume.',
         },
         idempotencyKey: {
           type: 'string',
-          description: '1-128 characters of [A-Za-z0-9._:-], unique per target. Needs a session identity.',
+          description:
+            '1-128 characters of [A-Za-z0-9._:-], unique per target. Needs a session identity.',
         },
       },
       required: ['agentId', 'message'],
@@ -964,7 +995,7 @@ export function buildAgentMessageStatusTool(): MCPToolDefinition {
       'and agentId (they differ after a resume), attemptCount, lastError, ' +
       'nextRetryAt, sender and ackState. "settled" means the turn ended, not ' +
       'that the agent acted on the message. An "outcome-unknown" message may ' +
-      'already have run. ackState is the agent\'s own acknowledgment: ' +
+      "already have run. ackState is the agent's own acknowledgment: " +
       '"pending" (not yet), "read", "acted", "rejected", or "unavailable" ' +
       '(the agent cannot call Ptah tools). A lane sees only messages it sent ' +
       'or received.',
@@ -992,9 +1023,19 @@ export function buildAgentMessageControlTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
-        agentId: { type: 'string', description: 'Agent ID the message was sent to' },
-        messageId: { type: 'string', description: 'Message ID from ptah_agent_message' },
-        action: { type: 'string', enum: ['retry', 'cancel'], description: 'retry or cancel' },
+        agentId: {
+          type: 'string',
+          description: 'Agent ID the message was sent to',
+        },
+        messageId: {
+          type: 'string',
+          description: 'Message ID from ptah_agent_message',
+        },
+        action: {
+          type: 'string',
+          enum: ['retry', 'cancel'],
+          description: 'retry or cancel',
+        },
         confirmDuplicateRisk: {
           type: 'boolean',
           description: 'Confirm a retry that may deliver the message twice.',
@@ -1022,8 +1063,15 @@ export function buildAgentMessageAckTool(): MCPToolDefinition {
     inputSchema: {
       type: 'object',
       properties: {
-        messageId: { type: 'string', description: 'Message ID from the message header' },
-        state: { type: 'string', enum: ['read', 'acted', 'rejected'], description: 'read, acted or rejected' },
+        messageId: {
+          type: 'string',
+          description: 'Message ID from the message header',
+        },
+        state: {
+          type: 'string',
+          enum: ['read', 'acted', 'rejected'],
+          description: 'read, acted or rejected',
+        },
         note: {
           type: 'string',
           description: `Optional short note, at most ${MAX_AGENT_ACK_NOTE_LENGTH} characters.`,
@@ -1072,7 +1120,8 @@ export function buildAgentReportTool(): MCPToolDefinition {
         },
         final: {
           type: 'boolean',
-          description: 'Closing success report, about to exit; held briefly for completion.',
+          description:
+            'Closing success report, about to exit; held briefly for completion.',
         },
       },
       required: ['message'],
