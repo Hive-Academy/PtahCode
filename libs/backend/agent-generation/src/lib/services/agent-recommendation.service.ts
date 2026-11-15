@@ -9,7 +9,7 @@
  * NOTE: this catalog is the wizard's picker source and MUST stay in sync with
  * `libs/backend/agent-generation/templates/agents/*.template.md`. An agent that
  * exists as a template but is missing here is never offered in the wizard and
- * therefore never generated (historical `visual-reviewer` drop).
+ * therefore never generated.
  *
  * @module @ptah-extension/agent-generation/services
  */
@@ -67,30 +67,6 @@ const AGENT_CATALOG: AgentMetadata[] = [
     icon: 'team',
   },
   {
-    id: 'senior-tester',
-    name: 'Senior Tester',
-    description:
-      'Creates comprehensive test suites, verifies implementations, and ensures quality',
-    category: 'qa',
-    icon: 'test',
-  },
-  {
-    id: 'code-style-reviewer',
-    name: 'Code Style Reviewer',
-    description:
-      'Reviews code for formatting, naming conventions, and style consistency',
-    category: 'qa',
-    icon: 'style',
-  },
-  {
-    id: 'code-logic-reviewer',
-    name: 'Code Logic Reviewer',
-    description:
-      'Reviews business logic, identifies bugs, and validates implementation correctness',
-    category: 'qa',
-    icon: 'logic',
-  },
-  {
     id: 'researcher-expert',
     name: 'Researcher Expert',
     description:
@@ -121,14 +97,6 @@ const AGENT_CATALOG: AgentMetadata[] = [
       'Creates documentation, blog posts, video scripts, and marketing content',
     category: 'creative',
     icon: 'content',
-  },
-  {
-    id: 'visual-reviewer',
-    name: 'Visual Reviewer',
-    description:
-      'Hunts UI/UX visual bugs, responsive breakpoints, and accessibility issues via browser testing',
-    category: 'qa',
-    icon: 'visual',
   },
 ];
 

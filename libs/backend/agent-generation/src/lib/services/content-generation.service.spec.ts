@@ -1003,7 +1003,7 @@ Default
 
       const template = {
         ...baseTemplate,
-        name: 'code-logic-reviewer',
+        name: 'software-architect',
         content: `<!-- LLM:SECTION_A -->
 Default
 <!-- /LLM:SECTION_A -->`,
@@ -1033,7 +1033,7 @@ Default
         "When an available skill's description matches this role's work, the generated role instructions must name that skill by its exact id and say to load it before that work; never name a skill that is not in the list.",
       );
       expect(callArgs.prompt).toContain(
-        "name that skill by its exact id and say to load it before that work; never name a skill that is not in the list.",
+        'name that skill by its exact id and say to load it before that work; never name a skill that is not in the list.',
       );
       expect(callArgs.systemPromptAppend).not.toContain('where relevant');
       expect(callArgs.systemPromptAppend).toContain('FORMATTED_SKILLS_HERE');
@@ -1204,7 +1204,7 @@ default
 
       const template = {
         ...baseTemplate,
-        name: 'code-logic-reviewer',
+        name: 'software-architect',
         content: `<!-- LLM:S -->
 default
 <!-- /LLM:S -->`,
@@ -1221,7 +1221,7 @@ default
         7,
         'sdk-block-id',
       );
-      expect(id).toMatch(/^gen-code-logic-reviewer-7-\d+$/);
+      expect(id).toMatch(/^gen-software-architect-7-\d+$/);
     });
 
     it('should fall back to "unknown" agentId in toolCallIdFactory when agentId is empty', async () => {
@@ -2430,7 +2430,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
   it('carries every rubric instruction verbatim in a RUBRIC RULES block', async () => {
     const { service, execute } = build(knownPolicy());
     await service.generateContent(
-      templateFor('code-logic-reviewer'),
+      templateFor('software-architect'),
       mockContext,
     );
 
@@ -2446,7 +2446,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
     stubLlmFromPrompt(execute);
 
     const result = await service.generateContent(
-      templateFor('code-logic-reviewer'),
+      templateFor('software-architect'),
       mockContext,
       { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
     );
@@ -2473,7 +2473,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
     const policy = knownPolicy([ROLE_SKILL.skillId]);
     const { service, execute } = build(policy);
     await service.generateContent(
-      templateFor('code-logic-reviewer'),
+      templateFor('software-architect'),
       mockContext,
       { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
     );
@@ -2494,7 +2494,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
     };
     const unreadable = build(failing);
     await unreadable.service.generateContent(
-      templateFor('code-logic-reviewer'),
+      templateFor('software-architect'),
       mockContext,
       { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
     );
@@ -2508,7 +2508,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
 
     const absent = build(null);
     await absent.service.generateContent(
-      templateFor('code-logic-reviewer'),
+      templateFor('software-architect'),
       mockContext,
       { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
     );
@@ -2581,7 +2581,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
     stubLlmFromPrompt(execute);
 
     const result = await service.generateContent(
-      templateFor('code-logic-reviewer'),
+      templateFor('software-architect'),
       mockContext,
       { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
     );

@@ -329,6 +329,18 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     },
   );
 
+  it('does not infer reviewer effort from a name in an implement phase', async () => {
+    const f = fixture();
+    f.defaults.mockReturnValue({});
+    await f.adapter.runSdk({
+      ...f.input,
+      phaseKind: 'implement',
+      role: { name: 'custom-reviewer', body: '' } as AgentRoleDefinition,
+    });
+    expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+    f.finish(0);
+  });
+
   it('lets an explicit model win over the Claude model tier', async () => {
     const f = fixture();
     await f.adapter.runSdk({ ...f.input, model: 'future-model' });

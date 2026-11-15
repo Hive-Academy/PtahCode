@@ -25,15 +25,26 @@ import {
 import { CliDetectionService } from './cli-detection.service';
 import type { CliLaneBudgets } from './cli-adapters/cli-adapter.interface';
 import type { CliAdapter } from './cli-adapters/cli-adapter.interface';
-import type { CliAdapterManifest, SpawnAgentRequest } from '@ptah-extension/shared';
-import { parseAgentBudgetSetting, DEFAULT_AGENT_BUDGET_SETTINGS, type AgentBudgetSettings } from '@ptah-extension/shared';
+import type {
+  CliAdapterManifest,
+  SpawnAgentRequest,
+} from '@ptah-extension/shared';
+import {
+  parseAgentBudgetSetting,
+  DEFAULT_AGENT_BUDGET_SETTINGS,
+  type AgentBudgetSettings,
+} from '@ptah-extension/shared';
 import { translateLaneSpawnPolicy } from './lane-spawn-policy';
 import { resolveCliLanePolicy } from './cli-lane-policy-resolver';
-import { CODEX_DEFAULT_LANE_BUDGETS, resolveCodexLaneBudgets } from './cli-adapters/codex/codex-lane-budgets';
+import {
+  CODEX_DEFAULT_LANE_BUDGETS,
+  resolveCodexLaneBudgets,
+} from './cli-adapters/codex/codex-lane-budgets';
 import {
   resolveLaneEffort,
   resolveLaneModel,
   type LaneEffortResolution,
+  type LaneEffortInput,
   type LaneModelResolution,
 } from './lane-spawn-policy';
 import {
@@ -109,7 +120,9 @@ export class AgentSpawnEnvironment {
      */
     @inject(PLATFORM_TOKENS.CALLER_WORKSPACE_RESOLVER, { isOptional: true })
     private readonly callerWorkspaceResolver: ICallerWorkspaceResolver | null = null,
-    @inject(CLI_AGENT_RUNTIME_TOKENS.AGENT_SPAWN_TRUSTED_ROOTS, { isOptional: true })
+    @inject(CLI_AGENT_RUNTIME_TOKENS.AGENT_SPAWN_TRUSTED_ROOTS, {
+      isOptional: true,
+    })
     private readonly trustedRoots: IAgentSpawnTrustedRoots | null = null,
   ) {}
 
@@ -133,7 +146,11 @@ export class AgentSpawnEnvironment {
    */
   resolveReasoningEffort(
     cli: CliType,
-    spawn: { readonly effort?: string; readonly roleName?: string } = {},
+    spawn: {
+      readonly effort?: string;
+      readonly roleName?: string;
+      readonly phaseKind?: LaneEffortInput['phaseKind'];
+    } = {},
   ): LaneEffortResolution {
     const settingKey = AgentSpawnEnvironment.EFFORT_CONFIG_KEYS[cli];
     const setting = settingKey
@@ -149,6 +166,7 @@ export class AgentSpawnEnvironment {
       setting,
       chatEffort: this.reasoningSettings.effort.get(),
       roleName: spawn.roleName,
+      phaseKind: spawn.phaseKind,
     });
   }
 
@@ -165,25 +183,57 @@ export class AgentSpawnEnvironment {
   /** Validate explicit spawn controls before an adapter creates a process. */
   resolveLanePolicy(
     adapter: CliAdapter,
-    request: Pick<SpawnAgentRequest, 'permission' | 'network' | 'parentLevel' | 'resumePolicy'>,
+    request: Pick<
+      SpawnAgentRequest,
+      'permission' | 'network' | 'parentLevel' | 'resumePolicy'
+    >,
   ) {
-    const saved = this.workspace.getConfiguration<unknown>('ptah', 'agentOrchestration.cliLaneDefaults', {});
+    const saved = this.workspace.getConfiguration<unknown>(
+      'ptah',
+      'agentOrchestration.cliLaneDefaults',
+      {},
+    );
     const absent = Symbol('codex sandbox mode absent');
-    const storedLegacy = adapter.name === 'codex'
-      ? this.workspace.getConfiguration<string | typeof absent>('ptah', 'agentOrchestration.codexSandboxMode', absent)
-      : absent;
+    const storedLegacy =
+      adapter.name === 'codex'
+        ? this.workspace.getConfiguration<string | typeof absent>(
+            'ptah',
+            'agentOrchestration.codexSandboxMode',
+            absent,
+          )
+        : absent;
     const legacy = storedLegacy === absent ? undefined : storedLegacy;
-    return AgentSpawnEnvironment.resolveLanePolicy(adapter, request, saved, legacy);
+    return AgentSpawnEnvironment.resolveLanePolicy(
+      adapter,
+      request,
+      saved,
+      legacy,
+    );
   }
 
   static resolveLanePolicy(
     adapter: { readonly name: CliType; capabilities(): CliAdapterManifest },
-    request: Pick<SpawnAgentRequest, 'permission' | 'network' | 'parentLevel' | 'resumePolicy'>,
+    request: Pick<
+      SpawnAgentRequest,
+      'permission' | 'network' | 'parentLevel' | 'resumePolicy'
+    >,
     saved: unknown = {},
     legacyCodexMode?: string,
   ) {
-    const resolved = resolveCliLanePolicy({ cli: adapter.name, manifest: adapter.capabilities(), request, saved, legacyCodexMode, parentLevel: request.parentLevel, resumePolicy: request.resumePolicy });
-    return translateLaneSpawnPolicy(adapter.name, adapter.capabilities(), resolved);
+    const resolved = resolveCliLanePolicy({
+      cli: adapter.name,
+      manifest: adapter.capabilities(),
+      request,
+      saved,
+      legacyCodexMode,
+      parentLevel: request.parentLevel,
+      resumePolicy: request.resumePolicy,
+    });
+    return translateLaneSpawnPolicy(
+      adapter.name,
+      adapter.capabilities(),
+      resolved,
+    );
   }
 
   /** The lane's model and where it came from (see `resolveLaneModel`). */
@@ -215,10 +265,26 @@ export class AgentSpawnEnvironment {
   resolveLaneBudgets(): CliLaneBudgets {
     const defaults = CODEX_DEFAULT_LANE_BUDGETS;
     const resolved = resolveCodexLaneBudgets({
-      warnRatio: this.workspace.getConfiguration('ptah', 'agentBudget.warnRatio', DEFAULT_AGENT_BUDGET_SETTINGS.warnRatio),
-      handoffContextTokens: this.workspace.getConfiguration('ptah', 'agentBudget.handoffContextTokens', DEFAULT_AGENT_BUDGET_SETTINGS.handoffContextTokens),
-      toolOutputTokenLimit: this.workspace.getConfiguration('ptah', 'compaction.toolOutputBudgetTokens', defaults.toolOutputTokenLimit),
-      webSearch: this.workspace.getConfiguration('ptah', 'agentOrchestration.codexWebSearch', defaults.webSearch),
+      warnRatio: this.workspace.getConfiguration(
+        'ptah',
+        'agentBudget.warnRatio',
+        DEFAULT_AGENT_BUDGET_SETTINGS.warnRatio,
+      ),
+      handoffContextTokens: this.workspace.getConfiguration(
+        'ptah',
+        'agentBudget.handoffContextTokens',
+        DEFAULT_AGENT_BUDGET_SETTINGS.handoffContextTokens,
+      ),
+      toolOutputTokenLimit: this.workspace.getConfiguration(
+        'ptah',
+        'compaction.toolOutputBudgetTokens',
+        defaults.toolOutputTokenLimit,
+      ),
+      webSearch: this.workspace.getConfiguration(
+        'ptah',
+        'agentOrchestration.codexWebSearch',
+        defaults.webSearch,
+      ),
     });
     for (const warning of resolved.warnings) {
       if (this.warnedLaneGuard.has(warning)) continue;
@@ -256,22 +322,46 @@ export class AgentSpawnEnvironment {
 
   /** Call `listener` when any `ptah.agentBudget.*` setting changes. */
   onAgentBudgetSettingsChanged(listener: () => void): { dispose(): void } {
-    return this.workspace.onDidChangeConfiguration?.((event) => {
-      if (event.affectsConfiguration('ptah.agentBudget')) listener();
-    }) ?? { dispose() { /* Test hosts without a configuration event. */ } };
+    return (
+      this.workspace.onDidChangeConfiguration?.((event) => {
+        if (event.affectsConfiguration('ptah.agentBudget')) listener();
+      }) ?? {
+        dispose() {
+          /* Test hosts without a configuration event. */
+        },
+      }
+    );
   }
 
   /** Read the live budget settings through the same workspace configuration surface. */
   resolveAgentBudgetSettings(): AgentBudgetSettings {
     const defaults = DEFAULT_AGENT_BUDGET_SETTINGS;
     const values = {
-      warnRatio: this.workspace.getConfiguration('ptah', 'agentBudget.warnRatio', defaults.warnRatio),
-      stopWeightedTokens: this.workspace.getConfiguration('ptah', 'agentBudget.stopWeightedTokens', defaults.stopWeightedTokens),
-      handoffContextTokens: this.workspace.getConfiguration('ptah', 'agentBudget.handoffContextTokens', defaults.handoffContextTokens),
-      maxDurationMin: this.workspace.getConfiguration('ptah', 'agentBudget.maxDurationMin', defaults.maxDurationMin),
+      warnRatio: this.workspace.getConfiguration(
+        'ptah',
+        'agentBudget.warnRatio',
+        defaults.warnRatio,
+      ),
+      stopWeightedTokens: this.workspace.getConfiguration(
+        'ptah',
+        'agentBudget.stopWeightedTokens',
+        defaults.stopWeightedTokens,
+      ),
+      handoffContextTokens: this.workspace.getConfiguration(
+        'ptah',
+        'agentBudget.handoffContextTokens',
+        defaults.handoffContextTokens,
+      ),
+      maxDurationMin: this.workspace.getConfiguration(
+        'ptah',
+        'agentBudget.maxDurationMin',
+        defaults.maxDurationMin,
+      ),
     };
     const resolved = { ...defaults };
-    for (const key of Object.keys(defaults) as Array<keyof AgentBudgetSettings>) {
+    for (const key of Object.keys(defaults) as Array<
+      keyof AgentBudgetSettings
+    >) {
       const parsed = parseAgentBudgetSetting(key, values[key]);
       if (parsed !== undefined) {
         resolved[key] = parsed;
@@ -279,7 +369,9 @@ export class AgentSpawnEnvironment {
         const signature = `agentBudget.${key}\u0000${typeof values[key]}:${String(values[key])}`;
         if (!this.warnedLaneGuard.has(signature)) {
           this.warnedLaneGuard.add(signature);
-          this.logger.warn(`[AgentSpawnEnvironment] Invalid agent budget setting ${key}; using default`);
+          this.logger.warn(
+            `[AgentSpawnEnvironment] Invalid agent budget setting ${key}; using default`,
+          );
         }
       }
     }
@@ -489,17 +581,30 @@ export class AgentSpawnEnvironment {
       throw new Error(`Cannot resolve working directory scope: ${message}`);
     }
     const resolvedRoots = await Promise.allSettled(
-      (this.trustedRoots?.roots() ?? []).map((root) => fsPromises.realpath(root)),
+      (this.trustedRoots?.roots() ?? []).map((root) =>
+        fsPromises.realpath(root),
+      ),
     );
     const realTrustedRoots = resolvedRoots.flatMap((result) => {
       if (result.status === 'fulfilled') return [result.value];
-      this.logger.warn('[AgentSpawnEnvironment] Skipping unresolved trusted root', {
-        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-      });
+      this.logger.warn(
+        '[AgentSpawnEnvironment] Skipping unresolved trusted root',
+        {
+          error:
+            result.reason instanceof Error
+              ? result.reason.message
+              : String(result.reason),
+        },
+      );
       return [];
     });
 
-    if (!isPathWithinRoots(realDirectory, [realWorkspaceRoot, ...realTrustedRoots])) {
+    if (
+      !isPathWithinRoots(realDirectory, [
+        realWorkspaceRoot,
+        ...realTrustedRoots,
+      ])
+    ) {
       throw new Error(
         `Working directory must be within workspace root. ` +
           `Got: ${dir}, Expected root: ${workspaceRoot}`,

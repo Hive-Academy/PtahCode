@@ -20,12 +20,7 @@
  * 6. complete - Generation complete, show summary
  */
 export type WizardStep =
-  | 'welcome'
-  | 'scan'
-  | 'review'
-  | 'select'
-  | 'generate'
-  | 'complete';
+  'welcome' | 'scan' | 'review' | 'select' | 'generate' | 'complete';
 
 /**
  * Wizard session state tracking.
@@ -39,7 +34,7 @@ export type WizardStep =
  *   currentStep: 'review',
  *   startedAt: new Date(),
  *   projectContext: {...},
- *   selectedAgentIds: ['senior-tester', 'senior-tester']
+ *   selectedAgentIds: ['software-architect', 'software-architect']
  * };
  * ```
  */
@@ -368,6 +363,4 @@ export interface WizardCancelMessage extends WizardRpcMessageBase {
  * Use for type narrowing in message handlers.
  */
 export type WizardRpcMessage =
-  | WizardStartMessage
-  | WizardSelectionMessage
-  | WizardCancelMessage;
+  WizardStartMessage | WizardSelectionMessage | WizardCancelMessage;

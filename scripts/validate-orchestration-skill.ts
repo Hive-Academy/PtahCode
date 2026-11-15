@@ -16,7 +16,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import matter from 'gray-matter';
 import * as ts from 'typescript';
-import { PHASE_KINDS, PHASE_CONTRACT_VERSION, MACHINE_CAPABILITIES } from '../libs/shared/src/lib/types/phase-contract.types';
+import {
+  PHASE_KINDS,
+  PHASE_CONTRACT_VERSION,
+  MACHINE_CAPABILITIES,
+} from '../libs/shared/src/lib/types/phase-contract.types';
+import { RETIRED_ROLES } from '../libs/shared/src/lib/types/retired-roles';
 
 /**
  * Represents a validation error found during checks.
@@ -112,20 +117,17 @@ const REQUIRED_AGENTS: readonly string[] = [
   'project-manager',
   'software-architect',
   'team-leader',
-  'senior-tester',
-  'code-style-reviewer',
-  'code-logic-reviewer',
   'researcher-expert',
   'modernization-detector',
   'ui-ux-designer',
-  'visual-reviewer',
   'technical-content-writer',
 ] as const;
 
-/** Retired role names remain documented only as phase aliases. */
-const IMPLEMENT_ALIASES: readonly string[] = [
-  'backend-developer', 'frontend-developer', 'devops-engineer',
-] as const;
+/** Each retired role must remain documented as an alias of its phase kind. */
+const RETIRED_ALIASES = RETIRED_ROLES.map(({ slug, phaseKind }) => ({
+  slug,
+  kind: phaseKind,
+}));
 
 /** Required sections in SKILL.md */
 const SKILL_REQUIRED_SECTIONS: readonly RequiredSection[] = [
@@ -172,26 +174,51 @@ const LANE_SKILL_FILE = path.join(
 );
 const TEAM_LEADER_TEMPLATE = path.join(AGENTS_DIR, 'team-leader.template.md');
 const REFERENCES_DIR: string = path.join(SKILL_ROOT, 'references');
-const MIRROR_ROOT = path.join(process.cwd(), '.claude', 'skills', 'orchestration');
+const MIRROR_ROOT = path.join(
+  process.cwd(),
+  '.claude',
+  'skills',
+  'orchestration',
+);
 const PHASE_HEADINGS = [
-  'Method', 'Output contract', 'Return value', 'Refusals', 'Escalation protocol',
+  'Method',
+  'Output contract',
+  'Return value',
+  'Refusals',
+  'Escalation protocol',
 ] as const;
-const REVIEW_KINDS: readonly string[] = ['review', 'document-review', 'visual-review'];
+const REVIEW_KINDS: readonly string[] = [
+  'review',
+  'document-review',
+  'visual-review',
+];
 
 function error(file: string, message: string): ValidationError {
-  return { file, type: 'content', message, suggestion: 'Correct the orchestration skill contract' };
+  return {
+    file,
+    type: 'content',
+    message,
+    suggestion: 'Correct the orchestration skill contract',
+  };
 }
 
-function listFiles(root: string, errors: ValidationError[] = [], relativeRoot = ''): string[] {
+function listFiles(
+  root: string,
+  errors: ValidationError[] = [],
+  relativeRoot = '',
+): string[] {
   if (!fs.existsSync(root)) return [];
-  return fs.readdirSync(root, { withFileTypes: true }).flatMap(entry => {
+  return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const absolute = path.join(root, entry.name);
     const relative = path.join(relativeRoot, entry.name).replace(/\\/g, '/');
     if (entry.isSymbolicLink()) {
       errors.push(error(relative, `Symbolic link in skill copy: ${relative}`));
       return [];
     }
-    if (entry.isDirectory()) return listFiles(absolute, errors, relative).map(file => path.join(entry.name, file));
+    if (entry.isDirectory())
+      return listFiles(absolute, errors, relative).map((file) =>
+        path.join(entry.name, file),
+      );
     return entry.isFile() ? [entry.name] : [];
   });
 }
@@ -202,8 +229,17 @@ function validateMirror(): ValidationError[] {
   const mirrorFiles = new Set(listFiles(MIRROR_ROOT, errors));
   for (const relative of new Set([...pluginFiles, ...mirrorFiles])) {
     if (!pluginFiles.has(relative) || !mirrorFiles.has(relative)) {
-      errors.push(error(relative, `Mirror file missing: ${relative} in ${pluginFiles.has(relative) ? '.claude' : 'plugin'} copy`));
-    } else if (!fs.readFileSync(path.join(SKILL_ROOT, relative)).equals(fs.readFileSync(path.join(MIRROR_ROOT, relative)))) {
+      errors.push(
+        error(
+          relative,
+          `Mirror file missing: ${relative} in ${pluginFiles.has(relative) ? '.claude' : 'plugin'} copy`,
+        ),
+      );
+    } else if (
+      !fs
+        .readFileSync(path.join(SKILL_ROOT, relative))
+        .equals(fs.readFileSync(path.join(MIRROR_ROOT, relative)))
+    ) {
       errors.push(error(relative, `Mirror bytes differ: ${relative}`));
     }
   }
@@ -211,15 +247,32 @@ function validateMirror(): ValidationError[] {
 }
 
 function retiredRoles(): string[] {
-  const sourcePath = path.join(process.cwd(), 'tools', 'role-census', 'check-role-census.ts');
-  const source = ts.createSourceFile(sourcePath, fs.readFileSync(sourcePath, 'utf8'), ts.ScriptTarget.Latest, true);
+  const sourcePath = path.join(
+    process.cwd(),
+    'tools',
+    'role-census',
+    'check-role-census.ts',
+  );
+  const source = ts.createSourceFile(
+    sourcePath,
+    fs.readFileSync(sourcePath, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+  );
   for (const statement of source.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
-      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== 'ROLES' || !declaration.initializer || !ts.isArrayLiteralExpression(declaration.initializer)) continue;
+      if (
+        !ts.isIdentifier(declaration.name) ||
+        declaration.name.text !== 'ROLES' ||
+        !declaration.initializer ||
+        !ts.isArrayLiteralExpression(declaration.initializer)
+      )
+        continue;
       const roles = declaration.initializer.elements;
-      if (!roles.length || !roles.every(ts.isStringLiteral)) throw new Error('Role census ROLES must contain string literals');
-      return roles.map(role => (role as ts.StringLiteral).text);
+      if (!roles.length || !roles.every(ts.isStringLiteral))
+        throw new Error('Role census ROLES must contain string literals');
+      return roles.map((role) => (role as ts.StringLiteral).text);
     }
   }
   throw new Error('Role census ROLES list was not found');
@@ -227,21 +280,31 @@ function retiredRoles(): string[] {
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown> : undefined;
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 // Keep heading rules aligned with libs/backend/lane-routing/src/lib/contracts/phase-definition-resolver.ts.
 function maskFences(body: string): string {
   let fence: { marker: string; length: number } | undefined;
-  return body.replace(/^.*(?:\n|$)/gm, line => {
+  return body.replace(/^.*(?:\n|$)/gm, (line) => {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (!fence && marker) fence = { marker: marker.charAt(0), length: marker.length };
-    else if (fence && marker?.charAt(0) === fence.marker && marker.length >= fence.length) fence = undefined;
+    if (!fence && marker)
+      fence = { marker: marker.charAt(0), length: marker.length };
+    else if (
+      fence &&
+      marker?.charAt(0) === fence.marker &&
+      marker.length >= fence.length
+    )
+      fence = undefined;
     return fence || marker ? line.replace(/[^\r\n]/g, ' ') : line;
   });
 }
 
-function validatePhase(file: string, roles: readonly string[]): ValidationError[] {
+function validatePhase(
+  file: string,
+  roles: readonly string[],
+): ValidationError[] {
   const relative = path.relative(SKILL_ROOT, file).replace(/\\/g, '/');
   const content = fs.readFileSync(file, 'utf8');
   const errors: ValidationError[] = [];
@@ -249,22 +312,106 @@ function validatePhase(file: string, roles: readonly string[]): ValidationError[
   try {
     data = record(matter(content, { language: 'yaml' }).data);
   } catch (caught: unknown) {
-    return [error(relative, `Invalid phase YAML: ${caught instanceof Error ? caught.message : String(caught)}`)];
+    return [
+      error(
+        relative,
+        `Invalid phase YAML: ${caught instanceof Error ? caught.message : String(caught)}`,
+      ),
+    ];
   }
-  if (!content.startsWith('---')) errors.push(error(relative, 'Missing phase YAML frontmatter'));
-  const topKeys = ['version', 'kind', 'input', 'deliverable', 'verdict', 'acceptanceStep', 'requiredCapabilities', 'machineCapabilities', 'toolProfile'];
-  for (const key of Object.keys(data ?? {})) if (!topKeys.includes(key)) errors.push(error(relative, `Unknown phase field: ${key}`));
-  if (data?.version !== 1 && data?.version !== PHASE_CONTRACT_VERSION) errors.push(error(relative, `Invalid phase field: version must be 1 or ${PHASE_CONTRACT_VERSION}`));
-  if (data?.version === PHASE_CONTRACT_VERSION && data.machineCapabilities === undefined) errors.push(error(relative, 'Invalid phase field: version 2 requires machineCapabilities'));
-  if (data?.machineCapabilities !== undefined && (!Array.isArray(data.machineCapabilities) || !data.machineCapabilities.every(value => MACHINE_CAPABILITIES.includes(value as typeof MACHINE_CAPABILITIES[number])))) errors.push(error(relative, 'Invalid phase field: machineCapabilities contains an unknown token'));
+  if (!content.startsWith('---'))
+    errors.push(error(relative, 'Missing phase YAML frontmatter'));
+  const topKeys = [
+    'version',
+    'kind',
+    'input',
+    'deliverable',
+    'verdict',
+    'acceptanceStep',
+    'requiredCapabilities',
+    'machineCapabilities',
+    'toolProfile',
+  ];
+  for (const key of Object.keys(data ?? {}))
+    if (!topKeys.includes(key))
+      errors.push(error(relative, `Unknown phase field: ${key}`));
+  if (data?.version !== 1 && data?.version !== PHASE_CONTRACT_VERSION)
+    errors.push(
+      error(
+        relative,
+        `Invalid phase field: version must be 1 or ${PHASE_CONTRACT_VERSION}`,
+      ),
+    );
+  if (
+    data?.version === PHASE_CONTRACT_VERSION &&
+    data.machineCapabilities === undefined
+  )
+    errors.push(
+      error(
+        relative,
+        'Invalid phase field: version 2 requires machineCapabilities',
+      ),
+    );
+  if (
+    data?.machineCapabilities !== undefined &&
+    (!Array.isArray(data.machineCapabilities) ||
+      !data.machineCapabilities.every((value) =>
+        MACHINE_CAPABILITIES.includes(
+          value as (typeof MACHINE_CAPABILITIES)[number],
+        ),
+      ))
+  )
+    errors.push(
+      error(
+        relative,
+        'Invalid phase field: machineCapabilities contains an unknown token',
+      ),
+    );
   const kind = path.basename(file, '.md');
-  if (!PHASE_KINDS.includes(kind as typeof PHASE_KINDS[number]) || data?.kind !== kind) errors.push(error(relative, `Invalid phase field: kind must equal filename ${kind}`));
-  for (const field of ['input', 'deliverable', 'verdict', 'acceptanceStep', 'requiredCapabilities'] as const) {
-    if (!Array.isArray(data?.[field]) || !data[field].length || !data[field].every(value => typeof value === 'string' && value.trim())) errors.push(error(relative, `Invalid phase field: ${field} must be a nonempty list of nonempty strings`));
+  if (
+    !PHASE_KINDS.includes(kind as (typeof PHASE_KINDS)[number]) ||
+    data?.kind !== kind
+  )
+    errors.push(
+      error(relative, `Invalid phase field: kind must equal filename ${kind}`),
+    );
+  for (const field of [
+    'input',
+    'deliverable',
+    'verdict',
+    'acceptanceStep',
+    'requiredCapabilities',
+  ] as const) {
+    if (
+      !Array.isArray(data?.[field]) ||
+      !data[field].length ||
+      !data[field].every((value) => typeof value === 'string' && value.trim())
+    )
+      errors.push(
+        error(
+          relative,
+          `Invalid phase field: ${field} must be a nonempty list of nonempty strings`,
+        ),
+      );
   }
   const profile = record(data?.toolProfile);
-  for (const key of Object.keys(profile ?? {})) if (!['disallowedTools', 'permission'].includes(key)) errors.push(error(relative, `Unknown toolProfile field: ${key}`));
-  if (!profile || !Array.isArray(profile.disallowedTools) || !profile.disallowedTools.every(value => typeof value === 'string' && value.trim()) || !['allow', 'deny', 'prompt'].includes(String(profile.permission))) errors.push(error(relative, 'Invalid phase field: toolProfile requires disallowedTools and permission allow|deny|prompt'));
+  for (const key of Object.keys(profile ?? {}))
+    if (!['disallowedTools', 'permission'].includes(key))
+      errors.push(error(relative, `Unknown toolProfile field: ${key}`));
+  if (
+    !profile ||
+    !Array.isArray(profile.disallowedTools) ||
+    !profile.disallowedTools.every(
+      (value) => typeof value === 'string' && value.trim(),
+    ) ||
+    !['allow', 'deny', 'prompt'].includes(String(profile.permission))
+  )
+    errors.push(
+      error(
+        relative,
+        'Invalid phase field: toolProfile requires disallowedTools and permission allow|deny|prompt',
+      ),
+    );
   const body = matter(content, { language: 'yaml' }).content;
   const matches = [...maskFences(body).matchAll(/^## ([^\r\n]+)\r?$/gm)];
   const sections = new Map<string, string[]>();
@@ -275,31 +422,63 @@ function validatePhase(file: string, roles: readonly string[]): ValidationError[
     if (!heading) continue;
     if (![...PHASE_HEADINGS, 'Reviewer stance'].includes(heading)) continue;
     const start = match.index! + match[0].length;
-    sections.set(heading, [...(sections.get(heading) ?? []), body.slice(start, matches[index + 1]?.index ?? body.length).trim()]);
+    sections.set(heading, [
+      ...(sections.get(heading) ?? []),
+      body.slice(start, matches[index + 1]?.index ?? body.length).trim(),
+    ]);
   }
-  for (const heading of [...PHASE_HEADINGS, ...(REVIEW_KINDS.includes(kind) ? ['Reviewer stance'] : [])]) {
-    if (!sections.get(heading)?.[0]) errors.push(error(relative, `Missing or empty phase section: ${heading}`));
+  for (const heading of [
+    ...PHASE_HEADINGS,
+    ...(REVIEW_KINDS.includes(kind) ? ['Reviewer stance'] : []),
+  ]) {
+    if (!sections.get(heading)?.[0])
+      errors.push(
+        error(relative, `Missing or empty phase section: ${heading}`),
+      );
   }
-  for (const [heading, values] of sections) if (values.length > 1) errors.push(error(relative, `Duplicate phase section: ${heading}`));
-  if (!REVIEW_KINDS.includes(kind) && sections.has('Reviewer stance')) errors.push(error(relative, 'Unexpected phase section: Reviewer stance'));
-  for (const role of roles) if (content.includes(role)) errors.push(error(relative, `Retired role name in phase definition: ${role}`));
+  for (const [heading, values] of sections)
+    if (values.length > 1)
+      errors.push(error(relative, `Duplicate phase section: ${heading}`));
+  if (!REVIEW_KINDS.includes(kind) && sections.has('Reviewer stance'))
+    errors.push(error(relative, 'Unexpected phase section: Reviewer stance'));
+  for (const role of roles)
+    if (content.includes(role))
+      errors.push(
+        error(relative, `Retired role name in phase definition: ${role}`),
+      );
   return errors;
 }
 
 function validatePhases(): ValidationError[] {
   const directory = path.join(SKILL_ROOT, 'phases');
-  const files = fs.existsSync(directory) ? fs.readdirSync(directory).filter(name => name.endsWith('.md')) : [];
+  const files = fs.existsSync(directory)
+    ? fs.readdirSync(directory).filter((name) => name.endsWith('.md'))
+    : [];
   const roles = retiredRoles();
-  const errors = files.flatMap(name => validatePhase(path.join(directory, name), roles));
+  const errors = files.flatMap((name) =>
+    validatePhase(path.join(directory, name), roles),
+  );
   const skill = fs.readFileSync(path.join(SKILL_ROOT, 'SKILL.md'), 'utf8');
-  const active = /^## Phase-kind flows\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(maskFences(skill));
+  const active = /^## Phase-kind flows\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(
+    maskFences(skill),
+  );
   if (active) {
-    const expected = new Set(PHASE_KINDS.map(kind => `${kind}.md`));
-    for (const name of expected) if (!files.includes(name)) errors.push(error(`phases/${name}`, `Required phase file missing: ${name}`));
-    for (const name of files) if (!expected.has(name)) errors.push(error(`phases/${name}`, `Unexpected phase file: ${name}`));
+    const expected = new Set(PHASE_KINDS.map((kind) => `${kind}.md`));
+    for (const name of expected)
+      if (!files.includes(name))
+        errors.push(
+          error(`phases/${name}`, `Required phase file missing: ${name}`),
+        );
+    for (const name of files)
+      if (!expected.has(name))
+        errors.push(error(`phases/${name}`, `Unexpected phase file: ${name}`));
     // The mask keeps the string length, so the offsets of the masked match are valid in the original text.
     const flow = skill.slice(active.index, active.index + active[0].length);
-    for (const role of roles) if (flow.includes(role)) errors.push(error('SKILL.md', `Retired role name in active phase flow: ${role}`));
+    for (const role of roles)
+      if (flow.includes(role))
+        errors.push(
+          error('SKILL.md', `Retired role name in active phase flow: ${role}`),
+        );
   }
   return errors;
 }
@@ -491,8 +670,13 @@ function validateInternalReferences(
       });
     } else if (anchor && fs.statSync(resolvedPath).isFile()) {
       const target = maskFences(fs.readFileSync(resolvedPath, 'utf8'));
-      const slugs = [...target.matchAll(/^#{1,6}\s+(.+)$/gm)].map(match =>
-        (match[1] ?? '').trim().toLowerCase().replace(/[`*_~]/g, '').replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-'),
+      const slugs = [...target.matchAll(/^#{1,6}\s+(.+)$/gm)].map((match) =>
+        (match[1] ?? '')
+          .trim()
+          .toLowerCase()
+          .replace(/[`*_~]/g, '')
+          .replace(/[^\p{L}\p{N} -]/gu, '')
+          .replace(/ /g, '-'),
       );
       if (!slugs.includes(decodeURIComponent(anchor).toLowerCase())) {
         errors.push(error(filePath, `Broken heading anchor: ${link}`));
@@ -555,10 +739,18 @@ function validateAgentsDocumented(
     }
   }
 
-  for (const alias of IMPLEMENT_ALIASES) {
-    const rowPattern = new RegExp(`^\\|\\s*${alias}\\s*\\|\\s*Retired; alias of.*implement`, 'im');
+  for (const { slug, kind } of RETIRED_ALIASES) {
+    const rowPattern = new RegExp(
+      `^\\|\\s*${slug}\\s*\\|\\s*Retired; alias of .*\`${kind}\``,
+      'im',
+    );
     if (!rowPattern.test(content)) {
-      errors.push(error(path.relative(process.cwd(), catalogFile), `Missing retired implement alias: ${alias}`));
+      errors.push(
+        error(
+          path.relative(process.cwd(), catalogFile),
+          `Missing retired ${kind} alias: ${slug}`,
+        ),
+      );
     }
   }
 

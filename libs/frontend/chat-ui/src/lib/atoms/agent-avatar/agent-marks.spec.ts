@@ -7,12 +7,17 @@ import {
 } from './agent-marks';
 
 describe('roleIconFor', () => {
-  it.each(['backend-developer', 'frontend-developer', 'devops-engineer'])(
-    'uses the Bot fallback for the retired %s role',
-    (role) => {
-      expect(roleIconFor(role)).toBe(Bot);
-    },
-  );
+  it.each([
+    'backend-developer',
+    'frontend-developer',
+    'devops-engineer',
+    'senior-tester',
+    'code-style-reviewer',
+    'code-logic-reviewer',
+    'visual-reviewer',
+  ])('uses the Bot fallback for the retired %s role', (role) => {
+    expect(roleIconFor(role)).toBe(Bot);
+  });
 });
 
 describe('ptahCliProviderMarkId', () => {
