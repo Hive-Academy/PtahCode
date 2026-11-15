@@ -3,12 +3,13 @@
 Route old session IDs to successor session after handoff.
 
 ## Status
-REWORK_IN_PROGRESS
+in_review
 
 ## Branch & PR
 - Branch: fix/session-id-successor-route
-- PR: #1285 (OPEN, HEAD: 8aae0ebad)
-- **⚠️ DO NOT MERGE** - Critical design issues identified by parent review
+- PR: #1285 (OPEN, reviewed head: 9fdb39af4)
+- Rework done: ownership goes backward, delivery goes forward. The 8aae0ebad
+  caller-authority mapping is removed. Independent review: `review.md` (APPROVED).
 
 ## Relates to
 TASK_2026_1168_7335 (program open problem #9)
