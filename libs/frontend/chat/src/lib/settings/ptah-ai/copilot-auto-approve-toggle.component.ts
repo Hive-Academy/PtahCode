@@ -35,8 +35,8 @@ const NOT_CONFIRMED = `${settingNotConfirmedMessage(LABEL)} Check the saved sett
   imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-1.5 border-t border-base-300 pt-2" data-testid="copilot-auto-approve-section">
-      <label class="flex items-center justify-between gap-2">
+    <div class="space-y-[calc(var(--ptah-space-1)*1.5)] border-t border-base-300 pt-[var(--ptah-space-2)]" data-testid="copilot-auto-approve-section">
+      <label class="flex items-center justify-between gap-[var(--ptah-gap-inline)]">
         <span class="text-xs font-semibold text-base-content">Auto-approve Copilot tool calls</span>
         <input type="checkbox" [class]="'toggle toggle-xs toggle-success ' + focusRing"
           [checked]="saved() ?? false" [indeterminate]="needsRecheck()"
