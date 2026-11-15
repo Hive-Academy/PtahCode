@@ -59,6 +59,7 @@ import {
 import { MessageValidationService } from './message-validation.service';
 import type { TabState } from '@ptah-extension/chat-types';
 import {
+  CHAT_ADMISSION_RPC_MARGIN_MS,
   type ExecutionChatMessage,
   type SessionId,
 } from '@ptah-extension/shared';
@@ -111,6 +112,7 @@ describe('MessageSenderService', () => {
     consumeFirstMessagePreamble: jest.Mock;
     setFirstMessagePreamble: jest.Mock;
     findTabByIdAcrossWorkspaces: jest.Mock;
+    onTabClosed: jest.Mock;
     activeWorkspacePath: string | null;
   };
   /** Tabs parked in a NON-active workspace — absent from `tabs()` by design. */
@@ -227,6 +229,7 @@ describe('MessageSenderService', () => {
           ? { tab: background, workspacePath: 'D:/other-repo' }
           : null;
       }),
+      onTabClosed: jest.fn(() => () => undefined),
       activeWorkspacePath: 'D:/repo',
     };
 
@@ -941,6 +944,54 @@ describe('MessageSenderService', () => {
 
       expect(tabManager.markTabIdle).toHaveBeenCalledWith('tab-1');
       expect(tabManager.isTabStreaming('tab-1')).toBe(false);
+    });
+
+    it('allows another send before chat:start times out', async () => {
+      let finishStart: (value: { success: boolean }) => void = () => undefined;
+      rpcCall.mockImplementationOnce(() => new Promise((resolve) => { finishStart = resolve; }));
+      rpcCall.mockResolvedValueOnce({ success: true });
+
+      const first = service.send('first', { tabId: 'tab-1' });
+      await Promise.resolve();
+      expect(service.isStartPending('tab-1')).toBe(false);
+      await expect(service.send('second', { tabId: 'tab-1' })).resolves.toEqual({ success: true });
+      expect(rpcCall.mock.calls.filter(([method]) => method === 'chat:start')).toHaveLength(2);
+
+      finishStart({ success: true });
+      await first;
+      expect(service.isStartPending('tab-1')).toBe(false);
+    });
+
+    it('keeps the start guard and starting state for a grace window after RPC timeout', async () => {
+      rpcCall.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:start' });
+      await expect(service.send('first')).resolves.toEqual({
+        success: false,
+        error: 'Chat is still starting',
+      });
+      expect(service.isStartPending('tab-1')).toBe(true);
+      expect(tabManager.markTabIdle).not.toHaveBeenCalled();
+      await expect(service.send('second')).resolves.toEqual({
+        success: false,
+        error: 'Chat is still starting',
+      });
+      expect(rpcCall).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns the tab to idle when a timed-out start never binds a session', async () => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      try {
+        const abandoned = jest.fn();
+        service.onStartAbandoned(abandoned);
+        rpcCall.mockResolvedValueOnce({ success: false, error: 'RPC timeout: chat:start' });
+        await service.send('first');
+        expect(tabManager.markTabIdle).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(CHAT_ADMISSION_RPC_MARGIN_MS);
+        expect(tabManager.markTabIdle).toHaveBeenCalledWith('tab-1');
+        expect(abandoned).toHaveBeenCalledWith('tab-1');
+        expect(service.isStartPending('tab-1')).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('leaves no tab in the streaming set when chat:start throws', async () => {
