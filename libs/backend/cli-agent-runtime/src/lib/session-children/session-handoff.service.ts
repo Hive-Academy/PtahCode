@@ -212,6 +212,11 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     return this.acknowledgeOnce(request);
   }
 
+  private resolveSessionId(id: string | undefined): string | undefined {
+    if (!id) return id;
+    return this.registry.resolveLatest(id)?.childSessionId ?? this.registry.resolveCaller(id);
+  }
+
   private async acknowledgeOnce(request: SessionHandoffAckRequest): Promise<SessionHandoffAckResult> {
     const refused = (reason: string): SessionHandoffAckResult => ({ status: 'refused', reason });
     const retry = (reason: string): SessionHandoffAckResult => ({ status: 'retryable-failure', reason });
@@ -222,8 +227,17 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       return refused('handoff identity or storage unavailable');
     }
     try {
-      const record = await this.ackStore.findByPredecessor(request.predecessorSessionId);
+      // A verified successor chain may route a historical ID to a later
+      // handoff; otherwise the predecessor's own record remains authoritative.
+      const resolved = this.resolveSessionId(request.predecessorSessionId);
+      const routed = resolved && resolved !== request.predecessorSessionId
+        ? await this.ackStore.findByPredecessor(resolved)
+        : undefined;
+      const record = routed ?? await this.ackStore.findByPredecessor(request.predecessorSessionId);
       if (!record) return refused('handoff record missing');
+      if (routed && resolved !== record.predecessorTabId && resolved !== record.predecessorSdkId) {
+        return refused('handoff predecessor is not in the successor chain');
+      }
       // Check the caller before joining an in-flight attempt, so a stranger never
       // receives another caller's result.
       if (request.callerSessionId !== record.successorTabId && request.callerSessionId !== record.successorSdkId) {
@@ -418,6 +432,7 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       return result;
     }
     this.settleAdoption(adoption, tabId, 'kept');
+    this.registry.recordCallerSuccessor(record.tabId, record.realSessionId, tabId);
     this.remember(record.tabId, {
       sdkSessionId: record.realSessionId,
       tabId,

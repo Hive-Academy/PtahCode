@@ -2502,14 +2502,19 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
     });
     expect(successor).not.toBe('');
     expect(h.lifecycleIds.has(successor)).toBe(false);
-    // The caller no longer owns the child or its held completion.
-    expect(h.spawner.takeHeldCompletions(PARENT)).toEqual([]);
+    // Kept handoff aliases route both predecessor spellings to the new owner.
+    expect(h.spawner.status({ callerSessionId: PARENT_SDK })).toMatchObject({
+      ok: true,
+      children: [{ childSessionId: child.childSessionId }],
+    });
     expect(
       h.spawner.status({
         callerSessionId: PARENT,
         childSessionId: child.childSessionId,
       }),
-    ).toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
+    ).toMatchObject({ ok: true, children: [{ childSessionId: child.childSessionId }] });
+    expect(h.spawner.status({ callerSessionId: OTHER, childSessionId: child.childSessionId }))
+      .toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
     // The new session does, by its tab id alone.
     expect(
       h.spawner.status({
@@ -2520,7 +2525,8 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
       ok: true,
       children: [{ childSessionId: child.childSessionId }],
     });
-    expect(h.spawner.takeHeldCompletions(successor)).toEqual([envelope(1)]);
+    expect(h.spawner.takeHeldCompletions(PARENT)).toEqual([envelope(1)]);
+    expect(h.spawner.takeHeldCompletions(PARENT_SDK)).toEqual([]);
     expect(h.spawner.takeHeldCompletions(successor)).toEqual([]);
   });
 });

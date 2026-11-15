@@ -144,6 +144,10 @@ function makeHarness() {
         links.reparent(childId, parent, parentSdk),
     ),
     get: jest.fn((id: string | undefined) => links.get(id)),
+    resolveLatest: jest.fn((id: string | undefined) => links.resolveLatest(id)),
+    resolveCaller: jest.fn((id: string) => links.resolveCaller(id)),
+    recordCallerSuccessor: jest.fn((from: string, sdk: string | null, to: string) =>
+      links.recordCallerSuccessor(from, sdk, to)),
   };
   const agents = {
     adoptLanes: jest.fn(
@@ -292,6 +296,29 @@ function addLink(
 }
 
 describe('SessionHandoffService', () => {
+  it('routes predecessor tab and SDK IDs to the kept successor and acknowledges the original record', async () => {
+    const h = makeHarness();
+    addLink(h.links, 'adopted-child');
+    const started = await h.service.handoff(h.request());
+    if (!started.ok) throw new Error('handoff should start');
+    expect(h.links.resolveCaller(CALLER)).toBe(started.tabId);
+    expect(h.links.resolveCaller(CALLER_SDK)).toBe(started.tabId);
+    expect(h.links.childrenOf([h.links.resolveCaller(CALLER)])).toEqual([
+      expect.objectContaining({ childSessionId: 'adopted-child' }),
+    ]);
+    expect(h.links.resolveCaller('unrelated-session')).toBe('unrelated-session');
+    h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+    await expect(h.service.acknowledge({
+      callerSessionId: started.tabId,
+      predecessorSessionId: CALLER_SDK,
+      handoffPath,
+    })).resolves.toMatchObject({ status: 'closed' });
+    await expect(h.service.acknowledge({
+      callerSessionId: started.tabId,
+      predecessorSessionId: 'unrelated-session',
+      handoffPath,
+    })).resolves.toMatchObject({ status: 'refused' });
+  });
   it('requires the recorded successor and exact file before closing after flush', async () => {
     const h = makeHarness();
     const started = await h.service.handoff(h.request());

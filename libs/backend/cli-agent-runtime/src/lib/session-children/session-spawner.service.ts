@@ -1066,7 +1066,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       if (!owned.ok) return owned.refusal;
       return { ok: true, children: [this.snapshotOf(owned.child)] };
     }
-    const caller = SessionId.safeParse(query.callerSessionId?.trim());
+    const caller = this.resolveCaller(query.callerSessionId);
     if (!caller) return unattributed();
     const callerIds = [caller, this.sdkIdOf(caller)];
     const children = [
@@ -1235,7 +1235,7 @@ export class SessionSpawnerService implements ISessionSpawner {
   }
 
   clearFinished(query: SessionChildClearQuery): SessionChildClearResult {
-    const caller = SessionId.safeParse(query.callerSessionId?.trim());
+    const caller = this.resolveCaller(query.callerSessionId);
     if (!caller) return unattributed();
     const callerIds = new Set(
       [caller as string, this.sdkIdOf(caller)].filter(
@@ -1336,7 +1336,7 @@ export class SessionSpawnerService implements ISessionSpawner {
   takeHeldCompletions(
     callerSessionId: string | undefined,
   ): readonly SessionChildCompletionEnvelope[] {
-    const caller = SessionId.safeParse(callerSessionId?.trim());
+    const caller = this.resolveCaller(callerSessionId);
     if (!caller) return [];
     const envelopes: SessionChildCompletionEnvelope[] = [];
     for (const child of this.registry.childrenOf([
@@ -1898,12 +1898,17 @@ export class SessionSpawnerService implements ISessionSpawner {
    * Helpers
    * ---------------------------------------------------------------------- */
 
+  private resolveCaller(id: string | undefined): ReturnType<typeof SessionId.safeParse> {
+    const parsed = SessionId.safeParse(id?.trim());
+    return parsed ? (SessionId.safeParse(this.registry.resolveCaller(parsed)) ?? parsed) : null;
+  }
+
   /** A pending start (status `starting`) of this caller with this id. */
   private ownedPending(
     callerSessionId: string | undefined,
     childSessionId: string,
   ): SessionChildRecord | undefined {
-    const caller = SessionId.safeParse(callerSessionId?.trim());
+    const caller = this.resolveCaller(callerSessionId);
     if (!caller) return undefined;
     const id = childSessionId.trim();
     return this.registry
@@ -1916,7 +1921,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     childSessionId: string,
     follow = true,
   ): OwnedLookup {
-    const caller = SessionId.safeParse(callerSessionId?.trim());
+    const caller = this.resolveCaller(callerSessionId);
     if (!caller) return { ok: false, refusal: unattributed() };
     const child = this.registry.get(childSessionId);
     if (!child) {
