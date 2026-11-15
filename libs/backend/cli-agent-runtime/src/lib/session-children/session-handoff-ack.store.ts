@@ -155,10 +155,12 @@ export class SessionHandoffAckStore {
       );
       if (index >= 0) {
         const existing = state.records[index];
-        if (
-          existing.state !== 'recorded' ||
-          existing.successorTabId === value.successorTabId
-        ) {
+        // A `starting` record of another successor is left by a host stop
+        // before the start settled. The in-flight reservation stops two live
+        // handoffs of one predecessor, so the new attempt can replace it.
+        const replaceable =
+          existing.state === 'recorded' || existing.state === 'starting';
+        if (!replaceable || existing.successorTabId === value.successorTabId) {
           throw new Error('handoff predecessor already recorded');
         }
         state.records[index] = RecordSchema.parse(value);
