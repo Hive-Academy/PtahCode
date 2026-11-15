@@ -21,6 +21,7 @@
  */
 import { inject, injectable } from 'tsyringe';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import {
   PLATFORM_TOKENS,
   createEvent,
@@ -54,6 +55,7 @@ import { TASK_SPECS_TOKENS } from './di/tokens';
 import { effectiveTaskStatus, type TaskStatusOverlay } from './task-status-overlay';
 import type { ITaskIndexStore } from './task-index.store';
 import type { ITaskIndexNotifier } from './task-index.port';
+import { TaskIndexRebuildQueue } from './task-index-rebuild-queue';
 
 /** Fired whenever the derived index changes. Drives the `tasks:changed` push. */
 export interface TaskIndexChangeEvent {
@@ -104,11 +106,15 @@ interface WorkspaceState {
   trailingFolders: Set<string>;
   trailingReason: TaskIndexChangeEvent['reason'];
   trailingCount: number;
-  writtenCarriers: Map<string, string>;
   flushRetries: Map<string, number>;
+  fingerprints: Map<string, string | null>;
+  eventsDuringRebuild: Set<string>;
+  firstEventAt: number | null;
+  eventClasses: Map<string, number>;
 }
 
 const DEBOUNCE_MS = 300;
+const MAX_WAIT_MS = 1000;
 const FLUSH_RETRY_MS = [1000, 5000, 30000] as const;
 export const TASK_INDEX_CLOCK = Symbol('task-index.clock');
 const REGISTRY_FILE = 'registry.md';
@@ -146,6 +152,9 @@ export class TaskIndexService implements ITaskIndexNotifier {
   private readonly _onDidChangeIndex: IEvent<TaskIndexChangeEvent>;
   private readonly fireChange: (e: TaskIndexChangeEvent) => void;
   private readonly now: () => number;
+  private readonly rebuildQueue = new TaskIndexRebuildQueue((waitedMs, depth) => {
+    if (waitedMs > 100 || depth > 0) this.logger.info('[task-specs] rebuild queue', { waitedMs, depth });
+  });
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -225,8 +234,11 @@ export class TaskIndexService implements ITaskIndexNotifier {
       trailingFolders: new Set<string>(),
       trailingReason: 'watcher',
       trailingCount: 0,
-      writtenCarriers: new Map(),
       flushRetries: new Map(),
+      eventsDuringRebuild: new Set(),
+      fingerprints: new Map(),
+      firstEventAt: null,
+      eventClasses: new Map(),
     };
     state.started = true;
     this.states.set(root, state);
@@ -323,7 +335,6 @@ export class TaskIndexService implements ITaskIndexNotifier {
     const root = normalizeWorkspaceRoot(workspaceRoot);
     const t0 = Date.now();
     const started = await this.ensureStarted(root);
-    this.states.get(root)?.writtenCarriers.clear();
     let indexedCount: number;
     let excludedCount: number;
     if (started?.indexWritten) {
@@ -355,30 +366,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
   ): Promise<void> {
     const root = normalizeWorkspaceRoot(workspaceRoot);
     await this.ensureStarted(root);
-    const state = this.states.get(root);
-    const carrier = path.join(root, '.ptah', 'specs', folderName, CARRIER_FILE);
-    let snapshot: string | undefined;
-    try {
-      const content = await this.fs.readFile(carrier);
-      snapshot = content;
-      state?.writtenCarriers.set(folderName, content);
-    } catch (error: unknown) {
-      state?.writtenCarriers.delete(folderName);
-      this.logger.debug('[task-specs] writer carrier snapshot unavailable', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    try {
-      const result = await this.scheduleRebuild(root, [folderName], 'write');
-      if (!result.indexWritten && state?.writtenCarriers.get(folderName) === snapshot) {
-        state?.writtenCarriers.delete(folderName);
-      }
-    } catch (error: unknown) {
-      if (state?.writtenCarriers.get(folderName) === snapshot) {
-        state?.writtenCarriers.delete(folderName);
-      }
-      throw error;
-    }
+    await this.scheduleRebuild(root, [folderName], 'write');
   }
 
   /** Read the derived index for a workspace (list/board RPCs). */
@@ -614,8 +602,8 @@ export class TaskIndexService implements ITaskIndexNotifier {
 
   /** Tear down all watchers + pending timers (container disposal). */
   dispose(): void {
+    this.rebuildQueue.dispose();
     for (const state of this.states.values()) {
-      state.writtenCarriers.clear();
       state.flushRetries.clear();
       if (state.timer) clearTimeout(state.timer);
       for (const sub of state.subscriptions) sub.dispose();
@@ -637,9 +625,9 @@ export class TaskIndexService implements ITaskIndexNotifier {
       const watcher = this.fs.createFileWatcher(SPECS_GLOB, { cwd: root });
       state.watcher = watcher;
       state.subscriptions.push(
-        watcher.onDidChange((p) => this.onWatchEvent(root, p)),
-        watcher.onDidCreate((p) => this.onWatchEvent(root, p)),
-        watcher.onDidDelete((p) => this.onWatchEvent(root, p)),
+        watcher.onDidChange((p) => this.onWatchEvent(root, p, 'change')),
+        watcher.onDidCreate((p) => this.onWatchEvent(root, p, 'create')),
+        watcher.onDidDelete((p) => this.onWatchEvent(root, p, 'delete')),
       );
     } catch (error: unknown) {
       // A host without a real watcher (or a failure) degrades to
@@ -650,13 +638,19 @@ export class TaskIndexService implements ITaskIndexNotifier {
     }
   }
 
-  private onWatchEvent(root: string, rawPath: string): void {
+  private onWatchEvent(root: string, rawPath: string, eventKind: string): void {
     const folderName = this.extractFolder(root, rawPath);
     if (!folderName) return;
     const state = this.states.get(root);
     if (!state) return;
     state.pending.add(folderName);
-    this.armFlush(root, state, DEBOUNCE_MS);
+    if (state.running) state.eventsDuringRebuild.add(folderName);
+    if (state.firstEventAt === null) state.firstEventAt = Date.now();
+    const leaf = path.basename(rawPath);
+    const kind = leaf === CARRIER_FILE ? 'carrier' : leaf.endsWith('.md') ? 'markdown' : 'other';
+    const category = `${eventKind}:${kind}`;
+    state.eventClasses.set(category, (state.eventClasses.get(category) ?? 0) + 1);
+    this.armFlush(root, state, Math.min(DEBOUNCE_MS, Math.max(0, MAX_WAIT_MS - (Date.now() - state.firstEventAt))));
   }
 
   private armFlush(
@@ -699,19 +693,19 @@ export class TaskIndexService implements ITaskIndexNotifier {
     state.timer = null;
     const folderNames = [...state.pending];
     state.pending.clear();
+    state.firstEventAt = null;
+    const eventClasses = Object.fromEntries(state.eventClasses);
+    state.eventClasses.clear();
+    if (folderNames.length > 0) this.logger.debug('[task-specs] watcher batch', {
+      folders: folderNames.length, activeRoots: this.states.size, eventClasses,
+    });
     try {
       if (state.running) await state.running.catch(() => undefined);
     const changed: string[] = [];
     for (const name of folderNames) {
-      const written = state.writtenCarriers.get(name);
-      state.writtenCarriers.delete(name);
-      if (written === undefined) {
-        changed.push(name);
-        continue;
-      }
       try {
-        const current = await this.fs.readFile(path.join(root, '.ptah', 'specs', name, CARRIER_FILE));
-        if (current !== written) changed.push(name);
+        const current = await this.fingerprintFolder(root, name);
+        if (!state.fingerprints.has(name) || current !== state.fingerprints.get(name)) changed.push(name);
       } catch (error: unknown) {
         this.logger.debug('[task-specs] watcher carrier comparison unavailable', {
           error: error instanceof Error ? error.message : String(error),
@@ -725,21 +719,12 @@ export class TaskIndexService implements ITaskIndexNotifier {
       for (const name of folderNames) state.flushRetries.delete(name);
     } catch (error: unknown) {
       let nextDelay = Number.POSITIVE_INFINITY;
-      let dropped = 0;
       for (const name of folderNames) {
         const attempts = state.flushRetries.get(name) ?? 0;
-        if (attempts >= FLUSH_RETRY_MS.length) {
-          state.flushRetries.delete(name);
-          dropped++;
-        } else {
-          state.flushRetries.set(name, attempts + 1);
-          state.pending.add(name);
-          nextDelay = Math.min(nextDelay, FLUSH_RETRY_MS[attempts]);
-        }
+        state.flushRetries.set(name, Math.min(attempts + 1, FLUSH_RETRY_MS.length));
+        state.pending.add(name);
+        nextDelay = Math.min(nextDelay, FLUSH_RETRY_MS[Math.min(attempts, FLUSH_RETRY_MS.length - 1)]);
       }
-      if (dropped > 0) this.logger.warn('[task-specs] watcher flush retries exhausted', {
-        folders: dropped, error: new Error('Watcher rebuild failed'),
-      });
       const retry = state.pending.size > 0 && Number.isFinite(nextDelay);
       this.logger.debug('[task-specs] watcher flush failed', {
         error: error instanceof Error ? error.name : 'Unknown error',
@@ -756,7 +741,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
     emit = true,
   ): Promise<RebuildResult> {
     const state = this.states.get(root);
-    if (!state) return this.rebuild(root, folders, reason, emit, 0, 1);
+    if (!state) return this.rebuildQueue.enqueue(root, (queuedFolders) => this.rebuild(root, queuedFolders, reason, emit, 0, 1), folders);
     if (state.running) {
       for (const folder of folders) state.trailingFolders.add(folder);
       if (reason === 'reindex' || (reason === 'write' && state.trailingReason === 'watcher')) {
@@ -773,7 +758,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
           state.trailingFolders.clear();
           state.trailingCount = 0;
           state.trailingReason = 'watcher';
-          const next = this.rebuild(root, nextFolders, nextReason, true, this.now() - queuedAt, count);
+          const next = this.rebuildQueue.enqueue(root, (queuedFolders) => this.rebuild(root, queuedFolders, nextReason, true, this.now() - queuedAt, count), nextFolders);
           state.running = next;
           state.trailing = null;
           void next.then(() => { if (state.running === next && !state.trailing) state.running = null; },
@@ -791,7 +776,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
       }
       return state.trailing;
     }
-    const run = this.rebuild(root, folders, reason, emit, 0, 1);
+    const run = this.rebuildQueue.enqueue(root, (queuedFolders) => this.rebuild(root, queuedFolders, reason, emit, 0, 1), folders);
     state.running = run;
     void run.then(() => { if (state.running === run && !state.trailing) state.running = null; },
       () => { if (state.running === run && !state.trailing) state.running = null; });
@@ -825,6 +810,11 @@ export class TaskIndexService implements ITaskIndexNotifier {
     let rows = 0;
     let failed = true;
     try {
+    const state = this.states.get(root);
+    if (state) {
+      state.eventsDuringRebuild.clear();
+      await this.captureFingerprints(root, state, folderNames);
+    }
     const scan = await this.scanner.scan(root);
     enumerateMs = scan.timing?.enumerateMs ?? 0;
     readMs = scan.timing?.readMs ?? 0;
@@ -882,8 +872,12 @@ export class TaskIndexService implements ITaskIndexNotifier {
         });
       }
     }
-    const state = this.states.get(root);
     if (state) state.specsDirExists = scan.specsDirExists;
+    if (state) {
+      if (!indexWritten) state.fingerprints.clear();
+      for (const name of state.eventsDuringRebuild) state.fingerprints.delete(name);
+      state.eventsDuringRebuild.clear();
+    }
     if (emit) {
       const listenerStarted = this.now();
       try { this.fireChange({ workspaceRoot: root, folderNames, reason }); }
@@ -896,12 +890,71 @@ export class TaskIndexService implements ITaskIndexNotifier {
       indexWritten,
     };
     } finally {
+      if (failed) this.states.get(root)?.fingerprints.clear();
       logRebuildTiming(this.logger, {
         trigger: reason === 'write' ? 'writer' : reason === 'reindex' && !emit ? 'activation' : reason,
         enumerateMs, readMs, parseValidateMs, sqliteReplaceMs: replaceMs,
         listenerMs, waitedMs, totalMs: this.now() - started + waitedMs,
         carriers, rows, coalesced, failed,
       });
+    }
+  }
+
+  private async fingerprintFolder(root: string, name: string): Promise<string | null> {
+    const folder = path.join(root, '.ptah', 'specs', name);
+    if (!(await this.fs.exists(folder))) return null;
+    const entries = await this.fs.readDirectory(folder);
+    if (entries.length > 128) throw new Error('Task folder fingerprint limit exceeded');
+    const hash = createHash('sha256');
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      hash.update(entry.name);
+      hash.update(String(entry.type));
+      if (entry.type !== FileType.File) continue;
+      const file = path.join(folder, entry.name);
+      const stat = await this.fs.lstat(file);
+      hash.update(String(stat.size));
+      const read = await this.fs.readFileBoundedNoFollow(file, 1024 * 1024);
+      if (read.truncated) throw new Error('Task file fingerprint limit exceeded');
+      hash.update(read.bytes);
+    }
+    return hash.digest('hex');
+  }
+
+  private async captureFingerprints(root: string, state: WorkspaceState, touched: string[]): Promise<void> {
+    try {
+      const full = state.fingerprints.size === 0 || touched.length === 0;
+      const entries = full ? await this.fs.readDirectory(path.join(root, '.ptah', 'specs')) : [];
+      const names = entries.filter((entry) => entry.type === FileType.Directory &&
+        isSingleTaskPathSegment(entry.name)).map((entry) => entry.name);
+      const next = full ? new Map<string, string | null>() : new Map(state.fingerprints);
+      for (const name of names.slice(0, 512)) {
+        try { next.set(name, await this.fingerprintFolder(root, name)); }
+        catch (error: unknown) {
+          this.logger.debug('[task-specs] folder fingerprint unavailable', {
+            error: error instanceof Error ? error.name : 'UnknownError',
+          });
+        }
+      }
+      for (const name of touched) {
+        try { next.set(name, await this.fingerprintFolder(root, name)); }
+        catch (error: unknown) {
+          next.delete(name);
+          this.logger.debug('[task-specs] touched folder fingerprint unavailable', {
+            error: error instanceof Error ? error.name : 'UnknownError',
+          });
+        }
+      }
+      while (next.size > 512) {
+        const oldest = next.keys().next();
+        if (oldest.done) break;
+        next.delete(oldest.value);
+      }
+      state.fingerprints = next;
+    } catch (error: unknown) {
+      this.logger.debug('[task-specs] fingerprint capture unavailable', {
+        error: error instanceof Error ? error.name : 'UnknownError',
+      });
+      state.fingerprints.clear();
     }
   }
 
