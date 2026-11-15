@@ -31,6 +31,7 @@ import type {
   PlanOwnerTarget,
   PlanUsageReading,
 } from './readers/plan-usage-reader.types';
+import { mapClaudePlanUsage } from './readers/claude-plan-usage.reader';
 
 const T0 = Date.UTC(2026, 9, 4, 12, 0, 0);
 const SECRET = 'sk-plan-usage-secret-123';
@@ -135,6 +136,7 @@ function harness() {
   const resolve = jest.fn<Promise<PlanCredentialResolution>, [unknown]>(
     async () => ({ kind: 'available', secret: new PlanSecret(SECRET) }),
   );
+  const oauthReader = jest.fn(async (): Promise<PlanUsageReading> => ({ status: 'no-usage-source', statusReason: 'no-oauth', windowSetEstablished: false, windows: [] }));
   const service = new PlanUsageService(
     logger as unknown as Logger,
     ledger,
@@ -146,12 +148,14 @@ function harness() {
       resolveRequestCredential: async () => ({ kind: 'apiKey', apiKey: 'kimi-shared' }),
       forceRefresh: async () => false,
     },
+    oauthReader,
   );
   return {
     service,
     ledger,
     logger,
     readPlanUsage,
+    oauthReader,
     getAccountUsage,
     resolve,
     advance: (ms: number) => {
@@ -162,6 +166,22 @@ function harness() {
 }
 
 describe('PlanUsageService', () => {
+  it('uses OAuth windows after one live no-session read and preserves live data when OAuth fails', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    const live = await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(live).toMatchObject({ status: 'service-unavailable', unavailableReason: 'no-open-session' });
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(1);
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const oauth = await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(oauth.status).toBe('available');
+    expect(oauth.windows.map(w => w.key)).toEqual(['five_hour']);
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(2);
+    h.oauthReader.mockRejectedValueOnce(new Error('offline'));
+    const failed = await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(failed).toMatchObject({ status: 'service-unavailable', unavailableReason: 'no-open-session' });
+  });
   it('registers Kimi and lets its reader resolve a direct lane key', async () => {
     const mockFetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true, status: 200,

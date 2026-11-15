@@ -51,6 +51,7 @@ function harness() {
     .fn()
     .mockResolvedValue({ status: 'available', value: usage });
   const readPlanUsage = jest.fn().mockResolvedValue(usage);
+  const oauthReader = jest.fn(async () => ({ status: 'no-usage-source' as const, statusReason: 'no-oauth' as const, windowSetEstablished: false, windows: [] }));
   const recordWindowEvidence = jest.fn();
   const logger: Pick<Logger, 'debug' | 'warn'> = createMockLogger();
   const service = new PlanUsageService(
@@ -59,12 +60,16 @@ function harness() {
     { resolve: jest.fn() },
     { readAccountForRoute, readPlanUsageForRoute, readPlanUsage },
     { getAccountUsage: jest.fn() },
+    Date.now,
+    undefined,
+    oauthReader,
   );
   return {
     service,
     readAccountForRoute,
     readPlanUsageForRoute,
     readPlanUsage,
+    oauthReader,
     recordWindowEvidence,
   };
 }
@@ -137,7 +142,7 @@ describe('Claude owner cache and source handles', () => {
   });
 
   it('keeps unknown owners unavailable and never chooses an unrelated query', async () => {
-    const { service, readPlanUsageForRoute } = harness();
+    const { service, readPlanUsageForRoute, oauthReader } = harness();
     const unknown = {
       ...target(),
       ownerRef: quotaOwnerRefFromKey(unknownOwnerKey('anthropic', 'run')),
@@ -151,6 +156,7 @@ describe('Claude owner cache and source handles', () => {
     });
     expect(missing.unavailableReason).toBe('no-open-session');
     expect(readPlanUsageForRoute).not.toHaveBeenCalled();
+    expect(oauthReader).not.toHaveBeenCalled();
   });
 
   it('retains ambient selection and its cached reading', async () => {

@@ -960,6 +960,7 @@ describe('PlanLimitOwnerDiscoveryService', () => {
         { getUsage: jest.fn(), currentOwnerKey: jest.fn() } as never,
         Date.now,
         kimiAuth,
+        async () => ({ status: 'no-usage-source', statusReason: 'no-oauth', windowSetEstablished: false, windows: [] }),
       );
       return { service, credentials, usageLedger };
     }
