@@ -998,9 +998,13 @@ for (const host of ['vscode', 'electron'] as const) {
           .locator(`[data-testid="${row}"]`)
           .evaluate((node) => {
             const [label, value] = Array.from(node.children) as HTMLElement[];
+            const labelBox = label.getBoundingClientRect();
+            const valueBox = value.getBoundingClientRect();
             return {
-              labelTop: label.getBoundingClientRect().top,
-              valueTop: value.getBoundingClientRect().top,
+              labelBottom: labelBox.bottom,
+              valueTop: valueBox.top,
+              labelMid: labelBox.top + labelBox.height / 2,
+              valueMid: valueBox.top + valueBox.height / 2,
               overflow: value.scrollWidth - value.clientWidth,
               lines: Math.round(value.getBoundingClientRect().height / 16),
             };
@@ -1008,11 +1012,17 @@ for (const host of ['vscode', 'electron'] as const) {
         console.log(
           `B28b ${row} ${host}/${theme}: ${layout.lines} line(s), overflow ${layout.overflow}`,
         );
-        // Baseline-aligned on one line. Settings UI polish: the provider value is 16 px (text-base, 24 px line) beside
-        // a 12 px label, which puts the label's box about 5 px lower than the value's (was within 4 px).
-        expect(Math.abs(layout.labelTop - layout.valueTop)).toBeLessThanOrEqual(
-          6,
-        );
+        // PR #1306: the rows are ptah-description-list items (dt + dd). From 640 px the pattern centers the term on
+        // the value (items-center), and the Provider value also holds the "Change main agent" button, so its dd is
+        // taller than the term and the tops differ by about 8 px. Compare the centers. Below 640 px the term stacks
+        // above the value.
+        if (layout.labelBottom <= layout.valueTop + 1) {
+          expect(layout.valueTop - layout.labelBottom).toBeLessThanOrEqual(8);
+        } else {
+          expect(Math.abs(layout.labelMid - layout.valueMid)).toBeLessThanOrEqual(
+            2,
+          );
+        }
         expect(layout.overflow).toBeLessThanOrEqual(0);
       }
       await expect(
