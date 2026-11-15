@@ -376,8 +376,31 @@ describe('plugin catalog panel — per-workspace skill selection', () => {
     ).toEqual({
       enabledPluginIds: [],
       disabledSkillIds: [],
-      disabledPluginIds: [],
+      disabledPluginIds: ['ptah-core'],
     });
+  });
+
+  it('does not deny core while it remains selected', async () => {
+    setResponder('plugins:list-available', () => ok({ plugins: [{
+      id: 'ptah-core', name: 'Ptah Core', description: 'Core', category: 'core-tools',
+      skillCount: 0, commandCount: 0, isDefault: true,
+    }] }));
+    setResponder('plugins:get-config', () => ok({ enabledPluginIds: ['ptah-core'], disabledPluginIds: [], disabledSkillIds: [] }));
+    const fixture = await mount();
+    clickSave(fixture.nativeElement as HTMLElement);
+    await settle(fixture);
+    expect(calls.find((call) => call.method === 'plugins:save-config')?.params).toEqual({
+      enabledPluginIds: ['ptah-core'], disabledSkillIds: [], disabledPluginIds: [],
+    });
+  });
+
+  it('does not save a core choice before the catalog finishes loading', async () => {
+    const fixture = TestBed.createComponent(PluginCatalogPanelComponent);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.isLoading()).toBe(true);
+    await fixture.componentInstance.saveConfiguration();
+    expect(calls.some((call) => call.method === 'plugins:save-config')).toBe(false);
+    await settle(fixture);
   });
 
   it('never records an untouched derived "all" as a choice', async () => {

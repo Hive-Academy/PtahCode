@@ -931,7 +931,7 @@ export class HarnessRpcHandlers {
         const profileSkillSlugs = this.collectProfileSkillSlugs(profile);
 
         const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
-        const config = this.pluginLoader.getWorkspacePluginConfig();
+        const config = await this.pluginLoader.getWorkspacePluginConfigForWrite();
         const effectiveConfig = await this.pluginLoader.getEffectivePluginConfig(workspaceRoot);
         const disabledPlugins = new Set(effectiveConfig.config.disabledPluginIds ?? []);
         const availableBundled = bundled.filter((id) => !disabledPlugins.has(id));

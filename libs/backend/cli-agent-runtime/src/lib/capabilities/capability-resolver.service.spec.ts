@@ -1361,7 +1361,8 @@ describe('CapabilityResolverService', () => {
       const saved = storedConfig(env);
       expect(saved.disabledSkillIds).toEqual(['orchestration']);
       expect(saved.disabledPluginIds).toEqual([]);
-      expect(saved.enabledPluginIds).toEqual([]);
+      // The first write from an unsaved workspace keeps the ptah-core default.
+      expect(saved.enabledPluginIds).toEqual(['ptah-core']);
       expect(saved).not.toHaveProperty('enabledSkillIds');
     });
 

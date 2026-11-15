@@ -161,6 +161,64 @@ const PRE_TASK_CONFIG: PluginConfigState = {
 };
 
 describe('PluginLoaderService — capability layers', () => {
+  describe('core default and first workspace write', () => {
+    it('keeps a saved empty list off without a broader choice', async () => {
+      const { service } = makeLoader({ storage: createStateStorage({ enabledPluginIds: [], disabledSkillIds: [] }) });
+      expect((await service.getEffectivePluginConfig()).config.enabledPluginIds).toEqual([]);
+    });
+
+    it('honors a global on beneath a saved empty workspace list', async () => {
+      const { service } = makeLoader({ storage: createStateStorage({ enabledPluginIds: [], disabledSkillIds: [] }), globalLayer: createGlobalLayer(okSnapshot([item('plugin', 'ptah-core', 'on')])) });
+      expect((await service.getEffectivePluginConfig()).config.enabledPluginIds).toContain('ptah-core');
+    });
+
+    it('keeps a global off when an unrelated first save occurs', async () => {
+      const storage = createStateStorage();
+      const { service } = makeLoader({ storage, globalLayer: createGlobalLayer(okSnapshot([item('plugin', 'ptah-core', 'off')])) });
+      const base = await service.getWorkspacePluginConfigForWrite();
+      await service.saveWorkspacePluginConfig({ ...base, disabledSkillIds: ['unrelated'] });
+      const config = (await service.getEffectivePluginConfig()).config;
+      expect(config.enabledPluginIds).not.toContain('ptah-core');
+      expect(config.disabledPluginIds).toContain('ptah-core');
+    });
+
+    it('does not carry core into the first save when an ancestor denies it', async () => {
+      const parent = tempDir('ptah-deny-parent-');
+      const child = path.join(parent, 'child');
+      fs.mkdirSync(child);
+      const childStore = createStateStorage();
+      const parentStore = createStateStorage({ enabledPluginIds: [], disabledPluginIds: ['ptah-core'], disabledSkillIds: [] });
+      const storage = {
+        ...childStore,
+        getStorageForWorkspace: (root: string) => root === parent ? parentStore : childStore,
+        getAllWorkspacePaths: () => [child, parent],
+      };
+      const { service } = makeLoader({ storage, workspaceRoot: child });
+      const effective = (await service.getEffectivePluginConfig(child, { ancestorRoots: [parent] })).config;
+      const base = await service.getWorkspacePluginConfigForWrite(child, effective);
+      expect(base.enabledPluginIds).not.toContain('ptah-core');
+    });
+
+    it('keeps core on when an unrelated first save occurs', async () => {
+      const { service } = makeLoader({ storage: createStateStorage() });
+      const base = await service.getWorkspacePluginConfigForWrite();
+      await service.saveWorkspacePluginConfig({ ...base, disabledSkillIds: ['unrelated'] });
+      expect((await service.getEffectivePluginConfig()).config.enabledPluginIds).toContain('ptah-core');
+    });
+
+    it('leaves core off after saving an explicit empty list', async () => {
+      const { service } = makeLoader({ storage: createStateStorage() });
+      await service.saveWorkspacePluginConfig({ enabledPluginIds: [], disabledSkillIds: [] });
+      expect((await service.getEffectivePluginConfig()).config.enabledPluginIds).toEqual([]);
+    });
+
+    it('does not enable core when workspace config is corrupt', async () => {
+      const { service } = makeLoader({ storage: createStateStorage({ enabledPluginIds: 'bad', disabledSkillIds: [] }) });
+      await expect(service.getEffectivePluginConfig()).rejects.toBeInstanceOf(CapabilityPolicyUnknownError);
+      await expect(service.getWorkspacePluginConfigForWrite()).rejects.toBeInstanceOf(CapabilityPolicyUnknownError);
+    });
+  });
+
   describe('explicit ancestor policy', () => {
     function scopedStores(roots: string[]) {
       const stores = new Map(
@@ -178,6 +236,16 @@ describe('PluginLoaderService — capability layers', () => {
       } as IStateStorage;
       return { storage, stores };
     }
+
+    it('honors an ancestor core on beneath a saved empty child', async () => {
+      const parent = tempDir('ptah-core-parent-');
+      const child = tempDir('ptah-core-child-');
+      const { storage, stores } = scopedStores([child, parent]);
+      stores.get(child)?.raw.set(CONFIG_KEY, { enabledPluginIds: [], disabledSkillIds: [] });
+      stores.get(parent)?.raw.set(CONFIG_KEY, { enabledPluginIds: ['ptah-core'], disabledSkillIds: [] });
+      const { service } = makeLoader({ storage, workspaceRoot: child });
+      expect((await service.getEffectivePluginConfig(child, { ancestorRoots: [parent] })).config.enabledPluginIds).toContain('ptah-core');
+    });
 
     it('layers R -> A -> B nearest first, keeps agents local, and saves only B', async () => {
       const root = tempDir('ptah-policy-root-');
