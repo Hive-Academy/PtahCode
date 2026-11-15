@@ -88,3 +88,13 @@ Checks: targeted Jest 3 suites, 105 tests passed. `npm run verify -- -p cli-agen
   Plain lookups still skip an unreadable document.
 - Spec: "refuses to mutate a stale copy while the document with the newer copy is unreadable".
 - Focused jest: 106 passed. Gate and review: see review-round-6.md and the PR test plan.
+
+## Review round 6 and 7 fixes (coordinator)
+
+- Round 6 (05ee51522): the guarded `transition` runs for every closable state, also `closePending`.
+  A close that succeeded reports `closed` when the `closeCompleted` write fails.
+- Round 7: `transition` returns `completed` for a `closeCompleted` record, and the ack returns
+  `already-closed` without a closer call. The service keeps `closedUnsettled`, an in-memory set of
+  predecessors it closed without a persisted completion. The next ack settles the record without
+  another close. The set does not survive a restart; then an absent tab is refused, as before.
+- Gate `npm run verify -- -p cli-agent-runtime` and `-t typecheck -p ptah-electron`: passed.

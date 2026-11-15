@@ -468,6 +468,11 @@ describe('SessionHandoffAckStore', () => {
         state: 'closeCompleted',
       }),
     ).toBe('moved');
+    expect(
+      await restarted.transition('before', 'recorded', {
+        state: 'closePending',
+      }),
+    ).toBe('completed');
   });
 
   it('pins record lookups and transitions to their workspace after the active workspace switches', async () => {

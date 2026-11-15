@@ -390,7 +390,7 @@ export class SessionHandoffAckStore {
       Pick<HandoffAckRecord, 'state' | 'successorSdkId' | 'keepPredecessor'>
     >,
     expectedSuccessorTabId?: string,
-  ): Promise<'moved' | 'already' | 'missing' | 'superseded'> {
+  ): Promise<'moved' | 'already' | 'completed' | 'missing' | 'superseded'> {
     return this.serialized(async () => {
       const located = await this.stateForPredecessor(predecessorTabId);
       if (!located) return 'missing';
@@ -400,7 +400,9 @@ export class SessionHandoffAckStore {
         state.records[index].successorTabId !== expectedSuccessorTabId
       )
         return 'superseded';
-      if (state.records[index].state !== from) return 'already';
+      const current = state.records[index].state;
+      if (current !== from)
+        return current === 'closeCompleted' ? 'completed' : 'already';
       state.records[index] = RecordSchema.parse({
         ...state.records[index],
         ...patch,

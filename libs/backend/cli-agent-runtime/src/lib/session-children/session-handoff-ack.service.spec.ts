@@ -189,7 +189,7 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     expect(h.closer.close).toHaveBeenCalledTimes(1);
   });
 
-  it('reports closed when closeCompleted persistence failed, and a repeated ack persists it', async () => {
+  it('reports closed when closeCompleted persistence failed, and a repeated ack settles it without another close', async () => {
     const h = harness();
     const store = h.makeStore();
     await record(store);
@@ -206,12 +206,49 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
       state: 'closePending',
     });
+    h.closer.close.mockResolvedValue({ kind: 'absent' });
     expect(await service.acknowledge(h.request)).toMatchObject({
-      status: 'closed',
+      status: 'already-closed',
     });
     expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
       state: 'closeCompleted',
     });
+    expect(h.closer.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an absent predecessor on the first acknowledgement', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    const service = h.makeService(store);
+    await armAndFlush(service, h.request);
+    h.closer.close.mockResolvedValue({ kind: 'absent' });
+    expect(await service.acknowledge(h.request)).toMatchObject({
+      status: 'refused',
+    });
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closePending',
+    });
+  });
+
+  it('reports already-closed when the record completes after the lookup', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    const service = h.makeService(store);
+    await armAndFlush(service, h.request);
+    const original = store.transition.bind(store);
+    jest.spyOn(store, 'transition').mockImplementationOnce(async (...args) => {
+      await original(...args);
+      await store.compareAndSet(predecessorSessionId, 'closePending', {
+        state: 'closeCompleted',
+      });
+      return original(...args);
+    });
+    expect(await service.acknowledge(h.request)).toMatchObject({
+      status: 'already-closed',
+    });
+    expect(h.closer.close).not.toHaveBeenCalled();
   });
 
   it('deduplicates concurrent aliases by recorded predecessor', async () => {

@@ -145,6 +145,8 @@ export class SessionHandoffService
   private readonly armed = new Map<string, ArmedCallerStop>();
   private readonly stopping = new Set<string>();
   private readonly stopped = new Set<string>();
+  /** Predecessors this service closed without a persisted closeCompleted. */
+  private readonly closedUnsettled = new Set<string>();
   private readonly flushed = new Set<string>();
   private readonly recoverableRecords = new Map<
     string,
@@ -401,11 +403,31 @@ export class SessionHandoffService
       );
       if (transition === 'superseded')
         return refused('handoff record superseded by a newer handoff');
+      if (transition === 'completed')
+        return {
+          status: 'already-closed',
+          reason: 'predecessor already closed',
+        };
       if (transition === 'missing') {
         this.logger?.warn(
           `${LOG_PREFIX} handoff acknowledgement record disappeared for predecessor ${record.predecessorTabId} in workspace ${record.workspaceRoot}`,
         );
         return retry('handoff record not yet available; retry later');
+      }
+      if (this.closedUnsettled.has(record.predecessorTabId)) {
+        // This service closed the predecessor but could not persist it.
+        // A rejected write here gives a retry through the outer catch.
+        await this.ackStore!.compareAndSet(
+          record.predecessorTabId,
+          'closePending',
+          { state: 'closeCompleted' },
+          record.successorTabId,
+        );
+        this.closedUnsettled.delete(record.predecessorTabId);
+        return {
+          status: 'already-closed',
+          reason: 'predecessor already closed',
+        };
       }
       const closer = this.container!.resolve<HandoffPredecessorCloser>(
         CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER,
@@ -449,8 +471,9 @@ export class SessionHandoffService
           { state: 'closeCompleted' },
         );
       } catch (error: unknown) {
-        // The predecessor is closed; report that. The record stays
-        // closePending, and a later acknowledgement finds the tab absent.
+        // The predecessor is closed; report that. The next acknowledgement
+        // settles the record without another close.
+        this.closedUnsettled.add(record.predecessorTabId);
         this.reportError('handoff close completion was not persisted', error);
       }
       return { status: 'closed', reason: 'predecessor closed' };

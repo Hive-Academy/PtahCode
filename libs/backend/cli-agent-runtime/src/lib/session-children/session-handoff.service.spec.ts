@@ -67,13 +67,15 @@ afterAll(() => {
 
 function makeHarness(storage?: IStateStorage) {
   const stored = new Map<string, unknown>();
-  const ackStore = new SessionHandoffAckStore(storage ?? {
-    get: <T>(key: string) => stored.get(key) as T | undefined,
-    update: async (key: string, value: unknown) => {
-      stored.set(key, value);
+  const ackStore = new SessionHandoffAckStore(
+    storage ?? {
+      get: <T>(key: string) => stored.get(key) as T | undefined,
+      update: async (key: string, value: unknown) => {
+        stored.set(key, value);
+      },
+      keys: () => [...stored.keys()],
     },
-    keys: () => [...stored.keys()],
-  });
+  );
   const records = new Map<string, FakeRecord>();
   const addRecord = (record: FakeRecord) => {
     records.set(record.tabId, record);
@@ -307,7 +309,13 @@ function scopedAckStorage() {
     keys: () => proxy.keys(),
     getAllWorkspacePaths: () => [root, outside],
     getStorageForWorkspace: (path: string) =>
-      path === root ? current : path === outside ? (outsideUnreadable ? failing : other) : undefined,
+      path === root
+        ? current
+        : path === outside
+          ? outsideUnreadable
+            ? failing
+            : other
+          : undefined,
   };
   const setNewerRecord = (record: object) => {
     documents.get(outside)?.set(HANDOFF_ACK_STORAGE_KEY, {
@@ -318,7 +326,9 @@ function scopedAckStorage() {
   return {
     storage,
     setNewerRecord,
-    makeOutsideUnreadable: () => { outsideUnreadable = true; },
+    makeOutsideUnreadable: () => {
+      outsideUnreadable = true;
+    },
   };
 }
 
@@ -326,16 +336,21 @@ async function closePendingHandoff(h: ReturnType<typeof makeHarness>) {
   const started = await h.service.handoff(h.request());
   if (!started.ok) throw new Error('handoff should start');
   h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
-  expect(await h.ackStore.compareAndSet(CALLER, 'recorded', {
-    state: 'closePending',
-  })).toBe(true);
+  expect(
+    await h.ackStore.compareAndSet(CALLER, 'recorded', {
+      state: 'closePending',
+    }),
+  ).toBe(true);
   const record = await h.ackStore.findByPredecessor(CALLER);
   if (!record) throw new Error('handoff record missing');
-  return { record, request: {
-    callerSessionId: started.tabId,
-    predecessorSessionId: CALLER,
-    handoffPath,
-  } };
+  return {
+    record,
+    request: {
+      callerSessionId: started.tabId,
+      predecessorSessionId: CALLER,
+      handoffPath,
+    },
+  };
 }
 
 /** A child record of `parent`, stored through a real reservation. */
@@ -422,9 +437,9 @@ describe('SessionHandoffService', () => {
   it('reports closed when completion persistence rejects after the closer succeeds', async () => {
     const h = makeHarness();
     const { request } = await closePendingHandoff(h);
-    jest.spyOn(h.ackStore, 'compareAndSet').mockRejectedValueOnce(
-      new Error('completion write unavailable'),
-    );
+    jest
+      .spyOn(h.ackStore, 'compareAndSet')
+      .mockRejectedValueOnce(new Error('completion write unavailable'));
 
     await expect(h.service.acknowledge(request)).resolves.toMatchObject({
       status: 'closed',
