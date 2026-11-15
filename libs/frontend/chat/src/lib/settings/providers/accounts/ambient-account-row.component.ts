@@ -41,7 +41,7 @@ const SIGNED_IN_WORD = 'Signed in';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
-      class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-box border border-base-content/15 bg-base-100 px-4 py-3 text-base-content"
+      class="flex flex-wrap items-center gap-x-[var(--ptah-gap-heading)] gap-y-[var(--ptah-gap-inline)] rounded-box border border-base-content/15 bg-base-100 px-[var(--ptah-surface-pad)] py-[var(--ptah-gap-heading)] text-base-content"
       role="group"
       aria-labelledby="ambient-account-name"
       data-testid="ambient-account-row"
@@ -51,7 +51,7 @@ const SIGNED_IN_WORD = 'Signed in';
         aria-hidden="true"
         >E</span
       >
-      <div class="min-w-0 flex-1 basis-40 space-y-0.5 break-words">
+      <div class="min-w-0 flex-1 basis-40 flex flex-col gap-[var(--ptah-gap-label)] break-words">
         <p
           #name
           id="ambient-account-name"
@@ -59,16 +59,16 @@ const SIGNED_IN_WORD = 'Signed in';
           tabindex="-1"
           data-testid="ambient-name"
         >Existing Claude login</p>
-        <p class="flex min-w-0 items-center text-xs text-base-content-muted">
+        <p class="flex min-w-0 items-center gap-[var(--ptah-gap-inline)] text-xs text-base-content-muted">
           @if (model().checking) {
             <span
-              class="mr-1.5 inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none"
+              class="inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none"
               aria-hidden="true"
               data-testid="ambient-spinner"
             ></span>
           } @else {
             <span
-              [class]="'mr-1.5 inline-block h-2 w-2 shrink-0 rounded-full ' + dot()"
+              [class]="'inline-block h-2 w-2 shrink-0 rounded-full ' + dot()"
               aria-hidden="true"
               data-testid="ambient-dot"
             ></span>
@@ -79,7 +79,7 @@ const SIGNED_IN_WORD = 'Signed in';
           }
         </p>
         @if (chips().length > 0) {
-          <p class="flex min-w-0 flex-wrap items-center gap-1 text-xs" data-testid="ambient-chips">
+          <p class="flex min-w-0 flex-wrap items-center gap-[var(--ptah-gap-label)] text-xs" data-testid="ambient-chips">
             <span class="text-base-content-muted">Used by</span>
             @for (chip of chips(); track chip) {
               <span ptahBadge class="h-auto max-w-full whitespace-normal break-words">{{ chip }}</span>

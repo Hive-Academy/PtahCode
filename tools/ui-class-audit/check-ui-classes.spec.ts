@@ -8,8 +8,10 @@ import {
   DEFAULT_IGNORE_GLOBS,
   DEFAULT_SCAN_GLOBS,
   DYNAMIC_TOKEN,
+  SPACING_RULE,
   analyzeClassExpression,
   isBlockedClassToken,
+  isRawSpacingToken,
   runAudit,
   scanHtmlFile,
   scanTsFile,
@@ -35,6 +37,10 @@ function makeTempRepo(): { repoRoot: string; baselinePath: string } {
   return { repoRoot, baselinePath: join(repoRoot, 'baseline.json') };
 }
 
+function spacingBaselineOf(baselinePath: string): string {
+  return join(dirname(baselinePath), 'baseline-spacing.json');
+}
+
 function writeRepoFile(repoRoot: string, relPath: string, content: string): void {
   const abs = join(repoRoot, relPath);
   mkdirSync(dirname(abs), { recursive: true });
@@ -51,6 +57,7 @@ function auditOptions(
     scanGlobs: DEFAULT_SCAN_GLOBS,
     ignoreGlobs: DEFAULT_IGNORE_GLOBS,
     baselinePath,
+    spacingBaselinePath: spacingBaselineOf(baselinePath),
     updateBaseline,
   };
 }
@@ -657,5 +664,330 @@ describe('runAudit baseline ratchet', () => {
       alert: 1,
       'alert-error': 1,
     });
+  });
+});
+
+// --- raw spacing rule (settings scope) -----------------------------------------
+
+describe('isRawSpacingToken', () => {
+  it('blocks numeric scale, px and auto values of every spacing utility', () => {
+    for (const token of [
+      'gap-2',
+      'gap-x-3',
+      'gap-y-0.5',
+      'p-4',
+      'px-4',
+      'py-2.5',
+      'pt-1',
+      'pr-0',
+      'pb-6',
+      'pl-3',
+      'ps-2',
+      'pe-2',
+      'p-px',
+      'm-0',
+      'mx-auto',
+      'my-1',
+      'mt-0.5',
+      'mr-1.5',
+      'mb-2',
+      'ml-px',
+      'ms-1',
+      'me-1',
+      'space-x-2',
+      'space-y-0.5',
+    ]) {
+      expect(isRawSpacingToken(token)).toBe(true);
+    }
+  });
+
+  it('blocks negative margins', () => {
+    for (const token of ['-mt-2', '-mx-1', '-m-px', '-ml-0.5', 'md:-mb-1']) {
+      expect(isRawSpacingToken(token)).toBe(true);
+    }
+  });
+
+  it('blocks variant and important forms', () => {
+    for (const token of [
+      'md:gap-2',
+      'hover:px-4',
+      'dark:md:!mt-1',
+      '!p-2',
+      'p-2!',
+      '[@container(min-width:640px)]:gap-4',
+    ]) {
+      expect(isRawSpacingToken(token)).toBe(true);
+    }
+  });
+
+  it('allows arbitrary values that use a --ptah- token', () => {
+    for (const token of [
+      'gap-[var(--ptah-gap-group)]',
+      'px-[var(--ptah-surface-pad)]',
+      'mt-[var(--ptah-gap-heading)]',
+      '-mt-[var(--ptah-gap-label)]',
+      'md:gap-[var(--ptah-gap-field)]',
+      '[@container(min-width:640px)]:gap-[var(--ptah-gap-group)]',
+      'p-(--ptah-gap-controls)',
+    ]) {
+      expect(isRawSpacingToken(token)).toBe(false);
+    }
+  });
+
+  it('blocks arbitrary values without a --ptah- token', () => {
+    for (const token of [
+      'gap-[7px]',
+      'p-[var(--other-pad)]',
+      'mt-[2rem]',
+      'px-(--my-pad)',
+    ]) {
+      expect(isRawSpacingToken(token)).toBe(true);
+    }
+  });
+
+  it('does not match other utilities or theme aliases', () => {
+    for (const token of [
+      'flex',
+      'text-sm',
+      'pointer-events-none',
+      'max-w-2',
+      'min-h-0',
+      'place-items-center',
+      'space-x-reverse',
+      'gap-ptah-field',
+      'py',
+      'w-4',
+      'top-2',
+      'inset-x-0',
+    ]) {
+      expect(isRawSpacingToken(token)).toBe(false);
+    }
+  });
+});
+
+describe('raw spacing template scanning', () => {
+  const FILE = 'libs/frontend/chat/src/lib/settings/demo.component.html';
+
+  it('judges static class, [class], [ngClass] and [class.x] and never reports dynamic', () => {
+    const html = [
+      '<div class="flex gap-2 gap-[var(--ptah-gap-group)] btn">A</div>',
+      `<div [class]="wide() ? 'px-4' : 'px-[var(--ptah-surface-pad)]'">B</div>`,
+      `<div [ngClass]="{ 'mt-1': on(), 'text-sm': true }">C</div>`,
+      '<div [class.-mb-2]="tight()">D</div>',
+      `<div [class]="chipClass() + ' py-1'">E</div>`,
+      '<div class="p-3 {{ extra }}">F</div>',
+    ].join('\n');
+    expect(scanHtmlFile(html, FILE, SPACING_RULE)).toEqual([
+      { file: FILE, line: 1, token: 'gap-2' },
+      { file: FILE, line: 2, token: 'px-4' },
+      { file: FILE, line: 3, token: 'mt-1' },
+      { file: FILE, line: 4, token: '-mb-2' },
+      { file: FILE, line: 5, token: 'py-1' },
+      { file: FILE, line: 6, token: 'p-3' },
+    ]);
+  });
+
+  it('scans inline templates and drops the dynamic template occurrence', () => {
+    const source = [
+      '@Component({',
+      '  template: `',
+      '    <div class="gap-1 ${cls}">A</div>',
+      '  `,',
+      '})',
+      'export class DemoComponent {}',
+      '@Component({ template: getTemplate() })',
+      'export class OtherComponent {}',
+    ].join('\n');
+    expect(scanTsFile(source, 'x.ts', SPACING_RULE)).toEqual([
+      { file: 'x.ts', line: 3, token: 'gap-1' },
+    ]);
+  });
+});
+
+describe('runAudit raw spacing rule', () => {
+  const SETTINGS_FILE =
+    'libs/frontend/chat/src/lib/settings/demo/demo.component.html';
+  const ACCOUNTS_FILE =
+    'libs/frontend/chat/src/lib/settings/providers/accounts/demo-row.component.html';
+  let repoRoot: string;
+  let baselinePath: string;
+  let spacingPath: string;
+  let logSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    const repo = makeTempRepo();
+    repoRoot = repo.repoRoot;
+    baselinePath = repo.baselinePath;
+    spacingPath = spacingBaselineOf(baselinePath);
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  function logLines(): string[] {
+    return logSpy.mock.calls.map((call: unknown[]) =>
+      call.map(String).join(' '),
+    );
+  }
+
+  it('does not flag raw spacing outside the settings scope', async () => {
+    writeRepoFile(
+      repoRoot,
+      'libs/frontend/chat/src/lib/chat/x.component.html',
+      '<div class="gap-2 px-4">A</div>',
+    );
+    writeRepoFile(
+      repoRoot,
+      'apps/ptah-extension-webview/src/app/app.html',
+      '<div class="mt-1">A</div>',
+    );
+    const result = await runAudit(auditOptions(repoRoot, baselinePath));
+    expect(result.spacing.occurrences).toEqual([]);
+    expect(result.failed).toBe(false);
+  });
+
+  it('does not scan settings spec files', async () => {
+    writeRepoFile(
+      repoRoot,
+      'libs/frontend/chat/src/lib/settings/demo/demo.component.spec.ts',
+      "@Component({ template: '<div class=\"gap-2\">Spec</div>' })\nexport class SpecHost {}\n",
+    );
+    const result = await runAudit(auditOptions(repoRoot, baselinePath));
+    expect(result.spacing.occurrences).toEqual([]);
+  });
+
+  it('fails a raw spacing utility in a settings file and names the rule', async () => {
+    writeRepoFile(
+      repoRoot,
+      SETTINGS_FILE,
+      '<div class="gap-2 gap-[var(--ptah-gap-group)]">A</div>',
+    );
+    const result = await runAudit(auditOptions(repoRoot, baselinePath));
+    expect(result.failed).toBe(true);
+    expect(result.comparison.failures).toEqual([]);
+    expect(result.spacing.comparison.failures).toEqual([
+      { file: SETTINGS_FILE, token: 'gap-2', count: 1, baseline: 0 },
+    ]);
+    expect(
+      logLines().some(
+        (line) =>
+          line.includes(`${SETTINGS_FILE}:1: gap-2`) &&
+          line.includes('raw spacing utility') &&
+          line.includes('use a pattern component or a --ptah-* token'),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not double count a dynamic expression in the settings scope', async () => {
+    writeRepoFile(
+      repoRoot,
+      SETTINGS_FILE,
+      `<div [class]="chip() + ' gap-2'">A</div>`,
+    );
+    const result = await runAudit(auditOptions(repoRoot, baselinePath));
+    expect(result.counts[SETTINGS_FILE]).toEqual({ [DYNAMIC_TOKEN]: 1 });
+    expect(result.spacing.counts[SETTINGS_FILE]).toEqual({ 'gap-2': 1 });
+  });
+
+  it('ratchets the spacing baseline up and down', async () => {
+    writeRepoFile(repoRoot, SETTINGS_FILE, '<div class="gap-2 px-4">A</div>');
+    const seed = await runAudit(auditOptions(repoRoot, baselinePath, true));
+    expect(seed.spacing.baselineWritten).toBe(true);
+    expect(readBaseline(spacingPath)).toEqual({
+      [SETTINGS_FILE]: { 'gap-2': 1, 'px-4': 1 },
+    });
+
+    // An increase fails, and --update-baseline never raises the count.
+    writeRepoFile(
+      repoRoot,
+      SETTINGS_FILE,
+      '<div class="gap-2 px-4">A</div>\n<p class="gap-2">B</p>',
+    );
+    const up = await runAudit(auditOptions(repoRoot, baselinePath));
+    expect(up.failed).toBe(true);
+    expect(up.spacing.comparison.failures).toEqual([
+      { file: SETTINGS_FILE, token: 'gap-2', count: 2, baseline: 1 },
+    ]);
+    const upUpdate = await runAudit(auditOptions(repoRoot, baselinePath, true));
+    expect(upUpdate.failed).toBe(true);
+    expect(readBaseline(spacingPath)).toEqual({
+      [SETTINGS_FILE]: { 'gap-2': 1, 'px-4': 1 },
+    });
+
+    // A decrease passes and is recorded only with --update-baseline.
+    writeRepoFile(
+      repoRoot,
+      SETTINGS_FILE,
+      '<div class="gap-[var(--ptah-gap-group)] px-4">A</div>',
+    );
+    const down = await runAudit(auditOptions(repoRoot, baselinePath));
+    expect(down.failed).toBe(false);
+    expect(down.spacing.comparison.decreases).toEqual([
+      { file: SETTINGS_FILE, token: 'gap-2', baseline: 1, count: 0 },
+    ]);
+    expect(readBaseline(spacingPath)).toEqual({
+      [SETTINGS_FILE]: { 'gap-2': 1, 'px-4': 1 },
+    });
+    const downUpdate = await runAudit(auditOptions(repoRoot, baselinePath, true));
+    expect(downUpdate.spacing.baselineWritten).toBe(true);
+    expect(readBaseline(spacingPath)).toEqual({ [SETTINGS_FILE]: { 'px-4': 1 } });
+  });
+
+  it('keeps spacing tokens out of baseline.json and leaves it untouched', async () => {
+    writeRepoFile(repoRoot, SETTINGS_FILE, '<div class="btn gap-2">A</div>');
+    await runAudit(auditOptions(repoRoot, baselinePath, true));
+    expect(readBaseline(baselinePath)).toEqual({ [SETTINGS_FILE]: { btn: 1 } });
+    expect(readBaseline(spacingPath)).toEqual({ [SETTINGS_FILE]: { 'gap-2': 1 } });
+
+    // Only spacing changes: baseline.json stays byte-identical.
+    const before = readFileSync(baselinePath, 'utf8');
+    writeRepoFile(repoRoot, SETTINGS_FILE, '<div class="btn">A</div>');
+    const update = await runAudit(auditOptions(repoRoot, baselinePath, true));
+    expect(update.baselineWritten).toBe(false);
+    expect(update.spacing.baselineWritten).toBe(true);
+    expect(readFileSync(baselinePath, 'utf8')).toBe(before);
+    expect(readBaseline(spacingPath)).toEqual({});
+  });
+
+  it('never seeds a converted accounts file, so its raw spacing fails', async () => {
+    writeRepoFile(
+      repoRoot,
+      ACCOUNTS_FILE,
+      '<div class="px-4 gap-[var(--ptah-gap-inline)]">A</div>',
+    );
+    writeRepoFile(repoRoot, SETTINGS_FILE, '<div class="gap-2">A</div>');
+    await runAudit(auditOptions(repoRoot, baselinePath, true));
+    expect(readBaseline(spacingPath)).toEqual({ [SETTINGS_FILE]: { 'gap-2': 1 } });
+    const after = await runAudit(auditOptions(repoRoot, baselinePath));
+    expect(after.failed).toBe(true);
+    expect(after.spacing.comparison.failures).toEqual([
+      { file: ACCOUNTS_FILE, token: 'px-4', count: 1, baseline: 0 },
+    ]);
+  });
+});
+
+describe('committed spacing baseline', () => {
+  it('is a lint input of the audit', () => {
+    const project = JSON.parse(
+      readFileSync(join(__dirname, 'project.json'), 'utf-8'),
+    ) as { targets: { lint: { inputs: string[] } } };
+    expect(project.targets.lint.inputs).toContain(
+      '{projectRoot}/baseline-spacing.json',
+    );
+  });
+
+  it('holds only settings files and no converted accounts file', () => {
+    const spacing = JSON.parse(
+      readFileSync(join(__dirname, 'baseline-spacing.json'), 'utf-8'),
+    ) as Baseline;
+    const files = Object.keys(spacing);
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      expect(file.startsWith('libs/frontend/chat/src/lib/settings/')).toBe(true);
+      expect(file.includes('/settings/providers/accounts/')).toBe(false);
+    }
   });
 });
