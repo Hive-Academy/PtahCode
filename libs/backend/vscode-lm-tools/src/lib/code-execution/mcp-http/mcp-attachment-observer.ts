@@ -52,11 +52,16 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
   recordRejectedAttempt(attempt: McpAttachmentAttempt): void {
     const key = this.key(attempt.agentId, attempt.port);
     if (this.rejectedAttempts.size >= 512 && !this.rejectedAttempts.has(key))
-      this.rejectedAttempts.delete(this.rejectedAttempts.keys().next().value ?? '');
+      this.rejectedAttempts.delete(
+        this.rejectedAttempts.keys().next().value ?? '',
+      );
     this.rejectedAttempts.set(key, attempt);
   }
 
   record(entry: McpAttachment): void {
+    // Only initialize confirms the MCP handshake. A tool list can be returned
+    // while the catalog is still settling and must not release waiters.
+    if (entry.method !== 'initialize') return;
     const key = this.key(entry.agentId, entry.port);
     if (this.get(entry.agentId, entry.port)) return;
     for (const [storedKey, stored] of this.entries) {

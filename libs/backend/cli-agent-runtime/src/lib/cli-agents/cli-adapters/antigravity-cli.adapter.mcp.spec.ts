@@ -367,6 +367,7 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
     const resolveWaits = new Map<string, (entry: McpAttachment) => void>();
     const probe: IMcpAttachmentProbe = {
       get: () => undefined,
+      getAttempt: () => undefined,
       waitFor: (id) =>
         new Promise((resolve) => {
           resolveWaits.set(id, resolve);
@@ -417,6 +418,70 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
     children[0].emit('close', 0, null);
     children[1].emit('close', 0, null);
     await Promise.all([first.done, second.done]);
+  });
+
+  const makeDeferredProbe = () => {
+    let finishWait: ((entry: McpAttachment | undefined) => void) | undefined;
+    const probe: IMcpAttachmentProbe = {
+      get: () => undefined,
+      getAttempt: () => undefined,
+      waitFor: () =>
+        new Promise((resolve) => {
+          finishWait = resolve;
+        }),
+    };
+    return { probe, finish: (e?: McpAttachment) => finishWait?.(e) };
+  };
+
+  it('calls the registered MCP timeout callback while the lane is active', async () => {
+    const { probe, finish } = makeDeferredProbe();
+    const handle = await adapter.runSdk({
+      task: 'do a thing',
+      workingDirectory: ws,
+      mcpPort: 51234,
+      attachmentProbe: probe,
+    });
+    const onTimeout = jest.fn();
+    handle.onMcpAttachmentTimeout?.(onTimeout);
+    finish(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    child.emit('close', 0, null);
+    await handle.done;
+  });
+
+  it('does not call the MCP timeout callback when the process closed first', async () => {
+    const { probe, finish } = makeDeferredProbe();
+    const handle = await adapter.runSdk({
+      task: 'do a thing',
+      workingDirectory: ws,
+      mcpPort: 51234,
+      attachmentProbe: probe,
+    });
+    const onTimeout = jest.fn();
+    handle.onMcpAttachmentTimeout?.(onTimeout);
+    child.emit('close', 0, null);
+    finish(undefined);
+    await handle.done;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it('does not replay a timeout to a callback registered after process close', async () => {
+    const { probe, finish } = makeDeferredProbe();
+    const handle = await adapter.runSdk({
+      task: 'do a thing',
+      workingDirectory: ws,
+      mcpPort: 51234,
+      attachmentProbe: probe,
+    });
+    finish(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    child.emit('close', 0, null);
+    await handle.done;
+    const onTimeout = jest.fn();
+    handle.onMcpAttachmentTimeout?.(onTimeout);
+    expect(onTimeout).not.toHaveBeenCalled();
   });
 
   it('releases the startup lock and restores the entry after a stdin write failure', async () => {
@@ -501,6 +566,7 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
       agentId: 'lane-config-failure',
       attachmentProbe: {
         get: () => undefined,
+        getAttempt: () => undefined,
         waitFor: jest.fn().mockResolvedValue(undefined),
       },
     });
