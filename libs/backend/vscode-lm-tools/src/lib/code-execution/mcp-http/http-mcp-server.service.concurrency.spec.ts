@@ -369,6 +369,35 @@ describe('chat registration queue behavior', () => {
     expect(serversOnDisk()).toHaveProperty('ptah');
   }, 10000);
 
+  it('queues one reconcile for chat callers that arrive before it starts', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = service['enqueueMcpOp'](() => gate);
+    const first = service['queueEnsureRegistered']();
+    const second = service['queueEnsureRegistered']();
+    expect(second).toBe(first);
+    release();
+    await queued;
+    expect((await first).registered).toBe(true);
+    expect(service['queueEnsureRegistered']()).not.toBe(first);
+    await service['mcpOpQueue'];
+  });
+
+  it('does not take the fast path for an entry with a changed URL path', async () => {
+    expect((await service.ensureRegisteredForSubagents()).registered).toBe(true);
+    const configPath = join(workspaceRoot, '.mcp.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    config.mcpServers.ptah.url = `${config.mcpServers.ptah.url}/extra`;
+    writeFileSync(configPath, JSON.stringify(config));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = service['enqueueMcpOp'](() => gate);
+    expect(await service.ensureRegisteredForSubagents()).toEqual({ registered: false, reason: 'timeout' });
+    release();
+    await queued;
+    await service['mcpOpQueue'];
+  }, 10000);
+
   it('retains only slots belonging to the requested root', async () => {
     const otherRoot = mkdtempSync(join(tmpdir(), 'ptah-mcp-other-'));
     try {

@@ -2014,8 +2014,17 @@ export class ChatSessionService {
       if (this.sdkContext.isMcpServerRunning()) {
         const registration =
           await this.codeExecutionMcp.ensureRegisteredForSubagents();
-        mcpRegisteredForSubagents = registration.registered;
-        if (!registration.registered) {
+        // A deadline expiry means the write is still queued, not refused: the
+        // resumed session's own MCP config does not read `.mcp.json`.
+        const pending =
+          !registration.registered && registration.reason === 'timeout';
+        mcpRegisteredForSubagents = registration.registered || pending;
+        if (pending) {
+          this.logger.warn(
+            '[ptah.main] chat:continue - .mcp.json registration still pending; resuming with session MCP',
+            { reason: registration.reason },
+          );
+        } else if (!registration.registered) {
           this.logger.warn(
             '[ptah.main] chat:continue - .mcp.json entry absent, resuming without MCP',
             { reason: registration.reason },

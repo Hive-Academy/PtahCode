@@ -213,8 +213,12 @@ export class MessageSenderService {
         if (preamble) this.tabManager.setFirstMessagePreamble(tabId, preamble);
         this.tabManager.markLoaded(tabId);
         this.tabManager.markTabIdle(tabId);
-        this.sessionManager.setStatus('loaded');
-        this.sessionManager.failSession();
+        // The session manager holds the ACTIVE tab's state: after 30 s the
+        // user may be on another tab, whose session this must not fail.
+        if (this.tabManager.activeTabId() === tabId) {
+          this.sessionManager.setStatus('loaded');
+          this.sessionManager.failSession();
+        }
         for (const listener of this.startAbandonedListeners) listener(tabId);
       }, CHAT_ADMISSION_RPC_MARGIN_MS),
     );

@@ -301,6 +301,8 @@ export class CodeExecutionMCP
    * change that arrives during it needs a new pass.
    */
   private queuedRepoint: Promise<void> | null = null;
+  /** A chat registration reconcile that is queued and has NOT started. */
+  private queuedEnsure: Promise<McpSubagentRegistration> | null = null;
   private registrationNeedsReconcile = false;
 
   /** Monotonic request counter; only the newest re-point is allowed to run. */
@@ -564,8 +566,8 @@ export class CodeExecutionMCP
     const activeTarget = this.getMcpJsonPath();
     if (!activeTarget) return notRegistered('no-workspace');
     const owned = this.registrations.get(activeTarget);
-    if (!this.registrationNeedsReconcile && !this.pendingRepoint &&
-        owned?.port === this.port && this.hasCurrentClaudeEntry(activeTarget, this.port)) {
+    if (!this.registrationNeedsReconcile && !this.pendingRepoint && owned?.port === this.port &&
+        this.hasCurrentClaudeEntry(activeTarget, this.port, owned.slot.workspaceRoot)) {
       return REGISTERED;
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -576,13 +578,33 @@ export class CodeExecutionMCP
       }, MCP_CHAT_REGISTRATION_DEADLINE_MS);
     });
     try {
-      return await Promise.race([this.enqueueMcpOp(() => this.ensureRegisteredNow()), deadline]);
+      return await Promise.race([this.queueEnsureRegistered(), deadline]);
     } finally {
       if (timer) clearTimeout(timer);
     }
   }
 
-  private hasCurrentClaudeEntry(configPath: string, port: number): boolean {
+  /**
+   * One queued full reconcile serves every chat caller that arrives before it
+   * starts. Without this, each caller that gave up at the deadline left one more
+   * full reconcile in the FIFO, and the backlog grew with each chat start.
+   */
+  private queueEnsureRegistered(): Promise<McpSubagentRegistration> {
+    if (this.queuedEnsure) return this.queuedEnsure;
+    const run: Promise<McpSubagentRegistration> = this.enqueueMcpOp(() => {
+      if (this.queuedEnsure === run) this.queuedEnsure = null;
+      return this.ensureRegisteredNow();
+    });
+    this.queuedEnsure = run;
+    void run.finally(() => {
+      if (this.queuedEnsure === run) this.queuedEnsure = null;
+    }).catch((error: unknown) => {
+      this.logger.warn(`[CodeExecutionMCP] Registration cleanup failed: ${String(error)}`, 'CodeExecutionMCP');
+    });
+    return run;
+  }
+
+  private hasCurrentClaudeEntry(configPath: string, port: number, workspaceRoot: string): boolean {
     try {
       const config: unknown = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       if (typeof config !== 'object' || config === null || !('mcpServers' in config)) return false;
@@ -595,6 +617,10 @@ export class CodeExecutionMCP
           !url.startsWith(`http://localhost:${port}/auth/`)) return false;
       const token = /\/auth\/([A-Za-z0-9_-]{43})\//.exec(url)?.[1];
       if (!token) return false;
+      // The whole URL must be the one this service writes (same grammar as
+      // `writeMcpJsonEntry`), so a changed path suffix goes to the repair.
+      const expected = `http://localhost:${port}/auth/${token}${ptahMcpUrl(port, workspaceRoot).slice(`http://localhost:${port}`.length)}`;
+      if (url !== expected) return false;
       const auth = this.callerCredentials.authorize({ token, workspaceRoot: path.dirname(configPath) });
       return auth.ok && auth.binding.capability === this.externalCallerAccess();
     } catch (error: unknown) {
@@ -755,7 +781,9 @@ export class CodeExecutionMCP
           if (owned.slot.workspaceRoot !== root) continue;
           if (this.workspaceProvider.getWorkspaceFolders().includes(root) ||
               this.workspaceProvider.getWorkspaceRoot() === root) continue;
-          await this.unregisterFromSlot(configPath);
+          // A failed removal leaves a live entry: the next chat registration
+          // must take the full reconcile, which retries it.
+          if (await this.unregisterFromSlot(configPath)) this.registrationNeedsReconcile = true;
         }
       } catch (error: unknown) {
         this.logger.warn(
