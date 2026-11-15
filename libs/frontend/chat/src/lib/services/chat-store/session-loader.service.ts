@@ -289,6 +289,7 @@ export class SessionLoaderService {
    */
   private readonly _inFlightSessions = new Map<string, InFlightLoad>();
   private resyncGeneration = 0;
+  private switchGeneration = 0;
   private readonly latestResync = new Map<string, number>();
   private readonly compactionResyncTabs = new Set<string>();
   private previousTabBindings = new Map<TabId, string | null>();
@@ -923,6 +924,16 @@ export class SessionLoaderService {
       ? this.requireTargetTab(sessionId, targetTabId)
       : null;
     const isResync = opts?.reason === 'resync' && targetTabId !== undefined;
+    let switchGeneration = this.switchGeneration;
+    const isCurrentSwitch = () =>
+      (targetTabId !== undefined || this.switchGeneration === switchGeneration) &&
+      (replayClaim === null || this.historyReplayer.isCurrent(replayClaim));
+    const startedAt = performance.now();
+    let loadMs = 0;
+    let resumeMs = 0;
+    let replayMs = 0;
+    let shellMs = 0;
+    let replayedEvents = 0;
     const myGeneration = isResync ? ++this.resyncGeneration : null;
     if (myGeneration !== null) this.latestResync.set(loadKey, myGeneration);
     const prefixMark = isResync ? this.historyReplayer.liveArrivalMark() : null;
@@ -935,6 +946,7 @@ export class SessionLoaderService {
       );
       return { staleSnapshot: false };
     }
+    if (!targetTabId) switchGeneration = ++this.switchGeneration;
 
     const existingTab =
       targetedTab ?? this.tabManager.findTabBySessionId(sessionId);
@@ -958,6 +970,7 @@ export class SessionLoaderService {
     let currentAtEnd: boolean;
     let loadCompleted = false;
     let preservedContextSeed = false;
+    let resumingTabId: string | null = null;
     try {
       if (isResync && this._inFlightSessions.get(loadKey) &&
           this._inFlightSessions.get(loadKey)?.reason !== 'resync') {
@@ -999,6 +1012,8 @@ export class SessionLoaderService {
       const loadResult = await this.claudeRpcService.call('session:load', {
         sessionId,
       });
+      loadMs = performance.now() - startedAt;
+      if (!isCurrentSwitch()) return { staleSnapshot: false };
 
       if (replayClaim && !this.historyReplayer.isCurrent(replayClaim)) {
         return { staleSnapshot: false };
@@ -1056,6 +1071,7 @@ export class SessionLoaderService {
           streamingState: createEmptyStreamingState(),
           providerId: session?.providerId,
         });
+        resumingTabId = resolvedTabId;
       }
       this.sessionManager.setNodeMaps(
         {
@@ -1067,6 +1083,8 @@ export class SessionLoaderService {
       this.sessionManager.setSessionId(sessionId);
       this.sessionManager.setStatus('resuming');
       this.streamingHandler.cleanupSessionDeduplication(sessionId);
+      shellMs = performance.now() - startedAt;
+      const resumeStartedAt = performance.now();
       const resumeResult = await this.claudeRpcService.call(
         'chat:resume',
         {
@@ -1096,6 +1114,7 @@ export class SessionLoaderService {
         },
         { timeout: SessionLoaderService.RESUME_TIMEOUT_MS },
       );
+      resumeMs = performance.now() - resumeStartedAt;
       if (targetTabId) this.requireTargetTab(sessionId, targetTabId);
       if (replayClaim && !this.historyReplayer.isCurrent(replayClaim)) {
         return { staleSnapshot: false };
@@ -1111,7 +1130,7 @@ export class SessionLoaderService {
         this.unavailableSessions.set(new Set(this.unavailableSessionUntil.keys()));
         this.tabManager.applyResumeFailure(resolvedTabId);
         this.tabManager.markTabIdle(resolvedTabId);
-        this.sessionManager.setStatus('loaded');
+        if (isCurrentSwitch()) this.sessionManager.setStatus('loaded');
         return { staleSnapshot: false };
       }
       if (
@@ -1135,7 +1154,7 @@ export class SessionLoaderService {
       if (resumeResult.data?.cancelled === true) {
         this.tabManager.applyResumeFailure(resolvedTabId);
         this.tabManager.markTabIdle(resolvedTabId);
-        this.sessionManager.setStatus('loaded');
+        if (isCurrentSwitch()) this.sessionManager.setStatus('loaded');
         return { staleSnapshot: false };
       }
 
@@ -1149,7 +1168,7 @@ export class SessionLoaderService {
         // the compaction marker and preloaded totals already on this tab.
         this.tabManager.applyResumeFailure(resolvedTabId);
         this.tabManager.markTabIdle(resolvedTabId);
-        this.sessionManager.setStatus('loaded');
+        if (isCurrentSwitch()) this.sessionManager.setStatus('loaded');
         staleCompactionSnapshot = true;
         return { staleSnapshot: true };
       }
@@ -1188,7 +1207,7 @@ export class SessionLoaderService {
       // fetch twice per session per app run. Anything that throws while
       // replaying 250+ events (or a transcript that yields none at all, the
       // failure branch below) therefore cost the whole Agents panel silently.
-      this.applyCliSessions(cliSessions, sessionId);
+      if (isCurrentSwitch()) this.applyCliSessions(cliSessions, sessionId);
       if (stats) {
         preservedContextSeed = isResync && this.compactionResyncTabs.has(targetTabId);
         this.applyResumeStats(resolvedTabId, sessionId, stats, {
@@ -1210,6 +1229,7 @@ export class SessionLoaderService {
       }
       if (resumeResult.success && events && events.length > 0) {
         try {
+          const replayStartedAt = performance.now();
           if (targetedTab && (isResync || opts?.reason === 'compaction')) {
             this.historyReplayer.setPersistedFilterInputs(replayClaim, {
               ownerByEvent: historyBlockOwners(resumeResult.data?.historyBlockOwners, events),
@@ -1229,6 +1249,8 @@ export class SessionLoaderService {
           if (outcome === 'superseded') {
             return { staleSnapshot: false };
           }
+          replayMs = performance.now() - replayStartedAt;
+          replayedEvents = events.length;
         } catch (error: unknown) {
           // A throwing chunk must not leave a half-replayed tab that looks
           // complete: drop the partial state (and its queued flush) and settle
@@ -1236,12 +1258,13 @@ export class SessionLoaderService {
           if (this.historyReplayer.isCurrent(replayClaim)) {
             this.streamingHandler.clearPendingUpdates(resolvedTabId);
             this.tabManager.applyResumeFailure(resolvedTabId);
-            this.sessionManager.setStatus('loaded');
           }
+          if (isCurrentSwitch()) this.sessionManager.setStatus('loaded');
           throw error;
         }
 
         this.historyPaging.recordTail(resolvedTabId, resumeResult.data);
+        if (!isCurrentSwitch()) return { staleSnapshot: false };
         this.sessionManager.setStatus('loaded');
         this._resumableSubagents.set(
           this.withoutDismissed(resumableSubagents ?? []),
@@ -1255,9 +1278,11 @@ export class SessionLoaderService {
         );
       } else {
         this.tabManager.applyResumeFailure(resolvedTabId);
-        this.sessionManager.setStatus('loaded');
-        this._resumableSubagents.set([]);
-        this._resumableSubagentsSessionId = sessionId;
+        if (isCurrentSwitch()) {
+          this.sessionManager.setStatus('loaded');
+          this._resumableSubagents.set([]);
+          this._resumableSubagentsSessionId = sessionId;
+        }
         throw new Error(
           `[SessionLoaderService] chat:resume failed for ${sessionId}: ${
             resumeResult.error ?? 'No events found'
@@ -1266,11 +1291,20 @@ export class SessionLoaderService {
       }
       return { staleSnapshot: false };
     } catch (error: unknown) {
+      if (!isCurrentSwitch() && resumingTabId === null) return { staleSnapshot: false };
+      if (!isCurrentSwitch() && resumingTabId !== null &&
+          (!replayClaim || this.historyReplayer.isCurrent(replayClaim))) {
+        this.streamingHandler.clearPendingUpdates(resumingTabId);
+        this.tabManager.applyResumeFailure(resumingTabId);
+        this.tabManager.markTabIdle(resumingTabId);
+      }
       if (isResync && targetTabId && replayClaim && !loadCompleted && this.historyReplayer.isCurrent(replayClaim)) {
         this.resetResyncTabBeforeSeed(targetTabId, sessionId, targetedTab?.name);
       }
-      this._resumableSubagents.set([]);
-      this._resumableSubagentsSessionId = null;
+      if (isCurrentSwitch()) {
+        this._resumableSubagents.set([]);
+        this._resumableSubagentsSessionId = null;
+      }
       throw error;
     } finally {
       let claimOverflowed: boolean;
@@ -1311,6 +1345,14 @@ export class SessionLoaderService {
            isResync && !freshResyncNeeded &&
               !opts?.liveSeed?.events.some((event) => event?.eventType === 'turn_state'))) {
         void this.livenessReconciler.reconcileTab(targetTabId, sessionId);
+      }
+      if (!targetTabId && inFlight) {
+        const bounded = (value: number) => Math.min(600_000, Math.max(0, Math.round(value)));
+        console.debug('[SessionLoaderService] cold switch timing', {
+          loadMs: bounded(loadMs), resumeMs: bounded(resumeMs),
+          replayMs: bounded(replayMs), replayedEvents: Math.min(100_000, replayedEvents),
+          shellMs: bounded(shellMs),
+        });
       }
     }
   }

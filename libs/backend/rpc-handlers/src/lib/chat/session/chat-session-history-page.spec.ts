@@ -146,10 +146,24 @@ function makeSessionService() {
     undefined,
     createFakeDriverLockCoordinator(),
   );
-  return { service, historyRead, subagentRegistry, events, stats };
+  return { service, historyRead, metadataStore, subagentRegistry, events, stats };
 }
 
 describe('ChatSessionService history paging', () => {
+  it('starts JSONL and CLI reads before either settles', async () => {
+    const harness = makeSessionService();
+    let finishHistory: ((value: { events: FlatStreamEventUnion[]; stats: typeof harness.stats; resolvedWorkspacePath: string }) => void) | undefined;
+    let finishCli: ((value: []) => void) | undefined;
+    harness.historyRead.readForResume.mockImplementation(() => new Promise((resolve) => { finishHistory = resolve; }));
+    harness.metadataStore.getCliSessionsForRestore.mockImplementation(() => new Promise((resolve) => { finishCli = resolve; }));
+    const pending = harness.service.resumeSession({ sessionId: SESSION_ID, tabId: TAB_ID, workspacePath: WORKSPACE });
+    for (let i = 0; i < 30 && !finishCli; i++) await Promise.resolve();
+    expect(harness.historyRead.readForResume).toHaveBeenCalledTimes(1);
+    expect(harness.metadataStore.getCliSessionsForRestore).toHaveBeenCalledTimes(1);
+    finishHistory?.({ events: harness.events, stats: harness.stats, resolvedWorkspacePath: WORKSPACE });
+    finishCli?.([]);
+    await expect(pending).resolves.toMatchObject({ success: true, activated: false });
+  });
   it('returns empty owner metadata for an opted-in unloaded read', async () => {
     const harness = makeSessionService();
     harness.historyRead.readForResume.mockResolvedValue({

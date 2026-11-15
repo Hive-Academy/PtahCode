@@ -2884,6 +2884,110 @@ describe('SessionLoaderService', () => {
       });
     }
 
+    it('shows the shell while resume is pending and replays only its events', async () => {
+      const harness = makeChunkedService();
+      let finishResume!: (value: unknown) => void;
+      const resume = new Promise<unknown>((resolve) => { finishResume = resolve; });
+      rpcCall.mockImplementation((method: string) =>
+        method === 'chat:resume' ? resume : Promise.resolve({ success: true, data: {} }),
+      );
+
+      const pending = harness.service.switchSession(SESSION);
+      await until(() => rpcCall.mock.calls.some(([method]) => method === 'chat:resume'));
+      expect(harness.applyResumingSession).toHaveBeenCalledWith(TAB, expect.objectContaining({
+        sessionId: SESSION,
+        streamingState: expect.objectContaining({ events: new Map() }),
+      }));
+      expect(harness.setStatus).toHaveBeenLastCalledWith('resuming');
+      expect(harness.processStreamEvent).not.toHaveBeenCalled();
+
+      finishResume({ success: true, data: { events: historyEvents(2) } });
+      await pending;
+      expect(harness.processStreamEvent).toHaveBeenCalledTimes(2);
+      expect(harness.setStatus).toHaveBeenLastCalledWith('loaded');
+    });
+
+    it('finishes the older tab from its JSONL events after a different cold session is selected', async () => {
+      const harness = makeChunkedService();
+      const nextSession = 'session-next' as SessionId;
+      const nextTab = 'tab-next' as TabId;
+      const tabs = TestBed.inject(TabManagerService);
+      (tabs.openSessionTab as jest.Mock).mockImplementation((id: SessionId) =>
+        id === SESSION ? TAB : nextTab);
+      const oldTab = { status: 'loaded', transcript: [] as string[] };
+      harness.applyResumingSession.mockImplementation((tabId: string) => {
+        if (tabId === TAB) {
+          oldTab.status = 'resuming';
+          oldTab.transcript = [];
+        }
+      });
+      harness.processStreamEvent.mockImplementation((event: { id: string }, tabId: string) => {
+        if (tabId === TAB) oldTab.transcript.push(event.id);
+      });
+      harness.finalizeSessionHistory.mockImplementation((tabId: string) => {
+        if (tabId === TAB) oldTab.status = 'loaded';
+      });
+      let finishOld!: (value: unknown) => void;
+      const oldResume = new Promise<unknown>((resolve) => { finishOld = resolve; });
+      rpcCall.mockImplementation((method: string, args: { sessionId: SessionId }) => {
+        if (method !== 'chat:resume') return Promise.resolve({ success: true, data: {} });
+        return args.sessionId === SESSION
+          ? oldResume
+          : Promise.resolve({ success: true, data: { events: historyEvents(1, 'new-') } });
+      });
+
+      const older = harness.service.switchSession(SESSION);
+      await until(() => rpcCall.mock.calls.some(([method]) => method === 'chat:resume'));
+      expect(harness.applyResumingSession).toHaveBeenCalledWith(TAB, expect.objectContaining({
+        streamingState: expect.objectContaining({ events: new Map() }),
+      }));
+      await harness.service.switchSession(nextSession);
+      finishOld({ success: true, data: { events: historyEvents(1, 'old-') } });
+      await older;
+      expect(harness.processStreamEvent.mock.calls.map(([event]) => event.id)).toEqual(['new-0', 'old-0']);
+      expect(harness.finalizeSessionHistory).toHaveBeenCalledWith(TAB, undefined);
+      expect(harness.applyResumeFailure).not.toHaveBeenCalledWith(TAB);
+      expect(oldTab).toEqual({ status: 'loaded', transcript: ['old-0'] });
+      expect(harness.setStatus).toHaveBeenLastCalledWith('loaded');
+    });
+
+    it('settles and reports an older tab when its resume rejects after another cold switch', async () => {
+      const harness = makeChunkedService();
+      const nextSession = 'session-next' as SessionId;
+      const nextTab = 'tab-next' as TabId;
+      const tabs = TestBed.inject(TabManagerService);
+      (tabs.openSessionTab as jest.Mock).mockImplementation((id: SessionId) =>
+        id === SESSION ? TAB : nextTab);
+      const oldTab = { status: 'loaded', transcript: [] as string[] };
+      harness.applyResumingSession.mockImplementation((tabId: string) => {
+        if (tabId === TAB) {
+          oldTab.status = 'resuming';
+          oldTab.transcript = [];
+        }
+      });
+      harness.applyResumeFailure.mockImplementation((tabId: string) => {
+        if (tabId === TAB) oldTab.status = 'loaded';
+      });
+      let rejectOld!: (error: Error) => void;
+      const oldResume = new Promise<unknown>((_resolve, reject) => { rejectOld = reject; });
+      rpcCall.mockImplementation((method: string, args: { sessionId: SessionId }) => {
+        if (method !== 'chat:resume') return Promise.resolve({ success: true, data: {} });
+        return args.sessionId === SESSION
+          ? oldResume
+          : Promise.resolve({ success: true, data: { events: historyEvents(1, 'new-') } });
+      });
+
+      const older = harness.service.switchSession(SESSION);
+      const oldFailure = expect(older).rejects.toThrow('older resume failed');
+      await until(() => rpcCall.mock.calls.some(([method]) => method === 'chat:resume'));
+      await harness.service.switchSession(nextSession);
+      rejectOld(new Error('older resume failed'));
+      await oldFailure;
+      expect(harness.applyResumeFailure).toHaveBeenCalledWith(TAB);
+      expect(oldTab).toEqual({ status: 'loaded', transcript: [] });
+      expect(harness.setStatus).toHaveBeenLastCalledWith('loaded');
+    });
+
     it('keeps delivered history when Codex activation fails', async () => {
       const harness = makeChunkedService();
       const tabs = TestBed.inject(TabManagerService);

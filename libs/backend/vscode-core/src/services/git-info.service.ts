@@ -77,6 +77,7 @@ import {
 import { parseStatusV2Z } from './git/git-status-parser';
 import { GitRepoWriteLock } from './git/git-write-lock';
 import { GitRootCache } from './git/git-root-cache';
+import { GitInfoReadCache } from './git/git-info-read-cache';
 import {
   GitCommitRunner,
   type GitCommitRunOptions,
@@ -646,6 +647,7 @@ export class GitInfoService {
   private readonly historyReader: GitHistoryReader;
   private readonly prStatusReader: GitHubPrStatusReader;
   private readonly operations = new GitOperationRegistry();
+  private readonly infoCache: GitInfoReadCache;
 
   /**
    * @param spawner Optional `IProcessSpawner`. When a host supplies one, every
@@ -661,6 +663,7 @@ export class GitInfoService {
     private readonly spawner?: IProcessSpawner,
     reviewReader?: GitReviewReaderService,
   ) {
+    this.infoCache = new GitInfoReadCache(logger);
     this.reviewReader =
       reviewReader ?? new GitReviewReaderService(logger, spawner);
     const deps = {
@@ -735,10 +738,6 @@ export class GitInfoService {
    */
   private readonly readCache = new Map<string, unknown>();
   private readonly rootCache = new GitRootCache();
-  private readonly infoCache = new Map<
-    string,
-    { value: GitInfoResult; until: number }
-  >();
 
   /**
    * One flight record per read key (same keys as {@link readCache}): the
@@ -785,8 +784,7 @@ export class GitInfoService {
    */
   invalidateReadCache(workspacePath?: string): void {
     this.cacheGeneration++;
-    if (workspacePath) this.infoCache.delete(workspacePath);
-    else this.infoCache.clear();
+    this.infoCache.invalidate(workspacePath);
     this.reviewReader.invalidate(workspacePath);
     // A mutation or watcher event can replace the repository at this path.
     this.rootCache.invalidate(workspacePath);
@@ -840,7 +838,7 @@ export class GitInfoService {
       return Promise.resolve(statusUnavailable('timeout'));
     }
     this.invalidateReadCache(workspacePath);
-    return this.singleFlight(`info|${workspacePath}|`, workspacePath, () =>
+    return this.infoCache.refresh(workspacePath, () =>
       this.computeGitInfo(workspacePath, 'background'),
     );
   }
@@ -972,26 +970,7 @@ export class GitInfoService {
   }
 
   async getGitInfo(workspacePath: string): Promise<GitInfoResult> {
-    const cached = this.infoCache.get(workspacePath);
-    if (cached && cached.until > Date.now()) return cached.value;
-    return this.singleFlight(
-      `info|${workspacePath}|`,
-      workspacePath,
-      async () => {
-        const generation = this.cacheGeneration;
-        const value = await this.computeGitInfo(workspacePath);
-        if (
-          generation >= this.generationOf(workspacePath) &&
-          !value.statusUnavailable
-        ) {
-          this.infoCache.set(workspacePath, {
-            value,
-            until: Date.now() + 2_500,
-          });
-        }
-        return value;
-      },
-    );
+    return this.infoCache.read(workspacePath, () => this.computeGitInfo(workspacePath));
   }
 
   /**
