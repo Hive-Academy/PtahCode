@@ -1,11 +1,11 @@
 ---
 id: TASK_2026_1195_7222
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix UI lint boundary errors and enable CI detection
 depends_on: []
 created: "2026-11-15T00:22:25.374Z"
-updated: "2026-11-15T00:22:25.374Z"
+updated: "2026-11-15T03:15:00.000Z"
 relates_to:
   - TASK_2026_1168_7335
 ---

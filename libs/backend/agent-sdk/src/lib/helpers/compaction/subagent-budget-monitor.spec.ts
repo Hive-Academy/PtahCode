@@ -287,6 +287,7 @@ function makeHarness(
     stopNotices,
     opts.lookupTranscript ?? (async () => undefined),
   );
+  createdMonitors.push(monitor);
   return {
     monitor,
     config,
@@ -342,6 +343,24 @@ function spawn(input: Record<string, unknown>, name = 'Agent'): unknown {
  * (GitGuardian) do not flag the spec source. None of these values are real.
  */
 const fake = (...parts: string[]): string => parts.join('');
+
+/**
+ * Every monitor a test built. A monitor a test leaves running keeps REAL
+ * timers (the 1 s notes-gate watchdog re-arms itself, plus deadline and
+ * stop-retry timers). Under machine load such a timer fires inside a LATER
+ * test, and its callback arms new timers on that test's fake clock, which a
+ * `jest.getTimerCount()` assertion then counts. Releasing the sessions after
+ * every test clears all of them, so no timer outlives its test.
+ */
+const createdMonitors: SubagentBudgetMonitor[] = [];
+const SESSIONS_USED = [SESSION, 'session-2', 'session-rekeyed'];
+
+afterEach(() => {
+  jest.useRealTimers();
+  for (const monitor of createdMonitors.splice(0)) {
+    for (const sessionId of SESSIONS_USED) monitor.release(sessionId);
+  }
+});
 
 describe('SubagentBudgetMonitor', () => {
   it('stops a task at its lifetime deadline without a subagent assistant message', async () => {

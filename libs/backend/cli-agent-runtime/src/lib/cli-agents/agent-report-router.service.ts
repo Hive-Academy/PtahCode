@@ -33,7 +33,12 @@ import type { AgentProcessInfo, IAgentAdapter } from '@ptah-extension/shared';
 import { AgentProcessManager } from './agent-process-manager.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { SessionChildRegistry } from '../session-children/session-child.registry';
-import { AgentReportCoalescer, type HeldReport } from './agent-report-coalescer';
+import {
+  AgentReportCoalescer,
+  type HeldReport,
+} from './agent-report-coalescer';
+import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
+import type { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
 
 /*
  * ---------------------------------------------------------------------------
@@ -272,6 +277,10 @@ export class AgentReportRouter {
     private readonly parentDelivery: ParentDeliveryDrainerService | null = null,
     @inject(AgentReportCoalescer, { isOptional: true })
     private readonly coalescer: AgentReportCoalescer | null = null,
+    @inject(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF_ACK_STORE, {
+      isOptional: true,
+    })
+    private readonly handoffAcks: SessionHandoffAckStore | null = null,
   ) {}
 
   /**
@@ -282,11 +291,18 @@ export class AgentReportRouter {
    * over-size body is rejected before any session state is consulted.
    */
   async deliver(input: AgentReportInput): Promise<AgentReportDelivery> {
-    if (isSessionChildInput(input) || !input.agentId || !this.agents.findAgentInfo(input.agentId))
+    if (
+      isSessionChildInput(input) ||
+      !input.agentId ||
+      !this.agents.findAgentInfo(input.agentId)
+    )
       return this.deliverOnce(input);
     try {
       const result = await this.deliverOnce(input);
-      this.agents.markReportAttempt?.(input.agentId, !result.delivered && !result.pending);
+      this.agents.markReportAttempt?.(
+        input.agentId,
+        !result.delivered && !result.pending,
+      );
       return result;
     } catch (error: unknown) {
       this.agents.markReportAttempt?.(input.agentId, true);
@@ -294,7 +310,9 @@ export class AgentReportRouter {
     }
   }
 
-  private async deliverOnce(input: AgentReportInput): Promise<AgentReportDelivery> {
+  private async deliverOnce(
+    input: AgentReportInput,
+  ): Promise<AgentReportDelivery> {
     // A non-empty string, not mere key presence: an input built as
     // `{ agentId, childSessionId: undefined }` belongs on the agent path.
     if (isSessionChildInput(input)) {
@@ -329,7 +347,9 @@ export class AgentReportRouter {
     // uuid arrives and `resolveParentSessionId` backfills it, so a value that
     // is not a session id means the parent never resolved one — there is no
     // session to deliver into, and saying so is the honest answer.
-    const parentSessionId = SessionId.safeParse(info.parentSessionId?.trim()) ?? info.parentSessionId?.trim();
+    const parentSessionId =
+      SessionId.safeParse(info.parentSessionId?.trim()) ??
+      info.parentSessionId?.trim();
     if (!parentSessionId) {
       return this.refuse('no-parent-recorded', agentId, {
         detail: info.parentSessionId
@@ -349,7 +369,10 @@ export class AgentReportRouter {
     if (!SessionId.safeParse(parentSessionId) && !this.parentDelivery) {
       return this.refuse('no-parent-recorded', agentId);
     }
-    if (!this.parentDelivery && !this.agentAdapter.isSessionActive(SessionId.from(parentSessionId))) {
+    if (
+      !this.parentDelivery &&
+      !this.agentAdapter.isSessionActive(SessionId.from(parentSessionId))
+    ) {
       return this.refuse('parent-session-not-active', agentId, {
         parentSessionId,
       });
@@ -359,11 +382,14 @@ export class AgentReportRouter {
     const hash = createHash('sha256').update(message).digest('hex');
     const key = `report:${agentId}:${info.turnSeq ?? 0}:${hash}`;
     const previous = this.parentDelivery?.find(key);
-    if (previous) return {
-      delivered: previous.state === 'delivered', recorded: true,
-      pending: previous.state === 'pending', deliveryId: previous.id,
-      parentSessionId,
-    };
+    if (previous)
+      return {
+        delivered: previous.state === 'delivered',
+        recorded: true,
+        pending: previous.state === 'pending',
+        deliveryId: previous.id,
+        parentSessionId,
+      };
     if (this.recentDeliveryCount(agentId, now) >= AGENT_REPORT_BURST_LIMIT) {
       return this.refuse('rate-limited', agentId, {
         limit: AGENT_REPORT_BURST_LIMIT,
@@ -381,14 +407,16 @@ export class AgentReportRouter {
     const envelope = AgentReportRouter.buildEnvelope(info, message, summary);
     if (this.parentDelivery && envelope.length > 1_048_476)
       return this.refuse('report-too-large', agentId, {
-        length: envelope.length, cap: 1_048_476,
+        length: envelope.length,
+        cap: 1_048_476,
       });
     if (final === true && this.coalescer && this.parentDelivery) {
       // An identical repeat leaves the held report in place: flushing it first
       // would wake the parent standalone and again with the completion.
       if (this.coalescer.peek(agentId)?.message === message) {
         return this.refuse('duplicate-report', agentId, {
-          detail: 'an identical final report is already held for the completion signal',
+          detail:
+            'an identical final report is already held for the completion signal',
         });
       }
       const older = this.coalescer.take(agentId);
@@ -396,68 +424,116 @@ export class AgentReportRouter {
         try {
           await older.deliverStandalone();
         } catch (error: unknown) {
-          this.logger.error('[AgentReportRouter] Older held report delivery failed',
-            error instanceof Error ? error : new Error(String(error)));
+          this.logger.error(
+            '[AgentReportRouter] Older held report delivery failed',
+            error instanceof Error ? error : new Error(String(error)),
+          );
           this.coalescer.hold(agentId, older, (expired) => {
-            void expired.deliverStandalone().catch((retryError: unknown) =>
-              this.logger.error('[AgentReportRouter] Report retry failed',
-                retryError instanceof Error ? retryError : new Error(String(retryError))));
+            void expired
+              .deliverStandalone()
+              .catch((retryError: unknown) =>
+                this.logger.error(
+                  '[AgentReportRouter] Report retry failed',
+                  retryError instanceof Error
+                    ? retryError
+                    : new Error(String(retryError)),
+                ),
+              );
           });
           return this.refuse('delivery-failed', agentId, { parentSessionId });
         }
       }
       const held: HeldReport = {
-        message, summary, envelopeBody: envelope, heldAt: now,
+        message,
+        summary,
+        envelopeBody: envelope,
+        heldAt: now,
         deliverStandalone: async () => {
-          await this.enqueueStandalone(info, parentSessionId, key, envelope, message, summary);
+          await this.enqueueStandalone(
+            info,
+            parentSessionId,
+            key,
+            envelope,
+            message,
+            summary,
+          );
         },
         markEnqueued: () => {
           this.remember(agentId, { at: Date.now(), message });
           this.agents.markReportDelivered(agentId);
           this.agents.recordAgentNote(agentId, {
             type: 'info',
-            content: `Reported to the spawning session: ${summary?.trim() ||
-              firstLine(message, TILE_NOTE_PREVIEW_LENGTH)}`,
+            content: `Reported to the spawning session: ${
+              summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH)
+            }`,
           });
         },
       };
       // A host crash during the window loses this in-memory report; the lane
       // process also dies, while its deliverable file and completion replay remain.
       this.coalescer.hold(agentId, held, (expired) => {
-        void expired.deliverStandalone().catch((error: unknown) =>
-          this.logger.error('[AgentReportRouter] Held report delivery failed',
-            error instanceof Error ? error : new Error(String(error))));
+        void expired
+          .deliverStandalone()
+          .catch((error: unknown) =>
+            this.logger.error(
+              '[AgentReportRouter] Held report delivery failed',
+              error instanceof Error ? error : new Error(String(error)),
+            ),
+          );
       });
-      return { delivered: false, pending: true, reason: 'held-for-completion', parentSessionId };
+      return {
+        delivered: false,
+        pending: true,
+        reason: 'held-for-completion',
+        parentSessionId,
+      };
     }
     if (this.parentDelivery) {
-      const saved = await this.parentDelivery.enqueue({
-        id: `lane-delivery:${key}`, dedupeKey: key, agentId,
-        parentSessionId, kind: 'report', body: envelope, createdAt: now,
-        originName: `${info.cli} · ${agentLabel(info)}`,
-      }, () => {
-        this.agents.markReportDelivered(agentId);
-        this.agents.recordAgentNote(agentId, {
-          type: 'info',
-          content: `Reported to the spawning session: ${summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH)}`,
-        });
-      });
-      if ('refused' in saved) return this.refuse(saved.refused, agentId, { parentSessionId });
+      const saved = await this.parentDelivery.enqueue(
+        {
+          id: `lane-delivery:${key}`,
+          dedupeKey: key,
+          agentId,
+          parentSessionId,
+          kind: 'report',
+          body: envelope,
+          createdAt: now,
+          originName: `${info.cli} · ${agentLabel(info)}`,
+        },
+        () => {
+          this.agents.markReportDelivered(agentId);
+          this.agents.recordAgentNote(agentId, {
+            type: 'info',
+            content: `Reported to the spawning session: ${summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH)}`,
+          });
+        },
+      );
+      if ('refused' in saved)
+        return this.refuse(saved.refused, agentId, { parentSessionId });
       this.remember(agentId, { at: now, message });
       await this.parentDelivery.drain(parentSessionId);
       const delivered = this.parentDelivery.find(key)?.state === 'delivered';
       const state = this.parentDelivery.find(key)?.state;
-      return { delivered, recorded: true, pending: state === 'pending',
-        deliveryId: saved.id, parentSessionId };
+      return {
+        delivered,
+        recorded: true,
+        pending: state === 'pending',
+        deliveryId: saved.id,
+        parentSessionId,
+      };
     }
     try {
-      await this.agentAdapter.sendMessageToSession(SessionId.from(parentSessionId), envelope, {
-        origin: {
-          kind: 'peer',
-          from: `ptah-agent:${agentId}`,
-          name: `${info.cli} · ${agentLabel(info)}`,
+      await this.agentAdapter.sendMessageToSession(
+        SessionId.from(parentSessionId),
+        envelope,
+        {
+          origin: {
+            kind: 'peer',
+            from: `ptah-agent:${agentId}`,
+            name: `${info.cli} · ${agentLabel(info)}`,
+          },
         },
-      });
+      );
     } catch (_error: unknown) {
       return this.refuse('delivery-failed', agentId, {
         parentSessionId,
@@ -497,23 +573,37 @@ export class AgentReportRouter {
    * from another agent" regardless of which vendor produced it.
    */
   private async enqueueStandalone(
-    info: AgentProcessInfo, parentSessionId: string, key: string,
-    envelope: string, message: string, summary?: string,
+    info: AgentProcessInfo,
+    parentSessionId: string,
+    key: string,
+    envelope: string,
+    message: string,
+    summary?: string,
   ): Promise<void> {
     if (!this.parentDelivery) throw new Error('Parent delivery unavailable');
-    const saved = await this.parentDelivery.enqueue({
-      id: `lane-delivery:${key}`, dedupeKey: key, agentId: info.agentId,
-      parentSessionId, kind: 'report', body: envelope, createdAt: Date.now(),
-      originName: `${info.cli} · ${agentLabel(info)}`,
-    }, () => {
-      this.agents.markReportDelivered(info.agentId);
-      this.agents.recordAgentNote(info.agentId, {
-        type: 'info',
-        content: `Reported to the spawning session: ${summary?.trim() ||
-          firstLine(message, TILE_NOTE_PREVIEW_LENGTH)}`,
-      });
-    });
-    if ('refused' in saved) throw new Error(`Standalone report enqueue: ${saved.refused}`);
+    const saved = await this.parentDelivery.enqueue(
+      {
+        id: `lane-delivery:${key}`,
+        dedupeKey: key,
+        agentId: info.agentId,
+        parentSessionId,
+        kind: 'report',
+        body: envelope,
+        createdAt: Date.now(),
+        originName: `${info.cli} · ${agentLabel(info)}`,
+      },
+      () => {
+        this.agents.markReportDelivered(info.agentId);
+        this.agents.recordAgentNote(info.agentId, {
+          type: 'info',
+          content: `Reported to the spawning session: ${
+            summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH)
+          }`,
+        });
+      },
+    );
+    if ('refused' in saved)
+      throw new Error(`Standalone report enqueue: ${saved.refused}`);
     this.remember(info.agentId, { at: Date.now(), message });
     await this.parentDelivery.drain(parentSessionId);
   }
@@ -594,8 +684,35 @@ export class AgentReportRouter {
     const adapter = this.agentAdapter;
     // The first recorded parseable parent is the owner. A later live ID
     // does not authorize rerouting a report from an unreachable owner.
-    const parentSessionId = candidates[0];
-    if (!adapter.isSessionActive(parentSessionId)) {
+    let parentSessionId = candidates[0];
+    let ownerChanged = false;
+    if (
+      !adapter.isSessionActive(parentSessionId) &&
+      candidates[1] &&
+      this.handoffAcks
+    ) {
+      try {
+        const binding = await this.handoffAcks.findBySuccessor(parentSessionId);
+        if (
+          binding?.successorTabId === parentSessionId &&
+          binding.successorSdkId === candidates[1] &&
+          adapter.isSessionActive(candidates[1])
+        )
+          parentSessionId = candidates[1];
+      } catch (error: unknown) {
+        this.logger.error(
+          'Failed to verify handoff report parent',
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+      // The lookup is async: a handoff can reparent the child meanwhile.
+      // Refuse when the owner changed, whatever the liveness of either id.
+      const current = this.sessionChildren?.get(childSessionId);
+      ownerChanged =
+        current?.parentSessionId?.trim() !== candidates[0] ||
+        current?.parentSdkSessionId?.trim() !== candidates[1];
+    }
+    if (ownerChanged || !adapter.isSessionActive(parentSessionId)) {
       this.sessionChildren?.markReportRefused(
         childSessionId,
         summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH),

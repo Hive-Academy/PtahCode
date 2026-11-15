@@ -57,6 +57,7 @@ import { GALLERY_ICON_PATHS, MODEL_OPTIONS, PROVIDER_OPTIONS } from './gallery-f
         <span ptahFieldLeading aria-hidden="true">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path [attr.d]="icons['key']" /></svg>
         </span>
+<<<<<<< HEAD
         <input ptahInput type="password" autocomplete="off" [value]="apiKey()" (input)="updateApiKey($event)" />
       </ptah-field>
     }
