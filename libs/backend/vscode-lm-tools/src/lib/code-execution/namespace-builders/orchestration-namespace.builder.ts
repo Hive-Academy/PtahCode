@@ -7,6 +7,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import type { PhaseKind } from '@ptah-extension/shared';
 import {
   OrchestrationNamespace,
   OrchestrationState,
@@ -47,16 +48,35 @@ const STRATEGY_PHASE_SEQUENCE: Record<string, OrchestrationPhase[]> = {
 };
 
 /**
- * Agent recommendations by phase
- * Maps phases to the agents that should be invoked
+ * Agent or phase recommendations by workflow phase
  */
 const PHASE_AGENTS: Record<OrchestrationPhase, string[]> = {
   planning: ['project-manager'],
   design: ['software-architect'],
   implementation: ['team-leader'],
-  qa: ['senior-tester', 'code-style-reviewer', 'code-logic-reviewer'],
+  qa: [],
   complete: [],
 };
+
+const PHASE_KIND_BY_PHASE: Partial<Record<OrchestrationPhase, PhaseKind>> = {
+  qa: 'tests',
+};
+
+function phaseAction(
+  phase: OrchestrationPhase,
+  context: OrchestrationNextAction['context'],
+  requiredInputs?: string[],
+): OrchestrationNextAction | null {
+  const phaseKind = PHASE_KIND_BY_PHASE[phase];
+  return phaseKind
+    ? {
+        action: 'invoke-phase',
+        phaseKind,
+        context,
+        ...(requiredInputs ? { requiredInputs } : {}),
+      }
+    : null;
+}
 
 /**
  * Checkpoints required before proceeding to next phase
@@ -182,7 +202,7 @@ export function buildOrchestrationNamespace(
       planning: [['task-description.md']],
       design: [['implementation-plan.md']],
       implementation: [['batches.md', 'tasks.md']],
-      qa: [],
+      qa: [['test-report.md']],
       complete: [],
     };
 
@@ -248,7 +268,8 @@ export function buildOrchestrationNamespace(
     },
 
     /**
-     * Analyze current state and recommend the next action
+     * Analyze current state and recommend the next action. QA invokes a phase
+     * kind; other workflow phases invoke named agents.
      */
     getNextAction: async (taskId: string): Promise<OrchestrationNextAction> => {
       const state = await readStateFile(taskId);
@@ -279,6 +300,12 @@ export function buildOrchestrationNamespace(
       }
       if (state.lastCheckpoint.status === 'rejected') {
         const agents = PHASE_AGENTS[state.phase];
+        const rejectedPhaseAction = phaseAction(state.phase, {
+          taskId,
+          phase: state.phase,
+          feedback: 'Checkpoint rejected, please revise',
+        });
+        if (rejectedPhaseAction) return rejectedPhaseAction;
         return {
           action: 'invoke-agent',
           agent: agents[0] || 'project-manager',
@@ -296,6 +323,12 @@ export function buildOrchestrationNamespace(
 
       if (!requirementsMet) {
         const agents = PHASE_AGENTS[state.phase];
+        const missingInputsPhaseAction = phaseAction(
+          state.phase,
+          { taskId, phase: state.phase },
+          ['task-context'],
+        );
+        if (missingInputsPhaseAction) return missingInputsPhaseAction;
         return {
           action: 'invoke-agent',
           agent: agents[0] || 'project-manager',
@@ -312,6 +345,12 @@ export function buildOrchestrationNamespace(
         };
       }
       const nextAgents = PHASE_AGENTS[nextPhase];
+      const nextPhaseAction = phaseAction(nextPhase, {
+        taskId,
+        previousPhase: state.phase,
+        nextPhase,
+      });
+      if (nextPhaseAction) return nextPhaseAction;
       return {
         action: 'invoke-agent',
         agent: nextAgents[0] || 'team-leader',

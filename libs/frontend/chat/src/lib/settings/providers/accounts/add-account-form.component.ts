@@ -52,7 +52,7 @@ import { ACCOUNT_COPY, validateAccountName } from './account-presentation';
       (keydown.escape)="keepEscape($event)"
       data-testid="add-account-form"
     >
-      <ptah-field edit label="Account name" appearance="stacked">
+      <ptah-field edit label="Account name">
         <input
           #name
           ptahInput

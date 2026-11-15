@@ -1509,8 +1509,8 @@ describe('AgentGenerationOrchestratorService', () => {
       wireHappyPath(
         mocks,
         createMockTemplate({
-          id: 'code-logic-reviewer',
-          name: 'code-logic-reviewer',
+          id: 'software-architect',
+          name: 'software-architect',
           model: 'opus',
         }),
       );
@@ -1534,7 +1534,10 @@ describe('AgentGenerationOrchestratorService', () => {
       const { service, mocks } = createOrchestrator();
       wireHappyPath(
         mocks,
-        createMockTemplate({ id: 'visual-reviewer', name: 'visual-reviewer' }),
+        createMockTemplate({
+          id: 'researcher-expert',
+          name: 'researcher-expert',
+        }),
       );
 
       await service.generateAgents({
@@ -1550,8 +1553,8 @@ describe('AgentGenerationOrchestratorService', () => {
       wireHappyPath(
         mocks,
         createMockTemplate({
-          id: 'senior-tester',
-          name: 'senior-tester',
+          id: 'technical-content-writer',
+          name: 'technical-content-writer',
         }),
       );
       // The content pass echoes a previous generation's frontmatter.
@@ -1559,10 +1562,10 @@ describe('AgentGenerationOrchestratorService', () => {
         Result.ok({
           content: [
             '---',
-            'name: senior-tester',
+            'name: technical-content-writer',
             'disallowedTools: mcp__firecrawl',
             '---',
-            '# Senior Tester',
+            '# Technical Content Writer',
           ].join('\n'),
           warnings: [],
           rejectedSections: 0,
@@ -1818,13 +1821,13 @@ describe('AgentGenerationOrchestratorService', () => {
 
     it('keeps the disallowedTools line, after the overridden model:', async () => {
       const settings = settingsReturning({
-        workspace: { 'code-logic-reviewer': { claude: 'haiku' } },
+        workspace: { 'software-architect': { claude: 'haiku' } },
       });
       const { frontmatter } = await frontmatterFor(
         settings,
         createMockTemplate({
-          id: 'code-logic-reviewer',
-          name: 'code-logic-reviewer',
+          id: 'software-architect',
+          name: 'software-architect',
           model: 'opus',
         }),
       );

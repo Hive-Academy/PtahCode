@@ -82,6 +82,35 @@ describe('GitRootWatchLeaseService', () => {
     expect(sentRoots()).toEqual([['/wt/a'], ['/wt/b']]);
   });
 
+  it('sends one trailing latest set without overlapping requests', async () => {
+    let settle: ((value: { success: boolean; data: { watched: string[]; rejected: string[]; evicted: string[] } }) => void) | undefined;
+    let active = 0;
+    let peak = 0;
+    mockRpcCall.mockImplementationOnce(() => {
+      active++;
+      peak = Math.max(peak, active);
+      return new Promise((resolve) => {
+        settle = (value) => {
+          active--;
+          resolve(value);
+        };
+      });
+    });
+    service.update(['/wt/a']);
+    await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.DEBOUNCE_MS);
+    service.update(['/wt/b']);
+    await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.DEBOUNCE_MS);
+    service.update(['/wt/c']);
+    await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.DEBOUNCE_MS);
+    expect(sentRoots()).toEqual([['/wt/a']]);
+
+    settle?.({ success: true, data: { watched: ['/wt/a'], rejected: [], evicted: [] } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sentRoots()).toEqual([['/wt/a'], ['/wt/c']]);
+    expect(peak).toBe(1);
+  });
+
   it('retries once after failure with the latest desired roots', async () => {
     mockRpcCall.mockResolvedValueOnce({ success: false, error: 'RPC timeout' });
     service.update(['/wt/a']);
@@ -172,7 +201,7 @@ describe('GitRootWatchLeaseService', () => {
     await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.DEBOUNCE_MS);
     service.update(['/wt/gone']);
     await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.DEBOUNCE_MS);
-    expect(sentRoots()).toEqual([['/wt/gone'], []]);
+    expect(sentRoots()).toEqual([['/wt/gone']]);
 
     await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.REJECTED_ROOT_BACKOFF_MS);
     expect(sentRoots().at(-1)).toEqual(['/wt/gone']);
@@ -190,6 +219,16 @@ describe('GitRootWatchLeaseService', () => {
     service.update(['/wt/a']);
     await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.DEBOUNCE_MS);
 
+    expect(mockRpcCall).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not rearm the debounce for the same normalized set', async () => {
+    service.update(['/wt/A', '/wt/b']);
+    await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.DEBOUNCE_MS - 1);
+    service.update(['/WT/b/', ' /WT/a/ ']);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(sentRoots()).toEqual([['/wt/A', '/wt/b']]);
+    await jest.advanceTimersByTimeAsync(GitRootWatchLeaseService.DEBOUNCE_MS);
     expect(mockRpcCall).toHaveBeenCalledTimes(1);
   });
 

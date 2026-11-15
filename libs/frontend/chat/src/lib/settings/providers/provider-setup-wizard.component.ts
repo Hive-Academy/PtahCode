@@ -433,8 +433,8 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
               </h3>
               <div class="mt-3 flex flex-col gap-1">
                 <span id="wizard-search-label" class="sr-only">Search providers</span>
-                <ptah-field label="Search providers">
-                  <input ptahInput
+                <ptah-field label="Search providers" size="sm">
+                  <input ptahInput size="sm"
                       type="text"
                       class="w-full text-base-content"
                       aria-labelledby="wizard-search-label"

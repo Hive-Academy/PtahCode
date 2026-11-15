@@ -113,10 +113,12 @@ export function parsePricing(input: string, output: string): { readonly ok: true
         </section>
 
         <section class="space-y-2" aria-labelledby="advanced-help-heading">
-          <h3 id="advanced-help-heading" class="font-semibold text-base-content">Documentation URL</h3>
+          <h3 id="advanced-help-heading" class="sr-only">Documentation URL</h3>
           <div class="flex gap-2">
-            <input ptahInput id="advanced-help-url" type="url" aria-labelledby="advanced-help-heading" class="min-w-0 flex-1 text-xs"
+            <ptah-field label="Documentation URL" class="min-w-0 flex-1">
+            <input ptahInput id="advanced-help-url" type="url" class="min-w-0 flex-1 text-xs"
               [value]="helpUrl()" placeholder="https://" (input)="helpUrlDraft.set(value($event))" data-testid="advanced-help-url" />
+            </ptah-field>
             <button type="button" ptahButton [busy]="busy()" [disabled]="helpUrlDraft() === null || !!helpUrlError()"
               (click)="saveHelpUrl()" data-testid="advanced-save-help">Save</button>
           </div>
@@ -126,12 +128,12 @@ export function parsePricing(input: string, output: string): { readonly ok: true
         <section class="space-y-2 rounded border border-base-300 bg-base-200 p-3" aria-labelledby="advanced-pricing-heading">
           <h3 id="advanced-pricing-heading" class="font-semibold text-base-content">Token pricing (per 1M tokens)</h3>
           <div class="grid grid-cols-2 gap-2">
-            <ptah-field label="Input price ($ / 1M)" appearance="stacked">
-              <input ptahInput type="number" min="0" step="0.01" class="mt-1 w-full font-mono text-xs" tone="mono"
+            <ptah-field label="Input price ($ / 1M)" size="sm">
+              <input ptahInput id="advanced-price-input" type="number" min="0" step="0.01" class="w-full font-mono text-xs" tone="mono"
                 [value]="inputPrice()" (input)="inputPriceDraft.set(value($event))" data-testid="advanced-price-input" />
             </ptah-field>
-            <ptah-field label="Output price ($ / 1M)" appearance="stacked">
-              <input ptahInput type="number" min="0" step="0.01" class="mt-1 w-full font-mono text-xs" tone="mono"
+            <ptah-field label="Output price ($ / 1M)" size="sm">
+              <input ptahInput id="advanced-price-output" type="number" min="0" step="0.01" class="w-full font-mono text-xs" tone="mono"
                 [value]="outputPrice()" (input)="outputPriceDraft.set(value($event))" data-testid="advanced-price-output" />
             </ptah-field>
           </div>

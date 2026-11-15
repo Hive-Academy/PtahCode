@@ -11,7 +11,10 @@ import {
   resolveHarnessWorkspaceRoot,
   stripFrontmatter,
 } from '@ptah-extension/harness-sync';
-import { type AgentRoleDefinition } from '@ptah-extension/shared';
+import {
+  phaseKindForRole,
+  type AgentRoleDefinition,
+} from '@ptah-extension/shared';
 
 export const MAX_ROLE_BYTES = 64 * 1024;
 
@@ -85,7 +88,7 @@ export class AgentRoleResolver {
     ) {
       throw new AgentRoleError(
         'unknown_role',
-        `Role "${role}" is retired. Use the "implement" phase instead.`,
+        `Role "${role}" is retired. Use the "${phaseKindForRole(role)}" phase instead.`,
         availableRoles,
       );
     }

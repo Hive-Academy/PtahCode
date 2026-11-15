@@ -650,27 +650,6 @@ export class SetupRpcHandlers {
               category: 'planning',
             },
             {
-              id: 'senior-tester',
-              name: 'Senior Tester',
-              description:
-                'Creates comprehensive test suites, verifies implementations, and ensures quality',
-              category: 'qa',
-            },
-            {
-              id: 'code-style-reviewer',
-              name: 'Code Style Reviewer',
-              description:
-                'Reviews code for formatting, naming conventions, and style consistency',
-              category: 'qa',
-            },
-            {
-              id: 'code-logic-reviewer',
-              name: 'Code Logic Reviewer',
-              description:
-                'Reviews business logic, identifies bugs, and validates implementation correctness',
-              category: 'qa',
-            },
-            {
               id: 'researcher-expert',
               name: 'Researcher Expert',
               description:
@@ -697,13 +676,6 @@ export class SetupRpcHandlers {
               description:
                 'Designs user interfaces, creates visual specifications, and improves user experience',
               category: 'creative',
-            },
-            {
-              id: 'visual-reviewer',
-              name: 'Visual Reviewer',
-              description:
-                'Hunts UI/UX visual bugs, responsive breakpoints, and accessibility issues via browser testing',
-              category: 'qa',
             },
           ];
 
@@ -1008,12 +980,17 @@ export class SetupRpcHandlers {
         });
       const parsedPackage: unknown = JSON.parse(packageContents);
       const packageJson =
-        parsedPackage && typeof parsedPackage === 'object' && !Array.isArray(parsedPackage)
+        parsedPackage &&
+        typeof parsedPackage === 'object' &&
+        !Array.isArray(parsedPackage)
           ? (parsedPackage as Record<string, unknown>)
           : {};
       const dependencyNames = (value: unknown): string[] =>
-        value && typeof value === 'object' && !Array.isArray(value) &&
-        (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        (Object.getPrototypeOf(value) === Object.prototype ||
+          Object.getPrototypeOf(value) === null)
           ? Object.keys(value)
           : [];
       const dependencies = [
@@ -1070,14 +1047,32 @@ export class SetupRpcHandlers {
         'ProjectGuidanceService',
       );
       const supplied = rawParams?.analysis;
-      const source = supplied && typeof supplied === 'object' ? supplied as unknown as Record<string, unknown> : {};
+      const source =
+        supplied && typeof supplied === 'object'
+          ? (supplied as unknown as Record<string, unknown>)
+          : {};
       const normalized = normalizeAgentOutput(analysis);
-      return service.getGuidance({
-        frameworks: Object.hasOwn(source, 'frameworks') ? normalized.frameworks : [],
-        ...(Object.hasOwn(source, 'architecturePatterns') ? { architecturePatterns: normalized.architecturePatterns } : {}),
-        ...(Object.hasOwn(source, 'codeConventions') && source['codeConventions'] && typeof source['codeConventions'] === 'object' && Object.keys(source['codeConventions']).length > 0 ? { codeConventions: normalized.codeConventions } : {}),
-        ...(Object.hasOwn(source, 'existingIssues') ? { existingIssues: normalized.existingIssues } : {}),
-      }, this.workspaceProvider.getWorkspaceRoot() ?? undefined, ownerDecision);
+      return service.getGuidance(
+        {
+          frameworks: Object.hasOwn(source, 'frameworks')
+            ? normalized.frameworks
+            : [],
+          ...(Object.hasOwn(source, 'architecturePatterns')
+            ? { architecturePatterns: normalized.architecturePatterns }
+            : {}),
+          ...(Object.hasOwn(source, 'codeConventions') &&
+          source['codeConventions'] &&
+          typeof source['codeConventions'] === 'object' &&
+          Object.keys(source['codeConventions']).length > 0
+            ? { codeConventions: normalized.codeConventions }
+            : {}),
+          ...(Object.hasOwn(source, 'existingIssues')
+            ? { existingIssues: normalized.existingIssues }
+            : {}),
+        },
+        this.workspaceProvider.getWorkspaceRoot() ?? undefined,
+        ownerDecision,
+      );
     });
   }
 

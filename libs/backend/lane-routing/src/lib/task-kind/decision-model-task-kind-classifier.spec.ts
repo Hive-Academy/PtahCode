@@ -56,15 +56,21 @@ function harness(options: {
         return {
           decide: async (payload) => {
             calls.push(payload);
-            return options.reply?.(payload) ?? {
-              ok: true,
-              result: {
-                model: 'nimble',
-                answers: {
-                  task_kind: { type: 'choice', choice: 'o1', confidence: 0.8 },
+            return (
+              options.reply?.(payload) ?? {
+                ok: true,
+                result: {
+                  model: 'nimble',
+                  answers: {
+                    task_kind: {
+                      type: 'choice',
+                      choice: 'o1',
+                      confidence: 0.8,
+                    },
+                  },
                 },
-              },
-            };
+              }
+            );
           },
         };
       },
@@ -75,12 +81,27 @@ function harness(options: {
 
 describe('DecisionModelTaskKindClassifier', () => {
   it.each(['backend-developer', 'frontend-developer', 'devops-engineer'])(
-    'uses the implement phase in the prompt for retired role %s', async (role) => {
-      const { classifier, calls } = harness({ selection: { kind: 'ollama', model: 'nimble' } });
+    'uses the implement phase in the prompt for retired role %s',
+    async (role) => {
+      const { classifier, calls } = harness({
+        selection: { kind: 'ollama', model: 'nimble' },
+      });
       await classifier.classify({ ...INPUT, role });
       expect(calls[0]?.state.request).toBe(`Role: implement\nTask:\n${BRIEF}`);
     },
   );
+  it.each([
+    ['code-logic-reviewer', 'review'],
+    ['code-style-reviewer', 'review'],
+    ['senior-tester', 'tests'],
+    ['visual-reviewer', 'visual-review'],
+  ])('uses the %s alias as %s in the prompt', async (role, kind) => {
+    const { classifier, calls } = harness({
+      selection: { kind: 'ollama', model: 'nimble' },
+    });
+    await classifier.classify({ ...INPUT, role });
+    expect(calls[0]?.state.request).toBe(`Role: ${kind}\nTask:\n${BRIEF}`);
+  });
   it('returns null without opening a request when the model is unset', async () => {
     const { classifier, calls, seen } = harness({});
     await expect(classifier.classify(INPUT)).resolves.toBeNull();

@@ -25,6 +25,7 @@ import {
   type TurnChangeSetFileStatus,
 } from '@ptah-extension/shared';
 import { sameWorkspaceRoot } from '../workspace-root';
+import { SessionGitStatsStore } from '../session-git-stats/session-git-stats.store';
 
 const LOG_PREFIX = '[ChangeSetStore]';
 
@@ -278,6 +279,7 @@ function recordedMarks(changeSet: TurnChangeSet): ChangeSetMarks {
 export class ChangeSetStore implements MessageHandler {
   private readonly vscode = inject(VSCodeService);
   private readonly tabManager = inject(TabManagerService);
+  private readonly gitStats = inject(SessionGitStatsStore);
 
   readonly handledMessageTypes = [
     MESSAGE_TYPES.GIT_TURN_CHANGE_SET,
@@ -356,7 +358,14 @@ export class ChangeSetStore implements MessageHandler {
       const sessionId = this.tabManager.activeTabSessionId();
       if (sessionId) untracked(() => void this.ensureLoaded(sessionId));
     });
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      const sessionId = this.tabManager.activeTabSessionId();
+      if (sessionId) this.requestReconcile(sessionId, false);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     inject(DestroyRef).onDestroy(() => {
+      document.removeEventListener('visibilitychange', onVisibility);
       for (const timer of this.timers.values()) clearTimeout(timer);
       this.timers.clear();
       for (const grace of this.graces.values()) clearTimeout(grace.timer);
@@ -634,6 +643,8 @@ export class ChangeSetStore implements MessageHandler {
   }
 
   private requestReconcile(sessionId: string, force: boolean): void {
+    if (document.visibilityState === 'hidden' && !force) return;
+    if (this.tabManager.activeTabSessionId() !== sessionId && !force) return;
     const root = this.rootFor(sessionId);
     if (!root || (this.unavailableRoots.get(sessionId)?.root === root &&
       (this.unavailableRoots.get(sessionId)?.until ?? 0) > Date.now())) return;
@@ -649,6 +660,7 @@ export class ChangeSetStore implements MessageHandler {
   }
 
   private async reconcile(sessionId: string): Promise<void> {
+    if (document.visibilityState === 'hidden' || (this.tabManager.activeTabSessionId() !== sessionId && !this.forced.has(sessionId))) return;
     const root = this.rootFor(sessionId);
     if (!root) return;
     if ((this.unavailableRoots.get(sessionId)?.root === root &&
@@ -686,7 +698,8 @@ export class ChangeSetStore implements MessageHandler {
     this.inFlight.add(sessionId);
     let snapshot: StatusSnapshot | null = null;
     try {
-      const result = await rpcCall<GitInfoResult>(
+      const shared = force ? null : this.gitStats.freshInfoFor(root);
+      const result = shared ? { success: true, data: shared } : await rpcCall<GitInfoResult>(
         this.vscode,
         'git:info',
         { workspaceRoot: root },

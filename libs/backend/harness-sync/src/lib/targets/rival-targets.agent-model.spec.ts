@@ -217,6 +217,35 @@ describe('rival targets — agent model reconciliation', () => {
     }
   });
 
+  it.each([
+    { origin: true, shouldSync: false },
+    { origin: false, shouldSync: true },
+  ])(
+    'syncs a step 2 same-name agent only without wizard origin: $origin',
+    async ({ origin, shouldSync }) => {
+      const role = 'code-logic-reviewer';
+      const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+      rmSync(join(agentsRoot, `${slug}.md`));
+      writeFileSync(
+        join(agentsRoot, `${role}.md`),
+        `---\nname: ${role}\ndescription: "an agent"\n---\ninstructions\n`,
+      );
+      const workspaceAgents = join(ws, '.claude', 'agents');
+      mkdirSync(workspaceAgents, { recursive: true });
+      writeFileSync(
+        join(workspaceAgents, `${role}.md`),
+        readFileSync(join(agentsRoot, `${role}.md`)),
+      );
+      if (origin) recordOrigins([role]);
+
+      await reconciler().reconcile(ws, { mode: 'full', reason: 'step 2 role' });
+
+      expect(existsSync(join(ws, `.codex/agents/${role}.toml`))).toBe(
+        shouldSync,
+      );
+    },
+  );
+
   it('keeps a formerly managed retired copy after its source gains Ptah provenance', async () => {
     const service = reconciler();
     await service.reconcile(ws, {

@@ -304,13 +304,13 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       host.accounts.set([account('signed-in'), OTHER]);
     });
 
-    it('the Name field uses the stacked label, the same field pattern as the Add form', () => {
+    it('the Name field floats and its label targets the input', () => {
       openEdit();
       const field = nameInput().closest('[data-ptah-field]');
-      expect(field?.getAttribute('data-appearance')).toBe('stacked');
+      expect(field?.getAttribute('data-appearance')).toBe('floating');
       const label = field?.querySelector('label');
       expect(label?.textContent?.trim()).toBe('Name');
-      expect(label?.getAttribute('for')).toBe('account-detail-name');
+      expect(label?.getAttribute('for')).toBe(nameInput().id);
       expect(nameInput().id).toBe('account-detail-name');
     });
 

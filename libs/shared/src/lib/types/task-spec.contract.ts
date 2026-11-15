@@ -66,20 +66,21 @@ export const IMPLEMENTATION_PLAN_FILE = 'implementation-plan.md';
 /** Current name of the team-leader batch breakdown. */
 export const BATCHES_FILE = 'batches.md';
 
-/** The senior-tester's evidence report. */
+/** The tests phase evidence report. */
 export const TEST_REPORT_FILE = 'test-report.md';
 
-/** The code-style reviewer's report. */
+/** Legacy code style review report filename, kept for old task records. */
 export const CODE_STYLE_REVIEW_FILE = 'code-style-review.md';
 
-/** The code-logic reviewer's report. */
+/** Legacy code logic review report filename, kept for old task records. */
 export const CODE_LOGIC_REVIEW_FILE = 'code-logic-review.md';
 
-/** The visual reviewer's report. */
+/** The visual-review phase report filename. */
 export const VISUAL_REVIEW_FILE = 'visual-review.md';
 
 /** The designer's section-by-section visual specification. */
-export const VISUAL_DESIGN_SPECIFICATION_FILE = 'visual-design-specification.md';
+export const VISUAL_DESIGN_SPECIFICATION_FILE =
+  'visual-design-specification.md';
 
 /** The designer's visual specification (`ui-ux-designer.template.md:104`). */
 export const DESIGN_SPEC_FILE = 'design-spec.md';
@@ -111,7 +112,7 @@ export const LEGACY_BATCHES_FILE = 'tasks.md';
  *    writes into the task folder (`.ptah/specs/<TASK_FOLDER>/design-spec.md`);
  *    orchestration checkpoints Gate 1.7 reads it before the next phase runs.
  *  - `content-specification.md` — `technical-content-writer.template.md:555`.
- *  - `testing-infrastructure-escalation.md` — `senior-tester.template.md:528`.
+ *  - `testing-infrastructure-escalation.md` — `phases/tests.md`.
  *
  * A fifth offender, `code-review.md`, was NOT admitted: the reviewer templates
  * themselves already write `code-style-review.md` / `code-logic-review.md`, so

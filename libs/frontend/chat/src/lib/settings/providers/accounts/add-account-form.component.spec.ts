@@ -117,7 +117,11 @@ describe('AddAccountFormComponent', () => {
     expect(document.activeElement).toBe(input());
     expect(input().closest('ptah-field')).not.toBeNull();
     expect(input().hasAttribute('ptahInput')).toBe(true);
-    expect(el().querySelector('label[for="add-account-name"]')?.textContent?.trim()).toBe('Account name');
+    const field = input().closest('[data-ptah-field]');
+    expect(field?.getAttribute('data-appearance')).toBe('floating');
+    const label = field?.querySelector('label');
+    expect(label?.textContent?.trim()).toBe('Account name');
+    expect(label?.getAttribute('for')).toBe(input().id);
     expect(input().getAttribute('maxlength')).toBe(String(PROVIDER_ACCOUNT_LABEL_MAX_LENGTH));
     expect(submit().textContent?.trim()).toBe('Add');
     expect(submit().type).toBe('submit');

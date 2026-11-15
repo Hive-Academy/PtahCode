@@ -14,7 +14,7 @@ Templates use the same download as [plugins](/plugins/plugin-storage/). They are
     └── agents/
         ├── _shared/
         ├── project-manager.template.md
-        ├── senior-tester.template.md
+        ├── modernization-detector.template.md
         ├── software-architect.template.md
         └── …
 ```

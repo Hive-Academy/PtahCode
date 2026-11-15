@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { container as rootContainer, type DependencyContainer } from 'tsyringe';
+import type { IStateStorage } from '@ptah-extension/platform-core';
 import {
   SESSION_HANDOFF_START_FAILED_DETAIL,
   SESSION_HANDOFF_START_TIMEOUT_DETAIL,
@@ -19,7 +20,10 @@ import {
   SessionHandoffService,
 } from './session-handoff.service';
 import type { SessionHandoffRequest } from './session-handoff.port';
-import { SessionHandoffAckStore } from './session-handoff-ack.store';
+import {
+  HANDOFF_ACK_STORAGE_KEY,
+  SessionHandoffAckStore,
+} from './session-handoff-ack.store';
 import type {
   ChildChatSessionStartOutcome,
   HandoffChatSessionStartInput,
@@ -61,15 +65,17 @@ afterAll(() => {
   rmSync(outside, { recursive: true, force: true });
 });
 
-function makeHarness() {
+function makeHarness(storage?: IStateStorage) {
   const stored = new Map<string, unknown>();
-  const ackStore = new SessionHandoffAckStore({
-    get: <T>(key: string) => stored.get(key) as T | undefined,
-    update: async (key: string, value: unknown) => {
-      stored.set(key, value);
+  const ackStore = new SessionHandoffAckStore(
+    storage ?? {
+      get: <T>(key: string) => stored.get(key) as T | undefined,
+      update: async (key: string, value: unknown) => {
+        stored.set(key, value);
+      },
+      keys: () => [...stored.keys()],
     },
-    keys: () => [...stored.keys()],
-  });
+  );
   const records = new Map<string, FakeRecord>();
   const addRecord = (record: FakeRecord) => {
     records.set(record.tabId, record);
@@ -272,6 +278,81 @@ function makeHarness() {
   };
 }
 
+function scopedAckStorage() {
+  const documents = new Map<string, Map<string, unknown>>([
+    [root, new Map()],
+    [outside, new Map()],
+    ['proxy', new Map()],
+  ]);
+  let outsideUnreadable = false;
+  const delegate = (path: string): IStateStorage => ({
+    get: <T>(key: string) => documents.get(path)?.get(key) as T | undefined,
+    update: async (key, value) => {
+      documents.get(path)?.set(key, value);
+    },
+    keys: () => [...(documents.get(path)?.keys() ?? [])],
+  });
+  const current = delegate(root);
+  const other = delegate(outside);
+  const proxy = delegate('proxy');
+  const unavailable = new Error('newer handoff document unavailable');
+  const failing = {
+    ...other,
+    getReadinessState: () => ({ status: 'not-ready' as const }),
+    whenReady: async () => {
+      throw unavailable;
+    },
+  };
+  const storage = {
+    get: <T>(key: string) => proxy.get<T>(key),
+    update: (key: string, value: unknown) => proxy.update(key, value),
+    keys: () => proxy.keys(),
+    getAllWorkspacePaths: () => [root, outside],
+    getStorageForWorkspace: (path: string) =>
+      path === root
+        ? current
+        : path === outside
+          ? outsideUnreadable
+            ? failing
+            : other
+          : undefined,
+  };
+  const setNewerRecord = (record: object) => {
+    documents.get(outside)?.set(HANDOFF_ACK_STORAGE_KEY, {
+      schemaVersion: 1,
+      records: [record],
+    });
+  };
+  return {
+    storage,
+    setNewerRecord,
+    makeOutsideUnreadable: () => {
+      outsideUnreadable = true;
+    },
+  };
+}
+
+async function closePendingHandoff(h: ReturnType<typeof makeHarness>) {
+  const started = await h.service.handoff(h.request());
+  if (!started.ok) throw new Error('handoff should start');
+  h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+  expect(
+    await h.ackStore.compareAndSet(CALLER, 'recorded', {
+      state: 'closePending',
+    }),
+  ).toBe(true);
+  const record = await h.ackStore.findByPredecessor(CALLER);
+  if (!record) throw new Error('handoff record missing');
+  return {
+    record,
+    request: {
+      callerSessionId: started.tabId,
+      predecessorSessionId: CALLER,
+      handoffPath,
+    },
+  };
+}
+
 /** A child record of `parent`, stored through a real reservation. */
 function addLink(
   links: SessionChildRegistry,
@@ -303,6 +384,103 @@ function addLink(
 }
 
 describe('SessionHandoffService', () => {
+  it('retries a closePending acknowledgement when a newer handoff document is unreadable', async () => {
+    const fixture = scopedAckStorage();
+    const h = makeHarness(fixture.storage);
+    const { record, request } = await closePendingHandoff(h);
+    fixture.setNewerRecord({
+      ...record,
+      workspaceRoot: outside,
+      successorTabId: 'new-successor',
+      generation: (record.generation ?? 0) + 1,
+      state: 'recorded',
+    });
+    fixture.makeOutsideUnreadable();
+
+    await expect(h.service.acknowledge(request)).resolves.toMatchObject({
+      status: 'retryable-failure',
+    });
+    expect(h.closer.close).not.toHaveBeenCalled();
+  });
+
+  it('refuses a closePending acknowledgement superseded in a readable document', async () => {
+    const fixture = scopedAckStorage();
+    const h = makeHarness(fixture.storage);
+    const { record, request } = await closePendingHandoff(h);
+    fixture.setNewerRecord({
+      ...record,
+      workspaceRoot: outside,
+      successorTabId: 'new-successor',
+      generation: (record.generation ?? 0) + 1,
+      state: 'recorded',
+    });
+
+    await expect(h.service.acknowledge(request)).resolves.toMatchObject({
+      status: 'refused',
+    });
+    expect(h.closer.close).not.toHaveBeenCalled();
+  });
+
+  it('closes the current successor from closePending and records completion', async () => {
+    const h = makeHarness();
+    const { request } = await closePendingHandoff(h);
+
+    await expect(h.service.acknowledge(request)).resolves.toMatchObject({
+      status: 'closed',
+    });
+    expect(h.closer.close).toHaveBeenCalledTimes(1);
+    expect(await h.ackStore.findByPredecessor(CALLER)).toMatchObject({
+      state: 'closeCompleted',
+    });
+  });
+
+  it('reports closed when completion persistence rejects after the closer succeeds', async () => {
+    const h = makeHarness();
+    const { request } = await closePendingHandoff(h);
+    jest
+      .spyOn(h.ackStore, 'compareAndSet')
+      .mockRejectedValueOnce(new Error('completion write unavailable'));
+
+    await expect(h.service.acknowledge(request)).resolves.toMatchObject({
+      status: 'closed',
+    });
+    expect(h.closer.close).toHaveBeenCalledTimes(1);
+    expect(await h.ackStore.findByPredecessor(CALLER)).toMatchObject({
+      state: 'closePending',
+    });
+  });
+
+  it('refuses an acknowledgement replaced before transition without closing the predecessor', async () => {
+    const h = makeHarness();
+    const started = await h.service.handoff(h.request());
+    if (!started.ok) throw new Error('handoff should start');
+    h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+    const previous = await h.ackStore.findByPredecessor(CALLER);
+    if (!previous) throw new Error('handoff record missing');
+    const transition = h.ackStore.transition.bind(h.ackStore);
+    jest
+      .spyOn(h.ackStore, 'transition')
+      .mockImplementationOnce(async (...args) => {
+        await h.ackStore.record({ ...previous, successorTabId: 'replacement' });
+        return transition(...args);
+      });
+    await expect(
+      h.service.acknowledge({
+        callerSessionId: started.tabId,
+        predecessorSessionId: CALLER,
+        handoffPath,
+      }),
+    ).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'handoff record superseded by a newer handoff',
+    });
+    expect(h.closer.close).not.toHaveBeenCalled();
+    expect(h.lifecycle.endSession).not.toHaveBeenCalled();
+    expect(await h.ackStore.findByPredecessor(CALLER)).toMatchObject({
+      successorTabId: 'replacement',
+      state: 'recorded',
+    });
+  });
   it('requires the recorded successor and exact file before closing after flush', async () => {
     const h = makeHarness();
     const started = await h.service.handoff(h.request());
@@ -1233,7 +1411,12 @@ describe('SessionHandoffService', () => {
         'child-held',
         'child-ended',
       ]);
-      for (const id of ['child-by-tab', 'child-by-sdk', 'child-held', 'child-ended']) {
+      for (const id of [
+        'child-by-tab',
+        'child-by-sdk',
+        'child-held',
+        'child-ended',
+      ]) {
         const child = h.links.get(id);
         expect(child?.parentSessionId).toBe(result.tabId);
         // The new session has no SDK id yet: readers follow its tab.
@@ -1256,9 +1439,12 @@ describe('SessionHandoffService', () => {
       const successorSdkId = '44444444-5555-4666-8777-888888888888';
       h.notifyResolved({ tabId: result.tabId, realSessionId: successorSdkId });
 
-      expect(h.links.get('child-live')?.parentSdkSessionId).toBe(successorSdkId);
-      expect(h.links.childrenOf([successorSdkId]).map((c) => c.childSessionId))
-        .toEqual(['child-live']);
+      expect(h.links.get('child-live')?.parentSdkSessionId).toBe(
+        successorSdkId,
+      );
+      expect(
+        h.links.childrenOf([successorSdkId]).map((c) => c.childSessionId),
+      ).toEqual(['child-live']);
       expect(h.links.childrenOf([CALLER, CALLER_SDK])).toEqual([]);
     });
 
@@ -1321,18 +1507,28 @@ describe('SessionHandoffService', () => {
 
     it('publishes a provisional record before the successor first turn', async () => {
       const h = makeHarness();
-      h.host.startHandoffSession.mockImplementationOnce(async (input: HandoffChatSessionStartInput) => {
-        const record = await h.ackStore.findByPredecessor(CALLER_SDK);
-        expect(record).toMatchObject({ successorTabId: input.tabId, state: 'starting' });
-        expect(await h.service.acknowledge({ callerSessionId: input.tabId,
-          predecessorSessionId: CALLER_SDK, handoffPath }))
-          .toMatchObject({ status: 'retryable-failure' });
-        return { started: true, uiAnnounced: true };
-      });
+      h.host.startHandoffSession.mockImplementationOnce(
+        async (input: HandoffChatSessionStartInput) => {
+          const record = await h.ackStore.findByPredecessor(CALLER_SDK);
+          expect(record).toMatchObject({
+            successorTabId: input.tabId,
+            state: 'starting',
+          });
+          expect(
+            await h.service.acknowledge({
+              callerSessionId: input.tabId,
+              predecessorSessionId: CALLER_SDK,
+              handoffPath,
+            }),
+          ).toMatchObject({ status: 'retryable-failure' });
+          return { started: true, uiAnnounced: true };
+        },
+      );
       const result = await h.service.handoff(h.request());
       expect(result.ok).toBe(true);
-      expect(await h.ackStore.findByPredecessor(CALLER_SDK))
-        .toMatchObject({ state: 'recorded' });
+      expect(await h.ackStore.findByPredecessor(CALLER_SDK)).toMatchObject({
+        state: 'recorded',
+      });
     });
 
     it('waits for acknowledgement after flush and stops only the caller tab', async () => {

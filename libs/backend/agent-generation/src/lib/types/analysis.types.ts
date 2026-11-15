@@ -179,7 +179,7 @@ export interface DeepProjectAnalysis {
 
   /**
    * Estimated test coverage information.
-   * Low coverage increases relevance of senior-tester agent.
+   * Low coverage can inform the tests phase.
    */
   testCoverage: TestCoverageEstimate;
 

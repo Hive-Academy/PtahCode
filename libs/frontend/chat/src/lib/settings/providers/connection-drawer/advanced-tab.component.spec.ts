@@ -102,6 +102,16 @@ describe('AdvancedTabComponent', () => {
   const disabled = (id: string) => isDisabledControl(query<HTMLButtonElement>(id));
 
   it('shows the stored endpoint, help URL and pricing, with the pricing note verbatim', () => {
+    for (const id of ['advanced-help-url', 'advanced-price-input', 'advanced-price-output']) {
+      const control = query<HTMLInputElement>(id);
+      expect(control).not.toBeNull();
+      const field = control?.closest('ptah-field');
+      expect(field).not.toBeNull();
+      const label = field?.querySelector('label');
+      expect(label).not.toBeNull();
+      expect(label?.htmlFor).toBe(control?.id);
+    }
+    expect(query('advanced-help-url')?.hasAttribute('aria-labelledby')).toBe(false);
     expect(query<HTMLInputElement>('advanced-base-url')?.value).toBe('https://gateway.example/v1');
     expect(query<HTMLInputElement>('advanced-models-endpoint')?.value).toBe('/v1/models');
     expect(query<HTMLInputElement>('advanced-help-url')?.value).toBe('https://docs.example/ai');

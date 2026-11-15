@@ -3,10 +3,13 @@ import {
   NativePopoverComponent,
   PtahButtonDirective,
   PtahFieldComponent,
+  PtahFieldTriggerDirective,
+  PtahIconButtonDirective,
   PtahSelectDirective,
 } from '@ptah-extension/ui';
 import type { CliAdapterManifest, CliLaneDefaults, CliType, LaneNetworkMode, LanePermissionMode } from '@ptah-extension/shared';
 import { CLI_LANE_DEFAULT_SCHEMA, resolveCliLaneDefaultPair } from '@ptah-extension/shared';
+import { Ellipsis, LucideAngularModule } from 'lucide-angular';
 
 type Choice = NonNullable<CliLaneDefaults[CliType]>;
 const PERMISSIONS: readonly LanePermissionMode[] = ['plan', 'ask', 'auto-edit', 'yolo'];
@@ -18,12 +21,15 @@ let nextTitleId = 0;
 @Component({
   selector: 'ptah-cli-lane-default-cell',
   standalone: true,
-  imports: [NativePopoverComponent, PtahButtonDirective, PtahFieldComponent, PtahSelectDirective],
+  imports: [LucideAngularModule, NativePopoverComponent, PtahButtonDirective, PtahFieldTriggerDirective, PtahIconButtonDirective, PtahFieldComponent, PtahSelectDirective],
   // Layout comes from the host data-layout attribute, not class bindings (ui-class-audit). Spacing uses --ptah-* tokens.
   host: { '[attr.data-layout]': 'layout()' },
   styles: `:host { display: block; min-width: 0; max-width: 100%; }
     :host([data-layout='wide']), :host([data-layout='card']) { width: 100%; }
     :host([data-layout='compact']) { width: max-content; }
+    :host([data-layout='card']) { display: contents; }
+    .defaults-reset { position: absolute; top: var(--ptah-space-2); right: 0; }
+    .defaults-warning { grid-column: 1 / -1; min-width: 0; }
     dialog.modal:not([open]) { display: none; }
     .fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ptah-gap-controls); min-width: 0; }
     :host([data-layout='card']) .fields, :host([data-layout='wide']) .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -32,6 +38,32 @@ let nextTitleId = 0;
     @container (max-width: 479px) { :host([data-layout='wide']) .fields { grid-template-columns: minmax(0, 1fr); } }`,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    @if (layout() === 'card') {
+      @if (saved()) {
+        <ptah-native-popover class="defaults-reset" [isOpen]="resetOpen()" placement="bottom-end" [hasBackdrop]="true" backdropClass="transparent" (closed)="resetOpen.set(false)">
+          <button trigger type="button" ptahIconButton size="xs" label="More default actions" [attr.aria-expanded]="resetOpen()" (click)="resetOpen.set(!resetOpen())"><lucide-angular [img]="EllipsisIcon" class="size-3.5" aria-hidden="true" /><span class="sr-only">More default actions</span></button>
+          @if (resetOpen()) { <div content class="p-[var(--ptah-gap-controls)]"><button type="button" ptahButton variant="ghost" [disabled]="disabled() || pending() !== null" (click)="requestReset()">Reset to default ({{ resetDescription() }})</button></div> }
+        </ptah-native-popover>
+      }
+      <ptah-field label="Permission" size="sm" class="min-w-0">
+      @if (permissions().length) {
+        <select ptahSelect class="w-full min-w-0 max-w-full" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission() ?? ''"
+          [disabled]="disabled() || pending() !== null" (change)="choosePermission($event)">
+          @if (effectivePermission() === undefined) { <option value="" disabled [selected]="true">Choose</option> }
+          @for (mode of permissions(); track mode) { <option [value]="mode" [selected]="mode === effectivePermission()">{{ mode }}</option> }
+        </select>
+      } @else { <button ptahFieldTrigger type="button" disabled class="text-base-content-muted" [title]="reason()">Unavailable</button> }
+      </ptah-field>
+      <ptah-field label="Network" size="sm" class="min-w-0" [hint]="!networks().length ? reason() : ''">
+      @if (networks().length) {
+        <select ptahSelect class="w-full min-w-0 max-w-full" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork() ?? ''"
+          [disabled]="disabled() || pending() !== null" (change)="chooseNetwork($event)">
+          @for (mode of networks(); track mode) { <option [value]="mode" [selected]="mode === effectiveNetwork()">{{ mode }}</option> }
+        </select>
+      } @else { <button ptahFieldTrigger type="button" disabled class="text-base-content-muted" [title]="reason()">Unavailable</button> }
+      </ptah-field>
+      @if ((networks().length || saved()) && unsupportedCombination(); as warningText) { <span class="defaults-warning text-base-content-muted" role="status">⚠ Unsupported combination: {{ warningText }}</span> }
+    } @else {
     <div class="flex min-w-0 max-w-full flex-col gap-[var(--ptah-gap-controls)] text-xs text-base-content [overflow-wrap:anywhere]">
       @if (cli() === 'ptah-cli') { <span>Shared by all Ptah CLI providers</span> }
       @if (cli() === 'codex') { <span>Same setting as Codex sandbox in Providers › OpenAI Codex › Credentials.</span> }
@@ -69,6 +101,8 @@ let nextTitleId = 0;
         </ptah-field>
       } @else { <span tabindex="0" [title]="reason()">Network: Unavailable — {{ reason() }}</span> }
       </div>
+    </div>
+    }
       <dialog #confirmation class="modal" (cancel)="cancel($event)" (close)="cancel()" [attr.aria-labelledby]="titleId">
         <div class="modal-box border border-base-content/60 bg-base-100 text-base-content">
           <h3 [id]="titleId" tabindex="-1" class="text-base font-semibold">Confirm full access</h3>
@@ -76,10 +110,10 @@ let nextTitleId = 0;
           <div class="modal-action"><button type="button" ptahButton variant="ghost" (click)="cancel()">Cancel</button><button type="button" class="btn btn-warning btn-sm" (click)="confirm()">Confirm</button></div>
         </div>
       </dialog>
-    </div>
   `,
 })
 export class CliLaneDefaultCellComponent {
+  protected readonly EllipsisIcon = Ellipsis;
   readonly cli = input.required<CliType>();
   readonly name = input.required<string>();
   readonly manifest = input<CliAdapterManifest>();
@@ -117,6 +151,8 @@ export class CliLaneDefaultCellComponent {
   readonly effectiveNetwork = computed(() => { const pair = this.effectivePair(); return 'network' in pair ? pair.network : undefined; });
   readonly reason = computed(() => Object.values(this.manifest()?.permissionModes ?? {}).find(value => value?.reason)?.reason ??
     Object.values(this.manifest()?.networkModes ?? {}).find(value => value?.reason)?.reason ?? 'No verified mode is available.');
+  readonly cardWarning = computed(() => this.unsupportedCombination() ? `Unsupported combination: ${this.unsupportedCombination()}` :
+    this.permissions().length === 0 || this.networks().length === 0 ? this.reason() : null);
   protected choosePermission(event: Event): void {
     if (!(event.target instanceof HTMLSelectElement)) return;
     this.returnFocus = event.target;

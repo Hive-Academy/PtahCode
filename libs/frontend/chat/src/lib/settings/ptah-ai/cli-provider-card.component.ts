@@ -7,6 +7,8 @@ import {
   PtahCheckboxDirective,
   PtahDescriptionItemComponent,
   PtahDescriptionListComponent,
+  PtahFieldComponent,
+  PtahFieldTriggerDirective,
   PtahSurfaceDirective,
   type PtahBadgeTone,
 } from '@ptah-extension/ui';
@@ -41,6 +43,8 @@ const NATIVE_BEHAVIOR_HINT =
     PtahCheckboxDirective,
     PtahDescriptionItemComponent,
     PtahDescriptionListComponent,
+    PtahFieldComponent,
+    PtahFieldTriggerDirective,
     PtahSurfaceDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -83,40 +87,43 @@ const NATIVE_BEHAVIOR_HINT =
           (click)="popoverRequested.emit('capabilities')">All capabilities</button>
         @if (openKind() === 'capabilities') { <ptah-cli-provider-card-popovers content [row]="row()" kind="capabilities" (closed)="popoverClosed.emit()" /> }
       </ptah-native-popover>
-      <!-- Editable lane settings. B2 moves them; B1 keeps their controls and store calls. -->
-      <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-controls)] border-t border-base-content/10 pt-[var(--ptah-space-2)] text-xs">
-        <div class="grid min-w-0 grid-cols-[4.7rem_minmax(0,1fr)] items-center gap-x-[var(--ptah-gap-inline)] gap-y-[var(--ptah-gap-label)]">
-          <span class="text-base-content-muted">Model</span>
+      <!-- Editable lane settings. -->
+      <div class="defaults-grid min-w-0 border-t border-base-content/10 pt-[var(--ptah-space-2)] text-xs">
+        <div class="defaults-heading flex min-w-0 items-center justify-between gap-[var(--ptah-gap-inline)]">
+          <h4 class="text-xs font-semibold text-base-content-muted">Defaults</h4>
+          @if (row().credentialAction) {
+            <div class="credential-slot min-w-0" [attr.data-has-reset]="saved() ? '' : null">
+              <ptah-native-popover [isOpen]="openKind() === 'credentials'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (opened)="focusCredentialKey()" (closed)="popoverClosed.emit()">
+                <button trigger type="button" ptahButton variant="outline" size="xs" data-popover-kind="credentials" [attr.aria-expanded]="openKind() === 'credentials'"
+                  (click)="popoverRequested.emit('credentials')">Credentials</button>
+                @if (openKind() === 'credentials') { <ptah-cursor-credential-popover content (closed)="popoverClosed.emit()" /> }
+              </ptah-native-popover>
+            </div>
+          } @else if (row().cli === 'codex') {
+            <div class="credential-slot min-w-0" [attr.data-has-reset]="saved() ? '' : null">
+              <button type="button" ptahButton variant="outline" size="xs" (click)="codexSettingsRequested.emit()">Codex settings</button>
+            </div>
+          }
+        </div>
+        <ptah-field label="Model" size="sm" class="defaults-trigger-field min-w-0">
           <ptah-native-popover [isOpen]="openKind() === 'model'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="popoverClosed.emit()">
-            <button trigger type="button" ptahButton variant="ghost" size="xs" density="compact" align="start" class="min-w-0 truncate" data-popover-kind="model" [disabled]="!row().interactive"
-              [class.opacity-60]="busy()" [class.cursor-wait]="busy()" [attr.aria-disabled]="busy() ? 'true' : null" [attr.aria-busy]="busy() ? 'true' : null" [title]="modelTitle()" [attr.aria-expanded]="openKind() === 'model'" (click)="!busy() && requestPopover('model')">{{ modelText() }}</button>
+            <button trigger ptahFieldTrigger type="button" class="default-trigger min-w-0" data-popover-kind="model" [disabled]="!row().interactive" [attr.aria-label]="'Model default for ' + row().name"
+              [attr.data-busy]="busy() ? '' : null" [attr.aria-disabled]="busy() ? 'true' : null" [attr.aria-busy]="busy() ? 'true' : null" [title]="modelTitle()" [attr.aria-expanded]="openKind() === 'model'" (click)="!busy() && requestPopover('model')">{{ modelText() }}</button>
             @if (openKind() === 'model') { <ptah-cli-model-effort-popover content [row]="row()" field="model" (closed)="popoverClosed.emit()" /> }
           </ptah-native-popover>
-          <span class="text-base-content-muted">Effort</span>
+        </ptah-field>
+        <ptah-field label="Effort" size="sm" class="defaults-trigger-field min-w-0">
           @if (row().effort) {
             <ptah-native-popover [isOpen]="openKind() === 'effort'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="popoverClosed.emit()">
-              <button trigger type="button" ptahButton variant="ghost" size="xs" density="compact" align="start" class="min-w-0 truncate" data-popover-kind="effort" [disabled]="!row().interactive"
-                [class.opacity-60]="busy()" [class.cursor-wait]="busy()" [attr.aria-disabled]="busy() ? 'true' : null" [attr.aria-busy]="busy() ? 'true' : null" [attr.aria-expanded]="openKind() === 'effort'" (click)="!busy() && requestPopover('effort')">{{ row().effort?.value || 'default' }}</button>
+              <button trigger ptahFieldTrigger type="button" class="default-trigger min-w-0" data-popover-kind="effort" [disabled]="!row().interactive" [attr.aria-label]="'Effort default for ' + row().name" [title]="row().effort?.value || 'default'"
+                [attr.data-busy]="busy() ? '' : null" [attr.aria-disabled]="busy() ? 'true' : null" [attr.aria-busy]="busy() ? 'true' : null" [attr.aria-expanded]="openKind() === 'effort'" (click)="!busy() && requestPopover('effort')">{{ row().effort?.value || 'default' }}</button>
               @if (openKind() === 'effort') { <ptah-cli-model-effort-popover content [row]="row()" field="effort" (closed)="popoverClosed.emit()" /> }
             </ptah-native-popover>
-          } @else { <span class="text-base-content-muted">n/a</span> }
-        </div>
+          } @else { <button ptahFieldTrigger type="button" disabled class="default-trigger min-w-0 text-base-content-muted">n/a</button> }
+        </ptah-field>
         <ptah-cli-lane-default-cell [cli]="row().cli" [name]="row().name" [manifest]="row().manifest"
           [saved]="saved()" [disabled]="busy() || !canWrite()" layout="card"
           (selected)="defaultSelected.emit($event)" (resetRequested)="defaultResetRequested.emit()" />
-        @if (row().credentialAction) {
-          <div class="credential-slot min-w-0">
-            <ptah-native-popover [isOpen]="openKind() === 'credentials'" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (opened)="focusCredentialKey()" (closed)="popoverClosed.emit()">
-              <button trigger type="button" ptahButton variant="outline" size="xs" data-popover-kind="credentials" [attr.aria-expanded]="openKind() === 'credentials'"
-                (click)="popoverRequested.emit('credentials')">Credentials</button>
-              @if (openKind() === 'credentials') { <ptah-cursor-credential-popover content (closed)="popoverClosed.emit()" /> }
-            </ptah-native-popover>
-          </div>
-        } @else if (row().cli === 'codex') {
-          <div class="credential-slot min-w-0">
-            <button type="button" ptahButton variant="outline" size="xs" (click)="codexSettingsRequested.emit()">Codex settings</button>
-          </div>
-        }
       </div>
       <div class="test-status min-w-0 break-words text-xs text-base-content-muted" aria-live="polite">{{ testing() ? 'Running…' : testText() }}</div>
     </div>
