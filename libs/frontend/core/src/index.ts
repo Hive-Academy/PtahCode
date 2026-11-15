@@ -5,7 +5,7 @@ export * from './lib/services/main-connection-target';
 export * from './lib/services/codex-login';
 export * from './lib/services/codex-commands';
 export * from './lib/services/codex-sign-in.service';
-export { AttentionPermissionActionsComponent } from './lib/components/attention-permission-actions.component';
+export { AttentionPermissionActionsComponent } from '@ptah-extension/notification-center';
 export {
   SURFACE_FOCUS_ROUTER,
   focusRouterKindFor,

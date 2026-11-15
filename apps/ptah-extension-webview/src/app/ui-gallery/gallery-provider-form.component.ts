@@ -57,7 +57,7 @@ import { GALLERY_ICON_PATHS, MODEL_OPTIONS, PROVIDER_OPTIONS } from './gallery-f
         <span ptahFieldLeading aria-hidden="true">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path [attr.d]="icons['key']" /></svg>
         </span>
-        <input ptahInput type="password" autocomplete="off" [value]="apiKey()" (input)="apiKey.set($any($event.target).value)" />
+        <input ptahInput type="password" autocomplete="off" [value]="apiKey()" (input)="apiKey.set(($event.target as HTMLInputElement).value)" />
       </ptah-field>
     }
     <ptah-field label="Default model" hint="Type to search. Groups show the tier.">
