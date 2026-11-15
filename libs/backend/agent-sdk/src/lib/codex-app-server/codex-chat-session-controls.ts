@@ -5,6 +5,7 @@ import {
 import {
   type IAgentAdapter,
   type SessionId,
+  type SessionEndCause,
   type FlatStreamEventUnion,
 } from '@ptah-extension/shared';
 import type { CodexChatSession as Session } from './codex-chat-turn-stream';
@@ -140,7 +141,8 @@ export class CodexChatSessionControls {
     if (accepted) session.blocked = false;
     return accepted;
   }
-  async interruptSession(id: SessionId): Promise<void> {
+  async interruptSession(id: SessionId, cause?: SessionEndCause): Promise<void> {
+    const hardStop = cause === 'parent-stop' || cause === 'user-stop';
     const opening = this.deps.opening.get(id);
     if (opening) {
       opening.cancelled = true;
@@ -150,6 +152,7 @@ export class CodexChatSessionControls {
     if (!session) return;
     if (!session.busy) {
       session.context.cancelPendingUserInput?.();
+      if (hardStop) await this.deps.close(session);
       return;
     }
     if (session.stopRequested) return;
@@ -166,6 +169,7 @@ export class CodexChatSessionControls {
         return;
       }
       if (session.turnId) session.sink.endTurn(id, session.turnId);
+      if (hardStop) await this.deps.close(session);
     } catch (error) {
       await this.deps.close(session);
       throw error;

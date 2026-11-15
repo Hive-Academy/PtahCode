@@ -2176,7 +2176,54 @@ describe('CodexChatAdapter', () => {
       await published;
     }
   });
-  it('keeps the thread when a matching token arrives after a completed turn stream', async () => {
+  it('closes an idle session on a parent-stop interrupt (D13)', async () => {
+    const { adapter, context } = setup();
+    const stream = await adapter.startChatSession({ tabId });
+    for await (const event of stream) void event;
+    expect(adapter.isSessionActive(id)).toBe(true);
+
+    await adapter.interruptSession(id, 'parent-stop');
+
+    expect(adapter.isSessionActive(id)).toBe(false);
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });
+  it('keeps an idle session open on a soft interrupt without a stop cause', async () => {
+    const { adapter, context } = setup();
+    const stream = await adapter.startChatSession({ tabId });
+    for await (const event of stream) void event;
+
+    await adapter.interruptSession(id);
+
+    expect(adapter.isSessionActive(id)).toBe(true);
+    expect(context.close).not.toHaveBeenCalled();
+    adapter.endSession(id);
+  });
+  it('closes a busy session whose interrupt was accepted on a parent-stop (D13)', async () => {
+    const { adapter, context } = setup();
+    context.events.mockImplementation(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn',
+          sequence: 1,
+          type: 'textDelta' as const,
+          itemId: 'item',
+          delta: 'hello',
+        };
+        yield terminal;
+      })(),
+    );
+    const stream = await adapter.startChatSession({ tabId });
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next();
+    context.interrupt.mockResolvedValue(true);
+
+    await adapter.interruptSession(id, 'parent-stop');
+
+    expect(context.interrupt).toHaveBeenCalled();
+    expect(adapter.isSessionActive(id)).toBe(false);
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });  it('keeps the thread when a matching token arrives after a completed turn stream', async () => {
     const { adapter, context, dispose, lifecycle } = setup();
     const stream = await adapter.startChatSession({ tabId });
     for await (const event of stream) void event;

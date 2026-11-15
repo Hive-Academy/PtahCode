@@ -1207,15 +1207,20 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (runtime) runtime.stopping = true;
 
     let reason = 'stopped-by-parent';
-    const tabId = SessionId.safeParse(id);
-    if (this.adapter && tabId) {
-      try {
-        await this.adapter.interruptSession(tabId, 'parent-stop');
-      } catch (error: unknown) {
-        // degradation-audit: reported - the child is still marked stopped;
-        // the interrupt error is recorded in its end reason.
-        reason = `stopped-by-parent (interrupt failed: ${errorMessage(error)})`;
-      }
+    const stop = await this.verifyAndHardStop(id, target.sdkSessionId);
+    if (stop.interruptError) {
+      // degradation-audit: reported - the interrupt error is recorded in the
+      // end reason when the hard path still ended the session.
+      reason = `stopped-by-parent (interrupt failed: ${stop.interruptError})`;
+    }
+    if (!stop.stopped) {
+      if (runtime) runtime.stopping = false;
+      this.log(`stop of ${id} refused: adapter session still active after hard end`);
+      return {
+        ok: false,
+        reason: 'still-active',
+        detail: `session ${id} is still active after interrupt and hard end; it was NOT marked stopped. Try again or end it from its tab.`,
+      };
     }
     this.registry.markEnded(id, 'stopped', reason, undefined, 'parent-stop');
     this.releaseResources(id);
@@ -1234,6 +1239,43 @@ export class SessionSpawnerService implements ISessionSpawner {
     };
   }
 
+  /**
+   * Soft interrupt, then hard end when the adapter still reports the session
+   * (under its tab id or SDK id) active. `stopped` is true only when the
+   * adapter confirms the session inactive. Without an adapter or a parseable
+   * id there is nothing live to verify, so it counts as stopped.
+   */
+  private async verifyAndHardStop(
+    childSessionId: string,
+    sdkSessionId?: string,
+  ): Promise<{ stopped: boolean; interruptError?: string }> {
+    const adapter = this.adapter;
+    const tabId = SessionId.safeParse(childSessionId);
+    if (!adapter || !tabId) return { stopped: true };
+    const ids = [tabId];
+    const sdkId = SessionId.safeParse(sdkSessionId);
+    if (sdkId && sdkId !== tabId) ids.push(sdkId);
+    const anyActive = (): boolean =>
+      ids.some((candidate) => adapter.isSessionActive(candidate));
+    let interruptError: string | undefined;
+    for (const candidate of ids) {
+      try {
+        await adapter.interruptSession(candidate, 'parent-stop');
+      } catch (error: unknown) {
+        interruptError = errorMessage(error);
+      }
+    }
+    if (!anyActive()) return { stopped: true, interruptError };
+    for (const candidate of ids) {
+      if (!adapter.isSessionActive(candidate)) continue;
+      try {
+        adapter.endSession(candidate);
+      } catch (error: unknown) {
+        interruptError ??= `hard end failed: ${errorMessage(error)}`;
+      }
+    }
+    return { stopped: !anyActive(), interruptError };
+  }
   clearFinished(query: SessionChildClearQuery): SessionChildClearResult {
     const caller = SessionId.safeParse(query.callerSessionId?.trim());
     if (!caller) return unattributed();
@@ -2183,9 +2225,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       this.releaseBudget(childSessionId);
       return Promise.resolve(false);
     }
-    return this.adapter
-      .interruptSession(id, 'parent-stop')
-      .then(() => true)
+    return this.verifyAndHardStop(childSessionId, this.registry.get(childSessionId)?.sdkSessionId)
+      .then((result) => result.stopped)
       .catch((error: unknown) => {
         this.log(
           `interrupt of ${childSessionId} failed: ${errorMessage(error)}`,
@@ -2310,13 +2351,15 @@ export class SessionSpawnerService implements ISessionSpawner {
     }
     runtime.handoffGraceTimer = undefined;
     const target = this.activeIdOf(child);
-    if (target && this.adapter) {
-      try {
-        await this.adapter.interruptSession(target, 'parent-stop');
-      } catch (error: unknown) {
-        // degradation-audit: reported - interruption failure still allows succession.
+    if (target) {
+      const stop = await this.verifyAndHardStop(
+        childSessionId,
+        child.sdkSessionId,
+      );
+      if (!stop.stopped || stop.interruptError) {
+        // degradation-audit: reported - failure still allows succession.
         this.log(
-          `${childSessionId} grace interrupt failed: ${errorMessage(error)}`,
+          `${childSessionId} grace stop incomplete (stopped=${stop.stopped}): ${stop.interruptError ?? 'still active'}`,
         );
       }
     }
