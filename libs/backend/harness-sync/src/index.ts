@@ -155,7 +155,6 @@ export {
   createOpencodeTarget,
   createRivalTargets,
   createVscodeMcpTarget,
-  LEGACY_HOME_PREFIXES,
   type RivalTargetDeps,
 } from './lib/targets/rival-targets';
 

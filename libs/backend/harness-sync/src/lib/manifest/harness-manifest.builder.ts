@@ -71,6 +71,7 @@ import {
   type ContentHashOptions,
 } from '../hash/content-hash';
 import type { HarnessSourceState } from '../sources/harness-source.port';
+import { userAgentFiles, type UserAgentLog } from '../sources/user-agent-source';
 import type { SkillSyncSelection } from '../state/skill-sync-gate';
 import { hashMcpConfig } from '../targets/mcp/mcp-json-format';
 import type {
@@ -311,6 +312,10 @@ export class HarnessManifestBuilder {
   constructor(
     private readonly warn: (message: string, detail?: unknown) => void = () =>
       undefined,
+    private readonly agentLog: UserAgentLog = {
+      warn: (message, detail) => { throw new Error(`${message}: ${String(detail)}`); },
+      error: (_message, error) => { throw error; },
+    },
   ) {}
 
   async build(
@@ -339,10 +344,11 @@ export class HarnessManifestBuilder {
       retired,
       hashOptions,
     );
-    const agents = await this.buildAgents(
+    const agents = await this.buildUserAgents(
+      options.workspaceRoot,
       sources,
+      options,
       collisions,
-      options.agentSyncEnabled !== false,
       hashOptions,
     );
 
@@ -735,52 +741,37 @@ export class HarnessManifestBuilder {
 
   // ---------------------------------------------------------------- agents
 
-  /**
-   * Agents, gated twice over — and both gates were missing until TASK_2026_286.
-   *
-   * 1. `agentSyncEnabled === false` makes the whole facet empty. That is the
-   *    WORKSPACE-level consent: until the setup wizard has run (or the
-   *    migration found evidence of a previous propagation), Ptah does not
-   *    scatter subagents into `.codex/agents`, `.github/agents` and
-   *    `.cursor/agents` for a project the user never asked it to.
-   * 2. `disabledAgentIds` drops individual slugs, exactly as
-   *    `disabledSkillIds` does in {@link buildSkills} — same key shape (the
-   *    filename minus `.md`), same raw membership test, so one saved config can
-   *    key both without a second canonicalisation rule to keep in step.
-   *
-   * Returning `[]` is a REAP, not a skip: agents are manifest-owned, so the
-   * removal sweep deletes whatever this pass stopped asking for. That is the
-   * behaviour we want when the user turns an agent off, and it is precisely why
-   * the absent-flag case must never resolve to a bare `false` — see
-   * `state/agent-sync-gate.ts`.
-   */
-  private async buildAgents(
+  /** User files selected for provider copies. Missing workspace roots yield none. */
+  private async buildUserAgents(
+    workspaceRoot: string | undefined,
     sources: HarnessSourceState,
+    options: HarnessManifestBuildOptions,
     collisions: HarnessCollision[],
-    syncEnabled: boolean,
     hashOptions: ContentHashOptions,
   ): Promise<HarnessDesiredAgent[]> {
-    if (!syncEnabled) return [];
-
-    const selection = {
-      agentSyncEnabled: syncEnabled,
-      disabledAgentIds: sources.disabledAgentIds,
-    };
+    if (workspaceRoot === undefined) return [];
+    const agentsDir = join(workspaceRoot, '.claude', 'agents');
     const claimed = new Map<string, HarnessDesiredAgent>();
-    for (const file of this.listMarkdownFiles(sources.layout.agentsRoot)) {
+    for (const file of await userAgentFiles(workspaceRoot, this.agentLog)) {
       const slug = file.replace(/\.md$/i, '');
-      if (!isAgentSelectedForSync(selection, slug)) continue;
+      if (!isAgentSelectedForSync(
+        {
+          agentSyncEnabled: options.agentSyncEnabled,
+          disabledAgentIds: sources.disabledAgentIds,
+        },
+        slug,
+      )) continue;
       const collision = this.rejectSlug(
         claimed,
         slug,
-        join(sources.layout.agentsRoot, file),
+        join(agentsDir, file),
         undefined,
       );
       if (collision !== null) {
         collisions.push(collision);
         continue;
       }
-      const sourceFile = join(sources.layout.agentsRoot, file);
+      const sourceFile = join(agentsDir, file);
       throwIfPassAborted(hashOptions.signal);
       const contentHash = await hashFile(sourceFile);
       if (contentHash === null) continue;

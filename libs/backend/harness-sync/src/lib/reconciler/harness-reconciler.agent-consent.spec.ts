@@ -87,7 +87,7 @@ describe('HarnessReconcilerService — the agents consent gate', () => {
   });
 
   function writeAgentSources(...slugs: string[]): void {
-    const agentsRoot = join(sourcesRoot, 'agents');
+    const agentsRoot = join(ws, '.claude', 'agents');
     mkdirSync(agentsRoot, { recursive: true });
     for (const slug of slugs) {
       writeFileSync(
@@ -223,7 +223,7 @@ describe('HarnessReconcilerService — the agents consent gate', () => {
     expect(readState()).toBeNull();
   });
 
-  it('[286] a disabled agent is reaped from every target while its sibling stays', async () => {
+  it('[286] a disabled agent remains managed during routine reconciliation', async () => {
     new HarnessStateStore().save(ws, { version: 1, agentSyncEnabled: true });
     await newReconciler().reconcile(ws, { mode: 'full', reason: 'both on' });
     expect(exists(...CODEX_TWO)).toBe(true);
@@ -233,10 +233,11 @@ describe('HarnessReconcilerService — the agents consent gate', () => {
       reason: 'agent-two disabled',
     });
 
-    expect(exists(...CODEX_TWO)).toBe(false);
+    expect(exists(...CODEX_TWO)).toBe(true);
     expect(exists(...CODEX_ONE)).toBe(true);
     expect(exists(...COPILOT_ONE)).toBe(true);
     const codex = health.targets.find((target) => target.target === 'codex');
-    expect(codex?.removed).toContain('.codex/agents/agent-two.toml');
+    expect(codex?.removed).not.toContain('.codex/agents/agent-two.toml');
+    expect(new ManagedManifestStore().load(ws, 'codex').entries['.codex/agents/agent-two.toml']).toBeDefined();
   });
 });

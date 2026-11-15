@@ -21,8 +21,6 @@ import { HarnessReconcilerService } from '../reconciler/harness-reconciler.servi
 import { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import {
   createPluginConfigSourceResolver,
-  defaultHarnessSourceLayout,
-  scopeAgentsRoot,
 } from '../sources/plugin-config-source-resolver';
 import { HarnessStateStore } from '../gitignore/harness-state-store';
 import { createCodexTarget, createOpencodeTarget } from './rival-targets';
@@ -44,7 +42,7 @@ describe('rival targets — agent model reconciliation', () => {
     '# source: ptah\nname = "backend-developer"\ndescription = "an agent"\ndeveloper_instructions = """\ninstructions\n"""\n';
 
   function recordOrigins(roles: readonly string[]): void {
-    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const agentsRoot = join(ws, '.claude', 'agents');
     const dir = join(ws, '.ptah', 'setup-wizard');
     mkdirSync(dir, { recursive: true });
     writeFileSync(
@@ -80,7 +78,7 @@ describe('rival targets — agent model reconciliation', () => {
     oldCodexHome = process.env['CODEX_HOME'];
     delete process.env['CODEX_HOME'];
     new HarnessStateStore().save(ws, { version: 1, agentSyncEnabled: true });
-    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const agentsRoot = join(ws, '.claude', 'agents');
     mkdirSync(agentsRoot, { recursive: true });
     writeFileSync(
       join(agentsRoot, `${slug}.md`),
@@ -128,8 +126,12 @@ describe('rival targets — agent model reconciliation', () => {
     );
     return new HarnessReconcilerService(
       logger as unknown as Logger,
-      new HarnessManifestBuilder((message, detail) =>
-        logger.warn(message, detail),
+      new HarnessManifestBuilder(
+        (message, detail) => logger.warn(message, detail),
+        {
+          warn: (message, detail) => logger.warn(message, detail),
+          error: (message, error) => logger.error(message, error),
+        },
       ),
       store,
       sourceResolver,
@@ -155,7 +157,7 @@ describe('rival targets — agent model reconciliation', () => {
   }
 
   it('does not copy retired Ptah clones and leaves tracked agent files in place', async () => {
-    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const agentsRoot = join(ws, '.claude', 'agents');
     for (const role of [
       'backend-developer',
       'frontend-developer',
@@ -224,7 +226,7 @@ describe('rival targets — agent model reconciliation', () => {
     'syncs a step 2 same-name agent only without wizard origin: $origin',
     async ({ origin, shouldSync }) => {
       const role = 'code-logic-reviewer';
-      const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+      const agentsRoot = join(ws, '.claude', 'agents');
       rmSync(join(agentsRoot, `${slug}.md`));
       writeFileSync(
         join(agentsRoot, `${role}.md`),
@@ -254,7 +256,7 @@ describe('rival targets — agent model reconciliation', () => {
     });
     const copy = join(ws, copyRel);
     const original = readFileSync(copy, 'utf-8');
-    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const agentsRoot = join(ws, '.claude', 'agents');
     const workspaceAgents = join(ws, '.claude', 'agents');
     mkdirSync(workspaceAgents, { recursive: true });
     writeFileSync(
@@ -270,7 +272,7 @@ describe('rival targets — agent model reconciliation', () => {
     const service = reconciler();
     await service.reconcile(ws, { mode: 'full', reason: 'initial agent' });
     const copy = join(ws, copyRel);
-    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const agentsRoot = join(ws, '.claude', 'agents');
     const workspaceAgents = join(ws, '.claude', 'agents');
     mkdirSync(workspaceAgents, { recursive: true });
     writeFileSync(
@@ -284,10 +286,10 @@ describe('rival targets — agent model reconciliation', () => {
   });
 
   it.each(['no origin entry', 'hash mismatch'])(
-    'removes a retired provider copy after its source disappears with %s',
+    'keeps a managed provider copy after its source disappears with %s',
     async (origin) => {
       const service = reconciler();
-      const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+      const agentsRoot = join(ws, '.claude', 'agents');
       const workspaceAgents = join(ws, '.claude', 'agents');
       mkdirSync(workspaceAgents, { recursive: true });
       writeFileSync(
@@ -302,26 +304,26 @@ describe('rival targets — agent model reconciliation', () => {
       expect(existsSync(join(ws, copyRel))).toBe(true);
       rmSync(join(agentsRoot, `${slug}.md`));
       await service.reconcile(ws, { mode: 'full', reason: 'source removed' });
-      expect(existsSync(join(ws, copyRel))).toBe(false);
+      expect(existsSync(join(ws, copyRel))).toBe(true);
     },
   );
 
   it('syncs a retired slug when its origin hash no longer matches', async () => {
     recordOrigins([slug]);
-    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const agentsRoot = join(ws, '.claude', 'agents');
     writeFileSync(join(agentsRoot, `${slug}.md`), '# edited');
     await reconciler().reconcile(ws, { mode: 'full', reason: 'edited agent' });
     expect(existsSync(join(ws, copyRel))).toBe(true);
   });
 
-  it('syncs a retired slug when its origin store is unreadable', async () => {
+  it('does not sync a retired slug when its origin store is unreadable', async () => {
     const dir = join(ws, '.ptah', 'setup-wizard', 'agent-origins.json');
     mkdirSync(dir, { recursive: true });
     await reconciler().reconcile(ws, {
       mode: 'full',
       reason: 'unreadable origins',
     });
-    expect(existsSync(join(ws, copyRel))).toBe(true);
+    expect(existsSync(join(ws, copyRel))).toBe(false);
   });
 
   it('rewrites a changed Codex model without reporting a local edit, using the normalized root', async () => {

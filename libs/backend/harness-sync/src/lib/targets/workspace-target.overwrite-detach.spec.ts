@@ -41,8 +41,6 @@ import { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import { HarnessReconcilerService } from '../reconciler/harness-reconciler.service';
 import {
   createPluginConfigSourceResolver,
-  defaultHarnessSourceLayout,
-  scopeAgentsRoot,
 } from '../sources/plugin-config-source-resolver';
 import type { IHarnessTarget } from './harness-target.port';
 import { createCodexTarget } from './rival-targets';
@@ -73,7 +71,7 @@ describe('WorkspaceHarnessTarget — keep edits, detach before replacing (TASK_2
     savedCodexHome = process.env['CODEX_HOME'];
     delete process.env['CODEX_HOME'];
     new HarnessStateStore().save(ws, { version: 1, agentSyncEnabled: true });
-    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const agentsRoot = join(ws, '.claude', 'agents');
     mkdirSync(agentsRoot, { recursive: true });
     writeFileSync(
       join(agentsRoot, `${slug}.md`),

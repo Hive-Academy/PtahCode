@@ -212,7 +212,7 @@ describe('Copilot home-directory reap (E19)', () => {
   }
 
   function writeAgentSource(slug: string): void {
-    const agentsRoot = join(sourcesRoot, 'agents');
+    const agentsRoot = join(ws, '.claude', 'agents');
     mkdirSync(agentsRoot, { recursive: true });
     writeFileSync(
       join(agentsRoot, `${slug}.md`),
@@ -251,7 +251,7 @@ describe('Copilot home-directory reap (E19)', () => {
     );
   }
 
-  it('[E19] reaps prefixed home entries that carry the Ptah writer signature, and reports every one in removed', async () => {
+  it('[E19] preserves prefixed home entries for consent-based retirement', async () => {
     const ptahFile = join(homeAgentsDir, 'ptah-old.agent.md');
     const ptahsynthFile = join(homeAgentsDir, 'ptahsynth-old.agent.md');
     const userFile = join(homeAgentsDir, 'user-keep.md');
@@ -264,15 +264,11 @@ describe('Copilot home-directory reap (E19)', () => {
       reason: 'home reap',
     });
 
-    expect(existsSync(ptahFile)).toBe(false);
-    expect(existsSync(ptahsynthFile)).toBe(false);
+    expect(existsSync(ptahFile)).toBe(true);
+    expect(existsSync(ptahsynthFile)).toBe(true);
     expect(existsSync(userFile)).toBe(true);
-    // Deleting a file in the user's HOME directory must be visible in the
-    // report, not merely in a debug log nobody reads.
     const copilot = health.targets.find((t) => t.target === 'copilot');
-    expect(copilot?.removed).toEqual(
-      expect.arrayContaining([ptahFile, ptahsynthFile]),
-    );
+    expect(copilot?.removed).toEqual([]);
   });
 
   it("[E19] a user's own ptah-notes.agent.md with no marker survives — the prefix alone is not proof of ownership", async () => {
@@ -295,7 +291,7 @@ describe('Copilot home-directory reap (E19)', () => {
     );
   });
 
-  it('[E19] a marker-less leftover is still reaped when its name names an agent this target writes', async () => {
+  it('[E19] preserves a marker-less leftover even when its name matches a desired agent', async () => {
     writeAgentSource('backend-developer');
     // Frontmatter hand-edited away by a user tidying the file — the name is the
     // remaining evidence, and it is evidence only because Ptah is being asked to
@@ -307,7 +303,7 @@ describe('Copilot home-directory reap (E19)', () => {
 
     await reconciler().reconcile(ws, { mode: 'full', reason: 'home reap' });
 
-    expect(existsSync(stripped)).toBe(false);
+    expect(existsSync(stripped)).toBe(true);
     expect(existsSync(unrelated)).toBe(true);
   });
 });

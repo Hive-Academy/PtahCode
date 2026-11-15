@@ -68,8 +68,6 @@
  * classify every one of them foreign, and never update a skill again.
  */
 
-import { homedir } from 'os';
-import { join } from 'path';
 import type { HarnessFacetMatrix } from '@ptah-extension/shared';
 import type { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import type { IHarnessCliDetector } from '../sources/harness-source.port';
@@ -80,9 +78,6 @@ import { CopilotAgentTransformer } from './transformers/copilot-agent-transforme
 import { CursorAgentTransformer } from './transformers/cursor-agent-transformer';
 import { OpencodeAgentTransformer } from './transformers/opencode-agent-transformer';
 import { WorkspaceHarnessTarget } from './workspace-target';
-
-/** Prefixes of the home-directory copies the pre-reconciler pipeline left behind. */
-export const LEGACY_HOME_PREFIXES: readonly string[] = ['ptah-', 'ptahsynth-'];
 
 function facets(supported: Partial<HarnessFacetMatrix>): HarnessFacetMatrix {
   return {
@@ -137,13 +132,6 @@ export function createCopilotTarget(deps: RivalTargetDeps): IHarnessTarget {
     skillsDirRel: '.github/skills',
     agentTransformer: new CopilotAgentTransformer(),
     mcpFacet: createMcpFacet('copilot', facetOptions(deps)),
-    // Copilot resolves agents home-first, so a `ptah-` copy left in
-    // `~/.copilot/agents` by the deleted pipeline silently shadows the
-    // workspace copy Ptah just wrote (E19).
-    homeReap: {
-      dir: () => join(deps.homeDir ?? homedir(), '.copilot', 'agents'),
-      prefixes: LEGACY_HOME_PREFIXES,
-    },
   });
 }
 

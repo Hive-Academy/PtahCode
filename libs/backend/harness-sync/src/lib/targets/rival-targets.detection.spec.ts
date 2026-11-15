@@ -100,7 +100,7 @@ describe('rival targets — detection gating (E17)', () => {
     detector: IHarnessCliDetector,
   ): HarnessReconcilerService {
     const skillsRoot = join(sourcesRoot, 'skills');
-    const agentsRoot = join(sourcesRoot, 'agents');
+    const agentsRoot = join(ws, '.claude', 'agents');
     writeSkill(skillsRoot, 'foo');
     writeAgent(agentsRoot, 'agentx');
     const sourceState: HarnessSourceState = {
