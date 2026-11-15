@@ -78,7 +78,7 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
   standalone: true,
   imports: [LucideAngularModule, PtahButtonDirective, PtahToggleDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block', '[class.mt-4]': 'visible()' },
+  host: { class: 'block' },
   template: `
     @if (visible()) {
       <!-- P2 section card (pattern map V26-V29). -->
