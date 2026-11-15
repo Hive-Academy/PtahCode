@@ -206,6 +206,15 @@ function errorMessage(err: unknown): string {
  * wrapper tools. Returns `null` when the tool name is not handled by this
  * dispatcher so the caller can try other dispatchers (e.g. `session_submit`).
  */
+class StdioSpawnAttemptError extends Error {
+  constructor(
+    readonly original: unknown,
+    readonly gate:
+      Awaited<ReturnType<typeof evaluateSpawnLimitGate>> | undefined,
+  ) {
+    super('Agent spawn attempt failed');
+  }
+}
 class StdioSpawnGateRefusal extends Error {
   constructor(readonly refusal: NonNullable<EvaluatedSpawnGate['refusal']>) {
     super(refusal.text);
@@ -473,34 +482,43 @@ export class AgentToolDispatcher {
         root,
         p,
         async () => {
-          gate = await evaluateSpawnLimitGate(target, p.force, (namedTarget) =>
-            this.lookupAgentLimits(undefined, {
-              target: namedTarget,
+          try {
+            gate = await evaluateSpawnLimitGate(
+              target,
+              p.force,
+              (namedTarget) =>
+                this.lookupAgentLimits(undefined, {
+                  target: namedTarget,
+                  model: p.model,
+                }),
+            );
+            if (gate.refusal) throw new StdioSpawnGateRefusal(gate.refusal);
+            return await this.ptahAPI.agent.spawn({
+              task: p.task,
+              cli: p.cli,
+              ptahCliId: p.ptahCliId,
+              workingDirectory: p.workingDirectory,
+              timeout: p.timeout,
+              files: p.files,
+              taskFolder: p.taskFolder,
+              deliverables: p.deliverables,
               model: p.model,
-            }),
-          );
-          if (gate.refusal) throw new StdioSpawnGateRefusal(gate.refusal);
-          return this.ptahAPI.agent.spawn({
-            task: p.task,
-            cli: p.cli,
-            ptahCliId: p.ptahCliId,
-            workingDirectory: p.workingDirectory,
-            timeout: p.timeout,
-            files: p.files,
-            taskFolder: p.taskFolder,
-            deliverables: p.deliverables,
-            model: p.model,
-            modelTier: p.modelTier,
-            resumeSessionId: p.resume_session_id,
-            parentSessionId: callerSessionId,
-            role: p.role,
-            effort: p.effort,
-            taskKind: p.taskKind,
-            routingSource: p.routingSource,
-            accountSelection: p.accountSelection,
-            permission: p.permission,
-            network: p.network,
-          });
+              modelTier: p.modelTier,
+              resumeSessionId: p.resume_session_id,
+              parentSessionId: callerSessionId,
+              role: p.role,
+              effort: p.effort,
+              taskKind: p.taskKind,
+              routingSource: p.routingSource,
+              accountSelection: p.accountSelection,
+              permission: p.permission,
+              network: p.network,
+            });
+          } catch (error: unknown) {
+            // Callers that share this attempt need the gate of the caller that
+            // started it, so each failure reply has the same limit text.
+            throw new StdioSpawnAttemptError(error, gate);
+          }
         },
         (spawned) =>
           isSpawnReplayValid(
@@ -571,7 +589,11 @@ export class AgentToolDispatcher {
           ...(result.roleChannel ? { roleChannel: result.roleChannel } : {}),
         },
       );
-    } catch (err: unknown) {
+    } catch (caught: unknown) {
+      const err =
+        caught instanceof StdioSpawnAttemptError ? caught.original : caught;
+      const replyGate =
+        caught instanceof StdioSpawnAttemptError ? caught.gate : gate;
       if (err instanceof StdioSpawnGateRefusal) {
         const { verdict } = err.refusal;
         this.logger.info('[McpStdio] agent_spawn refused at limit', {
@@ -591,9 +613,11 @@ export class AgentToolDispatcher {
       }
       // The lane the request named, so a failed spawn shows the same
       // `Limit state` a successful spawn on that lane would (design §5.2).
-      const limits = await gate?.resolveLimits(() => this.lookupAgentLimits());
+      const limits = await replyGate?.resolveLimits(() =>
+        this.lookupAgentLimits(),
+      );
       const limitBlock = formatAttemptedLimitSuffix(limits, target, {
-        forced: gate?.forced,
+        forced: replyGate?.forced,
       });
       this.logger.error(
         '[McpStdio] agent_spawn failed',

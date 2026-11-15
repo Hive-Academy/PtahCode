@@ -104,6 +104,24 @@ describe('AgentToolDispatcher — agent_spawn schema', () => {
     });
     expect(spawn).toHaveBeenCalledTimes(2);
   });
+
+  it('gives concurrent callers the same reply when the shared spawn fails', async () => {
+    const { dispatcher, spawn } = createHarness();
+    spawn.mockRejectedValue(
+      new AgentRoleError('role_read_failed', 'cannot read roles'),
+    );
+    const args = { task: 'shared failure', cli: 'codex' };
+    const [first, follower] = await Promise.all([
+      dispatcher.dispatch('agent_spawn', request, args),
+      dispatcher.dispatch('agent_spawn', request, args),
+    ]);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(toolResult(first).isError).toBe(true);
+    expect(JSON.stringify(toolResult(follower))).toBe(
+      JSON.stringify(toolResult(first)),
+    );
+  });
+
   it('forwards routing fields and leaves them undefined when absent', async () => {
     const { dispatcher, spawn } = createHarness();
     await dispatcher.dispatch('agent_spawn', request, {
