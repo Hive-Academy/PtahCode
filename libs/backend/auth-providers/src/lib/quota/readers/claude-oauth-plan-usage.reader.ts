@@ -70,7 +70,7 @@ export function createClaudeOauthPlanUsageReader(
     if (target.claudeRoute?.kind === 'named' || target.ownerRef.identityKind !== 'account')
       return unavailable('account-unverified', 'no-usage-source');
     let token: string;
-    const configDir = env().CLAUDE_CONFIG_DIR?.trim();
+    const configDir = env()['CLAUDE_CONFIG_DIR']?.trim();
     const credentialsPath = join(configDir || join(home(), '.claude'), '.credentials.json');
     const accountPath = join(configDir || home(), '.claude.json');
     try {
