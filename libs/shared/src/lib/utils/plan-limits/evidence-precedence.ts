@@ -18,8 +18,9 @@ export const LIMIT_LOOKUP_DEADLINE_MS = 3_000;
 
 /**
  * Deadline for providers whose read has a slow cold path: the Codex app-server
- * start-up and the Antigravity OS-keyring read both take 3-6 s, and a Kimi
- * Code read allows an 8 s request plus one OAuth refresh and retry.
+ * start-up and the Antigravity OS-keyring read both take 3-6 s, a Grok billing
+ * read allows a 5 s HTTP timeout, and a Kimi Code read allows an 8 s request
+ * plus one OAuth refresh and retry.
  */
 export const SLOW_LIMIT_LOOKUP_DEADLINE_MS = 12_000;
 
@@ -28,6 +29,7 @@ const SLOW_LIMIT_PROVIDERS: ReadonlySet<string> = new Set([
   'codex',
   'antigravity',
   'kimi-code',
+  'grok',
 ]);
 
 /** The lookup deadline for a provider id or CLI name. */

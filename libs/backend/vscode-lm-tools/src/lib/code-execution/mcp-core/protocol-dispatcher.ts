@@ -275,14 +275,15 @@ import {
   formatBrowserRecordStop,
 } from './mcp-response-formatter';
 import {
-  formatSpawnLimitBlock,
   spawnRequestTarget,
   type AgentLimitTarget,
 } from './agent-limit.formatter';
 import {
-  formatSpawnRefusal,
+  appendPendingSpawnLimits,
+  evaluateSpawnLimitGate,
+  formatAttemptedLimitSuffix,
   rowsWithSpawnModel,
-  spawnGateVerdict,
+  settledAgentLimits,
 } from './agent-spawn-limit-gate';
 
 /**
@@ -1158,20 +1159,20 @@ async function handleIndividualTool(
           effort: spawnArgs.effort,
         });
 
-        // A named lane is checked before the spawn; an auto-detected one
-        // keeps the lookup after `agent.spawn` settled.
+        // A named lane is checked before the spawn (bounded by SPAWN_GATE_WAIT_MS);
+        // an auto-detected one bounds the lookup after `agent.spawn` settled.
         const target = spawnRequestTarget(spawnArgs);
-        const preLimits = target
-          ? await lookupAgentLimits(ptahAPI, undefined, {
-              target,
+        const gate = await evaluateSpawnLimitGate(
+          target,
+          spawnArgs.force,
+          (namedTarget) =>
+            lookupAgentLimits(ptahAPI, undefined, {
+              target: namedTarget,
               model: spawnArgs.model,
-            })
-          : undefined;
-        const now = Date.now();
-        const verdict = preLimits
-          ? spawnGateVerdict(preLimits, target, now)
-          : undefined;
-        if (preLimits && verdict?.kind === 'blocked' && !spawnArgs.force) {
+            }),
+        );
+        if (gate.refusal) {
+          const { verdict } = gate.refusal;
           logger.info(
             '[MCP] ptah_agent_spawn refused at limit',
             'CodeExecutionMCP',
@@ -1181,12 +1182,9 @@ async function handleIndividualTool(
               reason: verdict.block.kind,
             },
           );
-          return toolErrorResponse(
-            request,
-            `Error: ${formatSpawnRefusal(preLimits, verdict, now)}`,
-          );
+          return toolErrorResponse(request, `Error: ${gate.refusal.text}`);
         }
-        const forced = verdict?.kind === 'blocked' && spawnArgs.force === true;
+        const { forced } = gate;
 
         let result: Awaited<ReturnType<PtahAPI['agent']['spawn']>>;
         try {
@@ -1227,10 +1225,12 @@ async function handleIndividualTool(
           }
           // The lane the request named, so a failed spawn shows the same
           // `Limit state` a successful spawn on that lane would (design §5.2).
-          const limits = target ? preLimits : await lookupAgentLimits(ptahAPI);
-          const limitBlock = limits
-            ? `\n\n${formatSpawnLimitBlock(limits, target, true, undefined, { forced })}`
-            : '';
+          const limits = await gate.resolveLimits(() =>
+            lookupAgentLimits(ptahAPI),
+          );
+          const limitBlock = formatAttemptedLimitSuffix(limits, target, {
+            forced,
+          });
           if (error instanceof AgentRoleError) {
             return toolErrorResponse(
               request,
@@ -1265,17 +1265,23 @@ async function handleIndividualTool(
           );
         }
 
-        const limits = target ? preLimits : await lookupAgentLimits(ptahAPI);
-        return await createToolSuccessResponse(
-          request,
+        const limits = await gate.resolveLimits(() =>
+          lookupAgentLimits(ptahAPI),
+        );
+        const formattedSpawn = appendPendingSpawnLimits(
           formatAgentSpawn(
             result,
             {
               modelTier: ptahCliId ? (modelTier ?? 'sonnet') : undefined,
               forced,
             },
-            limits,
-          ) +
+            settledAgentLimits(limits),
+          ),
+          limits,
+        );
+        return await createToolSuccessResponse(
+          request,
+          formattedSpawn +
             (callerSessionId
               ? ''
               : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),

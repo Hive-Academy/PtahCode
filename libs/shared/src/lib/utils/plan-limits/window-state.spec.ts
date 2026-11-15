@@ -53,6 +53,22 @@ const hit = (
   ...overrides,
 });
 
+describe('provider reported full windows', () => {
+  it('uses a fresh full provider reading after estimated exhaustion', () => {
+    const full = win({ used: { kind: 'percent', percent: 100 }, exhaustion: hit({ source: 'estimated' }) });
+    expect(classifyWindow(full, ctx())).toBe('limit-reached');
+    expect(activeWindowExhaustion(full, NOW, ctx())).toMatchObject({ source: 'provider-api', resetsAt: full.resetsAt });
+  });
+  it('classifies fresh 100% as reached and preserves aged, estimated and near states', () => {
+    const full = win({ used: { kind: 'percent', percent: 100 }, exhaustion: undefined });
+    expect(classifyWindow(full, ctx())).toBe('limit-reached');
+    expect(activeWindowExhaustion(full, NOW, ctx())).toMatchObject({ source: 'provider-api', observedAt: full.observedAt });
+    expect(classifyWindow({ ...full, observedAt: NOW - FRESHNESS_MS - 1 }, ctx())).toBe('aged');
+    expect(classifyWindow({ ...full, usedSource: 'estimated' }, ctx())).toBe('estimate-only');
+    expect(classifyWindow({ ...full, used: { kind: 'percent', percent: 99 } }, ctx())).toBe('near-limit');
+  });
+});
+
 describe('classifyOwnerEvidence / isActiveLimitEvidence', () => {
   it('is active before its reset and expired at and after it', () => {
     const evidence = hit({ resetsAt: NOW + MINUTE });

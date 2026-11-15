@@ -17,11 +17,16 @@ import {
   type AgentLimit,
 } from './agent-limit.formatter';
 import {
+  appendPendingSpawnLimits,
+  formatAttemptedLimitSuffix,
+  formatPendingSpawnLimitBlock,
   formatSpawnRefusal,
   rowsWithSpawnModel,
+  SPAWN_GATE_WAIT_MS,
   spawnGateVerdict,
   type SpawnGateVerdict,
 } from './agent-spawn-limit-gate';
+import { LIMIT_LOOKUP_PENDING } from './bounded-limit-lookup';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -127,7 +132,10 @@ const COOLING = lane(
     cooldown: { until: NOW + 15 * MIN, observedAt: NOW - MIN },
   }),
 );
-const FULL = lane(cliRow('antigravity'), snapshot({ windows: [window(100)] }));
+const FULL = lane(
+  cliRow('antigravity'),
+  snapshot({ windows: [window(100, { usedSource: 'provider-unofficial' })] }),
+);
 const ROOM = lane(cliRow('copilot'), snapshot({ windows: [window(20)] }));
 
 function blocked(
@@ -280,6 +288,60 @@ describe('spawnGateVerdict', () => {
       kind: 'unknown',
       reason: 'limit lookup timed out',
     });
+  });
+
+  it('treats a pending or failed lookup as unknown, never blocked', () => {
+    expect(SPAWN_GATE_WAIT_MS).toBe(4_000);
+    const pending = spawnGateVerdict(
+      LIMIT_LOOKUP_PENDING,
+      { cli: 'codex' },
+      NOW,
+    );
+    expect(pending.kind).not.toBe('blocked');
+    expect(pending).toEqual({
+      kind: 'unknown',
+      reason: 'limit lookup pending',
+    });
+
+    const failed = spawnGateVerdict(undefined, { cli: 'codex' }, NOW);
+    expect(failed.kind).not.toBe('blocked');
+    expect(failed).toEqual({
+      kind: 'unknown',
+      reason: 'limit lookup failed',
+    });
+
+    expect(spawnGateVerdict(LIMIT_LOOKUP_PENDING, undefined, NOW)).toEqual({
+      kind: 'clear',
+    });
+  });
+});
+
+describe('pending spawn limit formatting', () => {
+  it('formats pending limit state and one-line pending alternatives', () => {
+    const block = formatPendingSpawnLimitBlock(false);
+    expect(block).toContain('**Limit state:** unknown (limit lookup pending)');
+    expect(block).toContain(
+      '> Note: limit state unknown (limit lookup pending); spawned without a limit check.',
+    );
+    const alternativesLines = block
+      .split('\n')
+      .filter((line) => line.includes('Alternatives'));
+    expect(alternativesLines).toEqual([
+      '**Alternatives by limit state:** pending (limit lookup in progress).',
+    ]);
+  });
+
+  it('formats attempted suffix and appends pending block only when pending', () => {
+    expect(appendPendingSpawnLimits('## Agent Spawned', undefined)).toBe(
+      '## Agent Spawned',
+    );
+    expect(
+      appendPendingSpawnLimits('## Agent Spawned', LIMIT_LOOKUP_PENDING),
+    ).toContain('**Limit state:** unknown (limit lookup pending)');
+    expect(
+      formatAttemptedLimitSuffix(LIMIT_LOOKUP_PENDING, { cli: 'codex' }),
+    ).toContain('attempted without a limit check.');
+    expect(formatAttemptedLimitSuffix(undefined, { cli: 'codex' })).toBe('');
   });
 });
 
