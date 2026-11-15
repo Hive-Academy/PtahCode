@@ -67,6 +67,7 @@ import { KimiCodeLoginProgressComponent } from './connection-drawer/kimi-code-lo
 import {
   PtahBadgeDirective,
   PtahButtonDirective,
+  PtahFieldComponent,
   PtahInputDirective,
 } from '@ptah-extension/ui';
 
@@ -109,6 +110,7 @@ const CONTROL =
     ProviderCatalogModalComponent,
     KimiCodeLoginProgressComponent,
     PtahButtonDirective,
+    PtahFieldComponent,
     PtahInputDirective,
   ],
   template: `
@@ -260,17 +262,20 @@ const CONTROL =
                 }
               </div>
               <div class="flex flex-wrap items-center gap-2">
+                <ptah-field label="Filter connections" size="sm" class="w-52">
                 <input
                   ptahInput
+                  id="connections-filter"
                   size="sm"
                   type="search"
-                  class="w-52 text-sm text-base-content"
+                  class="w-full text-sm text-base-content"
                   placeholder="Filter connections…"
                   aria-label="Filter connections"
                   data-testid="connections-filter"
                   [value]="filter()"
                   (input)="filter.set(inputValue($event))"
                 />
+                </ptah-field>
                 <button
                   type="button"
                   ptahButton
