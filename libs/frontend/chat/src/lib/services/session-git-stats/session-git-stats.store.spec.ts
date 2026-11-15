@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { LoggingService, VSCodeService, rpcCall } from '@ptah-extension/core';
 import { GIT_ROOT_MISSING_MESSAGE, GIT_ROOT_UNAVAILABLE_MESSAGE, GIT_ROOT_PROBE_FAILED_MESSAGE, MESSAGE_TYPES, type GitInfoResult } from '@ptah-extension/shared';
@@ -59,7 +60,7 @@ describe(SessionGitStatsStore.name, () => {
       const good = store.stateFor('/a');
       turn('session');
       await tick();
-      expect(store.stateFor('/a')).toEqual(good);
+      expect(store.stateFor('/a')).toEqual({ ...good, unavailable: true });
     } finally {
       warn.mockRestore();
     }
@@ -128,11 +129,13 @@ describe(SessionGitStatsStore.name, () => {
     }
   });
   let store: SessionGitStatsStore;
+  const activeSessionId = signal<string | null>(null);
   const tabs = new Map<string, { tab: { claudeSessionId: string | null } }>();
   beforeEach(() => {
     jest.useFakeTimers();
     call.mockReset();
     tabs.clear();
+    activeSessionId.set(null);
     loggerWarn.mockReset();
     TestBed.configureTestingModule({
       providers: [
@@ -145,6 +148,7 @@ describe(SessionGitStatsStore.name, () => {
           provide: TabManagerService,
           useValue: {
             findTabByIdAcrossWorkspaces: (id: string) => tabs.get(id) ?? null,
+            activeTabSessionId: activeSessionId.asReadonly(),
           },
         },
       ],
@@ -169,6 +173,42 @@ describe(SessionGitStatsStore.name, () => {
       type: MESSAGE_TYPES.GIT_STATUS_UPDATE,
       payload: { ...data, workspaceRoot: root },
     });
+
+  it('waits for a hidden tab to become visible, then shares one root read', async () => {
+    const visibility = jest.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      tabs.set('one', { tab: { claudeSessionId: 's1' } });
+      tabs.set('two', { tab: { claudeSessionId: 's2' } });
+      activeSessionId.set('s1');
+      call.mockResolvedValue(success(info()));
+      store.track('/same', 'one');
+      store.track('/same/', 'two');
+      await tick();
+      expect(call).not.toHaveBeenCalled();
+      visibility.mockReturnValue('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await tick();
+      expect(call).toHaveBeenCalledTimes(1);
+      expect(store.freshInfoFor('/same')).not.toBeNull();
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it('lets an explicit refresh read while the tab is hidden', async () => {
+    const visibility = jest.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      call.mockResolvedValue(success(info()));
+      store.track('/hidden', 'one');
+      await tick();
+      expect(call).not.toHaveBeenCalled();
+      store.refresh('/hidden');
+      await tick();
+      expect(call).toHaveBeenCalledTimes(1);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
 
   it('declares all three message types', () => {
     expect(store.handledMessageTypes).toEqual([
@@ -328,7 +368,7 @@ describe(SessionGitStatsStore.name, () => {
     expect(store.stateFor('/a').kind).toBe('known');
     turn('session');
     await tick();
-    expect(store.stateFor('/a')).toEqual({ kind: 'unknown', reason: 'failed' });
+    expect(store.stateFor('/a')).toEqual({ kind: 'known', additions: 2, deletions: 1, partial: false, branch: null, unavailable: true });
     push(
       '/a',
       info([
@@ -344,10 +384,7 @@ describe(SessionGitStatsStore.name, () => {
     });
     turn('session', MESSAGE_TYPES.SESSION_TURN_FAILED);
     await tick();
-    expect(store.stateFor('/a')).toEqual({
-      kind: 'unknown',
-      reason: 'unavailable',
-    });
+    expect(store.stateFor('/a')).toEqual({ kind: 'known', additions: 7, deletions: 0, partial: false, branch: null, unavailable: true });
     call.mockResolvedValueOnce(success(info()));
     turn('session');
     await tick();

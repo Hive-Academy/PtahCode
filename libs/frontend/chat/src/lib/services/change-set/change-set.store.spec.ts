@@ -9,6 +9,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { VSCodeService } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
+import { SessionGitStatsStore } from '../session-git-stats/session-git-stats.store';
 import {
   GIT_ROOT_MISSING_MESSAGE,
   GIT_ROOT_PROBE_FAILED_MESSAGE,
@@ -74,6 +75,7 @@ describe('ChangeSetStore', () => {
   let persisted: unknown[] | null;
   let gitInfo: GitInfoResult | null;
   let warn: jest.SpyInstance;
+  let freshInfo: GitInfoResult | null;
 
   function rpcCallsFor(method: string): unknown[][] {
     return mockRpcCall.mock.calls.filter((call) => call[1] === method);
@@ -83,6 +85,7 @@ describe('ChangeSetStore', () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       providers: [
+        { provide: SessionGitStatsStore, useValue: { freshInfoFor: () => freshInfo } },
         {
           provide: VSCodeService,
           useValue: {
@@ -117,6 +120,7 @@ describe('ChangeSetStore', () => {
     activeSessionId = signal<string | null>(null);
     persisted = [changeSet()];
     gitInfo = status([{ path: 'src/a.ts' }, { path: 'src/b.ts' }]);
+    freshInfo = null;
     mockRpcCall.mockImplementation(async (_vscode, method: string) => {
       if (method === 'git:turnChangeSets') {
         return persisted
@@ -139,6 +143,14 @@ describe('ChangeSetStore', () => {
   });
 
   describe('loading', () => {
+    it('reuses a fresh stats result for reconciliation', async () => {
+      freshInfo = status([{ path: 'src/a.ts' }]);
+      const store = createStore();
+      await openSession('s1');
+      await passDebounce();
+      expect(rpcCallsFor('git:info')).toHaveLength(0);
+      expect(store.marksFor(store.changeSetsFor('s1')[0]).reconciled.has('src/b.ts')).toBe(true);
+    });
     it('reads the persisted sets once per session switch', async () => {
       const store = createStore();
       await openSession('s1');

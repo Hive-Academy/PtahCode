@@ -43,6 +43,8 @@ export class GitRootWatchLeaseService {
 
   /** The set to lease, highest priority first, de-duplicated and capped. */
   private roots: readonly string[] = [];
+  /** Order-independent identity of the desired, capped root set. */
+  private requestedKey = '';
   /**
    * Key of the set the backend last accepted. Starts as the empty set: the
    * backend holds nothing for a fresh lease id, so an empty update sends
@@ -72,7 +74,11 @@ export class GitRootWatchLeaseService {
    */
   update(roots: readonly (string | null)[]): void {
     if (this.destroyed || this.vscode.config().isElectron !== true) return;
-    this.roots = leaseRoots(roots);
+    const nextRoots = leaseRoots(roots);
+    const nextKey = leaseKey(nextRoots);
+    if (nextKey === this.requestedKey) return;
+    this.roots = nextRoots;
+    this.requestedKey = nextKey;
     const requested = new Set(this.roots.map((root) => normalizeWorkspaceRoot(root)));
     this.rejected = new Map([...this.rejected].filter(([root]) => requested.has(root)));
     if (this.debounceTimer !== null) clearTimeout(this.debounceTimer);
@@ -116,7 +122,7 @@ export class GitRootWatchLeaseService {
       if (!renew) this.flushAfterSend = true;
       return;
     }
-    const key = roots.map((root) => normalizeWorkspaceRoot(root)).join('\n');
+    const key = leaseKey(roots);
     if (!renew && key === this.sentKey) return;
     this.sending = true;
     try {
@@ -206,4 +212,9 @@ function leaseRoots(roots: readonly (string | null)[]): readonly string[] {
     if (out.length === GitRootWatchLeaseService.MAX_ROOTS) break;
   }
   return out;
+}
+
+/** Compare sets using the existing case and separator policy, independent of order. */
+function leaseKey(roots: readonly string[]): string {
+  return roots.map((root) => normalizeWorkspaceRoot(root)).sort().join('\n');
 }
