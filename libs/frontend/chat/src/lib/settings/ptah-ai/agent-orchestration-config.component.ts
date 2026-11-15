@@ -11,14 +11,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import {
-  ChevronDown,
-  ChevronUp,
-  LucideAngularModule,
-  Pencil,
-  RefreshCw,
-  X,
-} from 'lucide-angular';
+import { LucideAngularModule, Pencil, RefreshCw, X } from 'lucide-angular';
 import { ProvidersSettingsStateService } from '@ptah-extension/core';
 import {
   NativePopoverComponent,
@@ -28,6 +21,11 @@ import {
 } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { cliMatrixRows } from './cli-matrix-rows';
+import {
+  LaneOrderListComponent,
+  type LaneOrderChip,
+  type LaneOrderMove,
+} from './lane-order-list.component';
 
 /** Bounds of the max-concurrent field; the runtime enforces the same range (`MAX_CONCURRENT_AGENTS`). */
 const MIN_CONCURRENT = 1;
@@ -45,20 +43,13 @@ const SAVE_SCOPE = 'global';
 const DETECT_FAILED =
   'Could not re-detect CLI agents. Your saved settings have not changed.';
 
-/** One preferred-order entry: an installed system CLI or a Ptah CLI instance, in the matrix's rank order. */
-interface OrderChip {
-  readonly id: string;
-  readonly name: string;
-  readonly enabled: boolean;
-}
-
 /**
  * Agent Orchestration policy toolbar (plan :702-709, design-spec §1.2 item 2, prototype `orchestration.html` :107-147),
  * rendered inside the CLI matrix card above its table (no card of its own).
  * One row: max concurrent agents (number input 1-100), the preferred agent order as compact read-only chips
  * (the prototype's `1. Codex → 2. Antigravity → …`), and Re-detect CLIs.
- * - The chip group opens the order popover (the "popover for short choices" save model): one row per agent with ▲/▼
- *   buttons of 24×24 px (deviation 5: chevrons, no grip, no drag; `moveAgentUp/Down` kept). Each move saves.
+ * - The chip group opens the order popover (the "popover for short choices" save model). Its rows are
+ *   `ptah-lane-order-list` (drag and drop plus Move up/down buttons); each requested move saves here.
  * - Reads `state.orchestration()` and `state.cliAgents()`; the chips are the CLI matrix's installed rows
  *   (`cliMatrixRows`, same rank rule), so the bar and the matrix always show one order.
  * - Every write is `state.saveSettings({orchestration:{…}})` through `SettingsSaveFeedbackService` (toast, Undo, D15:
@@ -70,6 +61,7 @@ interface OrderChip {
   selector: 'ptah-agent-orchestration-config',
   standalone: true,
   imports: [
+    LaneOrderListComponent,
     LucideAngularModule,
     NativePopoverComponent,
     PtahButtonDirective,
@@ -104,10 +96,7 @@ interface OrderChip {
             max="100"
             step="1"
             inputmode="numeric"
-            [class]="
-              'w-16 px-1.5 text-center font-mono text-xs ' +
-              focusRing
-            "
+            [class]="'w-16 px-1.5 text-center font-mono text-xs ' + focusRing"
             [value]="maxConcurrent() ?? ''"
             [disabled]="maxConcurrent() === null || !canWrite()"
             aria-label="Max concurrent agents (1 to 100)"
@@ -212,11 +201,11 @@ interface OrderChip {
                   content
                   role="dialog"
                   aria-labelledby="policy-order-title"
-                  class="w-[16rem] max-w-[calc(100vw-2rem)] space-y-2 p-3"
+                  class="flex w-[16rem] max-w-[calc(100vw-2rem)] flex-col gap-[var(--ptah-gap-controls)] p-[var(--ptah-gap-heading)]"
                   data-testid="policy-order-popover"
                 >
                   <div
-                    class="flex items-center justify-between gap-2 border-b border-base-300 pb-1.5"
+                    class="flex items-center justify-between gap-[var(--ptah-gap-controls)] border-b border-base-300 pb-[var(--ptah-gap-label)]"
                   >
                     <!-- A plain title, not a heading: the popover sits in the page outline below the tab heading (axe heading-order). -->
                     <p
@@ -238,65 +227,11 @@ interface OrderChip {
                       />
                     </button>
                   </div>
-                  <ol class="space-y-1">
-                    @for (
-                      chip of chips();
-                      track chip.id;
-                      let i = $index, first = $first, last = $last
-                    ) {
-                      <li
-                        class="flex items-center gap-1 text-xs"
-                        [attr.data-testid]="'policy-order-row-' + chip.id"
-                      >
-                        <span
-                          class="min-w-0 flex-1 truncate font-bold"
-                          [class.text-base-content]="chip.enabled"
-                          [class.text-base-content-muted]="!chip.enabled"
-                          >{{ i + 1 }}. {{ chip.name }}</span
-                        >
-                        @if (!chip.enabled) {
-                          <span class="text-xs text-base-content-muted"
-                            >off</span
-                          >
-                        }
-                        <!-- Native disabled only at the ends; while a move cannot run (saving, not read) the buttons are
-                             aria-disabled and ignore clicks, so the focused one keeps focus and Esc closes the popover. -->
-                        <button
-                          type="button"
-                          ptahIconButton
-                          [disabled]="first"
-                          [busy]="!canReorder()"
-                          [label]="'Move ' + chip.name + ' up'"
-                          [attr.data-testid]="'policy-order-up-' + chip.id"
-                          (click)="moveAgentUp(i)"
-                        >
-                          <lucide-angular
-                            [img]="UpIcon"
-                            class="h-3.5 w-3.5"
-                            aria-hidden="true"
-                          />
-                        </button>
-                        <button
-                          type="button"
-                          ptahIconButton
-                          [disabled]="last"
-                          [busy]="!canReorder()"
-                          [label]="'Move ' + chip.name + ' down'"
-                          [attr.data-testid]="'policy-order-down-' + chip.id"
-                          (click)="moveAgentDown(i)"
-                        >
-                          <lucide-angular
-                            [img]="DownIcon"
-                            class="h-3.5 w-3.5"
-                            aria-hidden="true"
-                          />
-                        </button>
-                      </li>
-                    }
-                  </ol>
-                  <p class="text-xs text-base-content-muted">
-                    The first available agent is used when no CLI is specified.
-                  </p>
+                  <ptah-lane-order-list
+                    [chips]="chips()"
+                    [canReorder]="canReorder()"
+                    (reorder)="savePreferredOrder($event)"
+                  />
                 </div>
               }
             </ptah-native-popover>
@@ -339,8 +274,6 @@ interface OrderChip {
   `,
 })
 export class AgentOrchestrationConfigComponent {
-  protected readonly UpIcon = ChevronUp;
-  protected readonly DownIcon = ChevronDown;
   protected readonly RefreshIcon = RefreshCw;
   protected readonly EditIcon = Pencil;
   protected readonly CloseIcon = X;
@@ -359,7 +292,7 @@ export class AgentOrchestrationConfigComponent {
     () => this.state.orchestration().data !== null,
   );
   /** The installed rows of the CLI matrix, in its order (system CLIs and Ptah CLI instances). */
-  protected readonly chips = computed((): readonly OrderChip[] =>
+  protected readonly chips = computed((): readonly LaneOrderChip[] =>
     cliMatrixRows({
       orchestration: this.state.orchestration().data,
       cliAgents: this.state.cliAgents().data,
@@ -410,6 +343,7 @@ export class AgentOrchestrationConfigComponent {
     viewChild<ElementRef<HTMLElement>>('orderStrip');
   private readonly orderMeasure =
     viewChild<ElementRef<HTMLElement>>('orderMeasure');
+  private readonly orderList = viewChild(LaneOrderListComponent);
 
   constructor() {
     // A changed list recounts the chips that fit.
@@ -449,7 +383,9 @@ export class AgentOrchestrationConfigComponent {
     const arrowNode = measure.querySelector<HTMLElement>(
       '[data-measure="arrow"]',
     );
-    const moreNode = measure.querySelector<HTMLElement>('[data-measure="more"]');
+    const moreNode = measure.querySelector<HTMLElement>(
+      '[data-measure="more"]',
+    );
     const arrow = exact(arrowNode, arrowNode?.offsetWidth ?? 0);
     const more = exact(moreNode, moreNode?.offsetWidth ?? 0);
     if (!width || widths.some((width) => width === 0)) {
@@ -537,22 +473,6 @@ export class AgentOrchestrationConfigComponent {
     }
   }
 
-  /** Move an agent one place earlier in the preferred order. */
-  moveAgentUp(index: number): void {
-    if (index <= 0 || !this.canReorder()) return;
-    const ids = this.chips().map((chip) => chip.id);
-    [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]];
-    void this.savePreferredOrder(ids, ids[index - 1], 'up');
-  }
-
-  /** Move an agent one place later in the preferred order. */
-  moveAgentDown(index: number): void {
-    const ids = this.chips().map((chip) => chip.id);
-    if (index >= ids.length - 1 || !this.canReorder()) return;
-    [ids[index], ids[index + 1]] = [ids[index + 1], ids[index]];
-    void this.savePreferredOrder(ids, ids[index + 1], 'down');
-  }
-
   async redetectClis(): Promise<void> {
     if (this.detecting()) return;
     this.redetecting.set(true);
@@ -574,11 +494,11 @@ export class AgentOrchestrationConfigComponent {
    * One move = one write of the whole order, with Undo. The rows show the read-back order (D15); when this move's own
    * write did not save (refused, failed or threw), the page toast from `save()` says so with the details.
    */
-  private async savePreferredOrder(
-    order: string[],
-    movedId: string,
-    direction: 'up' | 'down',
-  ): Promise<void> {
+  protected async savePreferredOrder({
+    order,
+    movedId,
+    direction,
+  }: LaneOrderMove): Promise<void> {
     const context = this.state.reviewContext();
     if (!context || !this.canReorder()) return;
     const previous = [
@@ -598,29 +518,7 @@ export class AgentOrchestrationConfigComponent {
           context,
         ),
     });
-    this.refocus(movedId, direction);
-  }
-
-  /**
-   * The moved row changed place (re-ordering the list can move its element, which drops focus) and may have reached an
-   * end, where the button used is now `disabled`: once re-rendered, focus returns to the button used, or to the row's
-   * other one. During the save itself the buttons are only `aria-disabled`, so focus never leaves the popover.
-   */
-  private refocus(id: string, direction: 'up' | 'down'): void {
-    afterNextRender(
-      () => {
-        const other = direction === 'up' ? 'down' : 'up';
-        const host = this.element.nativeElement;
-        [direction, other]
-          .map((which) =>
-            host.querySelector<HTMLButtonElement>(
-              `[data-testid="policy-order-${which}-${id}"]`,
-            ),
-          )
-          .find((button) => button && !button.disabled)
-          ?.focus();
-      },
-      { injector: this.injector },
-    );
+    // A popover closed while the save ran has no list: focus stays where Esc put it.
+    this.orderList()?.settled(movedId, direction);
   }
 }
