@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1175_2690
-status: in_review
+status: done
 type: FEATURE
 title: 'Phase 4: Retire the role subagents, one by one'
 depends_on: []

@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1189_56c4
-status: in_review
+status: done
 type: BUGFIX
 title: "Fix three session-lifecycle defects (D13, D2, D3)"
 depends_on: []
