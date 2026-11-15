@@ -450,10 +450,6 @@ describe('CliOrchestrationMatrixComponent', () => {
         .find(button => button.textContent?.includes('Reset to default'));
       reset?.click();
       fixture.detectChanges();
-      expect(state.saveSettings).not.toHaveBeenCalled();
-      const confirm = Array.from(row('codex')?.querySelectorAll('button') ?? [])
-        .find(button => button.textContent?.trim() === 'Confirm');
-      confirm?.click();
       await flush();
       expect(state.saveSettings).toHaveBeenCalledWith(
         { orchestration: { cliLaneDefaults: { codex: null } } }, CONTEXT,

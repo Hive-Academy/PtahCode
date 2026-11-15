@@ -38,6 +38,7 @@ let nextTitleId = 0;
           <select ptahSelect [size]="layout() === 'wide' ? 'sm' : 'xs'" class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission()"
             [disabled]="disabled() || pending() !== null" (change)="choosePermission($event)">
             <!-- Per-option [selected]: a select [value] bound before its options render falls back to the first option ("plan"). -->
+            @if (effectivePermission() === undefined && permissions().length > 0) { <option value="" disabled [selected]="true">Choose a permission</option> }
             @for (mode of permissions(); track mode) { <option [value]="mode" [selected]="mode === effectivePermission()">{{ mode }}</option> }
           </select>
         </label>
