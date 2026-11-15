@@ -278,7 +278,7 @@ Buttons are projected. The bar does not create the buttons, so the feature keeps
 | --- | --- | --- |
 | Bar | layout | `flex flex-wrap items-center justify-end` |
 | Bar | gap | `--ptah-gap-controls` |
-| Bar | padding top (inline) | `--ptah-gap-group` |
+| Bar | padding top (inline) | `--ptah-gap-group`. None when the bar is the first child of its column (`first:pt-0`), or when `flush` is set because the parent gap already spaces it. `ptah-editable-section` sets `flush`. |
 | Bar (sticky) | padding | `--ptah-surface-pad` |
 | Bar (sticky) | fill, shadow | `--ptah-form-actions-bg`, `--ptah-form-actions-shadow` |
 | Bar (sticky) | top edge | `var(--ptah-border-width) solid var(--ptah-border-color)` |
@@ -320,6 +320,7 @@ Buttons are projected. The bar does not create the buttons, so the feature keeps
 })
 export class PtahFormActionsComponent {
   readonly sticky = input(false, { transform: booleanAttribute });
+  readonly flush = input(false, { transform: booleanAttribute }); // drops inline top padding
   readonly dirty = input(false, { transform: booleanAttribute });
   readonly saving = input(false, { transform: booleanAttribute });
   readonly disabled = input(false, { transform: booleanAttribute });

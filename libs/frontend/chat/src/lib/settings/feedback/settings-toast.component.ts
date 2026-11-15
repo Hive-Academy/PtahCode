@@ -6,6 +6,7 @@ import {
   effect,
   inject,
   input,
+  ViewEncapsulation,
   signal,
   viewChild,
 } from '@angular/core';
@@ -19,6 +20,52 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
 const ANNOUNCE_DELAY_MS = 50;
 
 /**
+ * Drawer-aware placement of the page toast. Global (ViewEncapsulation.None) because it keys on `body:has()` and
+ * reserves space in the drawer body, which is outside this component; every rule is scoped by the
+ * `ptah-settings-toast-*` classes, so nothing else is styled. Beside-mode thresholds: a `max-w-lg` panel (32rem)
+ * needs 32rem + 16rem toast + 3rem gutters = 51rem; any other panel is treated as the default `max-w-2xl`
+ * (42rem) and needs 61rem.
+ */
+export const TOAST_PLACEMENT_STYLES = `
+  body:has(ptah-native-drawer [role='dialog']) .ptah-settings-toast-region {
+    bottom: calc(var(--ptah-space-12) * 2 + var(--ptah-space-4));
+    max-width: min(30rem, calc(100vw - var(--ptah-space-12)));
+  }
+  body:has(ptah-native-drawer [role='dialog']) .ptah-settings-toast-region .ptah-settings-toast-message {
+    max-height: 3lh;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    overscroll-behavior: contain;
+  }
+  @media (width < 51rem) {
+    body:has(.ptah-settings-toast-region) ptah-native-drawer [role='dialog'] [data-testid='native-drawer-body'] {
+      padding-bottom: calc(var(--ptah-space-12) * 3);
+    }
+  }
+  @media (width < 61rem) {
+    body:has(.ptah-settings-toast-region) ptah-native-drawer [role='dialog']:not(.max-w-lg) [data-testid='native-drawer-body'] {
+      padding-bottom: calc(var(--ptah-space-12) * 3);
+    }
+  }
+  @media (width >= 51rem) {
+    body:has(ptah-native-drawer [role='dialog'].max-w-lg) .ptah-settings-toast-region {
+      bottom: var(--ptah-space-6);
+      left: var(--ptah-space-6);
+      right: auto;
+      max-width: min(24rem, calc(100vw - 32rem - var(--ptah-space-12)));
+    }
+  }
+  @media (width >= 61rem) {
+    body:has(ptah-native-drawer [role='dialog']) .ptah-settings-toast-region {
+      bottom: var(--ptah-space-6);
+      left: var(--ptah-space-6);
+      right: auto;
+      max-width: min(24rem, calc(100vw - 42rem - var(--ptah-space-12)));
+    }
+  }
+`;
+
+/**
  * Renders the Settings save toast (prototype `.toast-msg`, bottom-right) from
  * `SettingsSaveFeedbackService`. Undo is disabled while any save is in flight (D3); it stays focusable (aria-disabled).
  *
@@ -28,10 +75,13 @@ const ANNOUNCE_DELAY_MS = 50;
  * {@link ANNOUNCE_DELAY_MS}; dismissing clears them. The visual card carries no role of its own, so a message
  * is announced exactly once per toast instance.
  *
- * While a NativeDrawer is open the toast sits at `bottom-28` (112 px) instead of `bottom-6`, so it clears
- * the drawer's pinned footer (Close, Save, Back: 57 px, 105 px when the setup wizard's footer wraps) and
- * never takes a click meant for it (Batch 49b). The rule is pure CSS (`:has()`), so nothing is observed or
- * polled. The page toast also re-raises above newly opened modal dialogs without moving focus.
+ * Placement while a NativeDrawer is open ({@link TOAST_PLACEMENT_STYLES}, pure CSS `:has()` + media queries, so
+ * nothing is observed or polled): when the window leaves room beside the right-aligned panel, the toast moves to
+ * the bottom-left, over the backdrop, and covers no drawer content. In a narrow window it stays lifted above the
+ * pinned footer (Close, Save, Back: 57 px, 105 px when the setup wizard's footer wraps, Batch 49b) so it never
+ * takes a click meant for it, its message is capped at three lines (it scrolls; the live region still carries the
+ * full text), and the drawer body reserves scroll space under it, so the last section (for example "Danger zone")
+ * can scroll clear of the toast. The page toast also re-raises above newly opened modal dialogs without moving focus.
  *
  * `inline` (Batch 55b CS-1): the same toast in the flow of a panel instead of fixed to the page, for a surface
  * whose focus trap the page toast is outside of (the drawer's Models & Tiers tab), so a keyboard user can reach its
@@ -46,6 +96,8 @@ const ANNOUNCE_DELAY_MS = 50;
   standalone: true,
   imports: [NgTemplateOutlet, LucideAngularModule, SettingsBusyDisabledDirective, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  encapsulation: ViewEncapsulation.None,
+  styles: [TOAST_PLACEMENT_STYLES],
   template: `
     <div
       class="sr-only"
@@ -68,7 +120,7 @@ const ANNOUNCE_DELAY_MS = 50;
         <div
           #region
           popover="manual"
-          class="fixed inset-auto bottom-6 right-6 z-50 m-0 h-auto w-auto max-w-sm overflow-visible border-0 bg-transparent p-0 text-inherit [body:has(ptah-native-drawer_[role=dialog])_&]:bottom-28"
+          class="fixed inset-auto bottom-6 right-6 z-50 m-0 h-auto w-auto max-w-sm overflow-visible border-0 bg-transparent p-0 text-inherit ptah-settings-toast-region"
           data-testid="settings-toast-region"
         >
           <ng-container *ngTemplateOutlet="body; context: { $implicit: toast }" />
@@ -85,7 +137,7 @@ const ANNOUNCE_DELAY_MS = 50;
         [class.border-error/40]="toast.tone === 'alert'"
         [attr.data-testid]="testId('settings-toast')"
       >
-        <span class="min-w-0 flex-1" [attr.data-testid]="testId('settings-toast-message')">{{ toast.message }}</span>
+        <span class="ptah-settings-toast-message min-w-0 flex-1" [attr.data-testid]="testId('settings-toast-message')">{{ toast.message }}</span>
         @if (toast.canUndo) {
           <button
             type="button"

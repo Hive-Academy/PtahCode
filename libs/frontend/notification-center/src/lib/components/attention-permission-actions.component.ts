@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, input, output, signal, viewChild, viewChildren } from '@angular/core';
-import type { AttentionItem } from '../services/attention.types';
+import type { AttentionItem } from '@ptah-extension/core';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
 let permissionActionsInstance = 0;

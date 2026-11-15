@@ -11,6 +11,7 @@ const RAW_SPACING = /\b(gap|p|px|py|m|mx|my|space-[xy])-\d/;
   template: `
     <ptah-form-actions
       [sticky]="sticky()"
+      [flush]="flush()"
       [dirty]="dirty()"
       [saving]="saving()"
       [disabled]="disabled()"
@@ -25,6 +26,7 @@ const RAW_SPACING = /\b(gap|p|px|py|m|mx|my|space-[xy])-\d/;
 })
 class Host {
   readonly sticky = signal(false);
+  readonly flush = signal(false);
   readonly dirty = signal(false);
   readonly saving = signal(false);
   readonly disabled = signal(false);
@@ -111,6 +113,34 @@ describe('PtahFormActionsComponent', () => {
     expect(host.classList.contains('p-[var(--ptah-surface-pad)]')).toBe(true);
     expect(host.classList.contains('[background:var(--ptah-form-actions-bg)]')).toBe(true);
     expect(host.classList.contains('pt-[var(--ptah-gap-group)]')).toBe(false);
+  });
+
+  it('keeps the inline top padding by default and drops it when the bar is the first child', async () => {
+    const { host } = await render();
+    expect(host.classList.contains('pt-[var(--ptah-gap-group)]')).toBe(true);
+    expect(host.classList.contains('first:pt-0')).toBe(true);
+  });
+
+  it('drops the inline top padding when flush is set', async () => {
+    const { fixture, host } = await render();
+    fixture.componentInstance.flush.set(true);
+    fixture.detectChanges();
+    expect(host.classList.contains('pt-[var(--ptah-gap-group)]')).toBe(false);
+    expect(host.classList.contains('first:pt-0')).toBe(false);
+    expect(host.classList.contains('block')).toBe(true);
+    expect(host.classList.contains('[container-type:inline-size]')).toBe(true);
+  });
+
+  it('keeps the sticky look unchanged with or without flush', async () => {
+    const { fixture, host } = await render();
+    fixture.componentInstance.sticky.set(true);
+    fixture.detectChanges();
+    const stickyClasses = Array.from(host.classList).sort();
+    expect(stickyClasses).not.toContain('first:pt-0');
+    expect(stickyClasses).not.toContain('pt-[var(--ptah-gap-group)]');
+    fixture.componentInstance.flush.set(true);
+    fixture.detectChanges();
+    expect(Array.from(host.classList).sort()).toEqual(stickyClasses);
   });
 
   it('uses no raw spacing utility on the rendered pattern', async () => {

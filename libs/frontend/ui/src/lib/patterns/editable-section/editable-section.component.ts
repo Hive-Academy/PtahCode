@@ -190,6 +190,7 @@ export class PtahEditTemplateDirective {
             [saving]="saving()"
             [disabled]="disabled()"
             [sticky]="stickyActions()"
+            flush
           >
             <ng-container ngProjectAs="[start]"><ng-content select="[actions-start]" /></ng-container>
             <button

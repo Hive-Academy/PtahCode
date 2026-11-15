@@ -123,6 +123,10 @@ jobs:
       # it took 14-21 min, against 13 s on its own.
       - run: node_modules/.bin/nx affected -t build --exclude=ptah-docs --parallel=3
 
+      # Lint affected projects to catch boundary violations and style issues.
+      - name: Lint affected projects
+        run: node_modules/.bin/nx affected -t lint --parallel=2
+
       # Electron runtime-dependency gate: every external import in the main
       # bundle must be declared in apps/ptah-electron/package.json, or the
       # packaged app crashes with ERR_MODULE_NOT_FOUND. Also runs in pre-push;

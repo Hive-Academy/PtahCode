@@ -286,7 +286,7 @@ describe('createAcpSessionHandle — first turn', () => {
       options: {
         agentId: 'a-1',
         mcpPort: 51820,
-        attachmentProbe: { get: () => undefined, waitFor },
+        attachmentProbe: { get: () => undefined, getAttempt: () => undefined, waitFor },
       },
     });
 
@@ -317,6 +317,7 @@ describe('createAcpSessionHandle — first turn', () => {
         mcpPort: 51820,
         attachmentProbe: {
           get: () => undefined,
+          getAttempt: () => undefined,
           waitFor: async () => undefined,
         },
       },
@@ -341,6 +342,7 @@ describe('createAcpSessionHandle — first turn', () => {
         mcpPort: 51820,
         attachmentProbe: {
           get: () => undefined,
+          getAttempt: () => undefined,
           waitFor: (_id, _port, _timeout, signal) => {
             waiterSignal = signal;
             return new Promise((resolve) =>

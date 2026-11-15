@@ -82,6 +82,15 @@ const ATTENTION_CLASS = 'border-l-4 border-l-state-err pl-[var(--ptah-gap-headin
 const LOCK_REASON_ID = 'account-detail-lock-reason';
 
 /**
+ * The remove dialog body. It states what `provider:removeAccount` does on the host (ProviderAccountStore.remove):
+ * the profile row is kept as a tombstone, every Chat and Lanes selection of it in every workspace is cleared (a
+ * cleared selection uses the existing Claude login), run leases are not checked (running runs are not stopped), and
+ * no file is touched (the Claude sign-in data of the account is not deleted).
+ */
+const REMOVE_CONSEQUENCE =
+  'Ptah forgets this account. Chat and Lanes that use it, in every workspace, go back to the Existing Claude login. Runs that are running now are not stopped. The Claude sign-in data of this account stays on this computer.';
+
+/**
  * Account detail, one flat panel (TASK_2026_719 plan P6 component 7, design-spec-p6 "Detail"), composed from the
  * pattern layer (TASK_2026_1177_9109 pattern-spec 6.1/6.2): `ptah-form-section` "Sign-in" (commands through
  * `ptah-form-actions`), `ptah-editable-section` "Details" (facts in view mode, the Name field in edit mode) and
@@ -259,7 +268,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         }
         <ptah-description-list view ariaLabel="Account details" [items]="facts()" data-testid="account-detail-facts" />
         <ng-template ptahEditTemplate>
-          <ptah-field label="Name">
+          <ptah-field label="Name" appearance="stacked">
             <input
               ptahInput
               id="account-detail-name"
@@ -300,6 +309,7 @@ const LOCK_REASON_ID = 'account-detail-lock-reason';
         (closed)="cancelRemove()"
       >
         <h3 modal-header id="account-detail-remove-title" class="text-sm font-bold text-base-content">Remove {{ account().label }}?</h3>
+        <p id="account-detail-remove-body" class="mt-[var(--ptah-gap-heading)] text-sm text-base-content" data-testid="account-detail-remove-body">{{ removeConsequence }}</p>
         <div modal-footer class="mt-[var(--ptah-gap-group)] flex justify-end gap-[var(--ptah-gap-controls)]">
           <button #removeCancel type="button" ptahButton (click)="cancelRemove()" data-testid="account-detail-remove-cancel">Cancel</button>
           <button type="button" ptahButton variant="danger" [busy]="busyNow()" [disabled]="pending()" (click)="confirmRemove()" data-testid="account-detail-remove-confirm">Remove</button>
@@ -339,6 +349,7 @@ export class AccountDetailViewComponent {
   protected readonly focusRing = FOCUS;
   protected readonly maxLength = PROVIDER_ACCOUNT_LABEL_MAX_LENGTH;
   protected readonly lockReasonId = LOCK_REASON_ID;
+  protected readonly removeConsequence = REMOVE_CONSEQUENCE;
   protected readonly AlertTriangleIcon = AlertTriangle;
   protected readonly CopyIcon = Copy;
   protected readonly LockIcon = Lock;
