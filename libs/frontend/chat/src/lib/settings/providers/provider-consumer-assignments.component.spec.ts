@@ -366,6 +366,26 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     expect(mockState.refreshEnhancement).toHaveBeenCalled();
   });
 
+  it('connects the floating time-limit label to its input and resolves every label', () => {
+    button(fixture, 'timeout-edit-button')?.click();
+    fixture.detectChanges();
+
+    const control = inputEl(fixture, 'timeout-input');
+    expect(control).not.toBeNull();
+    const field = control?.closest('ptah-field');
+    expect(field).not.toBeNull();
+    const label = field?.querySelector('label');
+    expect(label).not.toBeNull();
+    expect(label?.htmlFor).toBe(control?.id);
+    expect(control?.id).toBe('enhance-timeout-input');
+    expect(field?.querySelector('[data-ptah-field]')?.getAttribute('data-size')).toBe('sm');
+
+    const linkedLabels = fixture.nativeElement.querySelectorAll('label[for]') as NodeListOf<HTMLLabelElement>;
+    for (const linkedLabel of linkedLabels) {
+      expect(fixture.nativeElement.querySelector(`#${linkedLabel.htmlFor}`)).not.toBeNull();
+    }
+  });
+
   it('saves the timeout through the enhancement patch and supports Undo', async () => {
     const saved = jest.fn();
     component.timeoutSaved.subscribe(saved);
