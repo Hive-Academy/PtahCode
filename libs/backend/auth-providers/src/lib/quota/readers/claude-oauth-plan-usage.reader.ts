@@ -19,14 +19,26 @@ const retryAfterMs = (value: string | null, now: number): number => {
     : Date.parse(value) - now;
   return Number.isFinite(duration) ? Math.max(1_000, Math.min(MAX_RETRY_AFTER_MS, duration)) : 60_000;
 };
+const Identity = z.object({
+  accountUuid: z.string().min(1).optional(),
+  organizationUuid: z.string().min(1).optional(),
+  account_uuid: z.string().min(1).optional(),
+  organization_uuid: z.string().min(1).optional(),
+});
+type Identity = z.infer<typeof Identity>;
+const identityMismatch = (source: Identity, account: Identity): boolean =>
+  (source.accountUuid !== undefined && source.accountUuid !== account.accountUuid) ||
+  (source.account_uuid !== undefined && source.account_uuid !== account.account_uuid) ||
+  (source.organizationUuid !== undefined && source.organizationUuid !== account.organizationUuid) ||
+  (source.organization_uuid !== undefined && source.organization_uuid !== account.organization_uuid);
 const Credentials = z.object({
-  claudeAiOauth: z.object({
+  claudeAiOauth: Identity.extend({
     accessToken: z.string().min(1),
     expiresAt: z.number().finite(),
   }).optional(),
 });
 const Config = z.object({
-  oauthAccount: z.object({
+  oauthAccount: Identity.extend({
     emailAddress: z.string().min(1),
     organizationName: z.string().optional(),
   }).optional(),
@@ -44,7 +56,7 @@ const Limit = z.object({
     display_name: z.string().optional(),
   }).optional() }).nullable().optional(),
 });
-const ResponseBody = z.object({
+const ResponseBody = Identity.extend({
   five_hour: z.unknown().optional(),
   seven_day: z.unknown().optional(),
   seven_day_opus: z.unknown().optional(),
@@ -54,7 +66,7 @@ const ResponseBody = z.object({
 });
 
 const unavailable = (reason: NonNullable<PlanUsageReading['statusReason']>, status: PlanUsageReading['status'] = 'service-unavailable'): PlanUsageReading => ({
-  status, statusReason: reason, windowSetEstablished: false, windows: [],
+  status, statusReason: reason, windowSetEstablished: false, windows: [], sourceInvalid: reason === 'account-unverified',
 });
 
 /** Dependencies are injectable so tests never touch a real credential file or endpoint. */
@@ -70,6 +82,8 @@ export function createClaudeOauthPlanUsageReader(
     if (target.claudeRoute?.kind === 'named' || target.ownerRef.identityKind !== 'account')
       return unavailable('account-unverified', 'no-usage-source');
     let token: string;
+    let credentialIdentity: Identity;
+    let metadataIdentity: Identity;
     const configDir = env()['CLAUDE_CONFIG_DIR']?.trim();
     const credentialsPath = join(configDir || join(home(), '.claude'), '.credentials.json');
     const accountPath = join(configDir || home(), '.claude.json');
@@ -80,8 +94,7 @@ export function createClaudeOauthPlanUsageReader(
       if (!oauth?.accessToken) return unavailable('no-oauth', 'no-usage-source');
       if (oauth.expiresAt <= now()) return unavailable('no-oauth', 'no-usage-source');
       token = oauth.accessToken;
-      // The endpoint has no account identity. Require the local Claude account
-      // metadata to reconstruct exactly the same owner key as accountInfo().
+      credentialIdentity = oauth;
     } catch (error: unknown) {
       const reason = error instanceof Error ? error.name : 'invalid';
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')
@@ -97,6 +110,8 @@ export function createClaudeOauthPlanUsageReader(
         email: account.emailAddress,
         organization: account.organizationName ?? '',
       }) !== target.ownerRef.key) return unavailable('account-unverified');
+      metadataIdentity = account;
+      if (identityMismatch(credentialIdentity, metadataIdentity)) return unavailable('account-unverified');
     } catch (error: unknown) {
       logger.warn('[PlanUsage] Claude OAuth account metadata unavailable', { reason: error instanceof Error ? error.name : 'invalid' });
       return unavailable('account-unverified');
@@ -123,8 +138,9 @@ export function createClaudeOauthPlanUsageReader(
       try { body = await response.json(); } catch { return unavailable('cli-parse-failed'); }
       const parsed = ResponseBody.safeParse(body);
       if (!parsed.success) return unavailable('cli-parse-failed');
+      if (identityMismatch(parsed.data, metadataIdentity)) return unavailable('account-unverified');
       const limits: Record<string, unknown> = {};
-      let droppedWindow = false;
+      let droppedWindow = parsed.data.limits !== undefined && !Array.isArray(parsed.data.limits);
       for (const field of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_oauth_apps'] as const) {
         const value = parsed.data[field];
         const window = Window.safeParse(value);
@@ -136,9 +152,10 @@ export function createClaudeOauthPlanUsageReader(
         const entry = Limit.safeParse(raw);
         if (!entry.success) { droppedWindow = true; continue; }
         if (entry.data.kind !== 'weekly_scoped') continue;
-        const name = entry.data.scope?.model?.display_name ?? entry.data.scope?.model?.id;
+        const name = entry.data.scope?.model?.display_name?.trim() || entry.data.scope?.model?.id?.trim();
         if (name && entry.data.percent !== undefined)
           scoped.push({ display_name: name, utilization: Math.min(100, entry.data.percent), ...(entry.data.resets_at && { resets_at: entry.data.resets_at }) });
+        else droppedWindow = true;
       }
       limits['model_scoped'] = scoped;
       if (Object.keys(limits).length === 1 && scoped.length === 0) return unavailable('cli-parse-failed');

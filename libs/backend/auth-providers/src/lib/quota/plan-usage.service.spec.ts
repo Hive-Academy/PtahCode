@@ -195,6 +195,38 @@ describe('PlanUsageService', () => {
     await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
     expect(h.oauthReader).toHaveBeenCalledTimes(2);
   });
+  it.each(['result', 'throw'])('does not cool down an OAuth read cancelled before its %s', async outcome => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    let finish: ((reading: PlanUsageReading) => void) | undefined;
+    let fail: ((error: Error) => void) | undefined;
+    h.oauthReader.mockImplementationOnce(() => new Promise<PlanUsageReading>((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    }));
+    const controller = new AbortController();
+    const pending = h.service.getOwnerSnapshot(claudeTarget(), { signal: controller.signal });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    if (outcome === 'result') finish?.({ status: 'service-unavailable', windowSetEstablished: false, windows: [] });
+    else fail?.(new Error('cancelled'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await h.service.getOwnerSnapshot(claudeTarget());
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+  });
+  it('does not cache an OAuth account identity mismatch', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    h.oauthReader.mockResolvedValue({ status: 'service-unavailable', statusReason: 'account-unverified', windowSetEstablished: false, windows: [], sourceInvalid: true });
+    const first = await h.service.getOwnerSnapshot(claudeTarget());
+    const second = await h.service.getOwnerSnapshot(claudeTarget());
+    expect(first).toMatchObject({ statusReason: 'account-unverified', windows: [] });
+    // The cooldown skips OAuth; the mismatched reading was not cached.
+    expect(second).toMatchObject({ unavailableReason: 'no-open-session', windows: [] });
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+  });
   it('uses OAuth windows after one live no-session read and preserves live data when OAuth fails', async () => {
     const h = harness();
     h.readPlanUsage.mockResolvedValue(null);

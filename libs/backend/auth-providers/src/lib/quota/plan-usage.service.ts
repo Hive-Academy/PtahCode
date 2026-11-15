@@ -201,6 +201,12 @@ export class PlanUsageService {
         if (failure && this.now() < failure.until && (failure.rateLimited || !request.refresh)) return live;
         try {
           const oauth = await claudeOauthReader(request);
+          if (request.signal?.aborted) return live;
+          if (oauth.sourceInvalid) {
+            // An unverified owner is not cached; the cooldown stops a re-read on each snapshot.
+            this.recordClaudeOauthFailure(ownerKey, oauth.retryAfterMs);
+            return oauth;
+          }
           if (oauth.status === 'available' && oauth.windows.length > 0) {
             this.claudeOauthFailures.delete(ownerKey);
             return oauth;
@@ -208,6 +214,7 @@ export class PlanUsageService {
           this.recordClaudeOauthFailure(ownerKey, oauth.retryAfterMs);
           return live;
         } catch (error: unknown) {
+          if (request.signal?.aborted) return live;
           this.recordClaudeOauthFailure(ownerKey);
           logger.warn('[PlanUsage] Claude OAuth source failed', { reason: error instanceof Error ? error.name : 'invalid' });
           return live;

@@ -56,6 +56,29 @@ describe('Claude OAuth plan usage', () => {
     expect(result.windows.map(w => w.key)).toEqual(['weekly']);
     expect(result.windowSetEstablished).toBe(false);
   });
+  it.each([
+    { limits: 'invalid' },
+    { limits: [{ kind: 'weekly_scoped', percent: 20 }] },
+    { limits: [{ kind: 'weekly_scoped', scope: { model: { id: 'fixture-model' } } }] },
+  ])('keeps valid windows but does not establish an incomplete limit set', async extra => {
+    const { reader } = harness(credentials, { seven_day: full.seven_day, ...extra });
+    const result = await reader({ target, refresh: true });
+    expect(result.windows.map(w => w.key)).toEqual(['weekly']);
+    expect(result.windowSetEstablished).toBe(false);
+  });
+  it('rejects a credential account that conflicts with metadata before HTTP', async () => {
+    const credentialFile = JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-token', expiresAt: NOW + 60_000, accountUuid: 'account-other' } });
+    const accountFile = JSON.stringify({ oauthAccount: { emailAddress: 'person@example.test', organizationName: 'Example', accountUuid: 'account-owner' } });
+    const h = harness(credentialFile, full, accountFile);
+    const result = await h.reader({ target, refresh: true });
+    expect(result).toMatchObject({ statusReason: 'account-unverified', windows: [], sourceInvalid: true });
+    expect(h.fetcher).not.toHaveBeenCalled();
+  });
+  it('rejects a response organization that conflicts with metadata', async () => {
+    const accountFile = JSON.stringify({ oauthAccount: { emailAddress: 'person@example.test', organizationName: 'Example', organizationUuid: 'org-owner' } });
+    const result = await harness(credentials, { ...full, organizationUuid: 'org-other' }, accountFile).reader({ target, refresh: true });
+    expect(result).toMatchObject({ statusReason: 'account-unverified', windows: [], sourceInvalid: true });
+  });
   it('does not call HTTP for absent, expired, or mismatched credentials', async () => {
     for (const [credentialFile, accountFile] of [
       ['{}', config],
