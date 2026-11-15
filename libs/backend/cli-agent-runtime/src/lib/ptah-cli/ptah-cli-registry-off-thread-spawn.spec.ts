@@ -250,7 +250,7 @@ describe('PtahCliRegistry — off-thread spawn seam (TASK_2026_367 B8)', () => {
   it('passes onStderr hook that classifies benign stderr to logger.debug and never calls logger.error', async () => {
     const { registry, logger, spawner, getCapturedOptions } =
       buildHarness(BASE_CONFIG);
-    await registry.spawnAgent(BASE_CONFIG.id, 'test prompt');
+    await registry.spawnAgent(BASE_CONFIG.id, 'test prompt', { permission: 'yolo' });
 
     const options = getCapturedOptions();
     const spawnClaudeCodeProcess = options?.spawnClaudeCodeProcess;

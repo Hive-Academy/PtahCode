@@ -6,6 +6,8 @@ interface ManifestFixtureOptions {
   readonly continuation?: boolean;
   readonly resume?: boolean;
   readonly roleChannel?: AgentRoleChannel;
+  /** Defaults to a supported plan mode so the fail-closed lane default resolves. */
+  readonly permissionModes?: CliAdapterManifest['permissionModes'];
 }
 
 /** Complete adapter manifest for tests that exercise a specific messaging capability. */
@@ -21,7 +23,9 @@ export function manifestFixture(options: ManifestFixtureOptions = {}): CliAdapte
       resume: support(options.resume ?? true),
     },
     roleChannel: options.roleChannel ?? 'task-prompt',
-    permissionModes: {},
+    permissionModes: options.permissionModes ?? {
+      plan: { state: 'supported', nativeMode: 'plan', networkModes: ['allow'] },
+    },
     networkModes: {
       allow: { state: 'supported' },
       deny: { state: 'unsupported', reason: 'Unavailable in this fixture.' },
