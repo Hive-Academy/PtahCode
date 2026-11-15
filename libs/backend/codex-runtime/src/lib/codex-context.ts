@@ -885,6 +885,8 @@ class RuntimeContext implements CodexContext {
               kind: native.lastActivityKind,
             } });
             this.terminalTurns.add(event.turnId);
+            this.childTools.delete(event.threadId);
+            this.childTurns.delete(event.threadId);
             return;
           }
           this.emit({ ...event, parentToolUseId });
