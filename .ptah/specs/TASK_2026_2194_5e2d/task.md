@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2194_5e2d
-status: in_progress
+status: in_review
 type: BUGFIX
 title: "Enable ptah-core plugin by default for new workspaces"
 depends_on: []
