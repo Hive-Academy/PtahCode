@@ -276,6 +276,57 @@ describe('PlanUsageService', () => {
       });
     });
 
+    it('clears denied Codex owner evidence on a newer allowed reading', async () => {
+      const h = harness();
+      h.getAccountUsage.mockResolvedValue({
+        status: 'available', providerId: 'openai-codex', fetchedAt: T0,
+        ordinaryUsageAllowed: false,
+        quota: { primary: { usedPercent: 7, resetsAt: RESET_SECONDS } },
+      });
+      const snapshot = await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
+      expect(snapshot.windows[0].exhaustion).toBeUndefined();
+      expect(snapshot.ownerEvidence).toEqual([{ observedAt: T0, source: 'provider-api', resetsAt: RESET_SECONDS * 1000 }]);
+      h.getAccountUsage.mockResolvedValue({
+        status: 'available', providerId: 'openai-codex', fetchedAt: T0 + 1,
+        ordinaryUsageAllowed: true,
+        quota: { primary: { usedPercent: 7, resetsAt: RESET_SECONDS } },
+      });
+      const allowed = await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
+      expect(allowed.ownerEvidence).toEqual([]);
+    });
+
+    it('clears denied Codex owner evidence when credits become usable', async () => {
+      const h = harness();
+      h.getAccountUsage.mockResolvedValue({
+        status: 'available', providerId: 'openai-codex', fetchedAt: T0,
+        ordinaryUsageAllowed: false,
+        quota: { primary: { usedPercent: 7, resetsAt: RESET_SECONDS } },
+      });
+      const denied = await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
+      expect(denied.ownerEvidence).toEqual([{ observedAt: T0, source: 'provider-api', resetsAt: RESET_SECONDS * 1000 }]);
+      h.getAccountUsage.mockResolvedValue({
+        status: 'available', providerId: 'openai-codex', fetchedAt: T0 + 1,
+        ordinaryUsageAllowed: false,
+        buckets: [{ id: 'codex', label: 'Codex', primary: { usedPercent: 7 },
+          credits: { hasCredits: true, unlimited: false, balance: '5' } }],
+      });
+      const credited = await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
+      expect(credited.ownerEvidence).toEqual([]);
+    });
+
+    it('keeps non-provider owner evidence when the Codex gate is open', async () => {
+      const h = harness();
+      const hit = { observedAt: T0 - 1, source: 'error-derived' as const };
+      h.ledger.recordOwnerEvidence(CODEX_A, hit);
+      h.getAccountUsage.mockResolvedValue({
+        status: 'available', providerId: 'openai-codex', fetchedAt: T0,
+        ordinaryUsageAllowed: true,
+        quota: { primary: { usedPercent: 7 } },
+      });
+      const snapshot = await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
+      expect(snapshot.ownerEvidence).toEqual([hit]);
+    });
+
     // OpenCode reads local usage through its CLI (PR #673); stub that reader
     // so these tests never spawn a real `opencode` process.
     const stubOpenCodeReader = (

@@ -334,6 +334,28 @@ describe('CodexAccountUsageClient', () => {
     });
   });
 
+  it.each([false, true, undefined])('validates ordinary usage allowed %s', async (allowed) => {
+    configure = (child) => {
+      child.response = {
+        ...(allowed !== undefined && { ordinaryUsageAllowed: allowed }),
+        rateLimits: {
+          primary: { usedPercent: 7 },
+        },
+      };
+    };
+    const result = await client.read(homeA);
+    expect(result.ordinaryUsageAllowed).toBe(allowed);
+  });
+
+  it('rejects a malformed ordinary usage gate', async () => {
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 7 } }, ordinaryUsageAllowed: 'false' };
+    };
+    const result = await client.read(homeA);
+    expect(result.status).toBe('service-unavailable');
+    expect(result.ordinaryUsageAllowed).toBeUndefined();
+  });
+
   it('retains ordered buckets and safe allowance fields without native identifiers', async () => {
     configure = (child) => {
       child.response = {
@@ -431,11 +453,24 @@ describe('CodexAccountUsageClient', () => {
     }, 1000);
     expect(result.buckets?.[0]).toEqual({
       id: 'codex', label: 'Codex', primary: { usedPercent: 25 },
-      spendControlReached: true,
+      spendControlReached: true, creditsUnparsed: true,
     });
     expect(result.quota?.primary).toEqual({ usedPercent: 25 });
     expect(result.buckets?.[1]?.primary).toBeUndefined();
     expect(JSON.stringify(result)).not.toMatch(/secret|example.com|remainingPercent|hasCredits/);
+  });
+
+  it.each([
+    [null, undefined],
+    [undefined, undefined],
+    [{ balance: '5', hasCredits: true, unlimited: false }, undefined],
+    [{ hasCredits: false, unlimited: true }, undefined],
+    [{ balance: '5', hasCredits: 'bad', unlimited: false }, true],
+    [{ balance: 'bad', hasCredits: true, unlimited: false }, true],
+    [{ balance: '-1', hasCredits: true, unlimited: false }, true],
+  ])('distinguishes valid, absent and malformed credits %#', (credits, unparsed) => {
+    const parsed = usageResult({ rateLimits: { primary: { usedPercent: 7 }, credits } }, 1000);
+    expect(parsed.buckets?.[0].creditsUnparsed).toBe(unparsed);
   });
 
   it('handles the observed rate-limit notification without inventing response fields', async () => {

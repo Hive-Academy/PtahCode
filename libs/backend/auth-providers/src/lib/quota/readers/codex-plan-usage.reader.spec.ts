@@ -332,6 +332,75 @@ describe('Codex plan-usage reader', () => {
   });
 
   describe('rateLimitReachedType as window evidence (Component 7)', () => {
+    it.each([true, undefined])('keeps ordinary usage allowed %s unchanged', (allowed) => {
+      const reading = mapCodexAccountUsage(result({ ordinaryUsageAllowed: allowed, quota: {
+        primary: { usedPercent: 7, windowDurationMins: 300 },
+        secondary: { usedPercent: 7, windowDurationMins: 10_080 },
+        rateLimitReachedType: 'rate_limit_reached',
+      } }), NOW);
+      expect(reading.windows.every((window) => window.exhaustion === undefined)).toBe(true);
+      expect(reading.providerOwnerEvidence).toBeUndefined();
+    });
+
+    it('exhausts a window at 100% without owner evidence', () => {
+      const reading = mapCodexAccountUsage(result({ ordinaryUsageAllowed: false, quota: {
+        primary: { usedPercent: 7, windowDurationMins: 300 },
+        secondary: { usedPercent: 100, windowDurationMins: 10_080 },
+        rateLimitReachedType: 'rate_limit_reached',
+      } }), NOW);
+      expect(reading.windows[0].exhaustion).toBeUndefined();
+      expect(reading.windows[1]).toMatchObject({
+        reachedType: 'rate_limit_reached', usedSource: 'provider-api',
+        exhaustion: { observedAt: FETCHED, source: 'provider-api' },
+      });
+      expect(reading.providerOwnerEvidence).toBeUndefined();
+    });
+
+    it('provides bounded owner evidence for a denied gate without an exhausted window', () => {
+      const reading = mapCodexAccountUsage(result({ ordinaryUsageAllowed: false, quota: {
+        primary: { usedPercent: 7, windowDurationMins: 300, resetsAt: Math.floor((FETCHED + 3_600_000) / 1000) },
+        rateLimitReachedType: 'workspace_member_usage_limit_reached',
+      } }), NOW);
+      expect(reading.windows[0].exhaustion).toBeUndefined();
+      expect(reading.providerOwnerEvidence).toEqual({ observedAt: FETCHED, source: 'provider-api', resetsAt: FETCHED + 3_600_000 });
+    });
+
+    it.each([{ balance: '2', hasCredits: true, unlimited: false }, { balance: 'unknown', hasCredits: true, unlimited: false }, { balance: '', hasCredits: true, unlimited: false }, { hasCredits: false, unlimited: true }])('does not block usable or uncertain credits %#', (credits) => {
+      const reading = mapCodexAccountUsage(result({ ordinaryUsageAllowed: false, buckets: [{
+        id: 'codex', label: 'Codex', primary: { usedPercent: 7 },
+        rateLimitReachedType: 'workspace_member_usage_limit_reached', credits,
+      }] }), NOW);
+      expect(reading.providerOwnerEvidence).toBeUndefined();
+      expect(reading.providerOwnerClear).toBe(true);
+    });
+
+    it('keeps malformed credits uncertain', () => {
+      const reading = mapCodexAccountUsage(result({ ordinaryUsageAllowed: false, buckets: [{
+        id: 'codex', label: 'Codex', primary: { usedPercent: 7 }, creditsUnparsed: true,
+      }] }), NOW);
+      expect(reading.providerOwnerEvidence).toBeUndefined();
+      expect(reading.providerOwnerClear).toBe(true);
+    });
+
+    it.each([
+      { hasCredits: true, unlimited: false, balance: '0' },
+      { hasCredits: false, unlimited: false },
+    ])('records owner evidence for depleted credits %#', (credits) => {
+      const reading = mapCodexAccountUsage(result({ ordinaryUsageAllowed: false, buckets: [{
+        id: 'codex', label: 'Codex', primary: { usedPercent: 7 }, credits,
+      }] }), NOW);
+      expect(reading.providerOwnerEvidence).toEqual({ observedAt: FETCHED, source: 'provider-api' });
+      expect(reading.providerOwnerClear).toBeUndefined();
+    });
+
+    it('records evidence when the reached type says credits are depleted', () => {
+      const reading = mapCodexAccountUsage(result({ ordinaryUsageAllowed: false, buckets: [{
+        id: 'codex', label: 'Codex', primary: { usedPercent: 7 },
+        rateLimitReachedType: 'workspace_member_credits_depleted',
+        credits: { balance: '2', hasCredits: true, unlimited: false },
+      }] }), NOW);
+      expect(reading.providerOwnerEvidence).toEqual({ observedAt: FETCHED, source: 'provider-api' });
+    });
     const limited = (
       primary: number,
       secondary: number,
