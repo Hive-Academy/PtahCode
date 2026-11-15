@@ -46,15 +46,12 @@ export class AgentSpawnDedupe<T extends { agentId: string }> {
     // `force` always starts a new lane, also when the call has an explicit key.
     if (args.force) return { promise: start(), replay: false };
     const workingDirectory = path.resolve(root, args.workingDirectory ?? root);
-    const input = args.idempotencyKey
-      ? { scope, idempotencyKey: args.idempotencyKey }
-      : {
-          scope,
-          ...args,
-          workingDirectory,
-          force: undefined,
-          idempotencyKey: undefined,
-        };
+    const input = {
+      scope,
+      ...args,
+      workingDirectory,
+      force: undefined,
+    };
     const key = createHash('sha256')
       .update(JSON.stringify(canonical(input)))
       .digest('hex');
@@ -71,11 +68,12 @@ export class AgentSpawnDedupe<T extends { agentId: string }> {
     if (existing) {
       if (!existing.settled) return { promise: existing.promise, replay: true };
       if (isStillValid) {
-        // degradation-audit: reported - a validity check that rejects counts as
-        // "not valid": the entry is dropped and this call starts a fresh spawn.
         existing.validation ??= existing.promise
           .then(isStillValid)
-          .catch(() => false);
+          .catch(() => {
+            // degradation-audit: optional-capability - failed validity check leaves lane state unknown; replay conservatively.
+            return true;
+          });
         const valid = await existing.validation;
         existing.validation = undefined;
         if (

@@ -31,6 +31,7 @@
  */
 
 import { z } from 'zod';
+import type { EvaluatedSpawnGate } from '../mcp-core/agent-spawn-limit-gate';
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { CliDetectionResult } from '@ptah-extension/shared';
@@ -79,6 +80,8 @@ import {
 } from './bounded-structured-content';
 import { agentToolBudgetName } from './tool-builders';
 import { AgentSpawnArgsSchema } from '../mcp-core/agent-spawn-args.schema';
+import { AgentSpawnDedupe } from '../mcp-core/agent-spawn-dedupe';
+import { isSpawnReplayValid } from '../mcp-core/agent-spawn-replay-status';
 import {
   AgentWaitArgsSchema,
   RunCheckArgsSchema,
@@ -203,7 +206,16 @@ function errorMessage(err: unknown): string {
  * wrapper tools. Returns `null` when the tool name is not handled by this
  * dispatcher so the caller can try other dispatchers (e.g. `session_submit`).
  */
+class StdioSpawnGateRefusal extends Error {
+  constructor(readonly refusal: NonNullable<EvaluatedSpawnGate['refusal']>) {
+    super(refusal.text);
+  }
+}
+
 export class AgentToolDispatcher {
+  private readonly spawnDedupe = new AgentSpawnDedupe<
+    Awaited<ReturnType<PtahAPI['agent']['spawn']>>
+  >();
   constructor(
     private readonly ptahAPI: PtahAPI,
     private readonly logger: Logger,
@@ -449,52 +461,78 @@ export class AgentToolDispatcher {
     // A named lane is checked before the spawn (bounded by SPAWN_GATE_WAIT_MS);
     // an auto-detected one bounds the lookup after `agent.spawn` settled.
     const target = spawnRequestTarget(p);
-    const gate = await evaluateSpawnLimitGate(target, p.force, (namedTarget) =>
-      this.lookupAgentLimits(undefined, { target: namedTarget, model: p.model }),
-    );
-    if (gate.refusal) {
-      const { verdict } = gate.refusal;
-      this.logger.info('[McpStdio] agent_spawn refused at limit', {
-        cli: verdict.limit.row.cli,
-        ptahCliId: verdict.limit.row.ptahCliId,
-        reason: verdict.block.kind,
-      });
-      return toolError(request, gate.refusal.text, 'mcp_tool_failed', {
-        tool: 'agent_spawn',
-        state: 'lane_at_limit',
-        lane: target,
-        reason: verdict.block.kind,
-        ...(verdict.block.resetsAt !== undefined
-          ? { resetsAt: new Date(verdict.block.resetsAt).toISOString() }
-          : {}),
-      });
-    }
-    const { forced } = gate;
+    let gate: Awaited<ReturnType<typeof evaluateSpawnLimitGate>> | undefined;
     try {
-      const result = await this.ptahAPI.agent.spawn({
-        task: p.task,
-        cli: p.cli,
-        ptahCliId: p.ptahCliId,
-        workingDirectory: p.workingDirectory,
-        timeout: p.timeout,
-        files: p.files,
-        taskFolder: p.taskFolder,
-        deliverables: p.deliverables,
-        model: p.model,
-        modelTier: p.modelTier,
-        resumeSessionId: p.resume_session_id,
-        parentSessionId: callerSessionId,
-        role: p.role,
-        effort: p.effort,
-        taskKind: p.taskKind,
-        routingSource: p.routingSource,
-        // Already refused by the schema unless omitted or ambient on a
-        // `claude` lane (`agentSpawnAccountRefusal`), so forwarding admits
-        // nothing.
-        accountSelection: p.accountSelection,
-        permission: p.permission,
-        network: p.network,
-      });
+      const root = this.spoolRoot();
+      const scope = JSON.stringify([
+        callerSessionId ?? root,
+        this.callerAgentId?.trim() || null,
+      ]);
+      const deduped = await this.spawnDedupe.run(
+        scope,
+        root,
+        p,
+        async () => {
+          gate = await evaluateSpawnLimitGate(target, p.force, (namedTarget) =>
+            this.lookupAgentLimits(undefined, {
+              target: namedTarget,
+              model: p.model,
+            }),
+          );
+          if (gate.refusal) throw new StdioSpawnGateRefusal(gate.refusal);
+          return this.ptahAPI.agent.spawn({
+            task: p.task,
+            cli: p.cli,
+            ptahCliId: p.ptahCliId,
+            workingDirectory: p.workingDirectory,
+            timeout: p.timeout,
+            files: p.files,
+            taskFolder: p.taskFolder,
+            deliverables: p.deliverables,
+            model: p.model,
+            modelTier: p.modelTier,
+            resumeSessionId: p.resume_session_id,
+            parentSessionId: callerSessionId,
+            role: p.role,
+            effort: p.effort,
+            taskKind: p.taskKind,
+            routingSource: p.routingSource,
+            accountSelection: p.accountSelection,
+            permission: p.permission,
+            network: p.network,
+          });
+        },
+        (spawned) =>
+          isSpawnReplayValid(
+            spawned.agentId,
+            (id) => this.ptahAPI.agent.status(id),
+            (error) =>
+              this.logger.warn(
+                '[McpStdio] agent spawn replay status unavailable',
+                {
+                  agentId: spawned.agentId,
+                  errorName: error instanceof Error ? error.name : 'unknown',
+                },
+              ),
+          ),
+      );
+      const result = await deduped.promise;
+      if (deduped.replay) {
+        return this.toolSuccess(
+          request,
+          'agent_spawn',
+          `Replay of earlier spawn: ${result.agentId}\n` +
+            'An identical ptah_agent_spawn call started this lane less than 120 s ago, so no second lane was started. ' +
+            'Use ptah_agent_status / ptah_agent_read with this agent ID. ' +
+            'To start another identical lane on purpose, pass force: true or a distinct idempotencyKey.' +
+            (callerSessionId
+              ? ''
+              : '\nNo parent session: completion signals and reports will not be pushed. Use agent_wait / agent_status / agent_read.'),
+          { agentId: result.agentId },
+        );
+      }
+      if (!gate) throw new Error('Spawn gate unavailable');
+      const { forced } = gate;
       if (!callerSessionId) {
         this.logger.warn('[MCP] Lane spawned without parent session', {
           transport: 'stdio',
@@ -534,14 +572,40 @@ export class AgentToolDispatcher {
         },
       );
     } catch (err: unknown) {
+      if (err instanceof StdioSpawnGateRefusal) {
+        const { verdict } = err.refusal;
+        this.logger.info('[McpStdio] agent_spawn refused at limit', {
+          cli: verdict.limit.row.cli,
+          ptahCliId: verdict.limit.row.ptahCliId,
+          reason: verdict.block.kind,
+        });
+        return toolError(request, err.refusal.text, 'mcp_tool_failed', {
+          tool: 'agent_spawn',
+          state: 'lane_at_limit',
+          lane: target,
+          reason: verdict.block.kind,
+          ...(verdict.block.resetsAt !== undefined
+            ? { resetsAt: new Date(verdict.block.resetsAt).toISOString() }
+            : {}),
+        });
+      }
       // The lane the request named, so a failed spawn shows the same
       // `Limit state` a successful spawn on that lane would (design §5.2).
-      const limits = await gate.resolveLimits(() => this.lookupAgentLimits());
-      const limitBlock = formatAttemptedLimitSuffix(limits, target, { forced });
-      this.logger.error('[McpStdio] agent_spawn failed',
-        err instanceof Error ? err : new Error(errorMessage(err)));
+      const limits = await gate?.resolveLimits(() => this.lookupAgentLimits());
+      const limitBlock = formatAttemptedLimitSuffix(limits, target, {
+        forced: gate?.forced,
+      });
+      this.logger.error(
+        '[McpStdio] agent_spawn failed',
+        err instanceof Error ? err : new Error(errorMessage(err)),
+      );
       if (err instanceof LaneSpawnPolicyError) {
-        return toolError(request, JSON.stringify(err.refusal), 'mcp_tool_failed', { tool: 'agent_spawn', ...err.refusal });
+        return toolError(
+          request,
+          JSON.stringify(err.refusal),
+          'mcp_tool_failed',
+          { tool: 'agent_spawn', ...err.refusal },
+        );
       }
       if (err instanceof AgentRoleError) {
         return toolError(
@@ -710,7 +774,9 @@ export class AgentToolDispatcher {
         {
           agentId: parsed.data.agentId,
           mode: outcome.mode,
-          ...(outcome.messageId !== undefined ? { messageId: outcome.messageId } : {}),
+          ...(outcome.messageId !== undefined
+            ? { messageId: outcome.messageId }
+            : {}),
           ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
         },
       );
@@ -735,15 +801,41 @@ export class AgentToolDispatcher {
     }
   }
 
-  private async handleMessageStatus(request: MCPRequest, args: unknown): Promise<MCPResponse> {
+  private async handleMessageStatus(
+    request: MCPRequest,
+    args: unknown,
+  ): Promise<MCPResponse> {
     const parsed = parseArgs(AgentMessageStatusArgsSchema, args);
-    if (!parsed.ok) return toolError(request, `Invalid arguments for agent_message_status: ${describeIssues(parsed.issues)}`, 'mcp_invalid_tool_args', { tool: 'agent_message_status', issues: parsed.issues });
+    if (!parsed.ok)
+      return toolError(
+        request,
+        `Invalid arguments for agent_message_status: ${describeIssues(parsed.issues)}`,
+        'mcp_invalid_tool_args',
+        { tool: 'agent_message_status', issues: parsed.issues },
+      );
     try {
-      const result = await this.ptahAPI.agent.messageStatus(parsed.data.agentId, parsed.data.messageId);
-      const view = agentMessageStatusView(parsed.data.agentId, parsed.data.messageId, result);
-      return await this.toolSuccess(request, 'agent_message_status', JSON.stringify(view), view);
+      const result = await this.ptahAPI.agent.messageStatus(
+        parsed.data.agentId,
+        parsed.data.messageId,
+      );
+      const view = agentMessageStatusView(
+        parsed.data.agentId,
+        parsed.data.messageId,
+        result,
+      );
+      return await this.toolSuccess(
+        request,
+        'agent_message_status',
+        JSON.stringify(view),
+        view,
+      );
     } catch {
-      return toolError(request, 'agent_message_status failed', 'mcp_tool_failed', { tool: 'agent_message_status' });
+      return toolError(
+        request,
+        'agent_message_status failed',
+        'mcp_tool_failed',
+        { tool: 'agent_message_status' },
+      );
     }
   }
 
@@ -782,7 +874,9 @@ export class AgentToolDispatcher {
         agentId: callerAgentId,
         message: parsed.data.message,
         summary: parsed.data.summary,
-        ...(parsed.data.final !== undefined ? { final: parsed.data.final } : {}),
+        ...(parsed.data.final !== undefined
+          ? { final: parsed.data.final }
+          : {}),
       });
       return await this.toolSuccess(
         request,
@@ -790,7 +884,9 @@ export class AgentToolDispatcher {
         formatAgentReport(delivery),
         {
           delivered: delivery.delivered,
-          ...(delivery.pending !== undefined ? { pending: delivery.pending } : {}),
+          ...(delivery.pending !== undefined
+            ? { pending: delivery.pending }
+            : {}),
           ...(delivery.reason !== undefined ? { reason: delivery.reason } : {}),
           ...(delivery.parentSessionId !== undefined
             ? { parentSessionId: delivery.parentSessionId }

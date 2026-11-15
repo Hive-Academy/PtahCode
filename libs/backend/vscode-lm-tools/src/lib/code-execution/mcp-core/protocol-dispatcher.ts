@@ -51,6 +51,7 @@ import {
 } from '@ptah-extension/cli-agent-runtime';
 import { AgentSpawnArgsSchema } from './agent-spawn-args.schema';
 import { AgentSpawnDedupe, agentSpawnTiming } from './agent-spawn-dedupe';
+import { isSpawnReplayValid } from './agent-spawn-replay-status';
 import {
   AgentMessageAckArgsSchema,
   AgentMessageArgsSchema,
@@ -743,8 +744,6 @@ export const MCP_SLOW_TOOL_WARN_MS_ENV = 'PTAH_MCP_SLOW_WARN_MS';
  * Nothing logged that cost before this warning existed.
  */
 export const DEFAULT_MCP_SLOW_TOOL_WARN_MS = 2000;
-/** Longest wait (ms) for the lane status before a settled spawn is replayed. */
-const SPAWN_REPLAY_STATUS_WAIT_MS = 2_000;
 const agentSpawnDedupes = new WeakMap<
   PtahAPI,
   AgentSpawnDedupe<Awaited<ReturnType<PtahAPI['agent']['spawn']>>>
@@ -1222,7 +1221,16 @@ async function handleIndividualTool(
           let result: Awaited<ReturnType<PtahAPI['agent']['spawn']>>;
           try {
             const root = knownWorkspaceFolders(deps)[0] ?? process.cwd();
-            const scope = callerSessionId ?? root;
+            const callerAgentId = getCallerAgentId();
+            const binding = request._callerBinding;
+            const identity = binding?.agentId ?? binding?.sessionId;
+            const scope = JSON.stringify([
+              callerSessionId ?? root,
+              callerAgentId ?? null,
+              !callerSessionId && !callerAgentId && identity
+                ? [binding?.kind, identity]
+                : null,
+            ]);
             let agentSpawnDedupe = agentSpawnDedupes.get(ptahAPI);
             if (!agentSpawnDedupe) {
               agentSpawnDedupe = new AgentSpawnDedupe();
@@ -1290,41 +1298,21 @@ async function handleIndividualTool(
                   throw new SpawnAttemptError(error, gate);
                 }
               },
-              async (spawned) => {
-                try {
-                  // Bounded: a status call that does not answer in time must not
-                  // hold the retry reply. Without an answer the earlier lane is
-                  // replayed, because a second lane costs more than a stale ID.
-                  let timer: ReturnType<typeof setTimeout> | undefined;
-                  const timedOut = new Promise<'timeout'>((resolve) => {
-                    timer = setTimeout(
-                      () => resolve('timeout'),
-                      SPAWN_REPLAY_STATUS_WAIT_MS,
-                    );
-                  });
-                  const current = await Promise.race([
-                    ptahAPI.agent.status(spawned.agentId),
-                    timedOut,
-                  ]).finally(() => clearTimeout(timer));
-                  if (current === 'timeout') return true;
-                  return (
-                    !Array.isArray(current) && current?.status === 'running'
-                  );
-                } catch (error: unknown) {
-                  // degradation-audit: reported - an unavailable status is treated
-                  // as unknown so a retry may start a fresh lane.
-                  logger.warn(
-                    '[MCP] agent spawn replay status unavailable',
-                    'CodeExecutionMCP',
-                    {
-                      agentId: spawned.agentId,
-                      errorName:
-                        error instanceof Error ? error.name : 'unknown',
-                    },
-                  );
-                  return false;
-                }
-              },
+              (spawned) =>
+                isSpawnReplayValid(
+                  spawned.agentId,
+                  (id) => ptahAPI.agent.status(id),
+                  (error) =>
+                    logger.warn(
+                      '[MCP] agent spawn replay status unavailable',
+                      'CodeExecutionMCP',
+                      {
+                        agentId: spawned.agentId,
+                        errorName:
+                          error instanceof Error ? error.name : 'unknown',
+                      },
+                    ),
+                ),
             );
             dedupedAt = performance.now();
             result = await deduped.promise;
@@ -1336,7 +1324,10 @@ async function handleIndividualTool(
                 `Replay of earlier spawn: ${result.agentId}\n` +
                   'An identical ptah_agent_spawn call started this lane less than 120 s ago, so no second lane was started. ' +
                   'Use ptah_agent_status / ptah_agent_read with this agent ID. ' +
-                  'To start another identical lane on purpose, pass force: true or a distinct idempotencyKey.',
+                  'To start another identical lane on purpose, pass force: true or a distinct idempotencyKey.' +
+                  (callerSessionId
+                    ? ''
+                    : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
                 deps,
               );
             }

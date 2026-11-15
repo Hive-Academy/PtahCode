@@ -48,6 +48,12 @@ describe('AgentSpawnDedupe', () => {
         start,
       )
     ).promise;
+    const same = await dedupe.run(
+      'caller',
+      '/root',
+      { task: 'one', idempotencyKey: 'key' },
+      start,
+    );
     const distinct = await (
       await dedupe.run(
         'caller',
@@ -56,7 +62,9 @@ describe('AgentSpawnDedupe', () => {
         start,
       )
     ).promise;
-    expect(replay).toEqual(first);
+    expect(replay.agentId).not.toBe(first.agentId);
+    expect(same.replay).toBe(true);
+    expect(await same.promise).toEqual(first);
     expect(distinct.agentId).not.toBe(first.agentId);
     const forced = await (
       await dedupe.run('caller', '/root', { task: 'one', force: true }, start)
@@ -72,7 +80,7 @@ describe('AgentSpawnDedupe', () => {
     expect((await forcedWithKey.promise).agentId).not.toBe(first.agentId);
   });
 
-  it('starts a fresh spawn when the validity check rejects', async () => {
+  it('replays when the validity check rejects', async () => {
     const dedupe = new AgentSpawnDedupe<{ agentId: string }>();
     let next = 0;
     const start = async () => ({ agentId: `lane-${++next}` });
@@ -88,8 +96,9 @@ describe('AgentSpawnDedupe', () => {
       start,
       isStillValid,
     );
-    expect(second.replay).toBe(false);
-    expect((await second.promise).agentId).toBe('lane-2');
+    expect(second.replay).toBe(true);
+    expect((await second.promise).agentId).toBe('lane-1');
+    expect(next).toBe(1);
   });
 
   it('evicts failures so a retry can start', async () => {

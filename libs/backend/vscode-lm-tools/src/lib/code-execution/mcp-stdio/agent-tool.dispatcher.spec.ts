@@ -66,11 +66,44 @@ function createHarness(): {
     error: jest.fn(),
     debug: jest.fn(),
   } as unknown as Logger;
-  const ptahAPI = { agent: { spawn } } as unknown as PtahAPI;
+  const ptahAPI = {
+    agent: {
+      spawn,
+      status: jest.fn().mockResolvedValue({ status: 'running' }),
+    },
+  } as unknown as PtahAPI;
   return { dispatcher: new AgentToolDispatcher(ptahAPI, logger), spawn };
 }
 
 describe('AgentToolDispatcher — agent_spawn schema', () => {
+  it('replays retries, shares concurrent calls, and lets force start another lane', async () => {
+    const { dispatcher, spawn } = createHarness();
+    const args = { task: 'retry on stdio', idempotencyKey: 'retry-key' };
+    const [first, concurrent] = await Promise.all([
+      dispatcher.dispatch('agent_spawn', request, args),
+      dispatcher.dispatch('agent_spawn', request, args),
+    ]);
+    const retry = await dispatcher.dispatch('agent_spawn', request, args);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(toolResult(first).isError).not.toBe(true);
+    expect(toolResult(concurrent).isError).not.toBe(true);
+    expect(JSON.stringify(toolResult(retry))).toContain('a1');
+    await dispatcher.dispatch('agent_spawn', request, { ...args, force: true });
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses arguments as well as the explicit key', async () => {
+    const { dispatcher, spawn } = createHarness();
+    await dispatcher.dispatch('agent_spawn', request, {
+      task: 'first',
+      idempotencyKey: 'same',
+    });
+    await dispatcher.dispatch('agent_spawn', request, {
+      task: 'second',
+      idempotencyKey: 'same',
+    });
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
   it('forwards routing fields and leaves them undefined when absent', async () => {
     const { dispatcher, spawn } = createHarness();
     await dispatcher.dispatch('agent_spawn', request, {
@@ -519,7 +552,9 @@ function createMessagingHarness(callerAgentId?: string): {
     error: jest.fn(),
     debug: jest.fn(),
   } as unknown as Logger;
-  const ptahAPI = { agent: { message, messageStatus, report } } as unknown as PtahAPI;
+  const ptahAPI = {
+    agent: { message, messageStatus, report },
+  } as unknown as PtahAPI;
   return {
     dispatcher: new AgentToolDispatcher(
       ptahAPI,
@@ -536,12 +571,28 @@ function createMessagingHarness(callerAgentId?: string): {
 describe('AgentToolDispatcher — agent_message', () => {
   it('forwards explicit steer and serves a status receipt', async () => {
     const { dispatcher, message, messageStatus } = createMessagingHarness();
-    await dispatcher.dispatch('agent_message', request, { agentId: 'a1', message: 'go', delivery: 'steer' });
-    expect(message).toHaveBeenCalledWith('a1', 'go', 'steer', undefined, undefined);
+    await dispatcher.dispatch('agent_message', request, {
+      agentId: 'a1',
+      message: 'go',
+      delivery: 'steer',
+    });
+    expect(message).toHaveBeenCalledWith(
+      'a1',
+      'go',
+      'steer',
+      undefined,
+      undefined,
+    );
     const id = '11111111-1111-4111-8111-111111111111';
-    const response = await dispatcher.dispatch('agent_message_status', request, { agentId: 'a1', messageId: id });
+    const response = await dispatcher.dispatch(
+      'agent_message_status',
+      request,
+      { agentId: 'a1', messageId: id },
+    );
     expect(messageStatus).toHaveBeenCalledWith('a1', id);
-    expect(toolResult(response).structuredContent).toMatchObject({ status: 'delivered' });
+    expect(toolResult(response).structuredContent).toMatchObject({
+      status: 'delivered',
+    });
   });
 
   it('returns an mcp_tool_failed error when agent_message_status rejects inside toolSuccess', async () => {
@@ -567,10 +618,14 @@ describe('AgentToolDispatcher — agent_message', () => {
         throw new Error('spool root unavailable');
       },
     );
-    const response = await dispatcher.dispatch('agent_message_status', request, {
-      agentId: 'a1',
-      messageId: id,
-    });
+    const response = await dispatcher.dispatch(
+      'agent_message_status',
+      request,
+      {
+        agentId: 'a1',
+        messageId: id,
+      },
+    );
     expect(toolResult(response).isError).toBe(true);
     expect(toolResult(response).structuredContent).toEqual({
       ptah_code: 'mcp_tool_failed',
@@ -589,7 +644,13 @@ describe('AgentToolDispatcher — agent_message', () => {
       agentId: 'a1',
       message: 'switch to the other branch',
     });
-    expect(message).toHaveBeenCalledWith('a1', 'switch to the other branch', undefined, undefined, undefined);
+    expect(message).toHaveBeenCalledWith(
+      'a1',
+      'switch to the other branch',
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(toolResult(response).isError).toBeUndefined();
     expect(toolResult(response).structuredContent).toMatchObject({
       agentId: 'a1',
@@ -648,11 +709,14 @@ describe('AgentToolDispatcher — agent_report', () => {
   it('passes an explicit closing-report flag to the agent router', async () => {
     const { dispatcher, report } = createMessagingHarness('agent-from-url');
     await dispatcher.dispatch('agent_report', request, {
-      message: 'closing', final: true,
+      message: 'closing',
+      final: true,
     });
     expect(report).toHaveBeenCalledWith({
-      agentId: 'agent-from-url', message: 'closing',
-      summary: undefined, final: true,
+      agentId: 'agent-from-url',
+      message: 'closing',
+      summary: undefined,
+      final: true,
     });
   });
 

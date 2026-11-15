@@ -836,7 +836,7 @@ export function buildAgentSpawnTool({
           minLength: 1,
           maxLength: 128,
           description:
-            'A retry with the same key replays the first spawn and starts no second lane. ' +
+            'A retry with the same key and the same arguments replays the first spawn and starts no second lane. ' +
             'force: true always starts a new lane.',
         },
       },

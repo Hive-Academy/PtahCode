@@ -4393,6 +4393,8 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
     expect(agentToolResult(later).text).toContain(
       'Replay of earlier spawn: a-9',
     );
+    // The request has no parent session, so the replay keeps the warning.
+    expect(agentToolResult(later).text).toContain('No parent session');
   });
 
   it('replays a running lane but spawns again after that lane fails', async () => {
@@ -4441,6 +4443,61 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('replays when the status lookup rejects', async () => {
+    const spawn = jest.fn().mockResolvedValue(spawned);
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: {
+          spawn,
+          status: jest
+            .fn()
+            .mockRejectedValue(new Error('temporary lookup failure')),
+        } as unknown as PtahAPI['agent'],
+      }),
+    });
+    const call = () =>
+      handleMCPRequest(spawnRequest({ task: 'status error retry' }), deps);
+    await call();
+    expect(agentToolResult(await call()).text).toContain(
+      'Replay of earlier spawn: a-9',
+    );
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('separates caller agents in one session even with the same key', async () => {
+    const spawn = jest.fn().mockResolvedValue(spawned);
+    const deps = spawnDeps(spawn);
+    const call = (agentId: string) =>
+      handleMCPRequest(
+        {
+          ...spawnRequest({
+            task: 'agent scoped task',
+            idempotencyKey: 'shared',
+          }),
+          _callerSessionId: 'parent-session',
+          _callerAgentId: agentId,
+        },
+        deps,
+      );
+    await call('agent-one');
+    await call('agent-two');
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('separates different arguments with one explicit key', async () => {
+    const spawn = jest.fn().mockResolvedValue(spawned);
+    const deps = spawnDeps(spawn);
+    await handleMCPRequest(
+      spawnRequest({ task: 'first keyed task', idempotencyKey: 'shared' }),
+      deps,
+    );
+    await handleMCPRequest(
+      spawnRequest({ task: 'second keyed task', idempotencyKey: 'shared' }),
+      deps,
+    );
+    expect(spawn).toHaveBeenCalledTimes(2);
   });
 
   it('gives concurrent callers the same formatted spawn error and permits retry', async () => {
