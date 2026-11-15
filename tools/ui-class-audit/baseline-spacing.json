@@ -336,20 +336,7 @@
     "space-y-2": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-section.component.ts": {
-    "gap-1": 1,
-    "gap-1.5": 1,
-    "gap-2": 1,
-    "gap-3": 3,
-    "gap-x-1.5": 3,
-    "gap-x-6": 1,
-    "gap-y-1": 1,
-    "gap-y-2": 1,
-    "ml-auto": 1,
-    "mr-auto": 1,
-    "mt-0.5": 1,
-    "px-2.5": 1,
-    "py-0.5": 1,
-    "space-y-1.5": 1
+    "mr-auto": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
     "-mt-6": 1,

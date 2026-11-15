@@ -968,21 +968,24 @@ describe('ProvidersSettingsComponent', () => {
     await render();
     // The compact card's one inline action is `btn-sm` like every other Settings control (32px).
     const cardAction = (node: Element) => node.closest('[data-testid="provider-connection-card"]') !== null;
-    // The Main agent's "Reassign" is stretched over the whole block (≥ 96px): the block is its target.
-    const nodeAction = (node: Element) => node.getAttribute('data-testid') === 'routing-node-action';
+    // PR A: the Main agent's "Change main agent" is a normal ptahButton (no stretched link), checked with the others below.
+    const nodeAction = (node: Element) => node.getAttribute('aria-label') === 'Change main agent: provider, model and effort';
     // Each card's details trigger covers the whole card (≥ 40px): the card is its target.
     const cardTrigger = (node: Element) => node.getAttribute('data-testid') === 'provider-card-details-trigger';
     // The catalog modal's controls are asserted in its own spec (closed here; the backdrop is the modal primitive's).
     const actions = Array.from(element.querySelectorAll('button')).filter((node) => !node.closest('ptah-provider-catalog-modal'));
     expect(actions.some((node) => cardAction(node) && !cardTrigger(node))).toBe(true);
     expect(actions.filter(nodeAction)).toHaveLength(1);
-    for (const node of actions.filter(nodeAction)) expect(node.classList.contains('after:inset-0')).toBe(true);
+    for (const node of actions.filter(nodeAction)) {
+      expect(node.getAttribute('data-testid')).toBe('routing-node-action');
+      expect(node.className).not.toContain('after:inset-0');
+    }
     expect(actions.filter(cardTrigger)).toHaveLength(2);
     for (const node of actions.filter(cardTrigger)) {
       expect(node.classList.contains('inset-0')).toBe(true);
       expect(node.classList.contains('focus-visible:outline-2')).toBe(true);
     }
-    for (const node of actions.filter((candidate) => !nodeAction(candidate) && !cardTrigger(candidate))) {
+    for (const node of actions.filter((candidate) => !cardTrigger(candidate))) {
       expect(node.classList.contains('btn-sm')).toBe(true);
       expect(node.classList.contains('btn-xs')).toBe(false);
       // `ptahButton` hosts get the shared focus ring from ptah-button.css; raw buttons carry the utility classes.
