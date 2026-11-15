@@ -88,6 +88,7 @@ function isNestedControl(el: Element): boolean {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events,@angular-eslint/template/interactive-supports-focus -->
     <div
       [class.rounded-xl]="isLegacy()"
       [class.ptah-card]="!isLegacy()"
@@ -107,10 +108,7 @@ function isNestedControl(el: Element): boolean {
       [attr.data-interactive]="isInteractive() ? '' : null"
       [attr.data-selected]="selectable() && selected() ? '' : null"
       [attr.data-disabled]="disabled() ? '' : null"
-      [tabindex]="isInteractive() ? 0 : -1"
       (click)="onCardClick($event)"
-      (keydown.enter)="onCardClick($event)"
-      (keydown.space)="onCardClick($event)"
     >
       @if (isInteractive()) {
         <button
