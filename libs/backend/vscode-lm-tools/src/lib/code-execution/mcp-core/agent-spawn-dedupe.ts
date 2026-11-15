@@ -71,8 +71,8 @@ export class AgentSpawnDedupe<T extends { agentId: string }> {
     if (existing) {
       if (!existing.settled) return { promise: existing.promise, replay: true };
       if (isStillValid) {
-        // A validity check that rejects counts as "not valid": the entry is
-        // dropped and this call starts a fresh spawn.
+        // degradation-audit: reported - a validity check that rejects counts as
+        // "not valid": the entry is dropped and this call starts a fresh spawn.
         existing.validation ??= existing.promise
           .then(isStillValid)
           .catch(() => false);
@@ -114,13 +114,11 @@ export class AgentSpawnDedupe<T extends { agentId: string }> {
           entry.expiresAt = Date.now() + TTL_MS;
       },
       () => {
-        // degradation-audit: reported - rejection is returned to the caller and
-        // the separate handler below removes the failed reservation.
+        // The caller receives the rejection through the returned promise. This
+        // handler only removes the failed reservation so a retry can start.
+        if (this.entries.get(key) === entry) this.entries.delete(key);
       },
     );
-    void promise.catch(() => {
-      if (this.entries.get(key) === entry) this.entries.delete(key);
-    });
     return { promise, replay: false };
   }
 }
