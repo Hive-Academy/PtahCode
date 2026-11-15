@@ -106,6 +106,18 @@ const ownerHit = (
   ...overrides,
 });
 
+describe('provider reported full lane window', () => {
+  it('names the full window in the at-limit reason', () => {
+    const owner = snapshot({ windows: [weekly({ used: { kind: 'percent', percent: 100 }, exhaustion: undefined })] });
+    const result = classifyLaneState(applicableLimits(owner, null), laneCtx());
+    expect(result.state).toBe('at-limit');
+    expect(result.reasons).toEqual([expect.objectContaining({
+      kind: 'window-limit', window: expect.objectContaining({ key: 'weekly', label: 'Weekly' }),
+      evidence: expect.objectContaining({ source: 'provider-api' }),
+    })]);
+  });
+});
+
 describe('ownerRelation (Decision 3, R7)', () => {
   it.each<
     [

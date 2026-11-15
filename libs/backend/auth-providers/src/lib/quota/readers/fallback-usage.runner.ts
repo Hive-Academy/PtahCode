@@ -12,7 +12,8 @@ export type FallbackReason = 'cli-unavailable' | 'cli-not-found' | 'cli-timeout'
   'cli-not-signed-in' | 'cli-exit-error' | 'cli-parse-failed' | 'cli-backoff' | 'cli-busy';
 export type FallbackResult<T> =
   | { readonly ok: true; readonly value: T; readonly readAt: number }
-  | { readonly ok: false; readonly reason: FallbackReason; readonly retryAfter?: number };
+  | { readonly ok: false; readonly reason: FallbackReason; readonly retryAfter?: number;
+      readonly cwdUnavailable?: true };
 
 /** A process handle exposes its lifetime to the runner; `dispose` releases any extra resource. */
 export interface FallbackProcess {
@@ -26,7 +27,7 @@ export interface FallbackProcess {
   killTree?(): Promise<void>;
 }
 export interface FallbackExecutor {
-  start(executable: string, args: readonly string[]): FallbackProcess;
+  start(executable: string, args: readonly string[], cwd?: string): FallbackProcess;
 }
 export interface FallbackRequest<T> {
   readonly sourceId: string;
@@ -35,6 +36,10 @@ export interface FallbackRequest<T> {
   readonly version: string;
   readonly accountFingerprint: string;
   readonly args: readonly string[];
+  readonly cwd?: string;
+  /** Created only for a new flight and removed after its process closes. */
+  readonly temporaryCwd?: { create(): Promise<string>; remove(cwd: string): Promise<void> };
+  readonly timeoutMs?: number;
   readonly executor: FallbackExecutor;
   readonly parse: (output: string, readAt: number) => T | undefined;
   readonly signal?: AbortSignal;
@@ -52,6 +57,7 @@ const running = new Map<string, number>();
 let total = 0;
 const liveRuns = new Set<FallbackProcess>();
 async function stopRun(handle: FallbackProcess, treeKill: (pid: number) => Promise<void>): Promise<void> {
+  // On Windows the PID of an exited parent can be reused, so never tree-kill it.
   if (process.platform === 'win32' ? handle.exited?.() : handle.isClosed?.()) return;
   try {
     const tree = handle.killTree?.() ?? (handle.pid ? treeKill(handle.pid) : Promise.resolve());
@@ -93,6 +99,7 @@ export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<
     running.set(request.sourceId, 1);
     flight = execute(request).catch(() => failure('cli-unavailable')).then((result) => {
       const until = result.ok ? now() + FALLBACK_CACHE_MS :
+        result.cwdUnavailable ? 0 :
         result.reason === 'cli-parse-failed' ? now() + FALLBACK_PARSE_BACKOFF_MS :
         ['cli-timeout', 'cli-exit-error', 'cli-not-signed-in', 'cli-unavailable'].includes(result.reason)
           ? now() + FALLBACK_SHORT_BACKOFF_MS : 0;
@@ -121,16 +128,40 @@ async function execute<T>(request: FallbackRequest<T>): Promise<FallbackResult<T
   const started = now();
   if (request.deadline !== undefined && request.deadline <= started) return failure('cli-timeout');
   let processHandle: FallbackProcess | undefined;
+  let cwd: string | undefined;
   let reason: FallbackReason | 'ok' = 'cli-unavailable';
-  const ms = Math.max(0, Math.min(FALLBACK_TIMEOUT_MS, (request.deadline ?? Infinity) - started));
+  const ms = Math.max(0, Math.min(request.timeoutMs ?? FALLBACK_TIMEOUT_MS, (request.deadline ?? Infinity) - started));
   let timer: ReturnType<typeof setTimeout> | undefined;
   let runAbort: (() => void) | undefined;
   try {
-    processHandle = request.executor.start(request.executable, request.args);
-    liveRuns.add(processHandle);
+    // The budget covers the directory creation too, so a stuck mkdtemp cannot hold the flight.
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('fallback-timeout')), ms);
     });
+    if (request.temporaryCwd) {
+      const temporaryCwd = request.temporaryCwd;
+      const creation = temporaryCwd.create();
+      try { cwd = await Promise.race([creation, timeout]); }
+      catch (error: unknown) {
+        if (error instanceof Error && error.message === 'fallback-timeout') {
+          void creation.then((late) => temporaryCwd.remove(late)).catch((lateError: unknown) => {
+            request.logger?.warn('[PlanUsage] late temporary usage directory cleanup failed', {
+              reason: lateError instanceof Error ? lateError.name : 'unknown',
+            });
+          });
+          reason = 'cli-timeout';
+          return failure(reason);
+        }
+        reason = 'cli-unavailable';
+        request.logger?.warn('[PlanUsage] temporary usage directory creation failed', {
+          reason: error instanceof Error ? error.name : 'unknown',
+        });
+        return { ok: false, reason, cwdUnavailable: true };
+      }
+    } else cwd = request.cwd;
+    if (request.runSignal?.aborted) return failure('cli-unavailable');
+    processHandle = request.executor.start(request.executable, request.args, cwd);
+    liveRuns.add(processHandle);
     const aborted = new Promise<never>((_, reject) => {
       runAbort = () => reject(new Error('fallback-aborted'));
       request.runSignal?.addEventListener('abort', runAbort, { once: true });
@@ -164,19 +195,49 @@ async function execute<T>(request: FallbackRequest<T>): Promise<FallbackResult<T
     if (timer) clearTimeout(timer);
     if (runAbort) request.runSignal?.removeEventListener('abort', runAbort);
     if (processHandle) {
+      const handle = processHandle;
+      const temporaryCwd = request.temporaryCwd;
+      const workingDirectory = cwd;
+      void handle.closed.then(async () => {
+        liveRuns.delete(handle);
+        if (workingDirectory && temporaryCwd) {
+          try { await temporaryCwd.remove(workingDirectory); }
+          catch (error: unknown) {
+            request.logger?.warn('[PlanUsage] temporary usage directory cleanup failed', {
+              reason: error instanceof Error ? error.name : 'unknown',
+            });
+          }
+        }
+      }, (error: unknown) => {
+        liveRuns.delete(handle);
+        request.logger?.warn('[PlanUsage] process close failed', {
+          reason: error instanceof Error ? error.name : 'unknown',
+        });
+      });
       try {
-        await stopRun(processHandle, request.killTree ??
+        await stopRun(handle, request.killTree ??
           ((pid) => killProcessTree(pid, 'SIGKILL')));
       } catch (_error: unknown) {
         // degradation-audit: optional-capability - cleanup still disposes a failed process handle.
       } finally {
+        handle.dispose?.();
+        let closeTimer: ReturnType<typeof setTimeout> | undefined;
         try {
-          processHandle.dispose?.();
-          await Promise.race([processHandle.closed, new Promise<void>((resolve) =>
-            setTimeout(resolve, FALLBACK_CLOSE_GRACE_MS))]);
+          await Promise.race([handle.closed, new Promise<void>((resolve) => {
+            closeTimer = setTimeout(resolve, FALLBACK_CLOSE_GRACE_MS);
+            closeTimer.unref?.();
+          })]);
         } finally {
-          liveRuns.delete(processHandle);
+          if (closeTimer) clearTimeout(closeTimer);
         }
+      }
+    }
+    if (!processHandle && cwd && request.temporaryCwd) {
+      try { await request.temporaryCwd.remove(cwd); }
+      catch (error: unknown) {
+        request.logger?.warn('[PlanUsage] temporary usage directory cleanup failed', {
+          reason: error instanceof Error ? error.name : 'unknown',
+        });
       }
     }
     request.logger?.[reason === 'ok' ? 'debug' : 'warn']('[PlanUsage] fallback', {
@@ -191,9 +252,9 @@ type NodeFallbackChild = Pick<ChildProcess,
 export function createNodeFallbackExecutor(
   spawnProcess: (executable: string, args: string[], options: SpawnOptions) => NodeFallbackChild = spawn,
 ): FallbackExecutor {
-  return { start(executable, args) {
+  return { start(executable, args, cwd) {
     const child = spawnProcess(executable, [...args], { shell: false, windowsHide: true,
-      detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+      detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], cwd });
     let output = '';
     let stderr = '';
     let size = 0;

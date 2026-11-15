@@ -46,7 +46,7 @@ import { readUsageSourceChain } from './usage-source-chain';
 import type { UsageSource, UsageSourceResult, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
 
 export const ANTIGRAVITY_USAGE_TIMEOUT_MS = 3_000;
-export const ANTIGRAVITY_CHAIN_TIMEOUT_MS = 11_000;
+export const ANTIGRAVITY_CHAIN_TIMEOUT_MS = 20_000;
 const ANTIGRAVITY_OAUTH_STAGE_TIMEOUT_MS = 3_000;
 const MIN_STAGE_MS = 1_000;
 export const ANTIGRAVITY_MAX_BODY_BYTES = 1_048_576;

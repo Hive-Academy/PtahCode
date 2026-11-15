@@ -1250,7 +1250,16 @@ export class ChatSessionService {
         // the SDK path already supports it.
         const registration =
           await this.codeExecutionMcp.ensureRegisteredForSubagents();
-        if (!registration.registered) {
+        if (!registration.registered && registration.reason === 'timeout') {
+          // The registration is still queued and lands in the background. The
+          // session's own Ptah MCP config is built per session and does not read
+          // `.mcp.json`, so only subagents started before the write miss the
+          // entry. Disabling MCP for the whole session would cost far more.
+          this.logger.warn(
+            '[ptah.main] chat:start - .mcp.json registration still pending; starting with session MCP',
+            { reason: registration.reason },
+          );
+        } else if (!registration.registered) {
           mcpServerRunning = false;
           this.logger.warn(
             '[ptah.main] chat:start - .mcp.json entry absent, starting session without MCP',
@@ -2005,8 +2014,17 @@ export class ChatSessionService {
       if (this.sdkContext.isMcpServerRunning()) {
         const registration =
           await this.codeExecutionMcp.ensureRegisteredForSubagents();
-        mcpRegisteredForSubagents = registration.registered;
-        if (!registration.registered) {
+        // A deadline expiry means the write is still queued, not refused: the
+        // resumed session's own MCP config does not read `.mcp.json`.
+        const pending =
+          !registration.registered && registration.reason === 'timeout';
+        mcpRegisteredForSubagents = registration.registered || pending;
+        if (pending) {
+          this.logger.warn(
+            '[ptah.main] chat:continue - .mcp.json registration still pending; resuming with session MCP',
+            { reason: registration.reason },
+          );
+        } else if (!registration.registered) {
           this.logger.warn(
             '[ptah.main] chat:continue - .mcp.json entry absent, resuming without MCP',
             { reason: registration.reason },

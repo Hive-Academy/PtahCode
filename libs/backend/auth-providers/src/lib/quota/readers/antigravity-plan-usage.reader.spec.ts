@@ -10,6 +10,7 @@ import {
   ANTIGRAVITY_REQUEST_BODY,
 } from './antigravity-ls.provisional';
 import {
+  ANTIGRAVITY_CHAIN_TIMEOUT_MS,
   createAntigravityPlanUsageReader,
   defaultRequest,
   readJsonResponse,
@@ -122,14 +123,16 @@ describe('Antigravity plan-usage reader', () => {
     expect(cli).toHaveBeenCalledTimes(1);
     expect(result.status).toBe('available');
     expect(result.source).toBe('cli-command');
-    expect(
-      result.windows.map(({ modelScope, kind }) => [modelScope, kind]),
-    ).toEqual([
-      ['Gemini Models', 'weekly'],
-      ['Gemini Models', 'five_hour'],
-      ['Claude and GPT models', 'weekly'],
-      ['Claude and GPT models', 'five_hour'],
+    // A group name is not a model id; batch (d) maps groups to model scopes.
+    expect(result.windows.map(({ kind }) => kind)).toEqual([
+      'weekly',
+      'five_hour',
+      'weekly',
+      'five_hour',
     ]);
+    expect(result.windows.every((w) => w.modelScope === undefined)).toBe(true);
+    expect(result.windows[0].label).toContain('Gemini Models');
+    expect(result.windows[2].label).toContain('Claude and GPT models');
   });
 
   it('refuses CLI output when the store account differs', async () => {
@@ -253,9 +256,11 @@ describe('Antigravity plan-usage reader', () => {
           () => accountRef,
         );
         const reading = instance({ target, refresh: true, allowCliFallback: true });
-        await jest.advanceTimersByTimeAsync(11_000);
+        await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CHAIN_TIMEOUT_MS);
         expect((await reading).statusReason).toBe('no-local-server');
-        expect(Date.now() - started).toBeLessThanOrEqual(11_000);
+        expect(Date.now() - started).toBeLessThanOrEqual(
+          ANTIGRAVITY_CHAIN_TIMEOUT_MS,
+        );
         expect(cli).toHaveBeenCalledTimes(1);
         expect(readOAuth).toHaveBeenCalledTimes(target === storeTarget ? 1 : 0);
       } finally {

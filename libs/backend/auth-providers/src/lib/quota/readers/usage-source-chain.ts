@@ -7,7 +7,7 @@ import type {
 } from './plan-usage-reader.types';
 
 /** One budget shared by all stages; each source must honor the request signal. */
-export const USAGE_CHAIN_DEADLINE_MS = 11_000;
+export const USAGE_CHAIN_DEADLINE_MS = 20_000;
 
 const FAILURE_RANK: Record<UsageFailureReason, number> = {
   'account-unverified': 0,

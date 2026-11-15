@@ -23,6 +23,69 @@ function harness() {
 
 describe('fallback runner', () => {
   afterEach(() => jest.useRealTimers());
+  it('releases a flight after close grace and removes cwd only on actual close', async () => {
+    jest.useFakeTimers();
+    let close!: () => void;
+    const closed = new Promise<void>((resolve) => { close = resolve; });
+    const remove = jest.fn(async () => undefined);
+    const firstHandle: FallbackProcess = { result: Promise.resolve('valid'), closed,
+      kill: jest.fn(), killTree: jest.fn(async () => undefined) };
+    const nextHandle: FallbackProcess = { result: Promise.resolve('valid'), closed: Promise.resolve(),
+      kill: jest.fn(), isClosed: () => true };
+    const executor: FallbackExecutor = { start: jest.fn()
+      .mockReturnValueOnce(firstHandle).mockReturnValueOnce(nextHandle) };
+    const sourceId = `never-close-${++serial}`;
+    const request = { sourceId, ownerKey: 'owner', executable: 'first', version: 'v1',
+      accountFingerprint: 'placeholder', args: [], executor, parse: (value: string) => value,
+      temporaryCwd: { create: async () => 'temporary', remove } };
+    const first = runFallbackUsage(request);
+    await jest.advanceTimersByTimeAsync(500);
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(remove).not.toHaveBeenCalled();
+    const second = runFallbackUsage({ ...request, executable: 'second' });
+    await expect(second).resolves.toMatchObject({ ok: true });
+    expect(executor.start).toHaveBeenCalledTimes(2);
+    close();
+    await Promise.resolve();
+    expect(remove).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a joined flight when its first caller aborts during cwd creation', async () => {
+    let finishCreate!: (cwd: string) => void;
+    const created = new Promise<string>((resolve) => { finishCreate = resolve; });
+    const controller = new AbortController();
+    const start = jest.fn((): FallbackProcess => ({ result: Promise.resolve('valid'),
+      closed: Promise.resolve(), kill: jest.fn(), isClosed: () => true }));
+    const request = { sourceId: `shared-create-${++serial}`, ownerKey: 'owner', executable: 'fake',
+      version: 'v1', accountFingerprint: 'placeholder', args: [], executor: { start },
+      parse: (value: string) => value, temporaryCwd: { create: () => created,
+        remove: async () => undefined } };
+    const first = runFallbackUsage({ ...request, signal: controller.signal });
+    const joined = runFallbackUsage(request);
+    controller.abort();
+    await expect(first).resolves.toMatchObject({ reason: 'cli-unavailable' });
+    finishCreate('temporary');
+    await expect(joined).resolves.toMatchObject({ ok: true, value: 'valid' });
+    expect(start).toHaveBeenCalledTimes(1);
+    await expect(runFallbackUsage(request)).resolves.toMatchObject({ ok: true });
+  });
+  it('times out a stuck cwd creation and removes the late directory', async () => {
+    jest.useFakeTimers();
+    let finishCreate!: (cwd: string) => void;
+    const created = new Promise<string>((resolve) => { finishCreate = resolve; });
+    const remove = jest.fn(async () => undefined);
+    const start = jest.fn();
+    const pending = runFallbackUsage({ sourceId: `stuck-create-${++serial}`, ownerKey: 'owner',
+      executable: 'fake', version: 'v1', accountFingerprint: 'placeholder', args: [],
+      executor: { start }, parse: (value: string) => value, timeoutMs: 1_000,
+      temporaryCwd: { create: () => created, remove } });
+    await jest.advanceTimersByTimeAsync(1_000);
+    await expect(pending).resolves.toMatchObject({ ok: false, reason: 'cli-timeout' });
+    expect(start).not.toHaveBeenCalled();
+    finishCreate('late');
+    await jest.advanceTimersByTimeAsync(0);
+    expect(remove).toHaveBeenCalledWith('late');
+  });
   it('does not start an executor after the deadline', async () => {
     const h = harness();
     await expect(h.run({ deadline: 100, now: () => 101 })).resolves.toMatchObject({ reason: 'cli-timeout' });
@@ -143,7 +206,7 @@ describe('production Node executor cleanup', () => {
       runFallbackUsage({ sourceId: `node-${++serial}`, ownerKey: '<user>', executable: 'fake',
         version: 'v1', accountFingerprint: '<account>', args: [], executor,
         parse: (output) => output, killTree: tree, ...overrides });
-    return { child, stdout, stderr, kill, tree, order, run };
+    return { child, stdout, stderr, kill, tree, order, run, spawnFake };
   }
   afterEach(() => jest.useRealTimers());
   it('tree-kills before direct kill on timeout', async () => {
@@ -152,6 +215,12 @@ describe('production Node executor cleanup', () => {
     await jest.advanceTimersByTimeAsync(8_000);
     await pending;
     expect(h.order).toEqual(['tree', 'direct']);
+  });
+  it('passes cwd to the spawn options', async () => {
+    const h = fake(); const pending = h.run({ cwd: 'isolated-dir' });
+    expect(h.spawnFake).toHaveBeenCalledWith('fake', [], expect.objectContaining({ cwd: 'isolated-dir', stdio: ['ignore', 'pipe', 'pipe'] }));
+    Object.assign(h.child, { exitCode: 0 }); h.child.emit('exit', 0); h.child.emit('close', 0);
+    await pending;
   });
   it('skips all kills after normal exit', async () => {
     const h = fake(); const pending = h.run();
@@ -167,7 +236,8 @@ describe('production Node executor cleanup', () => {
       const h = fake(); const pending = h.run();
       h.child.emit('exit', 0);
       await jest.advanceTimersByTimeAsync(8_000);
-      expect(h.tree).toHaveBeenCalledTimes(platform === 'linux' ? 1 : 0);
+      // A reused Windows PID must never be tree-killed after the parent exited.
+      expect(h.tree).toHaveBeenCalledTimes(platform === 'win32' ? 0 : 1);
       h.child.emit('close', 0);
       await pending;
     } finally {

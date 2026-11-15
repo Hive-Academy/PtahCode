@@ -208,7 +208,11 @@ export class GatewayTurnPreparation {
         // what decides the flag.
         const registration =
           await this.deps.codeExecutionMcp.ensureRegisteredForSubagents();
-        mcpServerRunning = registration.registered;
+        // A deadline expiry means the write is still queued, not refused: the
+        // turn's own session MCP config does not read `.mcp.json`, so keep it.
+        const pending =
+          !registration.registered && registration.reason === 'timeout';
+        mcpServerRunning = registration.registered || pending;
         if (!registration.registered) {
           this.deps.logger.warn(
             '[gateway-chat-bridge] MCP running but .mcp.json entry absent — subagents get no Ptah tools this turn',
