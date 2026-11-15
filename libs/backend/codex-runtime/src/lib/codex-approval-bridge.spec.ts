@@ -293,6 +293,74 @@ describe('CodexApprovalBridge', () => {
     },
   );
 
+  it('routes a live native child approval to the parent sink', async () => {
+    const { bridge, request } = setup({
+      isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+    });
+    const result = await bridge.handle(
+      frame(command, 2, { threadId: 'child', turnId: 'cturn' }),
+      'cturn',
+      signal(),
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(result.response).toEqual({ decision: 'accept' });
+  });
+
+  it('fails closed for an unknown native child thread', async () => {
+    const { bridge, request } = setup({ isChildTurn: () => false });
+    expect(
+      await bridge.handle(
+        frame(command, 3, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      ),
+    ).toEqual({ response: { decision: 'cancel' } });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for a terminal native child turn', async () => {
+    const { bridge, request } = setup({
+      isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn-live',
+    });
+    const result = await bridge.handle(
+      frame(command, 4, { threadId: 'child', turnId: 'cturn-terminal' }),
+      'cturn-terminal',
+      signal(),
+    );
+    expect(result).toEqual({ response: { decision: 'cancel' } });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  describe('D17: child approval policy — no looser than parent', () => {
+    it('child request goes through sink like parent, parent decision applies', async () => {
+      const { bridge, request } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+      });
+      request.mockReturnValue(Promise.resolve('acceptForSession'));
+      const result = await bridge.handle(
+        frame(command, 5, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(result.response).toEqual({ decision: 'acceptForSession' });
+    });
+
+    it('child denial maps to decline', async () => {
+      const { bridge, request } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+      });
+      request.mockReturnValue(Promise.resolve('decline'));
+      const result = await bridge.handle(
+        frame(command, 6, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(result.response).toEqual({ decision: 'decline' });
+    });
+  });
+
   it('ignores a late grant from a stale generation and records no rule', async () => {
     const pending = deferred<CodexApprovalDecision>();
     const { bridge, request, options, isCurrent } = setup();
@@ -852,5 +920,84 @@ describe('CodexApprovalBridge', () => {
       bridge.handle(frame(command, 1, { command: 42 }), 'turn', signal()),
     ).rejects.toThrow();
     expect(request).not.toHaveBeenCalled();
+  });
+
+  describe('Finding 2: terminal child turns', () => {
+    it('fails closed when isChildTurn detects a terminal turn', async () => {
+      const { bridge, request } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'live-turn',
+      });
+      const result = await bridge.handle(
+        frame(command, 4, { threadId: 'child', turnId: 'terminal-turn' }),
+        'terminal-turn',
+        signal(),
+      );
+      expect(result).toEqual({ response: { decision: 'cancel' } });
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it('rejects late approvals from child turns after terminal event', async () => {
+      const terminalTurns = new Set<string>();
+      const childTools = new Map<string, string>([['child', 'spawn']]);
+      const childTurns = new Map<string, string>([['child', 'cturn']]);
+      const isChildTurn = (thread: string, turn: string) =>
+        childTools.has(thread) && childTurns.get(thread) === turn && !terminalTurns.has(turn);
+      const { bridge, request } = setup({ isChildTurn });
+      request.mockResolvedValue('accept');
+
+      const result1 = await bridge.handle(
+        frame(command, 5, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(result1).toEqual({ response: { decision: 'accept' } });
+      expect(request).toHaveBeenCalledTimes(1);
+
+      terminalTurns.add('cturn');
+      childTools.delete('child');
+      childTurns.delete('child');
+
+      const result2 = await bridge.handle(
+        frame(command, 6, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(result2).toEqual({ response: { decision: 'cancel' } });
+      expect(request).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Finding 1: child approvals must reach parent sink', () => {
+    it.each<CodexPermissionLevel>(['plan', 'ask', 'auto-edit', 'yolo'])(
+      'routes child approval to sink in %s permission level',
+      async (permLevel) => {
+        const { bridge, request } = setup({
+          isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+          permissionLevel: () => permLevel,
+        });
+        request.mockResolvedValue('accept');
+        const result = await bridge.handle(
+          frame(command, 5, { threadId: 'child', turnId: 'cturn' }),
+          'cturn',
+          signal(),
+        );
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(result.response).toEqual({ decision: 'accept' });
+      },
+    );
+
+    it('applies parent denial to child approval', async () => {
+      const { bridge, request } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+      });
+      request.mockResolvedValue({ decision: 'decline', denialReason: 'safety' });
+      const result = await bridge.handle(
+        frame(command, 6, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(result.response).toEqual({ decision: 'decline' });
+    });
   });
 });

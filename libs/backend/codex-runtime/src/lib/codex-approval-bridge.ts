@@ -52,6 +52,11 @@ export interface CodexApprovalBridgeOptions {
   readonly permissionLevel: () => CodexPermissionLevel;
   readonly isCurrent: (correlation: CodexApprovalCorrelation) => boolean;
   readonly isWritable: () => boolean;
+  /**
+   * True only for a live native child thread/turn of this parent. Its approvals
+   * route to the parent sink. Any other foreign thread fails closed.
+   */
+  readonly isChildTurn?: (threadId: string, turnId: string) => boolean;
   readonly close: () => void;
   readonly timeoutMs?: number;
   /** Production passes the runtime logger. Absent only in bridges built outside this package. */
@@ -302,9 +307,15 @@ export class CodexApprovalBridge {
       }
       return { response };
     }
+    const isParent = () => params['threadId'] === identity.threadId;
+    const isChild = () =>
+      typeof params['threadId'] === 'string' &&
+      typeof params['turnId'] === 'string' &&
+      params['turnId'] === turnId &&
+      this.options.isChildTurn?.(params['threadId'], turnId) === true;
     const current = () =>
       !this.disposed &&
-      params['threadId'] === identity.threadId &&
+      (isParent() || isChild()) &&
       (params['turnId'] == null
         ? request.kind === 'mcpElicitation' && turnId.length > 0
         : params['turnId'] === turnId) &&
@@ -312,12 +323,14 @@ export class CodexApprovalBridge {
     const target = this.target(request, params);
     let reply: unknown = 'decline';
     if (current() && !signal.aborted) {
-      const policy = codexPermissionPolicy(
-        this.options.permissionLevel(),
-        request.kind,
-        target !== undefined && this.options.rules.matches(identity, target),
-        request.details,
-      );
+      const policy = isChild()
+        ? 'present'
+        : codexPermissionPolicy(
+            this.options.permissionLevel(),
+            request.kind,
+            target !== undefined && this.options.rules.matches(identity, target),
+            request.details,
+          );
       reply = await this.interact(request, signal, policy);
     }
     const edited = record(reply);
@@ -332,12 +345,14 @@ export class CodexApprovalBridge {
           'followUpMessage',
         ].some((key) => Object.hasOwn(edited, key)));
     const live = current() && !signal.aborted;
+    const isChildRequest = isChild();
     const decision: CodexApprovalDecision = this.disposed
       ? 'decline'
       : !live
         ? 'cancel'
         : isEdit ||
-            (request.kind !== 'userInput' &&
+            (!isChildRequest &&
+              request.kind !== 'userInput' &&
               this.options.permissionLevel() === 'plan')
           ? 'decline'
           : reply === 'accept' ||

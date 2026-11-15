@@ -30,10 +30,10 @@ function refusalFrom(run: () => unknown): LaneSpawnPolicyError {
 }
 
 describe('CLI lane policy resolver', () => {
-  it('selects the strongest supported manifest pair', () => {
-    expect(builtInLanePolicy(manifest)).toMatchObject({ permission: 'yolo', network: 'allow' });
+  it('selects the most restrictive supported manifest pair', () => {
+    expect(builtInLanePolicy(manifest)).toMatchObject({ permission: 'plan', network: 'deny' });
     expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: {} })).toMatchObject({
-      permission: 'yolo', network: 'allow', permissionSource: 'built-in', networkSource: 'built-in',
+      permission: 'plan', network: 'deny', permissionSource: 'built-in', networkSource: 'built-in',
     });
   });
 
@@ -150,5 +150,50 @@ describe('CLI lane policy resolver', () => {
       'ptah.agentOrchestration.codexSandboxMode': 'danger-full-access',
     } });
     expect(codexLaneSandboxMode(workspace)).toBe('read-only');
+  });
+
+  describe('D24: no-row lane default — three paths', () => {
+    it('path 1: explicit permission returns exactly that (requested == effective)', () => {
+      const result = resolveCliLanePolicy({ cli: 'codex', manifest,
+        saved: {},
+        request: { permission: 'auto-edit', network: 'allow' },
+      });
+      expect(result).toMatchObject({
+        permission: 'auto-edit', network: 'allow', permissionSource: 'spawn', networkSource: 'spawn',
+      });
+    });
+
+    it('path 2: restore with no row uses snapshot (not silent default)', () => {
+      const snapshot = { permission: 'auto-edit' as const, network: 'deny' as const,
+        permissionSource: 'saved' as const, networkSource: 'saved' as const };
+      const result = resolveCliLanePolicy({ cli: 'codex', manifest,
+        saved: {},
+        request: {}, resumePolicy: snapshot });
+      expect(result).toMatchObject(snapshot);
+    });
+
+    it('path 3: plain spawn with no permission defaults to plan (most restrictive)', () => {
+      const result = resolveCliLanePolicy({ cli: 'codex', manifest,
+        saved: {},
+        request: {},
+      });
+      expect(result).toMatchObject({
+        permission: 'plan', network: 'deny', permissionSource: 'built-in', networkSource: 'built-in',
+      });
+    });
+
+    it('fails closed when adapter does not support plan', () => {
+      const noPlanManifest: CliAdapterManifest = { ...manifest,
+        permissionModes: {
+          'auto-edit': { ...supported, networkModes: ['allow', 'deny'] },
+          yolo: { ...supported, networkModes: ['allow'] },
+        },
+      };
+      const error = refusalFrom(() => resolveCliLanePolicy({ cli: 'codex', manifest: noPlanManifest,
+        saved: {},
+        request: {} }));
+      expect(error.refusal).toMatchObject({ code: 'UNSUPPORTED_LANE_POLICY' });
+      expect(error.message).toContain('does not support plan');
+    });
   });
 });

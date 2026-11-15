@@ -3,7 +3,7 @@ import { PTAH_CLI_PERMISSION_CAPABILITIES, resolveCliLaneDefaultPair } from './c
 describe('resolveCliLaneDefaultPair', () => {
   it('fills the built-in pair from supported capabilities', () => {
     expect(resolveCliLaneDefaultPair(PTAH_CLI_PERMISSION_CAPABILITIES)).toEqual({
-      permission: 'yolo', network: 'allow', permissionSource: 'built-in', networkSource: 'built-in',
+      permission: 'plan', network: 'allow', permissionSource: 'built-in', networkSource: 'built-in',
     });
   });
 

@@ -17,6 +17,15 @@ const manifest: CliAdapterManifest = {
   mcp: supported,
   limitReader: { state: 'no-reliable-source' },
 };
+const cursorManifest: CliAdapterManifest = {
+  ...manifest,
+  permissionModes: {
+    plan: { ...unsupported, reason: 'Plan has no local proof.', networkModes: [] },
+    ask: { ...unsupported, reason: 'Ask has no binding.', networkModes: [] },
+    'auto-edit': { ...unsupported, reason: 'Scoped edit has no binding.', networkModes: [] },
+    yolo: { ...supported, networkModes: ['allow'] },
+  },
+};
 
 describe('CliLaneDefaultCellComponent', () => {
   beforeEach(() => {
@@ -69,20 +78,36 @@ describe('CliLaneDefaultCellComponent', () => {
 
   it('explains Cursor permission modes that cannot be selected', () => {
     const fixture = setup('cursor');
-    fixture.componentRef.setInput('manifest', {
-      ...manifest,
-      permissionModes: {
-        plan: { ...unsupported, reason: 'Plan has no local proof.', networkModes: [] },
-        ask: { ...unsupported, reason: 'Ask has no binding.', networkModes: [] },
-        'auto-edit': { ...unsupported, reason: 'Scoped edit has no binding.', networkModes: [] },
-        yolo: { ...supported, networkModes: ['allow'] },
-      },
-    });
+    fixture.componentRef.setInput('manifest', cursorManifest);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('plan unavailable: Plan has no local proof.');
     expect(fixture.nativeElement.textContent).toContain('ask unavailable: Ask has no binding.');
     expect(fixture.nativeElement.textContent).toContain('auto-edit unavailable: Scoped edit has no binding.');
-    expect(fixture.nativeElement.querySelectorAll('[tabindex="0"]').length).toBe(3);
+    expect(fixture.nativeElement.textContent).toContain('Network: Unavailable');
+    expect(fixture.nativeElement.textContent).toContain('Unsupported combination');
+    expect(fixture.nativeElement.querySelectorAll('[tabindex="0"]').length).toBe(4);
+    const placeholder = fixture.nativeElement.querySelector('select option[value=""]') as HTMLOptionElement;
+    expect(placeholder.textContent).toContain('Choose a permission');
+    expect(placeholder.selected).toBe(true);
+  });
+
+  it('confirms Cursor full access before saving its first permission choice', () => {
+    const fixture = setup('cursor');
+    fixture.componentRef.setInput('manifest', cursorManifest);
+    fixture.detectChanges();
+    const selected = jest.fn();
+    fixture.componentInstance.selected.subscribe(selected);
+    const select = fixture.nativeElement.querySelector('select') as HTMLSelectElement;
+    expect(select.value).toBe('');
+    select.value = 'yolo';
+    select.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    expect(selected).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.querySelector('dialog[open]')).not.toBeNull();
+    const confirm = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find(button => button.textContent?.trim() === 'Confirm');
+    confirm?.click();
+    expect(selected).toHaveBeenCalledWith({ permission: 'yolo', network: 'allow' });
   });
 
   it('requires confirmation for full auto and cancel preserves the saved choice', () => {
@@ -101,7 +126,7 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(selected).not.toHaveBeenCalled();
   });
 
-  it('confirms reset to built-in full access and cancel preserves the saved choice', () => {
+  it('resets to the built-in plan default without confirmation', () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
     const reset = jest.fn();
     fixture.componentInstance.resetRequested.subscribe(reset);
@@ -109,21 +134,11 @@ describe('CliLaneDefaultCellComponent', () => {
     (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
     fixture.detectChanges();
     const resetButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).find(button => button.textContent?.includes('Reset to default'))!;
-    expect(resetButton.textContent).toContain('Auto — full access');
+    expect(resetButton.textContent).toContain('Reset to default (plan)');
     resetButton.click();
     fixture.detectChanges();
-    expect(reset).not.toHaveBeenCalled();
-    const buttons = () => Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>);
-    buttons().find(button => button.textContent?.trim() === 'Cancel')?.click();
-    fixture.detectChanges();
-    expect(reset).not.toHaveBeenCalled();
-    expect((fixture.nativeElement.querySelector('select') as HTMLSelectElement).value).toBe('plan');
-    (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).find(button => button.textContent?.includes('Reset to default'))?.click();
-    fixture.detectChanges();
-    buttons().find(button => button.textContent?.trim() === 'Confirm')?.click();
     expect(reset).toHaveBeenCalledTimes(1);
+    expect(fixture.nativeElement.querySelector('dialog[open]')).toBeNull();
   });
 
   it('emits the confirmed full-auto choice', () => {

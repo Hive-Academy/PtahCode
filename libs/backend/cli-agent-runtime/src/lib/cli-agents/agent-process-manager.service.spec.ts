@@ -134,6 +134,10 @@ import {
   type LaneResumeGateInput,
 } from './lane-resume-gate';
 import { PTAH_API_RATE_LIMIT_SEGMENT } from './limits/lane-rate-limit-classifier';
+import { LANE_PLAN_MODE_INSTRUCTION } from './lane-reporting-contract';
+
+/** D24: a lane with no saved choice runs in plan, so the task gets the plan instruction. */
+const PLAN_SUFFIX = `\n\n${LANE_PLAN_MODE_INSTRUCTION}`;
 import type {
   CliAdapter,
   SdkHandle,
@@ -304,7 +308,10 @@ function createSdkAdapter(
         resume: { state: 'supported' },
       },
       roleChannel: 'developer-instructions',
-      permissionModes: {},
+      // A supported plan mode lets the fail-closed lane default resolve.
+      permissionModes: {
+        plan: { state: 'supported', nativeMode: 'plan', networkModes: ['allow'] },
+      },
       networkModes: {
         allow: { state: 'supported' },
         deny: { state: 'unsupported' },
@@ -1106,7 +1113,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       const runSdkCall = (sdkAdapter.runSdk as jest.Mock).mock.calls[0][0];
       // SDK adapters should receive the original task without shell sanitization
       // because they run in-process and $, (), {} are legitimate code content
-      expect(runSdkCall.task).toBe('Run tests $(injected)');
+      expect(runSdkCall.task).toBe(`Run tests $(injected)${PLAN_SUFFIX}`);
       expect(runSdkCall.workingDirectory).toBe('/workspace/root');
       expect(runSdkCall.files).toEqual(['src/app.ts']);
       expect(runSdkCall.taskFolder).toBe('/tmp/task');
@@ -2014,7 +2021,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         lastActivityAt: Date.parse('2026-10-04T08:00:00.000Z'),
       });
       const runSdkCall = (sdkAdapter.runSdk as jest.Mock).mock.calls[0][0];
-      expect(runSdkCall.task).toBe('Fix the lexer tests');
+      expect(runSdkCall.task).toBe(`Fix the lexer tests${PLAN_SUFFIX}`);
       expect(runSdkCall.resumeSessionId).toBe(SESSION);
     });
 
@@ -2062,7 +2069,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(task).toContain(
         'Started on the parser. Parser done; lexer tests still fail.',
       );
-      expect(task.endsWith('New instruction:\nFix the lexer tests')).toBe(true);
+      expect(task.endsWith(`New instruction:\nFix the lexer tests${PLAN_SUFFIX}`)).toBe(true);
       // The record keeps the caller's message as its task, and is a new lane:
       // it does not claim the old session.
       const info = manager.getStatus(result.agentId) as AgentProcessInfo;
@@ -2115,7 +2122,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       const secondTask: string = (sdkAdapter.runSdk as jest.Mock).mock
         .calls[1][0].task;
       expect(secondTask).toContain('Original task:\nImplement the parser');
-      expect(secondTask.endsWith('New instruction:\nNow the docs')).toBe(true);
+      expect(secondTask.endsWith(`New instruction:\nNow the docs${PLAN_SUFFIX}`)).toBe(true);
       expect(
         (manager.getStatus(second.agentId) as AgentProcessInfo).originalTask,
       ).toBe('Implement the parser');

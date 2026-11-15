@@ -380,12 +380,10 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(state.saveSettings).toHaveBeenLastCalledWith(
       { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT);
   });
-  it('opens lane default actions before Reset and restores the saved choice on Undo', async () => {
+  it('resets to the plan default without confirmation and restores the saved choice on Undo', async () => {
     showSavedCodexDefault();
     button(card('codex'), 'More default actions')?.click(); fixture.detectChanges();
     button(element(), 'Reset to default')?.click(); await flush();
-    expect(state.saveSettings).not.toHaveBeenCalled();
-    button(card('codex'), 'Confirm')?.click(); await flush();
     expect(state.saveSettings).toHaveBeenCalledWith({ orchestration: { cliLaneDefaults: { codex: null } } }, CONTEXT);
     await feedback.undo();
     expect(state.saveSettings).toHaveBeenLastCalledWith(

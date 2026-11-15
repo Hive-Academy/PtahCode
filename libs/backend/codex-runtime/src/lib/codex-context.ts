@@ -393,6 +393,10 @@ class RuntimeContext implements CodexContext {
           [...this.childTurns.values()].includes(correlation.turnId)) &&
         correlation.processGeneration === this.generation,
       isWritable: () => this.state !== 'closed',
+      isChildTurn: (threadId, turnId) =>
+        this.childTools.has(threadId) &&
+        this.childTurns.get(threadId) === turnId &&
+        !this.terminalTurns.has(turnId),
       close: this.onFailure,
       logger: this.options.logger,
       requestUserInput: this.options.requestUserInput,
@@ -887,11 +891,11 @@ class RuntimeContext implements CodexContext {
           this.emit({ ...event, parentToolUseId });
           this.terminalTurns.add(event.turnId);
           this.childTools.delete(event.threadId);
-           this.childParentThreads.delete(event.threadId);
+          this.childParentThreads.delete(event.threadId);
           this.childTurns.delete(event.threadId);
           this.pendingSpawns.delete(event.threadId);
-           if (this.rootTerminalPending &&
-             ![...this.childTools.keys()].some((id) => !this.nativeChildren.has(id)))
+          if (this.rootTerminalPending &&
+            ![...this.childTools.keys()].some((id) => !this.nativeChildren.has(id)))
             this.finishActiveTurn();
           return;
         }

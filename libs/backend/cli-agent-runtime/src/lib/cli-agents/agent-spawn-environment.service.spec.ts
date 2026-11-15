@@ -6,8 +6,8 @@ import type {
   IMcpServerStatus,
   IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
-import type { CliDetectionResult, CliType } from '@ptah-extension/shared';
-import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
+import type { CliAdapterManifest, CliDetectionResult, CliType } from '@ptah-extension/shared';
+import { normalizeWorkspaceRoot, PTAH_CLI_PERMISSION_CAPABILITIES } from '@ptah-extension/shared';
 import {
   AgentSpawnEnvironment,
   DEFAULT_CONCURRENT_AGENTS,
@@ -121,6 +121,17 @@ function makeEnvironment(
 }
 
 describe('AgentSpawnEnvironment', () => {
+  it('spawns with plan permission when no lane policy row or permission was requested', () => {
+    const { environment } = makeEnvironment();
+    const manifest = PTAH_CLI_PERMISSION_CAPABILITIES as CliAdapterManifest;
+    const adapter = { name: 'ptah-cli' as const, capabilities: () => manifest } as unknown as Parameters<typeof environment.resolveLanePolicy>[0];
+
+    expect(environment.resolveLanePolicy(adapter, {})).toMatchObject({
+      requested: { permission: 'plan', network: 'allow', permissionSource: 'built-in' },
+      permissionMode: 'plan',
+    });
+  });
+
   it('retains valid budget limits when another key is invalid', () => {
     const { environment, logger } = makeEnvironment({ config: {
       warnRatio: 2,

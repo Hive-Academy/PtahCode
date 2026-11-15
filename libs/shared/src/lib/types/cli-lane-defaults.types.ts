@@ -37,7 +37,7 @@ export const CLI_LANE_DEFAULTS_PATCH_SCHEMA = z.partialRecord(
 
 export type CliLaneDefaultsPatch = z.infer<typeof CLI_LANE_DEFAULTS_PATCH_SCHEMA>;
 
-const PERMISSIONS: readonly LanePermissionMode[] = ['yolo', 'auto-edit', 'ask', 'plan'];
+const PERMISSIONS: readonly LanePermissionMode[] = ['plan', 'ask', 'auto-edit', 'yolo'];
 const NETWORKS: readonly LaneNetworkMode[] = ['allow', 'deny'];
 
 export function resolveCliLaneDefaultPair(
@@ -46,20 +46,22 @@ export function resolveCliLaneDefaultPair(
 ): { permission?: LanePermissionMode; network?: LaneNetworkMode;
   permissionSource?: 'saved' | 'built-in'; networkSource?: 'saved' | 'built-in' }
   | { unsupported: string } {
-  const permissions = saved.permission ? [saved.permission] : PERMISSIONS;
+  const permissions: readonly LanePermissionMode[] = saved.permission
+    ? [saved.permission]
+    : (['plan'] as const);
   const networks = saved.network ? [saved.network] : NETWORKS;
   for (const permission of permissions) {
-    const support = capabilities.permissionModes[permission];
+    const support = capabilities.permissionModes[permission as LanePermissionMode];
     if (support?.state !== 'supported') continue;
     for (const network of networks) {
       if (capabilities.networkModes[network].state !== 'supported' || !support.networkModes.includes(network)) continue;
-      return { permission, network,
+      return { permission: permission as LanePermissionMode, network,
         permissionSource: saved.permission ? 'saved' : 'built-in',
         networkSource: saved.network ? 'saved' : 'built-in' };
     }
   }
   if (saved.permission || saved.network) return { unsupported: 'Saved CLI lane default has no supported permission/network pair.' };
-  return {};
+  return { unsupported: 'Adapter does not support plan permission; no default possible.' };
 }
 
 /** Shared permission contract used by the Ptah CLI registry and settings RPC. */

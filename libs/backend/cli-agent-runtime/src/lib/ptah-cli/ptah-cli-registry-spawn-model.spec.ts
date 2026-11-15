@@ -349,7 +349,7 @@ describe('PtahCliRegistry.spawnAgent — model override resolution', () => {
 describe('PtahCliRegistry.spawnAgent — stderr classification (C1)', () => {
   it('routes benign lines to debug and error lines to warn, never calling logger.error', async () => {
     const harness = buildHarness(BASE_CONFIG);
-    await harness.registry.spawnAgent(BASE_CONFIG.id, 'do work');
+    await harness.registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'yolo' });
 
     const stderrCallback = harness.getCapturedOptions()?.stderr;
     expect(stderrCallback).toBeDefined();
@@ -413,6 +413,7 @@ describe('PtahCliRegistry.spawnAgent — resume prompt passes the caller task (T
 
     await harness.registry.spawnAgent(BASE_CONFIG.id, task, {
       resumeSessionId: 'prev-session-1',
+      permission: 'yolo',
     });
 
     const prompt = harness.getCapturedPrompt();
