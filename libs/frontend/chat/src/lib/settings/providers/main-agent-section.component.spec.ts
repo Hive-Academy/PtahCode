@@ -79,7 +79,11 @@ describe('MainAgentSectionComponent', () => {
   it('shows the next request\'s provider, model and effort, and the projected D16 badges in its header', () => {
     expect(query('routing-main-provider')?.textContent?.trim()).toBe('Claude (Subscription)');
     expect(query('routing-main-model')?.textContent?.trim()).toBe('Default (chosen by Claude)');
-    expect(query('routing-node-footer')?.textContent?.trim()).toBe('Effort: medium');
+    expect(query('routing-node-footer')?.textContent?.trim()).toBe('medium');
+    // One description list: the rows Provider, Model and Effort, in that order.
+    const list = element.querySelector('[data-ptah-pattern="description-list"] dl');
+    expect(Array.from(list?.querySelectorAll('dt') ?? []).map((term) => term.textContent?.trim())).toEqual(['Provider', 'Model', 'Effort']);
+    expect(list?.contains(query('routing-node-footer'))).toBe(true);
     expect(query('routing-node-status')?.textContent?.trim()).toBe('Active');
     const badges = query('routing-node-badges');
     expect(badges?.contains(query('routing-node-status'))).toBe(true);
@@ -116,22 +120,47 @@ describe('MainAgentSectionComponent', () => {
     expect(query('routing-node-main-agent')?.textContent).toContain('Choose a provider to start the main agent.');
   });
 
-  it('"Reassign" is a primary btn-sm stretched over the block, and asks the page to open the Main Agent popover', () => {
-    const reassign = query('routing-node-action');
-    expect(reassign?.textContent?.trim()).toBe('Reassign');
-    expect(reassign?.classList.contains('btn-primary')).toBe(true);
-    expect(reassign?.classList.contains('btn-sm')).toBe(true);
-    expect(reassign?.classList.contains('after:inset-0')).toBe(true);
-    reassign?.click();
+  const changeButton = () => Array.from(element.querySelectorAll<HTMLButtonElement>('button'))
+    .filter((button) => button.textContent?.trim() === 'Change main agent');
+
+  it('"Change main agent" is one normal ptahButton (no stretched link), named for provider, model and effort', () => {
+    const buttons = changeButton();
+    expect(buttons).toHaveLength(1);
+    const [change] = buttons;
+    expect(change.getAttribute('aria-label')).toBe('Change main agent: provider, model and effort');
+    expect(change.getAttribute('data-testid')).toBe('routing-node-action');
+    expect(change.hasAttribute('data-ptah-button')).toBe(true);
+    expect(change.className).not.toMatch(/after:/);
+    change.click();
     expect(fixture.componentInstance.reassigned).toBe(1);
+  });
+
+  it('puts the change button in the same container as the provider value, directly after it (not in a far-right wrapper)', () => {
+    const [change] = changeButton();
+    const provider = query('routing-main-provider');
+    expect(change.parentElement).toBe(provider?.parentElement);
+    expect(provider?.nextElementSibling).toBe(change);
+    expect(change.closest('[data-ptah-description-actions]')).toBeNull();
+    expect(change.closest('[data-testid="routing-main-provider-row"]')).not.toBeNull();
+    expect(element.querySelector('.ml-auto')).toBeNull();
+  });
+
+  it('keeps the change button when there is no provider, so the user can choose one', () => {
+    state.route.set(ready({ ...ROUTE, driverProviderId: null }));
+    fixture.detectChanges();
+    expect(changeButton()).toHaveLength(1);
+    expect(changeButton()[0].parentElement?.textContent).toContain('Choose a provider to start the main agent.');
   });
 
   it('a loading route shows the skeleton; a failed one offers Retry of the route read', () => {
     state.route.set(loading());
     fixture.detectChanges();
     expect(query('routing-node-skeleton')).not.toBeNull();
+    expect(query('routing-node-main-agent')?.getAttribute('aria-busy')).toBe('true');
     state.route.set(failed());
     fixture.detectChanges();
+    expect(query('routing-node-error')?.getAttribute('role')).toBe('alert');
+    expect(changeButton()).toHaveLength(1);
     query('routing-node-retry')?.click();
     expect(state.refreshRoute).toHaveBeenCalledTimes(1);
   });
