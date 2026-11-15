@@ -53,7 +53,7 @@ The session that changes the state of a phase updates its row in the same pull r
 | 1 | Phase contract | - | #1147 | merged |
 | 2 | Executor neutrality | TASK_2026_1161_9efb | #1174 | merged |
 | 3 | Setup skills by stack | - | #1185 | merged |
-| 4 | Retire role subagents | TASK_2026_1175_2690 | #1267 (step 0a, merged), #1290 (step 0b, merged), #1307 (step 1) | in review (step 1: implementation roles retired) |
+| 4 | Retire role subagents | TASK_2026_1175_2690 | #1267 (step 0a, merged), #1290 (step 0b, merged), #1307 (step 1, merged), #1320 (step 2) | in review (step 2: verification roles retired) |
 | 5 | Remove agent generation | - | - | not started |
 | 6 | General workflow | - | - | not started |
 
