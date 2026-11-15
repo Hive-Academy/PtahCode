@@ -778,7 +778,8 @@ export class CodeExecutionMCP
   }
 
   /**
-   * Give back a root kept by {@link retainRoot}. Idempotent, never rejects.
+   * Give back one hold on a root kept by {@link retainRoot}. Call once per
+   * successful retain; a release of an unretained root does nothing. Never rejects.
    *
    * The entry goes away in the reconcile that follows, unless the folder is
    * also an open workspace folder, which keeps its own entry.
