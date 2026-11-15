@@ -1,7 +1,37 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readBuildIdentity, readDistributionChannel } from './build-identity';
+import {
+  formatBuildIdentitySummary,
+  readBuildIdentity,
+  readDistributionChannel,
+} from './build-identity';
+
+describe('formatBuildIdentitySummary', () => {
+  it('includes a validated commit', () => {
+    expect(
+      formatBuildIdentitySummary('1.2.3', 'direct', {
+        kind: 'local-production',
+        gitSha: 'a'.repeat(40),
+      }),
+    ).toBe(`Electron build identity: version=1.2.3 channel=direct commit=${'a'.repeat(40)}`);
+  });
+
+  it('reports unknown when metadata is missing', () => {
+    expect(formatBuildIdentitySummary('1.2.3', 'microsoft-store', null)).toBe(
+      'Electron build identity: version=1.2.3 channel=microsoft-store commit=unknown',
+    );
+  });
+
+  it('reports unknown when metadata is malformed', () => {
+    expect(
+      formatBuildIdentitySummary('1.2.3', 'direct', {
+        kind: 'local-production',
+        gitSha: 'not-a-sha',
+      }),
+    ).toBe('Electron build identity: version=1.2.3 channel=direct commit=unknown');
+  });
+});
 
 describe('readDistributionChannel', () => {
   it('reports the Microsoft Store channel when Electron sets windowsStore', () => {
