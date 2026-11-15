@@ -9,10 +9,24 @@ import { cliCapabilityView } from './cli-capability-view';
   standalone: true,
   imports: [LucideAngularModule, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<div class="mt-1 flex min-h-6 flex-wrap items-center gap-1 text-xs" data-testid="cli-capability-summary">
+  // The badge look sets a fixed height, nowrap and overflow: hidden. A capability
+  // value can be long, so these pills wrap to more lines and grow in height.
+  styles: `
+    .capability-summary { margin-top: var(--ptah-space-1); gap: var(--ptah-space-1); }
+    .capability-pill {
+      height: auto;
+      min-height: var(--ptah-badge-h-sm);
+      gap: var(--ptah-space-1);
+      padding-block: calc(var(--ptah-space-1) / 2);
+      white-space: normal;
+      overflow: visible;
+      overflow-wrap: anywhere;
+    }
+  `,
+  template: `<div class="capability-summary flex min-h-6 flex-wrap items-center text-xs" data-testid="cli-capability-summary">
     @for (badge of view().badges; track badge.label) {
       <span ptahBadge [tone]="badge.state === 'unverified' ? 'warn' : 'neutral'"
-        class="h-auto min-h-5 gap-1 whitespace-normal py-0.5 text-left leading-snug border text-base-content"
+        class="capability-pill text-left leading-snug border text-base-content"
         [attr.aria-label]="badge.label + ': ' + badge.value.replaceAll(' · ', ', ')">
         @if (badge.state === 'unverified') { <lucide-angular [img]="HelpIcon" class="h-3 w-3" aria-hidden="true" /> }
         @else if (badge.state === 'unsupported') { <lucide-angular [img]="SlashIcon" class="h-3 w-3" aria-hidden="true" /> }
