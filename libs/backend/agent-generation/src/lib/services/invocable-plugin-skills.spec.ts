@@ -8,6 +8,7 @@ jest.mock('./subagent-tool-allowlist', () => {
   );
   const policy: Readonly<Record<string, readonly string[]>> = {
     ...actual.SUBAGENT_DISALLOWED_TOOLS,
+    reviewer: [],
     'skill-less-fixture': ['Skill'],
   };
   const has = (type: string): boolean =>
@@ -66,33 +67,25 @@ describe('selectInvocablePluginSkills', () => {
   });
 
   it('lists no skill when the disabled-skill policy is unknown', () => {
-    expect(
-      selectInvocablePluginSkills('team-leader', skills, null),
-    ).toEqual([]);
+    expect(selectInvocablePluginSkills('reviewer', skills, null)).toEqual([]);
   });
 
   it('excludes a disabled skill for a known type that may invoke Skill', () => {
     expect(
-      selectInvocablePluginSkills('team-leader', skills, [
-        'review-code',
-      ]),
+      selectInvocablePluginSkills('reviewer', skills, ['review-code']),
     ).toEqual([skills[0]]);
   });
 
   it('excludes a skill by its directory id when its name differs', () => {
     expect(
-      selectInvocablePluginSkills(
-        'team-leader',
-        [acmeReview],
-        ['code-review'],
-      ),
+      selectInvocablePluginSkills('reviewer', [acmeReview], ['code-review']),
     ).toEqual([]);
   });
 
   it('keeps a skill whose name equals another skill disabled directory id', () => {
     expect(
       selectInvocablePluginSkills(
-        'team-leader',
+        'reviewer',
         [acmeReview, nameCollision],
         ['code-review'],
       ),
@@ -102,7 +95,7 @@ describe('selectInvocablePluginSkills', () => {
   it('does not exclude a skill by its frontmatter name', () => {
     expect(
       selectInvocablePluginSkills(
-        'team-leader',
+        'reviewer',
         [acmeReview],
         ['Acme Code Review'],
       ),
@@ -110,8 +103,6 @@ describe('selectInvocablePluginSkills', () => {
   });
 
   it('keeps every skill when nothing is disabled', () => {
-    expect(
-      selectInvocablePluginSkills('team-leader', skills, []),
-    ).toEqual(skills);
+    expect(selectInvocablePluginSkills('reviewer', skills, [])).toEqual(skills);
   });
 });

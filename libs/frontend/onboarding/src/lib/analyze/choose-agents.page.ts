@@ -421,7 +421,15 @@ export class ChooseAgentsPage implements OnInit {
   protected async openPreview(agentId?: string): Promise<void> {
     const binding = this.binding();
     const ids = agentId ? [agentId] : [...this.store.selection()];
-    if (!binding || ids.length === 0) return;
+    if (
+      !binding ||
+      ids.length === 0 ||
+      ids.some(
+        (id) =>
+          !this.store.recommendations().some((agent) => agent.agentId === id),
+      )
+    )
+      return;
     this.previewIds.set(ids);
     this.previewingRow.set(agentId !== undefined);
     this.submitError.set(null);
@@ -444,6 +452,14 @@ export class ChooseAgentsPage implements OnInit {
     const ids = this.previewIds().length
       ? this.previewIds()
       : [...this.store.selection()];
+    if (
+      ids.length === 0 ||
+      ids.some(
+        (id) =>
+          !this.store.recommendations().some((agent) => agent.agentId === id),
+      )
+    )
+      return;
     const confirmed = await this.preview.confirm(ids);
     if (this.destroyed) return;
     if (!confirmed.submit) return;

@@ -42,7 +42,7 @@ Return a markdown table with: path, issue, severity, suggested fix.
 | ------------- | -------- | --------------------------------------------------------------- |
 | `name`        | Yes      | Unique ID in the workspace.                                     |
 | `description` | Yes      | Tells the model when to use the agent.                          |
-| `model`       | No       | The model for this agent. The built-in templates use `opus` or `sonnet`. |
+| `model`       | No       | The model for this custom agent. |
 
 ## Create a custom agent
 

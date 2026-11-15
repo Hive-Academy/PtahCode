@@ -76,6 +76,31 @@ describe('AgentRecommendationListComponent', () => {
     category: 'planning',
   });
 
+  it('shows an empty built-in state and disables selection controls', () => {
+    const el = render([]);
+    expect(
+      el.querySelector('[data-testid="agent-recommendation-empty"]')
+        ?.textContent,
+    ).toContain('No built-in agents available');
+    expect(
+      el.querySelectorAll('[data-testid="agent-recommendation-row"]'),
+    ).toHaveLength(0);
+    expect(
+      (
+        el.querySelector(
+          '[data-testid="agent-recommendation-select-recommended"]',
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        el.querySelector(
+          '[data-testid="agent-recommendation-clear"]',
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+  });
+
   it('groups agents like the legacy list and puts unknown categories in Other', () => {
     const stray: AgentRecommendation = {
       ...unknown,

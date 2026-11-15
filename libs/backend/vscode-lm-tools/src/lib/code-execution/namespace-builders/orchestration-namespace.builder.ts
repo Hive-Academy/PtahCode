@@ -47,20 +47,10 @@ const STRATEGY_PHASE_SEQUENCE: Record<string, OrchestrationPhase[]> = {
   CREATIVE: ['planning', 'design', 'implementation', 'complete'],
 };
 
-/**
- * Agent or phase recommendations by workflow phase
- */
-const PHASE_AGENTS: Record<OrchestrationPhase, string[]> = {
-  planning: [],
-  design: [],
-  implementation: ['team-leader'],
-  qa: [],
-  complete: [],
-};
-
 const PHASE_KIND_BY_PHASE: Partial<Record<OrchestrationPhase, PhaseKind>> = {
   planning: 'plan',
   design: 'architecture',
+  implementation: 'batch',
   qa: 'tests',
 };
 
@@ -300,22 +290,12 @@ export function buildOrchestrationNamespace(
         };
       }
       if (state.lastCheckpoint.status === 'rejected') {
-        const agents = PHASE_AGENTS[state.phase];
         const rejectedPhaseAction = phaseAction(state.phase, {
           taskId,
           phase: state.phase,
           feedback: 'Checkpoint rejected, please revise',
         });
         if (rejectedPhaseAction) return rejectedPhaseAction;
-        return {
-          action: 'invoke-agent',
-          agent: agents[0] || 'team-leader',
-          context: {
-            taskId,
-            phase: state.phase,
-            feedback: 'Checkpoint rejected, please revise',
-          },
-        };
       }
       const requirementsMet = await checkPhaseRequirementsMet(
         taskId,
@@ -323,19 +303,12 @@ export function buildOrchestrationNamespace(
       );
 
       if (!requirementsMet) {
-        const agents = PHASE_AGENTS[state.phase];
         const missingInputsPhaseAction = phaseAction(
           state.phase,
           { taskId, phase: state.phase },
           ['task-context'],
         );
         if (missingInputsPhaseAction) return missingInputsPhaseAction;
-        return {
-          action: 'invoke-agent',
-          agent: agents[0] || 'team-leader',
-          context: { taskId, phase: state.phase },
-          requiredInputs: ['task-context'],
-        };
       }
       const nextPhase = getNextPhase(state.phase, state.strategy);
 
@@ -345,7 +318,6 @@ export function buildOrchestrationNamespace(
           context: { taskId, completedAt: new Date().toISOString() },
         };
       }
-      const nextAgents = PHASE_AGENTS[nextPhase];
       const nextPhaseAction = phaseAction(nextPhase, {
         taskId,
         previousPhase: state.phase,
@@ -353,13 +325,9 @@ export function buildOrchestrationNamespace(
       });
       if (nextPhaseAction) return nextPhaseAction;
       return {
-        action: 'invoke-agent',
-        agent: nextAgents[0] || 'team-leader',
-        context: {
-          taskId,
-          previousPhase: state.phase,
-          nextPhase: nextPhase,
-        },
+        action: 'invoke-phase',
+        phaseKind: 'completion',
+        context: { taskId, previousPhase: state.phase, nextPhase },
       };
     },
   };

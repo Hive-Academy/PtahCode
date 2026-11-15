@@ -1,7 +1,4 @@
-import {
-  Bot,
-  Users,
-} from 'lucide-angular';
+import { Bot } from 'lucide-angular';
 import type { LucideIconData } from 'lucide-angular';
 import type { CliType } from '@ptah-extension/shared';
 
@@ -105,9 +102,7 @@ export function cliMarkFor(
 }
 
 /** THE role-icon table: one lucide glyph per workspace agent type. */
-export const AGENT_ROLE_ICONS: Readonly<Record<string, LucideIconData>> = {
-  'team-leader': Users,
-};
+export const AGENT_ROLE_ICONS: Readonly<Record<string, LucideIconData>> = {};
 
 /** The glyph of a sub-agent or background agent type; `Bot` when unknown. */
 export function roleIconFor(

@@ -49,7 +49,7 @@ const TEMPLATES_DIR = path.join(
 const PARTIALS_DIR = path.join(TEMPLATES_DIR, SHARED_PARTIALS_DIR);
 
 /** The corpus is a fixed set of specialists, not a growing directory. */
-const EXPECTED_TEMPLATE_COUNT = 1;
+const EXPECTED_TEMPLATE_COUNT = 0;
 
 function templateFiles(): string[] {
   return fs
@@ -63,6 +63,8 @@ function read(name: string): string {
 }
 
 const FILES = templateFiles();
+const eachTemplate =
+  FILES.length > 0 ? it.each(FILES) : it.skip.each(['no shipped template']);
 
 /** Same loose id capture the resolver uses — a malformed id must be VISIBLE. */
 const MARKER_LINE = /^[ \t]*<!--[ \t]*(\/?)STATIC:(.*?)[ \t]*-->[ \t]*$/gm;
@@ -155,19 +157,19 @@ describe('template corpus', () => {
 // ---------------------------------------------------------------------------
 
 describe('template frontmatter', () => {
-  it.each(FILES)('%s carries exactly one frontmatter block', (file) => {
+  eachTemplate('%s carries exactly one frontmatter block', (file) => {
     const body = matter(read(file)).content;
     // A second block would sit at the very top of what gray-matter returned.
     expect(body.trimStart().startsWith('---')).toBe(false);
   });
 
-  it.each(FILES)('%s declares templateId and templateVersion', (file) => {
+  eachTemplate('%s declares templateId and templateVersion', (file) => {
     const data = matter(read(file)).data;
     expect(typeof data['templateId']).toBe('string');
     expect(typeof data['templateVersion']).toBe('string');
   });
 
-  it.each(FILES)(
+  eachTemplate(
     '%s has name === templateId minus the version suffix',
     (file) => {
       const data = matter(read(file)).data;
@@ -178,7 +180,7 @@ describe('template frontmatter', () => {
     },
   );
 
-  it.each(FILES)('%s declares a description', (file) => {
+  eachTemplate('%s declares a description', (file) => {
     const data = matter(read(file)).data;
     expect(typeof data['description']).toBe('string');
     expect(String(data['description']).trim().length).toBeGreaterThan(0);
@@ -190,7 +192,7 @@ describe('template frontmatter', () => {
 // ---------------------------------------------------------------------------
 
 describe('STATIC markers', () => {
-  it.each(FILES)('%s uses only registered block ids', (file) => {
+  eachTemplate('%s uses only registered block ids', (file) => {
     const offenders = markersOf(matter(read(file)).content)
       .filter(
         (m) =>
@@ -201,7 +203,7 @@ describe('STATIC markers', () => {
     expect(offenders).toEqual([]);
   });
 
-  it.each(FILES)('%s pairs every marker, without nesting', (file) => {
+  eachTemplate('%s pairs every marker, without nesting', (file) => {
     const markers = markersOf(matter(read(file)).content);
     const problems: string[] = [];
     let open: Marker | undefined;
@@ -249,14 +251,14 @@ describe('STATIC markers', () => {
  * section boundary the rest of the file is structured around.
  */
 describe('LLM markers', () => {
-  it.each(FILES)('%s uses only well-formed LLM ids', (file) => {
+  eachTemplate('%s uses only well-formed LLM ids', (file) => {
     const offenders = markersOf(matter(read(file)).content, LLM_MARKER_LINE)
       .filter((m) => !/^[A-Z_]+$/.test(m.id))
       .map((m) => `line ${m.line}: ${JSON.stringify(m.id)}`);
     expect(offenders).toEqual([]);
   });
 
-  it.each(FILES)('%s pairs every LLM marker, without nesting', (file) => {
+  eachTemplate('%s pairs every LLM marker, without nesting', (file) => {
     const markers = markersOf(matter(read(file)).content, LLM_MARKER_LINE);
     const problems: string[] = [];
     let open: Marker | undefined;
@@ -281,7 +283,7 @@ describe('LLM markers', () => {
     expect(problems).toEqual([]);
   });
 
-  it.each(FILES)('%s never nests an LLM pair inside a STATIC pair', (file) => {
+  eachTemplate('%s never nests an LLM pair inside a STATIC pair', (file) => {
     // A shared partial is one canonical text; a tailored section is per-project.
     // Nesting one in the other means the canonical block's content depends on
     // which repository the wizard ran in, which is the property `_shared/`
@@ -296,7 +298,7 @@ describe('LLM markers', () => {
     expect(offenders).toEqual([]);
   });
 
-  it.each(FILES)(
+  eachTemplate(
     '%s gives every LLM pair a non-empty fallback under a "## " heading',
     (file) => {
       const body = matter(read(file)).content;
@@ -334,7 +336,7 @@ describe('LLM markers', () => {
    * emitted agent file, where it reads as a token the agent is expected to
    * understand.
    */
-  it.each(FILES)('%s carries no {{VAR}} placeholder', (file) => {
+  eachTemplate('%s carries no {{VAR}} placeholder', (file) => {
     const body = matter(read(file)).content;
     const offenders = body
       .split('\n')
@@ -550,17 +552,22 @@ describe('heading uniqueness', () => {
     expect(cloned).toEqual([]);
   });
 
-  it('has a skeleton allowlist that every template actually uses', () => {
-    // A skeleton entry no template carries is a stale exemption, and a stale
-    // exemption silently widens the rule above.
-    const used = new Set(
-      FILES.flatMap((file) => sectionsOf(file).map((s) => s.heading)),
-    );
-    const unused = SKELETON_HEADINGS.filter((e) => !used.has(e.heading)).map(
-      (e) => e.heading,
-    );
-    expect(unused).toEqual([]);
-  });
+  // Phase 5 removes generation; this guard needs a template corpus to be meaningful.
+  const skeletonGuard = FILES.length > 0 ? it : it.skip;
+  skeletonGuard(
+    'has a skeleton allowlist that every template actually uses',
+    () => {
+      // A skeleton entry no template carries is a stale exemption, and a stale
+      // exemption silently widens the rule above.
+      const used = new Set(
+        FILES.flatMap((file) => sectionsOf(file).map((s) => s.heading)),
+      );
+      const unused = SKELETON_HEADINGS.filter((e) => !used.has(e.heading)).map(
+        (e) => e.heading,
+      );
+      expect(unused).toEqual([]);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -942,7 +949,6 @@ const SKILL_USE_PHRASES = [
   'required miss stops the dependent work',
 ] as const;
 
-
 describe('partial resolution', () => {
   const resolver = new TemplatePartialResolver({
     debug: jest.fn(),
@@ -951,7 +957,7 @@ describe('partial resolution', () => {
     error: jest.fn(),
   } as never);
 
-  it.each(FILES)('%s resolves and expands its shared blocks', async (file) => {
+  eachTemplate('%s resolves and expands its shared blocks', async (file) => {
     const parsed = matter(read(file));
     const raw = parsed.data['variables'];
     const variables =
@@ -982,7 +988,7 @@ describe('partial resolution', () => {
     const withBlock = FILES.filter((file) =>
       read(file).includes('STATIC:TASK_SPEC_CONTRACT'),
     );
-    expect(withBlock.length).toBeGreaterThan(0);
+    expect(withBlock.length).toBe(0);
 
     for (const file of withBlock) {
       const { blocks } = await resolveTemplate(file);
@@ -1025,14 +1031,8 @@ describe('partial resolution', () => {
 // ---------------------------------------------------------------------------
 
 const TOOLING: SharedBlockId = 'TOOLING_PRECEDENCE';
-const TASK_SPEC: SharedBlockId = 'TASK_SPEC_CONTRACT';
-const CLARIFY: SharedBlockId = 'CLARIFICATION_PROTOCOL';
-const REPLACE: SharedBlockId = 'REPLACEMENT_POLICY';
-const DELEGATE: SharedBlockId = 'CLI_DELEGATION';
 
-const ROLE_PARTIALS: Readonly<Record<string, readonly SharedBlockId[]>> = {
-  'team-leader': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
-};
+const ROLE_PARTIALS: Readonly<Record<string, readonly SharedBlockId[]>> = {};
 
 function staticIdsOf(file: string): string[] {
   return markersOf(matter(read(file)).content)
@@ -1069,7 +1069,7 @@ describe('role grants', () => {
     );
   });
 
-  it.each(FILES)(
+  eachTemplate(
     '%s carries exactly the partials its role is granted',
     (file) => {
       const role = file.replace('.template.md', '');
@@ -1143,7 +1143,7 @@ describe('task-spec audience', () => {
     'zero-pad',
   ];
 
-  it.each(FILES)(
+  eachTemplate(
     '%s receives allocation text only if it coordinates',
     async (file) => {
       const role = file.replace('.template.md', '');
@@ -1160,40 +1160,6 @@ describe('task-spec audience', () => {
       (file) =>
         taskSpecAudienceFor(file.replace('.template.md', '')) === 'coordinator',
     );
-    expect(coordinators).toEqual([
-      'team-leader.template.md',
-    ]);
-  });
-});
-
-describe('team-leader return contract', () => {
-  const HEADER_LABELS = [
-    'DECOMPOSITION COMPLETE',
-    'DECOMPOSITION BLOCKED',
-    'BATCH [N] PARTIAL FAILURE',
-    'NEEDS REVIEW',
-    'BATCH [N] NOT ACCEPTED',
-    'BATCH [N] COMPLETE',
-    'ALL BATCHES COMPLETE',
-    'TASK COMPLETE',
-  ];
-
-  it.each(HEADER_LABELS)(
-    'defines the literal header the orchestrator matches: %s',
-    async (label) => {
-      const { content } = await resolveTemplate('team-leader.template.md');
-      expect(content).toContain('- `' + label + '` — ');
-    },
-  );
-
-  it('states the one envelope and the NEEDS REVIEW suffix', async () => {
-    const { content } = await resolveTemplate('team-leader.template.md');
-    expect(content).toContain('## <HEADER> - TASK_YYYY_NNN');
-    expect(content).toContain('## NEEDS REVIEW - TASK_YYYY_NNN Batch [N]');
-  });
-
-  it('carries the batch executor prompt once, not once per variant', async () => {
-    const { content } = await resolveTemplate('team-leader.template.md');
-    expect(content.split('You are assigned Batch').length - 1).toBe(1);
+    expect(coordinators).toEqual([]);
   });
 });
