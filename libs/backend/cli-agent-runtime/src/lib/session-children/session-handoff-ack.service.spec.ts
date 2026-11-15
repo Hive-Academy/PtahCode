@@ -189,7 +189,7 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     expect(h.closer.close).toHaveBeenCalledTimes(1);
   });
 
-  it('retries after close succeeded but closeCompleted persistence failed', async () => {
+  it('reports closed when closeCompleted persistence failed, and a repeated ack persists it', async () => {
     const h = harness();
     const store = h.makeStore();
     await record(store);
@@ -201,7 +201,10 @@ describe('SessionHandoffService acknowledgement recovery', () => {
       .mockRejectedValueOnce(new Error('disk unavailable'))
       .mockImplementation(original);
     expect(await service.acknowledge(h.request)).toMatchObject({
-      status: 'retryable-failure',
+      status: 'closed',
+    });
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closePending',
     });
     expect(await service.acknowledge(h.request)).toMatchObject({
       status: 'closed',

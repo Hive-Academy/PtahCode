@@ -147,12 +147,13 @@ export class SessionHandoffAckStore {
 
   private async locate(
     predicate: (record: HandoffAckRecord) => boolean,
+    complete = false,
   ): Promise<AckMatch | undefined> {
     if (!this.storage)
       throw new Error('handoff acknowledgement storage unavailable');
     const rootStorage = this.storage;
     let best: AckMatch | undefined;
-    for (const { storage, state } of await this.readCandidates()) {
+    for (const { storage, state } of await this.readCandidates(complete)) {
       state.records.forEach((record, index) => {
         if (!predicate(record)) return;
         const match = {
@@ -205,7 +206,12 @@ export class SessionHandoffAckStore {
       }
     | undefined
   > {
-    const found = await this.locate((record) => record.predecessorTabId === id);
+    // Mutations need every document: with the newer copy unreadable, a stale
+    // duplicate would look authoritative. The ack path retries on rejection.
+    const found = await this.locate(
+      (record) => record.predecessorTabId === id,
+      true,
+    );
     if (!found) return undefined;
     return { state: found.state, storage: found.storage, index: found.index };
   }

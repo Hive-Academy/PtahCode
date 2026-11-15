@@ -146,6 +146,41 @@ describe('SessionHandoffAckStore', () => {
     expect(fixture.getRecords('/b')).toBeUndefined();
   });
 
+  it('refuses to mutate a stale copy while the document with the newer copy is unreadable', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/a', [{ ...baseRecord, generation: 1 }]);
+    fixture.setRecords('/b', [
+      {
+        ...baseRecord,
+        workspaceRoot: '/b',
+        successorTabId: 'new',
+        generation: 2,
+      },
+    ]);
+    const unavailable = new Error('delegate unavailable');
+    const failing = {
+      ...fixture.b,
+      getReadinessState: () => ({ status: 'not-ready' as const }),
+      whenReady: async () => {
+        throw unavailable;
+      },
+    };
+    const logger = { error: jest.fn() };
+    const storage = {
+      ...fixture.storage,
+      getStorageForWorkspace: (root: string) =>
+        root === '/a' ? fixture.a : root === '/b' ? failing : undefined,
+    };
+    const store = new SessionHandoffAckStore(storage, logger as never);
+    await expect(
+      store.transition('before', 'recorded', { state: 'closePending' }, 'old'),
+    ).rejects.toBe(unavailable);
+    await expect(
+      store.compareAndSet('before', 'recorded', { successorSdkId: 'sdk' }),
+    ).rejects.toBe(unavailable);
+    expect(fixture.getRecords('/a')?.[0].state).toBe('recorded');
+  });
+
   it('prefers the newer pinned duplicate for lookup, enumeration, and transition', async () => {
     const fixture = scopedFixture();
     fixture.setRecords('/a', [{ ...baseRecord, generation: 10 }]);

@@ -76,3 +76,15 @@ Checks: Prettier passed on five changed source/spec files. Targeted Jest passed 
 - Complete read for ordering: `readCandidates(complete)` rejects on any unreadable candidate when `complete` is set. `record()` uses it for the generation maximum, so a hidden record can never tie with a new write. New spec: "refuses to record while a candidate document is unreadable".
 
 Checks: targeted Jest 3 suites, 105 tests passed. `npm run verify -- -p cli-agent-runtime` passed. Review round 5 (codex): APPROVED.
+
+## PR bot finding fix (coordinator, round 6)
+
+- Finding: "Partial reads can authorize a superseded successor" (`session-handoff-ack.store.ts:189`, `:196`).
+  A failed cleanup can leave an old copy in one document. When the document with the newer copy is
+  unreadable, `readCandidates` skipped it, and `transition` selected the old copy.
+- Fix: `locate(predicate, complete)` passes `complete` to `readCandidates`. `stateForPredecessor`
+  (used by `transition`, `compareAndSet` and `discardStarting`) uses `complete = true`, so a mutation
+  rejects when any document is unreadable. The ack path catches the rejection and returns a retry.
+  Plain lookups still skip an unreadable document.
+- Spec: "refuses to mutate a stale copy while the document with the newer copy is unreadable".
+- Focused jest: 106 passed. Gate and review: see review-round-6.md and the PR test plan.

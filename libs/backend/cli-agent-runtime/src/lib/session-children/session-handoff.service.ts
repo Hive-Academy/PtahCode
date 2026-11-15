@@ -389,21 +389,23 @@ export class SessionHandoffService
       ) {
         return refused('predecessor close is unavailable in this host');
       }
-      if (record.state === 'recorded') {
-        const transition = await this.ackStore!.transition(
-          record.predecessorTabId,
-          'recorded',
-          { state: 'closePending' },
-          record.successorTabId,
+      // Every closable state goes through the guarded transition: it reads
+      // all documents and checks the successor, so a stale copy from a
+      // partial lookup cannot authorize the close. 'already' means the
+      // record is closePending for this successor; nothing is written.
+      const transition = await this.ackStore!.transition(
+        record.predecessorTabId,
+        'recorded',
+        { state: 'closePending' },
+        record.successorTabId,
+      );
+      if (transition === 'superseded')
+        return refused('handoff record superseded by a newer handoff');
+      if (transition === 'missing') {
+        this.logger?.warn(
+          `${LOG_PREFIX} handoff acknowledgement record disappeared for predecessor ${record.predecessorTabId} in workspace ${record.workspaceRoot}`,
         );
-        if (transition === 'superseded')
-          return refused('handoff record superseded by a newer handoff');
-        if (transition === 'missing') {
-          this.logger?.warn(
-            `${LOG_PREFIX} handoff acknowledgement record disappeared for predecessor ${record.predecessorTabId} in workspace ${record.workspaceRoot}`,
-          );
-          return retry('handoff record not yet available; retry later');
-        }
+        return retry('handoff record not yet available; retry later');
       }
       const closer = this.container!.resolve<HandoffPredecessorCloser>(
         CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER,
@@ -440,11 +442,17 @@ export class SessionHandoffService
         await closer.close(record.predecessorTabId, record.predecessorSdkId),
       );
       if (closeResult.status !== 'closed') return closeResult;
-      await this.ackStore!.compareAndSet(
-        record.predecessorTabId,
-        'closePending',
-        { state: 'closeCompleted' },
-      );
+      try {
+        await this.ackStore!.compareAndSet(
+          record.predecessorTabId,
+          'closePending',
+          { state: 'closeCompleted' },
+        );
+      } catch (error: unknown) {
+        // The predecessor is closed; report that. The record stays
+        // closePending, and a later acknowledgement finds the tab absent.
+        this.reportError('handoff close completion was not persisted', error);
+      }
       return { status: 'closed', reason: 'predecessor closed' };
     } catch (error: unknown) {
       this.reportError('handoff acknowledgement failed', error);
