@@ -293,6 +293,31 @@ describe('CodexApprovalBridge', () => {
     },
   );
 
+  it('routes a live native child approval to the parent sink', async () => {
+    const { bridge, request } = setup({
+      isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+    });
+    const result = await bridge.handle(
+      frame(command, 2, { threadId: 'child', turnId: 'cturn' }),
+      'cturn',
+      signal(),
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(result.response).toEqual({ decision: 'accept' });
+  });
+
+  it('fails closed for an unknown native child thread', async () => {
+    const { bridge, request } = setup({ isChildTurn: () => false });
+    expect(
+      await bridge.handle(
+        frame(command, 3, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      ),
+    ).toEqual({ response: { decision: 'cancel' } });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('ignores a late grant from a stale generation and records no rule', async () => {
     const pending = deferred<CodexApprovalDecision>();
     const { bridge, request, options, isCurrent } = setup();

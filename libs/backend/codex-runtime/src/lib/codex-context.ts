@@ -393,6 +393,9 @@ class RuntimeContext implements CodexContext {
           [...this.childTurns.values()].includes(correlation.turnId)) &&
         correlation.processGeneration === this.generation,
       isWritable: () => this.state !== 'closed',
+      isChildTurn: (threadId, turnId) =>
+        this.childTools.has(threadId) &&
+        this.childTurns.get(threadId) === turnId,
       close: this.onFailure,
       logger: this.options.logger,
       requestUserInput: this.options.requestUserInput,

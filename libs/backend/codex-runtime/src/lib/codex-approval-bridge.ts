@@ -52,6 +52,11 @@ export interface CodexApprovalBridgeOptions {
   readonly permissionLevel: () => CodexPermissionLevel;
   readonly isCurrent: (correlation: CodexApprovalCorrelation) => boolean;
   readonly isWritable: () => boolean;
+  /**
+   * True only for a live native child thread/turn of this parent. Its approvals
+   * route to the parent sink. Any other foreign thread fails closed.
+   */
+  readonly isChildTurn?: (threadId: string, turnId: string) => boolean;
   readonly close: () => void;
   readonly timeoutMs?: number;
   /** Production passes the runtime logger. Absent only in bridges built outside this package. */
@@ -304,7 +309,11 @@ export class CodexApprovalBridge {
     }
     const current = () =>
       !this.disposed &&
-      params['threadId'] === identity.threadId &&
+      (params['threadId'] === identity.threadId ||
+        (typeof params['threadId'] === 'string' &&
+          typeof params['turnId'] === 'string' &&
+          params['turnId'] === turnId &&
+          this.options.isChildTurn?.(params['threadId'], turnId) === true)) &&
       (params['turnId'] == null
         ? request.kind === 'mcpElicitation' && turnId.length > 0
         : params['turnId'] === turnId) &&
