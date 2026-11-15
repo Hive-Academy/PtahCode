@@ -226,7 +226,7 @@ describe('glass scene tint', () => {
       const on = rule(`:root[data-glass='on'] ${target}`);
       expect(off?.body).toContain('box-shadow: inset 0 1px 0 var(--surface-highlight);');
       expect(on?.body).toContain('box-shadow: inset 0 1px 0 var(--glass-glint);');
-      if (target.includes('.chat-bubble')) expect(specificity(on!.selector)).toBeGreaterThan(specificity(glassRaise));
+      if (target.includes('.chat-bubble') && on) expect(specificity(on.selector)).toBeGreaterThan(specificity(glassRaise));
     }
     // The lane row hover adds its lift to the inset edge in both modes.
     expect(rule('ptah-lane-event article:hover')?.body).toContain('inset 0 1px 0 var(--surface-highlight), 0 1px 3px');

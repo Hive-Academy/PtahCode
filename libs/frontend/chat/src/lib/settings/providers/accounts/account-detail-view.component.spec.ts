@@ -76,6 +76,16 @@ describe('AccountDetailViewComponent (flat panel)', () => {
   const nameInput = () => q<HTMLInputElement>('account-detail-rename-input') as HTMLInputElement;
   const text = () => el().textContent?.replace(/\s+/g, ' ') ?? '';
   const render = () => fixture.detectChanges();
+  /** Pattern hooks of `ptah-editable-section` (the Details section). */
+  const part = (hook: string) =>
+    el().querySelector<HTMLButtonElement>(`[data-testid="account-detail-details"] [data-ptah-editable-${hook}]`);
+  const editButton = () => part('edit') as HTMLButtonElement;
+  const saveButton = () => part('save') as HTMLButtonElement;
+  const openEdit = () => {
+    render();
+    editButton().click();
+    render();
+  };
   const type = (value: string) => {
     nameInput().value = value;
     nameInput().dispatchEvent(new Event('input'));
@@ -134,7 +144,9 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       expect(document.activeElement).toBe(heading);
       expect(q('account-detail-state')?.textContent?.trim()).toBe('Not signed in');
       expect(q('account-detail-state')?.querySelector('.rounded-full.bg-state-idle')).not.toBeNull();
-      expect(q('account-detail')?.className).toContain('space-y-6');
+      // Layout spacing comes from the pattern tokens, not raw spacing utilities.
+      expect(q('account-detail')?.className).toContain('gap-[var(--ptah-gap-group)]');
+      expect(q('account-detail')?.className).not.toMatch(/(^|\s)(space-[xy]|gap|p[xytrbl]?|m[xytrbl]?)-\d/);
     });
 
     it('emits back from "← Accounts"', () => {
@@ -188,7 +200,10 @@ describe('AccountDetailViewComponent (flat panel)', () => {
         for (const id of ['tablist', 'live', 'access-copy', 'no-runs', 'held', 'refusal', 'copy-status', 'overview-state', 'remove-copy', 'pending']) {
           expect(q(`account-detail-${id}`)).toBeNull();
         }
-        expect(el().querySelectorAll('[role="tab"], [role="tabpanel"], [aria-live]')).toHaveLength(0);
+        // The only live region is the (empty) dirty status of the sign-in action bar from ptah-form-actions.
+        expect(
+          el().querySelectorAll('[role="tab"], [role="tabpanel"], [aria-live]:not([data-ptah-form-actions-status])'),
+        ).toHaveLength(0);
         expect(text()).not.toMatch(/p-work-7c2a|verified|Set as default|Credentials|No runs are bound|Only you see|Waiting for you/);
       }
     });
@@ -226,7 +241,10 @@ describe('AccountDetailViewComponent (flat panel)', () => {
         expect(document.activeElement).toBe(control);
         control.click();
       }
-      expect(nameInput().readOnly).toBe(true);
+      expect(editButton().getAttribute('aria-disabled')).toBe('true');
+      editButton().click();
+      render();
+      expect(nameInput()).toBeNull();
       expect(host.events).toEqual([]);
       expect(el().querySelector('dialog')?.hasAttribute('open')).toBe(false);
     });
@@ -286,48 +304,129 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       host.accounts.set([account('signed-in'), OTHER]);
     });
 
-    it('shows Save only once the name is edited', () => {
+    it('Escape in the edit mode does not reach the drawer around the panel', () => {
+      render();
+      editButton().click();
+      render();
+      const outer = jest.fn();
+      document.addEventListener('keydown', outer);
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      nameInput().dispatchEvent(escape);
+      document.removeEventListener('keydown', outer);
+      expect(escape.defaultPrevented).toBe(true);
+      expect(outer).not.toHaveBeenCalled();
+    });
+
+    it('view mode shows the facts and no Name field; Edit opens the Name field with the committed name', () => {
+      render();
+      expect(nameInput()).toBeNull();
+      const facts = q('account-detail-facts') as HTMLElement;
+      expect(facts.querySelector('dl')?.getAttribute('aria-label')).toBe('Account details');
+      const rows = Array.from(facts.querySelectorAll('[data-ptah-description-row]')).map((row) => [
+        row.querySelector('dt')?.textContent?.trim(),
+        row.querySelector('dd')?.textContent?.trim(),
+      ]);
+      expect(rows).toEqual([
+        ['Name', 'Work'],
+        ['Status', 'Signed in'],
+        ['Active runs', '0'],
+      ]);
+      expect(editButton().getAttribute('aria-label')).toBe('Edit Details');
+      editButton().click();
       render();
       expect(nameInput().value).toBe('Work');
       expect(el().querySelector('label[for="account-detail-name"]')?.textContent?.trim()).toBe('Name');
-      expect(q('account-detail-rename-submit')).toBeNull();
+      expect(document.activeElement).toBe(nameInput());
+    });
+
+    it('enables Save only once the name is edited', () => {
+      openEdit();
+      expect(saveButton().textContent?.trim()).toBe('Save');
+      expect(saveButton().disabled).toBe(true);
       type('  Work  ');
-      expect(q('account-detail-rename-submit')).toBeNull();
+      expect(saveButton().disabled).toBe(true);
       type('   ');
-      expect(q('account-detail-rename-submit')).toBeNull();
+      expect(saveButton().disabled).toBe(true);
       type('Personal');
-      expect(btn('account-detail-rename-submit').textContent?.trim()).toBe('Save');
+      expect(saveButton().disabled).toBe(false);
     });
 
     it('emits the trimmed name, allowing a case-only change of its own name', () => {
-      render();
+      openEdit();
       type(' work ');
-      btn('account-detail-rename-submit').click();
+      saveButton().click();
       expect(host.renames).toEqual([{ profileId: 'p-work-7c2a', label: 'work' }]);
       expect(announce).not.toHaveBeenCalled();
     });
 
-    it('announces a duplicate as the alert "That name is already used." and emits nothing', () => {
-      render();
+    it('shows a duplicate as the section alert "That name is already used." and emits nothing', () => {
+      openEdit();
       type('team PLAN');
-      btn('account-detail-rename-submit').click();
-      expect(announce).toHaveBeenCalledWith(ACCOUNT_COPY.nameTaken, 'alert');
+      saveButton().click();
+      render();
       expect(host.renames).toEqual([]);
-      expect(q('account-detail-rename-error')).toBeNull();
+      expect(announce).not.toHaveBeenCalled();
+      expect(part('error')?.textContent?.trim()).toBe(ACCOUNT_COPY.nameTaken);
+      type('Personal');
+      expect(part('error')).toBeNull();
     });
 
-    it('resets the field to the committed name after a rename lands', () => {
+    it('marks the section busy while the rename is in flight', () => {
+      openEdit();
+      type('Personal');
+      host.busy.set('rename');
       render();
+      expect(saveButton().getAttribute('aria-busy') ?? saveButton().getAttribute('aria-disabled')).toBe('true');
+      expect(el().querySelector('[data-ptah-editable-form]')?.getAttribute('aria-busy')).toBe('true');
+      saveButton().click();
+      expect(host.renames).toEqual([]);
+    });
+
+    it('a landed rename closes edit mode and shows the committed name', () => {
+      openEdit();
       type('Personal');
       setAccount(account('signed-in', { label: 'Personal', revision: 2 }));
-      expect(nameInput().value).toBe('Personal');
-      expect(q('account-detail-rename-submit')).toBeNull();
+      render();
+      expect(nameInput()).toBeNull();
       expect(q('account-detail-heading')?.textContent).toBe('Personal');
+      expect(q('account-detail-facts')?.textContent).toContain('Personal');
+      editButton().click();
+      render();
+      expect(nameInput().value).toBe('Personal');
+    });
+
+    it('Cancel with a clean draft returns to view mode; with a dirty draft it asks first', () => {
+      openEdit();
+      part('cancel')?.click();
+      render();
+      expect(nameInput()).toBeNull();
+      openEdit();
+      type('Personal');
+      part('cancel')?.click();
+      render();
+      expect(el().querySelector('[data-ptah-editable-confirm-body]')?.textContent).toContain('Details');
+      (el().querySelector('[data-ptah-editable-discard]') as HTMLButtonElement).click();
+      render();
+      expect(nameInput()).toBeNull();
+      expect(host.renames).toEqual([]);
+      openEdit();
+      expect(nameInput().value).toBe('Work');
     });
   });
 
   describe('pending lock', () => {
-    it('makes Name readonly and Remove aria-disabled, both focusable and described by the sr-only lock reason', () => {
+    it('holds Edit while pending, with the lock icon and the reason as title', () => {
+      setAccount(account('pending'));
+      expect(editButton().getAttribute('aria-disabled')).toBe('true');
+      expect(editButton().getAttribute('title')).toBe(ACCOUNT_COPY.signInLocked);
+      editButton().click();
+      render();
+      expect(nameInput()).toBeNull();
+      expect(q('account-detail-locked')?.getAttribute('title')).toBe(ACCOUNT_COPY.signInLocked);
+    });
+
+    it('a sign-in that starts during edit makes Name readonly and Remove aria-disabled, both described by the sr-only lock reason', () => {
+      openEdit();
       setAccount(account('pending'));
       const input = nameInput();
       const remove = btn('account-detail-remove');
@@ -336,9 +435,9 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       expect(input.getAttribute('aria-disabled')).toBe('true');
       expect(remove.getAttribute('aria-disabled')).toBe('true');
       expect(remove.disabled).toBe(false);
-      const reasonId = input.getAttribute('aria-describedby') as string;
+      const reasonId = remove.getAttribute('aria-describedby') as string;
       expect(reasonId).toBeTruthy();
-      expect(remove.getAttribute('aria-describedby')).toBe(reasonId);
+      expect(input.getAttribute('aria-describedby')?.split(' ')).toContain(reasonId);
       const reason = el().querySelector(`#${reasonId}`) as HTMLElement;
       expect(reason.classList.contains('sr-only')).toBe(true);
       expect(reason.textContent).toBe(ACCOUNT_COPY.signInLocked);
@@ -349,10 +448,11 @@ describe('AccountDetailViewComponent (flat panel)', () => {
     });
 
     it('drops the lock when the sign-in ends', () => {
+      openEdit();
       setAccount(account('pending'));
       setAccount(account('signed-in'));
       expect(nameInput().readOnly).toBe(false);
-      expect(nameInput().getAttribute('aria-describedby')).toBeNull();
+      expect(nameInput().getAttribute('aria-describedby') ?? '').not.toContain('account-detail-lock-reason');
       expect(btn('account-detail-remove').getAttribute('aria-disabled')).toBeNull();
       expect(q('account-detail-locked')).toBeNull();
     });
@@ -403,16 +503,21 @@ describe('AccountDetailViewComponent (flat panel)', () => {
     });
   });
 
-  it('a different account resets the draft, closes the disclosure and focuses its heading', () => {
-    openTerminal();
+  it('a different account resets the draft, leaves edit mode, closes the disclosure and focuses its heading', () => {
+    openEdit();
     type('Draft');
+    openTerminal();
     btn('elsewhere').focus();
     host.operation.set(null);
     host.fallback.set(null);
     setAccount(OTHER);
-    expect(nameInput().value).toBe('Team plan');
+    render();
+    expect(nameInput()).toBeNull();
     expect(q('account-detail-fallback')).toBeNull();
     expect(document.activeElement).toBe(q('account-detail-heading'));
+    editButton().click();
+    render();
+    expect(nameInput().value).toBe('Team plan');
   });
 
   describe('a push that ends the pending sign-in (B-2)', () => {

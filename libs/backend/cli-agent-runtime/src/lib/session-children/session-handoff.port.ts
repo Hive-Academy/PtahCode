@@ -41,7 +41,8 @@ export type SessionHandoffRefusalCode =
   /** `handoffPath` is not an existing file inside an open workspace folder. */
   | 'handoff-file-missing'
   /** The host failed to start the new session. */
-  | 'session-start-failed';
+  | 'session-start-failed'
+  | 'session-start-timeout';
 
 export type SessionHandoffResult =
   | {
