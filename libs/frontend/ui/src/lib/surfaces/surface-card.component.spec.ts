@@ -259,6 +259,30 @@ describe('SurfaceCardComponent', () => {
     expect(fixture.componentInstance.activations).toBe(2);
   });
 
+  it('emits activated exactly once per Enter/Space on the activator', () => {
+    const { fixture, by, update } = setup();
+    update((h) => { h.interactive.set(true); h.label.set('Open details'); });
+    const activator = by('surface-card-activator') as HTMLButtonElement;
+    activator.click();
+    expect(fixture.componentInstance.activations).toBe(1);
+    activator.click();
+    expect(fixture.componentInstance.activations).toBe(2);
+  });
+
+  it('ensures non-interactive card has no tabindex', () => {
+    const { card } = setup();
+    expect(card().getAttribute('tabindex')).toBeNull();
+  });
+
+  it('prevents wrapper keyboard events from triggering activation', () => {
+    const { fixture, card, by, update } = setup();
+    update((h) => { h.interactive.set(true); h.label.set('Open details'); });
+    const wrapper = card();
+    wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(fixture.componentInstance.activations).toBe(0);
+  });
+
   describe('mouse activation', () => {
     function interactive() {
       const ctx = setup();

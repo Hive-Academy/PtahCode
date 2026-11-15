@@ -88,7 +88,7 @@ function isNestedControl(el: Element): boolean {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events,@angular-eslint/template/interactive-supports-focus -->
+    <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events,@angular-eslint/template/interactive-supports-focus -- pointer-only delegate; the .ptah-card-activator button is the keyboard and focus target -->
     <div
       [class.rounded-xl]="isLegacy()"
       [class.ptah-card]="!isLegacy()"
