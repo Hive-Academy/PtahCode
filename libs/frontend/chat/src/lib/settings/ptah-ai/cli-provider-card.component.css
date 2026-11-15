@@ -7,4 +7,26 @@
 }
 .test-button { min-width: 6.5rem; }
 .test-status { min-height: 1.25rem; }
+.defaults-grid {
+  --ptah-field-border: var(--ptah-border-color-strong);
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  column-gap: var(--ptah-gap-inline);
+  row-gap: var(--ptah-gap-label);
+}
+.defaults-heading { grid-column: 1 / -1; min-height: var(--ptah-control-h-xs); }
+.credential-slot[data-has-reset] { padding-right: calc(var(--ptah-control-h-xs) + var(--ptah-gap-label)); }
+.defaults-grid ptah-native-popover { min-width: 0; }
+.default-trigger { width: 100%; }
+.default-trigger[data-busy] { opacity: 0.6; cursor: wait; }
+:host ::ng-deep .defaults-grid .ptah-field__label {
+  top: calc(var(--ptah-border-width) * -1);
+  transform: translateY(-50%);
+  background-color: var(--ptah-field-notch-bg);
+  font-size: var(--ptah-field-label-float-size);
+  line-height: var(--ptah-field-label-float-leading);
+  font-weight: var(--ptah-field-label-float-weight);
+}
 :host button:focus-visible, :host input:focus-visible { outline: 2px solid var(--ptah-gold-strong); outline-offset: 2px; }

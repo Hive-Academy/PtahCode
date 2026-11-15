@@ -72,6 +72,28 @@ describe('CliLaneDefaultCellComponent', () => {
     const host = fixture.nativeElement as HTMLElement;
     expect(host.getAttribute('data-layout')).toBe('card');
     expect(host.querySelector('.card-layout, .compact, .wide, .gap-2, .gap-3, .grid-cols-2')).toBeNull();
+    expect([...host.querySelectorAll('label')].map(label => label.textContent?.trim())).toEqual(['Permission', 'Network']);
+    expect([...host.querySelectorAll('select')].map(select => select.getAttribute('aria-label'))).toEqual(['codex permission default', 'codex network default']);
+    expect(host.querySelectorAll('ptah-field')).toHaveLength(2);
+    expect([...host.querySelectorAll('[data-ptah-field]')].map(field => field.getAttribute('data-size'))).toEqual(['sm', 'sm']);
+  });
+
+  it('keeps unavailable Network in its compact field with the reason as its description', () => {
+    const fixture = setup('codex');
+    fixture.componentRef.setInput('layout', 'card');
+    fixture.componentRef.setInput('manifest', { ...manifest, permissionModes: {
+      ...manifest.permissionModes,
+      plan: { ...manifest.permissionModes.plan, state: 'unsupported', reason: 'Grok exposes no native read-only plan flag.' },
+    }, networkModes: {
+      deny: { ...unsupported, reason: 'Grok exposes no native read-only plan flag.' },
+      allow: { ...unsupported, reason: 'Grok exposes no native read-only plan flag.' },
+    } });
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const fields = host.querySelectorAll('ptah-field');
+    expect(fields[1].querySelector('[ptahFieldTrailing]')?.textContent?.trim()).toBe('Unavailable');
+    expect(fields[1].querySelector('.ptah-field__message')?.textContent?.trim()).toBe('Grok exposes no native read-only plan flag.');
+    expect(host.querySelector('.defaults-warning')).toBeNull();
   });
 
   it('shows the saved choice when the manifest and the saved row arrive together', () => {
