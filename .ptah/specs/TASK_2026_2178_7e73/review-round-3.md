@@ -1,27 +1,34 @@
-VERDICT: NEEDS_REVISION
+VERDICT: REQUEST CHANGES
 
-# Review Round 3 — PR #1288 (HEAD 2d1433ed)
+# PR #1288 permission enforcement — round 3
 
-## Finding 1 (D17): child approvals reach parent sink — PASS (code), weak-ish tests
-- `codex-approval-bridge.ts` ~L307-335: `isChild()` is split out. When it is true, `policy = 'present'` and the plan/permission policy is skipped, so the request goes to the sink via `interact`.
-- Specs cover plan, ask, auto-edit and yolo via `it.each`, plus parent denial. 66/66 pass in `codex-approval-bridge.spec.ts`.
-- Residual: `isChild()` is evaluated before the parent check. A parent-thread request (`threadId === identity.threadId`) that also passes the `isChildTurn` callback is not an issue in practice, since the child thread id differs from the parent's. Parent plan-mode no longer auto-declines child requests. This is intended by D17, but it relies entirely on the sink to enforce plan restrictions. No spec asserts that the sink receives the plan context.
+Reviewed HEAD `08b1a3e68`. HEAD advanced from `2d1433ed0` while this review was in progress. Antigravity rounds 1 and 2 were read from commit `a6f63e42e` because their files are absent from this worktree's task folder.
 
-## Finding 2: terminal children reject approvals — PASS (code), spec does not exercise the fix
-- `codex-context.ts` L396-399: `isChildTurn` now includes `!this.terminalTurns.has(turnId)`. Correct, and `terminalTurns` is populated at L888/892/902.
-- The new spec ("fails closed when isChildTurn detects a terminal turn") supplies its own `isChildTurn` stub that returns false for `terminal-turn`. It never touches `RuntimeContext`, so it passes with or without the `codex-context.ts` change.
-  - **Medium:** a regression that removes the `terminalTurns` check would not fail any test. Add a codex-context spec that completes a child turn and then sends an approval request.
+## Finding 1 / D17 — fixed in HEAD
 
-## D24: fail-closed default — FAIL
-- `cli-lane-defaults.types.ts` L62-63: the new guard sits after the search loop, which has already returned the first supported permission. When `plan` is unsupported but `auto-edit` or `yolo` is supported, the loop returns `auto-edit` or `yolo` as a built-in default. That is exactly the fail-open case D24 meant to close.
-- The guard is only reached when no pair is supported at all. `!saved.permission` is also redundant, because `saved.permission` returned a few lines earlier.
-- **High:** the new spec "fails closed when adapter does not support plan" FAILS. I ran `cli-lane-policy-resolver.spec.ts`: 20 passed, 1 failed with "Expected a lane policy refusal" (spec L192). The commit therefore ships a red test.
-- Fix: when `!saved.permission`, only the `plan` candidate should be tried (`permissions = saved.permission ? [saved.permission] : ['plan']`). If plan is unsupported, return `unsupported`. Check that existing callers and tests, such as the unverified-adapter and Ptah CLI paths, still pass.
+- `libs/backend/codex-runtime/src/lib/codex-approval-bridge.ts:310-334`: recognized children force `policy = 'present'`, bypassing `codexPermissionPolicy` and reaching the parent sink. This closes the auto-grant route.
+- `codex-approval-bridge.ts:348-356` exempts a recognized child from the parent plan-level decline after the sink responds. The plan case at `codex-approval-bridge.spec.ts:898-914` expects the sink's `accept`. The focused bridge suite passes 69/69.
 
-## Verification run
-- `jest` on `codex-approval-bridge.spec.ts`: 66/66 pass.
-- `jest` on `cli-lane-policy-resolver.spec.ts`: 1 failure (D24).
-- I did not run `ptah_get_diagnostics` or any workspace-wide checks.
+## Finding 2 — production fix present; test gap
 
-## Score: 4/10
-Finding 1 is sound. The Finding 2 production fix is correct but its test does not exercise it. D24 is not implemented, and its own spec fails. Another pass is needed. It does not drop to 1-2 because 2 of the 3 production fixes are right and the D24 fix is small.
+- `libs/backend/codex-runtime/src/lib/codex-context.ts:396-399` requires `!terminalTurns.has(turnId)` in `isChildTurn`. The native terminal path records the turn and removes the child maps at `:884-890`, so a late approval cannot pass that callback.
+- `libs/backend/codex-runtime/src/lib/codex-approval-bridge.spec.ts:882-894` stubs `isChildTurn` to reject a different turn ID. It never exercises the context's terminal handling; removing the production guard would leave this spec green. Add a context-level regression that terminates a native child and then submits an approval for its same thread and turn.
+
+## D24 — fail-closed logic present, but HEAD does not typecheck (high)
+
+- `libs/shared/src/lib/types/cli-lane-defaults.types.ts:49-62` limits no-row candidates to `plan` and returns `unsupported` if no plan/network pair exists. This is the intended fail-closed behavior.
+- The `['plan']` expression is inferred as `string[]`. The focused `cli-lane-policy-resolver.spec.ts` run fails before tests execute: TS7053 at `cli-lane-defaults.types.ts:52` and TS2322 at `:56`. Type `permissions` as `readonly LanePermissionMode[]` or preserve the literal type, then rerun the spec. The unsupported-plan assertion is at `cli-lane-policy-resolver.spec.ts:185-194`.
+
+## Verification and logic questions
+
+1. **Silent failure:** no silent auto-grant path found in recognized child approvals; `present` invokes the sink (`codex-approval-bridge.ts:325-334`).
+2. **Unexpected user action:** a parent approval in plan mode is honored for a recognized child (`codex-approval-bridge.ts:348-362`).
+3. **Wrong input:** a no-row adapter supporting only `yolo` is intended to return `unsupported` (`cli-lane-defaults.types.ts:49-62`), but compilation prevents this path from running.
+4. **Dependency failure:** terminal child approvals fail the context callback (`codex-context.ts:396-399`); the CLI spec cannot run due to the type errors above.
+5. **Missing coverage:** the terminal-child bridge spec does not wire up the runtime callback (`codex-approval-bridge.spec.ts:882-894`).
+
+Focused checks against source now committed in HEAD: `codex-approval-bridge.spec.ts` passed 69/69. The CLI resolver suite did not start because of the two TypeScript errors. `ptah_get_diagnostics` reported TypeScript checking still running after 45 seconds and returned no result. No reviewed source was edited.
+
+## Score: 6/10
+
+The three production logic paths now match the requested behavior, putting this above 3–4. The shared resolver has a compile-blocking error and the terminal-child regression does not exercise the runtime, keeping it below 7–8. Fix the type inference, pass the focused CLI resolver spec, and add a context-level terminal-child regression before approval.

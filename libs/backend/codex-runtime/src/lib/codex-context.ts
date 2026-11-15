@@ -890,6 +890,10 @@ class RuntimeContext implements CodexContext {
           }
           this.emit({ ...event, parentToolUseId });
           this.terminalTurns.add(event.turnId);
+          this.childTools.delete(event.threadId);
+          this.childParentThreads.delete(event.threadId);
+          this.childTurns.delete(event.threadId);
+          this.pendingSpawns.delete(event.threadId);
           if (this.rootTerminalPending &&
             ![...this.childTools.keys()].some((id) => !this.nativeChildren.has(id)))
             this.finishActiveTurn();

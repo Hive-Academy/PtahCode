@@ -935,6 +935,36 @@ describe('CodexApprovalBridge', () => {
       expect(result).toEqual({ response: { decision: 'cancel' } });
       expect(request).not.toHaveBeenCalled();
     });
+
+    it('rejects late approvals from child turns after terminal event', async () => {
+      const terminalTurns = new Set<string>();
+      const childTools = new Map<string, string>([['child', 'spawn']]);
+      const childTurns = new Map<string, string>([['child', 'cturn']]);
+      const isChildTurn = (thread: string, turn: string) =>
+        childTools.has(thread) && childTurns.get(thread) === turn && !terminalTurns.has(turn);
+      const { bridge, request } = setup({ isChildTurn });
+      request.mockResolvedValue('accept');
+
+      const result1 = await bridge.handle(
+        frame(command, 5, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(result1).toEqual({ response: { decision: 'accept' } });
+      expect(request).toHaveBeenCalledTimes(1);
+
+      terminalTurns.add('cturn');
+      childTools.delete('child');
+      childTurns.delete('child');
+
+      const result2 = await bridge.handle(
+        frame(command, 6, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(result2).toEqual({ response: { decision: 'cancel' } });
+      expect(request).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('Finding 1: child approvals must reach parent sink', () => {
