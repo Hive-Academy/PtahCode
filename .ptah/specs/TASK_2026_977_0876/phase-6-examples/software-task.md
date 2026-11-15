@@ -8,8 +8,11 @@ Request: add a retry option to the export command.
 | Skeleton step | Phase | Output |
 | --- | --- | --- |
 | clarify | pre-flight questions | Scope and acceptance criteria |
-| plan | plan | `implementation-plan.md` |
-| plan | design | Design handoff for the retry option |
+| plan | plan | `task-description.md` |
+| plan | document-review | Review task description |
+| plan | design (optional) | UI handoff, when needed |
+| plan | architecture | `implementation-plan.md` |
+| plan | document-review | Review implementation plan |
 | do | batch | `batches.md` with file-disjoint batches |
 | do | implement | Code changes per batch |
 | check | review | `code-review.md` |
@@ -17,4 +20,4 @@ Request: add a retry option to the export command.
 | deliver | completion | Commit, pull request, close-out |
 
 ## Phase order
-plan → design → batch → implement → review → tests → completion
+plan → document-review → architecture → document-review → batch → implement → review → tests → completion

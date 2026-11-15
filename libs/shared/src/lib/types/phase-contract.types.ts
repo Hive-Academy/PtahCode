@@ -38,6 +38,7 @@ export interface PackDefinitionV1 {
   /** Task types this pack applies to, for example "FEATURE" and "BUGFIX". */
   readonly workTypes: readonly string[];
   readonly phaseFlow: readonly PhaseKind[];
+  readonly stepMap: Readonly<Record<SkeletonStep, readonly PhaseKind[]>>;
   readonly version: 1;
 }
 

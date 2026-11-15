@@ -42,16 +42,16 @@ Every workflow follows one skeleton of five steps:
 4. **check** - review the result and run the tests.
 5. **deliver** - hand over the result and close the task.
 
-A pack maps phases onto these steps. Each pack is one kind of work. The packs are `software`, `research`, `content`, and `operations`. You can give a pack name to the orchestration routing in place of a strategy name. The routing then uses the phase list of that pack.
+A pack maps phases onto these steps. Each pack is one kind of work. The packs are `software`, `research`, `content`, and `operations`. The skill text guides the pack flow; existing strategy routing stays in code.
 
 Example: the software pack maps the steps as follows.
 
 | Step | Software pack phases |
 | --- | --- |
 | clarify | Pre-flight questions (no phase file) |
-| plan | `plan`, `architecture` |
-| do | `implement` |
-| check | `tests`, `review` |
+| plan | `plan`, `document-review`, optional `research` and `design`, `architecture` |
+| do | `batch`, `implement` |
+| check | `review`, `tests` |
 | deliver | `completion` |
 
 ## Checkpoints

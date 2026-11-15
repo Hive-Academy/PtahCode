@@ -18,6 +18,13 @@ describe('skeleton and pack contract', () => {
       displayName: 'Research',
       workTypes: ['RESEARCH'],
       phaseFlow: ['plan', 'research', 'docs', 'completion'],
+      stepMap: {
+        clarify: [],
+        plan: ['plan'],
+        do: ['research'],
+        check: ['docs'],
+        deliver: ['completion'],
+      },
       version: 1,
     };
     expect(JSON.parse(JSON.stringify(pack))).toEqual(pack);
@@ -37,6 +44,13 @@ describe('skeleton and pack contract', () => {
         'tests',
         'completion',
       ],
+      stepMap: {
+        clarify: [],
+        plan: ['plan', 'design'],
+        do: ['batch', 'implement'],
+        check: ['review', 'tests'],
+        deliver: ['completion'],
+      },
       version: 1,
     };
     expect(pack.phaseFlow.every((kind) => PHASE_KINDS.includes(kind))).toBe(

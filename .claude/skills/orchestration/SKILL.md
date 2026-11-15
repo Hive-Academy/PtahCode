@@ -38,7 +38,11 @@ correction in agent-lanes §6; any code you change is independently reviewed bef
 
 3. **Announce** type, depth and the planned phase-kind sequence. Then proceed.
 
-## Phase-kind flows
+## Packs and phase-kind flows
+
+The [software pack](packs/software.md) selects the flow for FEATURE, BUGFIX and
+REFACTORING tasks. Software is a pack, not a phase kind. Read its skeleton mapping
+and task-type flow before routing its individual phases.
 
 Route each phase by its kind at Gate 0.1 using `ptah_route_decide` with `kind`, and read
 [`phases/<kind>.md`](phases/) for its discipline, input, deliverable, verdict and acceptance step.
@@ -50,9 +54,6 @@ step, including batch verification and commits; an executor never accepts its ow
 
 | Type | Phase-kind flow |
 | --- | --- |
-| FEATURE | `plan` -> `document-review` -> [`research`] -> [`design` -> `document-review` -> Gate 1.7] -> `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
-| BUGFIX | [`research`] -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
-| REFACTORING | `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
 | DOCUMENTATION | `plan` -> `document-review` -> `docs` (content specification) -> `implement` (documentation files) -> `review` -> `tests` -> `completion` |
 | RESEARCH | `research` -> [`plan` and FEATURE flow if implementation is needed] -> `completion` |
 | DEVOPS | `plan` -> `document-review` -> `architecture` -> `document-review` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |

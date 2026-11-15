@@ -11,6 +11,6 @@ Research work answers a bounded question with cited evidence. The output is a re
 - deliver: the `completion` phase.
 
 ## Phase flow
-- research: collect evidence, compare options, write the report.
 - plan (optional): split a broad question into sub-questions before the research.
+- research: collect evidence, compare options, write the report.
 - completion: confirm the report answers the question, then close the task.

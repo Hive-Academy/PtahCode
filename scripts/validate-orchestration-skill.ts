@@ -22,6 +22,7 @@ import {
   MACHINE_CAPABILITIES,
 } from '../libs/shared/src/lib/types/phase-contract.types';
 import { RETIRED_ROLES } from '../libs/shared/src/lib/types/retired-roles';
+import { parsePack } from './orchestration-skill/pack-parser';
 
 /**
  * Represents a validation error found during checks.
@@ -440,12 +441,6 @@ function validatePhase(
   return errors;
 }
 
-const PACK_REQUIRED_SECTIONS = [
-  'Discipline',
-  'Skeleton mapping',
-  'Phase flow',
-] as const;
-
 function validatePacks(): ValidationError[] {
   const directory = path.join(SKILL_ROOT, 'packs');
   if (!fs.existsSync(directory)) return [];
@@ -454,21 +449,10 @@ function validatePacks(): ValidationError[] {
   for (const name of files) {
     const relative = `packs/${name}`;
     const content = fs.readFileSync(path.join(directory, name), 'utf8');
-    if (!content.trim()) {
-      errors.push(error(relative, 'Pack file is empty'));
-      continue;
-    }
-    if (!/^# Pack: \S+/m.test(content))
-      errors.push(error(relative, 'Missing "# Pack: <name>" title'));
-    const headings = maskFences(content).match(/^## .+$/gm) ?? [];
-    for (const section of PACK_REQUIRED_SECTIONS) {
-      const count = headings.filter(
-        (h) => h.slice(3).trim() === section,
-      ).length;
-      if (count === 0)
-        errors.push(error(relative, `Missing pack section: ${section}`));
-      else if (count > 1)
-        errors.push(error(relative, `Duplicate pack section: ${section}`));
+    try {
+      parsePack(path.basename(name, '.md'), content);
+    } catch (cause) {
+      errors.push(error(relative, (cause as Error).message));
     }
   }
   return errors;
