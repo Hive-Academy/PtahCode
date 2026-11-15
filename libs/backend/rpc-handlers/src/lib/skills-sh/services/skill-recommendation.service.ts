@@ -95,7 +95,8 @@ export class SkillRecommendationService {
       for (const entry of results[index] ?? []) {
         const words = [...tokenize(entry.skillId), ...tokenize(entry.name)];
         const pairs = words.slice(0, -1).map((word, position) => word + words[position + 1]);
-        if (term.length < 2 || (!words.includes(term) && (term.length < 3 || !pairs.includes(term)))) continue;
+        const complete = [entry.skillId, entry.name].some((value) => dependencyKeyword(value) === term);
+        if (term.length < 2 || (!complete && !words.includes(term) && (term.length < 3 || !pairs.includes(term)))) continue;
         matched = true;
         const key = `${entry.source}/${entry.skillId}`;
         const score = 100 + Math.log10(1 + Math.max(0, entry.installs));

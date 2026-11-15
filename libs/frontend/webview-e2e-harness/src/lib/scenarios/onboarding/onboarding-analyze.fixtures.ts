@@ -153,6 +153,9 @@ export function onboardingAnalyzeFixtures(
     'wizard:list-analyses': { analyses: [] },
     'wizard:get-resumable-run': { analysis: null, generation: null },
     'wizard:get-generation-run-state': { run: null },
+    'wizard:recommend-analysis-skills': {
+      skills: [], detectedItems: [], unmatchedItems: [], searchFailures: [], summarySource: 'none',
+    },
     ...overrides,
   };
   for (const [method, value] of Object.entries(fixtures)) {

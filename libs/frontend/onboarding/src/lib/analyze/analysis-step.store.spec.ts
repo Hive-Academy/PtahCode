@@ -47,7 +47,7 @@ describe('AnalysisStepStore', () => {
     const pending = store.useAnalysis('saved');
     store.resetForWorkspace();
     finish(completed);
-    expect(await pending).toBe('not-found');
+    expect(await pending).toBe('superseded');
     expect(store.loaded()).toBeNull();
   });
 });

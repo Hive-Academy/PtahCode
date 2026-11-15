@@ -37,4 +37,20 @@ describe('extractStackSummary', () => {
       ['language', 'TypeScript'], ['framework', 'Angular'],
     ]);
   });
+
+  it('applies the combined limit after deduplicating phase items', () => {
+    const block = (items: object[]) => '```stack-summary\n' + JSON.stringify({ items }) + '\n```';
+    const profile = Array.from({ length: 29 }, (_, index) => ({ kind: 'framework', name: `Framework ${index}`, evidence: 'package.json', sourcePhase: 'project-profile' }));
+    profile[28] = { ...profile[0] };
+    const architecture = [1, 2].map((index) => ({ kind: 'pattern', name: `Pattern ${index}`, evidence: 'src', sourcePhase: 'architecture-assessment' }));
+    const result = extractStackSummary({ 'project-profile': block(profile), 'architecture-assessment': block(architecture) });
+    expect(result.summary.items).toHaveLength(30);
+    expect(result.summary.items.at(-1)?.name).toBe('Pattern 2');
+  });
+
+  it('keeps observed multiword patterns and excludes recommendations', () => {
+    const result = extractStackSummary({ 'architecture-assessment':
+      '### Detected Patterns\n- Dependency Injection (src/container.ts)\n### Pattern Comparison\n- Hexagonal architecture is recommended but is not implemented.' });
+    expect(result.summary.items.map((item) => item.name)).toEqual(['Dependency Injection']);
+  });
 });

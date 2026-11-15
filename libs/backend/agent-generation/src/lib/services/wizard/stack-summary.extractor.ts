@@ -33,12 +33,15 @@ export function extractStackSummary(
     }
     try {
       const parsed = summarySchema.safeParse(JSON.parse(blocks[0][1]));
-      if (!parsed.success || structured.length + parsed.data.items.length > 30 ||
-          parsed.data?.items.some((item) => item.sourcePhase !== phase)) {
+      if (!parsed.success || parsed.data.items.some((item) => item.sourcePhase !== phase)) {
         warning ??= 'Invalid stack summary data';
         continue;
       }
       structured.push(...parsed.data.items);
+      if (dedupe(structured).length > 30) {
+        structured.splice(structured.length - parsed.data.items.length);
+        warning ??= 'Stack summary exceeds 30 unique items';
+      }
     } catch {
       warning ??= 'Malformed stack summary JSON';
       continue;
@@ -60,7 +63,7 @@ export function extractStackSummary(
           /framework/.test(title) ? 'framework' :
           /dependenc|librar/.test(title) ? 'library' :
           /test/.test(title) ? 'test-tool' :
-          /pattern|architecture/.test(title) ? 'pattern' : undefined;
+          /^(?:detected|observed|current|existing)\s+(?:patterns?|architecture)\b/.test(title) ? 'pattern' : undefined;
         continue;
       }
       if (!section || items.length >= 30) continue;
@@ -74,9 +77,11 @@ export function extractStackSummary(
       const candidate = category ? line.slice(category[0].length) : line;
       const bullet = category
         ? /^([@\w][\w@./+-]{1,79})(?:\s|$)/.exec(candidate)
-        : /^[-*]\s+([@\w][\w@./+-]{1,79})(?:\s|$)/.exec(candidate);
+        : /^[-*]\s+(.+?)(?:\s+\([^)]*\)|\s+[—–:]\s+.*)?$/.exec(candidate);
       if (!bullet || line.length > 300) continue;
-      items.push({ kind, name: bullet[1], evidence: line.trim(), sourcePhase: phase });
+      const name = bullet[1].trim().replace(/\s+v?\d+(?:\.\d+)*$/i, '');
+      if (!name || name.length > 100) continue;
+      items.push({ kind, name, evidence: line.trim(), sourcePhase: phase });
     }
   }
   return { summary: { items: dedupe(items), source: 'legacy' },

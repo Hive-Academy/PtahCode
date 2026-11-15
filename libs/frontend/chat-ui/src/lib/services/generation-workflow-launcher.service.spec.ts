@@ -47,7 +47,7 @@ describe('GenerationWorkflowLauncherService', () => {
     expect(tabs.createWorkflowTabForWorkspace).not.toHaveBeenCalled();
     expect(router.navigateToSurface).toHaveBeenCalledWith(
       'onboarding',
-      ['analyze', 'agents'],
+      ['analyze', 'skills'],
       {
         queryParams: { tab: 'owner' },
       },

@@ -2,22 +2,23 @@ import { ChangeDetectionStrategy, Component, computed, effect, inject, input, si
 import { FormsModule } from '@angular/forms';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type { StackSummaryItem } from '@ptah-extension/shared';
+import { PtahButtonDirective, PtahInputDirective, PtahTextareaDirective } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-project-skill-draft',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, PtahButtonDirective, PtahInputDirective, PtahTextareaDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="rounded-lg border border-base-300 p-3 space-y-2" aria-label="Project skill draft">
       <h3 class="font-semibold">Create a project skill for {{ item().name }}</h3>
       <p class="break-all text-xs">Destination: ~/.ptah/plugins/ptah-harness-{{ slug() }}/skills/{{ slug() }}/SKILL.md. Ptah syncs the skill into the workspace.</p>
-      <label class="block">Skill name <input class="input input-bordered w-full" [ngModel]="name()" (ngModelChange)="name.set($event)" /></label>
-      <label class="block">Description <input class="input input-bordered w-full" [ngModel]="description()" (ngModelChange)="description.set($event)" /></label>
-      <label class="block">Skill content <textarea class="textarea textarea-bordered min-h-40 w-full" [ngModel]="content()" (ngModelChange)="content.set($event)"></textarea></label>
+      <label class="block">Skill name <input ptahInput class="w-full" [ngModel]="name()" (ngModelChange)="name.set($event)" /></label>
+      <label class="block">Description <input ptahInput class="w-full" [ngModel]="description()" (ngModelChange)="description.set($event)" /></label>
+      <label class="block">Skill content <textarea ptahTextarea class="min-h-40 w-full" [ngModel]="content()" (ngModelChange)="content.set($event)"></textarea></label>
       @if (error()) { <p role="alert" class="text-state-err">{{ error() }}</p> }
       @if (createdPath()) { <p role="status">Created: {{ createdPath() }}</p> }
-      <button type="button" class="btn btn-primary" [disabled]="busy() || !slug() || !content().trim()" (click)="create()">{{ busy() ? 'Creating…' : 'Create skill' }}</button>
+      <button ptahButton variant="primary" type="button" [disabled]="busy() || !slug() || !content().trim()" (click)="create()">{{ busy() ? 'Creating…' : 'Create skill' }}</button>
     </section>
   `,
 })

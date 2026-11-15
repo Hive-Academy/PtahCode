@@ -418,7 +418,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   protected async useSaved(filename: string): Promise<void> {
     try {
       const result = await this.store.selectAnalysis(filename);
-      if (this.destroyed) return;
+      if (this.destroyed || result === 'superseded') return;
       this.selectError.set(
         result === 'loaded'
           ? null

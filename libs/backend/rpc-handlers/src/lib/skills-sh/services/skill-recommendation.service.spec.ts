@@ -44,4 +44,13 @@ describe('SkillRecommendationService.recommendAnalysis', () => {
     expect(result.skills).toHaveLength(1);
     expect(result.unmatchedItems).toEqual([]);
   });
+
+  it('matches a complete normalized multiword name', async () => {
+    const result = await service.recommendAnalysis({
+      items: [{ ...item, name: 'Domain Driven Design' }], summarySource: 'structured',
+      search: async () => [{ ...entry, skillId: 'domain-driven-design', name: 'Domain Driven Design' }],
+    });
+    expect(result.skills).toHaveLength(1);
+    expect(result.unmatchedItems).toEqual([]);
+  });
 });

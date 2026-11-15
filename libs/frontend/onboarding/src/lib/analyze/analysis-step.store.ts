@@ -132,14 +132,14 @@ export class AnalysisStepStore {
   }
   async selectAnalysis(
     filename: string,
-  ): Promise<'loaded' | 'not-found' | 'failed'> {
+  ): Promise<'loaded' | 'not-found' | 'failed' | 'superseded'> {
     if (!this.savedValue().some((item) => item.filename === filename))
       return 'not-found';
     const revision = this.workspaceRevision;
     const selectionRevision = ++this.selectionRevision;
     try {
       const result = await this.rpc.loadAnalysis(filename);
-      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'not-found';
+      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'superseded';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
       this.selectedValue.set(filename);
       this.loadedValue.set(result);
@@ -149,13 +149,13 @@ export class AnalysisStepStore {
       return 'failed';
     }
   }
-  async useAnalysis(slug: string): Promise<'loaded' | 'not-found' | 'failed'> {
+  async useAnalysis(slug: string): Promise<'loaded' | 'not-found' | 'failed' | 'superseded'> {
     if (!slug || slug.includes('/') || slug.includes('\\')) return 'not-found';
     const revision = this.workspaceRevision;
     const selectionRevision = ++this.selectionRevision;
     try {
       const result = await this.rpc.loadAnalysis(slug);
-      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'not-found';
+      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'superseded';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
       this.selectedValue.set(slug);
       this.loadedValue.set(result);

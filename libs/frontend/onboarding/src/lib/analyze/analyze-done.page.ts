@@ -6,6 +6,7 @@ import { MESSAGE_TYPES } from '@ptah-extension/shared';
 import { WizardRpcService } from '@ptah-extension/setup-wizard';
 import { OnboardingFlagService } from '../first-run/onboarding-flag.service';
 import { OnboardingStepperComponent, type OnboardingStep } from '../shared/onboarding-stepper.component';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const STEPS: readonly OnboardingStep[] = [
   { id: 'analyze', label: 'Analyze', state: 'completed' },
@@ -17,7 +18,7 @@ const STEPS: readonly OnboardingStep[] = [
 @Component({
   selector: 'ptah-analyze-done-page',
   standalone: true,
-  imports: [OnboardingStepperComponent],
+  imports: [OnboardingStepperComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="mx-auto max-w-[760px] space-y-4 p-4" aria-labelledby="analyze-done-title" data-testid="analyze-done-page">
@@ -38,8 +39,8 @@ const STEPS: readonly OnboardingStep[] = [
         <p>{{ guidanceStatus() }}</p>
       </section>
       <nav class="flex flex-wrap gap-2" aria-label="Next steps">
-        <button class="btn btn-primary" type="button" (click)="openChat()">Open chat</button>
-        <button class="btn" type="button" (click)="runAgain()">Run setup again</button>
+        <button ptahButton variant="primary" type="button" (click)="openChat()">Open chat</button>
+        <button ptahButton type="button" (click)="runAgain()">Run setup again</button>
       </nav>
     </section>
   `,
@@ -71,7 +72,8 @@ export class AnalyzeDonePage implements OnInit {
       const response = await this.rpc.call('harness:get-skill-selection', {});
       if (this.destroyRef.destroyed) return;
       if (!response.isSuccess()) throw new Error('Unavailable');
-      this.skills.set(response.data.available);
+      const { mode, slugs, available } = response.data;
+      this.skills.set(mode === 'selected' ? available.filter((skill) => slugs.includes(skill.slug)) : available);
     } catch {
       if (!this.destroyRef.destroyed) this.skillsError.set(true);
     } finally {

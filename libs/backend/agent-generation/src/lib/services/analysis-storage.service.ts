@@ -694,7 +694,9 @@ export class AnalysisStorageService {
   ): Promise<MultiPhaseAnalysisResponse | null> {
     const runs = await this.listValidRuns(workspacePath);
     const match = runs.find(({ manifest }) => manifest.runId === runId);
-    return match ? this.loadMultiPhase(workspacePath, match.entry) : null;
+    if (!match) return null;
+    const loaded = await this.loadMultiPhase(workspacePath, match.entry);
+    return loaded?.manifest.runId === runId ? loaded : null;
   }
 
   /**

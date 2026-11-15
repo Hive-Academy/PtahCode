@@ -4,6 +4,8 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import type { WizardRecommendAnalysisSkillsResult } from '@ptah-extension/shared';
+import { PtahButtonDirective } from '@ptah-extension/ui';
+import { WizardRpcService } from '@ptah-extension/setup-wizard';
 import { StackSkillStore } from '../proposal/stack-skill.store';
 import { StackSkillConsentComponent } from '../proposal/stack-skill-consent.component';
 import { StackSkillReviewComponent } from '../proposal/stack-skill-review.component';
@@ -13,7 +15,7 @@ import { ProjectSkillDraftComponent } from './project-skill-draft.component';
 @Component({
   selector: 'ptah-analyze-skills-page',
   standalone: true,
-  imports: [StackSkillReviewComponent, StackSkillConsentComponent, ProjectSkillDraftComponent],
+  imports: [StackSkillReviewComponent, StackSkillConsentComponent, ProjectSkillDraftComponent, PtahButtonDirective],
   providers: [StackSkillStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -43,7 +45,7 @@ import { ProjectSkillDraftComponent } from './project-skill-draft.component';
         }
       }
       @if (state.error() && !summary() && !state.loading()) {
-        <button type="button" class="btn" (click)="retry()">Retry skill search</button>
+        <button ptahButton type="button" (click)="retry()">Retry skill search</button>
       }
       <ptah-stack-skill-review
         [showOwnerDecision]="false"
@@ -69,6 +71,7 @@ export class AnalyzeSkillsPage implements OnInit {
   private readonly analysis = inject(AnalysisStepStore);
   private readonly destroyRef = inject(DestroyRef);
   readonly state = inject(StackSkillStore);
+  private readonly wizardRpc = inject(WizardRpcService);
   readonly summary = signal<WizardRecommendAnalysisSkillsResult | null>(null);
   private version = 0;
   private searchVersion = 0;
@@ -94,14 +97,29 @@ export class AnalyzeSkillsPage implements OnInit {
   ngOnInit(): void {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const slug = params.get('analysis');
+      const runId = params.get('run');
       if (slug && this.analysis.selected() !== slug) void this.loadSaved(slug);
+      else if (!slug && !this.analysis.loaded() && runId) void this.loadResumed(runId);
       else if (!this.analysis.loaded()) this.state.error.set('Choose a completed analysis first.');
     });
   }
 
+  private async loadResumed(runId: string): Promise<void> {
+    const resumable = await this.wizardRpc.getResumableRun();
+    if (this.destroyRef.destroyed || this.route.snapshot.queryParamMap.get('run') !== runId) return;
+    const directory = resumable.generation?.runId === runId ? resumable.generation.analysisDirectory : null;
+    const slug = directory?.split(/[\\/]/).filter(Boolean).at(-1);
+    if (slug) await this.loadSaved(slug);
+    else this.state.error.set('Choose a completed analysis first.');
+  }
+
   private async loadSaved(slug: string): Promise<void> {
+    const root = this.workspace.config().workspaceRoot;
+    const routeIdentity = `${this.route.snapshot.queryParamMap.get('analysis') ?? ''}:${this.route.snapshot.queryParamMap.get('run') ?? ''}`;
     const result = await this.analysis.useAnalysis(slug);
-    if (result !== 'loaded' && !this.destroyRef.destroyed)
+    if (result !== 'loaded' && result !== 'superseded' && !this.destroyRef.destroyed &&
+        root === this.workspace.config().workspaceRoot &&
+        routeIdentity === `${this.route.snapshot.queryParamMap.get('analysis') ?? ''}:${this.route.snapshot.queryParamMap.get('run') ?? ''}`)
       this.state.error.set('That analysis could not be loaded. Choose a completed analysis.');
   }
 
@@ -109,7 +127,7 @@ export class AnalyzeSkillsPage implements OnInit {
     this.state.loading.set(true);
     this.state.error.set(null);
     try {
-      const response = await this.rpc.call('wizard:recommend-analysis-skills', { runId });
+      const response = await this.rpc.call('wizard:recommend-analysis-skills', { runId }, { timeout: 75_000 });
       if (version !== this.version) return;
       if (!response.isSuccess()) throw new Error('Registry unavailable');
       this.summary.set(response.data);

@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
+import { WizardRpcService } from '@ptah-extension/setup-wizard';
 import { AnalysisStepStore } from './analysis-step.store';
 import { AnalyzeSkillsPage } from './analyze-skills.page';
 
@@ -19,6 +20,7 @@ describe('AnalyzeSkillsPage', () => {
     } });
     TestBed.configureTestingModule({ providers: [
       { provide: ClaudeRpcService, useValue: { call } },
+      { provide: WizardRpcService, useValue: { getResumableRun: jest.fn() } },
       { provide: VSCodeService, useValue: { config: root } },
       { provide: AnalysisStepStore, useValue: { loaded, selected: signal('saved'), useAnalysis: jest.fn() } },
       { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({ analysis: 'saved' }) }, queryParamMap: of(convertToParamMap({ analysis: 'saved' })) } },
@@ -31,7 +33,7 @@ describe('AnalyzeSkillsPage', () => {
     const fixture = TestBed.createComponent(AnalyzeSkillsPage);
     fixture.detectChanges();
     await fixture.whenStable();
-    expect(call).toHaveBeenCalledWith('wizard:recommend-analysis-skills', { runId: 'run-1' });
+    expect(call).toHaveBeenCalledWith('wizard:recommend-analysis-skills', { runId: 'run-1' }, { timeout: 75_000 });
     expect(fixture.componentInstance.summary()?.detectedItems[0].name).toBe('Angular');
     root.set({ workspaceRoot: '/other' });
     fixture.detectChanges();
@@ -46,6 +48,20 @@ describe('AnalyzeSkillsPage', () => {
     await fixture.whenStable();
     expect(fixture.componentInstance.state.error()).toBe('Choose a completed analysis first.');
     expect(call).not.toHaveBeenCalled();
+    loaded.set({ manifest: { runId: 'run-1' } });
+  });
+
+  it('restores the analysis directory for a resumed generation route', async () => {
+    loaded.set(null);
+    const useAnalysis = jest.fn().mockResolvedValue('loaded');
+    const query = convertToParamMap({ run: 'generation-1' });
+    TestBed.overrideProvider(AnalysisStepStore, { useValue: { loaded, selected: signal(null), useAnalysis } });
+    TestBed.overrideProvider(ActivatedRoute, { useValue: { snapshot: { queryParamMap: query }, queryParamMap: of(query) } });
+    TestBed.overrideProvider(WizardRpcService, { useValue: { getResumableRun: jest.fn().mockResolvedValue({ generation: { runId: 'generation-1', analysisDirectory: '/ws/.ptah/analysis/saved' } }) } });
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(useAnalysis).toHaveBeenCalledWith('saved');
     loaded.set({ manifest: { runId: 'run-1' } });
   });
 });

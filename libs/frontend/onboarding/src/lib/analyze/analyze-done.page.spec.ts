@@ -10,7 +10,7 @@ describe('AnalyzeDonePage', () => {
   const call = jest.fn();
   const navigate = jest.fn();
   beforeEach(() => {
-    call.mockResolvedValue({ isSuccess: () => true, data: { available: [{ slug: 'angular', name: 'Angular', description: '', pluginId: null }] } });
+    call.mockResolvedValue({ isSuccess: () => true, data: { mode: 'selected', slugs: ['angular'], available: [{ slug: 'angular', name: 'Angular', description: '', pluginId: null }] } });
     TestBed.configureTestingModule({ providers: [
       { provide: ClaudeRpcService, useValue: { call } },
       { provide: WizardRpcService, useValue: { getEnhancedPromptsStatus: jest.fn().mockResolvedValue({ enabled: true }) } },
