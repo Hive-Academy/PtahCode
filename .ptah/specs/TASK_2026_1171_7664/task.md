@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1171_7664
-status: in_review
+status: done
 type: BUGFIX
 title: 'Fix app-server caller attribution, lane MCP handshake, report delivery'
 depends_on: []
