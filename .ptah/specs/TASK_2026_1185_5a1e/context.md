@@ -51,7 +51,10 @@
 | webview fix (codex) | guard only after the RPC timeout | done (webview-report-2.md) |
 | coordinator | review findings 1 and 3: re-point during a running pass, abandoned start recovery | done |
 
-## Follow-up (out of scope)
+## Shared root retention (fixed in this PR)
 
-- `retainedRoots` is a `Set`: two sessions that retain one root, then one release, remove the
-  entry for the other session. This existed on `main` before this task.
+- `retainedRoots` was a `Set`: two sessions that retained one root, then one release, removed
+  the entry for the other session. This existed on `main` before this task.
+- `retainedRoots` is now a `Map<string, number>` count of holders per root. `releaseRoot`
+  removes the `.mcp.json` entry only when the last holder releases. A failed retain drops
+  its own count. Covered by "keeps a shared root entry until the last session releases it".

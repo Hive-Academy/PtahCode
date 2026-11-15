@@ -398,6 +398,23 @@ describe('chat registration queue behavior', () => {
     await service['mcpOpQueue'];
   }, 10000);
 
+  it('keeps a shared root entry until the last session releases it', async () => {
+    const sharedRoot = mkdtempSync(join(tmpdir(), 'ptah-mcp-shared-'));
+    const sharedConfig = join(sharedRoot, '.mcp.json');
+    const ptahOnDisk = (): unknown =>
+      JSON.parse(readFileSync(sharedConfig, 'utf-8')).mcpServers?.ptah;
+    try {
+      expect((await service.retainRoot(sharedRoot)).registered).toBe(true);
+      expect((await service.retainRoot(sharedRoot)).registered).toBe(true);
+      await service.releaseRoot(sharedRoot);
+      expect(ptahOnDisk()).toBeDefined();
+      await service.releaseRoot(sharedRoot);
+      expect(ptahOnDisk()).toBeUndefined();
+    } finally {
+      rmSync(sharedRoot, { recursive: true, force: true });
+    }
+  });
+
   it('retains only slots belonging to the requested root', async () => {
     const otherRoot = mkdtempSync(join(tmpdir(), 'ptah-mcp-other-'));
     try {

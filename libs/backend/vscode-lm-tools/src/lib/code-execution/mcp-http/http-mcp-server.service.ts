@@ -259,12 +259,14 @@ export class CodeExecutionMCP
    * session's git worktree). Planned beside the open folders in
    * {@link desiredSlots}, so a workspace-folder reconcile keeps them.
    *
-   * A set, not a count: each child owns its own worktree, so one root is never
-   * retained twice by two live sessions. Mutated only inside `enqueueMcpOp`.
-   * Survives `stop()` on purpose: the sessions still run in those folders, so a
-   * restarted server keeps their entries in its next reconcile.
+   * A count per root, not a set: two live sessions can share one worktree (a
+   * successor keeps its predecessor's), so each successful retain adds one and
+   * each release subtracts one. The entry goes away only at zero. Mutated only
+   * inside `enqueueMcpOp`. Survives `stop()` on purpose: the sessions still run
+   * in those folders, so a restarted server keeps their entries in its next
+   * reconcile.
    */
-  private readonly retainedRoots = new Set<string>();
+  private readonly retainedRoots = new Map<string, number>();
 
   /**
    * The tail of the re-pointing queue. Every `.mcp.json` OWNERSHIP mutation
@@ -739,8 +741,8 @@ export class CodeExecutionMCP
       return { registered: false, reason: 'not-started' };
     }
 
-    const alreadyRetained = this.retainedRoots.has(root);
-    this.retainedRoots.add(root);
+    // Counted before the write, so a reconcile during it keeps the root.
+    this.retainedRoots.set(root, (this.retainedRoots.get(root) ?? 0) + 1);
     let outcome: McpSubagentRegistration;
     try {
       const outcomes = await this.registerRootSlots(root, this.port);
@@ -757,10 +759,22 @@ export class CodeExecutionMCP
       outcome = notRegistered('write-failed');
     }
 
-    if (!outcome.registered && !alreadyRetained) {
-      this.retainedRoots.delete(root);
-    }
+    // A refused retain is never released by its caller, so it takes back its
+    // own count here. Other holders of the root keep theirs.
+    if (!outcome.registered) this.dropRetention(root);
     return outcome;
+  }
+
+  /** Subtract one holder of `root`. True when this was the last holder. */
+  private dropRetention(root: string): boolean {
+    const count = this.retainedRoots.get(root);
+    if (count === undefined) return false;
+    if (count > 1) {
+      this.retainedRoots.set(root, count - 1);
+      return false;
+    }
+    this.retainedRoots.delete(root);
+    return true;
   }
 
   /**
@@ -771,7 +785,8 @@ export class CodeExecutionMCP
    */
   async releaseRoot(root: string): Promise<void> {
     await this.enqueueMcpOp(async () => {
-      if (!this.retainedRoots.delete(root)) return;
+      // Another live session still holds this root: its entry stays.
+      if (!this.dropRetention(root)) return;
       // A stopping or stopped server has already given every entry back (or
       // kept the record of a failed removal for its next pass). Reconciling
       // here would write the open folders' entries for a port about to close.
@@ -807,7 +822,7 @@ export class CodeExecutionMCP
       workspaceRoots: [
         ...this.workspaceProvider.getWorkspaceFolders(),
         this.workspaceProvider.getWorkspaceRoot() ?? '',
-        ...this.retainedRoots,
+        ...this.retainedRoots.keys(),
       ],
       isInstalled: (target) =>
         this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
