@@ -24,6 +24,52 @@ it('offers the new child session kind only when its caller is eligible', () => {
   expect(candidatesFor(phase, { ...gathered, childSessionEligible: false }).map((candidate) => candidate.id))
     .not.toContain('child-session');
 });
+
+it.each(['backend-developer', 'frontend-developer', 'devops-engineer'])(
+  'routes retired role %s to the implement phase even when listed', (role) => {
+    const gathered: GatheredCall = {
+      lanes: [], roles: [role, 'custom-agent'], childSessionEligible: false,
+      rotation: { version: 1, entries: [] }, rotationUnavailable: false,
+      models: new Map(), missing: [], detailReasons: [],
+      matrix: {
+        reasons: [], outcomeFigures: () => null,
+        resolve: (family, model, taskKind) => ({
+          family, model, taskKind, score: 50, cell: { kind: 'unknown' as const },
+          profileModel: '*', noProfile: true,
+        }),
+      },
+    };
+    expect(candidatesFor({ id: 'build', kind: 'implement', role }, gathered))
+      .toContainEqual(expect.objectContaining({ phaseKind: 'implement' }));
+    expect(candidatesFor({ id: 'build', kind: 'implement', role }, gathered)
+      .some((candidate) => candidate.id === `subagent:${role}`)).toBe(false);
+    expect(candidatesFor({ id: 'verify', kind: 'tests', role }, gathered))
+      .toContainEqual(expect.objectContaining({ phaseKind: 'tests' }));
+    expect(candidatesFor({ id: 'build', kind: 'implement', role: 'custom-agent' }, gathered))
+      .toContainEqual(expect.objectContaining({ role: 'custom-agent' }));
+  },
+);
+
+it('routes unlisted retired roles by phase kind and keeps active explicit roles', () => {
+  const gathered: GatheredCall = {
+    lanes: [], roles: ['code-logic-reviewer'], childSessionEligible: false,
+    rotation: { version: 1, entries: [] }, rotationUnavailable: false,
+    models: new Map(), missing: [], detailReasons: [],
+    matrix: {
+      reasons: [], outcomeFigures: () => null,
+      resolve: (family, model, taskKind) => ({
+        family, model, taskKind, score: 50, cell: { kind: 'unknown' as const },
+        profileModel: '*', noProfile: true,
+      }),
+    },
+  };
+  for (const role of ['backend-developer', 'Frontend-Developer', ' devops-engineer ']) {
+    expect(candidatesFor({ id: 'verify', kind: 'tests', role }, gathered))
+      .toEqual([expect.objectContaining({ id: 'subagent:tests', phaseKind: 'tests' })]);
+  }
+  expect(candidatesFor({ id: 'review', kind: 'review', role: 'code-logic-reviewer' }, gathered))
+    .toEqual([expect.objectContaining({ id: 'subagent:code-logic-reviewer', role: 'code-logic-reviewer' })]);
+});
 import { policyForPhase } from './tier-effort-policy';
 
 function plan(scores: readonly number[]): PhasePlan {

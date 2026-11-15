@@ -495,7 +495,7 @@ After implementation:
 
 ### Developer Handoff
 
-**Recommended Developer**: frontend-developer
+**Recommended executor**: the `implement` phase
 **Task**: Implement visual design specifications with project's styling system
 **Complexity**: MEDIUM
 **Estimated Time**: 8-12 hours

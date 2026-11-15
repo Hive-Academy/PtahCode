@@ -13,8 +13,8 @@ Templates use the same download as [plugins](/plugins/plugin-storage/). They are
 └── templates/
     └── agents/
         ├── _shared/
-        ├── backend-developer.template.md
-        ├── frontend-developer.template.md
+        ├── project-manager.template.md
+        ├── senior-tester.template.md
         ├── software-architect.template.md
         └── …
 ```
@@ -30,7 +30,7 @@ Templates use the same download as [plugins](/plugins/plugin-storage/). They are
 {
   "templates": {
     "basePath": "libs/backend/agent-generation/templates/agents",
-    "files": ["backend-developer.template.md", "frontend-developer.template.md"]
+    "files": ["project-manager.template.md", "software-architect.template.md"]
   }
 }
 ```

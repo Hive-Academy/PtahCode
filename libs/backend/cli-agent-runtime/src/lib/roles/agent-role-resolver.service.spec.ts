@@ -120,7 +120,7 @@ describe('AgentRoleResolver', () => {
         {
           [agentsDir]: [
             file('team-leader.md'),
-            file('backend-developer.md'),
+            file('senior-tester.md'),
             file('notes.txt'),
             { name: 'nested.md', type: FileType.Directory },
             { name: 'linked.md', type: FileType.SymbolicLink },
@@ -133,7 +133,7 @@ describe('AgentRoleResolver', () => {
 
       await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
         'Architect',
-        'backend-developer',
+        'senior-tester',
         'team-leader',
       ]);
     });
@@ -203,7 +203,7 @@ describe('AgentRoleResolver', () => {
       const resolver = new AgentRoleResolver(fs.provider);
 
       const error = await expectRoleError(
-        resolver.resolve(workspaceRoot, 'backend-developer'),
+        resolver.resolve(workspaceRoot, 'senior-tester'),
         'no_roles',
       );
       expect(error.availableRoles).toEqual([]);
@@ -218,15 +218,31 @@ describe('AgentRoleResolver', () => {
       const resolver = new AgentRoleResolver(fs.provider);
 
       await expectRoleError(
-        resolver.resolve(workspaceRoot, 'backend-developer'),
+        resolver.resolve(workspaceRoot, 'senior-tester'),
         'no_roles',
       );
       expect(fs.readFile).not.toHaveBeenCalled();
     });
 
+    it.each(['backend-developer', 'frontend-developer', 'devops-engineer'])(
+      'rejects retired role %s with an implement phase hint', async (role) => {
+        const fs = createFakeFileSystem(
+          { [agentsDir]: [file(`${role}.md`), file('team-leader.md')] },
+          {},
+        );
+        const resolver = new AgentRoleResolver(fs.provider);
+        await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual(['team-leader']);
+        const error = await expectRoleError(resolver.resolve(workspaceRoot, role), 'unknown_role');
+        expect(error.availableRoles).toEqual(['team-leader']);
+        expect(error.message).toContain('implement');
+        expect(error.message).toContain(`Role "${role}" is retired.`);
+        expect(fs.readFile).not.toHaveBeenCalled();
+      },
+    );
+
     it('raises unknown_role listing the available roles', async () => {
       const fs = createFakeFileSystem(
-        { [agentsDir]: [file('team-leader.md'), file('backend-developer.md')] },
+        { [agentsDir]: [file('team-leader.md'), file('senior-tester.md')] },
         {},
       );
       const resolver = new AgentRoleResolver(fs.provider);
@@ -236,10 +252,10 @@ describe('AgentRoleResolver', () => {
         'unknown_role',
       );
       expect(error.availableRoles).toEqual([
-        'backend-developer',
+        'senior-tester',
         'team-leader',
       ]);
-      expect(error.message).toContain('backend-developer, team-leader');
+      expect(error.message).toContain('senior-tester, team-leader');
       expect(error.message).toContain(workspaceRoot);
       expect(fs.readFile).not.toHaveBeenCalled();
     });
@@ -288,8 +304,8 @@ describe('AgentRoleResolver', () => {
 
     it('matches case-sensitively', async () => {
       const fs = createFakeFileSystem(
-        { [agentsDir]: [file('backend-developer.md')] },
-        { [join(agentsDir, 'backend-developer.md')]: 'body' },
+        { [agentsDir]: [file('senior-tester.md')] },
+        { [join(agentsDir, 'senior-tester.md')]: 'body' },
       );
       const resolver = new AgentRoleResolver(fs.provider);
 
@@ -297,30 +313,30 @@ describe('AgentRoleResolver', () => {
         resolver.resolve(workspaceRoot, 'Backend-Developer'),
         'unknown_role',
       );
-      expect(error.availableRoles).toEqual(['backend-developer']);
+      expect(error.availableRoles).toEqual(['senior-tester']);
       expect(fs.readFile).not.toHaveBeenCalled();
     });
 
     it('reads the path joined from the matched listing entry and returns the definition', async () => {
-      const sourcePath = join(agentsDir, 'backend-developer.md');
+      const sourcePath = join(agentsDir, 'senior-tester.md');
       const fs = createFakeFileSystem(
-        { [agentsDir]: [file('backend-developer.md')] },
+        { [agentsDir]: [file('senior-tester.md')] },
         {
           [sourcePath]:
-            '---\nname: backend-developer\ndescription: "Writes backend code: services"\n---\n# Backend\n\nDo the work.\n',
+            '---\nname: senior-tester\ndescription: "Writes backend code: services"\n---\n# Backend\n\nDo the work.\n',
         },
       );
       const resolver = new AgentRoleResolver(fs.provider);
 
       const definition = await resolver.resolve(
         workspaceRoot,
-        'backend-developer',
+        'senior-tester',
       );
 
       expect(fs.readFile).toHaveBeenCalledTimes(1);
       expect(fs.readFile).toHaveBeenCalledWith(sourcePath);
       expect(definition).toEqual({
-        name: 'backend-developer',
+        name: 'senior-tester',
         description: 'Writes backend code: services',
         body: '# Backend\n\nDo the work.\n',
         sourcePath,

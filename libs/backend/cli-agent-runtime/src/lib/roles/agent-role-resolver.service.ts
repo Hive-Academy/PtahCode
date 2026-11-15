@@ -10,7 +10,10 @@ import {
   resolveHarnessWorkspaceRoot,
   stripFrontmatter,
 } from '@ptah-extension/harness-sync';
-import type { AgentRoleDefinition } from '@ptah-extension/shared';
+import {
+  isRetiredRole,
+  type AgentRoleDefinition,
+} from '@ptah-extension/shared';
 
 export const MAX_ROLE_BYTES = 64 * 1024;
 
@@ -52,7 +55,9 @@ export class AgentRoleResolver {
     const agentsDir = this.agentsDirFor(
       resolveHarnessWorkspaceRoot(workspaceRoot),
     );
-    return (await this.listRoleFiles(agentsDir)).map((file) => file.role);
+    return (await this.listRoleFiles(agentsDir))
+      .filter((file) => !isRetiredRole(file.role))
+      .map((file) => file.role);
   }
 
   async resolve(
@@ -70,7 +75,17 @@ export class AgentRoleResolver {
     const harnessRoot = resolveHarnessWorkspaceRoot(workspaceRoot);
     const agentsDir = this.agentsDirFor(harnessRoot);
     const roleFiles = await this.listRoleFiles(agentsDir);
-    const availableRoles = roleFiles.map((file) => file.role);
+    const availableRoles = roleFiles
+      .filter((file) => !isRetiredRole(file.role))
+      .map((file) => file.role);
+
+    if (isRetiredRole(role)) {
+      throw new AgentRoleError(
+        'unknown_role',
+        `Role "${role}" is retired. Use the "implement" phase instead.`,
+        availableRoles,
+      );
+    }
 
     if (roleFiles.length === 0) {
       throw new AgentRoleError(

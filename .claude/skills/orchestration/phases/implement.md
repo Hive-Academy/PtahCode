@@ -15,6 +15,8 @@ toolProfile:
 ## Method
 Read the assigned batch, all governing artifacts and local instructions; inspect adjacent code before editing. Use the repository's actual runtime, framework, dependency injection, public import boundaries, validation, logging, error, secret and size conventions. Trace existing callers and registration before changing contracts. Implement the complete requested behavior, including invalid inputs, dependency failure, cleanup and observable error paths. For UI, use the provided design handoff, safe rendering, existing RPC boundary, loading/empty/error states, accessibility and responsive behavior; render and inspect the result. For operations, enumerate real entry points, read complete automation and release rules, preserve service/data behavior, reference secrets only by name, and use a scoped check or dry run. Keep edits within assigned files and report collisions. Run the smallest meaningful checks, record commands, exit codes and remaining risk; never claim a check was run when it was not.
 
+Verify referenced symbols, state APIs and design tokens against source before use. For long-lived interfaces, avoid a timer, observer or poll per item in a growing list; give every listener, timer and observer a release path. Keep repeating animation on compositor properties where possible.
+
 For DOCUMENTATION, implement the approved `content-specification.md` by editing the actual requested documentation files and report those file paths as the deliverable.
 
 ## Output contract

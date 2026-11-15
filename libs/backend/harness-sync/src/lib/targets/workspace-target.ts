@@ -38,6 +38,8 @@ import type {
   HarnessTargetHealth,
   HarnessTargetId,
 } from '@ptah-extension/shared';
+import { isRetiredRole } from '@ptah-extension/shared';
+import { isRetiredPtahAgent } from './retired-agent-origin';
 import { throwIfPassAborted } from '../abort/pass-abort';
 import {
   hashContent,
@@ -195,7 +197,7 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     this.planHomeReap(migrations, desired, baseEntries);
 
     const ownership = this.ownershipOracle(workspaceRoot, baseEntries);
-    const desiredEntries = this.desiredEntries(desired);
+    const desiredEntries = this.desiredEntries(desired, workspaceRoot);
 
     const writes: HarnessPlanWrite[] = [];
     const foreign: string[] = [];
@@ -412,6 +414,7 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
    */
   private desiredEntries(
     desired: HarnessDesiredState,
+    workspaceRoot?: string,
   ): Map<string, DesiredEntry> {
     const entries = new Map<string, DesiredEntry>();
 
@@ -448,6 +451,12 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     const transformer = this.options.agentTransformer;
     if (transformer !== undefined) {
       for (const agent of desired.agents) {
+        // The wizard store suppresses only unchanged generated workspace agents.
+        if (
+          workspaceRoot !== undefined &&
+          isRetiredPtahAgent(workspaceRoot, agent.slug, agent.sourceFile)
+        )
+          continue;
         const model = desiredAgentModel(agent, this.id);
         const rendered = this.renderAgent(
           transformer,
@@ -653,6 +662,14 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       if (desiredEntries.has(relPath)) continue;
       const entry = baseEntries[relPath];
       if (entry.kind === 'mcp') continue; // owned by the facet planner
+      if (
+        entry.kind === 'agent' &&
+        this.options.agentTransformer !== undefined &&
+        isRetiredRole(
+          basenameWithoutSuffix(relPath, this.options.agentTransformer),
+        )
+      )
+        continue;
       if (mcpPlan.ownedKeys.has(relPath)) continue;
       const retiredItemId = retiredSourceItemId(
         entry.source,
@@ -897,7 +914,7 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     return ids;
   }
 
-  /** `ptah-backend-developer.agent.md` -> `backend-developer`. */
+  /** `ptah-senior-tester.agent.md` -> `senior-tester`. */
   private homeEntryAgentId(name: string, prefix: string): string {
     const withoutPrefix = name.slice(prefix.length);
     const transformer = this.options.agentTransformer;

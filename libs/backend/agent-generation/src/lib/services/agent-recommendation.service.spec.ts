@@ -63,6 +63,15 @@ describe('AgentRecommendationService', () => {
     expect(recommendedIds).toContain('visual-reviewer');
   });
 
+  it('does not recommend retired implementation roles', () => {
+    const ids = createService()
+      .calculateRecommendations(MINIMAL_ANALYSIS)
+      .map((recommendation) => recommendation.agentId);
+    for (const retired of ['backend-developer', 'frontend-developer', 'devops-engineer']) {
+      expect(ids).not.toContain(retired);
+    }
+  });
+
   it('recommends every agent at max relevance', () => {
     const service = createService();
     const recommendations = service.calculateRecommendations(MINIMAL_ANALYSIS);

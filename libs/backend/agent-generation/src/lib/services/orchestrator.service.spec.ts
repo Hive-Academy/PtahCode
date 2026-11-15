@@ -1550,8 +1550,8 @@ describe('AgentGenerationOrchestratorService', () => {
       wireHappyPath(
         mocks,
         createMockTemplate({
-          id: 'backend-developer',
-          name: 'backend-developer',
+          id: 'senior-tester',
+          name: 'senior-tester',
         }),
       );
       // The content pass echoes a previous generation's frontmatter.
@@ -1559,10 +1559,10 @@ describe('AgentGenerationOrchestratorService', () => {
         Result.ok({
           content: [
             '---',
-            'name: backend-developer',
+            'name: senior-tester',
             'disallowedTools: mcp__firecrawl',
             '---',
-            '# Backend Developer',
+            '# Senior Tester',
           ].join('\n'),
           warnings: [],
           rejectedSections: 0,

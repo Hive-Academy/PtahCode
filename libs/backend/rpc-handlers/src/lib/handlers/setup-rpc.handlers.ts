@@ -650,27 +650,6 @@ export class SetupRpcHandlers {
               category: 'planning',
             },
             {
-              id: 'backend-developer',
-              name: 'Backend Developer',
-              description:
-                'Implements APIs, database logic, business services, and server-side code',
-              category: 'development',
-            },
-            {
-              id: 'frontend-developer',
-              name: 'Frontend Developer',
-              description:
-                'Implements UI components, handles state management, and builds responsive interfaces',
-              category: 'development',
-            },
-            {
-              id: 'devops-engineer',
-              name: 'DevOps Engineer',
-              description:
-                'Manages CI/CD pipelines, containerization, deployment, and infrastructure',
-              category: 'development',
-            },
-            {
               id: 'senior-tester',
               name: 'Senior Tester',
               description:

@@ -266,7 +266,7 @@ Invoke DEVOPS strategy when task involves:
 
 **Key Signal**: Work is 100% infrastructure (no application business logic)
 
-**Implementation**: Route the infrastructure work as `implement`; default executor alias `devops-engineer`; use `Required Skills:` from the skill-routing table.
+**Implementation**: Route the infrastructure work as `implement`; use `Required Skills:` from the skill-routing table.
 
 **Candidate skill**: Assign `nestjs-deployment` in `Required Skills:` when the host lists it and
 the task containerizes, configures health checks, CORS, rate limiting or production logging, runs

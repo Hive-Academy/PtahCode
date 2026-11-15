@@ -49,7 +49,7 @@ const TEMPLATES_DIR = path.join(
 const PARTIALS_DIR = path.join(TEMPLATES_DIR, SHARED_PARTIALS_DIR);
 
 /** The corpus is a fixed set of specialists, not a growing directory. */
-const EXPECTED_TEMPLATE_COUNT = 14;
+const EXPECTED_TEMPLATE_COUNT = 11;
 
 function templateFiles(): string[] {
   return fs
@@ -1037,11 +1037,8 @@ const DELEGATE: SharedBlockId = 'CLI_DELEGATION';
 const STANCE: SharedBlockId = 'REVIEWER_STANCE';
 
 const ROLE_PARTIALS: Readonly<Record<string, readonly SharedBlockId[]>> = {
-  'backend-developer': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
   'code-logic-reviewer': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE, STANCE],
   'code-style-reviewer': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE, STANCE],
-  'devops-engineer': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
-  'frontend-developer': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
   'modernization-detector': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE],
   'project-manager': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
   'researcher-expert': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE],
@@ -1156,11 +1153,11 @@ describe('role grants', () => {
  * The hygiene rules have no shared partial. Released apps (electron v0.1.69 /
  * v0.1.70) download templates from main and reject any STATIC id their
  * compiled SHARED_BLOCK_IDS does not list, so a `STATIC:ENGINEERING_HYGIENE`
- * marker would stop template loading for those users. The four roles that
- * need the rules carry them inline instead. backend-developer is the source
- * of truth: the block runs from its first "- Engineering hygiene:" line
- * through the end of its "- Runtime cost:" line, and the other three roles
- * must carry that text byte-for-byte.
+ * marker would stop template loading for those users. The roles that need
+ * the rules carry them inline instead. software-architect is the source of
+ * truth: the block runs from its first "- Engineering hygiene:" line through
+ * the end of its "- Runtime cost:" line, and the other roles must carry that
+ * text byte-for-byte.
  */
 describe('engineering hygiene inlining', () => {
   const HYGIENE_START = '- Engineering hygiene:';
@@ -1176,12 +1173,8 @@ describe('engineering hygiene inlining', () => {
     return body.slice(start, lineEnd === -1 ? body.length : lineEnd).trimEnd();
   }
 
-  const REFERENCE_ROLE = 'backend-developer';
-  const INLINE_HYGIENE_ROLES = [
-    'frontend-developer',
-    'software-architect',
-    'code-style-reviewer',
-  ];
+  const REFERENCE_ROLE = 'software-architect';
+  const INLINE_HYGIENE_ROLES = ['code-style-reviewer'];
   const REFERENCE_BLOCK = hygieneBlock(read(`${REFERENCE_ROLE}.template.md`));
 
   it(`${REFERENCE_ROLE} carries a hygiene block that ends at Runtime cost`, () => {

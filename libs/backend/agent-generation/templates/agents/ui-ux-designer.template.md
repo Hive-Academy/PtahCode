@@ -14,7 +14,7 @@ description: >-
   content. Use when a task needs a brand or visual identity defined, a landing page or app
   screen specified with exact token values, an accessibility-checked colour and type scale,
   asset briefs written, or a design handoff prepared for a frontend implementer. Runs before
-  technical-content-writer and frontend-developer, not after them.
+  technical-content-writer and the `implement` phase, not after them.
 model: sonnet
 variables:
   CLARIFY_TRIGGER: >-

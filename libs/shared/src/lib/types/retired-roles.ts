@@ -36,7 +36,11 @@ export const ROLE_PHASE_ALIASES: Readonly<Record<string, PhaseKind>> =
  * The roles that Phase 4 retired so far. Each Phase 4 step adds its roles.
  * Every entry must use the phase kind of {@link ROLE_PHASE_ALIASES}.
  */
-export const RETIRED_ROLES: readonly RetiredRoleV1[] = Object.freeze([]);
+export const RETIRED_ROLES: readonly RetiredRoleV1[] = Object.freeze([
+  { slug: 'backend-developer', phaseKind: 'implement', step: 1 },
+  { slug: 'frontend-developer', phaseKind: 'implement', step: 1 },
+  { slug: 'devops-engineer', phaseKind: 'implement', step: 1 },
+]);
 
 function normalize(slug: string): string {
   return slug.trim().toLowerCase();

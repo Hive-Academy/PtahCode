@@ -1,16 +1,13 @@
 import {
   Bot,
   ClipboardList,
-  Container,
   DraftingCompass,
   Eye,
   FlaskConical,
-  LayoutTemplate,
   Palette,
   ScanEye,
   ScrollText,
   SearchCheck,
-  ServerCog,
   Sparkles,
   Telescope,
   Users,
@@ -119,8 +116,6 @@ export function cliMarkFor(
 
 /** THE role-icon table: one lucide glyph per workspace agent type. */
 export const AGENT_ROLE_ICONS: Readonly<Record<string, LucideIconData>> = {
-  'frontend-developer': LayoutTemplate,
-  'backend-developer': ServerCog,
   'software-architect': DraftingCompass,
   'team-leader': Users,
   'project-manager': ClipboardList,
@@ -129,7 +124,6 @@ export const AGENT_ROLE_ICONS: Readonly<Record<string, LucideIconData>> = {
   'code-logic-reviewer': SearchCheck,
   'code-style-reviewer': ScanEye,
   'researcher-expert': Telescope,
-  'devops-engineer': Container,
   'technical-content-writer': ScrollText,
   'modernization-detector': Sparkles,
   'visual-reviewer': Eye,

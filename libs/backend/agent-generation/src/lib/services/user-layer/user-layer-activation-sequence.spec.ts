@@ -121,7 +121,7 @@ describe('user-layer activation sequence (TASK_2026_261)', () => {
 
     await mkdir(agentSourceDir, { recursive: true });
     await writeFile(
-      join(agentSourceDir, 'backend-developer.md'),
+      join(agentSourceDir, 'custom-agent.md'),
       `# agent ${version}`,
       'utf8',
     );
@@ -157,7 +157,7 @@ describe('user-layer activation sequence (TASK_2026_261)', () => {
         'utf8',
       ),
       command: await readFile(join(roots.commands, 'review.md'), 'utf8'),
-      agent: await readFile(join(roots.agents, 'backend-developer.md'), 'utf8'),
+      agent: await readFile(join(roots.agents, 'custom-agent.md'), 'utf8'),
     };
   }
 
