@@ -35,23 +35,32 @@ const ROW_CLASS = [
   '[@container(min-width:640px)]:items-center [@container(min-width:640px)]:gap-x-[var(--ptah-gap-field)]',
 ].join(' ');
 
+const COMPACT_ROW_CLASS =
+  'grid grid-cols-[var(--ptah-dl-compact-term-w,7.5rem)_minmax(0,1fr)_auto] items-center min-h-[calc(var(--ptah-control-h-xs)+var(--ptah-space-1))] py-[var(--ptah-gap-label)] gap-x-[var(--ptah-gap-inline)]';
+
 const TERM_CLASS =
   'min-w-0 text-[length:var(--ptah-text-label-size)] leading-[var(--ptah-text-label-leading)] font-[number:var(--ptah-text-label-weight)] text-base-content-muted';
+const COMPACT_TERM_CLASS = 'min-w-0 break-words text-xs text-base-content-muted';
 
 const VALUE_CLASS =
   'min-w-0 break-words text-[length:var(--ptah-text-body-size)] leading-[var(--ptah-text-body-leading)] font-[number:var(--ptah-text-body-weight)] text-base-content';
+const COMPACT_VALUE_CLASS = 'min-w-0 break-words text-xs text-base-content';
 
 const MONO_CLASS =
   'font-[family-name:var(--ptah-font-mono)] text-[length:var(--ptah-text-code-size)] leading-[var(--ptah-text-code-leading)]';
 
 const PLACEHOLDER_CLASS = 'not-italic text-[color:var(--ptah-dl-empty-fg)]';
 
-function valueClass(mono: boolean, truncate: boolean): string {
+function valueClass(mono: boolean, truncate: boolean, density: 'default' | 'compact' = 'default'): string {
+  if (density === 'compact') {
+    return [COMPACT_VALUE_CLASS, mono ? 'font-[family-name:var(--ptah-font-mono)]' : ''].filter(Boolean).join(' ');
+  }
   return [VALUE_CLASS, mono ? MONO_CLASS : '', truncate ? 'truncate' : ''].filter(Boolean).join(' ');
 }
 
-function rowClass(divided: boolean): string {
-  return divided ? `${ROW_CLASS} ${DIVIDER_CLASS}` : ROW_CLASS;
+function rowClass(divided: boolean, density: 'default' | 'compact' = 'default'): string {
+  const classes = density === 'compact' ? COMPACT_ROW_CLASS : ROW_CLASS;
+  return divided ? `${classes} ${DIVIDER_CLASS}` : classes;
 }
 
 /**
@@ -73,22 +82,26 @@ function rowClass(divided: boolean): string {
   selector: 'ptah-description-list',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { 'data-ptah-pattern': 'description-list', class: 'block [container-type:inline-size]' },
+  host: {
+    'data-ptah-pattern': 'description-list',
+    class: 'block [container-type:inline-size]',
+    '[attr.data-density]': "density() === 'compact' ? 'compact' : null",
+  },
   template: `
     <dl [class]="listClass()" [attr.aria-label]="ariaLabel()">
       @if (items(); as rows) {
         @for (item of rows; track item.key) {
           <div data-ptah-description-row [class]="rowClass()">
-            <dt [class]="termClass">{{ item.term }}</dt>
+            <dt [class]="termClass()">{{ item.term }}</dt>
             @if (isEmpty(item.value)) {
-              <dd [class]="valueClass(false, false)" data-ptah-description-empty>
+              <dd [class]="valueClass(false, false, density())" data-ptah-description-empty>
                 <span aria-hidden="true" [class]="placeholderClass">{{ emptyText() }}</span
                 ><span class="sr-only">{{ item.term }} not set</span>
               </dd>
             } @else {
               <dd
-                [class]="valueClass(item.mono === true, item.truncate === true)"
-                [attr.title]="item.truncate ? item.value : null"
+                [class]="valueClass(item.mono === true, item.truncate === true, density())"
+                [attr.title]="density() === 'default' && item.truncate ? item.value : null"
               >{{ item.value }}</dd>
             }
           </div>
@@ -96,7 +109,7 @@ function rowClass(divided: boolean): string {
           <div data-ptah-description-row data-ptah-description-list-empty [class]="rowClass()">
             <!-- An empty dt keeps the dl content model valid (each row div needs a dt). -->
             <dt class="sr-only"></dt>
-            <dd [class]="valueClass(false, false) + ' ' + placeholderClass">{{ emptyText() }}</dd>
+            <dd [class]="valueClass(false, false, density()) + ' ' + placeholderClass">{{ emptyText() }}</dd>
           </div>
         }
       }
@@ -107,6 +120,7 @@ function rowClass(divided: boolean): string {
 export class PtahDescriptionListComponent {
   readonly items = input<readonly PtahDescriptionItem[] | null>(null);
   readonly divided = input(true, { transform: booleanAttribute });
+  readonly density = input<'default' | 'compact'>('default');
   readonly emptyText = input('Not set');
   readonly ariaLabel = input<string | null>(null);
 
@@ -115,8 +129,8 @@ export class PtahDescriptionListComponent {
       ? 'flex flex-col [&>:last-child]:[border-bottom:0]'
       : 'flex flex-col gap-[var(--ptah-gap-controls)]',
   );
-  protected readonly rowClass = computed(() => rowClass(this.divided()));
-  protected readonly termClass = TERM_CLASS;
+  protected readonly rowClass = computed(() => rowClass(this.divided(), this.density()));
+  protected readonly termClass = computed(() => this.density() === 'compact' ? COMPACT_TERM_CLASS : TERM_CLASS);
   protected readonly placeholderClass = PLACEHOLDER_CLASS;
   protected readonly isEmpty = isPtahDescriptionValueEmpty;
   protected readonly valueClass = valueClass;
@@ -145,12 +159,13 @@ export class PtahDescriptionListComponent {
     'data-ptah-pattern': 'description-item',
     'data-ptah-description-row': '',
     '[class]': 'rowClass()',
+    '[attr.data-density]': "density() === 'compact' ? 'compact' : null",
   },
   template: `
-    <dt [class]="termClass">{{ term() }}</dt>
+    <dt [class]="termClass()">{{ term() }}</dt>
     <dd
       [class]="valueClass()"
-      [attr.title]="truncate() && hasTextValue() ? value() : null"
+      [attr.title]="density() === 'default' && truncate() && hasTextValue() ? value() : null"
       [attr.data-ptah-description-empty]="showPlaceholder() ? '' : null"
     >
       @if (showPlaceholder()) {
@@ -186,11 +201,12 @@ export class PtahDescriptionItemComponent {
   private readonly valueSlot = viewChild.required<ElementRef<HTMLElement>>('valueSlot');
   private readonly slotHasContent = signal(false);
 
-  protected readonly termClass = TERM_CLASS;
+  protected readonly density = computed(() => this.list?.density() ?? 'default');
+  protected readonly termClass = computed(() => this.density() === 'compact' ? COMPACT_TERM_CLASS : TERM_CLASS);
   protected readonly placeholderClass = PLACEHOLDER_CLASS;
   protected readonly emptyText = computed(() => this.list?.emptyText() ?? 'Not set');
-  protected readonly rowClass = computed(() => rowClass(this.list?.divided() ?? true));
-  protected readonly valueClass = computed(() => valueClass(this.mono(), this.truncate()));
+  protected readonly rowClass = computed(() => rowClass(this.list?.divided() ?? true, this.density()));
+  protected readonly valueClass = computed(() => valueClass(this.mono(), this.truncate(), this.density()));
   protected readonly hasTextValue = computed(() => !isPtahDescriptionValueEmpty(this.value()));
   protected readonly showPlaceholder = computed(() => {
     const value = this.value();
