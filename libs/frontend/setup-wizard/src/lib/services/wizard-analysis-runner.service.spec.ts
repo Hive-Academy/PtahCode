@@ -52,17 +52,6 @@ const mockGenerationRun: ResumableGenerationRun = {
   ],
 };
 
-const mockRecommendations: AgentRecommendation[] = [
-  {
-    agentId: 'frontend-developer',
-    agentName: 'Frontend Developer',
-    relevanceScore: 95,
-    matchedCriteria: ['Angular detected'],
-    category: 'development',
-    recommended: true,
-  },
-];
-
 /**
  * The regression these cover: the analysis used to be owned by
  * `ScanProgressComponent`, so a view switch destroyed it mid-run and the
@@ -104,7 +93,6 @@ describe('WizardAnalysisRunner', () => {
 
     mockRpcService = {
       deepAnalyze: jest.fn().mockResolvedValue(mockMultiPhase),
-      recommendAgents: jest.fn().mockResolvedValue(mockRecommendations),
       cancelAnalysis: jest.fn().mockResolvedValue(undefined),
       getResumableRun: jest
         .fn()
@@ -127,9 +115,6 @@ describe('WizardAnalysisRunner', () => {
 
     expect(mockStateService.setMultiPhaseResult).toHaveBeenCalledWith(
       mockMultiPhase,
-    );
-    expect(mockStateService.setRecommendations).toHaveBeenCalledWith(
-      mockRecommendations,
     );
     expect(mockStateService.setCurrentStep).toHaveBeenCalledWith('analysis');
   });
@@ -182,13 +167,13 @@ describe('WizardAnalysisRunner', () => {
     expect(mockRpcService.deepAnalyze).not.toHaveBeenCalled();
   });
 
-  it('fetches only recommendations when a result is already stored', async () => {
+  it('reuses a stored analysis without another RPC', async () => {
     multiPhaseResult.set(mockMultiPhase);
 
     await runner.ensureStarted();
 
     expect(mockRpcService.deepAnalyze).not.toHaveBeenCalled();
-    expect(mockRpcService.recommendAgents).toHaveBeenCalledWith(mockMultiPhase);
+    expect(mockStateService.setCurrentStep).toHaveBeenCalledWith('analysis');
   });
 
   it('surfaces a failure and leaves the step alone', async () => {

@@ -13,7 +13,6 @@ import type {
   SetupGenerationRunState,
   WizardCancelParams,
   WizardGetGenerationRunStateParams,
-  WizardInstallPackAgentsResult,
   WizardPreviewGenerationParams,
   WizardRetryItemParams,
   WizardSubmitSelectionParams,
@@ -22,7 +21,6 @@ import type {
 import type {
   FileOutcome,
   GenerationTargetInfo,
-  WizardPlanPackInstallResult,
 } from './rpc-setup-decisions.types';
 import type {
   GenerationAgentOutcome,
@@ -188,30 +186,10 @@ describe('setup generation compatibility contract', () => {
       fileDecisions: { tester: { decision: 'replace', revision: 'rev-1' } },
       target: 'harness-root',
     };
-    const plan: WizardPlanPackInstallResult = {
-      planToken: 'plan-1',
-      target,
-      files: [{ file: 'docs-writer.md', state: 'differs', revision: 'rev-2' }],
-    };
-    const install: WizardInstallPackAgentsResult = {
-      success: true,
-      agentsDownloaded: 1,
-      fromCache: false,
-      files: [
-        { file: 'docs-writer.md', outcome: 'kept' },
-        { file: 'tester.md', outcome: 'changed-since-preview' },
-      ],
-      libraryPass: 'updated',
-    };
     expect(facts.counts?.kept).toBe(1);
     expect(facts.counts?.changedSincePreview).toBe(1);
     expect(facts.libraryPass).toBe('not-applicable');
-    expect(install.files?.map((entry) => entry.outcome)).toEqual([
-      'kept',
-      'changed-since-preview',
-    ]);
     expect(submit.fileDecisions?.['tester'].decision).toBe('replace');
-    expect(plan.files[0].state).toBe('differs');
   });
 
   it('keeps tabless requests and awaited result shapes valid', () => {

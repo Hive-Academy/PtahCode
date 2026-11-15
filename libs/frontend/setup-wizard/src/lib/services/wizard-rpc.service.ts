@@ -2,8 +2,6 @@ import { Injectable, inject } from '@angular/core';
 import { ClaudeRpcService, ModelStateService } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import type {
-  AgentPackInfoDto,
-  AgentRecommendation,
   AnalysisStatus,
   EnhancedPromptsRunWizardResponse,
   EnhancedPromptsGetStatusResponse,
@@ -12,10 +10,6 @@ import type {
   GenerationTargetChoice,
   SetupGenerationRejection,
   WizardGetResumableRunResponse,
-  WizardInstallPackAgentsParams,
-  WizardInstallPackAgentsResult,
-  WizardPlanPackInstallParams,
-  WizardPlanPackInstallResult,
   WizardPreviewGenerationParams,
   WizardPreviewGenerationResponse,
   SetupGenerationTabBinding,
@@ -41,10 +35,8 @@ import { findBoundGenerationTab } from './bound-generation-tab';
  */
 const WIZARD_RPC_TIMEOUTS = {
   LIST_MS: 10_000,
-  PACK_LIST_MS: 30_000,
   SHORT_LLM_MS: 60_000,
   GENERATION_MS: 300_000,
-  PACK_INSTALL_MS: 60_000,
   DEEP_ANALYSIS_MS: 3_660_000,
 } as const;
 
@@ -58,15 +50,6 @@ export type BoundAgentDecisions = Pick<
   'previewToken' | 'fileDecisions' | 'target'
 >;
 
-/**
- * Plan binding a community-pack install carries into
- * `wizard:install-pack-agents`: the plan token, one entry per Replace and the
- * target root. The server refuses any Replace without a matching plan.
- */
-export type PackInstallDecisions = Pick<
-  WizardInstallPackAgentsParams,
-  'planToken' | 'decisions' | 'target'
->;
 
 /** Only the decision fields that are set, so absent ones keep server defaults. */
 function boundDecisionFields(
@@ -110,9 +93,6 @@ export interface AgentSelectionResponse {
  * - wizard:cancel-analysis - Cancel a running analysis
  * - wizard:deep-analyze - Deep workspace analysis (supports resume)
  * - wizard:get-resumable-run - Read-only discovery of an unfinished run
- * - wizard:plan-pack-install - Compare pack files with the target folder
- * - wizard:install-pack-agents - Install community pack agents
- * - wizard:recommend-agents - Get agent recommendations
  * - enhancedPrompts:runWizard - Run Enhanced Prompts wizard
  * - enhancedPrompts:getStatus - Get Enhanced Prompts status
  * - enhancedPrompts:toggle - Toggle enhanced prompts on/off
@@ -432,28 +412,6 @@ export class WizardRpcService {
   }
 
   /**
-   * Get agent recommendations based on analysis results.
-   * Calls wizard:recommend-agents backend handler (registered in RpcMethodRegistry).
-   *
-   * Passes { isMultiPhase: true } to trigger all-agents-recommended path.
-   */
-  public async recommendAgents(
-    analysis: MultiPhaseAnalysisResponse,
-  ): Promise<AgentRecommendation[]> {
-    const payload = { isMultiPhase: true, analysisDir: analysis.analysisDir };
-
-    const result = await this.rpcService.call(
-      'wizard:recommend-agents',
-      payload,
-      { timeout: WIZARD_RPC_TIMEOUTS.SHORT_LLM_MS },
-    );
-    if (result.isSuccess() && result.data) {
-      return result.data as AgentRecommendation[];
-    }
-    throw new Error(result.error || 'Agent recommendation failed');
-  }
-
-  /**
    * Run Enhanced Prompts wizard to generate project-specific prompt guidance.
    * Uses the existing enhancedPrompts:runWizard RPC handler.
    *
@@ -669,88 +627,4 @@ export class WizardRpcService {
     throw new Error(result.error || 'Failed to load analysis');
   }
 
-  /**
-   * List available community agent packs.
-   * Calls the wizard:list-agent-packs backend handler to fetch curated pack manifests.
-   *
-   * @returns Array of agent pack info DTOs, or empty array on failure
-   */
-  public async listAgentPacks(): Promise<AgentPackInfoDto[]> {
-    const result = await this.rpcService.call(
-      'wizard:list-agent-packs',
-      {},
-      { timeout: WIZARD_RPC_TIMEOUTS.PACK_LIST_MS },
-    );
-
-    if (result.isSuccess() && result.data) {
-      return (result.data as { packs: AgentPackInfoDto[] }).packs;
-    }
-
-    return [];
-  }
-
-  /**
-   * Read-only comparison of pack files with the target folder
-   * (`wizard:plan-pack-install`). Writes nothing; its token binds the
-   * following install's Replace decisions.
-   *
-   * @param target - Root to compare against; absent = the harness root.
-   */
-  public async planPackInstall(
-    source: string,
-    agentFiles: string[],
-    target?: GenerationTargetChoice,
-  ): Promise<WizardPlanPackInstallResult> {
-    const params: WizardPlanPackInstallParams = {
-      source,
-      agentFiles,
-      ...(target !== undefined ? { target } : {}),
-    };
-    const result = await this.rpcService.call(
-      'wizard:plan-pack-install',
-      params,
-      { timeout: WIZARD_RPC_TIMEOUTS.PACK_INSTALL_MS },
-    );
-    if (result.isSuccess() && result.data) return result.data;
-    throw new Error(result.error || 'Failed to compare the pack files');
-  }
-
-  /**
-   * Install agents from a community pack into the workspace.
-   * Downloads specified agent files from the pack source to .claude/agents/.
-   *
-   * @param source - Manifest URL of the pack to install from
-   * @param agentFiles - Agent file names to install (must match manifest entries)
-   * @param plan - Token, Replace entries and target from `planPackInstall`;
-   *   absent fields keep the server defaults (keep, harness root).
-   * @returns Install result with success status and download count
-   */
-  public async installPackAgents(
-    source: string,
-    agentFiles: string[],
-    plan?: PackInstallDecisions,
-  ): Promise<WizardInstallPackAgentsResult> {
-    const result = await this.rpcService.call(
-      'wizard:install-pack-agents',
-      {
-        source,
-        agentFiles,
-        ...(plan?.planToken !== undefined ? { planToken: plan.planToken } : {}),
-        ...(plan?.decisions !== undefined ? { decisions: plan.decisions } : {}),
-        ...(plan?.target !== undefined ? { target: plan.target } : {}),
-      },
-      { timeout: WIZARD_RPC_TIMEOUTS.PACK_INSTALL_MS },
-    );
-
-    if (result.isSuccess() && result.data) {
-      return result.data as WizardInstallPackAgentsResult;
-    }
-
-    return {
-      success: false,
-      agentsDownloaded: 0,
-      fromCache: false,
-      error: result.error || 'Failed to install agents',
-    };
-  }
 }

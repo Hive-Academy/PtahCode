@@ -26,6 +26,7 @@ import { container } from 'tsyringe';
 import { TOKENS } from '@ptah-extension/vscode-core';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import { AGENT_GENERATION_TOKENS } from '@ptah-extension/agent-generation';
+import { USER_LAYER_MIRROR_SERVICE_TOKEN } from '@ptah-extension/skill-synthesis';
 import { provenanceLabel } from '@ptah-extension/shared';
 import {
   CloneProvenanceResolver,
@@ -33,6 +34,7 @@ import {
 } from './clone-provenance.resolver';
 
 const SCOPE = resolve('/workspace/acme-app');
+const AGENTS_ROOT = join(SCOPE, '.ptah', 'user', 'agents');
 const PLUGINS = resolve('/home/user/.ptah/plugins');
 const RELEASE_KIT_PATH = join(PLUGINS, 'ptah-release-kit');
 const OLD_HELPER_PATH = join(PLUGINS, 'old-helper');
@@ -86,6 +88,9 @@ function build(setup: Setup = {}) {
     child.registerInstance(SDK_TOKENS.SDK_PLUGIN_LOADER, pluginLoader);
   }
   child.registerInstance(AGENT_GENERATION_TOKENS.AGENT_ORIGIN_STORE, originStore);
+  child.registerInstance(USER_LAYER_MIRROR_SERVICE_TOKEN, {
+    getUserLayerRoots: jest.fn(() => ({ agents: AGENTS_ROOT })),
+  });
   return {
     resolver: child.resolve(CloneProvenanceResolver),
     pluginLoader,
@@ -137,7 +142,7 @@ describe('CloneProvenanceResolver — plugin-less clones', () => {
   });
 
   describe('wizardOriginUnchanged', () => {
-    const FILE = join(SCOPE, '.claude', 'agents', 'backend-developer.md');
+    const FILE = join(AGENTS_ROOT, 'backend-developer.md');
     const wizardAgents = { 'backend-developer': WIZARD_HASH };
 
     it('is true when the file hash equals the recorded hash', async () => {
@@ -155,6 +160,20 @@ describe('CloneProvenanceResolver — plugin-less clones', () => {
       );
       expect(origin?.provenance).toEqual({ kind: 'setup-wizard' });
       expect(origin?.wizardOriginUnchanged).toBe(false);
+    });
+
+    it('hashes the edited user-layer file instead of the workspace copy', async () => {
+      const workspaceFile = join(SCOPE, '.claude', 'agents', 'backend-developer.md');
+      const { resolver, originStore } = build({
+        wizardAgents,
+        fileHashes: {
+          [workspaceFile]: WIZARD_HASH,
+          [FILE]: `sha256:${'c'.repeat(64)}`,
+        },
+      });
+      const [origin] = (await resolver.resolveAll(SCOPE, [facts({})])) ?? [];
+      expect(origin.wizardOriginUnchanged).toBe(false);
+      expect(originStore.hashWrittenFile).toHaveBeenCalledWith(FILE);
     });
 
     it('is false with no error log when the file is missing', async () => {

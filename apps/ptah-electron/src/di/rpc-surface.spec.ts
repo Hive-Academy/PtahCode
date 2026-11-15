@@ -67,7 +67,10 @@ describe('Electron RPC surface', () => {
     );
   });
 
-  it('does not advertise retired community pack methods', () => {
+  it('does not advertise retired setup and agent methods', () => {
+    expect(surface.registered).not.toContain('setup-wizard:launch');
+    expect(surface.registered).not.toContain('wizard:recommend-agents');
+    expect(surface.registered).not.toContain('wizard:list-agent-packs');
     expect(surface.registered).not.toContain('wizard:plan-pack-install');
     expect(surface.registered).not.toContain('wizard:install-pack-agents');
   });

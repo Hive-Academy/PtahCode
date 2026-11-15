@@ -75,7 +75,7 @@ describe('ChooseAgentsPage', () => {
     findTabByIdAcrossWorkspaces: jest.fn(),
     getWorkspaceTabs: jest.fn(),
   };
-  const params: Record<string, string> = { source: 'catalog', tab: 'tab' };
+  const params: Record<string, string> = { tab: 'tab' };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -84,7 +84,6 @@ describe('ChooseAgentsPage', () => {
     rejection.set(null);
     selection.set(new Set(['agent-a']));
     store.recommendations.set([{ agentId: 'agent-a' }, { agentId: 'agent-b' }]);
-    params['source'] = 'catalog';
     params['tab'] = 'tab';
     delete params['analysis'];
     preview.open.mockResolvedValue(undefined);
@@ -152,9 +151,9 @@ describe('ChooseAgentsPage', () => {
   });
   afterEach(() => TestBed.resetTestingModule());
 
-  it('loads catalog recommendations and submits the reviewed token, Replace choice and target', async () => {
+  it('loads analysis state and submits the reviewed token, Replace choice and target', async () => {
     await page.ngOnInit();
-    expect(store.loadRecommendations).toHaveBeenCalledWith(binding, 'catalog');
+    expect(store.loadRecommendations).toHaveBeenCalledWith(binding, 'analysis');
     const actions = page as unknown as {
       openPreview(): Promise<void>;
       confirmPreview(): Promise<void>;
@@ -172,7 +171,7 @@ describe('ChooseAgentsPage', () => {
     );
   });
 
-  it('does not preview or generate when the built-in catalog is empty', async () => {
+  it('does not preview or generate when no agents are selected', async () => {
     store.recommendations.set([]);
     await page.ngOnInit();
     await page['openPreview']();

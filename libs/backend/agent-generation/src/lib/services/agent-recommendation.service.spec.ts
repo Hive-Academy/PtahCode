@@ -10,20 +10,9 @@
 
 import 'reflect-metadata';
 import { describe, it, expect } from '@jest/globals';
-import { readdirSync } from 'fs';
-import { join } from 'path';
 import { Logger } from '@ptah-extension/vscode-core';
 import { AgentRecommendationService } from './agent-recommendation.service';
 import type { DeepProjectAnalysis } from '../types/analysis.types';
-
-const TEMPLATES_DIR = join(__dirname, '..', '..', '..', 'templates', 'agents');
-
-function templateIdsOnDisk(): string[] {
-  return readdirSync(TEMPLATES_DIR)
-    .filter((f) => f.endsWith('.template.md'))
-    .map((f) => f.replace('.template.md', ''))
-    .sort();
-}
 
 function createService(): AgentRecommendationService {
   const logger = {
@@ -43,16 +32,12 @@ const MINIMAL_ANALYSIS = {
 } as unknown as DeepProjectAnalysis;
 
 describe('AgentRecommendationService', () => {
-  it('offers exactly one recommendation per agent template on disk (no template silently absent)', () => {
+  it('offers no built-in agent recommendations after template retirement', () => {
     const service = createService();
     const recommendations = service.calculateRecommendations(MINIMAL_ANALYSIS);
     const recommendedIds = recommendations.map((r) => r.agentId).sort();
     expect(recommendedIds).toEqual([]);
 
-    // Every template on disk must be reachable through the wizard picker.
-    for (const id of templateIdsOnDisk()) {
-      expect(recommendedIds).toContain(id);
-    }
   });
 
   it('excludes retired verification roles from the catalog', () => {

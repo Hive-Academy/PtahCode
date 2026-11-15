@@ -156,23 +156,6 @@ describe('wizard:get-resumable-run registration (TASK_2026_361)', () => {
   });
 });
 
-describe('wizard:plan-pack-install registration (TASK_2026_701 B8)', () => {
-  it('is in the shared RPC registry', () => {
-    expect(RPC_METHOD_NAMES).toContain('wizard:plan-pack-install');
-  });
-
-  it('is owned by the setup handler manifest entry and no other', () => {
-    const owners = RPC_HANDLER_MANIFEST.filter((entry) =>
-      (entry.methods as readonly string[]).includes('wizard:plan-pack-install'),
-    ).map((entry) => entry.key);
-    expect(owners).toEqual(['setup']);
-  });
-
-  it('is accepted by the existing `wizard:` runtime prefix', () => {
-    expect(ALLOWED_METHOD_PREFIXES).toContain('wizard:');
-  });
-});
-
 describe('plugin kept-item and config-home registration (TASK_2026_701 B12)', () => {
   const methods = [
     'plugins:replace-kept-items',

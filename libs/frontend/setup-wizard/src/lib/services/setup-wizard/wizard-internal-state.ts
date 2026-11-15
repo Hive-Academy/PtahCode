@@ -1,6 +1,5 @@
 import { InjectionToken, type WritableSignal } from '@angular/core';
 import type {
-  AgentPackInfoDto,
   AgentRecommendation,
   AnalysisStreamPayload,
   EnhancedPromptsSummary,
@@ -64,12 +63,6 @@ export interface WizardInternalState {
   readonly enhancedPromptsError: WritableSignal<string | null>;
   readonly enhancedPromptsDetectedStack: WritableSignal<string[] | null>;
   readonly enhancedPromptsSummary: WritableSignal<EnhancedPromptsSummary | null>;
-  readonly communityPacks: WritableSignal<AgentPackInfoDto[]>;
-  readonly communityPacksLoading: WritableSignal<boolean>;
-  readonly agentInstallStatus: WritableSignal<
-    Record<string, 'idle' | 'installing' | 'installed' | 'error'>
-  >;
-  readonly expandedPackSource: WritableSignal<string | null>;
 }
 
 /**
@@ -78,7 +71,6 @@ export interface WizardInternalState {
  * './wizard-internal-state'` without pulling the whole coordinator module.
  */
 export type {
-  AgentPackInfoDto,
   AgentRecommendation,
   EnhancedPromptsSummary,
   MultiPhaseAnalysisResponse,

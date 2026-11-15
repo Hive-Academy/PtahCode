@@ -51,7 +51,7 @@ jest.mock('os', () => ({
 }));
 
 describe('WorkspaceHarnessTarget — keep edits, detach before replacing (TASK_2026_609, D8)', () => {
-  const slug = 'backend-developer';
+  const slug = 'custom-developer';
   const COPY = `.codex/agents/${slug}.toml`;
   const HISTORY = '.ptah/harness/.history';
 

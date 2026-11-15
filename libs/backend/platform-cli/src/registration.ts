@@ -21,6 +21,7 @@ import {
   ContentDownloadService,
   DesktopOnlyDisplayWindowHost,
   createSessionDriverLock,
+  resolvePtahHomeDir,
 } from '@ptah-extension/platform-core';
 import type { IPlatformInfo } from '@ptah-extension/platform-core';
 import { PlatformType } from '@ptah-extension/platform-core';
@@ -64,7 +65,7 @@ export function registerPlatformCliServices(
     useValue: {
       async prepare(_workspaceRoot: string): Promise<void> {
         await Promise.all(['skills', 'agents', 'commands'].map((name) =>
-          mkdir(path.join(userDataPath, 'user', name), { recursive: true }),
+          mkdir(path.join(resolvePtahHomeDir(), 'user', name), { recursive: true }),
         ));
       },
     },

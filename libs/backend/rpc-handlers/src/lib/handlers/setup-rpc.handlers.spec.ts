@@ -1,24 +1,15 @@
 /**
  * SetupRpcHandlers — unit specs.
  *
- * Surface under test: setup RPC methods covering status, wizard launch,
- * analysis (deep-analyze / recommend-agents / cancel-analysis), saved
- * analyses (list/load), and the agent pack browser (list/install).
+ * Surface under test: setup RPC methods covering status, deep analysis,
+ * cancellation, and saved analyses (list/load).
  *
  * Behavioural contracts locked in here:
  *   - Registration: `register()` wires every method into the mock RpcHandler.
- *   - Workspace gating: `setup-status:get-status`, `setup-wizard:launch`,
- *     and `wizard:deep-analyze` throw when no workspace is open.
+ *   - Workspace gating: status and deep analysis require an open workspace.
  *   - DI container dispatch: `resolveService()` routes through
  *     `container.resolve()`; specs drive each method by mocking only the
  *     services the method actually calls.
- *   - `wizard:recommend-agents`:
- *       * `isMultiPhase: true` branch bypasses validation and returns the
- *         full 13-agent catalog with `recommended: true`.
- *       * Absent input throws a "Missing analysis input" error.
- *       * Invalid single-phase input throws an "Invalid analysis input"
- *         error sourced from the real Zod validation in
- *         `@ptah-extension/agent-generation`.
  *   - `wizard:cancel-analysis` is best-effort — it returns
  *     `{ cancelled: true }` as soon as any service cancels, and
  *     `{ cancelled: false }` only when every service throws.

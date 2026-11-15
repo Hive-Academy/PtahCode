@@ -19,9 +19,6 @@ import type { WizardInternalState } from './wizard-internal-state';
  * `state.foo()`.
  */
 export class WizardComputeds {
-  /** Count of installed community agents. */
-  public readonly installedCommunityAgentCount: Signal<number>;
-
   /** Whether a multi-phase analysis is active (totalPhaseCount > 0). */
   public readonly isMultiPhaseAnalysis: Signal<boolean>;
 
@@ -47,11 +44,6 @@ export class WizardComputeds {
   public readonly failedGenerationItems: Signal<SkillGenerationProgressItem[]>;
 
   public constructor(state: WizardInternalState) {
-    this.installedCommunityAgentCount = computed(() => {
-      const statuses = state.agentInstallStatus();
-      return Object.values(statuses).filter((s) => s === 'installed').length;
-    });
-
     this.isMultiPhaseAnalysis = computed(
       () =>
         state.totalPhaseCount() !== null && (state.totalPhaseCount() ?? 0) > 0,

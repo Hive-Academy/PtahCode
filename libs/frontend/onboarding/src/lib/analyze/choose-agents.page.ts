@@ -17,7 +17,6 @@ import type {
 } from '@ptah-extension/shared';
 import {
   AgentPreviewDialogComponent,
-  CommunityPacksPanelComponent,
   GenerationModelPickerComponent,
   GenerationPreviewStore,
   GenerationSourceStatusComponent,
@@ -44,7 +43,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
   imports: [
     AgentRecommendationListComponent,
     AgentPreviewDialogComponent,
-    CommunityPacksPanelComponent,
     GenerationModelPickerComponent,
     GenerationSourceStatusComponent,
     OwnerConflictBannerComponent,
@@ -88,24 +86,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           (primary)="analyzeFirst()"
         />
       } @else {
-        @if (source() === 'catalog') {
-          <section
-            class="rounded-[14px] border border-state-need bg-base-200 p-4 text-sm"
-            data-glass-surface="chrome"
-            data-testid="agent-only-banner"
-          >
-            No analysis is used; recommendations come from the workspace
-            catalog.
-            <button
-              ptahButton
-              variant="ghost"
-              type="button"
-              (click)="analyzeFirst()"
-            >
-              Analyze first
-            </button>
-          </section>
-        }
         <div
           class="rounded-[14px] border border-base-300 p-4"
           data-glass-surface="tile"
@@ -119,11 +99,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           } @else {
             <p class="text-sm text-base-content-muted">
               Context source:
-              {{
-                source() === 'catalog'
-                  ? 'Workspace discovery'
-                  : 'Selected analysis'
-              }}. The host checks the source when generation starts.
+              Selected analysis. The host checks the source when generation starts.
             </p>
           }
         </div>
@@ -169,12 +145,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                 [effectiveProvider]="generation.provider()"
                 [effectiveModel]="generation.model()"
               />
-            </section>
-            <section
-              class="rounded-[22px] border border-base-300 p-4"
-              data-glass-surface="content"
-            >
-              <ptah-community-packs-panel />
             </section>
             @if (ownerConflict()) {
               <div data-testid="choose-agents-owner-banner">
@@ -249,7 +219,6 @@ export class ChooseAgentsPage implements OnInit {
   private destroyed = false;
   private pendingAnalysis: string | null = null;
   protected readonly binding = signal<SetupGenerationTabBinding | null>(null);
-  protected readonly source = signal<'analysis' | 'catalog'>('analysis');
   protected readonly loading = signal(true);
   protected readonly loadError = signal<string | null>(null);
   protected readonly submitError = signal<string | null>(null);
@@ -262,9 +231,7 @@ export class ChooseAgentsPage implements OnInit {
     () => this.generation.rejection()?.reason === 'blocked',
   );
   protected readonly steps = computed<readonly OnboardingStep[]>(() => [
-    this.source() === 'catalog'
-      ? { id: 'analyze', label: 'Analyze', state: 'skipped' }
-      : {
+    {
           id: 'analyze',
           label: 'Analyze',
           state: 'completed',
@@ -292,8 +259,6 @@ export class ChooseAgentsPage implements OnInit {
       this.router.getCurrentNavigation()?.extras.state?.['explicitBack'] ===
       true;
     const params = this.route.snapshot.queryParamMap;
-    const source = params.get('source') === 'catalog' ? 'catalog' : 'analysis';
-    this.source.set(source);
     const workspacePath =
       this.tabs.activeWorkspacePath || this.vscode.config().workspaceRoot;
     if (!workspacePath) {
@@ -348,12 +313,12 @@ export class ChooseAgentsPage implements OnInit {
       return;
     }
     const analysis = params.get('analysis');
-    if (source === 'analysis' && analysis) {
+    if (analysis) {
       this.pendingAnalysis = analysis;
       await this.loadAnalysisAndRecommendations(analysis);
       return;
     }
-    if (source === 'analysis' && !this.store.loaded()) {
+    if (!this.store.loaded()) {
       this.loadError.set('Choose a completed analysis first.');
       this.loading.set(false);
       return;
@@ -403,7 +368,7 @@ export class ChooseAgentsPage implements OnInit {
     this.loading.set(true);
     this.loadError.set(null);
     try {
-      await this.store.loadRecommendations(binding, this.source());
+      await this.store.loadRecommendations(binding, 'analysis');
     } catch (error: unknown) {
       if (!this.destroyed)
         this.loadError.set(

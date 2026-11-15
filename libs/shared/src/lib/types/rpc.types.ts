@@ -226,8 +226,6 @@ import type {
 } from './rpc/rpc-plugin-marketplace.types';
 import type {
   LibraryPassStatus,
-  WizardPlanPackInstallParams,
-  WizardPlanPackInstallResult,
 } from './rpc/rpc-setup-decisions.types';
 
 import type {
@@ -434,16 +432,12 @@ import type {
 import type {
   SetupStatusGetParams,
   SetupStatusGetResponse,
-  SetupWizardLaunchParams,
-  SetupWizardLaunchResponse,
   WizardDeepAnalyzeParams,
   WizardDeepAnalyzeResponse,
   WizardGetResumableRunParams,
   WizardGetResumableRunResponse,
   WizardAnalysisStatusParams,
   WizardAnalysisStatusResponse,
-  WizardRecommendAgentsParams,
-  WizardRecommendAgentsResponse,
   WizardCancelAnalysisParams,
   WizardCancelAnalysisResponse,
   WizardSubmitSelectionParams,
@@ -469,10 +463,6 @@ import type {
   EnhancedPromptsCancelResponse,
   EnhancedPromptsGetRunStateParams,
   EnhancedPromptsGetRunStateResponse,
-  WizardListAgentPacksParams,
-  WizardListAgentPacksResult,
-  WizardInstallPackAgentsParams,
-  WizardInstallPackAgentsResult,
 } from './rpc/rpc-setup.types';
 
 import type {
@@ -1554,10 +1544,6 @@ export interface RpcMethodRegistry
     params: SetupStatusGetParams;
     result: SetupStatusGetResponse;
   };
-  'setup-wizard:launch': {
-    params: SetupWizardLaunchParams;
-    result: SetupWizardLaunchResponse;
-  };
   'wizard:deep-analyze': {
     params: WizardDeepAnalyzeParams;
     result: WizardDeepAnalyzeResponse;
@@ -1569,10 +1555,6 @@ export interface RpcMethodRegistry
   'wizard:analysis-status': {
     params: WizardAnalysisStatusParams;
     result: WizardAnalysisStatusResponse;
-  };
-  'wizard:recommend-agents': {
-    params: WizardRecommendAgentsParams;
-    result: WizardRecommendAgentsResponse;
   };
   'wizard:recommend-skills': {
     params: WizardRecommendSkillsParams;
@@ -1625,18 +1607,6 @@ export interface RpcMethodRegistry
   'wizard:load-analysis': {
     params: { filename: string };
     result: MultiPhaseAnalysisResponse;
-  };
-  'wizard:list-agent-packs': {
-    params: WizardListAgentPacksParams;
-    result: WizardListAgentPacksResult;
-  };
-  'wizard:plan-pack-install': {
-    params: WizardPlanPackInstallParams;
-    result: WizardPlanPackInstallResult;
-  };
-  'wizard:install-pack-agents': {
-    params: WizardInstallPackAgentsParams;
-    result: WizardInstallPackAgentsResult;
   };
   'license:getStatus': {
     params: LicenseGetStatusParams;
@@ -3841,11 +3811,9 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'auth:verifyDraftConnection': true,
   'auth:cancelDraftVerification': true,
   'setup-status:get-status': true,
-  'setup-wizard:launch': true,
   'wizard:deep-analyze': true,
   'wizard:get-resumable-run': true,
   'wizard:analysis-status': true,
-  'wizard:recommend-agents': true,
   'wizard:recommend-skills': true,
   'wizard:search-skills': true,
   'wizard:get-project-guidance': true,
@@ -3859,9 +3827,6 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:preview-generation': true,
   'wizard:list-analyses': true,
   'wizard:load-analysis': true,
-  'wizard:list-agent-packs': true,
-  'wizard:plan-pack-install': true,
-  'wizard:install-pack-agents': true,
   'license:getStatus': true,
   'license:setKey': true,
   'license:clearKey': true,

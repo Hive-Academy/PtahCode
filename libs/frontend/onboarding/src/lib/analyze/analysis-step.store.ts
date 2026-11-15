@@ -1,5 +1,4 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
   AgentRecommendation,
   MultiPhaseAnalysisResponse,
@@ -48,7 +47,6 @@ const phaseStatuses: readonly PhaseStatus[] = [
 @Injectable({ providedIn: 'root' })
 export class AnalysisStepStore {
   private readonly rpc = inject(WizardRpcService);
-  private readonly catalogRpc = inject(ClaudeRpcService);
   private readonly wizard = inject(SetupWizardStateService);
   private readonly runner = inject(WizardAnalysisRunner);
   private readonly generation = inject(GenerationWorkflowStore);
@@ -211,64 +209,12 @@ export class AnalysisStepStore {
     this.selectionValue.set(new Set());
   }
   async loadRecommendations(
-    binding: SetupGenerationTabBinding,
+    _binding: SetupGenerationTabBinding,
     source: 'analysis' | 'catalog',
   ): Promise<void> {
-    const revision = this.workspaceRevision;
     this.recommendationsValue.set([]);
-    const result = source === 'analysis' ? this.loaded() : null;
-    if (source === 'analysis' && !result)
+    if (source === 'analysis' && !this.loaded())
       throw new Error('Choose a completed analysis first.');
-    const recommendations =
-      source === 'analysis'
-        ? await this.rpc.recommendAgents(result!)
-        : await this.loadCatalog(binding);
-    if (revision !== this.workspaceRevision) return;
-    this.recommendationsValue.set(recommendations);
-    this.selectRecommended();
-  }
-  private async loadCatalog(
-    binding: SetupGenerationTabBinding,
-  ): Promise<AgentRecommendation[]> {
-    const response = await this.catalogRpc.call(
-      'wizard:recommend-agents',
-      { mode: 'workspace-catalog', tabBinding: binding },
-      { timeout: 60_000 },
-    );
-    if (!response.isSuccess() || !Array.isArray(response.data))
-      throw new Error('Catalog unavailable');
-    return response.data.flatMap((value: unknown): AgentRecommendation[] => {
-      if (typeof value !== 'object' || value === null) return [];
-      const row = value as Record<string, unknown>;
-      if (
-        typeof row['agentId'] !== 'string' ||
-        typeof row['agentName'] !== 'string' ||
-        typeof row['relevanceScore'] !== 'number' ||
-        typeof row['recommended'] !== 'boolean' ||
-        !['planning', 'development', 'qa', 'specialist', 'creative'].includes(
-          String(row['category']),
-        )
-      )
-        return [];
-      return [
-        {
-          agentId: row['agentId'],
-          agentName: row['agentName'],
-          relevanceScore: row['relevanceScore'],
-          recommended: row['recommended'],
-          category: row['category'] as AgentRecommendation['category'],
-          matchedCriteria: Array.isArray(row['matchedCriteria'])
-            ? row['matchedCriteria'].filter(
-                (item): item is string => typeof item === 'string',
-              )
-            : [],
-          ...(typeof row['description'] === 'string'
-            ? { description: row['description'] }
-            : {}),
-          ...(typeof row['icon'] === 'string' ? { icon: row['icon'] } : {}),
-        },
-      ];
-    });
   }
   async submit(
     binding: SetupGenerationTabBinding,

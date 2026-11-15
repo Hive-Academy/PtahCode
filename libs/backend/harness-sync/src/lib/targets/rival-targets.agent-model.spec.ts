@@ -85,6 +85,7 @@ describe('rival targets — agent model reconciliation', () => {
       `---\nname: ${slug}\ndescription: "an agent"\nmodel: opus\n---\ninstructions\n`,
       'utf-8',
     );
+    recordOrigins([]);
     layers = {};
   });
 
@@ -318,12 +319,54 @@ describe('rival targets — agent model reconciliation', () => {
 
   it('does not sync a retired slug when its origin store is unreadable', async () => {
     const dir = join(ws, '.ptah', 'setup-wizard', 'agent-origins.json');
+    rmSync(dir);
     mkdirSync(dir, { recursive: true });
     await reconciler().reconcile(ws, {
       mode: 'full',
       reason: 'unreadable origins',
     });
     expect(existsSync(join(ws, copyRel))).toBe(false);
+  });
+
+  it('removes an unchanged managed custom copy after its source is deleted', async () => {
+    const source = join(ws, '.claude', 'agents', 'custom.md');
+    const copy = join(ws, '.codex', 'agents', 'custom.toml');
+    writeFileSync(source, '# Custom agent');
+    const service = reconciler();
+    await service.reconcile(ws, { mode: 'full', reason: 'initial custom agent' });
+    expect(existsSync(copy)).toBe(true);
+    rmSync(source);
+    await service.reconcile(ws, { mode: 'full', reason: 'custom source deleted' });
+    expect(existsSync(copy)).toBe(false);
+  });
+
+  it('keeps an edited managed custom copy in place after sync is disabled', async () => {
+    const source = join(ws, '.claude', 'agents', 'custom.md');
+    const copy = join(ws, '.codex', 'agents', 'custom.toml');
+    writeFileSync(source, '# Custom agent');
+    const service = reconciler();
+    await service.reconcile(ws, { mode: 'full', reason: 'initial custom agent' });
+    expect(existsSync(copy)).toBe(true);
+    writeFileSync(copy, '# local edit');
+    new HarnessStateStore().save(ws, { version: 1, agentSyncEnabled: false });
+    const health = await service.reconcile(ws, { mode: 'full', reason: 'sync disabled' });
+    expect(readFileSync(copy, 'utf8')).toBe('# local edit');
+    expect(JSON.stringify(health)).toContain('custom.toml');
+  });
+
+  it('keeps and reports a custom copy whose contents cannot be hashed', async () => {
+    const source = join(ws, '.claude', 'agents', 'custom.md');
+    const copy = join(ws, '.codex', 'agents', 'custom.toml');
+    writeFileSync(source, '# Custom agent');
+    const service = reconciler();
+    await service.reconcile(ws, { mode: 'full', reason: 'initial custom agent' });
+    rmSync(source);
+    rmSync(copy);
+    mkdirSync(copy);
+    const health = await service.reconcile(ws, { mode: 'full', reason: 'uncertain copy' });
+    expect(existsSync(copy)).toBe(true);
+    expect(health.targets.find((target) => target.target === 'codex')?.keptLocalEdit)
+      .toContain('.codex/agents/custom.toml');
   });
 
   it('rewrites a changed Codex model without reporting a local edit, using the normalized root', async () => {

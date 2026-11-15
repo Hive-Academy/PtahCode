@@ -32,12 +32,13 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs';
 import type { Stats } from 'fs';
 import { mkdir, readFile, rm, unlink, writeFile } from 'fs/promises';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import type {
   HarnessFacetMatrix,
   HarnessTargetHealth,
   HarnessTargetId,
 } from '@ptah-extension/shared';
+import { isRetiredRole } from '@ptah-extension/shared';
 import { isRetiredPtahAgent } from './retired-agent-origin';
 import { throwIfPassAborted } from '../abort/pass-abort';
 import {
@@ -260,12 +261,13 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       baseEntries,
       retired?.mcpServerKeys ?? [],
     );
-    const removals = this.planRemovals(
+    const removals = await this.planRemovals(
       workspaceRoot,
       baseEntries,
       desiredEntries,
       mcpPlan,
       retired?.skillSourceRoots ?? [],
+      keptLocalEdit,
     );
     this.scanForeignDirs(workspaceRoot, desiredEntries, ownership, foreign);
 
@@ -645,21 +647,31 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
    * A copy whose manifest source lies under a retired skills.sh root carries
    * that root's item id (D-2).
    */
-  private planRemovals(
+  private async planRemovals(
     workspaceRoot: string,
     baseEntries: ManagedEntries,
     desiredEntries: Map<string, DesiredEntry>,
     mcpPlan: McpFacetPlan,
     retiredSkillRoots: readonly string[],
-  ): HarnessPlanRemove[] {
+    keptLocalEdit: string[],
+  ): Promise<HarnessPlanRemove[]> {
     const removals: HarnessPlanRemove[] = [];
     for (const relPath of Object.keys(baseEntries)) {
       if (desiredEntries.has(relPath)) continue;
       const entry = baseEntries[relPath];
       if (entry.kind === 'mcp') continue; // owned by the facet planner
-      // Retiring generated agents requires an explicit ownership check and
-      // consent. A routine reconciliation must not reap their old copies.
-      if (entry.kind === 'agent') continue;
+      if (entry.kind === 'agent') {
+        // A retired role could be wizard output. Without its source we cannot
+        // prove user authorship, so routine sync leaves that copy alone.
+        if (isRetiredRole(basename(entry.source, '.md'))) continue;
+        // Only a manifest claim plus matching output bytes proves the copy is
+        // ours to remove. Keep edited and unreadable copies at their live path.
+        const actual = await hashFile(toAbsolute(workspaceRoot, relPath));
+        if (actual !== entry.hash) {
+          keptLocalEdit.push(relPath);
+          continue;
+        }
+      }
       if (mcpPlan.ownedKeys.has(relPath)) continue;
       const retiredItemId = retiredSourceItemId(
         entry.source,
@@ -836,6 +848,22 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     removedLocalEdit: string[],
   ): Promise<void> {
     const { relPath, isDirectory } = removal;
+    if (removal.kind === 'agent') {
+      const gate = await prepareOwnedOverwrite({
+        workspaceRoot,
+        relPath,
+        isDirectory,
+        ownedHash: baseEntries[relPath]?.hash,
+      });
+      if (gate.kind === 'failed') {
+        result.writeFailed.push({ relPath, reason: gate.reason });
+      } else if (gate.kind === 'kept-local-edit') {
+        result.keptLocalEdit.push(relPath);
+      } else {
+        result.removed.push(relPath);
+      }
+      return;
+    }
     const outcome = await retireOwnedArtifact({
       workspaceRoot,
       relPath,

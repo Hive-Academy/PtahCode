@@ -20,7 +20,6 @@ import type {
   GenerationPreviewFile,
   GenerationTargetChoice,
   GenerationTargetInfo,
-  WizardPlanPackInstallResult,
   WizardPreviewGenerationResponse,
 } from '@ptah-extension/shared';
 
@@ -198,23 +197,6 @@ export function buildWizardRows(
     });
   }
   return rows;
-}
-
-/** Rows for a community-pack install plan: one per pack file. */
-export function buildPackRows(plan: WizardPlanPackInstallResult): DecisionRow[] {
-  return plan.files.map((file) => ({
-    id: file.file,
-    path: file.file,
-    kind: 'pack',
-    state: file.state,
-    revision: file.revision,
-    decision: 'keep',
-    forcedKeep: file.state === 'unreadable',
-    unchangedSinceWizardWrite: false,
-    libraryCopyEdited: false,
-    localText: file.localText,
-    incomingText: file.incomingText,
-  }));
 }
 
 /**

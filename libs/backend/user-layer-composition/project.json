@@ -3,5 +3,26 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "projectType": "library",
   "sourceRoot": "libs/backend/user-layer-composition/src",
-  "tags": ["scope:extension", "type:feature"]
+  "tags": ["scope:extension", "type:feature"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/backend/user-layer-composition",
+        "main": "libs/backend/user-layer-composition/src/index.ts",
+        "tsConfig": "libs/backend/user-layer-composition/tsconfig.lib.json",
+        "assets": [],
+        "format": ["cjs"],
+        "external": ["vscode", "tsyringe", "zod", "eventemitter3"]
+      }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": {
+        "jestConfig": "libs/backend/user-layer-composition/jest.config.ts",
+        "passWithNoTests": false
+      }
+    }
+  }
 }

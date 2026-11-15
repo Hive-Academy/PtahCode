@@ -382,7 +382,7 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
           <section class="space-y-2">
             <div class="flex items-center justify-between gap-2">
               <h3 class="text-xs font-medium text-base-content-muted">Body</h3>
-              @if (canEditBody() && !editing()) {
+              @if (canEditBody() && !editing() && !m.actions.retired) {
                 <button
                   #editBodyButton
                   type="button"

@@ -241,6 +241,14 @@ describe('HarnessManifestBuilder', () => {
     expect(desired.agents).toEqual([]);
   });
 
+  it('rejects an unreadable origin store with the default throwing logger when sync is enabled', async () => {
+    writeAgent(root, 'custom-developer');
+    const originFile = join(root, '.ptah', 'setup-wizard', 'agent-origins.json');
+    mkdirSync(originFile, { recursive: true });
+    await expect(builder.build(emptyState(root), { workspaceRoot: root }))
+      .rejects.toThrow();
+  });
+
   it('[286] an absent agentSyncEnabled option means enabled, so a caller with no opinion never triggers a reap', async () => {
     writeAgent(root, 'custom-developer');
 

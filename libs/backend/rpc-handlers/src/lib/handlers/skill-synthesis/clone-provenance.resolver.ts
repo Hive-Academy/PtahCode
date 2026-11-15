@@ -40,6 +40,8 @@ import {
   AGENT_GENERATION_TOKENS,
   type WizardAgentOriginStore,
 } from '@ptah-extension/agent-generation';
+import { USER_LAYER_MIRROR_SERVICE_TOKEN } from '@ptah-extension/skill-synthesis';
+import type { UserLayerMirrorService } from '@ptah-extension/user-layer-composition';
 import type {
   DivergedReason,
   LibraryPluginState,
@@ -102,6 +104,8 @@ export class CloneProvenanceResolver {
     private readonly pluginLoader: PluginLoaderService | null,
     @inject(AGENT_GENERATION_TOKENS.AGENT_ORIGIN_STORE, { isOptional: true })
     private readonly wizardOrigins: WizardAgentOriginStore | null,
+    @inject(USER_LAYER_MIRROR_SERVICE_TOKEN, { isOptional: true })
+    private readonly mirror: UserLayerMirrorService | null,
   ) {}
 
   /**
@@ -195,13 +199,16 @@ export class CloneProvenanceResolver {
     clone: CloneOriginFacts,
   ): Promise<boolean | undefined> {
     const recorded = context.wizardAgents.get(clone.slug);
-    if (recorded === undefined || !this.wizardOrigins || !context.scopeRoot) {
+    if (
+      recorded === undefined ||
+      !this.wizardOrigins ||
+      !this.mirror ||
+      !context.scopeRoot
+    ) {
       return false;
     }
     const filePath = join(
-      context.scopeRoot,
-      '.claude',
-      'agents',
+      this.mirror.getUserLayerRoots(context.scopeRoot).agents,
       `${clone.slug}.md`,
     );
     try {

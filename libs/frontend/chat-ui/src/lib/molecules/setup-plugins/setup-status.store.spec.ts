@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   ClaudeRpcService,
@@ -53,6 +54,7 @@ describe('SetupStatusStore', () => {
   };
   const tabs = { activeWorkspacePath: '/workspace' as string | null };
   const launcher = { open: jest.fn().mockResolvedValue({ outcome: 'landed' }) };
+  const navigate = jest.fn().mockResolvedValue(true);
   let store: SetupStatusStore;
   let electron = false;
   const addFolder = jest.fn().mockResolvedValue('cancelled');
@@ -69,6 +71,7 @@ describe('SetupStatusStore', () => {
     statusData = status;
     rpc.call.mockImplementation(reply);
     launcher.open.mockResolvedValue({ outcome: 'landed' });
+    navigate.mockResolvedValue(true);
     TestBed.configureTestingModule({
       providers: [
         SetupStatusStore,
@@ -84,6 +87,7 @@ describe('SetupStatusStore', () => {
           },
         },
         { provide: GenerationWorkflowLauncherService, useValue: launcher },
+        { provide: Router, useValue: { navigate } },
       ],
     });
     store = TestBed.inject(SetupStatusStore);
@@ -276,11 +280,7 @@ describe('SetupStatusStore', () => {
       { timeout: 10000 },
     );
     await store.launchWizard();
-    expect(rpc.call).toHaveBeenCalledWith(
-      'setup-wizard:launch',
-      {},
-      { timeout: 5000 },
-    );
+    expect(navigate).toHaveBeenCalledWith(['/onboarding']);
     await store.launchGeneration('setup-agent-generation');
     expect(launcher.open).toHaveBeenCalledWith({
       workspacePath: '/workspace',
@@ -394,7 +394,7 @@ describe('SetupStatusStore', () => {
   it('keeps a failed launch alert through its immediate refresh and clears it on a later successful read', async () => {
     TestBed.flushEffects();
     await store.refresh();
-    rpc.call.mockResolvedValueOnce({ isSuccess: () => false });
+    navigate.mockResolvedValueOnce(false);
     await store.launchWizard();
     expect(store.launchError()).toContain('Could not launch setup');
     await store.refresh();

@@ -52,7 +52,7 @@ describe('userAgentFiles', () => {
   });
 
   it.each(['{', '{"version":1,"agents":{"writer":{}}}'])(
-    'treats every agent as user-written when the origin store is invalid: %s',
+    'keeps custom agents but excludes retired slugs when the origin store is invalid: %s',
     async (store) => {
       const dir = join(root, '.claude', 'agents');
       const originDir = join(root, '.ptah', 'setup-wizard');
@@ -60,16 +60,18 @@ describe('userAgentFiles', () => {
       mkdirSync(originDir, { recursive: true });
       writeFileSync(join(dir, 'writer.md'), '# Generated');
       writeFileSync(join(dir, 'custom.md'), '# Custom');
+      writeFileSync(join(dir, 'backend-developer.md'), '# Generated');
       writeFileSync(join(originDir, 'agent-origins.json'), store);
       expect(await userAgentFiles(root, log)).toEqual(['custom.md', 'writer.md']);
       expect(log.warn).toHaveBeenCalled();
     },
   );
 
-  it('treats every agent as user-written when the origin store is unreadable', async () => {
+  it('keeps custom agents but excludes retired slugs when the origin store is unreadable', async () => {
     const dir = join(root, '.claude', 'agents');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'custom.md'), '# Custom');
+    writeFileSync(join(dir, 'backend-developer.md'), '# Generated');
     const originFile = join(root, '.ptah', 'setup-wizard', 'agent-origins.json');
     const fs: UserAgentFileSystem = {
       readFile: async (path, encoding) => {

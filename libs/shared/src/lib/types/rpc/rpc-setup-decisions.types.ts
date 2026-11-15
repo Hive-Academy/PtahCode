@@ -118,37 +118,3 @@ export type GenerationRivalStatus =
   | 'harness-unavailable'
   | 'cli-detection-failed'
   | 'opened-folder-elsewhere';
-
-/** One destination file of a community pack install plan. */
-export interface PackFilePlan {
-  /** Pack agent file name, e.g. `docs-writer.md`. */
-  file: string;
-  state: PackFileState;
-  /** Opaque baseline revision; echo it back with a replace decision. */
-  revision: string;
-  /** Incoming pack text, for the diff disclosure. */
-  incomingText?: string;
-  /** Current local text, for the diff disclosure. Absent for `new`/`unreadable`. */
-  localText?: string;
-}
-
-/** Params for `wizard:plan-pack-install`: one file or the whole pack. */
-export interface WizardPlanPackInstallParams {
-  source: string;
-  agentFiles: string[];
-  target?: GenerationTargetChoice;
-}
-
-/** Result of `wizard:plan-pack-install`. Read-only: planning writes nothing. */
-export interface WizardPlanPackInstallResult {
-  /** Opaque token; echo it on `wizard:install-pack-agents`. */
-  planToken: string;
-  target: GenerationTargetInfo;
-  files: PackFilePlan[];
-}
-
-/** One file's terminal outcome in a pack install. */
-export interface PackFileOutcome {
-  file: string;
-  outcome: FileOutcome;
-}

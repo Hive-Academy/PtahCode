@@ -1,5 +1,6 @@
 import { promises as nodeFs, type Dirent } from 'fs';
 import { join } from 'path';
+import { isRetiredRole } from '@ptah-extension/shared';
 import {
   AGENT_ORIGINS_FILE,
   AgentOriginsFileSchema,
@@ -34,9 +35,8 @@ function realError(error: unknown): Error {
  * Workspace agent files that cannot be proved to be unchanged wizard output.
  *
  * The origin store only proves that a file is wizard output. A missing,
- * invalid or unreadable store proves nothing, so every `.md` file in
- * `.claude/agents` is then treated as user-written. A damaged store must
- * never hide intact custom agents.
+ * invalid or unreadable store proves nothing. Custom slugs remain eligible,
+ * while retired role slugs need positive evidence of a user edit.
  */
 export async function userAgentFiles(
   workspaceRoot: string,
@@ -45,6 +45,7 @@ export async function userAgentFiles(
 ): Promise<string[]> {
   const agentsDir = join(workspaceRoot, '.claude', 'agents');
   let recorded: Record<string, { hash: string }> = {};
+  let originStoreUsable = false;
   try {
     const raw = await fs.readFile(
       join(workspaceRoot, WIZARD_STATE_DIR, AGENT_ORIGINS_FILE),
@@ -53,9 +54,10 @@ export async function userAgentFiles(
     const parsed = AgentOriginsFileSchema.safeParse(JSON.parse(raw) as unknown);
     if (parsed.success) {
       recorded = parsed.data.agents;
+      originStoreUsable = true;
     } else {
       log.warn(
-        'Invalid agent origin store; treating all agents as user-written',
+        'Invalid agent origin store; syncing only custom role slugs',
         parsed.error,
       );
     }
@@ -63,12 +65,12 @@ export async function userAgentFiles(
     if (!isMissing(error)) {
       if (error instanceof SyntaxError) {
         log.warn(
-          'Invalid agent origin store; treating all agents as user-written',
+          'Invalid agent origin store; syncing only custom role slugs',
           error,
         );
       } else {
         log.error(
-          'Cannot read agent origin store; treating all agents as user-written',
+          'Cannot read agent origin store; syncing only custom role slugs',
           realError(error),
         );
       }
@@ -86,7 +88,9 @@ export async function userAgentFiles(
   const selected: string[] = [];
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-    const origin = recorded[entry.name.slice(0, -3)];
+    const slug = entry.name.slice(0, -3);
+    if (!originStoreUsable && isRetiredRole(slug)) continue;
+    const origin = recorded[slug];
     if (origin === undefined) {
       selected.push(entry.name);
       continue;

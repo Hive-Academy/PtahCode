@@ -41,9 +41,7 @@ import { GuidanceGenerationRunSupervisor } from './handlers/guidance-generation-
 import { GenerationRunSupervisor } from './handlers/wizard-generation-run.supervisor';
 import { GenerationPreviewService } from './handlers/wizard-generation/generation-preview.service';
 import { GenerationLibraryPassService } from './handlers/wizard-generation/generation-library-pass.service';
-import { PackInstallService } from './handlers/setup/pack-install.service';
 import {
-  AgentPackDownloadService,
   PLATFORM_TOKENS,
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
@@ -99,13 +97,6 @@ export function registerSharedRpcHandlers(
   container.registerSingleton(GenerationPreviewService);
   // Stateless; the post-run Library pass every wizard agents run shares.
   container.registerSingleton(GenerationLibraryPassService);
-  // Singletons: the download service shares in-flight fetches and queues
-  // installs per target directory; the install service holds the pack plan
-  // tokens and the per-process revision secret `wizard:install-pack-agents`
-  // checks Replace decisions against. A second instance of either would
-  // break both.
-  container.registerSingleton(AgentPackDownloadService);
-  container.registerSingleton(PackInstallService);
   // Marketplace local items (TASK_2026_701 B12, A21). The approval registry
   // MUST be one instance: it holds the server-side digests behind every
   // approvalId the client was given, so a second instance would forget them
