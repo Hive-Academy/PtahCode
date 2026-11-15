@@ -1,8 +1,8 @@
 {
   "$schema": "https://ptah.live/schemas/content-manifest.json",
   "version": "1.0.0",
-  "contentHash": "sha256:dbe90241159cd836f39b1a8c82f6465b421a3eb10a05a5f7455cb79acb516057",
-  "generatedAt": "2026-11-15T16:48:38.601Z",
+  "contentHash": "sha256:e22ac8aded73bb082fbe5ffc6d4888805920c32c9ec27a3bca2bbdad24b91625",
+  "generatedAt": "2026-11-15T18:21:37.038Z",
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main",
   "plugins": {
     "basePath": "plugins",
@@ -59,6 +59,10 @@
       "ptah-core/skills/humanize-library/references/refactor-recipes.md",
       "ptah-core/skills/humanize-library/scripts/analyze_library.mjs",
       "ptah-core/skills/orchestration/SKILL.md",
+      "ptah-core/skills/orchestration/packs/content.md",
+      "ptah-core/skills/orchestration/packs/operations.md",
+      "ptah-core/skills/orchestration/packs/research.md",
+      "ptah-core/skills/orchestration/packs/software.md",
       "ptah-core/skills/orchestration/phases/architecture.md",
       "ptah-core/skills/orchestration/phases/batch.md",
       "ptah-core/skills/orchestration/phases/completion.md",
