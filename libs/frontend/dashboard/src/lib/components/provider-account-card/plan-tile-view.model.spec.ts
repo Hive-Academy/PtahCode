@@ -80,6 +80,17 @@ describe('plan-tile-view.model', () => {
   });
 
   describe('buildPlanTile primary selection', () => {
+    it('shows the reset for a fresh full provider reading', () => {
+      const view = buildPlanTile(owner([win({
+        used: { kind: 'percent', percent: 100 },
+        usedSource: 'provider-api',
+        resetSource: 'provider-api',
+        exhaustion: undefined,
+      })]), NOW, TIME);
+      expect(view.bar?.limitLine).toContain('Limit reached');
+      expect(view.bar?.limitLine).toContain('resets');
+      expect(view.bar?.limitLine).not.toContain('reset unknown');
+    });
     it('shows the window with the highest finite used percentage', () => {
       const view = buildPlanTile(
         owner([

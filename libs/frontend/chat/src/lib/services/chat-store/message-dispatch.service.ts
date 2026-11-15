@@ -106,6 +106,7 @@ export class MessageDispatchService {
     if (
       resolvedTabId != null &&
       (isStreaming ||
+        this.messageSender.isStartPending?.(resolvedTabId) ||
         this.sendLock.isHeld(resolvedTabId, options?.ownerToken) ||
         // Something is already waiting: a normal send would overtake it.
         this.followUps.hasPending(resolvedTabId))

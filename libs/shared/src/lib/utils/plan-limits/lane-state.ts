@@ -338,7 +338,7 @@ export function classifyLaneState(
   for (const { window, state } of windows) {
     const evidence =
       state === 'limit-reached'
-        ? activeWindowExhaustion(window, ctx.now)
+        ? activeWindowExhaustion(window, ctx.now, windowCtx)
         : undefined;
     if (evidence !== undefined) {
       limitReasons.push({ kind: 'window-limit', window, evidence });

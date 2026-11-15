@@ -94,6 +94,8 @@ export type McpRegistrationFailure =
    * later is expected to succeed.
    */
   | 'lock-timeout'
+  /** Registration is still queued or in progress after the chat deadline. */
+  | 'timeout'
   /** The read-modify-write itself failed (permissions, unparseable JSON, …). */
   | 'write-failed';
 
@@ -114,6 +116,7 @@ export interface McpSubagentRegistration {
 }
 
 const REGISTERED: McpSubagentRegistration = { registered: true };
+export const MCP_CHAT_REGISTRATION_DEADLINE_MS = 3000;
 
 /**
  * Duplicated from SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER (agent-sdk) to avoid
@@ -256,12 +259,14 @@ export class CodeExecutionMCP
    * session's git worktree). Planned beside the open folders in
    * {@link desiredSlots}, so a workspace-folder reconcile keeps them.
    *
-   * A set, not a count: each child owns its own worktree, so one root is never
-   * retained twice by two live sessions. Mutated only inside `enqueueMcpOp`.
-   * Survives `stop()` on purpose: the sessions still run in those folders, so a
-   * restarted server keeps their entries in its next reconcile.
+   * A count per root, not a set: two live sessions can share one worktree (a
+   * successor keeps its predecessor's), so each successful retain adds one and
+   * each release subtracts one. The entry goes away only at zero. Mutated only
+   * inside `enqueueMcpOp`. Survives `stop()` on purpose: the sessions still run
+   * in those folders, so a restarted server keeps their entries in its next
+   * reconcile.
    */
-  private readonly retainedRoots = new Set<string>();
+  private readonly retainedRoots = new Map<string, number>();
 
   /**
    * The tail of the re-pointing queue. Every `.mcp.json` OWNERSHIP mutation
@@ -290,6 +295,17 @@ export class CodeExecutionMCP
    *    bumps the generation as well, which is what cancels (b).
    */
   private mcpOpQueue: Promise<void> = Promise.resolve();
+  /** A re-point that is queued or running; the chat fast path waits for it. */
+  private pendingRepoint: Promise<void> | null = null;
+  /**
+   * A re-point that is queued and has NOT started. Only this one is joined by
+   * later requests: a running pass captured its desired slots already, so a
+   * change that arrives during it needs a new pass.
+   */
+  private queuedRepoint: Promise<void> | null = null;
+  /** A chat registration reconcile that is queued and has NOT started. */
+  private queuedEnsure: Promise<McpSubagentRegistration> | null = null;
+  private registrationNeedsReconcile = false;
 
   /** Monotonic request counter; only the newest re-point is allowed to run. */
   private repointGeneration = 0;
@@ -419,8 +435,12 @@ export class CodeExecutionMCP
    * RUNS, and drop the job if a newer request has landed in the meantime.
    */
   private queueRepoint(): Promise<void> {
+    if (this.queuedRepoint) return this.queuedRepoint;
     const generation = ++this.repointGeneration;
-    return this.enqueueMcpOp(async () => {
+    const run: Promise<void> = this.enqueueMcpOp(async () => {
+      // The job starts now: a later request must queue a new pass, because
+      // this one may have read the workspace before that change.
+      if (this.queuedRepoint === run) this.queuedRepoint = null;
       // Superseded while queued — a later workspace change, or a `stop()`, has
       // already asked for a different final state. Writing the intermediate one
       // here is exactly the entry that gets stranded.
@@ -436,6 +456,15 @@ export class CodeExecutionMCP
         );
       }
     });
+    this.pendingRepoint = run;
+    this.queuedRepoint = run;
+    void run.finally(() => {
+      if (this.pendingRepoint === run) this.pendingRepoint = null;
+      if (this.queuedRepoint === run) this.queuedRepoint = null;
+    }).catch((error: unknown) => {
+      this.logger.warn(`[CodeExecutionMCP] Repoint cleanup failed: ${String(error)}`, 'CodeExecutionMCP');
+    });
+    return run;
   }
 
   /**
@@ -535,7 +564,72 @@ export class CodeExecutionMCP
    * to the session.
    */
   async ensureRegisteredForSubagents(): Promise<McpSubagentRegistration> {
-    return this.enqueueMcpOp(() => this.ensureRegisteredNow());
+    if (this.stopped || !this.port) return notRegistered('not-started');
+    const activeTarget = this.getMcpJsonPath();
+    if (!activeTarget) return notRegistered('no-workspace');
+    const owned = this.registrations.get(activeTarget);
+    if (!this.registrationNeedsReconcile && !this.pendingRepoint && owned?.port === this.port &&
+        this.hasCurrentClaudeEntry(activeTarget, this.port, owned.slot.workspaceRoot)) {
+      return REGISTERED;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<McpSubagentRegistration>((resolve) => {
+      timer = setTimeout(() => {
+        this.logger.warn('[CodeExecutionMCP] Chat MCP registration exceeded deadline', 'CodeExecutionMCP');
+        resolve(notRegistered('timeout'));
+      }, MCP_CHAT_REGISTRATION_DEADLINE_MS);
+    });
+    try {
+      return await Promise.race([this.queueEnsureRegistered(), deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * One queued full reconcile serves every chat caller that arrives before it
+   * starts. Without this, each caller that gave up at the deadline left one more
+   * full reconcile in the FIFO, and the backlog grew with each chat start.
+   */
+  private queueEnsureRegistered(): Promise<McpSubagentRegistration> {
+    if (this.queuedEnsure) return this.queuedEnsure;
+    const run: Promise<McpSubagentRegistration> = this.enqueueMcpOp(() => {
+      if (this.queuedEnsure === run) this.queuedEnsure = null;
+      return this.ensureRegisteredNow();
+    });
+    this.queuedEnsure = run;
+    void run.finally(() => {
+      if (this.queuedEnsure === run) this.queuedEnsure = null;
+    }).catch((error: unknown) => {
+      this.logger.warn(`[CodeExecutionMCP] Registration cleanup failed: ${String(error)}`, 'CodeExecutionMCP');
+    });
+    return run;
+  }
+
+  private hasCurrentClaudeEntry(configPath: string, port: number, workspaceRoot: string): boolean {
+    try {
+      const config: unknown = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (typeof config !== 'object' || config === null || !('mcpServers' in config)) return false;
+      const servers = config.mcpServers;
+      if (typeof servers !== 'object' || servers === null || !('ptah' in servers)) return false;
+      const entry = servers.ptah;
+      if (typeof entry !== 'object' || entry === null || !('type' in entry) || !('url' in entry)) return false;
+      const url = entry.url;
+      if (entry.type !== 'http' || typeof url !== 'string' ||
+          !url.startsWith(`http://localhost:${port}/auth/`)) return false;
+      const token = /\/auth\/([A-Za-z0-9_-]{43})\//.exec(url)?.[1];
+      if (!token) return false;
+      // The whole URL must be the one this service writes (same grammar as
+      // `writeMcpJsonEntry`), so a changed path suffix goes to the repair.
+      const expected = `http://localhost:${port}/auth/${token}${ptahMcpUrl(port, workspaceRoot).slice(`http://localhost:${port}`.length)}`;
+      if (url !== expected) return false;
+      const auth = this.callerCredentials.authorize({ token, workspaceRoot: path.dirname(configPath) });
+      return auth.ok && auth.binding.capability === this.externalCallerAccess();
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - an unreadable config falls through to the queued repair.
+      this.logger.warn(`[CodeExecutionMCP] Could not inspect ${configPath}: ${String(error)}`, 'CodeExecutionMCP');
+      return false;
+    }
   }
 
   /** The body of {@link ensureRegisteredForSubagents}, already serialized. */
@@ -595,16 +689,32 @@ export class CodeExecutionMCP
   ): Promise<Map<string, McpSubagentRegistration>> {
     const desired = await this.desiredSlots();
     const outcomes = new Map<string, McpSubagentRegistration>();
+    let needsRetry = false;
 
     for (const owned of [...this.registrations.keys()]) {
       if (desired.has(owned)) continue;
-      await this.unregisterFromSlot(owned);
+      if (await this.unregisterFromSlot(owned)) needsRetry = true;
     }
 
     for (const [configPath, slot] of desired) {
-      outcomes.set(configPath, await this.registerInSlot(slot, port));
+      const outcome = await this.registerInSlot(slot, port);
+      outcomes.set(configPath, outcome);
+      if (!outcome.registered) needsRetry = true;
     }
 
+    this.registrationNeedsReconcile = needsRetry;
+    return outcomes;
+  }
+
+  private async registerRootSlots(root: string, port: number): Promise<Map<string, McpSubagentRegistration>> {
+    const slots = await planPtahMcpSlots({
+      workspaceRoots: [root],
+      isInstalled: (target) => this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
+    });
+    const outcomes = new Map<string, McpSubagentRegistration>();
+    for (const slot of slots) {
+      if (slot.workspaceRoot === root) outcomes.set(slot.configPath, await this.registerInSlot(slot, port));
+    }
     return outcomes;
   }
 
@@ -631,11 +741,11 @@ export class CodeExecutionMCP
       return { registered: false, reason: 'not-started' };
     }
 
-    const alreadyRetained = this.retainedRoots.has(root);
-    this.retainedRoots.add(root);
+    // Counted before the write, so a reconcile during it keeps the root.
+    this.retainedRoots.set(root, (this.retainedRoots.get(root) ?? 0) + 1);
     let outcome: McpSubagentRegistration;
     try {
-      const outcomes = await this.reconcileRegistrations(this.port);
+      const outcomes = await this.registerRootSlots(root, this.port);
       outcome =
         outcomes.get(path.join(root, '.mcp.json')) ??
         notRegistered('write-failed');
@@ -649,27 +759,48 @@ export class CodeExecutionMCP
       outcome = notRegistered('write-failed');
     }
 
-    if (!outcome.registered && !alreadyRetained) {
-      this.retainedRoots.delete(root);
-    }
+    // A refused retain is never released by its caller, so it takes back its
+    // own count here. Other holders of the root keep theirs.
+    if (!outcome.registered) this.dropRetention(root);
     return outcome;
   }
 
+  /** Subtract one holder of `root`. True when this was the last holder. */
+  private dropRetention(root: string): boolean {
+    const count = this.retainedRoots.get(root);
+    if (count === undefined) return false;
+    if (count > 1) {
+      this.retainedRoots.set(root, count - 1);
+      return false;
+    }
+    this.retainedRoots.delete(root);
+    return true;
+  }
+
   /**
-   * Give back a root kept by {@link retainRoot}. Idempotent, never rejects.
+   * Give back one hold on a root kept by {@link retainRoot}. Call once per
+   * successful retain; a release of an unretained root does nothing. Never rejects.
    *
    * The entry goes away in the reconcile that follows, unless the folder is
    * also an open workspace folder, which keeps its own entry.
    */
   async releaseRoot(root: string): Promise<void> {
     await this.enqueueMcpOp(async () => {
-      if (!this.retainedRoots.delete(root)) return;
+      // Another live session still holds this root: its entry stays.
+      if (!this.dropRetention(root)) return;
       // A stopping or stopped server has already given every entry back (or
       // kept the record of a failed removal for its next pass). Reconciling
       // here would write the open folders' entries for a port about to close.
       if (this.stopped || this.port === null) return;
       try {
-        await this.reconcileRegistrations(this.port);
+        for (const [configPath, owned] of this.registrations) {
+          if (owned.slot.workspaceRoot !== root) continue;
+          if (this.workspaceProvider.getWorkspaceFolders().includes(root) ||
+              this.workspaceProvider.getWorkspaceRoot() === root) continue;
+          // A failed removal leaves a live entry: the next chat registration
+          // must take the full reconcile, which retries it.
+          if (await this.unregisterFromSlot(configPath)) this.registrationNeedsReconcile = true;
+        }
       } catch (error: unknown) {
         this.logger.warn(
           `[CodeExecutionMCP] Failed to release ${root}: ${
@@ -692,7 +823,7 @@ export class CodeExecutionMCP
       workspaceRoots: [
         ...this.workspaceProvider.getWorkspaceFolders(),
         this.workspaceProvider.getWorkspaceRoot() ?? '',
-        ...this.retainedRoots,
+        ...this.retainedRoots.keys(),
       ],
       isInstalled: (target) =>
         this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
@@ -916,8 +1047,10 @@ export class CodeExecutionMCP
     slot: PtahMcpSlot,
     port: number,
   ): Promise<McpSubagentRegistration> {
+    const started = Date.now();
     try {
       const credential = await this.persistentCredential(slot);
+      const prepared = Date.now();
       const wrote =
         slot.target === CLAUDE_TARGET
           ? await this.writeMcpJsonEntry(
@@ -927,7 +1060,15 @@ export class CodeExecutionMCP
               credential.token,
             )
           : await this.writeFacetEntry(slot, port, credential.token);
+      const written = Date.now();
       await credential.commit();
+      const committed = Date.now();
+      if (committed - started > 1000) {
+        this.logger.warn(
+          `[CodeExecutionMCP] Slow registration for ${slot.target} in ${slot.configPath}: prepare=${prepared - started}ms write=${written - prepared}ms commit=${committed - written}ms total=${committed - started}ms`,
+          'CodeExecutionMCP',
+        );
+      }
 
       this.registrations.set(slot.configPath, { port, slot });
       if (wrote) {

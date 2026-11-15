@@ -466,7 +466,7 @@ export function windowDetail(
         ? formatted
         : `${formatted} used`,
     ...(percent !== undefined && { percent }),
-    resetFacts: windowResetFacts(entry, ctx),
+    resetFacts: windowResetFacts(entry, snapshot, ctx),
     ...(note && { note }),
     sourceChips: formatSourceChips(shown),
   };
@@ -521,10 +521,10 @@ function windowResetLine(entry: ClassifiedWindow, ctx: Ctx, countdown = false): 
   return state === 'not-confirmed' ? `${base} · last reset unknown` : base;
 }
 
-function windowResetFacts(entry: ClassifiedWindow, ctx: Ctx): string[] {
+function windowResetFacts(entry: ClassifiedWindow, snapshot: PlanLimitOwnerSnapshot, ctx: Ctx): string[] {
   const { window, state } = entry;
   if (state === 'limit-reached') {
-    const resetsAt = activeWindowExhaustion(window, ctx.now)?.resetsAt;
+    const resetsAt = activeWindowExhaustion(window, ctx.now, { ...ctx.lane, status: snapshot.status })?.resetsAt;
     return [
       resetsAt === undefined
         ? 'Limit reached — reset unknown'

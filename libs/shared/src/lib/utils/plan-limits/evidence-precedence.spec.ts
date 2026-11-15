@@ -184,6 +184,16 @@ describe('limitLookupDeadlineMs', () => {
     );
   });
 
+  it('gives Grok a deadline at least its 5 s billing HTTP timeout plus 1 s', () => {
+    const grokHttpTimeoutMs = 5_000;
+    const deadline = limitLookupDeadlineMs('grok');
+    expect(deadline).toBeGreaterThanOrEqual(grokHttpTimeoutMs + 1_000);
+    expect(deadline).toBe(SLOW_LIMIT_LOOKUP_DEADLINE_MS);
+    expect(limitLookupDeadlineMs(undefined, 'grok')).toBe(
+      SLOW_LIMIT_LOOKUP_DEADLINE_MS,
+    );
+  });
+
   it('keeps the ordinary deadline for other providers', () => {
     expect(limitLookupDeadlineMs('anthropic', undefined)).toBe(
       LIMIT_LOOKUP_DEADLINE_MS,

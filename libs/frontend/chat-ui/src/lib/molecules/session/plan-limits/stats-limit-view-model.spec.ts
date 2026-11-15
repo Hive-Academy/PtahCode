@@ -164,6 +164,16 @@ function noteTexts(group: LaneSubgroupModel): string[] {
 }
 
 describe('buildStatsLimitViewModel', () => {
+  it('shows the reset for a fresh full provider reading', () => {
+    const full = planWindow({
+      used: { kind: 'percent', percent: 100 },
+      exhaustion: undefined,
+    });
+    const vm = buildStatsLimitViewModel(input({ owners: [snapshot(CLAUDE_A, { windows: [full] })] }));
+    expect(vm.planTiles[0].window?.resetFacts[0]).toContain('Limit reached');
+    expect(vm.planTiles[0].window?.resetFacts[0]).toContain('resets');
+    expect(vm.planTiles[0].window?.resetFacts[0]).not.toContain('reset unknown');
+  });
   it.each([
     ['unsupported-config', 'This configuration does not support plan usage'],
     ['provider-unsupported', 'This provider does not report plan usage'],

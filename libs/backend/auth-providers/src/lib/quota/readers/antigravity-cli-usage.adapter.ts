@@ -10,10 +10,14 @@
  * (`cli-parse-failed`); unknown text is never read as 0 % used.
  */
 import { existsSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { runFallbackUsage, nodeFallbackExecutor, type FallbackExecutor } from './fallback-usage.runner';
-import { FALLBACK_TIMEOUT_MS, FALLBACK_PARSE_BACKOFF_MS, FALLBACK_SHORT_BACKOFF_MS, FALLBACK_MAX_OUTPUT_BYTES } from './fallback-usage.constants';
+import { ANTIGRAVITY_FALLBACK_TIMEOUT_MS, FALLBACK_PARSE_BACKOFF_MS, FALLBACK_SHORT_BACKOFF_MS, FALLBACK_MAX_OUTPUT_BYTES } from './fallback-usage.constants';
+import { parseAntigravityUsageJson } from './antigravity-usage-json.parser';
+import { antigravityGroupSlug, antigravityWindowIdentity } from './antigravity-usage-window';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   windowKindFromDuration,
@@ -21,7 +25,7 @@ import {
   type PlanLimitWindow,
 } from '@ptah-extension/shared';
 
-export const ANTIGRAVITY_CLI_TIMEOUT_MS = FALLBACK_TIMEOUT_MS;
+export const ANTIGRAVITY_CLI_TIMEOUT_MS = ANTIGRAVITY_FALLBACK_TIMEOUT_MS;
 export const ANTIGRAVITY_CLI_PARSE_BACKOFF_MS = FALLBACK_PARSE_BACKOFF_MS;
 export const ANTIGRAVITY_CLI_SHORT_BACKOFF_MS = FALLBACK_SHORT_BACKOFF_MS;
 export const ANTIGRAVITY_CLI_MAX_OUTPUT_BYTES = FALLBACK_MAX_OUTPUT_BYTES;
@@ -35,7 +39,7 @@ const USAGE_ROW_SCHEMA = z.tuple([
     .string()
     .min(1)
     .max(MAX_FIELD_LENGTH)
-    .regex(/(?:five\s*hour|weekly)/i),
+    .regex(/(?:five\s*hour|5h|weekly)/i),
   z
     .string()
     .regex(PERCENT)
@@ -90,7 +94,13 @@ export interface AntigravityCliOptions {
   readonly ownerKey?: string;
   readonly accountFingerprint?: string;
   readonly executor?: FallbackExecutor;
+  readonly temporaryCwd?: { create(): Promise<string>; remove(cwd: string): Promise<void> };
 }
+
+const productionCwd = {
+  create: () => mkdtemp(join(tmpdir(), 'ptah-agy-usage-')),
+  remove: (cwd: string) => rm(cwd, { recursive: true, force: true }),
+};
 
 /** `agy` on PATH first, then `%LOCALAPPDATA%/agy/bin/agy(.exe)` on Windows. */
 export function antigravityCliCandidates(
@@ -120,10 +130,12 @@ export async function readAntigravityCliUsage(
     const result = await runFallbackUsage({ sourceId: 'antigravity', ownerKey: options.ownerKey ?? 'cli-store',
       executable, version: 'usage-v1', accountFingerprint: options.accountFingerprint ??
         (options.exec ? executorId(options.exec) : 'active'),
-      args: ['-p', '/usage'], executor, parse: parseAntigravityCliUsage, signal, now,
-      deadline,
+      args: ['-p', '/usage', '--output-format', 'json'], executor,
+      temporaryCwd: options.temporaryCwd ?? (options.exec ? undefined : productionCwd),
+      timeoutMs: ANTIGRAVITY_CLI_TIMEOUT_MS, parse: parseAntigravityCliUsage, signal, now, deadline,
       logger: options.logger });
     if (result.ok) return { ok: true, windows: result.value, readAt: result.readAt };
+    if (result.cwdUnavailable) return { ok: false, reason: 'cli-unavailable' };
     if (result.reason === 'cli-not-found' || result.reason === 'cli-unavailable' ||
       result.reason === 'cli-exit-error' || result.reason === 'cli-backoff') {
       if (result.reason !== 'cli-not-found') firstFailure ??= result.reason;
@@ -157,12 +169,26 @@ export function parseAntigravityCliUsage(
   if (Buffer.byteLength(stdout, 'utf8') > ANTIGRAVITY_CLI_MAX_OUTPUT_BYTES) {
     return undefined;
   }
+  const jsonWindows = parseAntigravityUsageJson(stdout, observedAt);
+  if (jsonWindows) return jsonWindows;
   const lines = stdout.split(/\r?\n/).filter((line) => line.trim() !== '');
   if (lines.length === 0 || lines.length > MAX_LINES) return undefined;
   const windows: PlanLimitWindow[] = [];
   const keys = new Set<string>();
+  const groupIndexes = new Map<string, number>();
   for (const line of lines) {
-    const window = parseLine(line, observedAt);
+    const group = line.split('\t', 1)[0]?.trim() ?? '';
+    if (!groupIndexes.has(group)) groupIndexes.set(group, groupIndexes.size);
+  }
+  const slugCounts = new Map<string, number>();
+  for (const group of groupIndexes.keys()) {
+    const slug = antigravityGroupSlug(group);
+    slugCounts.set(slug, (slugCounts.get(slug) ?? 0) + 1);
+  }
+  for (const line of lines) {
+    const group = line.split('\t', 1)[0]?.trim() ?? '';
+    const window = parseLine(line, observedAt, groupIndexes.get(group) ?? 0,
+      (slugCounts.get(antigravityGroupSlug(group)) ?? 0) > 1);
     if (!window || keys.has(window.key)) return undefined;
     keys.add(window.key);
     windows.push(window);
@@ -173,6 +199,8 @@ export function parseAntigravityCliUsage(
 function parseLine(
   line: string,
   observedAt: number,
+  index: number,
+  collision: boolean,
 ): PlanLimitWindow | undefined {
   const parsed = USAGE_ROW_SCHEMA.safeParse(
     line.split('\t').map((field) => field.trim()),
@@ -180,27 +208,21 @@ function parseLine(
   if (!parsed.success) return undefined;
   const [group, label, remaining, resetsAt] = parsed.data;
   if (resetsAt < observedAt - 24 * 60 * 60_000) return undefined;
-  const durationMins = /five\s*hour/i.test(label)
+  const durationMins = /(?:five\s*hour|5h)/i.test(label)
     ? 300
     : /weekly/i.test(label)
       ? 10_080
       : undefined;
   const descriptor = windowKindFromDuration(durationMins, 0);
-  const slug = (value: string) =>
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-  const suffix = durationMins ? descriptor.kind : slug(label);
+  const identity = antigravityWindowIdentity(group, index, descriptor.kind, label, collision);
   return {
-    key: `other:cli-${slug(group)}-${suffix}`,
+    key: identity.key,
     kind: descriptor.kind,
-    label: `${durationMins ? descriptor.label : label} · ${group}`,
-    modelScope: group,
+    label: identity.label,
     ...(durationMins && { durationMins }),
     used: {
       kind: 'percent',
-      percent: Math.round((100 - remaining) * 10) / 10,
+      percent: remaining === 0 ? 100 : Math.min(Math.round((100 - remaining) * 10) / 10, 99.9),
     },
     usedSource: 'provider-unofficial',
     usedObservedAt: observedAt,
