@@ -77,9 +77,12 @@ as a limit).
 | Batch | Scope | PR | State |
 | --- | --- | --- | --- |
 | research | usage-sources.md | - | done |
-| a1 | codex false AT LIMIT, 100% reads limit-reached (codex lane 8e067b33) | batch (a) PR | implemented |
-| a2 | spawn bounded lookup wait, grok deadline (antigravity lane aa2f8cb4) | batch (a) PR | implemented |
-| a3 | review fixes 1, 3, 4 (codex lane 370c5eef); review: review-batch-a.md | batch (a) PR | implemented |
+| a1 | codex false AT LIMIT, 100% reads limit-reached (codex lane 8e067b33) | #1298 | in_review |
+| a2 | spawn bounded lookup wait, grok deadline (antigravity lane aa2f8cb4) | #1298 | in_review |
+| a3 | review fixes 1, 3, 4 (codex lane 370c5eef); review: review-batch-a.md | #1298 | in_review |
+| b | antigravity reader (agy JSON, branch fix/antigravity-usage-reader) | #1301 | in_review |
+| c | fallback reader port coverage | - | pending |
+| d | per-model limit state | - | pending |
 
 ### Batch (a) decisions
 
@@ -90,6 +93,3 @@ as a limit).
   plan-usage cache TTL, a slow lane with an active exhaustion can spawn with
   `unknown (limit lookup pending)`. The spawn dispatchers reach limits only through the async
   `PtahAPI.agent.limits`. A synchronous last-known read needs a new port (follow-up).
-| b | antigravity reader | - | pending |
-| c | fallback reader port coverage | - | pending |
-| d | per-model limit state | - | pending |
