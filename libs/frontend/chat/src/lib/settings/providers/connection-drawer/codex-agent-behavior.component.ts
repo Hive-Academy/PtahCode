@@ -7,6 +7,7 @@ import { CodexSandboxSettingComponent } from '../../advanced/codex-sandbox-setti
   selector: 'ptah-codex-agent-behavior',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'block' },
   imports: [AdvancedSettingsGroupComponent, CodexSandboxSettingComponent],
   template: `
     <section class="flex flex-col gap-[var(--ptah-gap-field)]" data-testid="codex-agent-behavior">
