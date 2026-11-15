@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2180_f8b5
-status: backlog
+status: in_review
 type: RESEARCH
 title: Investigate RPC timeouts and slow session switches
 depends_on: []
