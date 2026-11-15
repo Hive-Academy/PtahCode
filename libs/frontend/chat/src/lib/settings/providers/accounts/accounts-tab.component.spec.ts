@@ -190,7 +190,7 @@ describe('AccountsTabComponent', () => {
       expect(region?.getAttribute('aria-busy')).toBe('true');
     });
 
-    it('header: the form section "Accounts" heading (focusable by script); Add account in the list header actions', () => {
+    it('header: the form section "Accounts" heading (focusable by script); Add account in the section aside', () => {
       const heading = accountsHeading();
       expect(heading?.tagName).toBe('H3');
       expect(heading?.textContent?.trim()).toBe('Accounts');
@@ -200,7 +200,11 @@ describe('AccountsTabComponent', () => {
       expect(add?.textContent?.trim()).toBe('Add account');
       expect(add?.className).toContain('btn-outline');
       expect(add?.getAttribute('aria-disabled')).toBeNull();
-      expect(add?.closest('[data-testid="section-header-actions"]')).not.toBeNull();
+      expect(add?.closest('[data-testid="form-section-aside"]')).not.toBeNull();
+      // No second, visible list heading under "Accounts"; the list keeps its accessible name.
+      expect(root().querySelector('h4')).toBeNull();
+      expect(root().textContent).not.toContain('Account list');
+      expect(byTestId('accounts-tab-list')?.getAttribute('aria-label')).toBe('Claude accounts');
     });
 
     it('loading: busy list with a "Loading…" row; Add aria-disabled and inert', () => {
@@ -235,6 +239,10 @@ describe('AccountsTabComponent', () => {
       const badge = byTestId('accounts-tab-stale');
       expect(badge?.getAttribute('role')).toBe('status');
       expect(badge?.textContent?.trim()).toBe('Out of date');
+      // Add account and the stale badge share the section aside.
+      expect(byTestId('accounts-tab-add')?.closest('[data-testid="accounts-tab-aside"]')).toBe(
+        badge?.closest('[data-testid="accounts-tab-aside"]'),
+      );
       expect(all('accounts-tab-row')).toHaveLength(2);
       byTestId('accounts-tab-stale-retry')?.click();
       expect(accounts.refresh).toHaveBeenCalledWith('claude');

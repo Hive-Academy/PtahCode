@@ -304,6 +304,16 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       host.accounts.set([account('signed-in'), OTHER]);
     });
 
+    it('the Name field uses the stacked label, the same field pattern as the Add form', () => {
+      openEdit();
+      const field = nameInput().closest('[data-ptah-field]');
+      expect(field?.getAttribute('data-appearance')).toBe('stacked');
+      const label = field?.querySelector('label');
+      expect(label?.textContent?.trim()).toBe('Name');
+      expect(label?.getAttribute('for')).toBe('account-detail-name');
+      expect(nameInput().id).toBe('account-detail-name');
+    });
+
     it('Escape in the edit mode does not reach the drawer around the panel', () => {
       render();
       editButton().click();
@@ -471,6 +481,12 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       expect(dialog.hasAttribute('open')).toBe(true);
       expect(dialog.getAttribute('aria-labelledby')).toBe('account-detail-remove-title');
       expect(el().querySelector('#account-detail-remove-title')?.textContent).toBe('Remove Work?');
+      // The body states the host remove behavior: tombstone, cleared selections, runs kept, files kept.
+      const body = q('account-detail-remove-body')?.textContent?.trim();
+      expect(body).toContain('Ptah forgets this account.');
+      expect(body).toContain('go back to the Existing Claude login');
+      expect(body).toContain('Runs that are running now are not stopped.');
+      expect(body).toContain('sign-in data of this account stays on this computer');
       expect(document.activeElement).toBe(btn('account-detail-remove-cancel'));
       btn('account-detail-remove-cancel').click();
       render();
