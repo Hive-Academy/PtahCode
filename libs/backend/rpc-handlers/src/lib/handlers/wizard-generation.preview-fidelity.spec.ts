@@ -579,7 +579,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         workflow: 'setup-agent-generation' as const,
         workspacePath: f.workspace,
       };
-      const params = { selectedAgentIds: ['software-architect'], tabBinding };
+      const params = { selectedAgentIds: ['team-leader'], tabBinding };
       await call<WizardPreviewGenerationResponse>(
         f,
         'wizard:preview-generation',
@@ -589,7 +589,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         f.workspace,
         '.claude',
         'agents',
-        'software-architect.md',
+        'team-leader.md',
       );
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, 'changed after preview');
@@ -630,13 +630,13 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
           score: 0,
         }),
       );
-      const payload = await generate(f, ['software-architect']);
+      const payload = await generate(f, ['team-leader']);
       const content = fs.readFileSync(
-        path.join(f.workspace, '.claude', 'agents', 'software-architect.md'),
+        path.join(f.workspace, '.claude', 'agents', 'team-leader.md'),
         'utf8',
       );
       expect(payload.success).toBe(true);
-      expect(content).toContain('Authored guidance for software-architect.');
+      expect(content).toContain('Authored guidance for team-leader.');
       expect(content).not.toContain('Tailored for this workspace.');
     },
     STEP_TIMEOUT_MS,
@@ -647,7 +647,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
     async () => {
       const f = buildFixture({ disabledAgentIds: ['tester'] });
       f.gate.enable(f.workspace);
-      const ids = ['software-architect', 'project-manager', 'tester'];
+      const ids = ['team-leader', 'reviewer', 'tester'];
 
       const preview = await call<WizardPreviewGenerationResponse>(
         f,
@@ -656,8 +656,8 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       );
       expect(preview.warning).toBeUndefined();
       expect(definiteSet(preview)).toEqual([
-        '.claude/agents/project-manager.md',
-        '.claude/agents/software-architect.md',
+        '.claude/agents/reviewer.md',
+        '.claude/agents/team-leader.md',
         '.claude/agents/tester.md',
       ]);
       // codex/copilot/opencode for the two synced agents; tester opted out.
@@ -685,9 +685,9 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         [...definiteSet(preview), ...conditionalSet(preview)].sort(),
       );
       expect(written).toHaveLength(9);
-      expect(written).toContain('.codex/agents/software-architect.toml');
-      expect(written).toContain('.github/agents/project-manager.agent.md');
-      expect(written).toContain('.opencode/agent/software-architect.md');
+      expect(written).toContain('.codex/agents/team-leader.toml');
+      expect(written).toContain('.github/agents/reviewer.agent.md');
+      expect(written).toContain('.opencode/agent/team-leader.md');
       expect(written).not.toContain('.codex/agents/tester.toml');
     },
     STEP_TIMEOUT_MS,
@@ -702,7 +702,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         enabled: false,
         derived: false,
       });
-      const ids = ['software-architect', 'reviewer'];
+      const ids = ['team-leader', 'reviewer'];
 
       const preview = await call<WizardPreviewGenerationResponse>(
         f,
@@ -729,7 +729,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
     async () => {
       const f = buildFixture();
       expect(f.gate.persist(f.workspace, false)).toBe(true);
-      const ids = ['software-architect', 'reviewer'];
+      const ids = ['team-leader', 'reviewer'];
       // First generation while the gate stays disabled: the consent grant is
       // refused, so the propagation that follows syncs no agent copy.
       const enable = jest.spyOn(f.gate, 'enable').mockReturnValueOnce(false);
@@ -738,7 +738,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       expect(f.gate.resolve(f.workspace).enabled).toBe(false);
       expect(writtenAgentPaths(f.workspace)).toEqual([
         '.claude/agents/reviewer.md',
-        '.claude/agents/software-architect.md',
+        '.claude/agents/team-leader.md',
       ]);
 
       const preview = await call<WizardPreviewGenerationResponse>(
@@ -748,7 +748,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       );
       expect(definiteSet(preview)).toEqual([
         '.claude/agents/reviewer.md',
-        '.claude/agents/software-architect.md',
+        '.claude/agents/team-leader.md',
       ]);
       expect(conditionalSet(preview)).toHaveLength(6);
 
@@ -772,7 +772,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
     async () => {
       const f = buildFixture();
       f.gate.enable(f.workspace);
-      const ids = ['software-architect', 'reviewer'];
+      const ids = ['team-leader', 'reviewer'];
       const first = await generate(f, ids);
       expect(first.writtenCount).toBe(2);
       expect(writtenAgentPaths(f.workspace)).toHaveLength(8);
@@ -786,7 +786,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       expect(conditionalSet(preview)).toEqual([]);
       expect(definiteSet(preview)).toHaveLength(8);
       expect(definiteSet(preview)).toContain(
-        '.codex/agents/software-architect.toml',
+        '.codex/agents/team-leader.toml',
       );
 
       const second = await generate(f, ids);
@@ -810,7 +810,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       jest
         .spyOn(f.reconciler, 'verify')
         .mockRejectedValueOnce(new Error('verify exploded'));
-      const ids = ['software-architect', 'tester'];
+      const ids = ['team-leader', 'tester'];
 
       const preview = await call<WizardPreviewGenerationResponse>(
         f,
@@ -819,7 +819,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       );
       expect(preview.warning).toMatch(/only the Claude agent files/i);
       expect(definiteSet(preview)).toEqual([
-        '.claude/agents/software-architect.md',
+        '.claude/agents/team-leader.md',
         '.claude/agents/tester.md',
       ]);
 
