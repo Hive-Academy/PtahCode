@@ -14,8 +14,8 @@ export class PtahSelectIconDirective<T = unknown> {
 
   static ngTemplateContextGuard<T>(
     _dir: PtahSelectIconDirective<T>,
-    ctx: unknown,
-  ): ctx is PtahSelectIconContext<T> {
+    _ctx: unknown,
+  ): _ctx is PtahSelectIconContext<T> {
     return true;
   }
 }
