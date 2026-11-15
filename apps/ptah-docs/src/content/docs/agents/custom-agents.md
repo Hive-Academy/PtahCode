@@ -5,7 +5,7 @@ description: Create and edit your own agents in PtahCode.
 
 # Custom Agents
 
-A custom agent records how your team works. You can change a generated agent or create a new specialist.
+A custom agent records how your team works. You can create and edit a specialist.
 
 ## Where custom agents live
 
@@ -50,13 +50,9 @@ Return a markdown table with: path, issue, severity, suggested fix.
 2. Add the frontmatter and the system prompt.
 3. Save the file.
 
-:::tip[Start from a generated agent]
-Copy a file that the setup wizard wrote, give it a new `name`, and change the prompt.
-:::
+## Edit a custom agent
 
-## Change a generated agent
-
-Edit the file in `.claude/agents/`. When you run the [setup wizard](/setup/setup-wizard/) again, it overwrites the generated agent files in place.
+Edit the file in `.claude/agents/`. Workspace analysis leaves your agent files in place.
 
 ## Share agents
 

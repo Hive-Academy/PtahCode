@@ -1,11 +1,11 @@
 ---
 title: Project Analysis
-description: The multi-phase project analysis that the setup wizard runs and stores in .ptah/analysis/.
+description: Multi-phase project analysis stored in .ptah/analysis/.
 ---
 
 # Project Analysis
 
-The [setup wizard](/setup/setup-wizard/) runs a multi-phase analysis of your project. The result is a set of Markdown files that agents can read without a new scan.
+Workspace analysis produces Markdown files that agents can read without a new scan.
 
 ## Phases
 

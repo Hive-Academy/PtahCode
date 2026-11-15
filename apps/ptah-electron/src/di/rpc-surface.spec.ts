@@ -67,14 +67,9 @@ describe('Electron RPC surface', () => {
     );
   });
 
-  it('serves the community pack install plan (TASK_2026_701 B8)', () => {
-    expect(surface.registered).toEqual(
-      expect.arrayContaining([
-        'wizard:plan-pack-install',
-        'wizard:install-pack-agents',
-      ]),
-    );
-    expect(surface.excluded).not.toContain('wizard:plan-pack-install');
+  it('does not advertise retired community pack methods', () => {
+    expect(surface.registered).not.toContain('wizard:plan-pack-install');
+    expect(surface.registered).not.toContain('wizard:install-pack-agents');
   });
 
   it('serves the plugin kept-item and config-home methods (TASK_2026_701 B12)', () => {

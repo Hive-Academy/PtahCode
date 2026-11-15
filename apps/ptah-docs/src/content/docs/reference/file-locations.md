@@ -12,8 +12,7 @@ description: Where Ptah reads from and writes to on each platform.
 | `~/.ptah/settings.json`       | Global settings (`provider.*`, `agentOrchestration.*`, `memory.*`, `skillSynthesis.*`, `cron.*`, `gateway.*`, and more) |
 | `~/.ptah/state/ptah.sqlite`   | Shared SQLite database: memory, skills, scheduled jobs, messaging    |
 | `~/.ptah/plugins/`            | Plugins that Ptah downloads                                          |
-| `~/.ptah/templates/agents/`   | Agent templates that Ptah downloads                                  |
-| `~/.ptah/.content-cache.json` | Metadata of the downloaded plugin and template set                   |
+| `~/.ptah/.content-cache.json` | Metadata of the downloaded plugin set                   |
 | `~/.ptah/user/`               | Editable library copies of skills, agents, and commands (see below)  |
 
 ## Claude assets (`~/.claude/`)
