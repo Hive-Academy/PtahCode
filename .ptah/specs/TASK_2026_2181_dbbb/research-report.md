@@ -56,7 +56,7 @@ Task-create path:
 
 ## Log evidence
 
-Targeted grep of `C:\Users\abdal\AppData\Roaming\Ptah\logs\Ptah Electron-2026-11-15.log`; shortened, no task text or secrets (13 lines):
+Targeted grep of `C:\Users\<user>\AppData\Roaming\Ptah\logs\Ptah Electron-2026-11-15.log`; shortened, no task text or secrets (13 lines):
 
 > `12:20:00.745Z Spawning SDK agent ee1fad02…`
 > `12:21:09.380Z ptah_agent_spawn result ee1fad02… running`
