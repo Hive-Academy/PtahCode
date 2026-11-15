@@ -2655,7 +2655,11 @@ export class SessionSpawnerService implements ISessionSpawner {
       // degradation-audit: reported - failed successor start reverts adoption and link; shared worktree is kept.
       this.agents.settleLaneAdoption(adopted, 'reverted');
       nextRuntime.releasePolicy?.();
-      if (nextRuntime.mcpRoot) await this.releaseMcpRoot(nextRuntime.mcpRoot);
+      // Clear before release: retention is counted, so a second release by a
+      // later teardown would drop the predecessor's hold on the shared root.
+      const successorRoot = nextRuntime.mcpRoot;
+      nextRuntime.mcpRoot = undefined;
+      if (successorRoot) await this.releaseMcpRoot(successorRoot);
       if (stoppedMidSuccession) {
         // The parent stopped the successor: keep that stop. The predecessor
         // stays handed off and is retired, never made live again.

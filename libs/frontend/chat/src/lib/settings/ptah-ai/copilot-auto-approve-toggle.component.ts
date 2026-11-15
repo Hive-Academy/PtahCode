@@ -34,6 +34,7 @@ const NOT_CONFIRMED = `${settingNotConfirmedMessage(LABEL)} Check the saved sett
   standalone: true,
   imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'block' },
   template: `
     <div class="space-y-[calc(var(--ptah-space-1)*1.5)] border-t border-base-300 pt-[var(--ptah-space-2)]" data-testid="copilot-auto-approve-section">
       <label class="flex items-center justify-between gap-[var(--ptah-gap-inline)]">

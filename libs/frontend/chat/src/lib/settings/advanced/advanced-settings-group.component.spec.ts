@@ -143,6 +143,60 @@ describe('AdvancedSettingsGroupComponent', () => {
     ).toBe(false);
   });
 
+  describe('headingStyle', () => {
+    const group = ADVANCED_SETTING_GROUPS.find(
+      (candidate) => candidate.id === 'memory-upkeep',
+    );
+    const header = (): HTMLElement =>
+      host().querySelector('[section-header]') as HTMLElement;
+    const heading = (): HTMLElement => header().querySelector('h3') as HTMLElement;
+    const classesOf = (element: Element): string[] =>
+      (element.getAttribute('class') ?? '').split(/\s+/);
+
+    async function createWith(style?: 'caps' | 'section'): Promise<void> {
+      fixture = TestBed.createComponent(AdvancedSettingsGroupComponent);
+      fixture.componentRef.setInput('groupId', 'memory-upkeep');
+      if (style) fixture.componentRef.setInput('headingStyle', style);
+      fixture.detectChanges();
+      await settle();
+    }
+
+    it('defaults to the small uppercase label with no divider', async () => {
+      await createWith();
+      expect(classesOf(heading())).toEqual(
+        expect.arrayContaining(['text-xs', 'font-bold', 'uppercase', 'tracking-wider']),
+      );
+      expect(classesOf(heading())).not.toContain('text-base');
+      expect(classesOf(header())).not.toContain('border-b');
+    });
+
+    it("'section' renders the 16px sentence-case heading with a divider and the description", async () => {
+      await createWith('section');
+      expect(classesOf(heading())).toEqual(
+        expect.arrayContaining(['text-base', 'font-semibold']),
+      );
+      expect(classesOf(heading())).not.toContain('uppercase');
+      expect(classesOf(header())).toContain('border-b');
+      // The section's 12px flex gap is the only header-to-content spacing.
+      expect(classesOf(header()).some((name) => name.startsWith('mb-'))).toBe(false);
+      expect(header().querySelector('p')?.textContent?.trim()).toBe(
+        group?.description,
+      );
+    });
+
+    it.each(['caps', 'section'] as const)(
+      'keeps the heading id, aria-labelledby and test id in %s',
+      async (style) => {
+        await createWith(style);
+        const section = byTestId('settings-section-memory-upkeep');
+        expect(section).not.toBeNull();
+        expect(heading().id).toBeTruthy();
+        expect(section?.getAttribute('aria-labelledby')).toBe(heading().id);
+        expect(heading().textContent?.trim()).toBe(group?.title);
+      },
+    );
+  });
+
   describe('load', () => {
     it('reads only the group keys, in parallel with a 5 s timeout, and shows the saved values', async () => {
       await create('memory-upkeep');

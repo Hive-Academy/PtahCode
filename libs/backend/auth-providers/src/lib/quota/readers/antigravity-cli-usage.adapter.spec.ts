@@ -22,13 +22,52 @@ const errno = (code: string) =>
 
 describe('Antigravity CLI usage adapter', () => {
   describe('parseAntigravityCliUsage', () => {
+    it('reads two JSON groups as four separate windows', () => {
+      const output = JSON.stringify({ type: 'command', command: { name: 'usage', data: { groups: [
+        { name: 'Gemini Models', windows: [
+          { kind: 'weekly', remaining_fraction: 0.83, reset_time: '2030-01-08T00:00:00Z' },
+          { kind: '5h', remaining_fraction: 1, reset_time: '2030-01-01T05:00:00Z' },
+        ] },
+        { name: 'Claude and GPT models', windows: [
+          { kind: 'weekly', remaining_fraction: 0.25, reset_time: '2030-01-08T00:00:00Z' },
+          { kind: '5h', remaining_fraction: 0, reset_time: '2030-01-01T05:00:00Z' },
+        ] },
+      ] } } });
+      const windows = parseAntigravityCliUsage(output, 1);
+      expect(windows).toHaveLength(4);
+      expect(windows?.map((window) => window.used)).toEqual([17, 0, 75, 100].map((percent) => ({ kind: 'percent', percent })));
+      expect(new Set(windows?.map((window) => window.key)).size).toBe(4);
+      expect(windows?.[0]).toMatchObject({ label: 'Gemini Models · Weekly', resetsAt: Date.parse('2030-01-08T00:00:00Z') });
+      expect(windows?.[3]).toMatchObject({ label: 'Claude and GPT models · 5 Hour', resetsAt: Date.parse('2030-01-01T05:00:00Z') });
+      expect(windows?.every((window) => !('modelScope' in window) && !('exhaustion' in window))).toBe(true);
+    });
+    it('falls back from unusable JSON to TSV and accepts 5h', () => {
+      expect(parseAntigravityCliUsage('{bad', 1)).toBeUndefined();
+      expect(parseAntigravityCliUsage('G\t5h\t25%\t2030-01-01T05:00:00Z', 1)?.[0]).toMatchObject({ kind: 'five_hour', used: { percent: 75 } });
+      expect(parseAntigravityCliUsage('{"type":"command"}', 1)).toBeUndefined();
+    });
+    it('caps TSV percent below 100 while quota remains', () => {
+      const small = parseAntigravityCliUsage('Placeholder\tWeekly\t0.04%\t2030-01-01T00:00:00Z', 1);
+      const empty = parseAntigravityCliUsage('Placeholder\tWeekly\t0%\t2030-01-01T00:00:00Z', 1);
+      expect(small?.[0].used).toEqual({ kind: 'percent', percent: 99.9 });
+      expect(empty?.[0].used).toEqual({ kind: 'percent', percent: 100 });
+    });
+    it('uses the same identity for JSON and TSV windows', () => {
+      const json = JSON.stringify({ type: 'command', command: { name: 'usage', data: { groups: [
+        { name: 'Placeholder Group', windows: [{ kind: 'weekly', remaining_fraction: 0.5 }] },
+      ] } } });
+      const tsv = 'Placeholder Group\tWeekly Limit Remaining\t50%\t2030-01-01T00:00:00Z';
+      const jsonWindow = parseAntigravityCliUsage(json, 1)?.[0];
+      const tsvWindow = parseAntigravityCliUsage(tsv, 1)?.[0];
+      expect(jsonWindow?.key).toBe(tsvWindow?.key);
+      expect(jsonWindow?.label).toBe(tsvWindow?.label);
+    });
     it('maps remaining percent to used percent with resets', () => {
       const windows = parseAntigravityCliUsage(SAMPLE, 5);
       expect(windows).toHaveLength(5);
       expect(windows?.[0]).toMatchObject({
         key: 'other:cli-gemini-models-weekly',
         kind: 'weekly',
-        modelScope: 'Gemini Models',
         used: { kind: 'percent', percent: 0 },
         resetsAt: Date.parse('2030-10-27T00:08:58Z'),
         usedSource: 'provider-unofficial',
@@ -38,7 +77,6 @@ describe('Antigravity CLI usage adapter', () => {
       expect(windows?.[3]?.used).toEqual({ kind: 'percent', percent: 74.5 });
       expect(windows?.[4]).toMatchObject({
         kind: 'weekly',
-        modelScope: 'Gemini 4 Argon',
       });
     });
 
@@ -87,6 +125,73 @@ describe('Antigravity CLI usage adapter', () => {
   });
 
   describe('readAntigravityCliUsage', () => {
+    it('creates and removes cwd around a successful run, then skips creation on cache hit', async () => {
+      const order: string[] = [];
+      const temporaryCwd = {
+        create: jest.fn(async () => { order.push('create'); return 'temporary'; }),
+        remove: jest.fn(async () => { order.push('remove'); }),
+      };
+      const exec: AntigravityCliExec = async () => { order.push('run'); return SAMPLE; };
+      const options = { exec, temporaryCwd, executables: ['agy'], ownerKey: 'cwd-success' };
+      expect((await readAntigravityCliUsage(undefined, options)).ok).toBe(true);
+      expect(order).toEqual(['create', 'run', 'remove']);
+      expect((await readAntigravityCliUsage(undefined, options)).ok).toBe(true);
+      expect(temporaryCwd.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns cli-unavailable when cwd creation fails', async () => {
+      const exec = jest.fn(async () => SAMPLE);
+      const create = jest.fn(async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); });
+      const result = await readAntigravityCliUsage(undefined, { exec, executables: ['agy', 'agy-alt'],
+        ownerKey: 'cwd-failure', temporaryCwd: {
+          create, remove: jest.fn(),
+        } });
+      expect(result).toEqual({ ok: false, reason: 'cli-unavailable' });
+      expect(exec).not.toHaveBeenCalled();
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('removes cwd after the run closes on abort', async () => {
+      const order: string[] = [];
+      const controller = new AbortController();
+      let started!: () => void;
+      let finish!: () => void;
+      const start = new Promise<void>((resolve) => { started = resolve; });
+      const exec: AntigravityCliExec = async () => {
+        started();
+        return new Promise<string>((resolve) => { finish = () => { order.push('closed'); resolve(SAMPLE); }; });
+      };
+      const pending = readAntigravityCliUsage(controller.signal, { exec, executables: ['agy'],
+        ownerKey: 'cwd-abort', temporaryCwd: {
+          create: async () => 'temporary', remove: async () => { order.push('remove'); },
+        } });
+      await start;
+      controller.abort();
+      await expect(pending).resolves.toMatchObject({ ok: false });
+      expect(order).toEqual([]);
+      finish();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(order).toEqual(['closed', 'remove']);
+    });
+
+    it('removes cwd after timeout closes the run', async () => {
+      jest.useFakeTimers();
+      try {
+        const order: string[] = [];
+        const exec: AntigravityCliExec = async (_command, _args, signal) =>
+          new Promise<string>((_resolve, reject) => signal.addEventListener('abort', () => {
+            order.push('closed'); reject(Object.assign(new Error('timeout'), { code: 'ABORT_ERR' }));
+          }, { once: true }));
+        const pending = readAntigravityCliUsage(undefined, { exec, executables: ['agy'],
+          ownerKey: 'cwd-timeout', timeoutMs: 10, temporaryCwd: {
+            create: async () => 'temporary', remove: async () => { order.push('remove'); },
+          } });
+        await jest.advanceTimersByTimeAsync(20);
+        await expect(pending).resolves.toMatchObject({ reason: 'cli-timeout' });
+        expect(order).toEqual(['closed', 'remove']);
+      } finally { jest.useRealTimers(); }
+    });
+
     it('starts a short back-off after timeout', async () => {
       jest.useFakeTimers();
       try {
@@ -108,7 +213,8 @@ describe('Antigravity CLI usage adapter', () => {
         );
         const options = { exec, executables: ['agy'], now: Date.now };
         const pending = readAntigravityCliUsage(undefined, options);
-        await jest.advanceTimersByTimeAsync(8_000);
+        await jest.advanceTimersByTimeAsync(0);
+        await jest.advanceTimersByTimeAsync(15_000);
         await expect(pending).resolves.toEqual({
           ok: false,
           reason: 'cli-timeout',
@@ -119,7 +225,8 @@ describe('Antigravity CLI usage adapter', () => {
         expect(exec).toHaveBeenCalledTimes(1);
         await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_SHORT_BACKOFF_MS);
         const next = readAntigravityCliUsage(undefined, options);
-        await jest.advanceTimersByTimeAsync(8_000);
+        await jest.advanceTimersByTimeAsync(0);
+        await jest.advanceTimersByTimeAsync(15_000);
         await expect(next).resolves.toEqual({
           ok: false,
           reason: 'cli-timeout',
@@ -141,6 +248,7 @@ describe('Antigravity CLI usage adapter', () => {
         .mockResolvedValueOnce(SAMPLE);
       const options = { exec, executables: ['agy'] };
       const pending = readAntigravityCliUsage(controller.signal, options);
+      await new Promise<void>((resolve) => setImmediate(resolve));
       controller.abort();
       await expect(pending).resolves.toEqual({
         ok: false,
@@ -159,7 +267,7 @@ describe('Antigravity CLI usage adapter', () => {
           new Promise<string>((_, reject) => {
             const timer = setTimeout(
               () => reject(Object.assign(new Error('exit'), { code: 1 })),
-              5_000,
+              10_000,
             );
             signal.addEventListener(
               'abort',
@@ -178,12 +286,13 @@ describe('Antigravity CLI usage adapter', () => {
           executables: ['first', 'second'],
           now: Date.now,
         });
-        await jest.advanceTimersByTimeAsync(8_000);
+        await jest.advanceTimersByTimeAsync(0);
+        await jest.advanceTimersByTimeAsync(15_000);
         await expect(pending).resolves.toEqual({
           ok: false,
           reason: 'cli-timeout',
         });
-        expect(Date.now() - started).toBe(8_000);
+        expect(Date.now() - started).toBe(15_000);
       } finally {
         jest.useRealTimers();
       }
@@ -205,12 +314,9 @@ describe('Antigravity CLI usage adapter', () => {
       expect(success.ok).toBe(true);
       if (success.ok)
         expect(
-          success.windows.map(({ modelScope, kind }) => [modelScope, kind]),
+          success.windows.map(({ kind }) => kind),
         ).toEqual([
-          ['Gemini Models', 'weekly'],
-          ['Gemini Models', 'five_hour'],
-          ['Claude and GPT models', 'weekly'],
-          ['Claude and GPT models', 'five_hour'],
+          'weekly', 'five_hour', 'weekly', 'five_hour',
         ]);
       await readAntigravityCliUsage(undefined, options);
       expect(exec).toHaveBeenCalledTimes(2);
@@ -227,7 +333,7 @@ describe('Antigravity CLI usage adapter', () => {
       expect(result.ok).toBe(true);
       expect(exec).toHaveBeenCalledWith(
         'agy',
-        ['-p', '/usage'],
+        ['-p', '/usage', '--output-format', 'json'],
         expect.any(AbortSignal),
       );
     });
@@ -389,7 +495,7 @@ describe('Antigravity CLI usage adapter', () => {
       // The executable is one argv[0] entry; the arguments are fixed.
       expect(exec).toHaveBeenCalledWith(
         'agy; rm -rf /',
-        ['-p', '/usage'],
+        ['-p', '/usage', '--output-format', 'json'],
         expect.any(AbortSignal),
       );
     });

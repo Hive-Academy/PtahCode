@@ -580,6 +580,16 @@ describe('PlanLimitLedgerService — clearing (F22, F23, F62-F66)', () => {
       );
     });
 
+    it('keeps an error-derived 429 with a known reset after a newer 7% table read', () => {
+      const { ledger } = harness();
+      ledger.recordWindowEvidence(OWNER_A, {
+        ...readWindow('weekly', T0, 100, { resetsAt: OLD_RESET }),
+        exhaustion: { observedAt: T0, source: 'error-derived', resetsAt: OLD_RESET },
+      });
+      ledger.recordWindowEvidence(OWNER_A, readWindow('weekly', T0 + MINUTE, 7, { resetsAt: OLD_RESET }));
+      expect(windowOf(ledger, OWNER_A, 'weekly')?.exhaustion).toMatchObject({ source: 'error-derived', resetsAt: OLD_RESET });
+    });
+
     it('keeps a stream-reported hit when the reset of the read moves forward', () => {
       const { ledger } = harness();
       ledger.recordWindowEvidence(

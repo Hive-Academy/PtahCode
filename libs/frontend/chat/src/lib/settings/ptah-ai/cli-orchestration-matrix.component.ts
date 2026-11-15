@@ -143,17 +143,17 @@ const SAVE_SCOPE = 'global';
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-[var(--ptah-gap-field)]">
     <section
-      class="flex flex-col gap-4"
+      class="flex flex-col gap-[var(--ptah-gap-field)]"
       aria-labelledby="cli-matrix-heading"
       data-testid="settings-cli-matrix"
       data-glass-surface="content"
     >
-      <div section-header class="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div section-header class="flex flex-wrap items-center gap-x-[var(--ptah-gap-inline)] gap-y-[var(--ptah-gap-label)]">
         <h2
           id="cli-matrix-heading"
-          class="flex items-center gap-1.5 text-sm font-semibold normal-case text-base-content"
+          class="flex items-center gap-[var(--ptah-gap-inline)] text-sm font-semibold normal-case text-base-content"
         >
           <lucide-angular
             [img]="TerminalIcon"
@@ -172,7 +172,7 @@ const SAVE_SCOPE = 'global';
 
       <ptah-agent-orchestration-config />
 
-      <div data-testid="cli-matrix" tabindex="-1" [attr.aria-busy]="loading()">
+      <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]" data-testid="cli-matrix" tabindex="-1" [attr.aria-busy]="loading()">
         <ptah-cli-provider-grid [rows]="groups()[0].rows"
           [sharedOpenCell]="providerOpenCell()"
           [defaults]="state.orchestration().data?.cliLaneDefaults"
@@ -185,7 +185,7 @@ const SAVE_SCOPE = 'global';
           (popoverToggled)="toggleProviderPopover($event)" (popoverDismissed)="closeProviderPopover()"
           (codexSettingsRequested)="codexSettingsRequested.emit()" />
         @if (groups().length > 1) {
-          <button type="button" ptahButton variant="ghost" class="before:inline-block before:w-3 before:transition-transform before:content-['›'] aria-expanded:before:rotate-90"
+          <button type="button" ptahButton variant="ghost" class="self-start before:inline-block before:w-3 before:transition-transform before:content-['›'] aria-expanded:before:rotate-90"
             data-testid="cli-matrix-uninstalled-toggle" [attr.aria-expanded]="uninstalledShown()"
             (click)="toggleUninstalled()">Uninstalled CLI agents ({{ groups()[1].rows.length }})</button>
           @if (uninstalledShown()) {

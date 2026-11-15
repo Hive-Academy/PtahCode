@@ -18,7 +18,7 @@
  * Extracted from ChatStore refactoring.
  */
 
-import { Injectable, inject } from '@angular/core';
+import { DestroyRef, Injectable, inject } from '@angular/core';
 import {
   ClaudeRpcService,
   VSCodeService,
@@ -33,6 +33,7 @@ import {
   SessionId,
   EffortLevel,
   normalizeWorkspaceRoot,
+  CHAT_ADMISSION_RPC_MARGIN_MS,
 } from '@ptah-extension/shared';
 import type { ChatContinueResult } from '@ptah-extension/shared';
 import {
@@ -143,6 +144,8 @@ export function mapChatSendFailureText(
  */
 @Injectable({ providedIn: 'root' })
 export class MessageSenderService {
+  /** A timed-out renderer call may still be running on the host. */
+  private readonly startingTabs = new Map<string, number>();
   private readonly claudeRpcService = inject(ClaudeRpcService);
   private readonly vscodeService = inject(VSCodeService);
   private readonly tabManager = inject(TabManagerService);
@@ -158,6 +161,80 @@ export class MessageSenderService {
   private readonly ultracode = inject(UltracodeStateService);
   private readonly sendLock = inject(CommandCenterSendLockService);
   private readonly carryOver = inject(ProviderCarryOverService);
+
+  /** Grace-window expiry timers for timed-out starts, by tab. */
+  private readonly startGraceTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private readonly startAbandonedListeners = new Set<(tabId: string) => void>();
+
+  constructor() {
+    const destroyRef = inject(DestroyRef);
+    const unsubscribe = this.tabManager.onTabClosed?.(({ tabId }) =>
+      this.clearStartPending(tabId),
+    );
+    if (unsubscribe) destroyRef.onDestroy(unsubscribe);
+    destroyRef.onDestroy(() => {
+      for (const timer of this.startGraceTimers.values()) clearTimeout(timer);
+      this.startGraceTimers.clear();
+      this.startAbandonedListeners.clear();
+    });
+  }
+
+  /**
+   * Called with the tab id when a timed-out `chat:start` never bound a session
+   * within the grace window. The tab is idle again; listeners settle what they
+   * held for it (the follow-up queue moves held prompts to the composer).
+   */
+  onStartAbandoned(listener: (tabId: string) => void): () => void {
+    this.startAbandonedListeners.add(listener);
+    return () => this.startAbandonedListeners.delete(listener);
+  }
+
+  private clearStartPending(tabId: string): void {
+    this.startingTabs.delete(tabId);
+    const timer = this.startGraceTimers.get(tabId);
+    if (timer !== undefined) clearTimeout(timer);
+    this.startGraceTimers.delete(tabId);
+  }
+
+  private holdTimedOutStart(tabId: string, preamble: string | null): void {
+    this.clearStartPending(tabId);
+    this.startingTabs.set(tabId, Date.now() + CHAT_ADMISSION_RPC_MARGIN_MS);
+    this.startGraceTimers.set(
+      tabId,
+      setTimeout(() => {
+        this.clearStartPending(tabId);
+        const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
+        if (!tab || tab.claudeSessionId) return; // closed, or admitted late
+        // The host never admitted the turn: undo the optimistic streaming
+        // state as the failure path does, so the tab can send again.
+        if (preamble) this.tabManager.setFirstMessagePreamble(tabId, preamble);
+        this.tabManager.markLoaded(tabId);
+        this.tabManager.markTabIdle(tabId);
+        // The session manager holds the ACTIVE tab's state: after 30 s the
+        // user may be on another tab, whose session this must not fail.
+        if (this.tabManager.activeTabId() === tabId) {
+          this.sessionManager.setStatus('loaded');
+          this.sessionManager.failSession();
+        }
+        for (const listener of this.startAbandonedListeners) listener(tabId);
+      }, CHAT_ADMISSION_RPC_MARGIN_MS),
+    );
+  }
+
+  isStartPending(tabId: string): boolean {
+    const until = this.startingTabs.get(tabId);
+    if (until === undefined) return false;
+    if (this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab.claudeSessionId) {
+      this.clearStartPending(tabId); // admitted late: no recovery needed
+      return false;
+    }
+    if (Date.now() < until) return true;
+    this.startingTabs.delete(tabId);
+    return false;
+  }
 
   private isHeld(
     options?: SendMessageOptions & { ownerToken?: string },
@@ -556,6 +633,10 @@ export class MessageSenderService {
       this.validator.sanitize(content),
     );
     const targetTabId = options?.tabId;
+    const sendingTabId = targetTabId ?? this.tabManager.activeTabId();
+    if (sendingTabId && this.isStartPending(sendingTabId)) {
+      return { success: false, error: 'Chat is still starting' };
+    }
     // Across workspaces, not `tabs()`: an explicit tabId can name a canvas tile
     // or a tab parked in a background workspace, and the active-workspace
     // lookup silently fell through to `activeTab()` — so the send was judged
@@ -595,6 +676,8 @@ export class MessageSenderService {
     const effort = options?.effort;
     let activeTabId = options?.tabId ?? this.tabManager.activeTabId();
     let consumedPreamble: string | null = null;
+    if (activeTabId && this.isStartPending(activeTabId))
+      return { success: false, error: 'Chat is still starting' };
     try {
       const ready = await this.waitForServices(5000);
       if (!ready) {
@@ -686,6 +769,12 @@ export class MessageSenderService {
         },
         { signal: abortSignal },
       );
+
+      if (result.error === 'RPC timeout: chat:start') {
+        if (this.tabManager.findTabByIdAcrossWorkspaces(activeTabId))
+          this.holdTimedOutStart(activeTabId, consumedPreamble);
+        return { success: false, error: 'Chat is still starting' };
+      }
 
       if (result.data?.cancelled === true) {
         if (consumedPreamble) {

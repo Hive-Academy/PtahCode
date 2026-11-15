@@ -198,10 +198,10 @@ function toWindow(
       label: `${bucket.label} ${descriptor.label}`,
     }),
     ...(qualified && { bucketId: bucket.id }),
-    ...(bucket.rateLimitReachedType !== undefined && atLimit && {
+    ...(atLimit && bucket.rateLimitReachedType !== undefined && {
       reachedType: bucket.rateLimitReachedType,
     }),
-    ...(qualified && bucket.spendControlReached != null && {
+    ...(atLimit && bucket.spendControlReached != null && {
       spendControlReached: bucket.spendControlReached,
     }),
     ...(typeof durationMins === 'number' && { durationMins }),

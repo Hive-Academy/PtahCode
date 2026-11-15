@@ -75,6 +75,7 @@ describe('MessageDispatchService', () => {
   let hasPendingMock: jest.Mock;
   let handlePermissionResponseMock: jest.Mock;
   let isTabStreamingMock: jest.Mock;
+  let isStartPendingMock: jest.Mock;
 
   beforeEach(() => {
     tabs = [makeTab()];
@@ -108,6 +109,7 @@ describe('MessageDispatchService', () => {
     hasPendingMock = jest.fn(() => false);
     handlePermissionResponseMock = jest.fn();
     isTabStreamingMock = jest.fn(() => false);
+    isStartPendingMock = jest.fn(() => false);
 
     const tabManagerMock = {
       tabs: () => tabs,
@@ -158,6 +160,7 @@ describe('MessageDispatchService', () => {
 
     const messageSenderMock = {
       send: sendMock,
+      isStartPending: isStartPendingMock,
     } as unknown as MessageSenderService;
     const followUpsMock = {
       enqueue: enqueueMock,
@@ -396,6 +399,16 @@ describe('MessageDispatchService', () => {
 
       expect(sendMock).not.toHaveBeenCalled();
       expect(queueOrAppendMock).toHaveBeenCalledWith('follow up', undefined);
+    });
+
+    it('holds a retry in the follow-up queue while chat:start may still run on the host', async () => {
+      tabs = [makeTab({ id: 'tab-1', claudeSessionId: null, status: 'loaded' })];
+      isStartPendingMock.mockReturnValue(true);
+
+      await service.sendOrQueueMessage('retry', { tabId: 'tab-1' });
+
+      expect(sendMock).not.toHaveBeenCalled();
+      expect(enqueueMock).toHaveBeenCalledWith('tab-1', 'retry', { tabId: 'tab-1' });
     });
 
     it('checks the explicit target tab id for the self-heal streaming flag', async () => {
@@ -802,7 +815,7 @@ describe('MessageDispatchService with the real StreamingHandler + MessageFinaliz
         },
         {
           provide: MessageSenderService,
-          useValue: { send: sendMock },
+          useValue: { send: sendMock, isStartPending: () => false },
         },
         {
           provide: FollowUpQueueService,

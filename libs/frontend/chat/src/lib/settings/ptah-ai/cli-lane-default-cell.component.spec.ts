@@ -42,12 +42,36 @@ describe('CliLaneDefaultCellComponent', () => {
     return fixture;
   }
 
+  /** A combobox (native select) by its accessible name. */
+  function combobox(fixture: { nativeElement: HTMLElement }, name: string): HTMLSelectElement {
+    const select = fixture.nativeElement.querySelector(`select[aria-label="${name}"]`) as HTMLSelectElement | null;
+    if (!select) throw new Error(`No combobox named "${name}"`);
+    return select;
+  }
+
   it('filters unsupported options and restricts network by selected permission', () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
-    const selects = fixture.nativeElement.querySelectorAll('select') as NodeListOf<HTMLSelectElement>;
-    expect(Array.from(selects[0].options, option => option.value)).toEqual(['plan', 'auto-edit', 'yolo']);
-    expect(Array.from(selects[1].options, option => option.value)).toEqual(['deny']);
-    expect(selects[0].getAttribute('aria-label')).toContain('permission default');
+    expect(Array.from(combobox(fixture, 'codex permission default').options, option => option.value)).toEqual(['plan', 'auto-edit', 'yolo']);
+    expect(Array.from(combobox(fixture, 'codex network default').options, option => option.value)).toEqual(['deny']);
+  });
+
+  it('gives each control a visible label tied to it and keeps the full value as its title', () => {
+    const fixture = setup('codex', { permission: 'auto-edit', network: 'allow' });
+    for (const [label, name, value] of [['Permission', 'codex permission default', 'auto-edit'], ['Network', 'codex network default', 'allow']] as const) {
+      const select = combobox(fixture, name);
+      const visible = fixture.nativeElement.querySelector(`label[for="${select.id}"]`) as HTMLLabelElement | null;
+      expect(visible?.textContent?.trim()).toBe(label);
+      expect(select.title).toBe(value);
+    }
+  });
+
+  it('sets the layout as a host attribute, not as class bindings', () => {
+    const fixture = setup('codex', { permission: 'plan', network: 'deny' });
+    fixture.componentRef.setInput('layout', 'card');
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.getAttribute('data-layout')).toBe('card');
+    expect(host.querySelector('.card-layout, .compact, .wide, .gap-2, .gap-3, .grid-cols-2')).toBeNull();
   });
 
   it('shows the saved choice when the manifest and the saved row arrive together', () => {
@@ -60,9 +84,8 @@ describe('CliLaneDefaultCellComponent', () => {
     fixture.componentRef.setInput('manifest', manifest);
     fixture.componentRef.setInput('saved', { permission: 'auto-edit', network: 'allow' });
     fixture.detectChanges();
-    const selects = fixture.nativeElement.querySelectorAll('select') as NodeListOf<HTMLSelectElement>;
-    expect(selects[0].value).toBe('auto-edit');
-    expect(selects[1].value).toBe('allow');
+    expect(combobox(fixture, 'Codex permission default').value).toBe('auto-edit');
+    expect(combobox(fixture, 'Codex network default').value).toBe('allow');
   });
 
   it('shows reasons and shared Ptah scope', () => {
@@ -97,7 +120,7 @@ describe('CliLaneDefaultCellComponent', () => {
     fixture.detectChanges();
     const selected = jest.fn();
     fixture.componentInstance.selected.subscribe(selected);
-    const select = fixture.nativeElement.querySelector('select') as HTMLSelectElement;
+    const select = combobox(fixture, 'cursor permission default');
     expect(select.value).toBe('');
     select.value = 'yolo';
     select.dispatchEvent(new Event('change'));
@@ -114,7 +137,7 @@ describe('CliLaneDefaultCellComponent', () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
     const selected = jest.fn();
     fixture.componentInstance.selected.subscribe(selected);
-    const select = fixture.nativeElement.querySelector('select') as HTMLSelectElement;
+    const select = combobox(fixture, 'codex permission default');
     select.value = 'yolo';
     select.dispatchEvent(new Event('change'));
     fixture.detectChanges();
@@ -131,7 +154,8 @@ describe('CliLaneDefaultCellComponent', () => {
     const reset = jest.fn();
     fixture.componentInstance.resetRequested.subscribe(reset);
     expect(fixture.nativeElement.textContent).toContain('Saved default');
-    (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
+    (Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find(button => button.textContent?.trim() === 'More default actions'))?.click();
     fixture.detectChanges();
     const resetButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).find(button => button.textContent?.includes('Reset to default'))!;
     expect(resetButton.textContent).toContain('Reset to default (plan)');
@@ -145,7 +169,7 @@ describe('CliLaneDefaultCellComponent', () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
     const selected = jest.fn();
     fixture.componentInstance.selected.subscribe(selected);
-    const select = fixture.nativeElement.querySelector('select') as HTMLSelectElement;
+    const select = combobox(fixture, 'codex permission default');
     select.value = 'yolo';
     select.dispatchEvent(new Event('change'));
     fixture.detectChanges();

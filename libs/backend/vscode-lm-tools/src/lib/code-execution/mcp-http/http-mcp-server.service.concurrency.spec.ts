@@ -344,3 +344,122 @@ describe('CodeExecutionMCP × harness-sync — one .mcp.json, two writers', () =
     expect(servers['ptah']).toEqual(before);
   });
 });
+
+describe('chat registration queue behavior', () => {
+  it('returns an existing active registration while the operation queue is blocked', async () => {
+    expect((await service.ensureRegisteredForSubagents()).registered).toBe(true);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = service['enqueueMcpOp'](() => gate);
+    const result = await service.ensureRegisteredForSubagents();
+    expect(result).toEqual({ registered: true });
+    release();
+    await queued;
+  });
+
+  it('returns timeout while a queued registration continues in the background', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = service['enqueueMcpOp'](() => gate);
+    const result = await service.ensureRegisteredForSubagents();
+    expect(result).toEqual({ registered: false, reason: 'timeout' });
+    release();
+    await queued;
+    await service['mcpOpQueue'];
+    expect(serversOnDisk()).toHaveProperty('ptah');
+  }, 10000);
+
+  it('queues one reconcile for chat callers that arrive before it starts', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = service['enqueueMcpOp'](() => gate);
+    const first = service['queueEnsureRegistered']();
+    const second = service['queueEnsureRegistered']();
+    expect(second).toBe(first);
+    release();
+    await queued;
+    expect((await first).registered).toBe(true);
+    expect(service['queueEnsureRegistered']()).not.toBe(first);
+    await service['mcpOpQueue'];
+  });
+
+  it('does not take the fast path for an entry with a changed URL path', async () => {
+    expect((await service.ensureRegisteredForSubagents()).registered).toBe(true);
+    const configPath = join(workspaceRoot, '.mcp.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    config.mcpServers.ptah.url = `${config.mcpServers.ptah.url}/extra`;
+    writeFileSync(configPath, JSON.stringify(config));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = service['enqueueMcpOp'](() => gate);
+    expect(await service.ensureRegisteredForSubagents()).toEqual({ registered: false, reason: 'timeout' });
+    release();
+    await queued;
+    await service['mcpOpQueue'];
+  }, 10000);
+
+  it('keeps a shared root entry until the last session releases it', async () => {
+    const sharedRoot = mkdtempSync(join(tmpdir(), 'ptah-mcp-shared-'));
+    const sharedConfig = join(sharedRoot, '.mcp.json');
+    const ptahOnDisk = (): unknown =>
+      JSON.parse(readFileSync(sharedConfig, 'utf-8')).mcpServers?.ptah;
+    try {
+      expect((await service.retainRoot(sharedRoot)).registered).toBe(true);
+      expect((await service.retainRoot(sharedRoot)).registered).toBe(true);
+      await service.releaseRoot(sharedRoot);
+      expect(ptahOnDisk()).toBeDefined();
+      await service.releaseRoot(sharedRoot);
+      expect(ptahOnDisk()).toBeUndefined();
+    } finally {
+      rmSync(sharedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('retains only slots belonging to the requested root', async () => {
+    const otherRoot = mkdtempSync(join(tmpdir(), 'ptah-mcp-other-'));
+    try {
+      expect((await service.retainRoot(otherRoot)).registered).toBe(true);
+      const otherConfig = join(otherRoot, '.mcp.json');
+      writeFileSync(otherConfig, JSON.stringify({ mcpServers: {} }));
+      await service.retainRoot(workspaceRoot);
+      expect(JSON.parse(readFileSync(otherConfig, 'utf-8'))).toEqual({ mcpServers: {} });
+    } finally {
+      await service.releaseRoot(otherRoot);
+      rmSync(otherRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('coalesces pending full reconciles', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queued = service['enqueueMcpOp'](() => gate);
+    const first = service['queueRepoint']();
+    const second = service['queueRepoint']();
+    expect(second).toBe(first);
+    release();
+    await queued;
+    await first;
+  });
+
+  it('queues a new reconcile for a change that arrives while one runs', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const original = service['syncMcpJsonRegistration'];
+    let calls = 0;
+    service['syncMcpJsonRegistration'] = async () => {
+      calls += 1;
+      if (calls === 1) { entered(); await gate; }
+    };
+    const first = service['queueRepoint']();
+    await started;
+    const second = service['queueRepoint']();
+    expect(second).not.toBe(first);
+    release();
+    await first;
+    await second;
+    expect(calls).toBe(2);
+    service['syncMcpJsonRegistration'] = original;
+  });
+});

@@ -998,9 +998,13 @@ for (const host of ['vscode', 'electron'] as const) {
           .locator(`[data-testid="${row}"]`)
           .evaluate((node) => {
             const [label, value] = Array.from(node.children) as HTMLElement[];
+            const labelBox = label.getBoundingClientRect();
+            const valueBox = value.getBoundingClientRect();
             return {
-              labelTop: label.getBoundingClientRect().top,
-              valueTop: value.getBoundingClientRect().top,
+              labelBottom: labelBox.bottom,
+              valueTop: valueBox.top,
+              labelMid: labelBox.top + labelBox.height / 2,
+              valueMid: valueBox.top + valueBox.height / 2,
               overflow: value.scrollWidth - value.clientWidth,
               lines: Math.round(value.getBoundingClientRect().height / 16),
             };
@@ -1008,11 +1012,17 @@ for (const host of ['vscode', 'electron'] as const) {
         console.log(
           `B28b ${row} ${host}/${theme}: ${layout.lines} line(s), overflow ${layout.overflow}`,
         );
-        // Baseline-aligned on one line. Settings UI polish: the provider value is 16 px (text-base, 24 px line) beside
-        // a 12 px label, which puts the label's box about 5 px lower than the value's (was within 4 px).
-        expect(Math.abs(layout.labelTop - layout.valueTop)).toBeLessThanOrEqual(
-          6,
-        );
+        // PR #1306: the rows are ptah-description-list items (dt + dd). From 640 px the pattern centers the term on
+        // the value (items-center), and the Provider value also holds the "Change main agent" button, so its dd is
+        // taller than the term and the tops differ by about 8 px. Compare the centers. Below 640 px the term stacks
+        // above the value.
+        if (layout.labelBottom <= layout.valueTop + 1) {
+          expect(layout.valueTop - layout.labelBottom).toBeLessThanOrEqual(8);
+        } else {
+          expect(Math.abs(layout.labelMid - layout.valueMid)).toBeLessThanOrEqual(
+            2,
+          );
+        }
         expect(layout.overflow).toBeLessThanOrEqual(0);
       }
       await expect(
@@ -1402,7 +1412,8 @@ for (const host of ['vscode', 'electron'] as const) {
         page.locator('[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]'),
       ).toBeVisible();
       await assertOrderStripWhole(page, host, theme, 6);
-      // 52.1: one normalised version beside each name, on the name's line.
+      // 52.1: one normalised version per card. PR #1309: the version is a fact in the card's description list
+      // (term "Version"), not a second label on the name's line, so the header shows only the name and one status.
       const expected: Readonly<Record<string, string>> = {
         codex: 'v0.155.1',
         copilot: 'v1.0.83',
@@ -1415,19 +1426,18 @@ for (const host of ['vscode', 'electron'] as const) {
         );
         await expect(version).toHaveText(label);
         await expect(version).toHaveAttribute('title', LIVE_VERSIONS[cli]);
-        const line = await version.evaluate((element) => {
-          const name =
-            element.parentElement?.querySelector('h3')?.getBoundingClientRect();
-          const own = element.getBoundingClientRect();
-          return {
-            nameTop: name?.top ?? 0,
-            nameBottom: name?.bottom ?? 0,
-            top: own.top,
-            bottom: own.bottom,
-          };
-        });
-        expect(line.top).toBeLessThan(line.nameBottom);
-        expect(line.bottom).toBeGreaterThan(line.nameTop);
+        const fact = await version.evaluate((element) => ({
+          term:
+            element
+              .closest('[data-ptah-description-row]')
+              ?.querySelector('dt')
+              ?.textContent?.trim() ?? null,
+          inHeader: element.closest('header') !== null,
+          clipped: element.scrollWidth > element.clientWidth + 1,
+        }));
+        expect(fact.term).toBe('Version');
+        expect(fact.inHeader).toBe(false);
+        expect(fact.clipped).toBe(false);
       }
       // 52.2: the Antigravity model cell shows the id once, on at most two lines, with the name in its title.
       const model = page.locator(

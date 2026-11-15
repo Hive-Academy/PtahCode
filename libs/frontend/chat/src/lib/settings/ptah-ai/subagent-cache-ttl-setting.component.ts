@@ -50,10 +50,24 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
   template: `
     <section
       data-glass-surface="content"
-      class="border-b border-base-content/10 pb-[var(--ptah-gap-group)] text-sm text-base-content"
-      aria-label="Subagent prompt cache"
+      class="flex flex-col gap-[var(--ptah-gap-heading)] text-sm text-base-content"
+      aria-labelledby="subagent-cache-ttl-heading"
       data-testid="subagent-cache-ttl-setting"
     >
+      <div
+        section-header
+        class="border-b border-base-content/10 pb-[var(--ptah-space-2)]"
+      >
+        <h3
+          id="subagent-cache-ttl-heading"
+          class="text-base font-semibold text-base-content"
+        >
+          Subagent prompt cache
+        </h3>
+        <p class="mt-[var(--ptah-gap-label)] text-xs text-base-content-muted">
+          How long the prompt cache of subagent requests stays valid.
+        </p>
+      </div>
       <div class="flex min-h-12 flex-wrap items-center justify-between gap-[var(--ptah-space-3)]">
         <label
           for="subagent-cache-ttl"

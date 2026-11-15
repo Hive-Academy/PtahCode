@@ -357,12 +357,13 @@ function windowFacts(
   now: number,
   time: LocalTimeOptions,
 ): WindowFacts {
-  const state = classifyWindow(window, {
+  const classification = {
     now,
     nearLimitPercent: NEAR_LIMIT_PERCENT,
     freshnessMs: FRESHNESS_MS,
     status: owner.status,
-  });
+  };
+  const state = classifyWindow(window, classification);
   const percent = usedPercent(window.used);
   const showValue = percent !== undefined && state !== 'reset-usage-unknown';
   const at = (instant: number) => formatLocalWithRelative(instant, now, time);
@@ -371,7 +372,7 @@ function windowFacts(
   let resetLines: string[] = [];
   let note: string | null = null;
   if (state === 'limit-reached') {
-    const resetsAt = activeWindowExhaustion(window, now)?.resetsAt;
+    const resetsAt = activeWindowExhaustion(window, now, classification)?.resetsAt;
     limitLine =
       resetsAt !== undefined
         ? `Limit reached — resets ${at(resetsAt)}`

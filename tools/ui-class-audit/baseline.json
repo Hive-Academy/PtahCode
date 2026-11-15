@@ -480,10 +480,6 @@
   "libs/frontend/chat/src/lib/settings/providers/main-agent-scope-badges.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/chat/src/lib/settings/providers/main-agent-section.component.ts": {
-    "<dynamic>": 4,
-    "skeleton": 2
-  },
   "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
     "<dynamic>": 2,
     "skeleton": 2
@@ -512,8 +508,7 @@
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-lane-default-cell.component.ts": {
     "btn": 1,
     "btn-sm": 1,
-    "btn-warning": 1,
-    "card-layout": 1
+    "btn-warning": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-model-effort-popover.component.ts": {
     "<dynamic>": 2

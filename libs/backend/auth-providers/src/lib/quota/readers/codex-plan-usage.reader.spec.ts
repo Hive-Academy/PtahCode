@@ -276,6 +276,9 @@ describe('Codex plan-usage reader', () => {
     expect(reading.windows[0].reachedType).toBe('rate_limit_reached');
     expect(reading.windows[0].spendControlReached).toBe(true);
     expect(reading.windows[0].exhaustion?.observedAt).toBe(FETCHED);
+    expect(reading.windows[1].reachedType).toBeUndefined();
+    expect(reading.windows[1].spendControlReached).toBeUndefined();
+    expect(reading.windows[1].exhaustion).toBeUndefined();
     expect(reading.allowances).toEqual([
       {
         bucketId: 'codex', label: 'Codex',
@@ -438,12 +441,26 @@ describe('Codex plan-usage reader', () => {
       ]);
     });
 
-    it('marks nothing when no window can be matched', () => {
+    it('keeps a bucket flag on the allowance when no window is at its limit', () => {
       const reading = mapCodexAccountUsage(
         limited(60, 70, 'workspace_owner_credits_depleted'),
         NOW,
       );
-      expect(reading.windows.some((w) => w.exhaustion)).toBe(false);
+      expect(reading.windows).toHaveLength(2);
+      expect(reading.windows.every(
+        (w) => w.exhaustion === undefined && w.reachedType === undefined,
+      )).toBe(true);
+      expect(reading.allowances).toEqual([expect.objectContaining({
+        label: 'Codex',
+        reachedType: 'workspace_owner_credits_depleted',
+      })]);
+    });
+
+    it('keeps a 7% weekly window clear when the five-hour window is exhausted', () => {
+      const reading = mapCodexAccountUsage(limited(100, 7, 'rate_limit_reached'), NOW);
+      expect(reading.windows[0]).toMatchObject({ reachedType: 'rate_limit_reached', exhaustion: { source: 'provider-api' } });
+      expect(reading.windows[1].reachedType).toBeUndefined();
+      expect(reading.windows[1].exhaustion).toBeUndefined();
     });
 
     it('a window at 100% without a reached type is a reading, not exhaustion', () => {
