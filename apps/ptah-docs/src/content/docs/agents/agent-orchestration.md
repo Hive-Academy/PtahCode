@@ -32,6 +32,28 @@ The skill covers FEATURE, BUGFIX, REFACTORING, DOCUMENTATION, RESEARCH, DEVOPS, 
 
 A feature typically runs through `plan`, optional `research` and `design`, `architecture`, `batch`, `implement`, `tests`, `review`, and `completion`. The `batch` phase recommends executors; the orchestrator spawns them and acts on each returned next action.
 
+## Skeleton and packs
+
+Every workflow follows one skeleton of five steps:
+
+1. **clarify** - ask the questions that fix the scope.
+2. **plan** - decide the work and the order.
+3. **do** - make the change or the document.
+4. **check** - review the result and run the tests.
+5. **deliver** - hand over the result and close the task.
+
+A pack maps phases onto these steps. Each pack is one kind of work. The packs are `software`, `research`, `content`, and `operations`. The skill text guides the pack flow; existing strategy routing stays in code.
+
+Example: the software pack maps the steps as follows.
+
+| Step | Software pack phases |
+| --- | --- |
+| clarify | Pre-flight questions (no phase file) |
+| plan | `plan`, `document-review`, optional `research` and `design`, `architecture` |
+| do | `batch`, `implement` |
+| check | `review`, `tests` |
+| deliver | `completion` |
+
 ## Checkpoints
 
 The orchestrator owns every user checkpoint:

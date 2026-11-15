@@ -22,6 +22,7 @@ import {
   MACHINE_CAPABILITIES,
 } from '../libs/shared/src/lib/types/phase-contract.types';
 import { RETIRED_ROLES } from '../libs/shared/src/lib/types/retired-roles';
+import { parsePack } from './orchestration-skill/pack-parser';
 
 /**
  * Represents a validation error found during checks.
@@ -440,6 +441,23 @@ function validatePhase(
   return errors;
 }
 
+function validatePacks(): ValidationError[] {
+  const directory = path.join(SKILL_ROOT, 'packs');
+  if (!fs.existsSync(directory)) return [];
+  const errors: ValidationError[] = [];
+  const files = fs.readdirSync(directory).filter((n) => n.endsWith('.md'));
+  for (const name of files) {
+    const relative = `packs/${name}`;
+    const content = fs.readFileSync(path.join(directory, name), 'utf8');
+    try {
+      parsePack(path.basename(name, '.md'), content);
+    } catch (cause) {
+      errors.push(error(relative, (cause as Error).message));
+    }
+  }
+  return errors;
+}
+
 function validatePhases(): ValidationError[] {
   const directory = path.join(SKILL_ROOT, 'phases');
   const files = fs.existsSync(directory)
@@ -450,10 +468,12 @@ function validatePhases(): ValidationError[] {
     validatePhase(path.join(directory, name), roles),
   );
   const skill = fs.readFileSync(path.join(SKILL_ROOT, 'SKILL.md'), 'utf8');
-  const active = /^## Phase-kind flows\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(
+  const active = /^## Packs and phase-kind flows\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(
     maskFences(skill),
   );
-  if (active) {
+  if (!active) {
+    errors.push(error('SKILL.md', 'Required section missing: Packs and phase-kind flows'));
+  } else {
     const expected = new Set(PHASE_KINDS.map((kind) => `${kind}.md`));
     for (const name of expected)
       if (!files.includes(name))
@@ -1129,6 +1149,7 @@ function validateOrchestrationSkill(): ValidationResult {
   result.errors.push(...validateLanesFirstRules());
   result.errors.push(...validateMirror());
   result.errors.push(...validatePhases());
+  result.errors.push(...validatePacks());
   result.passed = result.errors.length === 0;
 
   return result;
