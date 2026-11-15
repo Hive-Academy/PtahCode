@@ -40,9 +40,8 @@ export async function boundedLimitLookup<T>(
   const safeLookup = lookup.then(
     (value): T | undefined => value,
     () => {
-      // degradation-audit: optional-capability - plan-limit lookup is
-      // non-blocking enrichment; a rejected lookup resolves to undefined
-      // (unknown, never blocked) and never fails or blocks a spawn.
+      // The plan-limit lookup is non-blocking enrichment. A rejected lookup
+      // resolves to undefined (unknown, never blocked) and never fails a spawn.
       return undefined;
     },
   );
