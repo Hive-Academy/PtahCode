@@ -98,7 +98,7 @@ export async function readAntigravityOAuthQuota(
     );
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT'
-      ? undefined
+      ? { status: 'no-usage-source', statusReason: 'no-oauth', windowSetEstablished: false, windows: [] }
       : unavailable();
   }
   let token: ReturnType<typeof TokenSchema.safeParse>;
