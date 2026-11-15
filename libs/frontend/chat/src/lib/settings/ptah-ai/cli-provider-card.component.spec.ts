@@ -27,9 +27,42 @@ describe('CliProviderCardComponent', () => {
   }
   it('labels native CLI behavior separately from the saved Lane default', () => {
     const root = setup().nativeElement as HTMLElement;
-    const label = [...root.querySelectorAll('p')].find(element => element.textContent?.trim() === 'Native CLI behavior');
-    expect(label).toBeDefined();
-    expect(label?.getAttribute('title')).toContain('Lane default');
+    const term = [...root.querySelectorAll('dt')].find(element => element.textContent?.trim() === 'Native CLI behavior');
+    expect(term).toBeDefined();
+    expect(term?.closest('[data-ptah-description-row]')?.getAttribute('title')).toContain('Lane default');
+    expect(term?.closest('[data-ptah-description-row]')?.querySelector('[data-popover-kind="permission"]')?.textContent?.trim()).toBe('Ask');
+  });
+  it('shows read-only facts as one description list with full, unclipped values', () => {
+    const root = setup({ ...row(), version: 'codex-cli 0.169.0', versionLabel: 'v0.169.0', codexStatusLine: 'Installed Codex 0.169.0', provider: 'OpenAI Codex' }).nativeElement as HTMLElement;
+    const facts = root.querySelector('[data-testid="cli-provider-facts"] dl');
+    expect(facts?.getAttribute('aria-label')).toBe('Codex details');
+    const value = (term: string) => [...root.querySelectorAll('dt')].find(element => element.textContent?.trim() === term)?.nextElementSibling;
+    expect(value('Version')?.querySelector('[data-testid="cli-matrix-version"]')?.textContent?.trim()).toBe('v0.169.0');
+    expect(value('Executable')?.textContent?.trim()).toBe('Installed Codex 0.169.0');
+    expect(value('Provider')?.textContent?.trim()).toBe('OpenAI Codex');
+    expect(root.querySelector('dd.truncate')).toBeNull();
+  });
+  it('shows every capability summary as a full row and keeps the All capabilities detail', () => {
+    const root = setup().nativeElement as HTMLElement;
+    const list = root.querySelector('[data-testid="cli-capability-summary"] dl');
+    expect(list?.getAttribute('aria-label')).toBe('Capabilities');
+    const terms = [...(list?.querySelectorAll('dt') ?? [])].map(element => element.textContent?.trim());
+    expect(terms).toEqual(['Messaging', 'Permission', 'Network', 'MCP', 'Limit']);
+    expect(list?.querySelector('[data-ptah-badge]')).toBeNull();
+    expect(root.querySelector('[data-popover-kind="capabilities"]')?.textContent?.trim()).toBe('All capabilities');
+  });
+  it('shows one status: a badge and no second Installed line', () => {
+    const root = setup({ ...row(), codexStatusLine: 'Installed Codex 0.169.0' }).nativeElement as HTMLElement;
+    expect(root.querySelectorAll('[data-status]')).toHaveLength(1);
+    expect(root.querySelector('.status-slot')?.textContent?.trim()).toBe('Enabled');
+    expect(root.querySelector('header')?.textContent).not.toContain('Installed');
+  });
+  it.each([
+    [row('codex', false), 'Not installed'],
+    [{ ...row('cursor', false), status: { kind: 'needs-key', label: 'Needs API key', tone: 'warning' } } as SystemCliMatrixRow, 'Needs API key'],
+    [{ ...row(), enabled: false, status: { kind: 'disabled', label: 'Disabled', tone: 'neutral' } } as SystemCliMatrixRow, 'Disabled'],
+  ])('derives the card status from the row status (%#)', (value, expected) => {
+    expect((setup(value).nativeElement as HTMLElement).querySelector('.status-slot')?.textContent?.trim()).toBe(expected);
   });
   it('uses the inset surface with a faint border and no outer padding', () => {
     const article = (setup().nativeElement as HTMLElement).querySelector('article');
@@ -50,7 +83,9 @@ describe('CliProviderCardComponent', () => {
     component.codexSettingsRequested.subscribe(settings);
     (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
     (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.test-button')?.click();
-    [...(fixture.nativeElement as HTMLElement).querySelectorAll('button')].find(button => button.textContent?.includes('Codex settings'))?.click();
+    const codexSettings = [...(fixture.nativeElement as HTMLElement).querySelectorAll('button')].find(button => button.textContent?.trim() === 'Codex settings');
+    expect(codexSettings?.classList.contains('btn-outline')).toBe(true);
+    codexSettings?.click();
     expect(toggle).toHaveBeenCalledTimes(1);
     expect(test).toHaveBeenCalledWith('codex');
     expect(settings).toHaveBeenCalledTimes(1);
@@ -72,8 +107,8 @@ describe('CliProviderCardComponent', () => {
   it.each([
     ['running', { testing: true, testText: '' }, 'Running'],
     ['failed', { testing: false, testText: 'The connection test failed. Timeout' }, 'Test failed'],
-    ['unsupported', { testing: false, testText: 'Unsupported combination' }, 'Ready'],
-    ['unavailable', { testing: false, testText: 'Permission unavailable' }, 'Ready'],
+    ['unsupported', { testing: false, testText: 'Unsupported combination' }, 'Enabled'],
+    ['unavailable', { testing: false, testText: 'Permission unavailable' }, 'Enabled'],
   ])('keeps status and live slots for %s', (_name, state, expected) => {
     const fixture = setup();
     fixture.componentRef.setInput('testing', state.testing);
