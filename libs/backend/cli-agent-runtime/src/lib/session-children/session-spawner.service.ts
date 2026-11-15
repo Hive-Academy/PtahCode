@@ -1207,7 +1207,13 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (runtime) runtime.stopping = true;
 
     let reason = 'stopped-by-parent';
-    const stop = await this.verifyAndHardStop(id, target.sdkSessionId);
+    let stop: Awaited<ReturnType<typeof this.verifyAndHardStop>>;
+    try {
+      stop = await this.verifyAndHardStop(id, target.sdkSessionId);
+    } catch (error) {
+      if (runtime) runtime.stopping = false;
+      throw error;
+    }
     if (stop.interruptError) {
       // degradation-audit: reported - the interrupt error is recorded in the
       // end reason when the hard path still ended the session.
@@ -2226,7 +2232,14 @@ export class SessionSpawnerService implements ISessionSpawner {
       return Promise.resolve(false);
     }
     return this.verifyAndHardStop(childSessionId, this.registry.get(childSessionId)?.sdkSessionId)
-      .then((result) => result.stopped)
+      .then((result) => {
+        if (!result.stopped) {
+          this.log(
+            `interrupt of ${childSessionId} ended the child but its adapter session is still alive (hard end did not stop it)`,
+          );
+        }
+        return result.stopped;
+      })
       .catch((error: unknown) => {
         this.log(
           `interrupt of ${childSessionId} failed: ${errorMessage(error)}`,
