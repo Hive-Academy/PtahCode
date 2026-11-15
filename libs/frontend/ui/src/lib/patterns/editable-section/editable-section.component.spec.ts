@@ -213,6 +213,14 @@ describe('PtahEditableSectionComponent', () => {
       expect(saveButton().getAttribute('type')).toBe('submit');
     });
 
+    it('renders the actions flush so only the form gap separates them from the fields', async () => {
+      await openEdit();
+      const actions = q<HTMLElement>('ptah-form-actions');
+      expect(actions?.parentElement).toBe(form());
+      expect(actions?.classList.contains('pt-[var(--ptah-gap-group)]')).toBe(false);
+      expect(form()?.classList.contains('gap-[var(--ptah-gap-field)]')).toBe(true);
+    });
+
     it('disables Save when not dirty and emits save on submit when dirty', async () => {
       await openEdit();
       expect(saveButton().disabled).toBe(true);
