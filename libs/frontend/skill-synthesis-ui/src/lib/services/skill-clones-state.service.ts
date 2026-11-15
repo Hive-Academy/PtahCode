@@ -17,6 +17,7 @@ import type {
   PhaseScorecard,
   CloneSummary,
   SkillCloneHistoryEntry,
+  SkillClonePhaseFile,
   SkillCloneKind,
   SkillSynthesisGetScorecardDetailResult,
   SkillSynthesisSaveCloneBodyResult,
@@ -28,6 +29,8 @@ export interface SkillCloneDetail {
   readonly clone: CloneSummary | null;
   readonly body: string | null;
   readonly history: SkillCloneHistoryEntry[];
+  /** Phase files of a skill clone (`phases/<kind>.md`). Absent from older hosts. */
+  readonly phaseFiles?: SkillClonePhaseFile[];
 }
 
 /**

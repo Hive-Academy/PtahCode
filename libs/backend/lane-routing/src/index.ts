@@ -43,6 +43,8 @@ export type {
   StructuredDecisionRequest,
 } from './lib/decision-model/structured-decision.port';
 export { registerLaneRoutingServices } from './lib/di/register';
+export type { PhaseDefinitionReader } from './lib/phase-definition-reader.port';
+export { PhaseDefinitionFileReader } from './lib/phase-definition-file.reader';
 export type {
   CapabilityMatrixView,
   CapabilityMatrixViewReader,
@@ -63,7 +65,7 @@ export {
   RouteDecideArgsSchema,
   type RouteDecideArgs,
 } from './lib/contracts/route-decide-args.schema';
-export { resolvePhaseDefinition, resolvePhaseDispatch, parsePhaseDispatch, PhaseDefinitionError, type PhaseDefinitionErrorCode } from './lib/contracts/phase-definition-resolver';
+export { resolvePhaseDefinition, resolvePhaseDispatch, parsePhaseDispatch, effectiveMachineCapabilities, PhaseDefinitionError, type PhaseDefinitionErrorCode } from './lib/contracts/phase-definition-resolver';
 export {
   EXCLUSION_RULES,
   FALLBACK_CAUSES,

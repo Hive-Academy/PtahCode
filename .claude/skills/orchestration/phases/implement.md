@@ -1,11 +1,12 @@
 ---
-version: 1
+version: 2
 kind: implement
 input: ["Approved requirements and plan", "Assigned batch and repository instructions", "Applicable design and parity artifacts"]
 deliverable: ["Assigned source and configuration changes", "Batch implementation report with verification evidence"]
 verdict: ["Implemented and verified", "Partial with blocker"]
 acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", "Run scoped checks, then the orchestrator acceptance step linked from ../SKILL.md; phase review per the lean rules"]
 requiredCapabilities: ["Backend and frontend implementation", "Operations and configuration changes", "Scoped verification and evidence"]
+machineCapabilities: []
 toolProfile:
   disallowedTools: []
   permission: prompt

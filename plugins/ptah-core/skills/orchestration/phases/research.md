@@ -1,11 +1,12 @@
 ---
-version: 1
+version: 2
 kind: research
 input: ["Decision question and task context", "Repository metadata, source and installed versions"]
 deliverable: ["research-report.md", "future-enhancements.md when modernization is requested"]
 verdict: ["Evidence supports recommendation", "Unknowns require experiment"]
 acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", "Verify source dates, installed versions and local consequences", "Hand recommendation or bounded experiment to next phase"]
 requiredCapabilities: ["Source evaluation", "Option comparison", "Modernization detection and occurrence counting"]
+machineCapabilities: []
 toolProfile:
   disallowedTools: []
   permission: prompt

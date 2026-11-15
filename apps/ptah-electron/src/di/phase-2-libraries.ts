@@ -11,7 +11,7 @@
  */
 
 import { instanceCachingFactory, type DependencyContainer } from 'tsyringe';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { resolveReviewRootsForPath } from '../services/review/resolve-review-roots-for-path';
 import { registerElectronCodexReadinessAndLogin } from './codex-login-composition';
 import { registerTaskEndHookComposition } from './task-end-hook-composition';
@@ -25,11 +25,12 @@ import {
 } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
+  resolvePtahHomeDir,
+  type IFileSystemProvider,
   type ContentDownloadService,
   type IProcessSpawner,
   type IWorkspaceProvider,
   type ISecretStorage,
-  type IFileSystemProvider,
 } from '@ptah-extension/platform-core';
 import { registerReviewCore, REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS, ReviewWorktreeService, ReviewPolicyService, ReviewStatusCoordinatorService, type IReviewSettingsStore, type ReviewOrchestratorService, type ReviewStageEnvironment } from '@ptah-extension/review-core';
 import { registerReviewGithubServices, REVIEW_GITHUB_TOKENS, REVIEW_GITHUB_TOKEN_KEY, type ReviewPublicationGuard } from '@ptah-extension/review-github';
@@ -66,6 +67,11 @@ import {
   registerHarnessSyncServices,
   createPluginConfigSourceResolver,
   HARNESS_SYNC_TOKENS,
+  type IHarnessSourceResolver,
+  SkillSyncGate,
+  ManagedManifestStore,
+  createOrchestrationPhaseSources,
+  resolveHarnessWorkspaceRoot,
   type HarnessPluginConfigReader,
 } from '@ptah-extension/harness-sync';
 import {
@@ -91,6 +97,7 @@ import {
 } from '@ptah-extension/cli-agent-runtime';
 import {
   LANE_ROUTING_TOKENS,
+  PhaseDefinitionFileReader,
   registerLaneRoutingServices,
 } from '@ptah-extension/lane-routing';
 import {
@@ -100,6 +107,7 @@ import {
 import {
   registerAgentGenerationServices,
   AGENT_GENERATION_TOKENS,
+  type UserLayerMirrorService,
 } from '@ptah-extension/agent-generation';
 import {
   registerPersistenceSqliteServices,
@@ -125,6 +133,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   registerSkillSynthesisServices,
+  SKILL_FILE_WRITER_TOKEN,
+  type SkillFileWriterPort,
   SKILL_REPROPAGATION_TOKEN,
 } from '@ptah-extension/skill-synthesis';
 import {
@@ -354,6 +364,33 @@ export function registerPhase2Libraries(
   registerCuratorAuthServices(container, logger);
   // Before phase 3 registerVsCodeLmToolsServices and wire-runtime
   // registerRpcSurface. AgentRpcHandlers injects DECISION_MODEL_CONFIG.
+  container.register(LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER, {
+    useFactory: (c) => {
+      const userSkillsRoot = join(resolvePtahHomeDir(), 'user', 'skills');
+      const pluginsRoot = c.resolve<ContentDownloadService>(PLATFORM_TOKENS.CONTENT_DOWNLOAD).getPluginsPath();
+      const workspaceRoot = () => resolveHarnessWorkspaceRoot(
+        c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER).getWorkspaceRoot() ?? process.cwd(),
+      );
+      const sources = createOrchestrationPhaseSources({
+        resolveWorkspaceRoot: workspaceRoot,
+        userSkillsRoot,
+        pluginsRoot,
+        sourceResolver: c.resolve<IHarnessSourceResolver>(HARNESS_SYNC_TOKENS.SOURCE_RESOLVER),
+        skillSyncGate: c.resolve<SkillSyncGate>(HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE),
+        manifestStore: c.resolve<ManagedManifestStore>(HARNESS_SYNC_TOKENS.MANIFEST_STORE),
+      });
+      return new PhaseDefinitionFileReader(
+        c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER),
+        userSkillsRoot,
+        pluginsRoot,
+        sources.isCloneActive,
+        () => c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER).getWorkspaceRoot() == null
+          ? undefined
+          : sources.workspaceSkillsRoot(),
+        sources.isWorkspaceOwned,
+      );
+    },
+  });
   registerLaneRoutingServices(container, logger);
   registerLaneOutcomeServices(container, logger);
   container.register(LANE_ROUTING_TOKENS.LANE_OUTCOME_READER, {
@@ -647,6 +684,9 @@ export function registerPhase2Libraries(
   });
   // Register the skill trigger and telemetry seam for library RPC handlers.
   registerSkillSynthesisServices(container, logger);
+  container.register<SkillFileWriterPort>(SKILL_FILE_WRITER_TOKEN, {
+    useFactory: (c) => c.resolve<UserLayerMirrorService>(AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE),
+  });
   registerTaskSpecsServices(container, logger);
   // Task-end hook (TASK_2026_886): binds the seven host ports, then the
   // library. Only with the SQLite block's connection: the run store and its

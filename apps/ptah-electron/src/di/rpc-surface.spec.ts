@@ -45,6 +45,7 @@ describe('Electron RPC surface', () => {
     expect(surface.registered).toEqual(
       expect.arrayContaining([
         'attention:getSnapshot',
+        'usage:getDimensionTotals',
         'enhancedPrompts:cancel',
         'enhancedPrompts:getRunState',
         'wizard:get-generation-run-state',

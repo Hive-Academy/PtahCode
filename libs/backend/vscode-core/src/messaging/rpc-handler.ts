@@ -46,6 +46,7 @@ import {
 export const ALLOWED_METHOD_PREFIXES = [
   'artifacts:',
   'attention:',
+  'usage:',
   'displayWindow:',
   'gitWindow:',
   'session:',

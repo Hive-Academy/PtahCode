@@ -58,6 +58,7 @@ export { GitWorkflowRpcHandlers } from './git-workflow-rpc.handlers';
 export { WorkspaceRpcHandlers } from './workspace-rpc.handlers';
 export { SettingsRpcHandlers } from './settings-rpc.handlers';
 export { AttentionRpcHandlers } from './attention-rpc.handlers';
+export { UsageRpcHandlers } from './usage-rpc.handlers';
 export { MemoryRpcHandlers } from './memory-rpc.handlers';
 export { MemRpcHandlers } from './mem-rpc.handlers';
 export { CorpusRpcHandlers } from './corpus-rpc.handlers';

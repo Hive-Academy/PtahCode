@@ -182,7 +182,7 @@ function phaseDispatch(
       deliverable: [],
       verdict: [],
       acceptanceStep: [],
-      requiredCapabilities: [],
+      requiredCapabilities: [], machineCapabilities: [],
       toolProfile,
       discipline: {
         method: 'method',

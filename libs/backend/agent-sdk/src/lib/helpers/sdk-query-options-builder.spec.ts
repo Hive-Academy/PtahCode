@@ -44,7 +44,7 @@ function phaseFixture(disallowedTools: readonly string[] = []): PhaseDispatchV1 
       deliverable: [],
       verdict: [],
       acceptanceStep: [],
-      requiredCapabilities: [],
+      requiredCapabilities: [], machineCapabilities: [],
       toolProfile,
       discipline: {
         method: '',

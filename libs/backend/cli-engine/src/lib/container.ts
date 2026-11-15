@@ -44,6 +44,7 @@ import {
   PLATFORM_TOKENS,
   isFileBasedSettingKey,
   ContentDownloadService,
+    resolvePtahHomeDir,
   migrateAgentBudgetSettings,
 } from '@ptah-extension/platform-core';
 import type {
@@ -98,6 +99,11 @@ import {
   registerHarnessSyncServices,
   createPluginConfigSourceResolver,
   HARNESS_SYNC_TOKENS,
+  type IHarnessSourceResolver,
+  SkillSyncGate,
+  ManagedManifestStore,
+  createOrchestrationPhaseSources,
+  resolveHarnessWorkspaceRoot,
   type HarnessPluginConfigReader,
 } from '@ptah-extension/harness-sync';
 
@@ -122,7 +128,7 @@ import {
   createContainerHarnessCliDetector,
 } from '@ptah-extension/cli-agent-runtime';
 import { registerCliCodexLaneFactory } from './codex-lane-runtime-composition';
-import { registerLaneRoutingServices } from '@ptah-extension/lane-routing';
+import { registerLaneRoutingServices, LANE_ROUTING_TOKENS, PhaseDefinitionFileReader } from '@ptah-extension/lane-routing';
 import { startCliLaneOutcomes, wireLaneOutcomes } from './lane-outcomes-wiring';
 import {
   registerAgentGenerationServices,
@@ -839,6 +845,33 @@ export class CliDIContainer {
     });
     // Before phase 4 registerVsCodeLmToolsServices and registerRpcSurface.
     // AgentRpcHandlers injects DECISION_MODEL_CONFIG.
+    container.register(LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER, {
+      useFactory: (c) => {
+        const userSkillsRoot = path.join(resolvePtahHomeDir(), 'user', 'skills');
+        const pluginsRoot = c.resolve<ContentDownloadService>(PLATFORM_TOKENS.CONTENT_DOWNLOAD).getPluginsPath();
+        const workspaceRoot = () => resolveHarnessWorkspaceRoot(
+          c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER).getWorkspaceRoot() ?? process.cwd(),
+        );
+        const sources = createOrchestrationPhaseSources({
+          resolveWorkspaceRoot: workspaceRoot,
+          userSkillsRoot,
+          pluginsRoot,
+          sourceResolver: c.resolve<IHarnessSourceResolver>(HARNESS_SYNC_TOKENS.SOURCE_RESOLVER),
+          skillSyncGate: c.resolve<SkillSyncGate>(HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE),
+          manifestStore: c.resolve<ManagedManifestStore>(HARNESS_SYNC_TOKENS.MANIFEST_STORE),
+        });
+        return new PhaseDefinitionFileReader(
+          c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER),
+          userSkillsRoot,
+          pluginsRoot,
+          sources.isCloneActive,
+          () => c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER).getWorkspaceRoot() == null
+            ? undefined
+            : sources.workspaceSkillsRoot(),
+          sources.isWorkspaceOwned,
+        );
+      },
+    });
     registerLaneRoutingServices(container, logger);
     wireLaneOutcomes(container, logger);
     registerCliCodexLaneFactory(container, logger);

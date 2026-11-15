@@ -1,6 +1,7 @@
 /** Machine capabilities used by the routing gate. */
-export const MACHINE_CAPABILITIES = ['browser'] as const;
-export type MachineCapability = (typeof MACHINE_CAPABILITIES)[number];
+export { MACHINE_CAPABILITIES } from '@ptah-extension/shared';
+import type { MachineCapability } from '@ptah-extension/shared';
+export type { MachineCapability } from '@ptah-extension/shared';
 
 /** Derive capabilities from names that the candidate can actually call. */
 export function capabilitiesFromTools(
@@ -11,14 +12,4 @@ export function capabilitiesFromTools(
     capabilities.add('browser');
   }
   return capabilities;
-}
-
-export function requiredCapabilities(
-  phaseKind: string,
-  explicit?: readonly MachineCapability[],
-): readonly MachineCapability[] {
-  if (explicit !== undefined) return explicit;
-  return phaseKind === 'visual-review' || phaseKind === 'design'
-    ? ['browser']
-    : [];
 }

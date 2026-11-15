@@ -19,7 +19,7 @@
  * matches one candidate id, or a `cli` value that belongs to exactly one lane.
  */
 import { PHASE_KINDS } from '../contracts/route-decide-args.schema';
-import { capabilitiesFromTools, requiredCapabilities, type MachineCapability } from './capability';
+import { capabilitiesFromTools, type MachineCapability } from './capability';
 import { EXCLUSION_RULES } from '../contracts/route-decide-result.schema';
 import { EXCLUDED_LIMIT_STATE } from '../routing-constants';
 import type { RoutingCandidate } from './candidate.types';
@@ -253,7 +253,7 @@ function classify(
 export function constrainPhase(
   input: ConstrainPhaseInput,
 ): PhaseConstraintResult {
-  const required = requiredCapabilities(input.phase.kind, input.phase.requiredCapabilities);
+  const required = input.phase.requiredCapabilities ?? [];
   const forbiddenFamilies = forbiddenReviewerFamilies(
     input.phase,
     input.knownExecutors ?? [],

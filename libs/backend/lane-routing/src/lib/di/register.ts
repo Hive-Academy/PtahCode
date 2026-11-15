@@ -26,6 +26,7 @@ import { DecisionModelConfig } from '../decision-model/decision-model.config';
 import type { StructuredDecisionCompleter } from '../decision-model/structured-decision.port';
 import { DecisionModelFailureClassifier } from '../failure-class/decision-model-failure-classifier';
 import type { LaneModelListing } from '../lane-model-listing.port';
+import type { PhaseDefinitionReader } from '../phase-definition-reader.port';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import { CapabilityMatrixStore } from '../matrix/capability-matrix.store';
 import { RotationStore } from '../ranking/rotation.store';
@@ -169,6 +170,10 @@ export function registerLaneRoutingServices(
 
   container.register(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE, {
     useFactory: instanceCachingFactory((c) => {
+      const phaseDefinitionReader = optional<PhaseDefinitionReader>(
+        c,
+        LANE_ROUTING_TOKENS.PHASE_DEFINITION_READER,
+      );
       const listing = optional<LaneModelListing>(
         c,
         LANE_ROUTING_TOKENS.LANE_MODEL_LISTING,
@@ -192,6 +197,7 @@ export function registerLaneRoutingServices(
         ),
         ...(listing !== undefined ? { listing } : {}),
         ...(structured !== undefined ? { structured } : {}),
+        ...(phaseDefinitionReader !== undefined ? { phaseDefinitionReader } : {}),
       });
     }),
   });

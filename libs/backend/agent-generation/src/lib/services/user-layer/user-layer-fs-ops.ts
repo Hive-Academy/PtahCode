@@ -72,7 +72,7 @@ export class UserLayerFsOps {
     }
   }
 
-  async copyTree(sourceDir: string, targetDir: string): Promise<void> {
+  async copyTree(sourceDir: string, targetDir: string, skipRootFile?: string): Promise<void> {
     const rootStat = await lstat(sourceDir);
     if (rootStat.isSymbolicLink()) {
       this.logger.warn('[UserLayerMirror] skipping symlinked source root', {
@@ -80,13 +80,14 @@ export class UserLayerFsOps {
       });
       return;
     }
-    await this.copyTreeRec(sourceDir, targetDir, 0);
+    await this.copyTreeRec(sourceDir, targetDir, 0, skipRootFile);
   }
 
   private async copyTreeRec(
     sourceDir: string,
     targetDir: string,
     depth: number,
+    skipRootFile?: string,
   ): Promise<void> {
     if (depth > MAX_COPY_RECURSION_DEPTH) {
       this.logger.warn(
@@ -98,6 +99,9 @@ export class UserLayerFsOps {
     await mkdir(targetDir, { recursive: true });
     const entries = await readdir(sourceDir, { withFileTypes: true });
     for (const entry of entries) {
+      if (depth === 0 && entry.isFile() && entry.name === skipRootFile) {
+        continue;
+      }
       if (entry.isSymbolicLink()) {
         continue;
       }

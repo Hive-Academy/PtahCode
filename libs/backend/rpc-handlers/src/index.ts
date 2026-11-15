@@ -54,6 +54,7 @@ export {
   WorkspaceRpcHandlers,
   SettingsRpcHandlers,
   AttentionRpcHandlers,
+  UsageRpcHandlers,
   MemoryRpcHandlers,
   MemRpcHandlers,
   CorpusRpcHandlers,

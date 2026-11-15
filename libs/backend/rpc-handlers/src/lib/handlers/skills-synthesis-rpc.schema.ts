@@ -9,6 +9,8 @@ import { z } from 'zod';
 import {
   AGENT_MODEL_PROVIDERS,
   AGENT_MODEL_WILDCARD,
+  isSkillCloneFile,
+  type SkillCloneFile,
 } from '@ptah-extension/shared';
 
 const SkillCloneKindSchema = z.enum(['skill', 'agent', 'command']);
@@ -22,6 +24,33 @@ const SlugSchema = z
     (s) => !s.includes('..') && !s.includes('/') && !s.includes('\\'),
     'invalid slug',
   );
+
+/**
+ * A file of a skill clone folder: `SKILL.md` or `phases/<kind>.md` with
+ * `<kind>` in `PHASE_KINDS`. Exact match, no normalization, so `..`, a
+ * backslash, an absolute path or a different case never pass (U-D13 (1)).
+ */
+export const SkillCloneFileSchema = z.custom<SkillCloneFile>(
+  (value) => isSkillCloneFile(value),
+  'invalid skill clone file',
+);
+
+/**
+ * Kinds `agent` and `command` are one file each, so they refuse a `file`
+ * argument of any value.
+ */
+function refuseFileOnFileKind(
+  value: { kind: 'skill' | 'agent' | 'command'; file?: SkillCloneFile },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.kind !== 'skill' && value.file !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['file'],
+      message: 'file is accepted for kind skill only',
+    });
+  }
+}
 
 const HistoryTsSchema = z
   .string()
@@ -46,10 +75,13 @@ const ProposalIdSchema = z
     'invalid proposalId',
   );
 
-export const SkillPreviewEnhancementParamsSchema = z.object({
-  kind: SkillCloneKindSchema,
-  slug: SlugSchema,
-});
+export const SkillPreviewEnhancementParamsSchema = z
+  .object({
+    kind: SkillCloneKindSchema,
+    slug: SlugSchema,
+    file: SkillCloneFileSchema.optional(),
+  })
+  .superRefine(refuseFileOnFileKind);
 
 export const SkillApplyProposalParamsSchema = z.object({
   kind: SkillCloneKindSchema,
@@ -63,17 +95,23 @@ export const SkillApplyProposalParamsSchema = z.object({
  * suffixed with a collision counter). Anything else — separators, dots,
  * traversal — is rejected before any path is built.
  */
-export const SkillGetHistoryBodyParamsSchema = z.object({
-  kind: SkillCloneKindSchema,
-  slug: SlugSchema,
-  ts: HistoryTsSchema,
-});
+export const SkillGetHistoryBodyParamsSchema = z
+  .object({
+    kind: SkillCloneKindSchema,
+    slug: SlugSchema,
+    ts: HistoryTsSchema,
+    file: SkillCloneFileSchema.optional(),
+  })
+  .superRefine(refuseFileOnFileKind);
 
-export const SkillRevertEnhancementParamsSchema = z.object({
-  kind: SkillCloneKindSchema,
-  slug: SlugSchema,
-  historyTs: HistoryTsSchema,
-});
+export const SkillRevertEnhancementParamsSchema = z
+  .object({
+    kind: SkillCloneKindSchema,
+    slug: SlugSchema,
+    historyTs: HistoryTsSchema,
+    file: SkillCloneFileSchema.optional(),
+  })
+  .superRefine(refuseFileOnFileKind);
 
 export const SkillRebaseCloneParamsSchema = z.object({
   kind: SkillCloneKindSchema,

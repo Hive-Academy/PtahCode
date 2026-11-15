@@ -1,6 +1,5 @@
 import type { RouteCandidateSource } from '../route-candidate-source.port';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
-import { requiredCapabilities } from '../ranking/capability';
 import type { GateArgs } from './phase-plan';
 import { candidatesFor } from './phase-plan';
 import type { GatheredCall } from './gather';
@@ -14,7 +13,7 @@ export async function readCandidateTools(
 ): Promise<ReadonlyMap<string, ReadonlyMap<string, readonly string[] | null>>> {
   const byPhase = new Map<string, ReadonlyMap<string, readonly string[] | null>>();
   for (const phase of phases) {
-    if (requiredCapabilities(phase.kind, phase.requiredCapabilities).length === 0) continue;
+    if ((phase.requiredCapabilities ?? []).length === 0) continue;
     const entries = await Promise.all(candidatesFor(phase, gathered).map(async (candidate) => {
       try {
         return [candidate.id, await source.tools?.(candidate, phase) ?? null] as const;

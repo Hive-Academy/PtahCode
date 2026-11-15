@@ -7,9 +7,12 @@ import {
   rm,
   stat,
   readdir,
+  symlink,
 } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import type { SkillClonePhaseFile } from '@ptah-extension/shared';
+import { formatSourceHash } from '@ptah-extension/platform-core';
 
 let fakeHome: string;
 
@@ -27,6 +30,7 @@ import {
   DEFAULT_HISTORY_DIR,
 } from './origin-sidecar.types';
 import type { OriginSidecar } from './origin-sidecar.types';
+import { computeSourceHash } from './source-hash';
 
 function makeLogger() {
   return {
@@ -108,6 +112,127 @@ describe('UserLayerMirrorService enhance/revert/history', () => {
     expect(sidecar.currentContentHash).toBe(result.currentContentHash);
     const tmps = (await readdir(skillDir)).filter((n) => n.endsWith('.tmp'));
     expect(tmps).toHaveLength(0);
+  });
+
+  it('writes one phase and restores only that phase from its folder snapshot', async () => {
+    const phases = join(skillDir, 'phases');
+    await mkdir(phases);
+    await writeFile(join(phases, 'review.md'), 'old review');
+    await writeFile(join(phases, 'design.md'), 'old design');
+    const written = await service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/review.md', newBody: 'new review' });
+    expect(written.historyTs).not.toBeNull();
+    expect(await readFile(join(phases, 'review.md'), 'utf8')).toBe('new review');
+    await writeFile(join(phases, 'design.md'), 'edited design');
+    const reverted = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/review.md', historyTs: written.historyTs as string });
+    expect(reverted.restored).toBe(true);
+    expect(await readFile(join(phases, 'review.md'), 'utf8')).toBe('old review');
+    expect(await readFile(join(phases, 'design.md'), 'utf8')).toBe('edited design');
+  });
+
+  it('refuses a stale phase body under the slug lock', async () => {
+    const phases = join(skillDir, 'phases');
+    await mkdir(phases);
+    await writeFile(join(phases, 'plan.md'), 'edited after preview');
+    const result = await service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/plan.md', newBody: 'proposal', expectedBodyHash: formatSourceHash('old preview') });
+    expect(result).toMatchObject({ stale: true, historyTs: null, liveBodyHash: formatSourceHash('edited after preview') });
+    expect(await readFile(join(phases, 'plan.md'), 'utf8')).toBe('edited after preview');
+  });
+
+  it('refuses a phase write when SKILL.md is missing', async () => {
+    await rm(join(skillDir, 'SKILL.md'));
+    await expect(service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/plan.md', newBody: 'proposal' })).rejects.toThrow();
+  });
+
+  it('recreates phases before a one-file revert', async () => {
+    await mkdir(join(skillDir, 'phases'));
+    await writeFile(join(skillDir, 'phases', 'plan.md'), 'old');
+    const written = await service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/plan.md', newBody: 'new' });
+    await rm(join(skillDir, 'phases'), { recursive: true });
+    const reverted = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/plan.md', historyTs: written.historyTs as string });
+    expect(reverted.restored).toBe(true);
+    expect(await readFile(join(skillDir, 'phases', 'plan.md'), 'utf8')).toBe('old');
+  });
+
+  it('refuses non-phase paths and escape attempts', async () => {
+    await expect(service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'SKILL.md' as SkillClonePhaseFile, newBody: 'bad' })).rejects.toThrow('Invalid phase file');
+    await expect(service.writeEnhancedSkillFile({ slug: 'deep-research', file: '../escape.md' as SkillClonePhaseFile, newBody: 'bad' })).rejects.toThrow('Invalid phase file');
+    await expect(service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'xxxxxxxreview.md' as SkillClonePhaseFile, newBody: 'bad' })).rejects.toThrow('Invalid phase file');
+    expect(await readFile(join(skillDir, 'SKILL.md'), 'utf8')).toBe('original body');
+  });
+
+  it('removes a newly created phase when reverting its snapshot', async () => {
+    const snapshot = await service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/review.md', newBody: 'new review' });
+    const result = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/review.md', historyTs: snapshot.historyTs as string });
+    expect(result.restored).toBe(true);
+    expect(result.newHistoryTs).not.toBeNull();
+    expect(await fileExists(join(skillDir, 'phases', 'review.md'))).toBe(false);
+    expect(await readFile(join(skillDir, DEFAULT_HISTORY_DIR, result.newHistoryTs as string, 'phases', 'review.md'), 'utf8')).toBe('new review');
+    expect((await readSidecar(skillDir)).currentContentHash).toBe(await computeSourceHash(skillDir));
+  });
+
+  it('keeps absent-phase history metadata out of a whole-skill revert', async () => {
+    const snapshot = await service.writeEnhancedSkillFile({
+      slug: 'deep-research',
+      file: 'phases/review.md',
+      newBody: 'new review',
+    });
+    const historyDir = join(skillDir, DEFAULT_HISTORY_DIR, snapshot.historyTs as string);
+    expect(await readFile(join(historyDir, '.ptah-absent-phase'), 'utf8')).toBe('phases/review.md');
+
+    const reverted = await service.revert({
+      kind: 'skill',
+      slug: 'deep-research',
+      historyTs: snapshot.historyTs as string,
+    });
+
+    expect(reverted.restored).toBe(true);
+    expect(await fileExists(join(skillDir, '.ptah-absent-phase'))).toBe(false);
+    expect(await fileExists(join(skillDir, 'phases', 'review.md'))).toBe(false);
+    expect((await readSidecar(skillDir)).currentContentHash).toBe(await computeSourceHash(skillDir));
+    expect((await service.listHistory('skill', 'deep-research')).some((entry) => entry.ts === snapshot.historyTs)).toBe(true);
+  });
+
+  it('returns restored false for a missing phase snapshot directory', async () => {
+    const result = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/review.md', historyTs: 'does-not-exist' });
+    expect(result).toEqual({ restored: false, revertedFrom: 'does-not-exist', newHistoryTs: null });
+  });
+
+  it('refuses a symlinked phases folder before writing', async () => {
+    const outside = join(workRoot, 'outside');
+    await mkdir(outside);
+    try { await symlink(outside, join(skillDir, 'phases'), 'dir'); }
+    catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') return; // Windows without symlink privilege.
+      throw error;
+    }
+    await expect(service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/plan.md', newBody: 'bad' })).rejects.toThrow('Symbolic link');
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it('refuses a symlinked snapshot folder before reverting', async () => {
+    const outside = join(workRoot, 'outside');
+    await mkdir(outside);
+    const historyRoot = join(skillDir, DEFAULT_HISTORY_DIR);
+    await mkdir(historyRoot);
+    try { await symlink(outside, join(historyRoot, 'stamp'), 'dir'); }
+    catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') return; // Windows without symlink privilege.
+      throw error;
+    }
+    await expect(service.revertSkillFile({ slug: 'deep-research', file: 'phases/plan.md', historyTs: 'stamp' })).rejects.toThrow('Symbolic link');
+  });
+
+  it('refuses a symlinked history source file before reverting', async () => {
+    const outside = join(workRoot, 'outside.md');
+    await writeFile(outside, 'secret');
+    const phaseHistory = join(skillDir, DEFAULT_HISTORY_DIR, 'stamp', 'phases');
+    await mkdir(phaseHistory, { recursive: true });
+    try { await symlink(outside, join(phaseHistory, 'plan.md'), 'file'); }
+    catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') return; // Windows without symlink privilege.
+      throw error;
+    }
+    await expect(service.revertSkillFile({ slug: 'deep-research', file: 'phases/plan.md', historyTs: 'stamp' })).rejects.toThrow('Symbolic link');
   });
 
   it('writeEnhancedSkill HARD GUARD: never writes outside ~/.ptah/user/', async () => {

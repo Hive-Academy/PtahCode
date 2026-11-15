@@ -1,11 +1,12 @@
 ---
-version: 1
+version: 2
 kind: visual-review
 input: [context.md, implementation-plan.md, approved prototype or before screenshots, Electron app, changed UI files]
 deliverable: [visual-review.md, Electron screenshots]
 verdict: [APPROVE, REVISE, REJECT]
 acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", orchestrator checks visual evidence and independent verdict before UI acceptance]
 requiredCapabilities: [inspect rendered Electron UI, capture screenshots, measure accessibility]
+machineCapabilities: [browser]
 toolProfile:
   disallowedTools: []
   permission: prompt

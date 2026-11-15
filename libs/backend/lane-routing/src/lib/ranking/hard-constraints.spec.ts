@@ -108,7 +108,7 @@ describe('constrainPhase requirement 3.2', () => {
       family: SUBAGENT_FAMILY,
     };
     const input: ConstrainPhaseInput = {
-      phase: { id: 'look', kind: 'visual-review' },
+      phase: { id: 'look', kind: 'visual-review', requiredCapabilities: ['browser'] },
       candidates: [child],
       pin: { executor: 'child-session' },
       toolNames: new Map([['child-session', ['ptah_browser_navigate']]]),
@@ -126,7 +126,7 @@ describe('constrainPhase requirement 3.2', () => {
   });
   it('routes visual review to a capable lane and excludes one without browser tools', () => {
     const result = constrainPhase({
-      phase: { id: 'look', kind: 'visual-review' },
+      phase: { id: 'look', kind: 'visual-review', requiredCapabilities: ['browser'] },
       candidates: [lane({ id: 'codex', cli: 'codex' }), lane({ id: 'grok', cli: 'grok' })],
       toolNames: new Map([['codex', []], ['grok', ['ptah_browser_navigate']]]),
     });
@@ -139,7 +139,7 @@ describe('constrainPhase requirement 3.2', () => {
 
   it('excludes an unreadable list and reports the capability when none are capable', () => {
     const result = constrainPhase({
-      phase: { id: 'look', kind: 'visual-review' },
+      phase: { id: 'look', kind: 'visual-review', requiredCapabilities: ['browser'] },
       candidates: [lane({ id: 'codex', cli: 'codex' }), lane({ id: 'grok', cli: 'grok' })],
       toolNames: new Map([['codex', null], ['grok', []]]),
     });
@@ -156,7 +156,7 @@ describe('constrainPhase requirement 3.2', () => {
 
   it('lets a capable pin win and refuses an incapable pin', () => {
     const input: ConstrainPhaseInput = {
-      phase: { id: 'look', kind: 'design' },
+      phase: { id: 'look', kind: 'design', requiredCapabilities: ['browser'] },
       candidates: [lane({ id: 'codex', cli: 'codex' }), lane({ id: 'grok', cli: 'grok' })],
       toolNames: new Map([['codex', []], ['grok', ['ptah_browser_screenshot']]]),
     };
@@ -440,7 +440,7 @@ describe('constrainPhase requirement 3.4', () => {
   it('excludes a lane without browser and keeps a capable subagent', () => {
     const subagent = toSubagentCandidate('visual-reviewer');
     const result = constrainPhase({
-      phase: { id: 'visual', kind: 'visual-review' },
+      phase: { id: 'visual', kind: 'visual-review', requiredCapabilities: ['browser'] },
       candidates: [lane({ id: 'codex', cli: 'codex' }), subagent],
       toolNames: new Map([['codex', []], [subagent.id, ['ptah_browser_navigate']]]),
     });
@@ -461,7 +461,7 @@ describe('constrainPhase requirement 3.4', () => {
   it('excludes lanes without browser on design', () => {
     const subagent = toSubagentCandidate('ui-ux-designer');
     const result = constrainPhase({
-      phase: { id: 'design', kind: 'design' },
+      phase: { id: 'design', kind: 'design', requiredCapabilities: ['browser'] },
       candidates: [
         lane({ id: 'codex', cli: 'codex' }),
         lane({ id: 'grok', cli: 'grok' }),
@@ -479,7 +479,7 @@ describe('constrainPhase requirement 3.4', () => {
 
   it('returns missing-capability when no candidate has browser', () => {
     const result = constrainPhase({
-      phase: { id: 'visual', kind: 'visual-review' },
+      phase: { id: 'visual', kind: 'visual-review', requiredCapabilities: ['browser'] },
       candidates: [lane({ id: 'codex', cli: 'codex' })],
     });
 
@@ -582,7 +582,7 @@ describe('constrainPhase requirement 3.6', () => {
   it('returns pin-unavailable with missing browser and does not move the pin', () => {
     const subagent = toSubagentCandidate('ui-ux-designer');
     const result = constrainPhase({
-      phase: { id: 'design', kind: 'design' },
+      phase: { id: 'design', kind: 'design', requiredCapabilities: ['browser'] },
       pin: { executor: 'codex' },
       candidates: [lane({ id: 'codex', cli: 'codex' }), subagent],
       toolNames: new Map([['codex', []], [subagent.id, ['ptah_browser_navigate']]]),

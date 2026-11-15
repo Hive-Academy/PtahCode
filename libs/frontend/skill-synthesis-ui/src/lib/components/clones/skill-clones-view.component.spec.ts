@@ -609,6 +609,7 @@ describe('SkillClonesViewComponent — detail drawer', () => {
       'agent',
       'planner',
       '20260101T000000',
+      undefined,
     );
     expect(state.refreshClones).toHaveBeenCalledTimes(2);
   });
@@ -658,6 +659,7 @@ describe('SkillClonesViewComponent — enhancement preview', () => {
     expect(rpc.previewEnhancement).toHaveBeenCalledWith(
       'skill',
       'deep-research',
+      undefined,
     );
     expect(rpc.applyProposal).not.toHaveBeenCalled();
     expect(rpc.saveCloneBody).not.toHaveBeenCalled();

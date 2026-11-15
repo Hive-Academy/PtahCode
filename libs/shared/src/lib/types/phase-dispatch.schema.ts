@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PHASE_CONTRACT_VERSION, PHASE_KINDS, type PhaseDefinitionV1 } from './phase-contract.types';
+import { PHASE_CONTRACT_VERSION, PHASE_KINDS, MACHINE_CAPABILITIES, type PhaseDefinitionV1 } from './phase-contract.types';
 
 const nonempty = z.string().trim().min(1);
 const toolProfile = z.object({
@@ -15,16 +15,24 @@ const discipline = z.object({
   reviewerStance: nonempty.optional(),
 }).strict();
 const definition = z.object({
-  version: z.literal(PHASE_CONTRACT_VERSION),
+  version: z.union([z.literal(1), z.literal(PHASE_CONTRACT_VERSION)]),
   kind: z.enum(PHASE_KINDS),
   input: z.array(nonempty).min(1),
   deliverable: z.array(nonempty).min(1),
   verdict: z.array(nonempty).min(1),
   acceptanceStep: z.array(nonempty).min(1),
   requiredCapabilities: z.array(nonempty).min(1),
+  machineCapabilities: z.array(z.enum(MACHINE_CAPABILITIES)).optional(),
   toolProfile,
   discipline,
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.version === PHASE_CONTRACT_VERSION && value.machineCapabilities === undefined) {
+    ctx.addIssue({ code: 'custom', message: 'version 2 requires machineCapabilities' });
+  }
+}).transform(value => ({
+  ...value,
+  machineCapabilities: value.machineCapabilities ?? [],
+}));
 const skill = z.object({
   name: nonempty,
   path: nonempty.optional(),
@@ -46,7 +54,7 @@ export function renderPhaseDiscipline(value: PhaseDefinitionV1['discipline']): s
 
 /** The single wire schema for a resolved phase handoff. */
 export const PhaseDispatchSchema = z.object({
-  version: z.literal(PHASE_CONTRACT_VERSION),
+  version: z.union([z.literal(1), z.literal(PHASE_CONTRACT_VERSION)]),
   kind: z.enum(PHASE_KINDS),
   text: nonempty,
   definition,

@@ -1,11 +1,12 @@
 ---
-version: 1
+version: 2
 kind: design
 input: [task context, existing UI and design system, parity-inventory.md when replacing a surface]
 deliverable: [design-spec.md, prototype/index.html, design-assets-inventory.md when needed]
 verdict: [prototype ready for review, blocked design decision]
 acceptanceStep: ["See ../SKILL.md orchestrator acceptance step", orchestrator obtains cross-side review and Gate 1.7 decision before implementation]
 requiredCapabilities: [inspect current UI, specify interactions and tokens, produce interactive prototype]
+machineCapabilities: [browser]
 toolProfile:
   disallowedTools: []
   permission: prompt

@@ -325,7 +325,7 @@ function constraintInput(
     phase: {
       id: phase.id,
       kind: phase.kind,
-      ...(phase.requiredCapabilities !== undefined ? { requiredCapabilities: phase.requiredCapabilities } : {}),
+      requiredCapabilities: phase.requiredCapabilities ?? [],
       ...(phase.reviews !== undefined ? { reviews: phase.reviews } : {}),
     },
     candidates,

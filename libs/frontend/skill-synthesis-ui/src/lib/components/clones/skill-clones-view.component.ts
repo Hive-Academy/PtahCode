@@ -64,6 +64,7 @@ import type {
   CloneSummary,
   ScorecardInvocationRow,
   SkillCloneKind,
+  SkillClonePhaseFile,
   SkillSynthesisPreviewEnhancementResult,
 } from '@ptah-extension/shared';
 
@@ -445,6 +446,7 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
         [clone]="selected()"
         [body]="detailBody()"
         [history]="history()"
+        [phaseFiles]="phaseFiles()"
         [detailLoading]="detailLoading()"
         [scorecard]="selectedScorecard()"
         [outcomeSignals]="selectedOutcomeSignals()"
@@ -465,6 +467,8 @@ export const PLUGIN_SETTINGS_POINTER_COPY =
         (rebase)="onRequestReconcile($event, 'rebase')"
         (keep)="onRequestReconcile($event, 'keep')"
         (revertTo)="onRevertTo($event)"
+        (phaseEnhance)="onEnhance($event.clone, $event.file)"
+        (phaseRevert)="onRevertTo($event)"
         (historyDiffRequested)="onLoadHistoryDiff($event)"
         (historyDiffCleared)="historyDiff.set(null)"
       />
@@ -685,6 +689,8 @@ export class SkillClonesViewComponent implements OnInit {
   public readonly historyDiffLoading = signal<string | null>(null);
 
   public readonly previewClone = signal<CloneSummary | null>(null);
+  /** The phase file of the open preview, or `null` for the main body. */
+  public readonly previewFile = signal<SkillClonePhaseFile | null>(null);
   public readonly previewResult =
     signal<SkillSynthesisPreviewEnhancementResult | null>(null);
   public readonly previewLoading = signal<boolean>(false);
@@ -695,6 +701,9 @@ export class SkillClonesViewComponent implements OnInit {
   protected readonly rebaseExplanation = REBASE_EXPLANATION;
 
   public readonly history = computed(() => this.state.detail()?.history ?? []);
+  public readonly phaseFiles = computed<readonly SkillClonePhaseFile[]>(
+    () => this.state.detail()?.phaseFiles ?? [],
+  );
   public readonly detailBody = computed(
     () => this.state.detail()?.body ?? null,
   );
@@ -923,11 +932,16 @@ export class SkillClonesViewComponent implements OnInit {
         req.clone.kind,
         req.clone.slug,
         req.ts,
+        req.file,
       );
+      const label =
+        req.file === undefined
+          ? req.clone.slug
+          : `${req.clone.slug}/${req.file}`;
       if (result.reverted) {
-        this.showToast(`Reverted "${req.clone.slug}".`, 'success');
+        this.showToast(`Reverted "${label}".`, 'success');
       } else {
-        this.showToast(`Could not revert "${req.clone.slug}".`, 'error');
+        this.showToast(`Could not revert "${label}".`, 'error');
       }
       this.onCloseDetail();
       await this.state.refreshClones();
@@ -944,14 +958,18 @@ export class SkillClonesViewComponent implements OnInit {
    * Start a preview. Never writes: the result is a candidate body plus the
    * judge verdict, which the preview drawer renders as a diff.
    */
-  protected async onEnhance(c: CloneSummary): Promise<void> {
+  protected async onEnhance(
+    c: CloneSummary,
+    file?: SkillClonePhaseFile,
+  ): Promise<void> {
     if (this.skillsPaused()) return;
     this.previewClone.set(c);
+    this.previewFile.set(file ?? null);
     this.previewResult.set(null);
     this.previewError.set(null);
     this.previewLoading.set(true);
     try {
-      const result = await this.rpc.previewEnhancement(c.kind, c.slug);
+      const result = await this.rpc.previewEnhancement(c.kind, c.slug, file);
       this.previewResult.set(result);
     } catch (err: unknown) {
       if (err instanceof SkillsPausedError) {
@@ -984,16 +1002,39 @@ export class SkillClonesViewComponent implements OnInit {
       return;
     this.previewApplying.set(true);
     this.previewError.set(null);
+    const phaseFile = this.previewFile();
     try {
-      await this.rpc.saveCloneBody(
-        c.kind,
-        c.slug,
-        draft.body,
-        draft.expectedSourceHash,
-        'enhancement',
-      );
+      if (phaseFile !== null) {
+        // `saveCloneBody` writes only SKILL.md. A phase file goes through the
+        // proposal, which the backend re-checks against the phase contract.
+        if (preview.proposalId === null) return;
+        const applied = await this.rpc.applyProposal(
+          c.kind,
+          c.slug,
+          preview.proposalId,
+        );
+        if (!applied.applied) {
+          if (this.previewClone() === c && this.previewResult() === preview) {
+            this.previewError.set(
+              `The phase file was not changed (${applied.skipReason ?? 'refused'}).`,
+            );
+          }
+          return;
+        }
+      } else {
+        await this.rpc.saveCloneBody(
+          c.kind,
+          c.slug,
+          draft.body,
+          draft.expectedSourceHash,
+          'enhancement',
+        );
+      }
       if (this.previewClone() !== c || this.previewResult() !== preview) return;
-      this.showToast(`Enhanced "${c.slug}".`, 'success');
+      this.showToast(
+        `Enhanced "${phaseFile === null ? c.slug : `${c.slug}/${phaseFile}`}".`,
+        'success',
+      );
       this.closePreview();
       await this.state.refreshClones();
       // Refresh the open detail drawer so the body and history reflect the
