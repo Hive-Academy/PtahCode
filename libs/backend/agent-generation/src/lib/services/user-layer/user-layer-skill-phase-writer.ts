@@ -1,9 +1,11 @@
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
-import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, unlink } from 'node:fs/promises';
 import { formatSourceHash } from '@ptah-extension/platform-core';
 import { isSkillCloneFile, phaseKindOfSkillCloneFile, type SkillClonePhaseFile } from '@ptah-extension/shared';
 import { DEFAULT_HISTORY_DIR } from './origin-sidecar.types';
 import { computeSourceHash } from './source-hash';
+
+const ABSENT_PHASE_MARKER = '.ptah-absent-phase';
 
 export interface SkillPhaseFileOps {
   readonly skillsRoot: () => string;
@@ -64,6 +66,19 @@ async function safeClone(cloneDir: string, skillsRoot: string): Promise<void> {
   await safePath(join(cloneDir, 'SKILL.md'), cloneDir, true);
 }
 
+async function snapshotPhaseState(ops: SkillPhaseFileOps, cloneDir: string, file: SkillClonePhaseFile, exists: boolean): Promise<string> {
+  const historyTs = basename(await ops.snapshotDirToHistory(cloneDir));
+  if (!exists) {
+    const historyDir = join(cloneDir, DEFAULT_HISTORY_DIR, historyTs);
+    const marker = join(historyDir, ABSENT_PHASE_MARKER);
+    ops.assertUnderUserLayer(marker);
+    await safePath(historyDir, join(cloneDir, DEFAULT_HISTORY_DIR), true);
+    await safePath(marker, historyDir);
+    await ops.writeTextAtomic(marker, file);
+  }
+  return historyTs;
+}
+
 export async function writeSkillPhaseFile(ops: SkillPhaseFileOps, args: SkillPhaseWriteArgs) {
   return ops.withSlugLock(args.slug, async () => {
     const { cloneDir, target } = paths(ops, args.slug, args.file);
@@ -74,7 +89,7 @@ export async function writeSkillPhaseFile(ops: SkillPhaseFileOps, args: SkillPha
     const exists = await safePath(target, cloneDir);
     const liveBody = exists ? await readFile(target, 'utf8') : null;
     if (args.expectedBodyHash !== undefined && (liveBody === null || formatSourceHash(liveBody) !== args.expectedBodyHash)) return { stale: true as const, slug: args.slug, historyTs: null, liveBodyHash: liveBody === null ? '' : formatSourceHash(liveBody) };
-    const historyTs = basename(await ops.snapshotDirToHistory(cloneDir));
+    const historyTs = await snapshotPhaseState(ops, cloneDir, args.file, exists);
     ops.assertUnderUserLayer(phasesDir);
     if (!isInsideRoot(phasesDir, cloneDir)) throw new Error('Phase directory escapes skill clone');
     await mkdir(phasesDir, { recursive: true });
@@ -94,24 +109,33 @@ export async function revertSkillPhaseFile(ops: SkillPhaseFileOps, args: SkillPh
     const historyRoot = join(cloneDir, DEFAULT_HISTORY_DIR);
     const historyDir = join(historyRoot, args.historyTs);
     const source = join(historyDir, args.file);
+    const marker = join(historyDir, ABSENT_PHASE_MARKER);
     ops.assertUnderUserLayer(historyRoot);
     ops.assertUnderUserLayer(historyDir);
     ops.assertUnderUserLayer(source);
+    ops.assertUnderUserLayer(marker);
     if (!isInsideRoot(historyRoot, cloneDir) || !isInsideRoot(historyDir, historyRoot) || !isInsideRoot(source, historyDir)) throw new Error('History file escapes skill clone');
     await safeClone(cloneDir, ops.skillsRoot());
     await safePath(historyRoot, cloneDir);
-    await safePath(historyDir, historyRoot);
+    if (!(await safePath(historyDir, historyRoot))) return { restored: false, revertedFrom: args.historyTs, newHistoryTs: null };
     await safePath(join(historyDir, 'phases'), historyDir);
-    if (!(await safePath(source, historyDir))) return { restored: false, revertedFrom: args.historyTs, newHistoryTs: null };
+    const sourceExists = await safePath(source, historyDir);
+    const markerExists = await safePath(marker, historyDir);
+    const wasAbsent = !sourceExists && markerExists && (await readFile(marker, 'utf8')) === args.file;
+    if (!sourceExists && !wasAbsent) return { restored: false, revertedFrom: args.historyTs, newHistoryTs: null };
     await safePath(join(cloneDir, 'phases'), cloneDir);
-    await safePath(target, cloneDir);
+    const targetExists = await safePath(target, cloneDir);
     await safePath(historyRoot, cloneDir);
-    const newHistoryTs = basename(await ops.snapshotDirToHistory(cloneDir));
-    await mkdir(join(cloneDir, 'phases'), { recursive: true });
-    await safePath(join(cloneDir, 'phases'), cloneDir, true);
-    await safePath(source, historyDir, true);
-    await safePath(target, cloneDir);
-    await ops.copyFileAtomic(source, target);
+    const newHistoryTs = await snapshotPhaseState(ops, cloneDir, args.file, targetExists);
+    if (wasAbsent) {
+      if (await safePath(target, cloneDir)) await unlink(target);
+    } else {
+      await mkdir(join(cloneDir, 'phases'), { recursive: true });
+      await safePath(join(cloneDir, 'phases'), cloneDir, true);
+      await safePath(source, historyDir, true);
+      await safePath(target, cloneDir);
+      await ops.copyFileAtomic(source, target);
+    }
     const hash = await computeSourceHash(cloneDir);
     await ops.refreshSidecar(cloneDir, args.slug, hash);
     return { restored: true, revertedFrom: args.historyTs, newHistoryTs };

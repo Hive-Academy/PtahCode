@@ -30,6 +30,7 @@ import {
   DEFAULT_HISTORY_DIR,
 } from './origin-sidecar.types';
 import type { OriginSidecar } from './origin-sidecar.types';
+import { computeSourceHash } from './source-hash';
 
 function makeLogger() {
   return {
@@ -159,11 +160,19 @@ describe('UserLayerMirrorService enhance/revert/history', () => {
     expect(await readFile(join(skillDir, 'SKILL.md'), 'utf8')).toBe('original body');
   });
 
-  it('does not replace a phase when the snapshot lacks it', async () => {
+  it('removes a newly created phase when reverting its snapshot', async () => {
     const snapshot = await service.writeEnhancedSkillFile({ slug: 'deep-research', file: 'phases/review.md', newBody: 'new review' });
     const result = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/review.md', historyTs: snapshot.historyTs as string });
-    expect(result).toEqual({ restored: false, revertedFrom: snapshot.historyTs, newHistoryTs: null });
-    expect(await readFile(join(skillDir, 'phases', 'review.md'), 'utf8')).toBe('new review');
+    expect(result.restored).toBe(true);
+    expect(result.newHistoryTs).not.toBeNull();
+    expect(await fileExists(join(skillDir, 'phases', 'review.md'))).toBe(false);
+    expect(await readFile(join(skillDir, DEFAULT_HISTORY_DIR, result.newHistoryTs as string, 'phases', 'review.md'), 'utf8')).toBe('new review');
+    expect((await readSidecar(skillDir)).currentContentHash).toBe(await computeSourceHash(skillDir));
+  });
+
+  it('returns restored false for a missing phase snapshot directory', async () => {
+    const result = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/review.md', historyTs: 'does-not-exist' });
+    expect(result).toEqual({ restored: false, revertedFrom: 'does-not-exist', newHistoryTs: null });
   });
 
   it('refuses a symlinked phases folder before writing', async () => {
