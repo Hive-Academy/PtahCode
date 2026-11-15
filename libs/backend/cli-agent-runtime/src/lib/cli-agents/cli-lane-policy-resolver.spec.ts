@@ -30,10 +30,10 @@ function refusalFrom(run: () => unknown): LaneSpawnPolicyError {
 }
 
 describe('CLI lane policy resolver', () => {
-  it('selects the strongest supported manifest pair', () => {
-    expect(builtInLanePolicy(manifest)).toMatchObject({ permission: 'yolo', network: 'allow' });
+  it('selects the most restrictive supported manifest pair', () => {
+    expect(builtInLanePolicy(manifest)).toMatchObject({ permission: 'plan', network: 'deny' });
     expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: {} })).toMatchObject({
-      permission: 'yolo', network: 'allow', permissionSource: 'built-in', networkSource: 'built-in',
+      permission: 'plan', network: 'deny', permissionSource: 'built-in', networkSource: 'built-in',
     });
   });
 

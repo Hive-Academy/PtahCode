@@ -37,7 +37,7 @@ export const CLI_LANE_DEFAULTS_PATCH_SCHEMA = z.partialRecord(
 
 export type CliLaneDefaultsPatch = z.infer<typeof CLI_LANE_DEFAULTS_PATCH_SCHEMA>;
 
-const PERMISSIONS: readonly LanePermissionMode[] = ['yolo', 'auto-edit', 'ask', 'plan'];
+const PERMISSIONS: readonly LanePermissionMode[] = ['plan', 'ask', 'auto-edit', 'yolo'];
 const NETWORKS: readonly LaneNetworkMode[] = ['allow', 'deny'];
 
 export function resolveCliLaneDefaultPair(
