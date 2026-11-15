@@ -508,15 +508,6 @@
     "px-3": 2,
     "py-2": 2
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-shared-defaults.component.ts": {
-    "gap-4": 1,
-    "mt-1": 2
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {
-    "gap-2": 1,
-    "pt-2": 1,
-    "space-y-1.5": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.ts": {
     "gap-1.5": 2,
     "gap-2": 2,
@@ -637,12 +628,6 @@
     "px-3": 1,
     "py-1": 1,
     "space-y-1.5": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/subagent-cache-ttl-setting.component.ts": {
-    "gap-3": 1,
-    "pb-6": 1,
-    "px-2": 1,
-    "py-1": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
     "gap-1": 1,

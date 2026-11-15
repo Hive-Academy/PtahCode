@@ -50,11 +50,11 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
   template: `
     <section
       data-glass-surface="content"
-      class="border-b border-base-content/10 pb-6 text-sm text-base-content"
+      class="border-b border-base-content/10 pb-[var(--ptah-gap-group)] text-sm text-base-content"
       aria-label="Subagent prompt cache"
       data-testid="subagent-cache-ttl-setting"
     >
-      <div class="flex min-h-12 flex-wrap items-center justify-between gap-3">
+      <div class="flex min-h-12 flex-wrap items-center justify-between gap-[var(--ptah-space-3)]">
         <label
           for="subagent-cache-ttl"
           class="text-sm font-medium text-base-content"
@@ -88,7 +88,7 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
       @if (envNotice(); as notice) {
         <p
           id="subagent-cache-ttl-env"
-          class="rounded-md border border-info/30 bg-info/10 px-2 py-1 text-xs text-base-content"
+          class="rounded-md border border-info/30 bg-info/10 px-[var(--ptah-space-2)] py-[var(--ptah-space-1)] text-xs text-base-content"
           data-testid="subagent-cache-ttl-env"
         >
           @if (notice.invalid) {
