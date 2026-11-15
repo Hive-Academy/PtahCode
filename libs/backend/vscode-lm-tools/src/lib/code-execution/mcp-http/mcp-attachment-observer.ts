@@ -1,17 +1,12 @@
 import type {
   IMcpAttachmentProbe,
   McpAttachment,
+  McpAttachmentAttempt,
 } from '@ptah-extension/cli-agent-runtime';
 
-const RETENTION_MS = 60 * 60 * 1000;
+export type { McpAttachmentAttempt };
 
-export interface McpAttachmentAttempt {
-  readonly agentId: string;
-  readonly port: number;
-  readonly reason: 'auth-required' | 'invalid-credential' | 'forbidden' | 'auth-error' | 'invalid-url' | 'seen';
-  readonly method: string;
-  readonly time: number;
-}
+const RETENTION_MS = 60 * 60 * 1000;
 
 class McpAttachmentObserver implements IMcpAttachmentProbe {
   private readonly entries = new Map<string, McpAttachment>();

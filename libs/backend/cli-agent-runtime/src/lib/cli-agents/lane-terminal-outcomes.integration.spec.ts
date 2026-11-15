@@ -206,6 +206,14 @@ describe('lane terminal outcomes integration', () => {
     const run = await fixture();
     try {
       const targetId = `${AGENT}:${ENDED}`;
+      const captureReview = run.recorder.captureReview.bind(run.recorder);
+      const captureCompleted = new Promise<Awaited<ReturnType<typeof captureReview>>>((resolve) => {
+        jest.spyOn(run.recorder, 'captureReview').mockImplementation((input) => {
+          const completion = captureReview(input);
+          resolve(completion);
+          return completion;
+        });
+      });
       await run.write('implementation');
       await run.write('Verdict: REVISE', true, 'review.md');
       await run.notifier.signal(run.info());
@@ -214,7 +222,7 @@ describe('lane terminal outcomes integration', () => {
         agentId: REVIEWER, role: 'code-logic-reviewer', taskKind: 'review',
         deliverables: ['review.md'], completedAt: '2026-10-30T10:03:00.000Z',
       }));
-      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      await captureCompleted;
       await run.flush();
       expect(await run.store.get(targetId)).toMatchObject({ reviseRounds: 0, finalReview: null });
       expect(jest.mocked(run.logger.warn)).toHaveBeenCalledWith(
