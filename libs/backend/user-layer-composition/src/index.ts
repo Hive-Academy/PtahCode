@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+
 export type { UserLayerMirrorSources, UserLayerBootstrap, UserLayerMirror } from './lib/contracts';
 export * from './lib/tokens';
 export * from './lib/register';

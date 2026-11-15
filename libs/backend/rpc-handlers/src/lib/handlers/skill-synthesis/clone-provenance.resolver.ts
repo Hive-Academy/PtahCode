@@ -207,10 +207,9 @@ export class CloneProvenanceResolver {
     try {
       return (await this.wizardOrigins.hashWrittenFile(filePath)) === recorded;
     } catch (error: unknown) {
+      // degradation-audit: reported - missing files are absent; other read
+      // failures are logged and leave the state unknown.
       if (isMissingFileError(error)) return false;
-      // degradation-audit: reported - an unexpected read error leaves the
-      // state unknown. The field is omitted, so no surface treats the file as
-      // unchanged or as edited.
       this.logger.warn(
         '[clone-provenance] wizard agent file hash failed; state unknown',
         error instanceof Error ? error : new Error(String(error)),
