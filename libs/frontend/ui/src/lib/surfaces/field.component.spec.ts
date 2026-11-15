@@ -2,6 +2,10 @@ import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PtahFieldComponent } from './field.component';
 import { PtahFieldControlDirective } from './field-control.directive';
+import { PtahFieldTriggerDirective } from './field.component';
+import { NativePopoverComponent } from '../native/popover/native-popover.component';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 @Component({
   standalone: true,
   imports: [PtahFieldComponent, PtahFieldControlDirective],
@@ -120,3 +124,70 @@ describe('PtahFieldComponent', () => {
   `,
 })
 class ActionsHost {}
+
+@Component({
+  standalone: true,
+  imports: [PtahFieldComponent, PtahFieldControlDirective, PtahFieldTriggerDirective, NativePopoverComponent],
+  template: `
+    <ptah-field label="Model" size="sm" required busy hint="Choose a model">
+      <ptah-native-popover [isOpen]="false">
+        <button trigger ptahFieldTrigger type="button" [id]="triggerId()">Sonnet</button>
+        <div content>Options</div>
+      </ptah-native-popover>
+    </ptah-field>
+    <ptah-field label="Effort" size="sm"><button ptahFieldTrigger type="button" disabled>High</button></ptah-field>
+    <ptah-field label="Provider" size="sm"><select ptahFieldControl><option>Local</option></select></ptah-field>
+    <ptah-field label="Notes" size="sm"><textarea ptahFieldControl></textarea></ptah-field>
+  `,
+})
+class CompactHost {
+  triggerId = signal('model-trigger');
+}
+
+describe('compact field and trigger', () => {
+  it('wires the nested popover button and direct disabled button', async () => {
+    await TestBed.configureTestingModule({ imports: [CompactHost] }).compileComponents();
+    const fixture = TestBed.createComponent(CompactHost);
+    fixture.detectChanges();
+    const fields = fixture.nativeElement.querySelectorAll('.ptah-field') as NodeListOf<HTMLElement>;
+    expect([...fields].map((field) => field.getAttribute('data-size'))).toEqual(['sm', 'sm', 'sm', 'sm']);
+    const button = fields[0].querySelector('button[ptahFieldTrigger]') as HTMLButtonElement;
+    const label = fields[0].querySelector('label') as HTMLLabelElement;
+    expect(label.htmlFor).toBe(button.id);
+    expect(button.getAttribute('aria-labelledby')).toBe(`${label.id} ${button.id}`);
+    expect(button.getAttribute('aria-required')).toBe('true');
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(button.getAttribute('aria-describedby')).toContain('ptah-field-description-');
+    button.focus();
+    expect(fields[0].querySelector('.ptah-field__box:focus-within')).not.toBeNull();
+    expect((fields[1].querySelector('button') as HTMLButtonElement).disabled).toBe(true);
+    expect(fields[2].querySelector('select')?.id).toBeTruthy();
+    expect(fields[3].querySelector('textarea')?.id).toBeTruthy();
+  });
+
+  it('updates the trigger name and label target when its bound id changes', async () => {
+    const fixture = TestBed.createComponent(CompactHost);
+    fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('button[ptahFieldTrigger]') as HTMLButtonElement;
+    const label = fixture.nativeElement.querySelector('label') as HTMLLabelElement;
+    expect(button.getAttribute('aria-labelledby')).toBe(`${label.id} model-trigger`);
+
+    fixture.componentInstance.triggerId.set('new-model-trigger');
+    fixture.detectChanges();
+    expect(button.id).toBe('new-model-trigger');
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(button.getAttribute('aria-labelledby')).toBe(`${label.id} new-model-trigger`);
+    expect(label.htmlFor).toBe('new-model-trigger');
+  });
+
+  it('defines a 40px compact height and trigger focus styling', () => {
+    const css = readFileSync(join(__dirname, '../form-controls/ptah-field.css'), 'utf8');
+    const tokens = readFileSync(join(__dirname, '../tokens/ptah-tokens.css'), 'utf8');
+    expect(tokens).toContain('--ptah-field-h-sm: 2.5rem');
+    expect(css).toMatch(/\.ptah-field\[data-size='sm'\]\s*\{[^}]*--ptah-field-textarea-min-h: var\(--ptah-field-h-sm\);[^}]*--ptah-field-textarea-pad-y: var\(--ptah-space-2\)/);
+    expect(css).toMatch(/\[data-size='sm'\] \.ptah-field__box\s*\{\s*min-height: var\(--ptah-field-h-sm\)/);
+    expect(css).toContain('.ptah-field .ptah-field__box:has(.ptah-field__body :focus)');
+  });
+});

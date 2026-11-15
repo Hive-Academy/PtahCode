@@ -44,6 +44,34 @@
   min-height: var(--ptah-field-h-lg);
 }
 
+.ptah-field[data-size='sm'] {
+  --ptah-field-textarea-min-h: var(--ptah-field-h-sm);
+  --ptah-field-textarea-pad-y: var(--ptah-space-2);
+}
+
+.ptah-field[data-size='sm'] .ptah-field__box {
+  min-height: var(--ptah-field-h-sm);
+}
+
+.ptah-field[data-size='sm'] .ptah-field__body :is(input, select, textarea, button[ptahFieldTrigger]) {
+  font-size: var(--ptah-text-label-size);
+}
+
+.ptah-field[data-size='sm'][data-appearance='floating'] .ptah-field__label {
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+}
+
+.ptah-field[data-size='sm'][data-appearance='floating'] .ptah-field__body:has(textarea) .ptah-field__label {
+  top: calc(var(--ptah-field-textarea-pad-y) + var(--ptah-text-label-leading) / 2);
+}
+
+.ptah-field[data-size='sm'][data-appearance='floating']:is(:focus-within, :has(.ptah-field__body :is(input, textarea):not(:placeholder-shown)), :has(.ptah-field__body select), :has(.ptah-field__body button[ptahFieldTrigger])) .ptah-field__label {
+  top: calc(var(--ptah-border-width) * -1);
+  font-size: var(--ptah-field-label-float-size);
+  line-height: var(--ptah-field-label-float-leading);
+}
+
 .ptah-field[data-appearance='stacked'] .ptah-field__box {
   min-height: var(--ptah-control-h-md);
 }
@@ -116,6 +144,7 @@
     :has(.ptah-field__body :is(input, textarea):autofill),
     :has(.ptah-field__body :is(input, textarea)[placeholder]:not([placeholder=' '])),
     :has(.ptah-field__body select),
+    :has(.ptah-field__body button[ptahFieldTrigger]),
     :has(.ptah-field__body .ptah-select:is([data-open], [data-ptah-filled]))
   )
   .ptah-field__label {
@@ -169,6 +198,50 @@
 
 .ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) textarea:is(.textarea, #ptah-control) {
   padding-block: var(--ptah-field-textarea-pad-y);
+}
+
+/* The trigger's chevron uses the Lucide ChevronDown path (24 unit viewBox). */
+.ptah-field__body ptah-native-popover,
+.ptah-field__body ptah-native-popover .popover-trigger {
+  display: flex;
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.ptah-field__body button[ptahFieldTrigger] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ptah-space-2);
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.ptah-field__body button[ptahFieldTrigger]::after {
+  content: '';
+  flex: none;
+  width: var(--ptah-field-icon);
+  height: var(--ptah-field-icon);
+  background-color: var(--ptah-field-icon-fg);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.ptah-field__body button[ptahFieldTrigger]:focus-visible {
+  outline: none;
+}
+
+.ptah-field__body button[ptahFieldTrigger]:disabled {
+  cursor: not-allowed;
 }
 
 /* The field clear action replaces the browser search action. */

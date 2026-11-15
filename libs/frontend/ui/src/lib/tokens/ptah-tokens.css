@@ -180,6 +180,7 @@
   /* Field with a floating label, and the rich select (TASK_2026_950_ed73).
      The field box owns the edge, the fill and the rail. The rail is a line
      at the bottom edge that carries focus, error and busy. */
+  --ptah-field-h-sm: 2.5rem; /* 40px compact floating box */
   --ptah-field-h-md: 3rem;
   --ptah-field-h-lg: 3.5rem;
   --ptah-field-pad-x: var(--ptah-space-3);
