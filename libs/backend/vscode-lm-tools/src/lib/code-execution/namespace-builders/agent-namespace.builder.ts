@@ -12,6 +12,7 @@
 
 import type { AgentNamespace } from '../types';
 import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import { resolveWorkspaceSkillPath } from '@ptah-extension/platform-core';
 import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
@@ -21,7 +22,11 @@ import {
 } from '../mcp-core/agent-spawn-args.schema';
 import { readProviderAccountSelectionField } from '@ptah-extension/shared/schemas';
 import { getExecutionAbortSignal } from '../mcp-core/code-execution.engine';
-import { mcpAckCallerAgentId, mcpControlActor } from './agent-message-control-actor';
+import { agentSpawnTiming } from '../mcp-core/agent-spawn-dedupe';
+import {
+  mcpAckCallerAgentId,
+  mcpControlActor,
+} from './agent-message-control-actor';
 import {
   getCallerAgentId,
   getCallerBinding,
@@ -68,8 +73,14 @@ import {
  */
 function mcpVerifiedLaneSender(): VerifiedLaneSender | undefined {
   const binding = getCallerBinding();
-  if (!binding || binding.kind !== 'agent' || binding.capability === 'read-only') return undefined;
-  if (binding.agentId === undefined || !AgentId.validate(binding.agentId)) return undefined;
+  if (
+    !binding ||
+    binding.kind !== 'agent' ||
+    binding.capability === 'read-only'
+  )
+    return undefined;
+  if (binding.agentId === undefined || !AgentId.validate(binding.agentId))
+    return undefined;
   return {
     agentId: AgentId.from(binding.agentId),
     ...(binding.workspaceRoot ? { workspaceRoot: binding.workspaceRoot } : {}),
@@ -84,14 +95,21 @@ function mcpVerifiedLaneSender(): VerifiedLaneSender | undefined {
  * - else a `/session/{id}` caller is that parent session (unchanged);
  * - else an anonymous parent, which may not use an idempotency key.
  */
-function mcpMessageSender():
-  | { readonly sender: AgentMessageSender; readonly lane?: VerifiedLaneSender }
-  | null {
+function mcpMessageSender(): {
+  readonly sender: AgentMessageSender;
+  readonly lane?: VerifiedLaneSender;
+} | null {
   const lane = mcpVerifiedLaneSender();
-  if (lane) return { sender: { kind: 'lane', agentId: lane.agentId, verified: true }, lane };
+  if (lane)
+    return {
+      sender: { kind: 'lane', agentId: lane.agentId, verified: true },
+      lane,
+    };
   if (getCallerAgentId()) return null;
   const sessionId = getCallerSessionId();
-  return { sender: sessionId ? { kind: 'parent', sessionId } : { kind: 'parent' } };
+  return {
+    sender: sessionId ? { kind: 'parent', sessionId } : { kind: 'parent' },
+  };
 }
 
 /**
@@ -106,7 +124,12 @@ function mcpStatusViewer(): AgentMessageSender | undefined | null {
 }
 
 function identityMissingOutcome(agentId: AgentId): AgentMessageOutcome {
-  return { mode: 'unsupported', reasonCode: 'identity-missing', detail: 'identity-missing', requestedAgentId: agentId };
+  return {
+    mode: 'unsupported',
+    reasonCode: 'identity-missing',
+    detail: 'identity-missing',
+    requestedAgentId: agentId,
+  };
 }
 
 /**
@@ -169,9 +192,14 @@ interface PtahCliRegistryLike {
       phase?: SpawnAgentRequest['phase'];
     },
   ): Promise<
-    | { handle: SdkHandle; agentName: string; setAgentId: (id: string) => void;
-        potentialCapabilities?: CliAdapterManifest; effectivePolicy?: EffectiveLanePolicy;
-        toolProfileApplied?: boolean }
+    | {
+        handle: SdkHandle;
+        agentName: string;
+        setAgentId: (id: string) => void;
+        potentialCapabilities?: CliAdapterManifest;
+        effectivePolicy?: EffectiveLanePolicy;
+        toolProfileApplied?: boolean;
+      }
     | SpawnAgentFailure
   >;
 }
@@ -180,7 +208,12 @@ interface PtahCliRegistryLike {
  * Dependencies for agent namespace
  */
 export interface AgentNamespaceDependencies {
-  getMessageCoordinator?: () => Pick<import('@ptah-extension/cli-agent-runtime').AgentMessageCoordinator, 'send' | 'getReceipt' | 'retry' | 'cancel' | 'acknowledge'> | undefined;
+  getMessageCoordinator?: () =>
+    | Pick<
+        import('@ptah-extension/cli-agent-runtime').AgentMessageCoordinator,
+        'send' | 'getReceipt' | 'retry' | 'cancel' | 'acknowledge'
+      >
+    | undefined;
   agentProcessManager: AgentProcessManager;
   cliDetectionService: CliDetectionService;
   /** Lazy getter for workspace root path. Called at spawn time to get the current workspace root. */
@@ -202,7 +235,9 @@ export interface AgentNamespaceDependencies {
   getPreferredAgentOrder?: () => string[];
   /** Resolves a tab ID to its real SDK session UUID. Used for MCP session threading. */
   resolveSessionId?: (tabIdOrSessionId: string) => string;
-  getParentLevel?: (tabIdOrSessionId: string) => SpawnAgentRequest['parentLevel'];
+  getParentLevel?: (
+    tabIdOrSessionId: string,
+  ) => SpawnAgentRequest['parentLevel'];
   /**
    * Deliver a child agent's or child session's report to the session that
    * started it (TASK_2026_402, Component 7; the `childSessionId` form is
@@ -329,11 +364,16 @@ function assertOutcomeField(
 const NO_PARENT_NOTICE =
   'No parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.';
 
-const resolvedSkillsSchema = z.array(z.object({
-  name: z.string().min(1),
-  path: z.string().min(1).optional(),
-  text: z.string().min(1).optional(),
-}).strict().refine(skill => Boolean(skill.path || skill.text)));
+const resolvedSkillsSchema = z.array(
+  z
+    .object({
+      name: z.string().min(1),
+      path: z.string().min(1).optional(),
+      text: z.string().min(1).optional(),
+    })
+    .strict()
+    .refine((skill) => Boolean(skill.path || skill.text)),
+);
 
 export function buildAgentNamespace(
   deps: AgentNamespaceDependencies,
@@ -362,249 +402,294 @@ export function buildAgentNamespace(
   return {
     resolveCallerParentId,
     spawn: async (request: UntypedSpawnRequest) => {
-      if (request.phase) parsePhaseDispatch(request.phase);
-      assertEffort(request.effort);
-      assertOutcomeField('taskKind', request.taskKind, OUTCOME_TASK_KINDS);
-      assertOutcomeField('routingSource', request.routingSource, OUTCOME_ROUTING_SOURCES);
-      const resolvedSkills = resolvedSkillsSchema.parse(
-        request.skills === undefined ? request.phase?.skills ?? [] : request.skills,
-      );
-      const skillText = resolvedSkills.map(skill => {
-        if (skill.text) return `### Skill: ${skill.name}\n${skill.text}`;
-        const path = resolveWorkspaceSkillPath(getWorkspaceRoot(), skill.path ?? '');
-        if (!path) throw new Error(`Resolved skill ${skill.name} could not be read`);
-        try {
-          return `### Skill: ${skill.name}\n${readFileSync(path, 'utf8')}`;
-        } catch {
-          // degradation-audit: reported - the caller receives a bounded skill read error.
-          throw new Error(`Resolved skill ${skill.name} could not be read`);
-        }
-      }).join('\n\n');
-      const deliveryText = [request.phase?.text, skillText].filter(Boolean).join('\n\n');
-      const deliveredTask = deliveryText ? `${request.task}\n\n${deliveryText}` : request.task;
-      const accountSelection = assertAccountSelection(request);
-      if (request.systemPrompt !== undefined) {
-        logger.warn(
-          'ptah.agent.spawn: "systemPrompt" is not a spawn field and was dropped; ' +
-            'lanes receive the capped project guidance instead.',
+      const timing = agentSpawnTiming.getStore();
+      const resolutionStartedAt = performance.now();
+      try {
+        if (request.phase) parsePhaseDispatch(request.phase);
+        assertEffort(request.effort);
+        assertOutcomeField('taskKind', request.taskKind, OUTCOME_TASK_KINDS);
+        assertOutcomeField(
+          'routingSource',
+          request.routingSource,
+          OUTCOME_ROUTING_SOURCES,
         );
-      }
-
-      // The request context is transport-owned. An explicit parent remains
-      // available to internal callers outside an MCP request.
-      const rawSessionId = isMcpRequestInFlight()
-        ? getCallerSessionId()?.trim() || undefined
-        : request.parentSessionId?.trim() || undefined;
-      const activeSessionId = rawSessionId
-        ? resolveCallerParentId(rawSessionId)
-        : undefined;
-      const parentLevel = rawSessionId ? getParentLevel?.(rawSessionId) : undefined;
-      // An HTTP MCP caller (execute_code) without session identity gets an
-      // ownerless lane. Say so in the result and the log; never guess one.
-      const markParentless = <T extends { agentId: string }>(
-        spawned: T,
-      ): T | (T & { parentSessionId: undefined; notice: string }) => {
-        if (!isMcpRequestInFlight() || activeSessionId) return spawned;
-        logger.warn('[agent namespace] Lane spawned without parent session', {
-          transport: 'http',
-          agentId: spawned.agentId,
-        });
-        return {
-          ...spawned,
-          parentSessionId: undefined,
-          notice: NO_PARENT_NOTICE,
-        };
-      };
-      let roleDefinition: AgentRoleDefinition | undefined;
-      if (request.role !== undefined) {
-        if (!resolveAgentRole) {
-          throw new Error(
-            'Agent roles are unavailable: no role resolver is wired into this ' +
-              'host, so the agent was not spawned. Register the CLI agent ' +
-              'runtime container before building the Ptah API, or spawn ' +
-              'without "role".',
-          );
-        }
-        roleDefinition = await resolveAgentRole(
-          getWorkspaceRoot(),
-          request.role,
+        const resolvedSkills = resolvedSkillsSchema.parse(
+          request.skills === undefined
+            ? (request.phase?.skills ?? [])
+            : request.skills,
         );
-      }
-      if (request.ptahCliId) {
-        const registry = getPtahCliRegistry?.();
-        if (!registry) {
-          throw new Error(
-            'Ptah CLI registry not available. Ptah CLI agents require the Agent SDK.',
-          );
-        }
-        const workingDirectory = request.workingDirectory ?? getWorkspaceRoot();
-
-        // The registry's spawn options have no effort field: a Ptah CLI lane
-        // runs at its provider's default. Said once, rather than dropped
-        // without notice (PR1-M1).
-        if (request.effort !== undefined) {
+        const skillText = resolvedSkills
+          .map((skill) => {
+            if (skill.text) return `### Skill: ${skill.name}\n${skill.text}`;
+            const path = resolveWorkspaceSkillPath(
+              getWorkspaceRoot(),
+              skill.path ?? '',
+            );
+            if (!path)
+              throw new Error(`Resolved skill ${skill.name} could not be read`);
+            try {
+              return `### Skill: ${skill.name}\n${readFileSync(path, 'utf8')}`;
+            } catch {
+              // degradation-audit: reported - the caller receives a bounded skill read error.
+              throw new Error(`Resolved skill ${skill.name} could not be read`);
+            }
+          })
+          .join('\n\n');
+        const deliveryText = [request.phase?.text, skillText]
+          .filter(Boolean)
+          .join('\n\n');
+        const deliveredTask = deliveryText
+          ? `${request.task}\n\n${deliveryText}`
+          : request.task;
+        const accountSelection = assertAccountSelection(request);
+        if (request.systemPrompt !== undefined) {
           logger.warn(
-            'ptah.agent.spawn: Ptah CLI lanes do not take "effort"; it is ignored for this lane.',
-            { ptahCliId: request.ptahCliId, effort: request.effort },
+            'ptah.agent.spawn: "systemPrompt" is not a spawn field and was dropped; ' +
+              'lanes receive the capped project guidance instead.',
           );
         }
 
-        // The registry builds AND starts the handle, so the blocked-model check
-        // (R9.5) and the resume gate (R9.1) run here, before it does
-        // (TASK_2026_614, E.4 and B-m2). On `fresh` the lane gets the handoff
-        // task and no resume id; the record keeps the caller's message.
-        const prepared = await agentProcessManager.prepareSdkHandleSpawn({
-          cli: 'ptah-cli',
-          task: request.task,
-          model: request.model,
-          resumeSessionId: request.resumeSessionId,
-        });
+        // The request context is transport-owned. An explicit parent remains
+        // available to internal callers outside an MCP request.
+        const rawSessionId = isMcpRequestInFlight()
+          ? getCallerSessionId()?.trim() || undefined
+          : request.parentSessionId?.trim() || undefined;
+        const activeSessionId = rawSessionId
+          ? resolveCallerParentId(rawSessionId)
+          : undefined;
+        const parentLevel = rawSessionId
+          ? getParentLevel?.(rawSessionId)
+          : undefined;
+        // An HTTP MCP caller (execute_code) without session identity gets an
+        // ownerless lane. Say so in the result and the log; never guess one.
+        const markParentless = <T extends { agentId: string }>(
+          spawned: T,
+        ): T | (T & { parentSessionId: undefined; notice: string }) => {
+          if (!isMcpRequestInFlight() || activeSessionId) return spawned;
+          logger.warn('[agent namespace] Lane spawned without parent session', {
+            transport: 'http',
+            agentId: spawned.agentId,
+          });
+          return {
+            ...spawned,
+            parentSessionId: undefined,
+            notice: NO_PARENT_NOTICE,
+          };
+        };
+        let roleDefinition: AgentRoleDefinition | undefined;
+        if (request.role !== undefined) {
+          if (!resolveAgentRole) {
+            throw new Error(
+              'Agent roles are unavailable: no role resolver is wired into this ' +
+                'host, so the agent was not spawned. Register the CLI agent ' +
+                'runtime container before building the Ptah API, or spawn ' +
+                'without "role".',
+            );
+          }
+          roleDefinition = await resolveAgentRole(
+            getWorkspaceRoot(),
+            request.role,
+          );
+        }
+        if (request.ptahCliId) {
+          const registry = getPtahCliRegistry?.();
+          if (!registry) {
+            throw new Error(
+              'Ptah CLI registry not available. Ptah CLI agents require the Agent SDK.',
+            );
+          }
+          const workingDirectory =
+            request.workingDirectory ?? getWorkspaceRoot();
 
-        // ONE id, minted once, before the handle exists (TASK_2026_402).
-        // `spawnFromSdkHandle` would otherwise mint it AFTER the handle — and
-        // therefore after the MCP URL baked into that handle — so the URL could
-        // never name the record. Reserving here and passing the same value to
-        // both is what lets the child's `/agent/{id}` segment be true.
-        const agentId = agentProcessManager.reserveAgentId();
+          // The registry's spawn options have no effort field: a Ptah CLI lane
+          // runs at its provider's default. Said once, rather than dropped
+          // without notice (PR1-M1).
+          if (request.effort !== undefined) {
+            logger.warn(
+              'ptah.agent.spawn: Ptah CLI lanes do not take "effort"; it is ignored for this lane.',
+              { ptahCliId: request.ptahCliId, effort: request.effort },
+            );
+          }
 
-        // A Ptah CLI lane's task string goes to the SDK verbatim and never
-        // passes through `buildTaskPrompt`, so the completion contract is
-        // rendered here from the SAME function the rival-CLI adapters use
-        // (TASK_2026_515). Two call sites, one text.
-        const ptahCliTask =
-          `${prepared.task}${deliveryText ? `\n\n${deliveryText}` : ''}\n\n` +
-          renderLaneCompletionContract({
-            effectivePermission: parentLevel === 'plan' || request.permission === 'plan' ? 'plan' : undefined,
-            taskFolder: request.taskFolder,
-            deliverables: request.deliverables,
-            canUsePtahMcp: registry.hasMcpPort?.() === true,
+          // The registry builds AND starts the handle, so the blocked-model check
+          // (R9.5) and the resume gate (R9.1) run here, before it does
+          // (TASK_2026_614, E.4 and B-m2). On `fresh` the lane gets the handoff
+          // task and no resume id; the record keeps the caller's message.
+          const prepared = await agentProcessManager.prepareSdkHandleSpawn({
+            cli: 'ptah-cli',
+            task: request.task,
+            model: request.model,
+            resumeSessionId: request.resumeSessionId,
           });
 
-        const result = await registry.spawnAgent(
-          request.ptahCliId,
-          ptahCliTask,
-          {
-            workingDirectory,
-            resumeSessionId: prepared.resumeSessionId,
-            parentSessionId: activeSessionId,
-            modelTier: request.modelTier,
-            model: request.model,
-            agentId,
-            role: roleDefinition,
-            permission: request.permission,
-            network: request.network,
-            parentLevel,
-            ...(request.phase ? { phase: request.phase } : {}),
-          },
-        );
-        if ('status' in result) {
-          throw new Error(
-            `Ptah CLI agent spawn failed: ${result.message}. ` +
-              'Use ptah_agent_list to see available agents.',
+          // ONE id, minted once, before the handle exists (TASK_2026_402).
+          // `spawnFromSdkHandle` would otherwise mint it AFTER the handle — and
+          // therefore after the MCP URL baked into that handle — so the URL could
+          // never name the record. Reserving here and passing the same value to
+          // both is what lets the child's `/agent/{id}` segment be true.
+          const agentId = agentProcessManager.reserveAgentId();
+
+          // A Ptah CLI lane's task string goes to the SDK verbatim and never
+          // passes through `buildTaskPrompt`, so the completion contract is
+          // rendered here from the SAME function the rival-CLI adapters use
+          // (TASK_2026_515). Two call sites, one text.
+          const ptahCliTask =
+            `${prepared.task}${deliveryText ? `\n\n${deliveryText}` : ''}\n\n` +
+            renderLaneCompletionContract({
+              effectivePermission:
+                parentLevel === 'plan' || request.permission === 'plan'
+                  ? 'plan'
+                  : undefined,
+              taskFolder: request.taskFolder,
+              deliverables: request.deliverables,
+              canUsePtahMcp: registry.hasMcpPort?.() === true,
+            });
+
+          const result = await registry.spawnAgent(
+            request.ptahCliId,
+            ptahCliTask,
+            {
+              workingDirectory,
+              resumeSessionId: prepared.resumeSessionId,
+              parentSessionId: activeSessionId,
+              modelTier: request.modelTier,
+              model: request.model,
+              agentId,
+              role: roleDefinition,
+              permission: request.permission,
+              network: request.network,
+              parentLevel,
+              ...(request.phase ? { phase: request.phase } : {}),
+            },
           );
+          if ('status' in result) {
+            throw new Error(
+              `Ptah CLI agent spawn failed: ${result.message}. ` +
+                'Use ptah_agent_list to see available agents.',
+            );
+          }
+
+          const spawnResult = await agentProcessManager.spawnFromSdkHandle(
+            result.handle,
+            {
+              // The RECORD keeps the task the caller gave, not the prompt the
+              // lane was handed: the tile, the persisted session reference and
+              // the completion signal's headline all read this field, and the
+              // appended contract is plumbing rather than the task.
+              task: request.task,
+              taskKind: request.taskKind,
+              routingSource: request.routingSource,
+              cli: 'ptah-cli',
+              workingDirectory,
+              taskFolder: request.taskFolder,
+              deliverables: request.deliverables,
+              parentSessionId: activeSessionId,
+              ptahCliName: result.agentName,
+              ptahCliId: request.ptahCliId,
+              potentialCapabilities: result.potentialCapabilities,
+              effectivePolicy: result.effectivePolicy,
+              requestedPolicy: {
+                permission: request.permission,
+                network: request.network,
+              },
+              ...(request.phase
+                ? { toolProfileApplied: result.toolProfileApplied }
+                : {}),
+              mcpPort: registry.getMcpPort?.(),
+              // A registry that cannot say its port cannot say MCP was expected.
+              expectsMcp: registry.getMcpPort !== undefined,
+              timeout: request.timeout,
+              resumeSessionId: prepared.resumeSessionId,
+              ...(prepared.resumeDecision
+                ? { resumeDecision: prepared.resumeDecision }
+                : {}),
+              ...(prepared.originalTask !== undefined
+                ? { originalTask: prepared.originalTask }
+                : {}),
+              agentId,
+              ...(request.phase ? { phase: request.phase } : {}),
+              ...(roleDefinition
+                ? {
+                    roleStamp: {
+                      role: roleDefinition.name,
+                      ...PTAH_CLI_ROLE_DELIVERY,
+                    },
+                  }
+                : {}),
+            },
+          );
+          result.setAgentId(spawnResult.agentId);
+
+          return {
+            ...markParentless(spawnResult),
+            ...(resolvedSkills.length && { skillDelivery: 'inline' as const }),
+          };
+        }
+        if (request.cli) {
+          const disabledClis = getDisabledClis?.() ?? [];
+          if (disabledClis.includes(request.cli)) {
+            throw new Error(
+              `CLI agent '${request.cli}' is disabled. ` +
+                'Enable it in Settings > Providers > CLI Agents or use a different CLI. ' +
+                'Use ptah_agent_list to see available agents.',
+            );
+          }
         }
 
-        const spawnResult = await agentProcessManager.spawnFromSdkHandle(
-          result.handle,
-          {
-            // The RECORD keeps the task the caller gave, not the prompt the
-            // lane was handed: the tile, the persisted session reference and
-            // the completion signal's headline all read this field, and the
-            // appended contract is plumbing rather than the task.
-            task: request.task,
-            taskKind: request.taskKind,
-            routingSource: request.routingSource,
-            cli: 'ptah-cli',
-            workingDirectory,
-            taskFolder: request.taskFolder,
-            deliverables: request.deliverables,
-            parentSessionId: activeSessionId,
-            ptahCliName: result.agentName,
-            ptahCliId: request.ptahCliId,
-            potentialCapabilities: result.potentialCapabilities,
-            effectivePolicy: result.effectivePolicy,
-            requestedPolicy: { permission: request.permission, network: request.network },
-            ...(request.phase
-              ? { toolProfileApplied: result.toolProfileApplied }
-              : {}),
-            mcpPort: registry.getMcpPort?.(),
-            // A registry that cannot say its port cannot say MCP was expected.
-            expectsMcp: registry.getMcpPort !== undefined,
-            timeout: request.timeout,
-            resumeSessionId: prepared.resumeSessionId,
-            ...(prepared.resumeDecision
-              ? { resumeDecision: prepared.resumeDecision }
-              : {}),
-            ...(prepared.originalTask !== undefined
-              ? { originalTask: prepared.originalTask }
-              : {}),
-            agentId,
-            ...(request.phase ? { phase: request.phase } : {}),
-            ...(roleDefinition
-              ? {
-                  roleStamp: {
-                    role: roleDefinition.name,
-                    ...PTAH_CLI_ROLE_DELIVERY,
-                  },
-                }
-              : {}),
-          },
-        );
-        result.setAgentId(spawnResult.agentId);
+        // System-CLI lanes get the capped project guidance only. The full
+        // generated system prompt is never fetched for them: `buildTaskPrompt`
+        // preferred it over the guidance, which bypassed the guidance cap on
+        // every lane (TASK_2026_597, R3.4).
+        const [projectGuidance, pluginPaths] = await Promise.all([
+          getProjectGuidance?.() ?? Promise.resolve(undefined),
+          getPluginPaths?.() ?? Promise.resolve(undefined),
+        ]);
+        const workingDirectory = request.workingDirectory ?? getWorkspaceRoot();
 
-        return { ...markParentless(spawnResult), ...(resolvedSkills.length && { skillDelivery: 'inline' as const }) };
-      }
-      if (request.cli) {
-        const disabledClis = getDisabledClis?.() ?? [];
-        if (disabledClis.includes(request.cli)) {
-          throw new Error(
-            `CLI agent '${request.cli}' is disabled. ` +
-              'Enable it in Settings > Providers > CLI Agents or use a different CLI. ' +
-              'Use ptah_agent_list to see available agents.',
+        // Drop the raw parentSessionId before spreading: `...request` would
+        // otherwise carry an unusable '' straight through, since the conditional
+        // spread below only overwrites when a resolved id exists. A
+        // caller-supplied roleDefinition is dropped too: only the resolver may
+        // produce one. So is a caller-supplied systemPrompt (warned above). The
+        // raw accountSelection is replaced by the parsed one from the check
+        // above: only a selection on a `claude` lane gets this far (ambient,
+        // omitted, or named on a fresh spawn), and it is forwarded as typed.
+        const {
+          parentSessionId: _rawParentSessionId,
+          parentLevel: _rawParentLevel,
+          resumePolicy: _rawResumePolicy,
+          roleDefinition: _callerRoleDefinition,
+          systemPrompt: _callerSystemPrompt,
+          accountSelection: _rawAccountSelection,
+          ...requestFields
+        } = request;
+
+        const enrichedRequest = {
+          ...requestFields,
+          task: deliveredTask,
+          ...(accountSelection && { accountSelection }),
+          ...(workingDirectory && { workingDirectory }),
+          ...(activeSessionId && { parentSessionId: activeSessionId }),
+          ...(parentLevel && { parentLevel }),
+          ...(roleDefinition && { roleDefinition }),
+          ...(projectGuidance && { projectGuidance }),
+          ...(pluginPaths && pluginPaths.length > 0 && { pluginPaths }),
+        };
+        if (timing)
+          timing.namespaceResolutionMs = Math.round(
+            performance.now() - resolutionStartedAt,
+          );
+        return {
+          ...markParentless(await agentProcessManager.spawn(enrichedRequest)),
+          ...(resolvedSkills.length && { skillDelivery: 'inline' as const }),
+        };
+      } finally {
+        if (timing && timing.namespaceResolutionMs === null) {
+          timing.namespaceResolutionMs = Math.round(
+            performance.now() - resolutionStartedAt,
           );
         }
       }
-
-      // System-CLI lanes get the capped project guidance only. The full
-      // generated system prompt is never fetched for them: `buildTaskPrompt`
-      // preferred it over the guidance, which bypassed the guidance cap on
-      // every lane (TASK_2026_597, R3.4).
-      const [projectGuidance, pluginPaths] = await Promise.all([
-        getProjectGuidance?.() ?? Promise.resolve(undefined),
-        getPluginPaths?.() ?? Promise.resolve(undefined),
-      ]);
-      const workingDirectory = request.workingDirectory ?? getWorkspaceRoot();
-
-      // Drop the raw parentSessionId before spreading: `...request` would
-      // otherwise carry an unusable '' straight through, since the conditional
-      // spread below only overwrites when a resolved id exists. A
-      // caller-supplied roleDefinition is dropped too: only the resolver may
-      // produce one. So is a caller-supplied systemPrompt (warned above). The
-      // raw accountSelection is replaced by the parsed one from the check
-      // above: only a selection on a `claude` lane gets this far (ambient,
-      // omitted, or named on a fresh spawn), and it is forwarded as typed.
-      const {
-        parentSessionId: _rawParentSessionId,
-        parentLevel: _rawParentLevel,
-        resumePolicy: _rawResumePolicy,
-        roleDefinition: _callerRoleDefinition,
-        systemPrompt: _callerSystemPrompt,
-        accountSelection: _rawAccountSelection,
-        ...requestFields
-      } = request;
-
-      const enrichedRequest = {
-        ...requestFields,
-        task: deliveredTask,
-        ...(accountSelection && { accountSelection }),
-        ...(workingDirectory && { workingDirectory }),
-        ...(activeSessionId && { parentSessionId: activeSessionId }),
-        ...(parentLevel && { parentLevel }),
-        ...(roleDefinition && { roleDefinition }),
-        ...(projectGuidance && { projectGuidance }),
-        ...(pluginPaths && pluginPaths.length > 0 && { pluginPaths }),
-      };
-      return { ...markParentless(await agentProcessManager.spawn(enrichedRequest)), ...(resolvedSkills.length && { skillDelivery: 'inline' as const }) };
     },
 
     status: async (agentId?) => {
@@ -615,15 +700,25 @@ export function buildAgentNamespace(
       return agentProcessManager.readOutput(agentId, tail, offset);
     },
 
-    message: async (agentId, message, delivery, allowPartialTurnLoss, idempotencyKey) => {
-      if (!AgentId.validate(agentId)) throw new AgentMessageError('not_found', 'Agent not found.');
+    message: async (
+      agentId,
+      message,
+      delivery,
+      allowPartialTurnLoss,
+      idempotencyKey,
+    ) => {
+      if (!AgentId.validate(agentId))
+        throw new AgentMessageError('not_found', 'Agent not found.');
       const coordinator = deps.getMessageCoordinator?.();
       if (coordinator) {
         const caller = mcpMessageSender();
         // An agent caller without a verified binding is never attributed by URL.
         if (!caller) return identityMissingOutcome(AgentId.from(agentId));
         const request = {
-          agentId: AgentId.from(agentId), message, delivery, allowPartialTurnLoss,
+          agentId: AgentId.from(agentId),
+          message,
+          delivery,
+          allowPartialTurnLoss,
           ...(idempotencyKey ? { idempotencyKey } : {}),
         };
         return caller.lane
@@ -635,21 +730,38 @@ export function buildAgentNamespace(
       const fallbackCaller = mcpMessageSender();
       if (!fallbackCaller) return identityMissingOutcome(AgentId.from(agentId));
       if (fallbackCaller.lane) {
-        return { mode: 'unsupported', reasonCode: 'delivery-refused', detail: 'delivery-refused', requestedAgentId: AgentId.from(agentId) };
+        return {
+          mode: 'unsupported',
+          reasonCode: 'delivery-refused',
+          detail: 'delivery-refused',
+          requestedAgentId: AgentId.from(agentId),
+        };
       }
       // The outcome is RETURNED, not swallowed: `unsupported` means nothing
       // was delivered and `interrupt-resume` means a turn's partial work was
       // discarded. A `void` return would have made both look like a success.
-      return agentProcessManager.sendToAgent(agentId, message, delivery, undefined, allowPartialTurnLoss);
+      return agentProcessManager.sendToAgent(
+        agentId,
+        message,
+        delivery,
+        undefined,
+        allowPartialTurnLoss,
+      );
     },
     messageStatus: async (agentId, messageId) => {
-      if (!AgentId.validate(agentId)) throw new AgentMessageError('not_found', 'Agent not found.');
+      if (!AgentId.validate(agentId))
+        throw new AgentMessageError('not_found', 'Agent not found.');
       const coordinator = deps.getMessageCoordinator?.();
       const viewer = mcpStatusViewer();
-      if (viewer === null) throw new AgentMessageError('not_found', 'Message receipt not found.');
+      if (viewer === null)
+        throw new AgentMessageError('not_found', 'Message receipt not found.');
       if (!coordinator) {
         // No coordinator means no viewer scoping: a lane caller sees nothing.
-        if (viewer) throw new AgentMessageError('not_found', 'Message receipt not found.');
+        if (viewer)
+          throw new AgentMessageError(
+            'not_found',
+            'Message receipt not found.',
+          );
         return agentProcessManager.getAgentMessageStatus(agentId, messageId);
       }
       return viewer
@@ -657,27 +769,38 @@ export function buildAgentNamespace(
         : coordinator.getReceipt(AgentId.from(agentId), messageId);
     },
     control: async (agentId, messageId, action, confirmDuplicateRisk) => {
-      if (!AgentId.validate(agentId)) throw new AgentMessageError('not_found', 'Agent not found.');
+      if (!AgentId.validate(agentId))
+        throw new AgentMessageError('not_found', 'Agent not found.');
       const coordinator = deps.getMessageCoordinator?.();
       if (!coordinator) {
-        throw new Error('Message retry and cancel are unavailable: no message coordinator is wired into this host.');
+        throw new Error(
+          'Message retry and cancel are unavailable: no message coordinator is wired into this host.',
+        );
       }
       // The actor comes from the verified caller binding, never the URL, so a
       // caller acts only on messages it sent. Absent or unverified identity throws.
       const actor = mcpControlActor();
       return action === 'retry'
-        ? coordinator.retry(AgentId.from(agentId), messageId, actor, { confirmDuplicateRisk })
+        ? coordinator.retry(AgentId.from(agentId), messageId, actor, {
+            confirmDuplicateRisk,
+          })
         : coordinator.cancel(AgentId.from(agentId), messageId, actor);
     },
     ack: async (messageId, state, note) => {
       // The acknowledging lane is the credential's agent, never an argument.
       const callerAgentId = mcpAckCallerAgentId();
-      if (!callerAgentId) return { ok: false, messageId, code: 'unattributed-caller' };
+      if (!callerAgentId)
+        return { ok: false, messageId, code: 'unattributed-caller' };
       const coordinator = deps.getMessageCoordinator?.();
       if (!coordinator) {
-        throw new Error('Message acknowledgment is unavailable: no message coordinator is wired into this host.');
+        throw new Error(
+          'Message acknowledgment is unavailable: no message coordinator is wired into this host.',
+        );
       }
-      return coordinator.acknowledge({ messageId, state, ...(note ? { note } : {}) }, { agentId: callerAgentId });
+      return coordinator.acknowledge(
+        { messageId, state, ...(note ? { note } : {}) },
+        { agentId: callerAgentId },
+      );
     },
 
     report: async (input) => {

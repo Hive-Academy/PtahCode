@@ -144,8 +144,7 @@ function responseContent(response: MCPResponse | null): {
   isError: boolean;
 } {
   const result = response?.result as
-    | { content: Array<{ text: string }>; isError?: boolean }
-    | undefined;
+    { content: Array<{ text: string }>; isError?: boolean } | undefined;
   return {
     text: result?.content[0]?.text ?? '',
     isError: result?.isError === true,
@@ -344,7 +343,10 @@ describe.each([
     };
     const ptahAPI = { agent: agent as AgentNamespace } as PtahAPI;
 
-    const firstCall = callSpawn(ptahAPI, { task: 'Implement fix', cli: 'codex' });
+    const firstCall = callSpawn(ptahAPI, {
+      task: 'Implement fix',
+      cli: 'codex',
+    });
     await jest.advanceTimersByTimeAsync(SPAWN_GATE_WAIT_MS);
     const firstReply = await firstCall;
 
@@ -363,8 +365,9 @@ describe.each([
     expect(cachedLimits).toBeDefined();
 
     // Subsequent spawn sees the cached at-limit state immediately and blocks.
+    // The task is different: an identical call in the 120 s window is a replay.
     const secondReply = await callSpawn(ptahAPI, {
-      task: 'Implement fix',
+      task: 'Implement a second fix',
       cli: 'codex',
     });
     expect(secondReply.isError).toBe(true);

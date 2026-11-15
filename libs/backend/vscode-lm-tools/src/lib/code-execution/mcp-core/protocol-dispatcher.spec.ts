@@ -26,7 +26,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { z } from 'zod';
-import { reconcilePendingCompletionRead, wasTerminalReadAcknowledged } from '@ptah-extension/cli-agent-runtime';
+import {
+  reconcilePendingCompletionRead,
+  wasTerminalReadAcknowledged,
+} from '@ptah-extension/cli-agent-runtime';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   countTokens,
@@ -208,101 +211,266 @@ describe('terminal lane read acknowledgment', () => {
   it('read from a tab alias acknowledges the resolved parent transition', async () => {
     const aliasAgent = { ...agent, agentId: 'dispatcher-alias-lane' };
     const read = jest.fn().mockResolvedValue({
-      agentId: aliasAgent.agentId, stdout: '', stderr: '', lineCount: 0,
-      totalLines: 0, omittedLines: 0, stdoutTotalLines: 0,
-      stderrTotalLines: 0, truncated: false,
+      agentId: aliasAgent.agentId,
+      stdout: '',
+      stderr: '',
+      lineCount: 0,
+      totalLines: 0,
+      omittedLines: 0,
+      stdoutTotalLines: 0,
+      stderrTotalLines: 0,
+      truncated: false,
     });
     const status = jest.fn().mockResolvedValue(aliasAgent);
-    const resolveCallerParentId = jest.fn().mockReturnValue('dispatcher-parent');
-    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({
-      agent: { read, status, resolveCallerParentId },
-    }) });
-    await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'tab-alias',
-      params: { name: 'ptah_agent_read', arguments: { agentId: aliasAgent.agentId } },
-    }), deps);
+    const resolveCallerParentId = jest
+      .fn()
+      .mockReturnValue('dispatcher-parent');
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: { read, status, resolveCallerParentId },
+      }),
+    });
+    await handleMCPRequest(
+      makeRequest({
+        method: 'tools/call',
+        _callerSessionId: 'tab-alias',
+        params: {
+          name: 'ptah_agent_read',
+          arguments: { agentId: aliasAgent.agentId },
+        },
+      }),
+      deps,
+    );
     expect(resolveCallerParentId).toHaveBeenCalledWith('tab-alias');
-    expect(wasTerminalReadAcknowledged(`${aliasAgent.agentId}:${aliasAgent.completedAt}`)).toBe(true);
+    expect(
+      wasTerminalReadAcknowledged(
+        `${aliasAgent.agentId}:${aliasAgent.completedAt}`,
+      ),
+    ).toBe(true);
   });
 
   it('read from a different resolved parent does not acknowledge', async () => {
     const otherAgent = { ...agent, agentId: 'dispatcher-other-parent-lane' };
     const read = jest.fn().mockResolvedValue({
-      agentId: otherAgent.agentId, stdout: '', stderr: '', lineCount: 0,
-      totalLines: 0, omittedLines: 0, stdoutTotalLines: 0,
-      stderrTotalLines: 0, truncated: false,
+      agentId: otherAgent.agentId,
+      stdout: '',
+      stderr: '',
+      lineCount: 0,
+      totalLines: 0,
+      omittedLines: 0,
+      stdoutTotalLines: 0,
+      stderrTotalLines: 0,
+      truncated: false,
     });
     const status = jest.fn().mockResolvedValue(otherAgent);
-    const resolveCallerParentId = jest.fn().mockReturnValue('different-session');
-    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({
-      agent: { read, status, resolveCallerParentId },
-    }) });
-    await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'different-tab',
-      params: { name: 'ptah_agent_read', arguments: { agentId: otherAgent.agentId } },
-    }), deps);
+    const resolveCallerParentId = jest
+      .fn()
+      .mockReturnValue('different-session');
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: { read, status, resolveCallerParentId },
+      }),
+    });
+    await handleMCPRequest(
+      makeRequest({
+        method: 'tools/call',
+        _callerSessionId: 'different-tab',
+        params: {
+          name: 'ptah_agent_read',
+          arguments: { agentId: otherAgent.agentId },
+        },
+      }),
+      deps,
+    );
     expect(resolveCallerParentId).toHaveBeenCalledWith('different-tab');
-    expect(wasTerminalReadAcknowledged(`${otherAgent.agentId}:${otherAgent.completedAt}`)).toBe(false);
+    expect(
+      wasTerminalReadAcknowledged(
+        `${otherAgent.agentId}:${otherAgent.completedAt}`,
+      ),
+    ).toBe(false);
   });
 
   it('read on a terminal lane acknowledges its observed transition', async () => {
     const read = jest.fn().mockResolvedValue({
-      agentId: agent.agentId, stdout: '', stderr: '', lineCount: 0,
-      totalLines: 0, omittedLines: 0, stdoutTotalLines: 0,
-      stderrTotalLines: 0, truncated: false,
+      agentId: agent.agentId,
+      stdout: '',
+      stderr: '',
+      lineCount: 0,
+      totalLines: 0,
+      omittedLines: 0,
+      stdoutTotalLines: 0,
+      stderrTotalLines: 0,
+      truncated: false,
     });
     const status = jest.fn().mockResolvedValue(agent);
-    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({
-      agent: { read, status } as unknown as PtahAPI['agent'],
-    }) });
-    await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'dispatcher-parent',
-      params: { name: 'ptah_agent_read', arguments: { agentId: agent.agentId } },
-    }), deps);
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: { read, status } as unknown as PtahAPI['agent'],
+      }),
+    });
+    await handleMCPRequest(
+      makeRequest({
+        method: 'tools/call',
+        _callerSessionId: 'dispatcher-parent',
+        params: {
+          name: 'ptah_agent_read',
+          arguments: { agentId: agent.agentId },
+        },
+      }),
+      deps,
+    );
     expect(wasTerminalReadAcknowledged(key)).toBe(true);
   });
 
   it('wait on a terminal lane acknowledges its observed transition', async () => {
     const waitForAgents = jest.fn().mockResolvedValue({
-      mode: 'all', timedOut: false, cancelled: false, waitedMs: 0,
+      mode: 'all',
+      timedOut: false,
+      cancelled: false,
+      waitedMs: 0,
       entries: [{ agentId: agent.agentId, state: 'exited', info: agent }],
     });
     const read = jest.fn().mockResolvedValue({
-      agentId: agent.agentId, stdout: '', stderr: '', lineCount: 0,
-      totalLines: 0, omittedLines: 0, stdoutTotalLines: 0,
-      stderrTotalLines: 0, truncated: false,
+      agentId: agent.agentId,
+      stdout: '',
+      stderr: '',
+      lineCount: 0,
+      totalLines: 0,
+      omittedLines: 0,
+      stdoutTotalLines: 0,
+      stderrTotalLines: 0,
+      truncated: false,
     });
-    const resolveCallerParentId = jest.fn().mockReturnValue('dispatcher-parent');
-    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({
-      agent: { waitForAgents, read, resolveCallerParentId },
-    }) });
-    await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'wait-tab-alias',
-      params: { name: 'ptah_agent_wait', arguments: { agentIds: [agent.agentId], timeoutSec: 0 } },
-    }), deps);
+    const resolveCallerParentId = jest
+      .fn()
+      .mockReturnValue('dispatcher-parent');
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: { waitForAgents, read, resolveCallerParentId },
+      }),
+    });
+    await handleMCPRequest(
+      makeRequest({
+        method: 'tools/call',
+        _callerSessionId: 'wait-tab-alias',
+        params: {
+          name: 'ptah_agent_wait',
+          arguments: { agentIds: [agent.agentId], timeoutSec: 0 },
+        },
+      }),
+      deps,
+    );
     expect(resolveCallerParentId).toHaveBeenCalledWith('wait-tab-alias');
     expect(wasTerminalReadAcknowledged(key)).toBe(true);
   });
 
-  it.each(['status', 'resolver', 'cancellation'] as const)('read returns output when %s fails', async (failure) => {
-    const info = { ...agent, agentId: `read-failure-${failure}` };
-    const read = jest.fn().mockResolvedValue({ agentId: info.agentId, stdout: 'output', stderr: '', lineCount: 1, totalLines: 1, omittedLines: 0, stdoutTotalLines: 1, stderrTotalLines: 0, truncated: false });
-    const status = jest.fn().mockImplementation(() => failure === 'status' ? Promise.reject(new Error('status failed')) : Promise.resolve(info));
-    const resolveCallerParentId = jest.fn().mockImplementation(() => { if (failure === 'resolver') throw new Error('resolver failed'); return 'dispatcher-parent'; });
-    if (failure === 'cancellation') await reconcilePendingCompletionRead(`${info.agentId}:${info.completedAt}`, async () => { throw new Error('cancel failed'); });
-    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({ agent: { read, status, resolveCallerParentId } }) });
-    const response = await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'tab-alias', params: { name: 'ptah_agent_read', arguments: { agentId: info.agentId } } }), deps);
-    expect(response.result).toBeDefined();
-    expect(JSON.stringify(response.result)).toContain('output');
-  });
+  it.each(['status', 'resolver', 'cancellation'] as const)(
+    'read returns output when %s fails',
+    async (failure) => {
+      const info = { ...agent, agentId: `read-failure-${failure}` };
+      const read = jest.fn().mockResolvedValue({
+        agentId: info.agentId,
+        stdout: 'output',
+        stderr: '',
+        lineCount: 1,
+        totalLines: 1,
+        omittedLines: 0,
+        stdoutTotalLines: 1,
+        stderrTotalLines: 0,
+        truncated: false,
+      });
+      const status = jest
+        .fn()
+        .mockImplementation(() =>
+          failure === 'status'
+            ? Promise.reject(new Error('status failed'))
+            : Promise.resolve(info),
+        );
+      const resolveCallerParentId = jest.fn().mockImplementation(() => {
+        if (failure === 'resolver') throw new Error('resolver failed');
+        return 'dispatcher-parent';
+      });
+      if (failure === 'cancellation')
+        await reconcilePendingCompletionRead(
+          `${info.agentId}:${info.completedAt}`,
+          async () => {
+            throw new Error('cancel failed');
+          },
+        );
+      const deps = buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          agent: { read, status, resolveCallerParentId },
+        }),
+      });
+      const response = await handleMCPRequest(
+        makeRequest({
+          method: 'tools/call',
+          _callerSessionId: 'tab-alias',
+          params: {
+            name: 'ptah_agent_read',
+            arguments: { agentId: info.agentId },
+          },
+        }),
+        deps,
+      );
+      expect(response.result).toBeDefined();
+      expect(JSON.stringify(response.result)).toContain('output');
+    },
+  );
 
-  it.each(['resolver', 'cancellation'] as const)('wait processes entries when %s fails', async (failure) => {
-    const info = { ...agent, agentId: `wait-failure-${failure}` };
-    const waitForAgents = jest.fn().mockResolvedValue({ mode: 'all', timedOut: false, cancelled: false, waitedMs: 0, entries: [{ agentId: info.agentId, state: 'exited', info }] });
-    const read = jest.fn().mockResolvedValue({ agentId: info.agentId, stdout: 'wait output', stderr: '', lineCount: 1, totalLines: 1, omittedLines: 0, stdoutTotalLines: 1, stderrTotalLines: 0, truncated: false });
-    const resolveCallerParentId = jest.fn().mockImplementation(() => { if (failure === 'resolver') throw new Error('resolver failed'); return 'dispatcher-parent'; });
-    if (failure === 'cancellation') await reconcilePendingCompletionRead(`${info.agentId}:${info.completedAt}`, async () => { throw new Error('cancel failed'); });
-    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({ agent: { waitForAgents, read, resolveCallerParentId } }) });
-    const response = await handleMCPRequest(makeRequest({ method: 'tools/call', _callerSessionId: 'tab-alias', params: { name: 'ptah_agent_wait', arguments: { agentIds: [info.agentId], timeoutSec: 0 } } }), deps);
-    expect(response.result).toBeDefined();
-    expect(read).toHaveBeenCalled();
-  });
+  it.each(['resolver', 'cancellation'] as const)(
+    'wait processes entries when %s fails',
+    async (failure) => {
+      const info = { ...agent, agentId: `wait-failure-${failure}` };
+      const waitForAgents = jest.fn().mockResolvedValue({
+        mode: 'all',
+        timedOut: false,
+        cancelled: false,
+        waitedMs: 0,
+        entries: [{ agentId: info.agentId, state: 'exited', info }],
+      });
+      const read = jest.fn().mockResolvedValue({
+        agentId: info.agentId,
+        stdout: 'wait output',
+        stderr: '',
+        lineCount: 1,
+        totalLines: 1,
+        omittedLines: 0,
+        stdoutTotalLines: 1,
+        stderrTotalLines: 0,
+        truncated: false,
+      });
+      const resolveCallerParentId = jest.fn().mockImplementation(() => {
+        if (failure === 'resolver') throw new Error('resolver failed');
+        return 'dispatcher-parent';
+      });
+      if (failure === 'cancellation')
+        await reconcilePendingCompletionRead(
+          `${info.agentId}:${info.completedAt}`,
+          async () => {
+            throw new Error('cancel failed');
+          },
+        );
+      const deps = buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          agent: { waitForAgents, read, resolveCallerParentId },
+        }),
+      });
+      const response = await handleMCPRequest(
+        makeRequest({
+          method: 'tools/call',
+          _callerSessionId: 'tab-alias',
+          params: {
+            name: 'ptah_agent_wait',
+            arguments: { agentIds: [info.agentId], timeoutSec: 0 },
+          },
+        }),
+        deps,
+      );
+      expect(response.result).toBeDefined();
+      expect(read).toHaveBeenCalled();
+    },
+  );
 });
 
 describe('artifact publish dispatch scope', () => {
@@ -3549,7 +3717,13 @@ describe('protocol-handlers › ptah_agent_message', () => {
       }),
     );
 
-    expect(message).toHaveBeenCalledWith('a-1', 'use the other branch', undefined, undefined, undefined);
+    expect(message).toHaveBeenCalledWith(
+      'a-1',
+      'use the other branch',
+      undefined,
+      undefined,
+      undefined,
+    );
     const { text, isError } = agentToolResult(res);
     expect(isError).toBeUndefined();
     expect(text).toMatch(/Mode:\*\* interrupt-resume/);
@@ -3560,8 +3734,24 @@ describe('protocol-handlers › ptah_agent_message', () => {
     const message = jest.fn().mockResolvedValue({ mode: 'steer' });
     const messageStatus = jest.fn().mockResolvedValue({ status: 'delivered' });
     const agent = { message, messageStatus };
-    await handleMCPRequest(makeRequest({ id: 'am-steer', method: 'tools/call', params: { name: 'ptah_agent_message', arguments: { agentId: 'a-1', message: 'go', delivery: 'steer' } } }), buildDeps({ ptahAPI: buildPtahAPIStub({ agent }) }));
-    expect(message).toHaveBeenCalledWith('a-1', 'go', 'steer', undefined, undefined);
+    await handleMCPRequest(
+      makeRequest({
+        id: 'am-steer',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_agent_message',
+          arguments: { agentId: 'a-1', message: 'go', delivery: 'steer' },
+        },
+      }),
+      buildDeps({ ptahAPI: buildPtahAPIStub({ agent }) }),
+    );
+    expect(message).toHaveBeenCalledWith(
+      'a-1',
+      'go',
+      'steer',
+      undefined,
+      undefined,
+    );
     const id = '11111111-1111-4111-8111-111111111111';
     const res = await handleMCPRequest(
       makeRequest({
@@ -3604,97 +3794,233 @@ describe('protocol-handlers › ptah_agent_message', () => {
   });
 
   // TASK_2026_AGENT_MESSAGING P1-E.
-  const callTool = (name: string, args: Record<string, unknown>, agent: object) =>
+  const callTool = (
+    name: string,
+    args: Record<string, unknown>,
+    agent: object,
+  ) =>
     handleMCPRequest(
-      makeRequest({ id: `am-${name}`, method: 'tools/call', params: { name, arguments: args } }),
-      buildDeps({ ptahAPI: buildPtahAPIStub({ agent: agent as PtahAPI['agent'] }) }),
+      makeRequest({
+        id: `am-${name}`,
+        method: 'tools/call',
+        params: { name, arguments: args },
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({ agent: agent as PtahAPI['agent'] }),
+      }),
     );
   const MESSAGE_ID = '11111111-1111-4111-8111-111111111111';
 
   it('passes the idempotency key and rejects a malformed one', async () => {
-    const message = jest.fn().mockResolvedValue({ mode: 'queue-next-turn', deduplicated: true });
-    await callTool('ptah_agent_message', { agentId: 'a-1', message: 'go', idempotencyKey: 'run-7:step.2' }, { message });
-    expect(message).toHaveBeenCalledWith('a-1', 'go', undefined, undefined, 'run-7:step.2');
-    const bad = await callTool('ptah_agent_message', { agentId: 'a-1', message: 'go', idempotencyKey: 'no spaces' }, { message });
+    const message = jest
+      .fn()
+      .mockResolvedValue({ mode: 'queue-next-turn', deduplicated: true });
+    await callTool(
+      'ptah_agent_message',
+      { agentId: 'a-1', message: 'go', idempotencyKey: 'run-7:step.2' },
+      { message },
+    );
+    expect(message).toHaveBeenCalledWith(
+      'a-1',
+      'go',
+      undefined,
+      undefined,
+      'run-7:step.2',
+    );
+    const bad = await callTool(
+      'ptah_agent_message',
+      { agentId: 'a-1', message: 'go', idempotencyKey: 'no spaces' },
+      { message },
+    );
     expect(agentToolResult(bad).isError).toBe(true);
     expect(message).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a sender argument: the sender comes from the transport', async () => {
     const message = jest.fn();
-    const res = await callTool('ptah_agent_message', { agentId: 'a-1', message: 'go', sender: { kind: 'user' } }, { message });
+    const res = await callTool(
+      'ptah_agent_message',
+      { agentId: 'a-1', message: 'go', sender: { kind: 'user' } },
+      { message },
+    );
     expect(message).not.toHaveBeenCalled();
     expect(agentToolResult(res).isError).toBe(true);
     expect(agentToolResult(res).text).toMatch(/sender/);
   });
 
-  it.each(['sender', 'from'])('rejects a spoofed `%s` key from a lane caller (strict schema)', async (key) => {
-    const message = jest.fn();
-    const res = await callTool('ptah_agent_message',
-      { agentId: 'a-1', message: 'go', [key]: '66666666-7777-4888-8999-aaaaaaaaaaaa' }, { message });
-    expect(message).not.toHaveBeenCalled();
-    expect(agentToolResult(res).isError).toBe(true);
-    expect(agentToolResult(res).text).toMatch(new RegExp(key));
-  });
+  it.each(['sender', 'from'])(
+    'rejects a spoofed `%s` key from a lane caller (strict schema)',
+    async (key) => {
+      const message = jest.fn();
+      const res = await callTool(
+        'ptah_agent_message',
+        {
+          agentId: 'a-1',
+          message: 'go',
+          [key]: '66666666-7777-4888-8999-aaaaaaaaaaaa',
+        },
+        { message },
+      );
+      expect(message).not.toHaveBeenCalled();
+      expect(agentToolResult(res).isError).toBe(true);
+      expect(agentToolResult(res).text).toMatch(new RegExp(key));
+    },
+  );
 
   it('answers not_found when a scoped lane viewer may not see the message', async () => {
-    const messageStatus = jest.fn().mockRejectedValue(new AgentMessageError('not_found', 'Message receipt not found.'));
-    const res = await callTool('ptah_agent_message_status', { agentId: 'a-1', messageId: MESSAGE_ID }, { messageStatus });
+    const messageStatus = jest
+      .fn()
+      .mockRejectedValue(
+        new AgentMessageError('not_found', 'Message receipt not found.'),
+      );
+    const res = await callTool(
+      'ptah_agent_message_status',
+      { agentId: 'a-1', messageId: MESSAGE_ID },
+      { messageStatus },
+    );
     expect(agentToolResult(res).isError).toBe(true);
-    expect(agentToolResult(res).text).toMatch(/not_found: Message receipt not found\./);
+    expect(agentToolResult(res).text).toMatch(
+      /not_found: Message receipt not found\./,
+    );
   });
 
   it('accepts 102,400 characters and rejects 102,401 (AGENT_MESSAGE_MAX_CHARS)', async () => {
     const message = jest.fn().mockResolvedValue({ mode: 'queue-next-turn' });
-    const atLimit = await callTool('ptah_agent_message', { agentId: 'a-1', message: 'x'.repeat(102_400) }, { message });
+    const atLimit = await callTool(
+      'ptah_agent_message',
+      { agentId: 'a-1', message: 'x'.repeat(102_400) },
+      { message },
+    );
     expect(agentToolResult(atLimit).isError).toBeUndefined();
-    const over = await callTool('ptah_agent_message', { agentId: 'a-1', message: 'x'.repeat(102_401) }, { message });
+    const over = await callTool(
+      'ptah_agent_message',
+      { agentId: 'a-1', message: 'x'.repeat(102_401) },
+      { message },
+    );
     expect(agentToolResult(over).isError).toBe(true);
     expect(message).toHaveBeenCalledTimes(1);
   });
 
   it('shows requestedAgentId, the owning agentId and the new receipt fields in the status', async () => {
     const messageStatus = jest.fn().mockResolvedValue({
-      id: MESSAGE_ID, agentId: 'a-1', actualAgentId: 'b-2', state: 'outcome-unknown',
-      mode: 'steer', delivery: 'now', sender: 'parent', senderSessionId: 's-1',
-      createdAt: 1, updatedAt: 2, attemptCount: 2, lastError: 'timeout', nextRetryAt: 9,
+      id: MESSAGE_ID,
+      agentId: 'a-1',
+      actualAgentId: 'b-2',
+      state: 'outcome-unknown',
+      mode: 'steer',
+      delivery: 'now',
+      sender: 'parent',
+      senderSessionId: 's-1',
+      createdAt: 1,
+      updatedAt: 2,
+      attemptCount: 2,
+      lastError: 'timeout',
+      nextRetryAt: 9,
     });
-    const res = await callTool('ptah_agent_message_status', { agentId: 'a-1', messageId: MESSAGE_ID }, { messageStatus });
+    const res = await callTool(
+      'ptah_agent_message_status',
+      { agentId: 'a-1', messageId: MESSAGE_ID },
+      { messageStatus },
+    );
     expect(JSON.parse(agentToolResult(res).text)).toMatchObject({
-      messageId: MESSAGE_ID, requestedAgentId: 'a-1', agentId: 'b-2', actualAgentId: 'b-2',
-      state: 'outcome-unknown', ackState: 'unavailable', attemptCount: 2, lastError: 'timeout',
-      nextRetryAt: 9, sender: 'parent', senderSessionId: 's-1',
+      messageId: MESSAGE_ID,
+      requestedAgentId: 'a-1',
+      agentId: 'b-2',
+      actualAgentId: 'b-2',
+      state: 'outcome-unknown',
+      ackState: 'unavailable',
+      attemptCount: 2,
+      lastError: 'timeout',
+      nextRetryAt: 9,
+      sender: 'parent',
+      senderSessionId: 's-1',
     });
   });
 
   it('retries and cancels through ptah_agent_message_control', async () => {
-    const control = jest.fn()
+    const control = jest
+      .fn()
       .mockResolvedValueOnce({ mode: 'queue-next-turn', messageId: MESSAGE_ID })
       .mockResolvedValueOnce({ id: MESSAGE_ID, state: 'cancelled' });
-    const retried = await callTool('ptah_agent_message_control',
-      { agentId: 'a-1', messageId: MESSAGE_ID, action: 'retry', confirmDuplicateRisk: true }, { control });
-    const cancelled = await callTool('ptah_agent_message_control',
-      { agentId: 'a-1', messageId: MESSAGE_ID, action: 'cancel' }, { control });
-    expect(control).toHaveBeenNthCalledWith(1, 'a-1', MESSAGE_ID, 'retry', true);
-    expect(control).toHaveBeenNthCalledWith(2, 'a-1', MESSAGE_ID, 'cancel', undefined);
-    expect(JSON.parse(agentToolResult(retried).text)).toMatchObject({ action: 'retry', mode: 'queue-next-turn' });
-    expect(JSON.parse(agentToolResult(cancelled).text)).toMatchObject({ action: 'cancel', state: 'cancelled' });
+    const retried = await callTool(
+      'ptah_agent_message_control',
+      {
+        agentId: 'a-1',
+        messageId: MESSAGE_ID,
+        action: 'retry',
+        confirmDuplicateRisk: true,
+      },
+      { control },
+    );
+    const cancelled = await callTool(
+      'ptah_agent_message_control',
+      { agentId: 'a-1', messageId: MESSAGE_ID, action: 'cancel' },
+      { control },
+    );
+    expect(control).toHaveBeenNthCalledWith(
+      1,
+      'a-1',
+      MESSAGE_ID,
+      'retry',
+      true,
+    );
+    expect(control).toHaveBeenNthCalledWith(
+      2,
+      'a-1',
+      MESSAGE_ID,
+      'cancel',
+      undefined,
+    );
+    expect(JSON.parse(agentToolResult(retried).text)).toMatchObject({
+      action: 'retry',
+      mode: 'queue-next-turn',
+    });
+    expect(JSON.parse(agentToolResult(cancelled).text)).toMatchObject({
+      action: 'cancel',
+      state: 'cancelled',
+    });
   });
 
   it('answers an unverified control caller with a typed tool error', async () => {
-    const control = jest.fn().mockRejectedValue(new AgentMessageControlIdentityError('identity-unverified'));
-    const res = await callTool('ptah_agent_message_control',
-      { agentId: 'a-1', messageId: MESSAGE_ID, action: 'cancel' }, { control });
+    const control = jest
+      .fn()
+      .mockRejectedValue(
+        new AgentMessageControlIdentityError('identity-unverified'),
+      );
+    const res = await callTool(
+      'ptah_agent_message_control',
+      { agentId: 'a-1', messageId: MESSAGE_ID, action: 'cancel' },
+      { control },
+    );
     expect(agentToolResult(res).isError).toBe(true);
-    expect(agentToolResult(res).text).toMatch(/could not cancel message .* identity-unverified/);
+    expect(agentToolResult(res).text).toMatch(
+      /could not cancel message .* identity-unverified/,
+    );
   });
 
   it('rejects an unknown control action and a non-uuid message id', async () => {
     const control = jest.fn();
     const results = await Promise.all([
-      callTool('ptah_agent_message_control', { agentId: 'a-1', messageId: MESSAGE_ID, action: 'ack' }, { control }),
-      callTool('ptah_agent_message_control', { agentId: 'a-1', messageId: 'm-1', action: 'cancel' }, { control }),
-      callTool('ptah_agent_message_control', { agentId: 'a-1', messageId: MESSAGE_ID, action: 'cancel', sender: 'user' }, { control }),
+      callTool(
+        'ptah_agent_message_control',
+        { agentId: 'a-1', messageId: MESSAGE_ID, action: 'ack' },
+        { control },
+      ),
+      callTool(
+        'ptah_agent_message_control',
+        { agentId: 'a-1', messageId: 'm-1', action: 'cancel' },
+        { control },
+      ),
+      callTool(
+        'ptah_agent_message_control',
+        {
+          agentId: 'a-1',
+          messageId: MESSAGE_ID,
+          action: 'cancel',
+          sender: 'user',
+        },
+        { control },
+      ),
     ]);
     for (const res of results) expect(agentToolResult(res).isError).toBe(true);
     expect(control).not.toHaveBeenCalled();
@@ -3702,23 +4028,50 @@ describe('protocol-handlers › ptah_agent_message', () => {
 
   it('acks through ptah_agent_message_ack and keeps the receipt out of the reply', async () => {
     const ack = jest.fn().mockResolvedValue({
-      ok: true, messageId: MESSAGE_ID, ackState: 'acted', changed: true,
+      ok: true,
+      messageId: MESSAGE_ID,
+      ackState: 'acted',
+      changed: true,
       receipt: { id: MESSAGE_ID, state: 'settled', senderSessionId: 's-1' },
     });
-    const res = await callTool('ptah_agent_message_ack', { messageId: MESSAGE_ID, state: 'acted', note: 'done' }, { ack });
+    const res = await callTool(
+      'ptah_agent_message_ack',
+      { messageId: MESSAGE_ID, state: 'acted', note: 'done' },
+      { ack },
+    );
     expect(ack).toHaveBeenCalledWith(MESSAGE_ID, 'acted', 'done');
     expect(JSON.parse(agentToolResult(res).text)).toEqual({
-      ok: true, messageId: MESSAGE_ID, ackState: 'acted', changed: true, state: 'settled',
+      ok: true,
+      messageId: MESSAGE_ID,
+      ackState: 'acted',
+      changed: true,
+      state: 'settled',
     });
   });
 
   it('rejects an agentId, an unknown state and a long note in ptah_agent_message_ack', async () => {
     const ack = jest.fn();
     const results = await Promise.all([
-      callTool('ptah_agent_message_ack', { agentId: 'a-1', messageId: MESSAGE_ID, state: 'read' }, { ack }),
-      callTool('ptah_agent_message_ack', { messageId: MESSAGE_ID, state: 'done' }, { ack }),
-      callTool('ptah_agent_message_ack', { messageId: MESSAGE_ID, state: 'read', note: 'x'.repeat(501) }, { ack }),
-      callTool('ptah_agent_message_ack', { messageId: 'm-1', state: 'read' }, { ack }),
+      callTool(
+        'ptah_agent_message_ack',
+        { agentId: 'a-1', messageId: MESSAGE_ID, state: 'read' },
+        { ack },
+      ),
+      callTool(
+        'ptah_agent_message_ack',
+        { messageId: MESSAGE_ID, state: 'done' },
+        { ack },
+      ),
+      callTool(
+        'ptah_agent_message_ack',
+        { messageId: MESSAGE_ID, state: 'read', note: 'x'.repeat(501) },
+        { ack },
+      ),
+      callTool(
+        'ptah_agent_message_ack',
+        { messageId: 'm-1', state: 'read' },
+        { ack },
+      ),
     ]);
     for (const res of results) expect(agentToolResult(res).isError).toBe(true);
     expect(agentToolResult(results[0]).text).toMatch(/agentId/);
@@ -3726,15 +4079,30 @@ describe('protocol-handlers › ptah_agent_message', () => {
   });
 
   it('returns a refusal from the ack as data', async () => {
-    const ack = jest.fn().mockResolvedValue({ ok: false, messageId: MESSAGE_ID, code: 'ack-forbidden' });
-    const res = await callTool('ptah_agent_message_ack', { messageId: MESSAGE_ID, state: 'read' }, { ack });
+    const ack = jest.fn().mockResolvedValue({
+      ok: false,
+      messageId: MESSAGE_ID,
+      code: 'ack-forbidden',
+    });
+    const res = await callTool(
+      'ptah_agent_message_ack',
+      { messageId: MESSAGE_ID, state: 'read' },
+      { ack },
+    );
     expect(agentToolResult(res).isError).toBeUndefined();
-    expect(JSON.parse(agentToolResult(res).text)).toEqual({ ok: false, messageId: MESSAGE_ID, code: 'ack-forbidden' });
+    expect(JSON.parse(agentToolResult(res).text)).toEqual({
+      ok: false,
+      messageId: MESSAGE_ID,
+      code: 'ack-forbidden',
+    });
   });
 
   it('is advertised next to ptah_agent_message_status', async () => {
     const names = listedToolNames(
-      await handleMCPRequest(makeRequest({ id: 'am-list-control', method: 'tools/list' }), buildDeps()),
+      await handleMCPRequest(
+        makeRequest({ id: 'am-list-control', method: 'tools/list' }),
+        buildDeps(),
+      ),
     );
     expect(names).toContain('ptah_agent_message_control');
   });
@@ -3994,7 +4362,10 @@ function spawnRequest(args: unknown): MCPRequest {
 function spawnDeps(spawn: jest.Mock): ProtocolHandlerDependencies {
   return buildDeps({
     ptahAPI: buildPtahAPIStub({
-      agent: { spawn } as unknown as PtahAPI['agent'],
+      agent: {
+        spawn,
+        status: jest.fn().mockResolvedValue({ status: 'running' }),
+      } as unknown as PtahAPI['agent'],
     }),
   });
 }
@@ -4007,6 +4378,296 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
     startedAt: '2026-09-13T00:00:00Z',
   };
 
+  it('replays simultaneous and later identical requests with one lane ID', async () => {
+    const spawn = jest.fn().mockResolvedValue(spawned);
+    const deps = spawnDeps(spawn);
+    const args = { task: 'unique retry task', cli: 'codex' };
+    const [first, second] = await Promise.all([
+      handleMCPRequest(spawnRequest(args), deps),
+      handleMCPRequest(spawnRequest(args), deps),
+    ]);
+    const later = await handleMCPRequest(spawnRequest(args), deps);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(agentToolResult(first).text).toContain('a-9');
+    expect(agentToolResult(second).text).toContain('a-9');
+    expect(agentToolResult(later).text).toContain(
+      'Replay of earlier spawn: a-9',
+    );
+    // The request has no parent session, so the replay keeps the warning.
+    expect(agentToolResult(later).text).toContain('No parent session');
+  });
+
+  it('replays a running lane but spawns again after that lane fails', async () => {
+    const spawn = jest
+      .fn()
+      .mockResolvedValueOnce({ ...spawned, agentId: 'first' })
+      .mockResolvedValueOnce({ ...spawned, agentId: 'second' });
+    const status = jest
+      .fn()
+      .mockResolvedValueOnce({ status: 'running' })
+      .mockResolvedValueOnce({ status: 'failed' });
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: { spawn, status } as unknown as PtahAPI['agent'],
+      }),
+    });
+    const request = spawnRequest({ task: 'retry after failure' });
+    await handleMCPRequest(request, deps);
+    expect(
+      agentToolResult(await handleMCPRequest(request, deps)).text,
+    ).toContain('Replay of earlier spawn: first');
+    expect(
+      agentToolResult(await handleMCPRequest(request, deps)).text,
+    ).toContain('second');
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds replay status lookup and replays when it times out', async () => {
+    jest.useFakeTimers();
+    try {
+      const spawn = jest.fn().mockResolvedValue(spawned);
+      const status = jest.fn(() => new Promise<never>(() => undefined));
+      const deps = buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          agent: { spawn, status } as unknown as PtahAPI['agent'],
+        }),
+      });
+      const request = spawnRequest({ task: 'hanging replay status' });
+      await handleMCPRequest(request, deps);
+      const replay = handleMCPRequest(request, deps);
+      await jest.advanceTimersByTimeAsync(2_001);
+      expect(agentToolResult(await replay).text).toContain(
+        'Replay of earlier spawn: a-9',
+      );
+      expect(spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('replays when the status lookup rejects', async () => {
+    const spawn = jest.fn().mockResolvedValue(spawned);
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: {
+          spawn,
+          status: jest
+            .fn()
+            .mockRejectedValue(new Error('temporary lookup failure')),
+        } as unknown as PtahAPI['agent'],
+      }),
+    });
+    const call = () =>
+      handleMCPRequest(spawnRequest({ task: 'status error retry' }), deps);
+    await call();
+    expect(agentToolResult(await call()).text).toContain(
+      'Replay of earlier spawn: a-9',
+    );
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('separates caller agents in one session even with the same key', async () => {
+    const spawn = jest.fn().mockResolvedValue(spawned);
+    const deps = spawnDeps(spawn);
+    const call = (agentId: string) =>
+      handleMCPRequest(
+        {
+          ...spawnRequest({
+            task: 'agent scoped task',
+            idempotencyKey: 'shared',
+          }),
+          _callerSessionId: 'parent-session',
+          _callerAgentId: agentId,
+        },
+        deps,
+      );
+    await call('agent-one');
+    await call('agent-two');
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('separates different arguments with one explicit key', async () => {
+    const spawn = jest.fn().mockResolvedValue(spawned);
+    const deps = spawnDeps(spawn);
+    await handleMCPRequest(
+      spawnRequest({ task: 'first keyed task', idempotencyKey: 'shared' }),
+      deps,
+    );
+    await handleMCPRequest(
+      spawnRequest({ task: 'second keyed task', idempotencyKey: 'shared' }),
+      deps,
+    );
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives concurrent callers the same formatted spawn error and permits retry', async () => {
+    const spawn = jest
+      .fn()
+      .mockRejectedValueOnce(
+        new AgentRoleError('unknown_role', 'role unavailable'),
+      )
+      .mockResolvedValueOnce(spawned);
+    const deps = spawnDeps(spawn);
+    const request = spawnRequest({
+      task: 'failed concurrent retry',
+      role: 'reviewer',
+    });
+    const [first, second] = await Promise.all([
+      handleMCPRequest(request, deps),
+      handleMCPRequest(request, deps),
+    ]);
+    expect(agentToolResult(first).text).toBe(agentToolResult(second).text);
+    expect(agentToolResult(first).text).toContain('role unknown_role');
+    expect(spawn).toHaveBeenCalledTimes(1);
+    await handleMCPRequest(request, deps);
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts another lane for force and after the 120 second TTL', async () => {
+    jest.useFakeTimers();
+    try {
+      const spawn = jest
+        .fn()
+        .mockResolvedValueOnce({ ...spawned, agentId: 'first' })
+        .mockResolvedValueOnce({ ...spawned, agentId: 'forced' })
+        .mockResolvedValueOnce({ ...spawned, agentId: 'after-ttl' });
+      const deps = spawnDeps(spawn);
+      await handleMCPRequest(spawnRequest({ task: 'ttl retry' }), deps);
+      await handleMCPRequest(
+        spawnRequest({ task: 'ttl retry', force: true }),
+        deps,
+      );
+      expect(spawn).toHaveBeenCalledTimes(2);
+      jest.advanceTimersByTime(120_001);
+      expect(
+        agentToolResult(
+          await handleMCPRequest(spawnRequest({ task: 'ttl retry' }), deps),
+        ).text,
+      ).toContain('after-ttl');
+      expect(spawn).toHaveBeenCalledTimes(3);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('refuses a known AT LIMIT target and reevaluates a retry', async () => {
+    const row = { cli: 'codex', installed: true, messagingMode: 'steer' };
+    const spawn = jest.fn();
+    const list = jest.fn().mockResolvedValue([row]);
+    const limits = jest.fn().mockResolvedValue([
+      {
+        row,
+        lookup: 'ok',
+        state: { state: 'at-limit', reasons: [], windows: [] },
+        snapshot: {
+          owner: {
+            key: 'provider#account:test',
+            providerId: 'provider',
+            identityKind: 'account',
+            label: 'Account',
+          },
+          status: 'available',
+          windowSetEstablished: true,
+          windows: [],
+          ownerEvidence: [],
+        },
+      },
+    ]);
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: { spawn, list, limits } as unknown as PtahAPI['agent'],
+      }),
+    });
+    const request = spawnRequest({ task: 'blocked target', cli: 'codex' });
+    const first = await handleMCPRequest(request, deps);
+    const second = await handleMCPRequest(request, deps);
+    expect(agentToolResult(first).isError).toBe(true);
+    expect(agentToolResult(second).text).toBe(agentToolResult(first).text);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(limits).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the pending limit note without a post-spawn lookup', async () => {
+    jest.useFakeTimers();
+    try {
+      const row = { cli: 'codex', installed: true, messagingMode: 'steer' };
+      const limits = jest.fn(() => new Promise<never>(() => undefined));
+      const spawn = jest.fn().mockResolvedValue(spawned);
+      const deps = buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          agent: {
+            spawn,
+            list: jest.fn().mockResolvedValue([row]),
+            limits,
+          } as unknown as PtahAPI['agent'],
+        }),
+      });
+      const response = handleMCPRequest(
+        spawnRequest({ task: 'pending target', cli: 'codex' }),
+        deps,
+      );
+      await jest.advanceTimersByTimeAsync(1_001);
+      expect(agentToolResult(await response).text).toContain(
+        'limit lookup pending',
+      );
+      expect(limits).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('looks up limits after an auto-detected spawn settles', async () => {
+    const limits = jest.fn().mockResolvedValue(undefined);
+    const list = jest
+      .fn()
+      .mockResolvedValue([
+        { cli: 'codex', installed: true, messagingMode: 'steer' },
+      ]);
+    const spawn = jest.fn().mockResolvedValue(spawned);
+    const deps = buildDeps({
+      ptahAPI: buildPtahAPIStub({
+        agent: { spawn, list, limits } as unknown as PtahAPI['agent'],
+      }),
+    });
+    await handleMCPRequest(spawnRequest({ task: 'limit-free reply' }), deps);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(limits).toHaveBeenCalledTimes(1);
+    expect(limits.mock.invocationCallOrder[0]).toBeGreaterThan(
+      spawn.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('logs timing on success and failure without task text', async () => {
+    const logger = createMockLogger();
+    const task = 'private task text';
+    const success = buildDeps({
+      logger: asLogger(logger),
+      ptahAPI: buildPtahAPIStub({
+        agent: {
+          spawn: jest.fn().mockResolvedValue(spawned),
+        } as unknown as PtahAPI['agent'],
+      }),
+    });
+    await handleMCPRequest(spawnRequest({ task }), success);
+    const failure = buildDeps({
+      logger: asLogger(logger),
+      ptahAPI: buildPtahAPIStub({
+        agent: {
+          spawn: jest.fn().mockRejectedValue(new Error('failed')),
+        } as unknown as PtahAPI['agent'],
+      }),
+    });
+    await handleMCPRequest(spawnRequest({ task }), failure);
+    const lines = logger.info.mock.calls.filter(
+      (call) => call[0] === '[MCP] agent spawn timing',
+    );
+    expect(lines).toHaveLength(2);
+    expect(JSON.stringify(lines)).not.toContain(task);
+    expect(lines[0]?.[2]).toEqual(
+      expect.objectContaining({ agentId: 'a-9', cli: 'auto-detect' }),
+    );
+  });
+
   it('reports a parent Plan cap in the spawn tool response', async () => {
     const spawn = jest.fn().mockResolvedValue({
       ...spawned,
@@ -4018,7 +4679,9 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
       spawnDeps(spawn),
     );
     const { text } = agentToolResult(response);
-    expect(text).toContain('requested auto-edit -> effective plan (source: Parent plan cap) (Codex sandbox read-only, approvals never)');
+    expect(text).toContain(
+      'requested auto-edit -> effective plan (source: Parent plan cap) (Codex sandbox read-only, approvals never)',
+    );
     expect(text).toContain('no approval prompt will appear');
   });
 
@@ -8879,7 +9542,8 @@ const HANDOFF_ARGS = {
 
 /** A real session namespace over a fake handoff service and no spawner. */
 function handoffDeps(
-  handoff: Pick<ISessionHandoff, 'handoff'> & Partial<ISessionHandoff> | undefined,
+  handoff:
+    (Pick<ISessionHandoff, 'handoff'> & Partial<ISessionHandoff>) | undefined,
 ) {
   const service: ISessionHandoff | undefined = handoff
     ? { acknowledge: jest.fn(), ...handoff }
@@ -8989,20 +9653,36 @@ describe('protocol-handlers › route and outcome registration', () => {
   it('returns isError and notifies observers when a lifecycle handler throws', async () => {
     const onToolResult = jest.fn();
     const deps = buildDeps({
-      ptahAPI: buildPtahAPIStub({ tasks: {
-        cleanupCompleted: jest.fn().mockRejectedValue(new Error('cleanup exploded')),
-      } }),
+      ptahAPI: buildPtahAPIStub({
+        tasks: {
+          cleanupCompleted: jest
+            .fn()
+            .mockRejectedValue(new Error('cleanup exploded')),
+        },
+      }),
       onToolResult,
     });
-    const response = await handleMCPRequest(makeRequest({
-      id: 'cleanup-throws', method: 'tools/call', params: {
-        name: 'ptah_task_cleanup_completed', arguments: {
-          runId: 'run-1', taskId: 'TASK_2026_898_c1a5', workspaceRoot: process.cwd(),
+    const response = await handleMCPRequest(
+      makeRequest({
+        id: 'cleanup-throws',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_task_cleanup_completed',
+          arguments: {
+            runId: 'run-1',
+            taskId: 'TASK_2026_898_c1a5',
+            workspaceRoot: process.cwd(),
+          },
         },
-      },
-    }), deps);
+      }),
+      deps,
+    );
     expect(agentToolResult(response).isError).toBe(true);
-    expect(onToolResult).toHaveBeenCalledWith('cleanup-throws', 'cleanup exploded', true);
+    expect(onToolResult).toHaveBeenCalledWith(
+      'cleanup-throws',
+      'cleanup exploded',
+      true,
+    );
   });
   it('keeps route listed after handoff with agent disabled and outcome deferred', async () => {
     const response = await handleMCPRequest(
@@ -9018,9 +9698,15 @@ describe('protocol-handlers › route and outcome registration', () => {
     expect(names[names.indexOf('ptah_session_handoff') + 1]).toBe(
       'ptah_session_handoff_ack',
     );
-    expect(names[names.indexOf('ptah_session_handoff') + 2]).toBe('ptah_task_close_out');
-    expect(names[names.indexOf('ptah_session_handoff') + 3]).toBe('ptah_task_close_out_status');
-    expect(names[names.indexOf('ptah_session_handoff') + 4]).toBe('ptah_task_cleanup_completed');
+    expect(names[names.indexOf('ptah_session_handoff') + 2]).toBe(
+      'ptah_task_close_out',
+    );
+    expect(names[names.indexOf('ptah_session_handoff') + 3]).toBe(
+      'ptah_task_close_out_status',
+    );
+    expect(names[names.indexOf('ptah_session_handoff') + 4]).toBe(
+      'ptah_task_cleanup_completed',
+    );
     expect(names[names.indexOf('ptah_session_handoff') + 5]).toBe(
       'ptah_route_decide',
     );
@@ -9441,11 +10127,14 @@ describe('protocol-handlers › caller capability', () => {
     });
   });
 
-  const agentWith = (agent: object): PtahAPI['agent'] => agent as PtahAPI['agent'];
+  const agentWith = (agent: object): PtahAPI['agent'] =>
+    agent as PtahAPI['agent'];
 
   it('lets a lane-report caller ack a message', async () => {
     const ack = jest.fn().mockResolvedValue({
-      ok: false, messageId: '11111111-1111-4111-8111-111111111111', code: 'ack-before-delivery',
+      ok: false,
+      messageId: '11111111-1111-4111-8111-111111111111',
+      code: 'ack-before-delivery',
     });
     const response = await handleMCPRequest(
       makeRequest({
@@ -9455,13 +10144,20 @@ describe('protocol-handlers › caller capability', () => {
         _callerAgentId: 'lane-a',
         params: {
           name: 'ptah_agent_message_ack',
-          arguments: { messageId: '11111111-1111-4111-8111-111111111111', state: 'read' },
+          arguments: {
+            messageId: '11111111-1111-4111-8111-111111111111',
+            state: 'read',
+          },
         },
       }),
       buildDeps({ ptahAPI: buildPtahAPIStub({ agent: agentWith({ ack }) }) }),
     );
     expect(response.error).toBeUndefined();
-    expect(ack).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', 'read', undefined);
+    expect(ack).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+      'read',
+      undefined,
+    );
   });
 
   it('denies lane-report calls that target another agent or write', async () => {
@@ -9469,9 +10165,14 @@ describe('protocol-handlers › caller capability', () => {
       ['ptah_agent_report', { agentId: 'lane-b', message: 'spoofed' }],
       ['ptah_agent_message_status', { agentId: 'lane-b', messageId: 'id' }],
       ['ptah_agent_message', { agentId: 'lane-b', message: 'lane-to-lane' }],
-      ['ptah_agent_message_control', {
-        agentId: 'lane-b', messageId: '11111111-1111-4111-8111-111111111111', action: 'cancel',
-      }],
+      [
+        'ptah_agent_message_control',
+        {
+          agentId: 'lane-b',
+          messageId: '11111111-1111-4111-8111-111111111111',
+          action: 'cancel',
+        },
+      ],
       ['ptah_task_create', { title: 'not allowed' }],
     ] as const) {
       const response = await handleMCPRequest(
@@ -9584,13 +10285,21 @@ describe('protocol-handlers › phase tool profile', () => {
 
   it('refuses execute_code through the same phase credential', async () => {
     const response = await handleMCPRequest(
-      makeRequest({ id: 12, method: 'tools/call', _callerAgentId: 'lane-a',
+      makeRequest({
+        id: 12,
+        method: 'tools/call',
+        _callerAgentId: 'lane-a',
         _callerBinding: phaseBinding,
-        params: { name: 'execute_code', arguments: { code: 'ptah.tasks.create({})' } } }),
+        params: {
+          name: 'execute_code',
+          arguments: { code: 'ptah.tasks.create({})' },
+        },
+      }),
       buildDeps(),
     );
     expect(response.error).toEqual({
-      code: MCP_CALLER_FORBIDDEN_CODE, message: MCP_TOOL_DENIED_MESSAGE,
+      code: MCP_CALLER_FORBIDDEN_CODE,
+      message: MCP_TOOL_DENIED_MESSAGE,
     });
   });
 
