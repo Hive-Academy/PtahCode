@@ -16,7 +16,13 @@ import {
 const BUTTON_SELECTOR =
   'button, input[type="submit"], input[type="button"], a[ptahButton], [role="button"]';
 
-const INLINE_CLASS = 'pt-[var(--ptah-gap-group)]';
+/**
+ * Top space that separates an inline bar from the fields above it. A bar that
+ * is the first child of its column has nothing above it, so `first:pt-0` drops
+ * the space there. The `flush` input drops it when the parent already spaces
+ * its children with a gap.
+ */
+const INLINE_CLASS = 'pt-[var(--ptah-gap-group)] first:pt-0';
 const STICKY_CLASS = [
   'sticky bottom-0 z-[var(--ptah-z-raised)]',
   'p-[var(--ptah-surface-pad)]',
@@ -89,6 +95,11 @@ const STICKY_CLASS = [
 })
 export class PtahFormActionsComponent {
   readonly sticky = input(false, { transform: booleanAttribute });
+  /**
+   * Drops the inline top padding. Set it when the parent already puts a gap
+   * between its children, so the two spaces do not stack. No effect in sticky mode.
+   */
+  readonly flush = input(false, { transform: booleanAttribute });
   readonly dirty = input(false, { transform: booleanAttribute });
   readonly saving = input(false, { transform: booleanAttribute });
   readonly disabled = input(false, { transform: booleanAttribute });
@@ -106,7 +117,7 @@ export class PtahFormActionsComponent {
     [
       this.hasButton() ? 'block' : '',
       '[container-type:inline-size]',
-      this.sticky() ? STICKY_CLASS : INLINE_CLASS,
+      this.sticky() ? STICKY_CLASS : this.flush() ? '' : INLINE_CLASS,
     ]
       .filter(Boolean)
       .join(' '),

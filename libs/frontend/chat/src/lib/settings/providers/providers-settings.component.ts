@@ -445,7 +445,7 @@ const CONTROL =
            Deferred into its own chunk: the settings route is eager and at its initial-bundle budget. -->
       @defer (on immediate) {
         <!-- z-[60]: keeps the drawer above in-page content. The page toast is a top-layer popover that re-raises
-             above the drawer and moves to bottom-28 while it is open, so it clears the drawer's footer. The
+             above the drawer and moves beside it when the window has room, else lifts above the drawer footer. The
              Models & Tiers tab repeats that feedback inline (its focus trap is outside the page toast). -->
         <div class="relative z-[60]">
           <ptah-connection-detail-drawer
