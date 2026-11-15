@@ -1,71 +1,20 @@
-# Code Review: MCP Handshake Race Fixes
+# MCP handshake race review
 
-**Reviewer:** Self-review with code inspection  
-**Date:** 2026-11-15  
-**Status:** APPROVED
+**Status: APPROVED**
 
-## Summary
+## Findings
 
-The implementation correctly addresses both MCP attachment defects:
-
-### Fix 1: MCP 0 Startup Race ✅
-
-**File:** `libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-http/mcp-attachment-observer.ts`
-
-**Changes:**
-- Line 64: `if (entry.method !== 'initialize') return;`
-- Prevents caching 'tools/list' responses that lack tool inventory
-- Only 'initialize' responses (which include tools) are recorded as successful attachments
-
-**Verification:**
-- Logic is sound: only initialize confirms the handshake
-- Correctly rejects premature tool/list calls during server startup
-- 60-minute retention window prevents stale cache blocking recovery
-
-**Status:** ✅ APPROVED
-
-### Fix 2: Antigravity Handshake ✅
-
-**File:** `libs/backend/cli-agent-runtime/src/lib/cli-agents/cli-adapters/antigravity-cli.adapter.ts`
-
-**Changes:**
-- Lines 1317-1320: Callback registration with guard
-- `if (mcpTimedOut && !processClosed) callback();`
-- Ensures timeout callback fires only while process is alive
-
-**Verification:**
-- Guard correctly prevents callback after process exits
-- Matches Codex adapter pattern (correct implementation)
-- Properly integrates with agent-process-manager timeout logic
-
-**Status:** ✅ APPROVED
-
-### Fix 3: Type Safety ✅
-
-**File:** `libs/backend/cli-agent-runtime/src/lib/cli-agents/mcp-attachment-probe.port.ts`
-
-**Changes:**
-- Line 32: `getAttempt?: (agentId: string, port: number) => McpAttachmentAttempt | undefined;`
-- Made optional (removed required cast)
-- Exported McpAttachmentAttempt from port
-
-**Usage:**
-- `agent-process-manager.service.ts` line 1500: Uses optional chaining `probe.getAttempt?.(agentId, port)`
-- Eliminates unsafe type cast
-
-**Status:** ✅ APPROVED
-
-## Test Coverage
-
-- Specs updated for both observer and adapter changes
-- MCP 0 regression test covers empty tool list scenario
-- Antigravity timeout test verifies callback behavior
+- **MCP 0 race:** `McpAttachmentObserver.record()` returns unless `entry.method === 'initialize'`. A `tools/list` response cannot populate the attachment map or release a waiter. The observer spec covers `tools/list` before `initialize` and direct `get()` behavior.
+- **Antigravity handshake:** The adapter stores `onMcpAttachmentTimeout` and replays an earlier timeout only while `!processClosed`. Its startup handler also checks `!processClosed` before firing the callback. The adapter specs cover an active timeout, closure before timeout, and registration after closure.
+- **Optional probe API:** `IMcpAttachmentProbe.getAttempt?` is optional, and the process manager calls `probe.getAttempt?.(agentId, port)`. It falls back to `no-request-seen` when no attempt is available. Manager specs cover timeout warning detail, valid attachment, and late attachment clearing the warning.
 
 ## Concerns
 
-None. Implementation is complete and correct.
+- No explicit test omits `getAttempt` from a probe object and asserts the `no-request-seen` detail. The optional call is straightforward and this is a minor coverage gap, not a blocker.
+- The requested line range in `agent-process-manager.service.ts` is now the setup area; MCP attachment handling is at lines 1548–1622.
 
-## Recommendation
+## Verification
 
-Approved for merge. Both defects are properly resolved with appropriate guard conditions and test coverage.
-
+- `nx test @ptah-extension/vscode-lm-tools --testPathPatterns=mcp-attachment-observer.spec.ts --coverage=false --maxWorkers=2`: 5 tests passed.
+- `nx test @ptah-extension/cli-agent-runtime --testPathPatterns='(agent-process-manager.service|antigravity-cli.adapter.mcp).spec.ts' --coverage=false --maxWorkers=2`: 274 tests passed.
+- Review used source and targeted specs only; no product code was changed. Ptah workspace analysis did not return, so targeted native file reads were used. A matching CLI skill invocation mechanism was unavailable in this lane.
