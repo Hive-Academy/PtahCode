@@ -468,10 +468,12 @@ function validatePhases(): ValidationError[] {
     validatePhase(path.join(directory, name), roles),
   );
   const skill = fs.readFileSync(path.join(SKILL_ROOT, 'SKILL.md'), 'utf8');
-  const active = /^## Phase-kind flows\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(
+  const active = /^## Packs and phase-kind flows\s*$([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(
     maskFences(skill),
   );
-  if (active) {
+  if (!active) {
+    errors.push(error('SKILL.md', 'Required section missing: Packs and phase-kind flows'));
+  } else {
     const expected = new Set(PHASE_KINDS.map((kind) => `${kind}.md`));
     for (const name of expected)
       if (!files.includes(name))

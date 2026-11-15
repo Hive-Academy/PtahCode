@@ -28,9 +28,11 @@ Resolve every supplied task ID against an existing `.ptah/specs/<id>/task.md` an
 ## Execution
 
 1. Invoke the `orchestration` skill (Skill tool) — do not Read it by relative path
-2. Follow the Workflow Selection Matrix to determine strategy. For FEATURE,
-   BUGFIX and REFACTORING, load `packs/software.md` from the orchestration skill
-   directory and use its task-type flow.
+2. Follow the Workflow Selection Matrix to determine strategy. Load the matching
+   pack from the orchestration skill directory and use its task-type flow:
+   FEATURE, BUGFIX and REFACTORING → `packs/software.md`; RESEARCH →
+   `packs/research.md`; DOCUMENTATION → `packs/content.md`; DEVOPS (including
+   OPERATIONS requests) → `packs/operations.md`.
 3. Execute the chosen strategy (invoke agents, handle checkpoints)
 4. Load references as needed during execution, resolving them relative to the
    orchestration skill's own directory:
@@ -47,7 +49,9 @@ Resolve every supplied task ID against an existing `.ptah/specs/<id>/task.md` an
 
 **Strategies**: FEATURE, BUGFIX, REFACTORING, DOCUMENTATION, RESEARCH, DEVOPS, CREATIVE
 
-**Software pack**: FEATURE, BUGFIX and REFACTORING use `packs/software.md`.
+**Packs**: FEATURE, BUGFIX and REFACTORING use `packs/software.md`; RESEARCH uses
+`packs/research.md`; DOCUMENTATION uses `packs/content.md`; DEVOPS (including
+OPERATIONS requests) uses `packs/operations.md`.
 
 **Active phases**: `batch` decomposes and accepts batches; `completion` audits final evidence. Requirements, architecture, research, design and docs use the `plan`, `architecture`, `research`, `design` and `docs` phase kinds. Verification uses the `review`, `tests` and `visual-review` phase kinds. Implementation uses the `implement` phase kind.
 

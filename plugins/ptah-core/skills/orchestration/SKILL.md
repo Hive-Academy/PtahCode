@@ -40,9 +40,17 @@ correction in agent-lanes §6; any code you change is independently reviewed bef
 
 ## Packs and phase-kind flows
 
-The [software pack](packs/software.md) selects the flow for FEATURE, BUGFIX and
-REFACTORING tasks. Software is a pack, not a phase kind. Read its skeleton mapping
-and task-type flow before routing its individual phases.
+Select and read the pack for the classified task type before routing its individual phases.
+Read its skeleton mapping and task-type flow. Packs are not phase kinds:
+
+| Task type | Pack |
+| --- | --- |
+| FEATURE, BUGFIX, REFACTORING | [software](packs/software.md) |
+| RESEARCH | [research](packs/research.md) |
+| DOCUMENTATION | [content](packs/content.md) |
+| DEVOPS (including OPERATIONS requests) | [operations](packs/operations.md) |
+
+Use the selected pack's phase flow for these task types.
 
 Route each phase by its kind at Gate 0.1 using `ptah_route_decide` with `kind`, and read
 [`phases/<kind>.md`](phases/) for its discipline, input, deliverable, verdict and acceptance step.
@@ -54,9 +62,6 @@ step, including batch verification and commits; an executor never accepts its ow
 
 | Type | Phase-kind flow |
 | --- | --- |
-| DOCUMENTATION | `plan` -> `document-review` -> `docs` (content specification) -> `implement` (documentation files) -> `review` -> `tests` -> `completion` |
-| RESEARCH | `research` -> [`plan` and FEATURE flow if implementation is needed] -> `completion` |
-| DEVOPS | `plan` -> `document-review` -> `architecture` -> `document-review` -> `implement` -> `review` -> `tests` -> `completion` -> `research` (after-QA modernization scan) |
 | SAAS_INIT | discovery -> `plan` -> `document-review` -> `architecture` -> `document-review` -> `batch` -> `implement` -> `review` -> `tests` -> `completion` |
 | CREATIVE | [`design` -> `document-review` -> Gate 1.7] -> `docs` -> `implement` -> `review` -> `visual-review` -> `completion` |
 
