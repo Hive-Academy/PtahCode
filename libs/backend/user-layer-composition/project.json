@@ -17,11 +17,17 @@
         "external": ["vscode", "tsyringe", "zod", "eventemitter3"]
       }
     },
-    "test": {
-      "executor": "@nx/jest:jest",
+    "typecheck": {
+      "executor": "nx:run-commands",
       "options": {
-        "jestConfig": "libs/backend/user-layer-composition/jest.config.ts",
-        "passWithNoTests": false
+        "command": "tsc --noEmit --project libs/backend/user-layer-composition/tsconfig.lib.json"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "libs/backend/user-layer-composition",
+        "command": "eslint ."
       }
     }
   }

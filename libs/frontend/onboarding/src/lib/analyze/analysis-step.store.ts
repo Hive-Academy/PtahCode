@@ -1,17 +1,12 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import type {
-  AgentRecommendation,
   MultiPhaseAnalysisResponse,
   SavedAnalysisMetadata,
-  SetupGenerationRejection,
-  SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
 import {
-  GenerationWorkflowStore,
   SetupWizardStateService,
   WizardAnalysisRunner,
   WizardRpcService,
-  type BoundAgentDecisions,
 } from '@ptah-extension/setup-wizard';
 
 export type PhaseStatus =
@@ -49,17 +44,12 @@ export class AnalysisStepStore {
   private readonly rpc = inject(WizardRpcService);
   private readonly wizard = inject(SetupWizardStateService);
   private readonly runner = inject(WizardAnalysisRunner);
-  private readonly generation = inject(GenerationWorkflowStore);
   private readonly savedValue = signal<readonly SavedAnalysisMetadata[]>([]);
   private readonly hiddenValue = signal<ReadonlySet<string>>(new Set());
   private readonly selectedValue = signal<string | null>(null);
   private readonly loadedValue = signal<MultiPhaseAnalysisResponse | null>(
     null,
   );
-  private readonly recommendationsValue = signal<
-    readonly AgentRecommendation[]
-  >([]);
-  private readonly selectionValue = signal<ReadonlySet<string>>(new Set());
   private readonly attachedValue = signal(false);
   private workspaceRevision = 0;
   readonly saved = this.savedValue.asReadonly();
@@ -68,8 +58,6 @@ export class AnalysisStepStore {
   readonly loaded = computed(() =>
     this.selectedValue() ? this.loadedValue() : this.completedLiveResult(),
   );
-  readonly recommendations = this.recommendationsValue.asReadonly();
-  readonly selection = this.selectionValue.asReadonly();
   readonly phaseRows = computed<readonly PhaseRow[]>(() => {
     const result = this.loaded();
     const phases = result?.manifest.phases;
@@ -180,79 +168,10 @@ export class AnalysisStepStore {
     this.hiddenValue.set(new Set());
     this.selectedValue.set(null);
     this.loadedValue.set(null);
-    this.recommendationsValue.set([]);
-    this.selectionValue.set(new Set());
     this.attachedValue.set(false);
   }
   clearSelection(): void {
     this.selectedValue.set(null);
     this.loadedValue.set(null);
-  }
-  toggleAgent(id: string): void {
-    this.selectionValue.update((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-  selectRecommended(): void {
-    this.selectionValue.set(
-      new Set(
-        this.recommendationsValue()
-          .filter((agent) => agent.recommended)
-          .map((agent) => agent.agentId),
-      ),
-    );
-  }
-  clearAgents(): void {
-    this.selectionValue.set(new Set());
-  }
-  async loadRecommendations(
-    _binding: SetupGenerationTabBinding,
-    source: 'analysis' | 'catalog',
-  ): Promise<void> {
-    this.recommendationsValue.set([]);
-    if (source === 'analysis' && !this.loaded())
-      throw new Error('Choose a completed analysis first.');
-  }
-  async submit(
-    binding: SetupGenerationTabBinding,
-    decisions?: BoundAgentDecisions,
-    agentIds: readonly string[] = [...this.selectionValue()],
-  ): Promise<
-    | { runId: string }
-    | { rejection: SetupGenerationRejection }
-    | { error: string }
-  > {
-    this.generation.bind(binding);
-    const bound = this.generation.binding();
-    if (
-      bound?.tabId !== binding.tabId ||
-      bound.workspacePath !== binding.workspacePath ||
-      bound.workflow !== binding.workflow
-    )
-      return { error: 'Generation tab is unavailable. Try again.' };
-    const previous = this.generation.acceptedRun();
-    const previousRejection = this.generation.rejection();
-    const previousError = this.generation.startError();
-    await this.generation.startAgents([...agentIds], decisions);
-    const accepted = this.generation.acceptedRun();
-    if (
-      accepted &&
-      (!previous ||
-        accepted.runId !== previous.runId ||
-        accepted.revision !== previous.revision)
-    )
-      return { runId: accepted.runId };
-    const rejection = this.generation.rejection();
-    if (rejection && rejection !== previousRejection) return { rejection };
-    const error = this.generation.startError();
-    return {
-      error:
-        error && error !== previousError
-          ? error
-          : 'Generation could not start. Try again.',
-    };
   }
 }

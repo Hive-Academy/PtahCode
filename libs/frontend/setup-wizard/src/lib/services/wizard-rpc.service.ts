@@ -50,7 +50,6 @@ export type BoundAgentDecisions = Pick<
   'previewToken' | 'fileDecisions' | 'target'
 >;
 
-
 /** Only the decision fields that are set, so absent ones keep server defaults. */
 function boundDecisionFields(
   decisions: BoundAgentDecisions | undefined,

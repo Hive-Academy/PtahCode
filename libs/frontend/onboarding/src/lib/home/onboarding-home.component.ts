@@ -163,7 +163,7 @@ interface StatusChip {
           class="min-[721px]:row-span-2"
           testId="analyze"
           title="Analyze current project"
-          description="Best when you already have code. Ptah reads your workspace, recommends agents, writes them and prepares project guidance."
+          description="Best when you already have code. Ptah reads your workspace and prepares project guidance."
           callToAction="Start analysis"
           [icon]="icons.scanSearch"
           [link]="analyzeLink"
@@ -179,22 +179,6 @@ interface StatusChip {
                 aria-hidden="true"
               />
               Analyze workspace
-            </li>
-            <li class="flex items-center gap-2">
-              <lucide-angular
-                [img]="icons.listChecks"
-                class="size-4 text-base-content"
-                aria-hidden="true"
-              />
-              Choose agents
-            </li>
-            <li class="flex items-center gap-2">
-              <lucide-angular
-                [img]="icons.wandSparkles"
-                class="size-4 text-base-content"
-                aria-hidden="true"
-              />
-              Generate agents
             </li>
             <li class="flex items-center gap-2">
               <lucide-angular

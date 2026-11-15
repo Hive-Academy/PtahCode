@@ -42,6 +42,7 @@ describe('ProjectGuidancePage', () => {
   const step = { bindGuidance: jest.fn(), guidanceSections: jest.fn() };
   const rpc = { getBoundRunState: jest.fn(), getEnhancedPromptsStatus: jest.fn() };
   const router = { navigate: jest.fn() };
+  const launcher = { open: jest.fn() };
   const tabs = { activeWorkspacePath: '/ws', findTabByIdAcrossWorkspaces: jest.fn(), getWorkspaceTabs: jest.fn() };
   let fixture: ReturnType<typeof TestBed.createComponent<ProjectGuidancePage>>;
 
@@ -54,12 +55,13 @@ describe('ProjectGuidancePage', () => {
     step.bindGuidance.mockReturnValue('bound'); step.guidanceSections.mockReturnValue(null);
     rpc.getBoundRunState.mockResolvedValue(null); rpc.getEnhancedPromptsStatus.mockResolvedValue({ enabled: true, hasGeneratedPrompt: false, generatedAt: null, detectedStack: null, cacheValid: false });
     router.navigate.mockResolvedValue(true); handoff.startNow.mockResolvedValue(undefined);
+    launcher.open.mockResolvedValue({ outcome: 'landed', tabId: 'guidance-tab' });
     tabs.findTabByIdAcrossWorkspaces.mockReturnValue({ workspacePath: '/ws', tab: { id: 'guidance-tab', workflow: 'setup-project-prompt' } });
     tabs.getWorkspaceTabs.mockReturnValue([{ id: 'guidance-tab', workflow: 'setup-project-prompt' }]);
     TestBed.configureTestingModule({ providers: [provideRouter([]),
       { provide: ActivatedRoute, useValue: { snapshot: { get queryParamMap() { return convertToParamMap(params); }, get queryParams() { return { ...params }; }, data: {} } } },
       { provide: Router, useValue: router }, { provide: TabManagerService, useValue: tabs }, { provide: VSCodeService, useValue: { config: () => ({ workspaceRoot: '/ws' }) } },
-      { provide: GenerationWorkflowLauncherService, useValue: { open: jest.fn() } },
+      { provide: GenerationWorkflowLauncherService, useValue: launcher },
       { provide: GenerationWorkflowStore, useValue: workflow }, { provide: GuidanceGenerationStore, useValue: guidance },
       { provide: GenerationHandoffStore, useValue: handoff }, { provide: GenerationStepStore, useValue: step }, { provide: WizardRpcService, useValue: rpc },
     ] });
@@ -70,6 +72,17 @@ describe('ProjectGuidancePage', () => {
   });
   afterEach(() => TestBed.resetTestingModule());
   async function render() { fixture = TestBed.createComponent(ProjectGuidancePage); fixture.detectChanges(); await fixture.whenStable(); fixture.detectChanges(); return fixture.nativeElement as HTMLElement; }
+
+  it('opens a guidance tab when a retired route redirects without a tab', async () => {
+    delete params['tab'];
+    await render();
+    expect(launcher.open).toHaveBeenCalledWith({
+      workspacePath: '/ws',
+      workflow: 'setup-project-prompt',
+      origin: 'analysis-result-continue',
+    });
+    expect(step.bindGuidance).not.toHaveBeenCalled();
+  });
 
   it('rebinds URL run before a different handoff run', async () => {
     handoff.started.set({ ...binding, runId: 'other-run' });
@@ -85,7 +98,7 @@ describe('ProjectGuidancePage', () => {
     const panel = layout?.querySelector('ptah-run-panel');
     expect(log).not.toBeNull();
     expect(log?.hasAttribute('runlog')).toBe(true);
-    expect(log?.compareDocumentPosition(panel as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect((log?.compareDocumentPosition(panel as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(log?.querySelector('[role="log"]')).not.toBeNull();
     expect(log?.querySelector('summary')).toBeNull();
     const logInstance = fixture.debugElement.query((debug) => debug.componentInstance instanceof DetailsLogStubComponent)?.componentInstance as DetailsLogStubComponent;

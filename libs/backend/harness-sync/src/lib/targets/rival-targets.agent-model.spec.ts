@@ -328,7 +328,18 @@ describe('rival targets — agent model reconciliation', () => {
     expect(existsSync(join(ws, copyRel))).toBe(false);
   });
 
-  it('removes an unchanged managed custom copy after its source is deleted', async () => {
+  it('keeps a managed retired-name copy when the origin store disappears', async () => {
+    const service = reconciler();
+    await service.reconcile(ws, { mode: 'full', reason: 'initial user agent' });
+    const copy = join(ws, copyRel);
+    const original = readFileSync(copy, 'utf8');
+    rmSync(join(ws, '.ptah', 'setup-wizard', 'agent-origins.json'));
+    await service.reconcile(ws, { mode: 'full', reason: 'origin store missing' });
+    expect(readFileSync(copy, 'utf8')).toBe(original);
+    expect(new ManagedManifestStore().load(ws, 'codex').entries[copyRel]).toBeDefined();
+  });
+
+  it('retains an unchanged managed custom copy after its source is deleted', async () => {
     const source = join(ws, '.claude', 'agents', 'custom.md');
     const copy = join(ws, '.codex', 'agents', 'custom.toml');
     writeFileSync(source, '# Custom agent');
@@ -337,7 +348,8 @@ describe('rival targets — agent model reconciliation', () => {
     expect(existsSync(copy)).toBe(true);
     rmSync(source);
     await service.reconcile(ws, { mode: 'full', reason: 'custom source deleted' });
-    expect(existsSync(copy)).toBe(false);
+    expect(existsSync(copy)).toBe(true);
+    expect(new ManagedManifestStore().load(ws, 'codex').entries['.codex/agents/custom.toml']).toBeDefined();
   });
 
   it('keeps an edited managed custom copy in place after sync is disabled', async () => {

@@ -1,5 +1,5 @@
 /**
- * Analyze workspace (A1) and Choose agents (A2) capture fixtures
+ * Analyze workspace capture fixtures
  * (TASK_2026_ONBOARDING B3a). Wizard RPCs are mocked so captures do not depend
  * on a live analysis run. This file imports nothing from
  * `@ptah-extension/onboarding`; state text is asserted by the spec as literals.
@@ -153,14 +153,6 @@ export function onboardingAnalyzeFixtures(
     'wizard:list-analyses': { analyses: [] },
     'wizard:get-resumable-run': { analysis: null, generation: null },
     'wizard:get-generation-run-state': { run: null },
-    'wizard:preview-generation': {
-      agents: [{ agentId: 'backend-developer', files: [] }],
-      previewToken: 'preview-e2e-analyze',
-    },
-    'wizard:submit-selection': {
-      success: false,
-      rejection: { reason: 'blocked', ownerTabId: 'other-generation-tab' },
-    },
     ...overrides,
   };
   for (const [method, value] of Object.entries(fixtures)) {

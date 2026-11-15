@@ -82,6 +82,7 @@ export async function userAgentFiles(
   } catch (error) {
     if (!isMissing(error)) {
       log.error('Cannot list workspace agents', realError(error));
+      throw realError(error);
     }
     return [];
   }

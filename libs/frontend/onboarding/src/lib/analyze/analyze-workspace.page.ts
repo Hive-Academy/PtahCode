@@ -81,7 +81,7 @@ import { PhaseListComponent } from './phase-list.component';
             Analyze workspace
           </h1>
           <p class="text-sm text-base-content-muted">
-            Understand this project before choosing agents.
+            Understand this project before creating project guidance.
           </p>
         </div>
       </header>
@@ -154,11 +154,11 @@ import { PhaseListComponent } from './phase-list.component';
           state="done"
           [viewState]="viewState()"
           title="Analysis complete"
-          continueLabel="Choose agents"
+          continueLabel="Project guidance"
           [message]="
             'Completed in ' + duration(result.manifest.totalDurationMs)
           "
-          (continueRun)="chooseAgents()"
+          (continueRun)="continueGuidance()"
         >
           <ptah-phase-list [phases]="store.phaseRows()" />
         </ptah-run-panel>
@@ -311,8 +311,6 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     viewChild.required<ConfirmationModalComponent>('stopModal');
   protected readonly steps: readonly OnboardingStep[] = [
     { id: 'analyze', label: 'Analyze', state: 'current' },
-    { id: 'agents', label: 'Choose agents', state: 'upcoming' },
-    { id: 'generate', label: 'Generate agents', state: 'upcoming' },
     { id: 'guidance', label: 'Project guidance', state: 'upcoming' },
     { id: 'done', label: 'Done', state: 'upcoming' },
   ];
@@ -485,11 +483,11 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     this.releaseClock = null;
     this.openedAt.set(null);
   }
-  protected async chooseAgents(): Promise<void> {
+  protected async continueGuidance(): Promise<void> {
     const identity = {
       analysis: this.store.selected() ?? this.store.loaded()?.manifest.slug,
     };
-    const link = onboardingStepLink('analyze', 'agents', identity);
+    const link = onboardingStepLink('analyze', 'guidance', identity);
     await this.router.navigate([...link.commands], {
       queryParams: link.queryParams,
       state: { explicitBack: false },

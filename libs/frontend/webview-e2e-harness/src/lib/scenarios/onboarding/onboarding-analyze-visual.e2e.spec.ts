@@ -1,10 +1,9 @@
 /**
- * Analyze workspace (A1) and Choose agents (A2) visual gate
+ * Analyze workspace visual gate
  * (TASK_2026_ONBOARDING B3a). Four themes, WIDE 1280×800 and NARROW 464×800
  * (400px content area, design-spec §12.8), axe report per capture.
  *
- * Route is asserted through page host testids (`analyze-workspace`,
- * `choose-agents`), never `page.url()` (`MemoryPlatformLocation`).
+ * Route is asserted through the analyze page host testid.
  *
  * Run (screenshot step, after a webview build):
  *   node scripts/verify.mjs --exec --task onboarding-analyze-captures -- \
@@ -40,7 +39,6 @@ const WIDE = { width: 1280, height: 800 } as const;
 const NARROW = { width: 464, height: 800 } as const;
 
 const ANALYZE = '[data-testid="analyze-workspace"]';
-const AGENTS = '[data-testid="choose-agents"]';
 const PHASE_HEADER = '[data-testid="phase-header"]';
 const BUSY_EXEMPT = `${ANALYZE}, [data-testid="details-log"]`;
 
@@ -78,11 +76,6 @@ async function boot(
 async function openAnalyze(page: Page): Promise<void> {
   await page.locator('[data-testid="onboarding-path-link-analyze"]').click();
   await expect(page.locator(ANALYZE)).toBeVisible();
-}
-
-async function openAgentsCatalog(page: Page): Promise<void> {
-  await page.locator('[data-testid="onboarding-link-agents-only"]').click();
-  await expect(page.locator(AGENTS)).toBeVisible();
 }
 
 async function expectSavedList(page: Page): Promise<void> {
@@ -132,40 +125,6 @@ async function expectCompleted(page: Page): Promise<void> {
   await expect(
     page.getByRole('button', { name: 'Manual adjust' }),
   ).toHaveCount(0);
-}
-
-async function expectCatalogBanner(page: Page): Promise<void> {
-  await expect(page.locator('[data-testid="agent-only-banner"]')).toContainText(
-    'No analysis is used; recommendations come from the workspace catalog',
-  );
-}
-
-async function expectLoadedRecommendations(page: Page): Promise<void> {
-  await expectCatalogBanner(page);
-  // One badge per row (40% and 92%). Filter so strict mode does not see both.
-  const match92 = page
-    .locator('[data-testid="agent-recommendation-match"]')
-    .filter({ hasText: '92% match' });
-  await expect(match92).toHaveCount(1);
-  await expect(
-    page.locator('[data-testid="agent-recommendation-count"]'),
-  ).toHaveCount(1);
-  await expect(
-    page.locator('[data-testid="agent-recommendation-count"]'),
-  ).toContainText('1 selected');
-}
-
-async function expectOwnerConflict(page: Page): Promise<void> {
-  await expectLoadedRecommendations(page);
-  await expect(
-    page.locator('[data-testid="choose-agents-preview-trigger"]'),
-  ).toBeEnabled();
-  await page.locator('[data-testid="choose-agents-preview-trigger"]').click();
-  await expect(page.locator('[data-testid="preview-confirm"]')).toBeVisible();
-  await page.locator('[data-testid="preview-confirm"]').click();
-  await expect(
-    page.locator('[data-testid="choose-agents-owner-banner"]'),
-  ).toContainText('Another run is active.');
 }
 
 const SAVED_LIST_RPC = {
@@ -269,53 +228,6 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
         await shoot(page, { view: `${size.prefix}analyze-completed`, theme });
       });
 
-      test(`${size.prefix}agents-catalog-banner`, async ({
-        page,
-        fixtureServer,
-      }) => {
-        await boot(page, fixtureServer.url, theme, { viewport: size.viewport });
-        await openAgentsCatalog(page);
-        await expectCatalogBanner(page);
-        await shoot(page, {
-          view: `${size.prefix}agents-catalog-banner`,
-          theme,
-        });
-      });
-
-      test(`${size.prefix}agents-92-match`, async ({ page, fixtureServer }) => {
-        await boot(page, fixtureServer.url, theme, { viewport: size.viewport });
-        await openAgentsCatalog(page);
-        await expectLoadedRecommendations(page);
-        await shoot(page, { view: `${size.prefix}agents-92-match`, theme });
-      });
-
-      test(`${size.prefix}agents-selection-count`, async ({
-        page,
-        fixtureServer,
-      }) => {
-        await boot(page, fixtureServer.url, theme, { viewport: size.viewport });
-        await openAgentsCatalog(page);
-        await expect(
-          page.locator('[data-testid="agent-recommendation-count"]'),
-        ).toContainText('1 selected');
-        await shoot(page, {
-          view: `${size.prefix}agents-selection-count`,
-          theme,
-        });
-      });
-
-      test(`${size.prefix}agents-owner-conflict`, async ({
-        page,
-        fixtureServer,
-      }) => {
-        await boot(page, fixtureServer.url, theme, { viewport: size.viewport });
-        await openAgentsCatalog(page);
-        await expectOwnerConflict(page);
-        await shoot(page, {
-          view: `${size.prefix}agents-owner-conflict`,
-          theme,
-        });
-      });
     }
   });
 }

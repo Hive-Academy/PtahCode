@@ -80,7 +80,7 @@ describe('HarnessReconcilerService — retiring a hand-edited copy (TASK_2026_60
     ws = mkdtempSync(join(tmpdir(), 'harness-retire-ws-'));
     sourcesRoot = mkdtempSync(join(tmpdir(), 'harness-retire-src-'));
     home = mkdtempSync(join(tmpdir(), 'harness-retire-home-'));
-    jest.mocked(homedir).mockReturnValue(home);
+    jest.mocked(homedir).mockReturnValue(tmpdir());
     savedCodexHome = process.env['CODEX_HOME'];
     delete process.env['CODEX_HOME'];
     mkdirSync(join(sourcesRoot, 'skills'), { recursive: true });
@@ -212,6 +212,16 @@ describe('HarnessReconcilerService — retiring a hand-edited copy (TASK_2026_60
     expect(row(health, 'codex').removed).not.toContain(CODEX_TWO);
     expect(ownedPaths('codex')).toContain(CODEX_TWO);
     expect(exists(HISTORY)).toBe(false);
+  });
+
+  it('clears a stale claim when an undesired agent copy is already missing', async () => {
+    await reconcile();
+    deleteAgentSource('agent-two');
+    rmSync(abs(CODEX_TWO), { force: true });
+    const health = await reconcile();
+    expect(row(health, 'codex').keptLocalEdit).not.toContain(CODEX_TWO);
+    expect(ownedPaths('codex')).not.toContain(CODEX_TWO);
+    expect(exists(COPILOT_TWO)).toBe(true);
   });
 
   it('2. a hand-edited managed copy remains after source deletion', async () => {

@@ -132,6 +132,16 @@ describe('userAgentFiles', () => {
     expect(await userAgentFiles(root, log)).toEqual(['yes.md']);
   });
 
+  it('aborts when listing agents fails for a reason other than absence', async () => {
+    const failure = Object.assign(new Error('unreadable'), { code: 'EACCES' });
+    const fs: UserAgentFileSystem = {
+      readFile: async () => { throw failure; },
+      readdir: async () => { throw failure; },
+    };
+    await expect(userAgentFiles(root, log, fs)).rejects.toBe(failure);
+    expect(log.error).toHaveBeenCalledWith('Cannot list workspace agents', failure);
+  });
+
   it('does not read a retired agent snapshot back as a source', async () => {
     const snapshot = join(root, '.ptah', 'harness', '.history', 'writer', 'stamp');
     mkdirSync(snapshot, { recursive: true });

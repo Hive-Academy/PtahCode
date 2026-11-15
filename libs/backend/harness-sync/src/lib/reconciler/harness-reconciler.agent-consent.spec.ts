@@ -27,7 +27,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'fs';
-import { tmpdir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import type { HarnessTargetId } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -49,6 +49,11 @@ import {
   createCopilotTarget,
 } from '../targets/rival-targets';
 import { HarnessReconcilerService } from './harness-reconciler.service';
+
+jest.mock('os', () => ({
+  ...jest.requireActual<typeof import('os')>('os'),
+  homedir: jest.fn(),
+}));
 
 function fakeLogger(): Logger {
   return {
@@ -77,10 +82,12 @@ describe('HarnessReconcilerService — the agents consent gate', () => {
     ws = mkdtempSync(join(tmpdir(), 'harness-consent-ws-'));
     sourcesRoot = mkdtempSync(join(tmpdir(), 'harness-consent-src-'));
     home = mkdtempSync(join(tmpdir(), 'harness-consent-home-'));
+    jest.mocked(homedir).mockReturnValue(tmpdir());
     writeAgentSources('agent-one', 'agent-two');
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     for (const dir of [ws, sourcesRoot, home]) {
       rmSync(dir, { recursive: true, force: true });
     }

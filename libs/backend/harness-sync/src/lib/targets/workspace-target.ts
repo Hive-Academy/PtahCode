@@ -32,13 +32,12 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs';
 import type { Stats } from 'fs';
 import { mkdir, readFile, rm, unlink, writeFile } from 'fs/promises';
-import { basename, dirname, join } from 'path';
+import { dirname, join } from 'path';
 import type {
   HarnessFacetMatrix,
   HarnessTargetHealth,
   HarnessTargetId,
 } from '@ptah-extension/shared';
-import { isRetiredRole } from '@ptah-extension/shared';
 import { isRetiredPtahAgent } from './retired-agent-origin';
 import { throwIfPassAborted } from '../abort/pass-abort';
 import {
@@ -661,15 +660,18 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       const entry = baseEntries[relPath];
       if (entry.kind === 'mcp') continue; // owned by the facet planner
       if (entry.kind === 'agent') {
-        // A retired role could be wizard output. Without its source we cannot
-        // prove user authorship, so routine sync leaves that copy alone.
-        if (isRetiredRole(basename(entry.source, '.md'))) continue;
-        // Only a manifest claim plus matching output bytes proves the copy is
-        // ours to remove. Keep edited and unreadable copies at their live path.
-        const actual = await hashFile(toAbsolute(workspaceRoot, relPath));
-        if (actual !== entry.hash) {
-          keptLocalEdit.push(relPath);
+        // Routine passes retain managed agent copies pending explicit removal.
+        // A copy already absent on disk only needs its stale claim removed.
+        try {
+          lstatSync(toAbsolute(workspaceRoot, relPath));
+          const actual = await hashFile(toAbsolute(workspaceRoot, relPath));
+          if (actual !== entry.hash) keptLocalEdit.push(relPath);
           continue;
+        } catch (error) {
+          if (!isMissingFile(error)) {
+            keptLocalEdit.push(relPath);
+            continue;
+          }
         }
       }
       if (mcpPlan.ownedKeys.has(relPath)) continue;
@@ -848,22 +850,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     removedLocalEdit: string[],
   ): Promise<void> {
     const { relPath, isDirectory } = removal;
-    if (removal.kind === 'agent') {
-      const gate = await prepareOwnedOverwrite({
-        workspaceRoot,
-        relPath,
-        isDirectory,
-        ownedHash: baseEntries[relPath]?.hash,
-      });
-      if (gate.kind === 'failed') {
-        result.writeFailed.push({ relPath, reason: gate.reason });
-      } else if (gate.kind === 'kept-local-edit') {
-        result.keptLocalEdit.push(relPath);
-      } else {
-        result.removed.push(relPath);
-      }
-      return;
-    }
     const outcome = await retireOwnedArtifact({
       workspaceRoot,
       relPath,
@@ -1084,6 +1070,10 @@ function lstatSyncOrNull(path: string): Stats | null {
     // and null routes the path through the normal create-or-repair plan.
     return null;
   }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
 /** Names recorded under `key` in a legacy `.ptah-managed.json`. */
