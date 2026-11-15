@@ -402,11 +402,43 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       attempt,
       SESSION_HANDOFF_START_TIMEOUT_MS,
     );
+    let recordSaved = false;
+    let lateStartSucceeded = false;
     if (result === TIMED_OUT) {
       this.pending.delete(tabId);
-      // The session may still open late, but the caller is told it did not
-      // start, so the caller keeps its work: a late success adopts nothing.
-      this.settleAdoption(adoption, tabId, 'reverted');
+      // The session may still open late. Wait a brief moment to catch late
+      // completion so we can save ackStore record and keep adoption (D2/D3 fix).
+      const lateResult = await withDeadline(attempt, 5_000);
+      if (lateResult !== TIMED_OUT && lateResult.ok) {
+        // Late success: keep adoption and save the record so acknowledge can find it.
+        lateStartSucceeded = true;
+        this.remember(record.tabId, {
+          sdkSessionId: record.realSessionId,
+          tabId,
+        });
+        this.settleAdoption(adoption, tabId, 'kept');
+        try {
+          if (this.ackStore) {
+            const handoffPath = await fs.realpath(request.handoffPath);
+            await this.ackStore.record({
+              predecessorTabId: record.tabId,
+              predecessorSdkId: record.realSessionId,
+              successorTabId: tabId,
+              successorSdkId: this.pending.get(tabId)?.resolvedSdkId ?? null,
+              workspaceRoot: resolve(paths.root),
+              handoffPath,
+              state: 'recorded',
+            });
+            recordSaved = true;
+            this.log(`${record.tabId}: saved ackStore record for late-started successor ${tabId}; adoption kept`);
+          }
+        } catch (error: unknown) {
+          this.reportError('handoff late-completion record failed', error);
+        }
+      } else {
+        // No late success: revert adoption.
+        this.settleAdoption(adoption, tabId, 'reverted');
+      }
       return this.refuse(
         'session-start-failed',
         SESSION_HANDOFF_START_TIMEOUT_DETAIL,
@@ -422,7 +454,6 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       sdkSessionId: record.realSessionId,
       tabId,
     });
-    let recordSaved = false;
     try {
       if (!this.ackStore) throw new Error('handoff acknowledgement storage unavailable');
       const handoffPath = await fs.realpath(request.handoffPath);
