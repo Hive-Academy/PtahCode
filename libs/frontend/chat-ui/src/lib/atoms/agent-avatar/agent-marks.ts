@@ -1,11 +1,5 @@
 import {
   Bot,
-  ClipboardList,
-  DraftingCompass,
-  Palette,
-  ScrollText,
-  Sparkles,
-  Telescope,
   Users,
 } from 'lucide-angular';
 import type { LucideIconData } from 'lucide-angular';
@@ -112,13 +106,7 @@ export function cliMarkFor(
 
 /** THE role-icon table: one lucide glyph per workspace agent type. */
 export const AGENT_ROLE_ICONS: Readonly<Record<string, LucideIconData>> = {
-  'software-architect': DraftingCompass,
   'team-leader': Users,
-  'project-manager': ClipboardList,
-  'ui-ux-designer': Palette,
-  'researcher-expert': Telescope,
-  'technical-content-writer': ScrollText,
-  'modernization-detector': Sparkles,
 };
 
 /** The glyph of a sub-agent or background agent type; `Bot` when unknown. */

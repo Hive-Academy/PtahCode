@@ -1,63 +1,32 @@
 ---
 title: Built-in Agents
-description: The built-in agent templates in PtahCode, their roles, and when to use each.
+description: The active built-in agent and the phase workflow in PtahCode.
 ---
 
 # Built-in Agents
 
-PtahCode has 7 built-in agent templates for planning, research, and design. The [setup wizard](/setup/setup-wizard/) selects the templates that apply to your project and writes them to `<workspace-root>/.claude/agents/`. Implementation, testing, code review, and visual review run as phase kinds on a subagent, CLI lane, or session.
+PtahCode ships the `team-leader` agent template. The [setup wizard](/setup/setup-wizard/) can write it to `<workspace-root>/.claude/agents/`. Planning, architecture, research, documentation, design, implementation, tests, review, and visual review run as phases on a subagent, CLI lane, or session.
 
-## The catalog
+## Active agent
 
-| Agent                        | Role                                                           | Reach for it when…                                               |
-| ---------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **project-manager**          | Breaks work into tasks, tracks status, coordinates handoffs    | You have a vague goal and need it turned into actionable tickets |
-| **software-architect**       | Designs systems, picks patterns, authors ADRs                  | You're starting a new module or making a cross-cutting change    |
-| **team-leader**              | Recommends batch executors, verifies work, records batch state | A plan needs batches, executor recommendations, and review gates |
-| **researcher-expert**        | Evaluates libraries, patterns, API docs, RFCs                  | Choosing a dependency or exploring an unfamiliar domain          |
-| **modernization-detector**   | Spots outdated patterns, deprecated APIs, legacy idioms        | Before a refactor sprint or framework upgrade                    |
-| **ui-ux-designer**           | Visual design, design systems, component specs                 | Creating landing pages, brand assets, design tokens              |
-| **technical-content-writer** | Marketing copy, docs, blogs, video scripts                     | Release notes, launch pages, tutorials, API references           |
+| Agent | Role | Use it when |
+| --- | --- | --- |
+| **team-leader** | Recommends batch executors, verifies work, and records batch state | A plan needs batches and review gates |
 
-## Agent groups at a glance
+## Phase workflow
 
-### Planning & Leadership
+A feature can run through `plan` -> optional `research` / `design` -> `architecture` -> `team-leader` -> `implement` -> `tests` and `review`. The `docs` phase prepares documentation and content. The `visual-review` phase uses browser tools.
 
-`project-manager` → `software-architect` → `team-leader`
+Old role names remain phase aliases: `project-manager` maps to `plan`; `software-architect` maps to `architecture`; `researcher-expert` and `modernization-detector` map to `research`; `technical-content-writer` maps to `docs`; `ui-ux-designer` maps to `design`. Verification aliases also remain: `senior-tester` maps to `tests`; `code-style-reviewer` and `code-logic-reviewer` map to `review`; `visual-reviewer` maps to `visual-review`.
 
-Use this trio when you're kicking off something non-trivial. The project manager writes the brief, the architect designs the approach, and the team leader supervises execution.
-
-### Implementation
-
-The `implement` phase covers backend, frontend, and operations changes. It runs on an assigned executor: a subagent, [CLI lane](/agents/cli-agents/), or session. Older records that name `backend-developer`, `frontend-developer`, or `devops-engineer` map to `implement`.
-
-A custom agent with one of these retired names still maps to `implement` in routing. Lane spawn role resolution, mirror, and sync use the setup wizard origin store and matching workspace file hash, so user-authored or edited agents with these names remain available for lane spawn.
-A provider copy is kept after its source is removed only when the workspace agent file proves it is an unchanged wizard-written agent.
-
-### Quality & Review
-
-Use `tests` for test coverage, `review` for code style and logic, and `visual-review` for browser-based UI checks. Old role names map to these phase kinds: `senior-tester` to `tests`; `code-style-reviewer` and `code-logic-reviewer` to `review`; `visual-reviewer` to `visual-review`.
-
-Custom agents with these names still map to the corresponding phase kind in routing. Lane spawn role resolution, mirror, and sync retire only unchanged wizard agents proven by the setup wizard origin store and matching workspace file hash. User-authored or edited agents with these names remain available for lane spawn.
-
-### Research & Design
-
-`researcher-expert`, `modernization-detector`, `ui-ux-designer`, `technical-content-writer`
-
-These specialists produce specs, briefs, reports, and content artifacts for the assigned executor.
-
-## How agents are used
-
-The model selects its own sub-agents. For a coordinated task, use [orchestration](/agents/agent-orchestration/). The team-leader recommends executors and next actions. The orchestrator spawns the agents.
+Custom agents with these names remain available for lane spawn. The origin store and matching workspace file hash identify unchanged wizard agents for retirement; user-authored or edited agents remain available.
 
 ## Delegation and task state
 
-The orchestrator spawns sub-agents, batch executors, and phase lanes. Other eligible specialists may delegate focused sub-tasks to CLI lanes when lane mode is enabled or auto and the tools are available. **`team-leader` and `ui-ux-designer` do not delegate to CLI lanes.** The `visual-review` phase uses browser tools. The team-leader spawns no agents at all.
+The orchestrator spawns phase lanes, batch executors, and subagents. The team-leader recommends executors and records batch states in `batches.md`; it does not spawn agents. Phase workers report evidence within their assigned scope. The orchestrator owns task status and user checkpoints.
 
-Specialist templates receive a task-spec block for their assigned role: no task-ID allocation and no edits to `task.md` or `batches.md`. They report completion with evidence. The team-leader alone records batch states; task status belongs to the orchestrator, project-manager, and team-leader.
+When `ptah_*` tools are listed in a session, templates use them first. CLI work follows the [agent-lanes skill](/mcp-and-skills/skills/#skill-dependencies).
 
-When `ptah_*` tools are listed in the session, templates use them first. If absent, they use native tools without probing for Ptah tools. CLI work follows the [agent-lanes skill](/mcp-and-skills/skills/#skill-dependencies).
-
-## Customizing built-ins
+## Customizing the built-in
 
 Edit the agent file in `<workspace-root>/.claude/agents/`. The setup wizard overwrites a generated agent file in place when you run it again. See [Custom agents](/agents/custom-agents/) for the full flow.

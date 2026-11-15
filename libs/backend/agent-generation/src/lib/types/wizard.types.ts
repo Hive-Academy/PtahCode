@@ -34,7 +34,7 @@ export type WizardStep =
  *   currentStep: 'review',
  *   startedAt: new Date(),
  *   projectContext: {...},
- *   selectedAgentIds: ['software-architect', 'software-architect']
+ *   selectedAgentIds: ['team-leader', 'team-leader']
  * };
  * ```
  */

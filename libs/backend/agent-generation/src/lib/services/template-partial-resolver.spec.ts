@@ -117,7 +117,7 @@ describe('TemplatePartialResolver', () => {
 
   it('maps only the coordinator templates to the coordinator audience', () => {
     expect(taskSpecAudienceFor('team-leader')).toBe('coordinator');
-    expect(taskSpecAudienceFor('project-manager')).toBe('coordinator');
+    expect(taskSpecAudienceFor('project-manager')).toBe('specialist');
     expect(taskSpecAudienceFor('backend-developer')).toBe('specialist');
     expect(taskSpecAudienceFor('some-agent')).toBe('specialist');
     expect(taskSpecAudienceFor('')).toBe('specialist');

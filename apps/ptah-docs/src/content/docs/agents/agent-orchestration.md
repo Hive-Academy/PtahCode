@@ -22,7 +22,7 @@ The `orchestration` skill in `ptah-core` coordinates development work: classify 
 | **Specialists**  | Work within their assigned scope and return deliverables with evidence. Eligible specialists may use CLI lanes for focused sub-tasks when lanes are enabled or in auto mode. |
 | **CLI lanes**    | Run self-contained tasks through `ptah_agent_spawn`, using an installed CLI or a configured Ptah CLI provider.                                                               |
 
-The `visual-review` phase uses browser tools. `ui-ux-designer` does not delegate to CLI lanes because design needs interactive discovery. The team-leader recommends work for the orchestrator to assign.
+The `visual-review` phase uses browser tools. The `design` phase handles interactive discovery. The team-leader recommends work for the orchestrator to assign.
 
 Specialists do not allocate task IDs or edit `task.md` or `batches.md`. They report completion and blockers; the team-leader records batch state. In a Relay run without a team-leader, the conductor verifies the implementation report and records `batches.md`.
 
@@ -30,7 +30,7 @@ Specialists do not allocate task IDs or edit `task.md` or `batches.md`. They rep
 
 The skill covers FEATURE, BUGFIX, REFACTORING, DOCUMENTATION, RESEARCH, DEVOPS, SAAS_INIT, and CREATIVE work. It chooses full, partial, or minimal depth from the request and asks when the type is ambiguous.
 
-A feature typically goes through project-manager → optional research/design → software-architect → team-leader → QA. The team-leader recommends batch executors; the orchestrator spawns them and acts on each returned next action.
+A feature typically runs through `plan`, optional `research` and `design`, `architecture`, `team-leader`, `implement`, then `tests` and `review`. The team-leader recommends batch executors; the orchestrator spawns them and acts on each returned next action.
 
 ## Checkpoints
 

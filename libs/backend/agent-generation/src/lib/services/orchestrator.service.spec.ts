@@ -1509,8 +1509,8 @@ describe('AgentGenerationOrchestratorService', () => {
       wireHappyPath(
         mocks,
         createMockTemplate({
-          id: 'software-architect',
-          name: 'software-architect',
+          id: 'team-leader',
+          name: 'team-leader',
           model: 'opus',
         }),
       );
@@ -1553,8 +1553,8 @@ describe('AgentGenerationOrchestratorService', () => {
       wireHappyPath(
         mocks,
         createMockTemplate({
-          id: 'technical-content-writer',
-          name: 'technical-content-writer',
+          id: 'team-leader',
+          name: 'team-leader',
         }),
       );
       // The content pass echoes a previous generation's frontmatter.
@@ -1562,10 +1562,10 @@ describe('AgentGenerationOrchestratorService', () => {
         Result.ok({
           content: [
             '---',
-            'name: technical-content-writer',
+            'name: team-leader',
             'disallowedTools: mcp__firecrawl',
             '---',
-            '# Technical Content Writer',
+            '# Team Leader',
           ].join('\n'),
           warnings: [],
           rejectedSections: 0,
@@ -1580,7 +1580,7 @@ describe('AgentGenerationOrchestratorService', () => {
       const writtenAgent = mocks.fileWriter.writeAgent.mock.calls[0]![0];
       expect(writtenAgent.content.match(/disallowedTools:/g)).toHaveLength(1);
       expect(writtenAgent.content).toContain(
-        'disallowedTools: mcp__firecrawl\n---\n',
+        'disallowedTools: mcp__firecrawl, mcp__ptah__ptah_web_search,',
       );
     });
   });
@@ -1821,13 +1821,13 @@ describe('AgentGenerationOrchestratorService', () => {
 
     it('keeps the disallowedTools line, after the overridden model:', async () => {
       const settings = settingsReturning({
-        workspace: { 'software-architect': { claude: 'haiku' } },
+        workspace: { 'team-leader': { claude: 'haiku' } },
       });
       const { frontmatter } = await frontmatterFor(
         settings,
         createMockTemplate({
-          id: 'software-architect',
-          name: 'software-architect',
+          id: 'team-leader',
+          name: 'team-leader',
           model: 'opus',
         }),
       );

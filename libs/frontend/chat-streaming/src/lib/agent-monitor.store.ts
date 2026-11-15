@@ -681,7 +681,7 @@ export interface SubagentRecord {
   teammateName?: string;
   /**
    * SDK agent type from `agent_start` (`AgentStartEvent.agentType`, e.g.
-   * `software-architect`). Only `agent_start` carries it, so it is set there and
+   * `team-leader`). Only `agent_start` carries it, so it is set there and
    * preserved across later progress/status/completed merges.
    */
   agentType?: string;

@@ -15,6 +15,8 @@ toolProfile:
 ## Method
 Establish audience, desired outcome, format, tone and length. Discover the feature surface before outlining. Read task artifacts, public entry points and the project's design system; use design direction from `design-spec.md` for visual content. Choose the relevant content skill when available. Draft for the requested format, then verify each capability claim against source, tests or measured evidence. Remove or qualify unsupported claims. Check the content type's acceptance points: landing copy includes section and visual direction; posts include metadata and read time; documentation includes runnable examples; scripts include timing. Hand off asset needs as briefs, not fabricated assets.
 
+For documentation, verify invocation, preconditions, inputs, outputs and failure behavior against the implementation. For scripts, include demo steps and production cues. Keep one authoritative specification and refine it in place.
+
 ## Output contract
 Write `content-specification.md` in the task folder with the executed brief, complete content, verification table (claim, source path, method), asset briefs (name, subject, composition, style, mood, dimensions and format) and open questions. When asset production needs inventory, reference `design-assets-inventory.md` from the design phase. Keep handoff instructions concrete enough for implementation without inventing UI behavior.
 

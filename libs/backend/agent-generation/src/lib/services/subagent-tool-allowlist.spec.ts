@@ -1,5 +1,6 @@
 import { readdirSync } from 'fs';
 import * as path from 'path';
+import { isRetiredRole } from '@ptah-extension/shared';
 import {
   PTAH_BROWSER_TOOLS,
   SUBAGENT_DISALLOWED_TOOLS,
@@ -27,7 +28,6 @@ const NO_BROWSER_NO_WEB = [
   'mcp__ptah__ptah_web_search',
   ...BROWSER,
 ];
-const NO_WEB_SCRAPE = ['mcp__firecrawl'];
 
 describe('subagent tool allowlist (N3)', () => {
   it('names every Ptah browser tool in full and the web servers/tools', () => {
@@ -37,13 +37,7 @@ describe('subagent tool allowlist (N3)', () => {
   });
 
   it.each([
-    ['modernization-detector', NO_BROWSER_NO_WEB],
-    ['project-manager', NO_BROWSER_NO_WEB],
-    ['software-architect', NO_BROWSER_NO_WEB],
     ['team-leader', NO_BROWSER_NO_WEB],
-    ['technical-content-writer', NO_WEB_SCRAPE],
-    ['ui-ux-designer', NO_WEB_SCRAPE],
-    ['researcher-expert', []],
   ])('%s denies exactly its row', (agentType, expected) => {
     expect(getSubagentDisallowedTools(agentType)).toEqual(expected);
   });
@@ -53,11 +47,12 @@ describe('subagent tool allowlist (N3)', () => {
     const templateNames = readdirSync(templateDir)
       .filter((file) => file.endsWith('.template.md'))
       .map((file) => file.replace(/\.template\.md$/, ''))
+      .filter((name) => !isRetiredRole(name))
       .sort();
     expect(Object.keys(SUBAGENT_DISALLOWED_TOOLS).sort()).toEqual(
       templateNames,
     );
-    expect(templateNames).toHaveLength(7);
+    expect(templateNames).toHaveLength(1);
   });
 
   it('never uses a form the runtime ignores (bare * or a partial wildcard)', () => {
@@ -76,10 +71,7 @@ describe('subagent tool allowlist (N3)', () => {
   });
 
   it('formats one comma-separated frontmatter line', () => {
-    expect(formatDisallowedToolsFrontmatter('technical-content-writer')).toBe(
-      'disallowedTools: mcp__firecrawl',
-    );
-    expect(formatDisallowedToolsFrontmatter('software-architect')).toBe(
+    expect(formatDisallowedToolsFrontmatter('team-leader')).toBe(
       `disallowedTools: ${NO_BROWSER_NO_WEB.join(', ')}`,
     );
   });
@@ -93,9 +85,6 @@ describe('subagent tool allowlist (N3)', () => {
 // Phase C regression (decision #20): the remaining NO_BROWSER_NO_WEB roles keep their
 // exact deny set. Literal on purpose, so a shortening attempt fails loudly.
 const NO_BROWSER_NO_WEB_ROLES = [
-  'modernization-detector',
-  'project-manager',
-  'software-architect',
   'team-leader',
 ];
 const PINNED_DENY_SET_LITERAL = [
@@ -139,17 +128,15 @@ describe('least-privilege effective set (Phase C, decision #20)', () => {
     },
   );
 
-  it('keeps the other roles on their narrower rows', () => {
+  it('keeps retired roles out of the active policy', () => {
     const others = Object.keys(SUBAGENT_DISALLOWED_TOOLS).filter(
       (role) => !NO_BROWSER_NO_WEB_ROLES.includes(role),
     );
-    expect(others).toHaveLength(3);
+    expect(others).toHaveLength(0);
     for (const role of others) {
       expect(getSubagentDisallowedTools(role).length).toBeLessThanOrEqual(1);
     }
-    expect(formatDisallowedToolsFrontmatter('technical-content-writer')).toBe(
-      'disallowedTools: mcp__firecrawl',
-    );
+    expect(formatDisallowedToolsFrontmatter('technical-content-writer')).toBeUndefined();
     expect(formatDisallowedToolsFrontmatter('visual-reviewer')).toBeUndefined();
   });
 });

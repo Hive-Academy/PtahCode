@@ -1,8 +1,8 @@
 {
   "$schema": "https://ptah.live/schemas/content-manifest.json",
   "version": "1.0.0",
-  "contentHash": "sha256:08f4529c274b83b7dabea311b5f7b88f317bf23be4876db0bcaa11daabedc3f4",
-  "generatedAt": "2026-11-15T11:50:40.770Z",
+  "contentHash": "sha256:d626ff92d967f1886090cf017c983626d6be20bdba4c038f51a8dc23c382e986",
+  "generatedAt": "2026-11-15T14:09:18.590Z",
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main",
   "plugins": {
     "basePath": "plugins",
@@ -235,13 +235,7 @@
       "_shared/replacement-policy.md",
       "_shared/reviewer-stance.md",
       "_shared/tooling-precedence.md",
-      "modernization-detector.template.md",
-      "project-manager.template.md",
-      "researcher-expert.template.md",
-      "software-architect.template.md",
-      "team-leader.template.md",
-      "technical-content-writer.template.md",
-      "ui-ux-designer.template.md"
+      "team-leader.template.md"
     ]
   }
 }

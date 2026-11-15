@@ -9,14 +9,11 @@ Templates use the same download as [plugins](/plugins/plugin-storage/). They are
 
 ```text
 ~/.ptah/
-├── .content-cache.json
-└── templates/
-    └── agents/
-        ├── _shared/
-        ├── project-manager.template.md
-        ├── modernization-detector.template.md
-        ├── software-architect.template.md
-        └── …
+  .content-cache.json
+  templates/
+    agents/
+      _shared/
+      team-leader.template.md
 ```
 
 | Path                          | Purpose                                      |
@@ -30,7 +27,7 @@ Templates use the same download as [plugins](/plugins/plugin-storage/). They are
 {
   "templates": {
     "basePath": "libs/backend/agent-generation/templates/agents",
-    "files": ["project-manager.template.md", "software-architect.template.md"]
+    "files": ["team-leader.template.md"]
   }
 }
 ```

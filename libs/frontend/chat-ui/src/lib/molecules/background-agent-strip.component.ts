@@ -46,7 +46,7 @@ export interface BackgroundAgentStripEntry {
   /** Stable identity — the subagent/background `toolCallId`. Also the `@for` key
    * and the value echoed back through every output. */
   readonly id: string;
-  /** Primary label — the agent type when known, e.g. `software-architect`. */
+  /** Primary label — the agent type when known, e.g. `team-leader`. */
   readonly name: string;
   /** Secondary label shown muted after the name (e.g. the teammate name) when
    * it adds information beyond {@link name}. */

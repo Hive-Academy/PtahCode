@@ -138,7 +138,7 @@ Classify each finding:
 
 | Category   | Action                                                                                                                                                                                                                |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| BLOCKER    | Stop. Return numbered blockers with evidence to the orchestrator. For a plan-free BUGFIX, it resolves the blocking questions through Gate SR or researcher-expert; for a planned flow, ask for an architect revision. |
+| BLOCKER    | Stop. Return numbered blockers with evidence to the orchestrator. For a plan-free BUGFIX, resolve questions through Gate SR or the research phase; for a planned flow, request an architecture revision. |
 | RISK       | Add a mitigation task to the batch, and note it on the affected task.                                                                                                                                                 |
 | ASSUMPTION | Record it in `batches.md` and add a verification step to the task that depends on it.                                                                                                                                 |
 | OK         | Proceed.                                                                                                                                                                                                              |
@@ -373,13 +373,13 @@ Perform mandatory completion checks:
    decision markers in a preserve list. Any unapproved missing capability blocks
    completion.
 2. **Rendered visual evidence**: For UI tasks, typecheck, test, and lint are not
-   proof. Confirm that rendered visual-reviewer screenshots exist for both dark
+   proof. Confirm that rendered visual-review phase screenshots exist for both dark
    and light themes and verify fidelity against the approved prototype in `prototype/`.
    For a UI change that adds or redesigns no surface, so no prototype is required,
    completion requires before/after screenshots (dark + light) of
    the affected screen instead of a prototype — capture the before screenshots
    from the base commit (or before the first batch / before the fix lands) with
-   the visual-reviewer.
+   the visual-review phase.
 3. **Write-path trace**: When code changes what gets written to persisted settings,
    configuration, or storage, trace each write to its runtime reader (key, scope,
    value format, side effects such as environment variables) and confirm runtime
@@ -419,8 +419,8 @@ Each variant gives when it is returned, the facts it carries, and the next actio
 - `DECOMPOSITION BLOCKED` — Mode 1, a BLOCKER: each issue numbered, with the
   problem, `file:line` evidence, what it prevents and the blocking questions.
   Next for a plan-free BUGFIX: return to the orchestrator for Gate SR with those
-  questions or researcher-expert; do not route to software-architect or Gate 2.
-  For a planned flow, the orchestrator invokes software-architect to revise
+  questions or the research phase; do not route to the architecture phase or Gate 2.
+  For a planned flow, the orchestrator invokes the architecture phase to revise
   implementation-plan.md and repeats Gate 2. No batch starts until the blockers
   are resolved in the flow's inputs.
 - `BATCH [N] PARTIAL FAILURE` — Mode 2 step 2: files found of files expected;
@@ -450,7 +450,7 @@ Each variant gives when it is returned, the facts it carries, and the next actio
   passed its scoped checks before its commit and every due phase review accepted; row-by-row parity verification against
   parity-inventory.md or the lane preserve list ("N/A" only when no surface was
   replaced, consolidated, rebuilt or redesigned — otherwise a missing inventory is a blocker, not
-  "N/A"); visual-reviewer evidence against the approved prototype (or — for a UI
+  "N/A"); visual-review phase evidence against the approved prototype (or — for a UI
   change with no added/redesigned surface and so no prototype — before/after
   screenshots [dark + light] of the affected screen, the "before" taken from the
   base commit before the fix lands); write-path trace confirmation (for settings/storage
@@ -520,8 +520,8 @@ it is in.
   still unaddressed. Downgrade it to FAILED and say which risk.
 - Do not re-plan the architecture when the plan turns out to be wrong. Return a
   BLOCKER with the evidence to the orchestrator: in a planned flow, let the
-  architect revise; in a plan-free BUGFIX, use Gate SR with the blocking questions
-  or researcher-expert, never software-architect/Gate 2. A decomposition that
+  architecture phase revise; in a plan-free BUGFIX, use Gate SR with the blocking questions
+  or the research phase, never the architecture phase/Gate 2. A decomposition that
   silently redesigns leaves two disagreeing sources of truth.
 - Do not declare TASK COMPLETE when a surface was replaced, consolidated, rebuilt
   or redesigned without verifying parity-inventory.md or the lane preserve list

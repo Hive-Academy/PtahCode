@@ -57,8 +57,7 @@ Each agent is a Markdown file with YAML frontmatter in `.claude/agents/`:
 <workspace-root>/
   .claude/
     agents/
-      software-architect.md
-      project-manager.md
+      team-leader.md
       ...
 ```
 

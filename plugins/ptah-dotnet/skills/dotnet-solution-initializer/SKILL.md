@@ -29,7 +29,7 @@ d) Handoff          — emit "Foundation complete. Next tasks (run each in a new
 e) STOP             — do not implement domain features in this session
 ```
 
-Stage B (every roadmap item beyond Foundation) runs later, one item per session, via `/orchestrate <slug>` or the project-manager agent -- identical to the SaaS flow.
+Stage B (every roadmap item beyond Foundation) runs later, one item per session, via `/orchestrate <slug>` or the `plan` phase -- identical to the SaaS flow.
 
 ## Step a) Discovery — mandatory, two-round `AskUserQuestion`
 

@@ -379,7 +379,7 @@ TASK TYPES (8):
 - RESEARCH: Researcher -> [conditional implementation]
 - DEVOPS: PM -> Architect -> DevOps Engineer -> QA
 - SAAS_INIT: Discovery -> PM -> Architect -> Team-Leader
-- CREATIVE: [ui-ux-designer] -> content-writer -> frontend
+- CREATIVE: [design phase] -> docs phase -> frontend
 
 WORKFLOW DEPTH:
 - Full: New features, unclear scope (PM -> Architect -> Team-Leader -> QA)
@@ -389,7 +389,7 @@ WORKFLOW DEPTH:
 STATE MANAGEMENT:
 - getState(taskId) - Get current orchestration state for a task
 - setState(taskId, partialState) - Update orchestration state
-- getNextAction(taskId) - Get recommended next action: invoke-agent names a real agent; invoke-phase provides a phaseKind (for example \`tests\`)
+- getNextAction(taskId) - Get recommended next action: invoke-agent names a real agent; invoke-phase provides a phaseKind (for example \`plan\`)
 
 CLI AGENT DELEGATION (3-tier hierarchy):
   Tier 1: Claude (Orchestrator) — coordinates workflow
@@ -400,14 +400,16 @@ CLI agent adapters: ${SYSTEM_CLI_TYPES.join(', ')}, plus ptah-cli for configured
 Sub-agents decide when to delegate grunt work vs do it directly.
 
 SPECIALIST PHASES AND AGENTS:
-- Planning: project-manager
-- Architecture: software-architect
+- Planning: phase kind \`plan\`
+- Architecture: phase kind \`architecture\`
 - Development and infrastructure: phase kind \`implement\` (not an agent; route it to a lane, session or phase subagent)
 - Testing: phase kind \`tests\`
 - Code review: phase kind \`review\`
 - Visual review: phase kind \`visual-review\`
 - Explicit user agents remain available by name
-- Research: researcher-expert
+- Research: phase kind \`research\`
+- Documentation: phase kind \`docs\`
+- Interface design: phase kind \`design\`
 - Coordination: team-leader (3 modes)
 
 IMPORTANT: Always use ptah.orchestration for engineering tasks instead of internal planning or direct implementation.

@@ -459,7 +459,7 @@ describe('constrainPhase requirement 3.4', () => {
   });
 
   it('excludes lanes without browser on design', () => {
-    const subagent = toSubagentCandidate('ui-ux-designer');
+    const subagent = toSubagentCandidate('custom-designer');
     const result = constrainPhase({
       phase: { id: 'design', kind: 'design', requiredCapabilities: ['browser'] },
       candidates: [
@@ -580,7 +580,7 @@ describe('constrainPhase requirement 3.6', () => {
   });
 
   it('returns pin-unavailable with missing browser and does not move the pin', () => {
-    const subagent = toSubagentCandidate('ui-ux-designer');
+    const subagent = toSubagentCandidate('custom-designer');
     const result = constrainPhase({
       phase: { id: 'design', kind: 'design', requiredCapabilities: ['browser'] },
       pin: { executor: 'codex' },

@@ -28,8 +28,8 @@ export type AgentCategory =
  * @example
  * ```typescript
  * const recommendation: AgentRecommendation = {
- *   agentId: 'software-architect',
- *   agentName: 'Software Architect',
+ *   agentId: 'custom-architecture-agent',
+ *   agentName: 'Custom Architecture Agent',
  *   relevanceScore: 92,
  *   matchedCriteria: [
  *     'NestJS framework detected',

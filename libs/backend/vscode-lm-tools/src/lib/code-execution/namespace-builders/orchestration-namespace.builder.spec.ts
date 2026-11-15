@@ -122,11 +122,11 @@ describe('buildOrchestrationNamespace — state persistence', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildOrchestrationNamespace — getNextAction', () => {
-  it('recommends project-manager when state does not exist', async () => {
+  it('recommends the plan phase when state does not exist', async () => {
     const ns = buildOrchestrationNamespace(makeDeps());
     const action = await ns.getNextAction('TASK_NEW');
-    expect(action.action).toBe('invoke-agent');
-    expect(action.agent).toBe('project-manager');
+    expect(action.action).toBe('invoke-phase');
+    expect(action.phaseKind).toBe('plan');
     expect(action.context).toEqual(
       expect.objectContaining({ isNewTask: true }),
     );
@@ -165,7 +165,7 @@ describe('buildOrchestrationNamespace — getNextAction', () => {
     expect(action.checkpointType).toBe('requirements');
   });
 
-  it('re-invokes the current phase agent when last checkpoint is rejected', async () => {
+  it('re-invokes the current phase when last checkpoint is rejected', async () => {
     await writeState('TASK_REJ', {
       taskId: 'TASK_REJ',
       phase: 'design',
@@ -182,8 +182,8 @@ describe('buildOrchestrationNamespace — getNextAction', () => {
 
     const ns = buildOrchestrationNamespace(makeDeps());
     const action = await ns.getNextAction('TASK_REJ');
-    expect(action.action).toBe('invoke-agent');
-    expect(action.agent).toBe('software-architect');
+    expect(action.action).toBe('invoke-phase');
+    expect(action.phaseKind).toBe('architecture');
   });
 
   it('advances to the next phase when checkpoint approved and required docs exist', async () => {
@@ -206,12 +206,12 @@ describe('buildOrchestrationNamespace — getNextAction', () => {
 
     const ns = buildOrchestrationNamespace(makeDeps());
     const action = await ns.getNextAction(taskId);
-    expect(action.action).toBe('invoke-agent');
-    expect(action.agent).toBe('software-architect');
+    expect(action.action).toBe('invoke-phase');
+    expect(action.phaseKind).toBe('architecture');
     expect(action.context?.['nextPhase']).toBe('design');
   });
 
-  it('re-invokes current-phase agent when required docs are missing', async () => {
+  it('re-invokes current phase when required docs are missing', async () => {
     await writeState('TASK_MISS', {
       taskId: 'TASK_MISS',
       phase: 'planning',
@@ -228,8 +228,8 @@ describe('buildOrchestrationNamespace — getNextAction', () => {
 
     const ns = buildOrchestrationNamespace(makeDeps());
     const action = await ns.getNextAction('TASK_MISS');
-    expect(action.action).toBe('invoke-agent');
-    expect(action.agent).toBe('project-manager');
+    expect(action.action).toBe('invoke-phase');
+    expect(action.phaseKind).toBe('plan');
     expect(action.requiredInputs).toEqual(['task-context']);
   });
 });

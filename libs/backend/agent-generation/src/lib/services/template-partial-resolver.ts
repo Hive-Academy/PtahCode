@@ -77,7 +77,6 @@ export const SHARED_BLOCK_IDS = [
 export type SharedBlockId = (typeof SHARED_BLOCK_IDS)[number];
 
 export const TASK_SPEC_COORDINATOR_TEMPLATES: readonly string[] = [
-  'project-manager',
   'team-leader',
 ];
 

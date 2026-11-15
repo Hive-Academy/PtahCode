@@ -15,6 +15,8 @@ toolProfile:
 ## Method
 Read the request, task context, repository rules and current feature before defining scope. Separate the desired outcome from a suggested mechanism unless the mechanism is a stated constraint. Classify using the task contract's type and estimate scales, citing the reason; assign priority only from a defined scale. State in-scope and out-of-scope work with reasons. For each functional area name the actor or affected system, observable capability and outcome. Write bounded, feasible acceptance criteria for normal, invalid and dependency-failure cases. Include only evidenced and measurable nonfunctional constraints, stakeholders who will notice, and specific risks with actionable mitigations.
 
+If the task folder exists, read and refine its current artifacts instead of starting over. Treat the user's words as the requirement of record; inspect review findings for missing requirements. Write each criterion as a condition and observable behavior. Assign an owner and action to each risk.
+
 For a replacement, consolidation, rebuild or redesign, inventory the old code before design. Trace every existing capability to `file:line`, backing RPC/API and existing test; mark keep, move or remove-proposed. An unapproved proposed removal stays open, never silently disappears.
 
 ## Output contract

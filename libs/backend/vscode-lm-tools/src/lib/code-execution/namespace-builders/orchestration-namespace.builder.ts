@@ -51,14 +51,16 @@ const STRATEGY_PHASE_SEQUENCE: Record<string, OrchestrationPhase[]> = {
  * Agent or phase recommendations by workflow phase
  */
 const PHASE_AGENTS: Record<OrchestrationPhase, string[]> = {
-  planning: ['project-manager'],
-  design: ['software-architect'],
+  planning: [],
+  design: [],
   implementation: ['team-leader'],
   qa: [],
   complete: [],
 };
 
 const PHASE_KIND_BY_PHASE: Partial<Record<OrchestrationPhase, PhaseKind>> = {
+  planning: 'plan',
+  design: 'architecture',
   qa: 'tests',
 };
 
@@ -268,15 +270,14 @@ export function buildOrchestrationNamespace(
     },
 
     /**
-     * Analyze current state and recommend the next action. QA invokes a phase
-     * kind; other workflow phases invoke named agents.
+     * Analyze current state and recommend the next action.
      */
     getNextAction: async (taskId: string): Promise<OrchestrationNextAction> => {
       const state = await readStateFile(taskId);
       if (!state) {
         return {
-          action: 'invoke-agent',
-          agent: 'project-manager',
+          action: 'invoke-phase',
+          phaseKind: 'plan',
           context: { taskId, isNewTask: true },
           requiredInputs: ['user-request'],
         };
@@ -308,7 +309,7 @@ export function buildOrchestrationNamespace(
         if (rejectedPhaseAction) return rejectedPhaseAction;
         return {
           action: 'invoke-agent',
-          agent: agents[0] || 'project-manager',
+          agent: agents[0] || 'team-leader',
           context: {
             taskId,
             phase: state.phase,
@@ -331,7 +332,7 @@ export function buildOrchestrationNamespace(
         if (missingInputsPhaseAction) return missingInputsPhaseAction;
         return {
           action: 'invoke-agent',
-          agent: agents[0] || 'project-manager',
+          agent: agents[0] || 'team-leader',
           context: { taskId, phase: state.phase },
           requiredInputs: ['task-context'],
         };

@@ -958,13 +958,11 @@ describe('SetupRpcHandlers', () => {
       >(h, 'wizard:recommend-agents', { mode: 'workspace-catalog' });
       expect(result.map((agent) => agent.agentId)).toEqual(
         expect.arrayContaining([
-          'project-manager',
-          'software-architect',
-          'ui-ux-designer',
+          'team-leader',
         ]),
       );
       expect(result.map((agent) => agent.category)).toEqual(
-        expect.arrayContaining(['planning', 'specialist', 'creative']),
+        ['planning'],
       );
       expect(result.every((agent) => agent.relevanceScore === 100)).toBe(true);
       expect(
@@ -1029,7 +1027,7 @@ describe('SetupRpcHandlers', () => {
       >(h, 'wizard:recommend-agents', { isMultiPhase: true });
 
       // Every catalog agent is recommended at relevanceScore=100.
-      expect(result.length).toBe(7);
+      expect(result.length).toBe(1);
       expect(result.every((r) => r.relevanceScore === 100)).toBe(true);
       expect(
         result.every(
@@ -1050,12 +1048,18 @@ describe('SetupRpcHandlers', () => {
       ]) {
         expect(ids.has(retired)).toBe(false);
       }
-      expect(ids.has('ui-ux-designer')).toBe(true);
+      expect(ids.has('team-leader')).toBe(true);
       for (const retired of [
         'senior-tester',
         'code-style-reviewer',
         'code-logic-reviewer',
         'visual-reviewer',
+        'project-manager',
+        'software-architect',
+        'researcher-expert',
+        'modernization-detector',
+        'technical-content-writer',
+        'ui-ux-designer',
       ]) {
         expect(ids.has(retired)).toBe(false);
       }

@@ -120,7 +120,7 @@ A resumed run gets a new `agentId` and retains the prior conversation. A saved t
 
 ## Using CLI agents from chat
 
-Ask the orchestrator to assign CLI work. Eligible specialists can also delegate focused sub-tasks when lane mode permits; `team-leader` and `ui-ux-designer` do not. The `visual-review` phase uses browser tools. For example:
+Ask the orchestrator to assign CLI work. Eligible specialists can also delegate focused sub-tasks when lane mode permits; `team-leader` does not. The `visual-review` phase uses browser tools. For example:
 
 > "Spawn three Codex CLI agents in parallel to generate unit tests for `libs/backend/auth`, `libs/backend/billing`, and `libs/backend/users`. Merge the results."
 
