@@ -1,7 +1,8 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createOrchestrationPhaseSources } from './orchestration-phase-sources';
+import { hashDir } from '../hash/content-hash';
 import { emptyManifest, managedEntry } from '../manifest-store/managed-manifest';
 import type { HarnessSourceState } from './harness-source.port';
 import type { SkillSyncDecision } from '../state/skill-sync-gate';
@@ -54,27 +55,41 @@ describe('createOrchestrationPhaseSources', () => {
     await expect(policy.isCloneActive()).resolves.toBe(false);
   });
 
-  it('does not own a manifest-managed workspace entry', () => {
+  it('does not own an unmodified manifest-managed workspace entry', async () => {
     mkdirSync(skillRoot, { recursive: true });
-    manifest.entries['.claude/skills/orchestration'] = managedEntry('hash', userSkillsRoot, 'skill');
-    expect(policy.isWorkspaceOwned(skillRoot)).toBe(false);
+    writeFileSync(join(skillRoot, 'SKILL.md'), 'original');
+    const hash = await hashDir(skillRoot);
+    if (hash === null) throw new Error('Expected skill directory hash');
+    manifest.entries['.claude/skills/orchestration'] = managedEntry(hash, userSkillsRoot, 'skill');
+    await expect(policy.isWorkspaceOwned(skillRoot)).resolves.toBe(false);
   });
 
-  it('owns a plain workspace folder', () => {
+  it('owns an edited manifest-managed workspace entry', async () => {
+    mkdirSync(skillRoot, { recursive: true });
+    const skillFile = join(skillRoot, 'SKILL.md');
+    writeFileSync(skillFile, 'original');
+    const hash = await hashDir(skillRoot);
+    if (hash === null) throw new Error('Expected skill directory hash');
+    manifest.entries['.claude/skills/orchestration'] = managedEntry(hash, userSkillsRoot, 'skill');
+    writeFileSync(skillFile, 'workspace edit');
+    await expect(policy.isWorkspaceOwned(skillRoot)).resolves.toBe(true);
+  });
+
+  it('owns a plain workspace folder', async () => {
     mkdirSync(skillRoot, { recursive: true });
     expect(policy.workspaceSkillsRoot()).toBe(join(workspaceRoot, '.claude', 'skills'));
-    expect(policy.isWorkspaceOwned(skillRoot)).toBe(true);
+    await expect(policy.isWorkspaceOwned(skillRoot)).resolves.toBe(true);
   });
 
-  it('does not own a symlink into the user skills root', () => {
+  it('does not own a symlink into the user skills root', async () => {
     const target = join(userSkillsRoot, 'orchestration');
     mkdirSync(target, { recursive: true });
     mkdirSync(join(workspaceRoot, '.claude', 'skills'), { recursive: true });
     symlinkSync(target, skillRoot, 'junction');
-    expect(policy.isWorkspaceOwned(skillRoot)).toBe(false);
+    await expect(policy.isWorkspaceOwned(skillRoot)).resolves.toBe(false);
   });
 
-  it('does not own a symlink into the plugins root', () => {
+  it('does not own a symlink into the plugins root', async () => {
     const target = join(pluginsRoot, 'ptah-core', 'skills', 'orchestration');
     mkdirSync(target, { recursive: true });
     mkdirSync(join(workspaceRoot, '.claude', 'skills'), { recursive: true });
@@ -84,6 +99,6 @@ describe('createOrchestrationPhaseSources', () => {
       if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return;
       throw error;
     }
-    expect(policy.isWorkspaceOwned(skillRoot)).toBe(false);
+    await expect(policy.isWorkspaceOwned(skillRoot)).resolves.toBe(false);
   });
 });

@@ -5,7 +5,7 @@ import { isSkillCloneFile, phaseKindOfSkillCloneFile, type SkillClonePhaseFile }
 import { DEFAULT_HISTORY_DIR } from './origin-sidecar.types';
 import { computeSourceHash } from './source-hash';
 
-const ABSENT_PHASE_MARKER = '.ptah-absent-phase';
+export const ABSENT_PHASE_MARKER = '.ptah-absent-phase';
 
 export interface SkillPhaseFileOps {
   readonly skillsRoot: () => string;

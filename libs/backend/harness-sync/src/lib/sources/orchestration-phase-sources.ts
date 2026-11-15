@@ -1,6 +1,7 @@
 import { existsSync, lstatSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { isOptOutPluginId } from '@ptah-extension/shared';
+import { hashDir } from '../hash/content-hash';
 import { readUserLayerOrigin } from '../manifest/plugin-origin-gate';
 import type { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import type { SkillSyncGate } from '../state/skill-sync-gate';
@@ -34,13 +35,17 @@ export function createOrchestrationPhaseSources(options: OrchestrationPhaseSourc
       return sources.overlayPluginPathsKnown !== true || sources.overlayPluginPaths.some((entry) => basename(entry) === origin.pluginId);
     },
     workspaceSkillsRoot: (): string => join(resolveWorkspaceRoot(), '.claude', 'skills'),
-    isWorkspaceOwned: (skillRoot: string): boolean => {
+    isWorkspaceOwned: async (skillRoot: string): Promise<boolean> => {
       if (!existsSync(skillRoot)) return false;
       const root = resolveWorkspaceRoot();
       const owned = manifestStore.load(root, 'claude').entries['.claude/skills/orchestration'];
-      if (owned?.kind === 'skill') return false;
-      if (!lstatSync(skillRoot).isSymbolicLink()) return true;
-      return !isMigratableLink(skillRoot, [userSkillsRoot, pluginsRoot]);
+      if (lstatSync(skillRoot).isSymbolicLink()) {
+        return owned?.kind !== 'skill' && !isMigratableLink(skillRoot, [userSkillsRoot, pluginsRoot]);
+      }
+      if (owned?.kind !== 'skill') return true;
+      const actual = await hashDir(skillRoot);
+      if (actual === null) throw new Error(`Unable to hash workspace skill: ${skillRoot}`);
+      return actual !== owned.hash;
     },
   };
 }

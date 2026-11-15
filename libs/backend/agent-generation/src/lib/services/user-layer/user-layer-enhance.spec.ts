@@ -170,6 +170,28 @@ describe('UserLayerMirrorService enhance/revert/history', () => {
     expect((await readSidecar(skillDir)).currentContentHash).toBe(await computeSourceHash(skillDir));
   });
 
+  it('keeps absent-phase history metadata out of a whole-skill revert', async () => {
+    const snapshot = await service.writeEnhancedSkillFile({
+      slug: 'deep-research',
+      file: 'phases/review.md',
+      newBody: 'new review',
+    });
+    const historyDir = join(skillDir, DEFAULT_HISTORY_DIR, snapshot.historyTs as string);
+    expect(await readFile(join(historyDir, '.ptah-absent-phase'), 'utf8')).toBe('phases/review.md');
+
+    const reverted = await service.revert({
+      kind: 'skill',
+      slug: 'deep-research',
+      historyTs: snapshot.historyTs as string,
+    });
+
+    expect(reverted.restored).toBe(true);
+    expect(await fileExists(join(skillDir, '.ptah-absent-phase'))).toBe(false);
+    expect(await fileExists(join(skillDir, 'phases', 'review.md'))).toBe(false);
+    expect((await readSidecar(skillDir)).currentContentHash).toBe(await computeSourceHash(skillDir));
+    expect((await service.listHistory('skill', 'deep-research')).some((entry) => entry.ts === snapshot.historyTs)).toBe(true);
+  });
+
   it('returns restored false for a missing phase snapshot directory', async () => {
     const result = await service.revertSkillFile({ slug: 'deep-research', file: 'phases/review.md', historyTs: 'does-not-exist' });
     expect(result).toEqual({ restored: false, revertedFrom: 'does-not-exist', newHistoryTs: null });

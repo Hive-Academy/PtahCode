@@ -10,7 +10,7 @@ import {
   USER_LAYER_AGENTS_DIR_NAME,
   userLayerAgentDirName,
 } from '@ptah-extension/shared';
-import { writeSkillPhaseFile, revertSkillPhaseFile, type SkillPhaseFileOps, type SkillPhaseWriteArgs, type SkillPhaseRevertArgs } from './user-layer-skill-phase-writer';
+import { ABSENT_PHASE_MARKER, writeSkillPhaseFile, revertSkillPhaseFile, type SkillPhaseFileOps, type SkillPhaseWriteArgs, type SkillPhaseRevertArgs } from './user-layer-skill-phase-writer';
 import type {
   OriginKind,
   OriginSidecar,
@@ -1293,7 +1293,7 @@ export class UserLayerMirrorService {
       await mkdir(cloneDir, { recursive: true });
     }
 
-    await this.copyTree(historyDir, cloneDir);
+    await this.copyTree(historyDir, cloneDir, ABSENT_PHASE_MARKER);
     const currentContentHash = await computeSourceHash(cloneDir);
     await this.refreshEnhancedSidecarDir(cloneDir, slug, currentContentHash);
 
@@ -2595,8 +2595,8 @@ export class UserLayerMirrorService {
     await this.fsOps.clearCloneTrackedContent(cloneDir);
   }
 
-  private async copyTree(sourceDir: string, targetDir: string): Promise<void> {
-    await this.fsOps.copyTree(sourceDir, targetDir);
+  private async copyTree(sourceDir: string, targetDir: string, skipRootFile?: string): Promise<void> {
+    await this.fsOps.copyTree(sourceDir, targetDir, skipRootFile);
   }
 
   private async copyFileAtomic(
