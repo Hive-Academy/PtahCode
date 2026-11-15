@@ -729,6 +729,74 @@ describe('native activity cycle linkage', () => {
       lastActivityKind: 'completed',
     });
   });
+
+  it('rejects late approvals for child turns recorded as terminal via !terminalTurns.has(turnId) guard', () => {
+    const h = harness();
+    h.apply('started', 'parent-1');
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['child', 'call-parent-1', 'root']);
+    Reflect.apply(Reflect.get(h.context, 'bindChildTurn'), h.context, ['child', 'child-turn-1']);
+
+    const childTools = Reflect.get(h.context, 'childTools') as Map<string, string>;
+    const childTurns = Reflect.get(h.context, 'childTurns') as Map<string, string>;
+    const terminalTurns = Reflect.get(h.context, 'terminalTurns') as Set<string>;
+
+    const isChildTurnBefore = (threadId: string, turnId: string) =>
+      childTools.has(threadId) && childTurns.get(threadId) === turnId && !terminalTurns.has(turnId);
+
+    expect(isChildTurnBefore('child', 'child-turn-1')).toBe(true);
+
+    const terminal: CodexRuntimeEvent = {
+      type: 'terminal',
+      contextId: 'ctx',
+      processGeneration: 1,
+      threadId: 'child',
+      turnId: 'child-turn-1',
+      sequence: 1,
+      status: 'completed',
+    };
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context,
+      [terminal, 'call-parent-1']);
+
+    expect(terminalTurns.has('child-turn-1')).toBe(true);
+
+    const isChildTurnAfter = (threadId: string, turnId: string) =>
+      childTools.has(threadId) && childTurns.get(threadId) === turnId && !terminalTurns.has(turnId);
+
+    expect(isChildTurnAfter('child', 'child-turn-1')).toBe(false);
+  });
+
+  it('demonstrates guard is necessary: without !terminalTurns.has(turnId), late approval would be accepted', () => {
+    const h = harness();
+    h.apply('started', 'parent-1');
+    Reflect.apply(Reflect.get(h.context, 'linkChild'), h.context, ['child', 'call-parent-1', 'root']);
+    Reflect.apply(Reflect.get(h.context, 'bindChildTurn'), h.context, ['child', 'child-turn-2']);
+
+    const terminal: CodexRuntimeEvent = {
+      type: 'terminal',
+      contextId: 'ctx',
+      processGeneration: 1,
+      threadId: 'child',
+      turnId: 'child-turn-2',
+      sequence: 1,
+      status: 'completed',
+    };
+    Reflect.apply(Reflect.get(h.context, 'admitEvent'), h.context,
+      [terminal, 'call-parent-1']);
+
+    const terminalTurns = Reflect.get(h.context, 'terminalTurns') as Set<string>;
+    const childTools = Reflect.get(h.context, 'childTools') as Map<string, string>;
+    const childTurns = Reflect.get(h.context, 'childTurns') as Map<string, string>;
+
+    const isChildTurnWithoutGuard = (threadId: string, turnId: string) =>
+      childTools.has(threadId) && childTurns.get(threadId) === turnId;
+
+    expect(isChildTurnWithoutGuard('child', 'child-turn-2')).toBe(true);
+
+    const isChildTurnWithGuard = (threadId: string, turnId: string) =>
+      childTools.has(threadId) && childTurns.get(threadId) === turnId && !terminalTurns.has(turnId);
+
+    expect(isChildTurnWithGuard('child', 'child-turn-2')).toBe(false);
+  });
 });
 
 it('flushes v1 child notifications once toolStarted supplies agentThreadIds', () => {
