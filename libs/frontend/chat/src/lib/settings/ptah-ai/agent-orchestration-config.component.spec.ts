@@ -251,7 +251,7 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
       );
     });
 
-    it('shows the order as compact read-only chips with no move buttons on the bar (deviation 5: no grip, no drag)', () => {
+    it('shows the order as compact read-only chips with no move buttons on the bar (grip and drag live in the popover only)', () => {
       const bar = q('[data-testid="settings-section-orchestration-policy"]');
       expect(
         bar?.querySelectorAll(
@@ -502,6 +502,62 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
         'glm-1',
       ]);
       expect(document.activeElement).toBe(button('policy-order-up-glm-1'));
+    });
+
+    it('a dragged row saves the whole new order and announces its new position', async () => {
+      await openOrder();
+      const row = (id: string) => q(`[data-testid="policy-order-row-${id}"]`);
+      const drag = (type: string, target: HTMLElement | null) => {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        // jsdom has no layout: every row box is 0 high, so each dragover lands after the row.
+        Object.defineProperties(event, {
+          clientY: { value: 0 },
+          dataTransfer: {
+            value: {
+              effectAllowed: 'none',
+              dropEffect: 'none',
+              setData: jest.fn(),
+            },
+          },
+        });
+        target?.dispatchEvent(event);
+        fixture.detectChanges();
+      };
+      drag('dragstart', row('codex'));
+      drag('dragover', row('copilot'));
+      expect(
+        q(
+          '[data-testid="policy-order-row-opencode"] [data-testid="policy-order-drop-indicator"]',
+        ),
+      ).not.toBeNull();
+      drag('drop', row('copilot'));
+      await flush();
+      TestBed.tick();
+      expect(state.saveSettings).toHaveBeenLastCalledWith(
+        {
+          orchestration: {
+            preferredAgentOrder: [
+              'antigravity',
+              'glm-1',
+              'copilot',
+              'codex',
+              'opencode',
+            ],
+          },
+        },
+        CONTEXT,
+      );
+      expect(rows()).toEqual([
+        'antigravity',
+        'glm-1',
+        'copilot',
+        'codex',
+        'opencode',
+      ]);
+      expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe(
+        'Codex moved to position 4 of 5',
+      );
+      expect(document.activeElement).toBe(button('policy-order-down-codex'));
     });
 
     it('D15: a failed move keeps the saved order; the toast reports it, the popover shows no host text', async () => {
