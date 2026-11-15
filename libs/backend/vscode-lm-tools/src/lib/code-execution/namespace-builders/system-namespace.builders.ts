@@ -389,7 +389,7 @@ WORKFLOW DEPTH:
 STATE MANAGEMENT:
 - getState(taskId) - Get current orchestration state for a task
 - setState(taskId, partialState) - Update orchestration state
-- getNextAction(taskId) - Get recommended next action
+- getNextAction(taskId) - Get recommended next action: invoke-agent names a real agent; invoke-phase provides a phaseKind (for example \`tests\`)
 
 CLI AGENT DELEGATION (3-tier hierarchy):
   Tier 1: Claude (Orchestrator) — coordinates workflow
@@ -403,8 +403,10 @@ SPECIALIST PHASES AND AGENTS:
 - Planning: project-manager
 - Architecture: software-architect
 - Development and infrastructure: phase kind \`implement\` (not an agent; route it to a lane, session or phase subagent)
-- Testing: senior-tester
-- Review: code-style-reviewer, code-logic-reviewer, visual-reviewer
+- Testing: phase kind \`tests\`
+- Code review: phase kind \`review\`
+- Visual review: phase kind \`visual-review\`
+- Explicit user agents remain available by name
 - Research: researcher-expert
 - Coordination: team-leader (3 modes)
 

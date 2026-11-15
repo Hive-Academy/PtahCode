@@ -54,20 +54,31 @@ describe('AgentRecommendationService', () => {
     }
   });
 
-  it('includes visual-reviewer in the catalog', () => {
+  it('excludes retired verification roles from the catalog', () => {
     const service = createService();
     const recommendedIds = service
       .calculateRecommendations(MINIMAL_ANALYSIS)
       .map((r) => r.agentId);
 
-    expect(recommendedIds).toContain('visual-reviewer');
+    for (const retired of [
+      'senior-tester',
+      'code-style-reviewer',
+      'code-logic-reviewer',
+      'visual-reviewer',
+    ]) {
+      expect(recommendedIds).not.toContain(retired);
+    }
   });
 
   it('does not recommend retired implementation roles', () => {
     const ids = createService()
       .calculateRecommendations(MINIMAL_ANALYSIS)
       .map((recommendation) => recommendation.agentId);
-    for (const retired of ['backend-developer', 'frontend-developer', 'devops-engineer']) {
+    for (const retired of [
+      'backend-developer',
+      'frontend-developer',
+      'devops-engineer',
+    ]) {
       expect(ids).not.toContain(retired);
     }
   });

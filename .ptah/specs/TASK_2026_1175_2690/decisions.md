@@ -19,3 +19,9 @@ Audit log of Phase 4 decisions. The parent session or the user can overturn each
 | P4-5  | The content move covers this repository (layer A, plus layer B history of this workspace scope). Clones of other workspaces stay as user data: the retired role is read-only history for them, and "Rebase all diverged" skips them. Tracked files give only counts for other scopes, no scope names                       | Mine all scopes into the product; keep other scopes as user data | Other scopes are user projects (personal data, public repository rule). U-D13 (4) makes a retired role read-only history                                                                                                                     | Yes                           |
 
 | P4-S1-1 | Routing applies the retired-slug alias by slug. Lane spawn role resolution, mirror, and sync retire only unchanged wizard-written agents proved by the setup wizard origin store and matching workspace file hash. Custom or edited agents with these names remain available for lane spawn. Provider copies are kept after source removal only for proved wizard agents | Slug-only lane spawn and unconditional provider-copy retention | Phase plan has no origin marker | Yes |
+
+## Follow-ups
+
+| ID | Follow-up | Reason |
+| --- | --- | --- |
+| F-S2-1 | Add reviewer-family separation for `visual-review` in a later step. | C2-2: this is a new routing rule, not part of role retirement. |

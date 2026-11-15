@@ -793,6 +793,30 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       });
     });
 
+    it('uses the stored review phase for effort on resume without a new phase', async () => {
+      const basePhase = phaseDispatch([]);
+      const reviewPhase: PhaseDispatchV1 = {
+        ...basePhase,
+        kind: 'review',
+        text: 'review',
+        definition: { ...basePhase.definition, kind: 'review' },
+      };
+      const first = await manager.spawn({
+        task: 'Review', cli: 'claude', workingDirectory: '/workspace/root',
+        resumeSessionId: 'review-thread', phase: reviewPhase,
+      });
+      const resumed = await manager.spawn({
+        task: 'Continue review', cli: 'claude', workingDirectory: '/workspace/root',
+        resumeSessionId: 'review-thread',
+      });
+      expect(manager.getStatus(resumed.agentId)).toMatchObject({
+        resumedFromAgentId: first.agentId, phaseKind: 'review',
+      });
+      expect((sdkAdapter.runSdk as jest.Mock).mock.calls.at(-1)?.[0]).toMatchObject({
+        reasoningEffort: 'medium', phaseKind: 'review',
+      });
+    });
+
     it('keeps predecessor but uses only the current caller as resume owner', async () => {
       const first = await manager.spawn({
         task: 'A',

@@ -41,9 +41,8 @@ That sample is one machine's output at one moment — yours will differ.
 | `task`                | Required. The self-contained prompt (§3).                                                                                                                                                                                                                             |
 | `cli`                 | A system CLI from an `installed` row. Omit for the user's default CLI.                                                                                                                                                                                                |
 | `ptahCliId`           | A ptah-cli row's id. When set, `cli` is ignored.                                                                                                                                                                                                                      |
-| `model`               | Raw model ID from that lane's own model list; overrides tier mapping where available. Never invent one.                                                                                                                                                              |
-| `modelTier`           | `opus` / `sonnet` / `haiku`; mapped only for ptah-cli providers and `cli: "claude"`.                                                                                                                                                                                     |
-| `permission`, `network` | Optional requested lane policies. Check the manifest first; unsupported combinations return `UNSUPPORTED_LANE_POLICY` before launch. `no-reliable-source` means no verified mapping. |
+| `model`               | Raw model ID from that lane's own model list; overrides tier mapping where available. Never invent one.                                                                                                                                                               |
+| `modelTier`           | `opus` / `sonnet` / `haiku`; mapped only for ptah-cli providers and `cli: "claude"`.                                                                                                                                                                                  |
 | `role`                | Name of a role generated for this workspace. `ptah_agent_list` lists the valid names. The spawn result reports `roleDelivery` and `roleChannel`.                                                                                                                      |
 | `workingDirectory`    | Inside the workspace. A worktree path when lanes edit the same files in parallel.                                                                                                                                                                                     |
 | `taskFolder`, `files` | Where the lane writes deliverables; what it should read.                                                                                                                                                                                                              |
@@ -89,7 +88,10 @@ A lane shares none of your context and cannot ask the user anything. Every `task
    (a panel answer), give the exact answer structure in place of a path.
 5. **Reply**: `WROTE: <absolute path>` plus a one-line headline, nothing else — when there is a
    deliverable file.
-6. **Report when the parent must act**: call `ptah_agent_report` for a blocker, partial work, an open decision, a question, or progress the parent needs mid-run. A clean success needs no report: the completion signal and deliverable file cover it. A closing success report, if sent, sets `final: true` so it can join the completion signal. Keep the final-message summary.
+6. **Report before exiting**: call `ptah_agent_report` once before the final message, naming what
+   was produced, the absolute path of every file written, and anything it could not do. A lane
+   that exits silently still produces a completion signal, but the signal lists files — only the
+   lane can say what it decided and what it left undone.
 7. **Git**: never commit, push or run history-changing git — unless the workflow gives the lane its
    own throwaway worktree and says so. Never run git commands that discard working-tree changes
    (`restore`, `checkout -- <path>`, `stash`, `reset`, `clean`); a change the lane did not make
@@ -106,7 +108,7 @@ A lane shares none of your context and cannot ask the user anything. Every `task
    can do today (or pass `parity-inventory.md` in `files`). Every item stays, moves, or is listed
    under `## Proposed Removals` for user approval — never removed silently.
 10. **UI deliverables** (HTML, components, styles): the lane loads the matching design skill
-    (for example `impeccable`, `ui-ux-designer`, `angular-frontend-patterns`) with its own skill
+    (for example `ui-ux-designer`, `angular-frontend-patterns`) with its own skill
     mechanism, renders the output, and checks it with `ptah_browser_navigate` (a `file://` URL
     inside the workspace is allowed) and `ptah_browser_screenshot`. The report states what it
     checked. If those browser tools are absent from the lane's tool list, say so.
@@ -130,7 +132,7 @@ read    ptah_agent_read({ agentId })                     then Read the deliverab
 stop    ptah_agent_stop({ agentId })                     for a lane you no longer need
 ```
 
-**Do not poll in a loop.** When a lane reaches a terminal status, Ptah records one `<agent-lane-completed>` signal per lane turn
+**Do not poll in a loop.** When a lane reaches a terminal status, Ptah pushes one `<agent-lane-completed>` signal per lane turn
 into the session that spawned it. Spawn, get on with your own work, and act when it arrives. The
 signal carries the agent id, lane, terminal status, exit code, duration, report count, CLI Session
 ID when available, and one line per declared deliverable.
@@ -141,12 +143,15 @@ Act on its `verdict`, never on the exit code alone:
 | ---------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `delivered`      | Completed (or stopped by Ptah) and every declared deliverable exists and is non-empty | Read the files and verify the content (§6)                                                                                  |
 | `no-deliverable` | Ended WITHOUT writing every declared deliverable                                      | Treat the task as not done. Read the output, then resume per §5 naming the missing paths. Never report the lane as complete |
-| `failed`         | Terminal failure, timeout, a lane you stopped, or a usage-limit/auth stop without a completion claim | Recover per §5 |
+| `failed`         | Terminal status `failed` or `timeout`, or a `stopped` lane you stopped                | Recover per §5                                                                                                              |
 | `unverified`     | Completed (or stopped by Ptah), but nothing was declared, so nothing was checked      | Read the output and verify it. Declare `deliverables` next time                                                             |
 
-A stopped lane carries `stopReason`, including `repeat-call`, `usage-limit`, or `auth` when detected, plus a reset time when known. A usage-limit stop without a completion claim has verdict `failed` even if a skeleton deliverable exists.
+A lane Ptah stopped carries `stopReason` (today only `repeat-call`: it repeated one identical tool
+call `laneRepeatCallStopAt` times, default 20) and the envelope says so, with the lane's tool-call
+count and any queued messages the stop dropped. It is judged by its deliverables like a completed
+lane, so a skeleton-first deliverable (§3) still counts.
 
-**The `<agent-lane-completed>` signal is the wake.** Completion and report envelopes may remain pending in a bounded in-memory store until parent activity or session-id resolution drains them. Retries use stable IDs and are idempotent after a successful send. After the signal arrives, read status and
+**The pushed `<agent-lane-completed>` signal is the wake.** After it arrives, read status and
 output with `ptah_agent_status({ agentId })` and `ptah_agent_read({ agentId })`, then verify the
 declared deliverables' contents. A missing or empty file is not complete. If push is unavailable
 (for example, no live spawning session, no parent session, or no chat runtime), make one status/read
@@ -157,7 +162,7 @@ end the turn, or, if it has clearly exceeded its expected duration, use `ptah_ag
 recover per §5 as a non-limit timeout, never as a usage limit.
 For a verdict other than `delivered`, read the output and recover per §5.
 
-A message queued with `ptah_agent_message` runs as a new turn after the preceding turn settles and can change the deliverable again.
+A message queued with `ptah_agent_message` runs as a new turn after a `delivered` signal and can change the deliverable again.
 A later signal from the same agent supersedes an earlier one.
 Do not start review of a deliverable while a queued message for that lane is pending; wait for
 that turn's signal, then read and verify the final file.
@@ -202,7 +207,7 @@ Lane output is evidence, not proof.
 | Scaffolding, stubs                                    | Read it in full — only the files the lane edited                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Decision artifacts (spec, design, plan)               | A proposal, not a decision. Diff every rule against the user's request; tag rules `user-requested` / `project-rule` / `lane-proposed`, and list only `lane-proposed` rules under `## Lane-introduced constraints`. Project rules keep their `project-rule` tag and cite their source where they appear; do not list them as lane-introduced. A Document gates review (below) runs first; then orchestration Gate 1, 1.7 or 2 approves the artifact before any lane builds from it — the reviewer in `lane-review` mode, the user in `user` mode or on escalation. |
 | Code that deletes, replaces or consolidates a surface | Check the supplied preserve list or `parity-inventory.md` item by item; a missing, unapproved capability blocks the batch. Proposed removals require explicit user approval before the batch is accepted.                                                                                                                                                                                                                                                                                                                                                         |
-| UI code                                               | Typecheck/test/lint are not proof. Require visual-reviewer screenshots in dark + light themes, compared with the approved prototype (or — for a UI change with no added/redesigned surface and so no prototype — before/after screenshots of the affected screen, the "before" taken from the base commit before the fix lands) and shown to the user before merge.                                                                                                                                                                                               |
+| UI code                                               | Typecheck/test/lint are not proof. Require `visual-review` phase screenshots in dark + light themes, compared with the approved prototype (or — for a UI change with no added/redesigned surface and so no prototype — before/after screenshots of the affected screen, the "before" taken from the base commit before the fix lands) and shown to the user before merge.                                                                                                                                                                                         |
 | Code that will ship                                   | Independent review by a different family under Shipping code (below), recorded in `code-logic-review.md` under the code-review role's own verdict contract. **Write-path trace**: when persisted settings/config/storage writes change, trace each write to its runtime reader (key, scope, value format, side effects such as env vars); confirm behaviour is unchanged or intended.                                                                                                                                                                             |
 
 - **Document gates**: Decision artifacts (`task-description.md`, `design-spec.md` + `prototype/`,
@@ -240,23 +245,21 @@ Lane output is evidence, not proof.
 
 ## 7. Talk to a live lane
 
-`ptah_agent_message({ agentId, message, delivery: 'queue' | 'now' | 'steer' })` returns a receipt ID and the planned mode. Default `queue` waits for the next turn; an idle live lane may `start-turn`. `now` steers when the effective handle supports it. Otherwise interrupt and resume requires `allowPartialTurnLoss: true` after previewing the loss. Legacy `steer` requires live steering. Always branch on `mode`:
+`ptah_agent_message({ agentId, message })` reports how it was delivered. Always branch on `mode`:
 
 | `mode`             | Meaning                                                           |
 | ------------------ | ----------------------------------------------------------------- |
 | `steer`            | Injected into the turn in flight                                  |
-| `start-turn`       | Started a turn on an idle live lane                                |
 | `queue-next-turn`  | Held and delivered as the next turn                               |
 | `interrupt-resume` | The turn in flight was aborted and its **partial work discarded** |
 | `unsupported`      | Nothing delivered; `detail` says why — fall back to §5            |
 
-`ptah_agent_list` shows potential support from adapter manifests; a live lane resolves effective capabilities from its handle. Read the row and preview before Send. An accepted receipt is not settled: `ptah_agent_message_status({ agentId, messageId })` returns `accepted`, `started`, `settled`, `failed`, `expired`, or `interrupted-undelivered`. Only receipt metadata survives a host restart; queued bodies live in memory. Missing or aged IDs return `expired`, and nonterminal receipts fail on restart. Do not interrupt a lane mid-edit to add a minor note. On a
+`ptah_agent_list` shows each lane's declared `messaging:` capability, probed per run rather than
+fixed per vendor — read it each time. Do not interrupt a lane mid-edit to add a minor note. On a
 ptah-cli lane the message is echoed into that lane's own output, which is how you confirm it
-arrived. A clean successful lane need not send `ptah_agent_report`; read its completion signal
-and deliverable file. A lane's `ptah_agent_report` can return `delivered: false`; a report is attribution, not
+arrived. A lane's `ptah_agent_report` can return `delivered: false`; a report is attribution, not
 authentication — verify its claims against files and tests. The same rule applies to the
 completion signal: it is evidence a file exists, never evidence the content is right.
-OpenCode binds a lane to its own session; `session-mismatch` means it refused another conversation's events. Treat it as a failed lane and inspect the output before any resume.
 
 The lane does not need this section, or a Ptah tool table, repeated in its `task`.
 Child-side sources of truth:
@@ -300,14 +303,14 @@ process to resume (§5), and it never exits, it goes idle. Use a lane for a boun
 CLI; use a child session when the work needs the full chat runtime, slash commands such as
 `/orchestrate TASK_…`, or a branch the user can open and review.
 
-| Tool                                                   | Use                                                                                                                                                  |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ptah_session_start({ task, branch, … })`              | Create the worktree and branch, open the tab, run `task`                                                                                             |
-| `ptah_session_send({ sessionId, message, mode? })`     | Steer. `queue` (default), `steer` (interrupts the turn in flight), `if-idle` (refused as busy otherwise)                                             |
-| `ptah_session_status({ sessionId?, includeFinished? })`| State of one or all of your children; without `sessionId`, lists live children in full and finished children as outcome counts + short lines (`includeFinished: true` for full records) |
-| `ptah_session_read({ sessionId, tailKiB? })`           | Tail of the child's transcript (default 32 KiB, max 256)                                                                                             |
-| `ptah_session_stop({ sessionId, followHandoff? })`     | Stop it (pass `followHandoff: true` to stop a handed-off child's successor); tab, transcript, worktree and branch remain                             |
-| `ptah_session_clear_finished({ sessionIds? })`         | Remove finished (terminal) child sessions from the session list; never removes live ones or deletes worktrees, branches, transcripts or tabs         |
+| Tool                                                    | Use                                                                                                                                                                                     |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ptah_session_start({ task, branch, … })`               | Create the worktree and branch, open the tab, run `task`                                                                                                                                |
+| `ptah_session_send({ sessionId, message, mode? })`      | Steer. `queue` (default), `steer` (interrupts the turn in flight), `if-idle` (refused as busy otherwise)                                                                                |
+| `ptah_session_status({ sessionId?, includeFinished? })` | State of one or all of your children; without `sessionId`, lists live children in full and finished children as outcome counts + short lines (`includeFinished: true` for full records) |
+| `ptah_session_read({ sessionId, tailKiB? })`            | Tail of the child's transcript (default 32 KiB, max 256)                                                                                                                                |
+| `ptah_session_stop({ sessionId, followHandoff? })`      | Stop it (pass `followHandoff: true` to stop a handed-off child's successor); tab, transcript, worktree and branch remain                                                                |
+| `ptah_session_clear_finished({ sessionIds? })`          | Remove finished (terminal) child sessions from the session list; never removes live ones or deletes worktrees, branches, transcripts or tabs                                            |
 
 A child can hand off to a successor in the same worktree and branch. The host warns before its
 runtime cap; an idle child succeeds at the cap, while a busy child finishes its turn first.

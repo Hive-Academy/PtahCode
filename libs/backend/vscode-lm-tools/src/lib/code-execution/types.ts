@@ -12,6 +12,7 @@ import type {
   AgentOutput,
   AgentMessageOutcome,
   CliDetectionResult,
+  PhaseKind,
 } from '@ptah-extension/shared';
 import type {
   AgentReportDelivery,
@@ -2027,7 +2028,7 @@ export interface OrchestrationState {
  * Determines what the orchestrator should do next
  */
 export type OrchestrationActionType =
-  'invoke-agent' | 'present-checkpoint' | 'complete';
+  'invoke-agent' | 'invoke-phase' | 'present-checkpoint' | 'complete';
 
 /**
  * Next action recommendation for orchestration workflow
@@ -2040,7 +2041,10 @@ export interface OrchestrationNextAction {
   /** Agent to invoke (when action is 'invoke-agent') */
   agent?: string;
 
-  /** Context to pass to the agent */
+  /** Phase to invoke (when action is 'invoke-phase') */
+  phaseKind?: PhaseKind;
+
+  /** Context to pass to the agent or phase */
   context?: Record<string, unknown>;
 
   /** Required inputs that must be available before proceeding */
@@ -2074,7 +2078,8 @@ export interface OrchestrationNamespace {
   ) => Promise<void>;
 
   /**
-   * Analyze current state and recommend the next action
+   * Analyze current state and recommend the next action. `invoke-phase` names a
+   * phase kind; `invoke-agent` names an available agent.
    * @param taskId - Task identifier
    * @returns Recommended next action for the orchestrator
    */

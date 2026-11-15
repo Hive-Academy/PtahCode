@@ -49,7 +49,7 @@ const TEMPLATES_DIR = path.join(
 const PARTIALS_DIR = path.join(TEMPLATES_DIR, SHARED_PARTIALS_DIR);
 
 /** The corpus is a fixed set of specialists, not a growing directory. */
-const EXPECTED_TEMPLATE_COUNT = 11;
+const EXPECTED_TEMPLATE_COUNT = 7;
 
 function templateFiles(): string[] {
   return fs
@@ -1034,27 +1034,18 @@ const TASK_SPEC: SharedBlockId = 'TASK_SPEC_CONTRACT';
 const CLARIFY: SharedBlockId = 'CLARIFICATION_PROTOCOL';
 const REPLACE: SharedBlockId = 'REPLACEMENT_POLICY';
 const DELEGATE: SharedBlockId = 'CLI_DELEGATION';
-const STANCE: SharedBlockId = 'REVIEWER_STANCE';
 
 const ROLE_PARTIALS: Readonly<Record<string, readonly SharedBlockId[]>> = {
-  'code-logic-reviewer': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE, STANCE],
-  'code-style-reviewer': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE, STANCE],
   'modernization-detector': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE],
   'project-manager': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
   'researcher-expert': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE],
-  'senior-tester': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
   'software-architect': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
   'team-leader': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
   'technical-content-writer': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE],
   'ui-ux-designer': [TOOLING, TASK_SPEC, CLARIFY, REPLACE],
-  'visual-reviewer': [TOOLING, TASK_SPEC, CLARIFY, STANCE],
 };
 
 const NON_DELEGATING_ROLES: ReadonlyArray<{ role: string; why: string }> = [
-  {
-    role: 'visual-reviewer',
-    why: 'Its evidence is a live browser session. A CLI lane has no browser, so a delegated finding carries no screenshot.',
-  },
   {
     role: 'ui-ux-designer',
     why: 'Design discovery is a dialogue routed through the orchestrator. A lane that shares none of that context invents the answers.',
@@ -1153,11 +1144,10 @@ describe('role grants', () => {
  * The hygiene rules have no shared partial. Released apps (electron v0.1.69 /
  * v0.1.70) download templates from main and reject any STATIC id their
  * compiled SHARED_BLOCK_IDS does not list, so a `STATIC:ENGINEERING_HYGIENE`
- * marker would stop template loading for those users. The roles that need
- * the rules carry them inline instead. software-architect is the source of
- * truth: the block runs from its first "- Engineering hygiene:" line through
- * the end of its "- Runtime cost:" line, and the other roles must carry that
- * text byte-for-byte.
+ * marker would stop template loading for those users. software-architect
+ * retains the reference block; generic review guidance lives in phases/review.md.
+ * The block runs from its first "- Engineering hygiene:" line through the
+ * end of its "- Runtime cost:" line.
  */
 describe('engineering hygiene inlining', () => {
   const HYGIENE_START = '- Engineering hygiene:';
@@ -1174,7 +1164,6 @@ describe('engineering hygiene inlining', () => {
   }
 
   const REFERENCE_ROLE = 'software-architect';
-  const INLINE_HYGIENE_ROLES = ['code-style-reviewer'];
   const REFERENCE_BLOCK = hygieneBlock(read(`${REFERENCE_ROLE}.template.md`));
 
   it(`${REFERENCE_ROLE} carries a hygiene block that ends at Runtime cost`, () => {
@@ -1183,13 +1172,6 @@ describe('engineering hygiene inlining', () => {
     // external calls, tests, runtime cost.
     expect(REFERENCE_BLOCK?.split('\n')).toHaveLength(7);
   });
-
-  it.each(INLINE_HYGIENE_ROLES)(
-    `%s carries the ${REFERENCE_ROLE} hygiene block verbatim`,
-    (role) => {
-      expect(hygieneBlock(read(`${role}.template.md`))).toBe(REFERENCE_BLOCK);
-    },
-  );
 
   it('no template references the deleted ENGINEERING_HYGIENE partial', () => {
     // Both the substring and the parsed marker ids: a loose marker such as

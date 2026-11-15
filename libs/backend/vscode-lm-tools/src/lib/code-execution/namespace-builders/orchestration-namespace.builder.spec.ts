@@ -279,6 +279,9 @@ describe('buildOrchestrationNamespace — .ptah/specs resolution', () => {
 
       // BUGFIX sequence: implementation → qa.
       expect(action.context?.['nextPhase']).toBe('qa');
+      expect(action.action).toBe('invoke-phase');
+      expect(action.phaseKind).toBe('tests');
+      expect(action.agent).toBeUndefined();
     },
   );
 
@@ -303,5 +306,54 @@ describe('buildOrchestrationNamespace — .ptah/specs resolution', () => {
 
     expect(action.action).toBe('invoke-agent');
     expect(action.agent).toBe('team-leader');
+  });
+
+  it('invokes the tests phase after a rejected qa checkpoint', async () => {
+    const taskId = 'TASK_QA_REJECTED';
+    await writeState(taskId, {
+      taskId,
+      phase: 'qa',
+      currentAgent: null,
+      lastCheckpoint: { type: null, status: 'rejected', timestamp: '' },
+      pendingActions: [],
+      strategy: 'BUGFIX',
+      metadata: {},
+    });
+
+    const action =
+      await buildOrchestrationNamespace(makeDeps()).getNextAction(taskId);
+    expect(action).toMatchObject({
+      action: 'invoke-phase',
+      phaseKind: 'tests',
+      context: {
+        taskId,
+        phase: 'qa',
+        feedback: 'Checkpoint rejected, please revise',
+      },
+    });
+    expect(action.agent).toBeUndefined();
+  });
+
+  it('invokes the tests phase when qa documents are missing', async () => {
+    const taskId = 'TASK_QA_MISSING';
+    await writeState(taskId, {
+      taskId,
+      phase: 'qa',
+      currentAgent: null,
+      lastCheckpoint: { type: null, status: 'pending', timestamp: '' },
+      pendingActions: [],
+      strategy: 'BUGFIX',
+      metadata: {},
+    });
+
+    const action =
+      await buildOrchestrationNamespace(makeDeps()).getNextAction(taskId);
+    expect(action).toMatchObject({
+      action: 'invoke-phase',
+      phaseKind: 'tests',
+      context: { taskId, phase: 'qa' },
+      requiredInputs: ['task-context'],
+    });
+    expect(action.agent).toBeUndefined();
   });
 });

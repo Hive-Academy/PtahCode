@@ -120,7 +120,7 @@ A resumed run gets a new `agentId` and retains the prior conversation. A saved t
 
 ## Using CLI agents from chat
 
-Ask the orchestrator to assign CLI work. Eligible specialists can also delegate focused sub-tasks when lane mode permits; `team-leader`, `visual-reviewer`, and `ui-ux-designer` do not. For example:
+Ask the orchestrator to assign CLI work. Eligible specialists can also delegate focused sub-tasks when lane mode permits; `team-leader` and `ui-ux-designer` do not. The `visual-review` phase uses browser tools. For example:
 
 > "Spawn three Codex CLI agents in parallel to generate unit tests for `libs/backend/auth`, `libs/backend/billing`, and `libs/backend/users`. Merge the results."
 
@@ -132,8 +132,8 @@ Each lane shows as an agent card in the chat, with its status, its output, and i
 
 ## Troubleshooting
 
-| Symptom                       | Cause                             | Fix                                                                           |
-| ----------------------------- | --------------------------------- | ----------------------------------------------------------------------------- |
-| CLI not detected              | Binary not on `PATH`              | Add the CLI to `PATH`, then restart PtahCode                                  |
-| Hanging forever               | CLI waiting for interactive input | Stop it; rewrite prompt to be fully non-interactive                           |
-| Mangled colors in output      | ANSI codes in transcript          | PtahCode sets `FORCE_COLOR=0` and `NO_COLOR=1`. Make sure that no shell profile overrides them. |
+| Symptom                  | Cause                             | Fix                                                                                             |
+| ------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| CLI not detected         | Binary not on `PATH`              | Add the CLI to `PATH`, then restart PtahCode                                                    |
+| Hanging forever          | CLI waiting for interactive input | Stop it; rewrite prompt to be fully non-interactive                                             |
+| Mangled colors in output | ANSI codes in transcript          | PtahCode sets `FORCE_COLOR=0` and `NO_COLOR=1`. Make sure that no shell profile overrides them. |

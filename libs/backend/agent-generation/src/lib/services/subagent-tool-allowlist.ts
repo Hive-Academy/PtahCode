@@ -60,22 +60,17 @@ const NO_WEB_SCRAPE: readonly string[] = [...WEB_SCRAPE_SERVERS];
 
 /**
  * Deny list per agent type (the template `name`). An empty list means the type
- * keeps every tool: visual-reviewer needs the browser, researcher-expert needs
- * web search and scraping.
+ * keeps every tool: researcher-expert needs web search and scraping.
  */
 export const SUBAGENT_DISALLOWED_TOOLS: Readonly<
   Record<string, readonly string[]>
 > = {
-  'code-logic-reviewer': NO_BROWSER_NO_WEB,
-  'code-style-reviewer': NO_BROWSER_NO_WEB,
   'modernization-detector': NO_BROWSER_NO_WEB,
   'project-manager': NO_BROWSER_NO_WEB,
   'software-architect': NO_BROWSER_NO_WEB,
   'team-leader': NO_BROWSER_NO_WEB,
-  'senior-tester': NO_WEB_SCRAPE,
   'technical-content-writer': NO_WEB_SCRAPE,
   'ui-ux-designer': NO_WEB_SCRAPE,
-  'visual-reviewer': [],
   'researcher-expert': [],
 };
 
