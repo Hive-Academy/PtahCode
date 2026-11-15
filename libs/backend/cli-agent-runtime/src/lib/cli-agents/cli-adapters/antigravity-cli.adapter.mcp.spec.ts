@@ -367,6 +367,7 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
     const resolveWaits = new Map<string, (entry: McpAttachment) => void>();
     const probe: IMcpAttachmentProbe = {
       get: () => undefined,
+      getAttempt: () => undefined,
       waitFor: (id) =>
         new Promise((resolve) => {
           resolveWaits.set(id, resolve);
@@ -417,6 +418,28 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
     children[0].emit('close', 0, null);
     children[1].emit('close', 0, null);
     await Promise.all([first.done, second.done]);
+  });
+
+  it('calls the registered MCP timeout callback while the lane is active', async () => {
+    let finishWait: ((entry: McpAttachment | undefined) => void) | undefined;
+    const probe: IMcpAttachmentProbe = {
+      get: () => undefined,
+      getAttempt: () => undefined,
+      waitFor: () => new Promise((resolve) => { finishWait = resolve; }),
+    };
+    const handle = await adapter.runSdk({
+      task: 'do a thing',
+      workingDirectory: ws,
+      mcpPort: 51234,
+      attachmentProbe: probe,
+    });
+    const onTimeout = jest.fn();
+    handle.onMcpAttachmentTimeout?.(onTimeout);
+    finishWait?.(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    child.emit('close', 0, null);
+    await handle.done;
   });
 
   it('releases the startup lock and restores the entry after a stdin write failure', async () => {
@@ -501,6 +524,7 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
       agentId: 'lane-config-failure',
       attachmentProbe: {
         get: () => undefined,
+        getAttempt: () => undefined,
         waitFor: jest.fn().mockResolvedValue(undefined),
       },
     });

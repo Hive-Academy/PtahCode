@@ -567,7 +567,9 @@ async function handleHttpRequest(
           method: mcpRequest.method,
           port: req.socket.localPort,
           time: Date.now(),
-        });
+        }, mcpRequest.method === 'tools/list' && mcpResponse.result &&
+          typeof mcpResponse.result === 'object' && 'tools' in mcpResponse.result
+          ? mcpResponse.result.tools : undefined);
       }
       // The caller is gone: there is no one to write the reply to.
       if (res.destroyed) return;

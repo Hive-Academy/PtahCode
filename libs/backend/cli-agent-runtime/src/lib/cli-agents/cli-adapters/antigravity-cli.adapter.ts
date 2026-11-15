@@ -1154,32 +1154,32 @@ export class AntigravityCliAdapter implements CliAdapter {
                   options.agentId,
                   options.mcpPort,
                   MCP_ATTACHMENT_TIMEOUT_MS,
-                ),
-                done.then(() => undefined),
+                ).then((entry) => ({ exited: false as const, entry })),
+                done.then(() => ({ exited: true as const, entry: undefined })),
               ])
             : mcpRestoreNeeded
               ? // No probe can confirm that agy read the lane URL, so keep the
                 // startup lock for the same window (or until the lane ends).
                 // Releasing at once would race agy's config read.
                 Promise.race([
-                  done.then(() => undefined),
-                  new Promise<undefined>((resolve) => {
+                  done.then(() => ({ exited: true as const, entry: undefined })),
+                  new Promise<{ exited: true; entry: undefined }>((resolve) => {
                     startupGrace = setTimeout(
-                      () => resolve(undefined),
+                      () => resolve({ exited: true, entry: undefined }),
                       MCP_ATTACHMENT_TIMEOUT_MS,
                     );
                   }),
                 ])
-              : Promise.resolve(undefined);
+              : Promise.resolve({ exited: true as const, entry: undefined });
         void startup
-          .then(async (attached) => {
+          .then(async (result) => {
             if (
               mcpConfigured &&
-              !attached &&
+              !result.exited &&
+              !result.entry &&
               options.attachmentProbe &&
               options.agentId &&
-              options.mcpPort &&
-              !processClosed
+              options.mcpPort
             ) {
               mcpTimedOut = true;
               onMcpTimeout?.();

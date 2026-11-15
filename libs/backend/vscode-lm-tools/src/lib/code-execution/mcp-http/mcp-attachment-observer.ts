@@ -1,17 +1,12 @@
 import type {
   IMcpAttachmentProbe,
   McpAttachment,
+  McpAttachmentAttempt,
 } from '@ptah-extension/cli-agent-runtime';
 
-const RETENTION_MS = 60 * 60 * 1000;
+export type { McpAttachmentAttempt } from '@ptah-extension/cli-agent-runtime';
 
-export interface McpAttachmentAttempt {
-  readonly agentId: string;
-  readonly port: number;
-  readonly reason: 'auth-required' | 'invalid-credential' | 'forbidden' | 'auth-error' | 'invalid-url' | 'seen';
-  readonly method: string;
-  readonly time: number;
-}
+const RETENTION_MS = 60 * 60 * 1000;
 
 class McpAttachmentObserver implements IMcpAttachmentProbe {
   private readonly entries = new Map<string, McpAttachment>();
@@ -61,7 +56,11 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
     this.rejectedAttempts.set(key, attempt);
   }
 
-  record(entry: McpAttachment): void {
+  record(entry: McpAttachment, tools?: unknown): void {
+    // A successful JSON-RPC response can still contain an empty tools/list
+    // during startup. Keep waiting for a usable response or initialize.
+    if (entry.method === 'tools/list' &&
+        (!Array.isArray(tools) || tools.length === 0)) return;
     const key = this.key(entry.agentId, entry.port);
     if (this.get(entry.agentId, entry.port)) return;
     for (const [storedKey, stored] of this.entries) {
