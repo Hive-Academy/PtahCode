@@ -81,8 +81,10 @@ as a limit).
 | a2 | spawn bounded lookup wait, grok deadline (antigravity lane aa2f8cb4) | #1298 | merged |
 | a3 | review fixes 1, 3, 4 (codex lane 370c5eef); review: review-batch-a.md | #1298 | merged |
 | b | antigravity reader (agy JSON, branch fix/antigravity-usage-reader) | #1301 | merged |
-| c1 | codex `ordinaryUsageAllowed` gate (branch fix/lane-usage-sources); review: review-batch-c1-r3.md | #1308 | in_review |
-| c | fallback reader port coverage: claude OAuth usage, grok, copilot | - | pending |
+| c1 | codex `ordinaryUsageAllowed` gate (branch fix/lane-usage-sources); review: review-batch-c1-r3.md | #1308 | merged |
+| c2 | grok balance reader, 402 clear (branch fix/lane-usage-readers-c2); review: review-batch-c2-r3.md | #1316 | in_review |
+| c3a | claude OAuth usage reader (branch fix/lane-usage-claude-c3); review: review-batch-c3a-r2.md | (this PR) | in_review |
+| c3b | copilot usage reader | - | pending |
 | d | per-model limit state | - | pending |
 
 ### Batch (a) decisions

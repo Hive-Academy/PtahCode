@@ -10,6 +10,15 @@ import type { PlanUsageReader, PlanUsageReading } from './plan-usage-reader.type
 
 export const CLAUDE_OAUTH_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const TIMEOUT_MS = 5_000;
+const MAX_RETRY_AFTER_MS = 5 * 60_000;
+const retryAfterMs = (value: string | null, now: number): number => {
+  if (!value) return 60_000;
+  const seconds = Number(value);
+  const duration = Number.isFinite(seconds) && seconds >= 0
+    ? seconds * 1_000
+    : Date.parse(value) - now;
+  return Number.isFinite(duration) ? Math.max(1_000, Math.min(MAX_RETRY_AFTER_MS, duration)) : 60_000;
+};
 const Credentials = z.object({
   claudeAiOauth: z.object({
     accessToken: z.string().min(1),
@@ -74,7 +83,10 @@ export function createClaudeOauthPlanUsageReader(
       // The endpoint has no account identity. Require the local Claude account
       // metadata to reconstruct exactly the same owner key as accountInfo().
     } catch (error: unknown) {
-      logger.warn('[PlanUsage] Claude OAuth credentials unavailable', { reason: error instanceof Error ? error.name : 'invalid' });
+      const reason = error instanceof Error ? error.name : 'invalid';
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')
+        logger.debug('[PlanUsage] Claude OAuth credentials absent');
+      else logger.warn('[PlanUsage] Claude OAuth credentials unavailable', { reason });
       return unavailable('no-oauth', 'no-usage-source');
     }
     try {
@@ -101,8 +113,11 @@ export function createClaudeOauthPlanUsageReader(
         redirect: 'error', signal: controller.signal,
       });
       if (!response.ok) {
-        await response.body?.cancel();
-        return unavailable(response.status === 401 || response.status === 403 ? 'usage-auth-rejected' : 'cli-unavailable');
+        await response.body?.cancel().catch(() => undefined);
+        return {
+          ...unavailable(response.status === 401 || response.status === 403 ? 'usage-auth-rejected' : 'cli-unavailable'),
+          ...(response.status === 429 && { retryAfterMs: retryAfterMs(response.headers.get('Retry-After'), now()) }),
+        };
       }
       let body: unknown;
       try { body = await response.json(); } catch { return unavailable('cli-parse-failed'); }

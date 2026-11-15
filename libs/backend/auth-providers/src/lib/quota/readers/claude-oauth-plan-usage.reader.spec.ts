@@ -21,16 +21,24 @@ const full = {
   seven_day_sonnet: { utilization: 12, resets_at: null },
   limits: [{ kind: 'weekly_scoped', percent: 17, scope: { model: { display_name: 'Fable' } } }],
 };
+const loggers: ReturnType<typeof createMockLogger>[] = [];
 
 function harness(credentialFile = credentials, body: unknown = full, accountFile = config, env: Readonly<Record<string, string | undefined>> = {}) {
   const fetcher = jest.fn(async () => new Response(JSON.stringify(body))) as typeof fetch;
   const read = jest.fn(async (path: string) => path.endsWith('.credentials.json') ? credentialFile : accountFile);
   const logger = createMockLogger();
+  loggers.push(logger);
   const reader = createClaudeOauthPlanUsageReader(logger as Partial<Logger> as Logger, () => NOW, fetcher, read, () => '/fixture-home', () => env);
   return { reader, fetcher, read, logger };
 }
 
 describe('Claude OAuth plan usage', () => {
+  afterEach(() => {
+    for (const logger of loggers)
+      expect(JSON.stringify([logger.warn.mock.calls, logger.debug.mock.calls, logger.error.mock.calls]))
+        .not.toMatch(/fixture-token|person@example\.test|Example/);
+    loggers.length = 0;
+  });
   it('maps full and scoped windows with the live reader keys', async () => {
     const { reader, fetcher } = harness();
     const result = await reader({ target, refresh: true });
@@ -64,6 +72,8 @@ describe('Claude OAuth plan usage', () => {
     h.read.mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }));
     expect((await h.reader({ target, refresh: true })).status).toBe('no-usage-source');
     expect(h.fetcher).not.toHaveBeenCalled();
+    expect(h.logger.warn).not.toHaveBeenCalled();
+    expect(h.logger.debug).toHaveBeenCalled();
   });
   it('returns unavailable for 401 and invalid JSON', async () => {
     const h = harness();
@@ -110,6 +120,19 @@ describe('Claude OAuth plan usage', () => {
     const h = harness();
     (h.fetcher as jest.Mock).mockResolvedValueOnce(new Response('private', { status }));
     expect((await h.reader({ target, refresh: true })).statusReason).toBe(status === 403 ? 'usage-auth-rejected' : 'cli-unavailable');
+  });
+  it('keeps the auth reason when response body cancellation rejects', async () => {
+    const h = harness();
+    (h.fetcher as jest.Mock).mockResolvedValueOnce({ ok: false, status: 403, body: { cancel: async () => { throw new Error('cancel failed'); } } });
+    expect((await h.reader({ target, refresh: true })).statusReason).toBe('usage-auth-rejected');
+  });
+  it('bounds Retry-After and accepts seconds and HTTP dates', async () => {
+    const h = harness();
+    for (const value of ['120', new Date(NOW + 90_000).toUTCString(), '999999']) {
+      (h.fetcher as jest.Mock).mockResolvedValueOnce({ ok: false, status: 429, headers: new Headers({ 'Retry-After': value }) });
+      const result = await h.reader({ target, refresh: true });
+      expect(result.retryAfterMs).toBe(value === '999999' ? 300_000 : value === '120' ? 120_000 : 90_000);
+    }
   });
   it.each([{}, null, []])('rejects empty or invalid response shape', async body => {
     expect((await harness(credentials, body).reader({ target, refresh: true })).statusReason).toBe('cli-parse-failed');

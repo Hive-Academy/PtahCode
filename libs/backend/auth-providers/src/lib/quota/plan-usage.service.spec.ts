@@ -166,6 +166,35 @@ function harness() {
 }
 
 describe('PlanUsageService', () => {
+  it('backs off failed OAuth reads per owner while preserving each live no-session result', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    const first = await h.service.getOwnerSnapshot(claudeTarget());
+    const second = await h.service.getOwnerSnapshot(claudeTarget());
+    expect(first).toMatchObject({ unavailableReason: 'no-open-session' });
+    expect(second).toMatchObject({ unavailableReason: 'no-open-session' });
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(2);
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    const otherOwner = { ...claudeTarget(), ownerRef: quotaOwnerRefFromKey(accountOwnerKey('anthropic', 'other@fixture.test\0')) };
+    await h.service.getOwnerSnapshot(otherOwner);
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+    await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(3);
+    h.advance(60_000);
+    await h.service.getOwnerSnapshot(claudeTarget());
+    expect(h.oauthReader).toHaveBeenCalledTimes(4);
+  });
+  it('honors a rate limit cooldown even on refresh', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    h.oauthReader.mockResolvedValueOnce({ status: 'service-unavailable', statusReason: 'cli-unavailable', windowSetEstablished: false, windows: [], retryAfterMs: 120_000 });
+    await h.service.getOwnerSnapshot(claudeTarget());
+    await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    h.advance(120_000);
+    await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+  });
   it('uses OAuth windows after one live no-session read and preserves live data when OAuth fails', async () => {
     const h = harness();
     h.readPlanUsage.mockResolvedValue(null);

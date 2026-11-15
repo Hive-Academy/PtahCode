@@ -159,6 +159,19 @@ export class PlanUsageService {
   private readonly cache = new Map<string, CachedReading>();
   private readonly failingSince = new Map<string, number>();
   private readonly flights = new Map<string, Flight>();
+  private readonly claudeOauthFailures = new Map<string, { until: number; rateLimited: boolean }>();
+
+  private recordClaudeOauthFailure(ownerKey: string, retryAfterMs?: number): void {
+    this.claudeOauthFailures.delete(ownerKey);
+    this.claudeOauthFailures.set(ownerKey, {
+      until: this.now() + (retryAfterMs ?? 60_000),
+      rateLimited: retryAfterMs !== undefined,
+    });
+    if (this.claudeOauthFailures.size > PLAN_USAGE_MAX_OWNERS) {
+      const oldest = this.claudeOauthFailures.keys().next().value;
+      if (oldest !== undefined) this.claudeOauthFailures.delete(oldest);
+    }
+  }
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -183,10 +196,19 @@ export class PlanUsageService {
         const live = await claudeLiveReader(request);
         if (live.unavailableReason !== 'no-open-session' || request.target.claudeRoute?.kind === 'named' || request.target.ownerRef.identityKind !== 'account')
           return live;
+        const ownerKey = request.target.ownerRef.key;
+        const failure = this.claudeOauthFailures.get(ownerKey);
+        if (failure && this.now() < failure.until && (failure.rateLimited || !request.refresh)) return live;
         try {
           const oauth = await claudeOauthReader(request);
-          return oauth.status === 'available' && oauth.windows.length > 0 ? oauth : live;
+          if (oauth.status === 'available' && oauth.windows.length > 0) {
+            this.claudeOauthFailures.delete(ownerKey);
+            return oauth;
+          }
+          this.recordClaudeOauthFailure(ownerKey, oauth.retryAfterMs);
+          return live;
         } catch (error: unknown) {
+          this.recordClaudeOauthFailure(ownerKey);
           logger.warn('[PlanUsage] Claude OAuth source failed', { reason: error instanceof Error ? error.name : 'invalid' });
           return live;
         }

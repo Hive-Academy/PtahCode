@@ -87,6 +87,8 @@ export type PlanUsageReading = Omit<
   readonly providerOwnerEvidence?: OwnerLimitEvidence;
   /** A fresh provider API reading clears older provider owner evidence. */
   readonly providerOwnerClear?: true;
+  /** Private source cooldown hint in milliseconds; never copied to a snapshot. */
+  readonly retryAfterMs?: number;
 };
 
 /** Reads one provider's plan usage. A throw maps to `service-unavailable`. */
