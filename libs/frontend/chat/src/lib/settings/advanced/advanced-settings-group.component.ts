@@ -19,6 +19,7 @@ import {
   type AdvancedSettingGroupId,
   type AdvancedSettingValidation,
 } from '@ptah-extension/shared';
+import { NgTemplateOutlet } from '@angular/common';
 import { PtahButtonDirective, PtahInputDirective, PtahToggleDirective } from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
@@ -73,7 +74,7 @@ function formatValue(
 @Component({
   selector: 'ptah-advanced-settings-group',
   standalone: true,
-  imports: [PtahButtonDirective, PtahInputDirective, PtahToggleDirective, SettingsBusyDisabledDirective],
+  imports: [NgTemplateOutlet, PtahButtonDirective, PtahInputDirective, PtahToggleDirective, SettingsBusyDisabledDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (group(); as group) {
@@ -83,13 +84,7 @@ function formatValue(
         [attr.aria-labelledby]="idPrefix() + '-heading'"
         [attr.data-testid]="'settings-section-' + group.id"
       >
-        <div section-header class="mb-3">
-          <h3
-            [id]="idPrefix() + '-heading'"
-            class="text-xs font-bold uppercase tracking-wider text-base-content"
-          >
-            {{ group.title }}
-          </h3>
+        <ng-template #description>
           <p class="mt-0.5 text-xs text-base-content-muted">
             {{ group.description }}
           </p>
@@ -98,7 +93,33 @@ function formatValue(
               Agent limits apply even when compaction is off.
             </p>
           }
-        </div>
+        </ng-template>
+        <!-- 'section': the sentence-case heading of the sibling setting sections (session budget); 'caps': the
+             small uppercase group label of the Advanced tab and the Codex drawer. -->
+        @if (headingStyle() === 'section') {
+          <div
+            section-header
+            class="mb-[var(--ptah-gap-heading)] border-b border-base-content/10 pb-[var(--ptah-space-2)]"
+          >
+            <h3
+              [id]="idPrefix() + '-heading'"
+              class="text-base font-semibold text-base-content"
+            >
+              {{ group.title }}
+            </h3>
+            <ng-container [ngTemplateOutlet]="description" />
+          </div>
+        } @else {
+          <div section-header class="mb-[var(--ptah-gap-heading)]">
+            <h3
+              [id]="idPrefix() + '-heading'"
+              class="text-xs font-bold uppercase tracking-wider text-base-content"
+            >
+              {{ group.title }}
+            </h3>
+            <ng-container [ngTemplateOutlet]="description" />
+          </div>
+        }
 
         @switch (load()) {
           @case ('loading') {
@@ -263,6 +284,8 @@ function formatValue(
 })
 export class AdvancedSettingsGroupComponent implements OnInit {
   readonly contentSurface = input(true);
+  /** 'section' matches the sentence-case section headings of the Context Management tab; 'caps' is the group label. */
+  readonly headingStyle = input<'caps' | 'section'>('caps');
   private readonly vscode = inject(VSCodeService);
   /** The page toast: every write's outcome (with Undo after a save) is said there. */
   private readonly feedback = inject(SettingsSaveFeedbackService);

@@ -148,7 +148,7 @@ const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
   `,
   styles: `
     :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: var(--ptah-surface-pad);
+      padding: 1.25rem;
     }
   `,
 })
