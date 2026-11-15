@@ -1,0 +1,3 @@
+Verdict: REQUEST_CHANGES
+
+- **High — A report can still reach the former owner.** In [agent-report-router.service.ts:697](</D:/projects/ptah-extension/.claude-worktrees/fix-session-lifecycle-handoff-a49b5b532596/libs/backend/cli-agent-runtime/src/lib/cli-agents/agent-report-router.service.ts:697>), if the child is reparented while the binding lookup is pending and the old parent tab becomes active during that lookup, `ownerUnchanged` prevents the SDK fallback but leaves `parentSessionId` set to the old tab. The subsequent liveness check passes and sends the report to that former owner. Refuse or restart resolution whenever ownership changed, regardless of the old tab’s current liveness.
