@@ -50,8 +50,12 @@ export function parsePack(stem: string, source: string): PackDefinitionV1 {
 
   const phaseFlow: PhaseKind[] = [];
   for (const line of sections.get('Phase flow') ?? []) {
-    const match = /^- ([a-z-]+)(?: \(optional\))?(?::.*)?$/.exec(line);
-    if (!match) continue;
+    const entry = line.trimEnd();
+    if (!entry.startsWith('- ')) continue;
+    // Software's task-type bullets describe detailed flows below the flat list.
+    if (/^- (?:FEATURE|BUGFIX|REFACTORING):/.test(entry)) continue;
+    const match = /^- ([a-z-]+)(?: \(optional\))?(?::.*)?$/.exec(entry);
+    if (!match) throw new Error(`Malformed phase flow entry: ${entry}`);
     const kind = match[1] ?? '';
     if (!phaseKinds.has(kind)) throw new Error(`Unknown phase kind: ${kind}`);
     phaseFlow.push(kind as PhaseKind);

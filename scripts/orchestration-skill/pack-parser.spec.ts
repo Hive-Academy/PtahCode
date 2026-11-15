@@ -21,6 +21,20 @@ describe('pack parser', () => {
     ).toThrow('Unknown phase kind');
   });
 
+  it('rejects malformed phase bullets without dropping valid phases', () => {
+    const source = read('fixtures/extra-phase.md');
+    expect(
+      parsePack('extra-phase', source.replace('- docs\n', '- docs \n'))
+        .phaseFlow,
+    ).toContain('docs');
+    expect(() =>
+      parsePack('extra-phase', source.replace('- docs\n', '- unknown_kind\n')),
+    ).toThrow('Malformed phase flow entry');
+    expect(() =>
+      parsePack('extra-phase', source.replace('- docs\n', '- `docs`\n')),
+    ).toThrow('Malformed phase flow entry');
+  });
+
   it('matches the real software and research examples', () => {
     const root = path.resolve(__dirname, '../..');
     const pack = (stem: string) =>
