@@ -1045,6 +1045,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       getMcpPort.mockReturnValue(51821);
       let agentId = '';
       const probe: import('./mcp-attachment-probe.port').IMcpAttachmentProbe = {
+        getAttempt: () => undefined,
         get: (id, port) => id === agentId && port === 51821
           ? { agentId: id, port, method: 'initialize', time: Date.now() }
           : undefined,

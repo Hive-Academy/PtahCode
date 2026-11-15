@@ -1,11 +1,11 @@
-import { signal, type WritableSignal } from '@angular/core';
+import { signal, ViewEncapsulation, type WritableSignal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
   ProvidersSettingsStateService,
   type ProvidersSettingsCommit,
 } from '@ptah-extension/core';
 import { SettingsSaveFeedbackService } from './settings-save-feedback.service';
-import { SettingsToastComponent } from './settings-toast.component';
+import { SettingsToastComponent, TOAST_PLACEMENT_STYLES } from './settings-toast.component';
 import { isDisabledControl } from './busy-disabled.testing';
 
 const EMPTY: ProvidersSettingsCommit = {
@@ -460,11 +460,7 @@ describe('SettingsToastComponent', () => {
     });
   });
 
-  describe('placement over an open drawer (Batch 49b)', () => {
-    const LIFT = '[body:has(ptah-native-drawer_[role=dialog])_&]:bottom-28';
-    /** The CSS selector Tailwind emits for {@link LIFT}, minus the toast's own class. */
-    const LIFT_CONDITION = 'body:has(ptah-native-drawer [role=dialog])';
-
+  describe('placement over an open drawer (Batch 49b, polish B)', () => {
     async function showToast(): Promise<HTMLElement | null> {
       await feedback.save({
         label: 'voice',
@@ -476,28 +472,119 @@ describe('SettingsToastComponent', () => {
       return query('settings-toast-region');
     }
 
-    it('sits at bottom-6 and carries the lift above a drawer footer', async () => {
+    /** Builds `<ptah-native-drawer><div role=dialog class=...><div data-testid=native-drawer-body>`. */
+    function mountDrawer(panelClass: string): { drawer: HTMLElement; body: HTMLElement } {
+      const drawer = document.createElement('ptah-native-drawer');
+      const panel = document.createElement('div');
+      panel.setAttribute('role', 'dialog');
+      panel.className = panelClass;
+      const body = document.createElement('div');
+      body.setAttribute('data-testid', 'native-drawer-body');
+      panel.appendChild(body);
+      drawer.appendChild(panel);
+      document.body.appendChild(drawer);
+      return { drawer, body };
+    }
+
+    /** Rules of {@link TOAST_PLACEMENT_STYLES}: selector -> declarations, keyed with the media condition. */
+    function rules(): Array<{ media: string | null; selector: string; body: string }> {
+      const out: Array<{ media: string | null; selector: string; body: string }> = [];
+      const re = /@media\s*\(([^)]*)\)\s*\{\s*([^{}]+)\{([^{}]*)\}\s*\}|([^{}@]+)\{([^{}]*)\}/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(TOAST_PLACEMENT_STYLES)) !== null) {
+        if (m[1] !== undefined) out.push({ media: m[1].trim(), selector: m[2].trim(), body: m[3] });
+        else out.push({ media: null, selector: m[4].trim(), body: m[5] });
+      }
+      return out;
+    }
+
+    it('marks the region and its message for the placement rules, and keeps the live regions outside', async () => {
       const region = await showToast();
 
       expect(region?.classList.contains('bottom-6')).toBe(true);
-      expect(region?.classList.contains(LIFT)).toBe(true);
+      expect(region?.classList.contains('right-6')).toBe(true);
+      expect(region?.classList.contains('ptah-settings-toast-region')).toBe(true);
+      // The old arbitrary lift moved into the stylesheet.
+      expect([...(region?.classList ?? [])].some((c) => c.includes('bottom-28'))).toBe(false);
+      expect(query('settings-toast-message')?.classList.contains('ptah-settings-toast-message')).toBe(true);
       expect(region?.querySelector('[data-testid="settings-toast"]')).not.toBeNull();
-      // The live regions stay outside the popover, which exists only while a toast shows.
       expect(region?.querySelector('[data-testid="settings-toast-live-status"]')).toBeNull();
+      expect(region?.querySelector('[data-testid="settings-toast-live-alert"]')).toBeNull();
     });
 
-    it('lifts only while a drawer panel is rendered, not for a closed drawer host', () => {
-      const drawer = document.createElement('ptah-native-drawer');
-      document.body.appendChild(drawer);
-      try {
-        expect(document.querySelector(LIFT_CONDITION)).toBeNull();
+    it('ships the placement stylesheet unscoped, so its body:has() rules can reach the page', () => {
+      const def = (SettingsToastComponent as unknown as {
+        ɵcmp: { encapsulation: ViewEncapsulation };
+      }).ɵcmp;
+      expect(def.encapsulation).toBe(ViewEncapsulation.None);
+      // jest-preset-angular strips component styles, so the rules are checked through TOAST_PLACEMENT_STYLES.
+    });
 
-        const panel = document.createElement('div');
-        panel.setAttribute('role', 'dialog');
-        drawer.appendChild(panel);
-        expect(document.querySelector(LIFT_CONDITION)).toBe(document.body);
+    it('narrow window: lifts above the footer, caps the message and reserves drawer scroll space', () => {
+      const all = rules();
+      const lift = all.find((r) => r.media === null && r.selector.endsWith('.ptah-settings-toast-region'));
+      expect(lift?.body).toContain('bottom: calc(var(--ptah-space-12) * 2 + var(--ptah-space-4))');
+      const cap = all.find((r) => r.media === null && r.selector.endsWith('.ptah-settings-toast-message'));
+      expect(cap?.body).toContain('max-height: 3lh');
+      expect(cap?.body).toContain('overflow-y: auto');
+      const reserves = all.filter((r) => r.selector.includes("[data-testid='native-drawer-body']"));
+      expect(reserves.map((r) => r.media)).toEqual(['width < 51rem', 'width < 61rem']);
+      for (const r of reserves) expect(r.body).toContain('padding-bottom: calc(var(--ptah-space-12) * 3)');
+    });
+
+    it('wide window: moves beside the drawer, a max-w-lg panel from 51rem and any other panel from 61rem', () => {
+      const beside = rules().filter((r) => r.body.includes('left: var(--ptah-space-6)'));
+      expect(beside.map((r) => r.media)).toEqual(['width >= 51rem', 'width >= 61rem']);
+      for (const r of beside) {
+        expect(r.body).toContain('right: auto');
+        expect(r.body).toContain('bottom: var(--ptah-space-6)');
+      }
+      expect(beside[0].body).toContain('calc(100vw - 32rem - var(--ptah-space-12))');
+      expect(beside[1].body).toContain('calc(100vw - 42rem - var(--ptah-space-12))');
+    });
+
+    it('selectors match only while a drawer panel is rendered, and the reserve only while a page toast shows', async () => {
+      const all = rules();
+      const pick = (match: (r: (typeof all)[number]) => boolean): (typeof all)[number] => {
+        const found = all.find(match);
+        if (!found) throw new Error('placement rule missing');
+        return found;
+      };
+      const lift = pick((r) => r.media === null && r.selector.endsWith('.ptah-settings-toast-region'));
+      const lgBeside = pick((r) => r.media === 'width >= 51rem');
+      const reserveLg = pick((r) => r.media === 'width < 51rem');
+      const reserveOther = pick((r) => r.media === 'width < 61rem');
+      const condition = (selector: string): string => selector.replace(/\s+\.ptah-settings-toast-region$/, '');
+
+      const host = document.createElement('ptah-native-drawer');
+      document.body.appendChild(host);
+      expect(document.querySelector(condition(lift.selector))).toBeNull();
+      host.remove();
+
+      const lg = mountDrawer('w-full max-w-lg');
+      try {
+        expect(document.querySelector(condition(lift.selector))).toBe(document.body);
+        expect(document.querySelector(condition(lgBeside.selector))).toBe(document.body);
+        // No page toast yet: no space is reserved.
+        expect(lg.body.matches(reserveLg.selector)).toBe(false);
+        const region = await showToast();
+        expect(region).not.toBeNull();
+        expect(lg.body.matches(reserveLg.selector)).toBe(true);
+        expect(lg.body.matches(reserveOther.selector)).toBe(false);
+        expect(region?.matches(lift.selector)).toBe(true);
       } finally {
-        drawer.remove();
+        lg.drawer.remove();
+      }
+
+      const wide = mountDrawer('w-full max-w-2xl');
+      try {
+        expect(document.querySelector(condition(lgBeside.selector))).toBeNull();
+        expect(wide.body.matches(reserveOther.selector)).toBe(true);
+        feedback.dismiss();
+        fixture.detectChanges();
+        expect(wide.body.matches(reserveOther.selector)).toBe(false);
+      } finally {
+        wide.drawer.remove();
       }
     });
   });

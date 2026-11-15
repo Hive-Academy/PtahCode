@@ -380,6 +380,30 @@ describe('HTTP request handling', () => {
     mcpAttachmentObserver.clear();
   });
 
+  it('does not report attachment for a populated tools/list response', async () => {
+    onMCPRequest.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 5,
+      result: { tools: [{ name: 'ptah_example' }] },
+    });
+    await fetchPath(
+      port,
+      'POST',
+      '/agent/lane-a',
+      JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'tools/list' }),
+    );
+    expect(mcpAttachmentObserver.get('lane-a', port)).toBeUndefined();
+    await fetchPath(
+      port,
+      'POST',
+      '/agent/lane-a',
+      JSON.stringify({ jsonrpc: '2.0', id: 6, method: 'initialize' }),
+    );
+    expect(mcpAttachmentObserver.get('lane-a', port)?.method).toBe(
+      'initialize',
+    );
+  });
+
   beforeEach(async () => {
     logger = createLogger();
     state = createStateStorage();
@@ -1162,8 +1186,19 @@ describe('HTTP caller authentication', () => {
     expect(status).toBe(403);
     expect(body).not.toContain(token);
     const attempt = mcpAttachmentObserver.getAttempt('other', port);
-    expect(attempt).toMatchObject({ agentId: 'other', port, reason: 'forbidden', method: 'POST' });
-    expect(Object.keys(attempt ?? {})).toEqual(['agentId', 'port', 'reason', 'method', 'time']);
+    expect(attempt).toMatchObject({
+      agentId: 'other',
+      port,
+      reason: 'forbidden',
+      method: 'POST',
+    });
+    expect(Object.keys(attempt ?? {})).toEqual([
+      'agentId',
+      'port',
+      'reason',
+      'method',
+      'time',
+    ]);
     expect(JSON.stringify(attempt)).not.toContain(token);
     expect(JSON.parse(body)).toEqual({
       jsonrpc: '2.0',

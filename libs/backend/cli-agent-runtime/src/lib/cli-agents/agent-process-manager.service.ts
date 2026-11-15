@@ -116,7 +116,11 @@ import {
 import { LaneBudgetGuard } from './lane-budget-guard';
 import { AgentBudgetCoordinator } from './agent-budget-coordinator';
 import { createLaneBudget } from './lane-budget-deadline';
-import { deliverLaneBudgetWarning, LaneBudgetTelemetry, takeHeldBudgetWarning } from './lane-budget-telemetry';
+import {
+  deliverLaneBudgetWarning,
+  LaneBudgetTelemetry,
+  takeHeldBudgetWarning,
+} from './lane-budget-telemetry';
 import { bindLaneSessionId } from './lane-session-binding';
 import type { AgentOutputJournal } from './agent-output-journal.service';
 import {
@@ -137,7 +141,12 @@ import { findBlockedLaneModel } from './lane-spawn-policy';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from './mcp-attachment-probe.port';
 import type { TrackedAgent } from './tracked-agent';
-import { observedModelFrom, requestedModelForLog, takeOutcomeLog, type LaneModelLogState } from './lane-model-log';
+import {
+  observedModelFrom,
+  requestedModelForLog,
+  takeOutcomeLog,
+  type LaneModelLogState,
+} from './lane-model-log';
 import {
   classifyLaneLimit,
   laneLimitEvidence,
@@ -220,7 +229,10 @@ export interface AgentRoleStamp {
 }
 
 interface SdkSpawnOptions {
-  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
+  readonly requestedPolicy?: Pick<
+    EffectiveLanePolicy,
+    'permission' | 'network'
+  >;
   readonly effectivePolicy?: ReturnType<
     AgentSpawnEnvironment['resolveLanePolicy']
   >;
@@ -383,7 +395,10 @@ export class AgentProcessManager {
   /** Promise-based mutex to serialize spawn operations and prevent TOCTOU race in concurrent limit check */
   private spawnMutex: Promise<void> = Promise.resolve();
   /** Pending recovered-output persists of restored lanes, keyed by agent id. */
-  private readonly recoveredOutputWrites = new Map<string, TrackedRecoveredWrite>();
+  private readonly recoveredOutputWrites = new Map<
+    string,
+    TrackedRecoveredWrite
+  >();
   /** EventEmitter for agent lifecycle events (spawned, output, exited) */
   readonly events = new EventEmitter();
 
@@ -462,31 +477,54 @@ export class AgentProcessManager {
     @inject(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { isOptional: true })
     private readonly usageReconciliationTrigger?: import('@ptah-extension/platform-core').UsageReconciliationTrigger,
   ) {
-    this.budgetTelemetry = new LaneBudgetTelemetry(this.logger,
+    this.budgetTelemetry = new LaneBudgetTelemetry(
+      this.logger,
       async (agentId) => {
         const tracked = this.agents.get(agentId);
-        return deliverLaneBudgetWarning(agentId, tracked?.sdkHandle,
+        return deliverLaneBudgetWarning(
+          agentId,
+          tracked?.sdkHandle,
           tracked?.info.status === 'running' && !tracked.hasExited,
-          tracked ? (warning) => {
-            const pending = tracked.pendingMessages[0];
-            if (!pending) return false;
-            if (tracked.sdkHandle?.queueForNextTurn) tracked.sdkHandle.queueForNextTurn(warning);
-            else tracked.pendingMessages[0] = { ...pending, text: `${warning}\n\n${pending.text}` };
-            return true;
-          } : undefined);
+          tracked
+            ? (warning) => {
+                const pending = tracked.pendingMessages[0];
+                if (!pending) return false;
+                if (tracked.sdkHandle?.queueForNextTurn)
+                  tracked.sdkHandle.queueForNextTurn(warning);
+                else
+                  tracked.pendingMessages[0] = {
+                    ...pending,
+                    text: `${warning}\n\n${pending.text}`,
+                  };
+                return true;
+              }
+            : undefined,
+        );
       },
-      (agentId, reason) => { void this.stopLaneForGuard(agentId, reason, 0, 0); });
-    this.budgetSettingsSubscription = this.spawnEnvironment.onAgentBudgetSettingsChanged?.(() => {
-      const settings = this.spawnEnvironment.resolveAgentBudgetSettings();
-      for (const [agentId, tracked] of this.agents) {
-        if (tracked.info.status !== 'running' || !tracked.budget) continue;
-        const decision = tracked.budget.updateSettings(settings);
-        tracked.info = { ...tracked.info, agentBudget: tracked.budget.record() };
-        if (decision.stopReason) clearTimeout(tracked.budgetTimer);
-        else this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
-        this.budgetTelemetry.dispatch(agentId, tracked, decision);
-      }
-    });
+      (agentId, reason) => {
+        void this.stopLaneForGuard(agentId, reason, 0, 0);
+      },
+    );
+    this.budgetSettingsSubscription =
+      this.spawnEnvironment.onAgentBudgetSettingsChanged?.(() => {
+        const settings = this.spawnEnvironment.resolveAgentBudgetSettings();
+        for (const [agentId, tracked] of this.agents) {
+          if (tracked.info.status !== 'running' || !tracked.budget) continue;
+          const decision = tracked.budget.updateSettings(settings);
+          tracked.info = {
+            ...tracked.info,
+            agentBudget: tracked.budget.record(),
+          };
+          if (decision.stopReason) clearTimeout(tracked.budgetTimer);
+          else
+            this.budgetTelemetry.armDeadline(
+              agentId,
+              tracked,
+              () => this.agents.get(agentId) === tracked,
+            );
+          this.budgetTelemetry.dispatch(agentId, tracked, decision);
+        }
+      });
   }
 
   /**
@@ -617,7 +655,10 @@ export class AgentProcessManager {
       expectsMcp: request.attachMcp !== false && adapter.supportsMcp !== false,
       cliVersion: detection.version,
       effectivePolicy,
-      requestedPolicy: { permission: request.permission, network: request.network },
+      requestedPolicy: {
+        permission: request.permission,
+        network: request.network,
+      },
     });
   }
 
@@ -753,10 +794,15 @@ export class AgentProcessManager {
     const gate = await this.resumeGate.evaluate({
       cli,
       cliSessionId: resumeSessionId,
-      ...(latest?.info.agentBudget || isAgentBudgetStopReason(latest?.info.stopReason)
+      ...(latest?.info.agentBudget ||
+      isAgentBudgetStopReason(latest?.info.stopReason)
         ? {
-            ...(latest.info.agentBudget ? { budget: latest.info.agentBudget } : {}),
-            ...(latest.info.stopReason ? { stopReason: latest.info.stopReason } : {}),
+            ...(latest.info.agentBudget
+              ? { budget: latest.info.agentBudget }
+              : {}),
+            ...(latest.info.stopReason
+              ? { stopReason: latest.info.stopReason }
+              : {}),
             budgetSettings: this.spawnEnvironment.resolveAgentBudgetSettings(),
           }
         : {}),
@@ -799,10 +845,14 @@ export class AgentProcessManager {
 
     // A checkpoint older than the output the lane holds is never carried. An
     // equal time is the checkpoint the lane was restored from, so it is kept.
-    const checkpoint = latest ? this.outputJournal?.read(latest.info.agentId) : undefined;
+    const checkpoint = latest
+      ? this.outputJournal?.read(latest.info.agentId)
+      : undefined;
     const carryOver = collectHandoffCarryOver(
       lane.flatMap((tracked) => tracked.accumulatedSegments),
-      checkpoint && checkpointFreshness(checkpoint, latest?.info.outputLostAfter) !== 'older'
+      checkpoint &&
+        checkpointFreshness(checkpoint, latest?.info.outputLostAfter) !==
+          'older'
         ? checkpoint
         : undefined,
     );
@@ -945,7 +995,11 @@ export class AgentProcessManager {
     } = options;
     const agentId = AgentId.create();
     const startedAt = new Date().toISOString();
-    const previous = previousResumeRecord(this.agents.values(), cli, request.resumeSessionId);
+    const previous = previousResumeRecord(
+      this.agents.values(),
+      cli,
+      request.resumeSessionId,
+    );
     const laneModel = this.spawnEnvironment.resolveModel(
       cli,
       request.model,
@@ -997,7 +1051,11 @@ export class AgentProcessManager {
       // formatter and `SystemCliLaneResumer` read `permission` directly.
       effectivePolicy: options.effectivePolicy?.requested,
       requestedPolicy: options.requestedPolicy,
-      ...(request.phase ? { phaseKind: request.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
+      ...(request.phase
+        ? { phaseKind: request.phase.kind }
+        : previous?.phaseKind
+          ? { phaseKind: previous.phaseKind }
+          : {}),
     };
 
     const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
@@ -1053,8 +1111,7 @@ export class AgentProcessManager {
     try {
       const laneMcpCapability = laneMcpTokenCapability(cli);
       const mcpToken =
-        mcpPort &&
-        laneMcpCapability
+        mcpPort && laneMcpCapability
           ? issueLaneMcpToken(
               this.mcpCredentials,
               this.logger,
@@ -1141,14 +1198,20 @@ export class AgentProcessManager {
     // Pi reports its shared channel here too (4332578858).
     const effectiveChannel = sdkHandle.getRoleDelivery?.() ?? roleChannel;
     const toolProfileAdapter = laneToolProfileAdapterResult(
-      cli, request.phase,
+      cli,
+      request.phase,
       cli === 'claude'
-        ? 'toolProfileApplied' in sdkHandle && sdkHandle.toolProfileApplied === true
+        ? 'toolProfileApplied' in sdkHandle &&
+            sdkHandle.toolProfileApplied === true
         : Boolean(issuedMcpToken),
     );
-    const boundInfo = { ...scopedInfo, ...admittedReference,
+    const boundInfo = {
+      ...scopedInfo,
+      ...admittedReference,
       ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
-      ...(sdkHandle.effectivePolicy ? { effectivePolicy: sdkHandle.effectivePolicy } : {}),
+      ...(sdkHandle.effectivePolicy
+        ? { effectivePolicy: sdkHandle.effectivePolicy }
+        : {}),
     };
     const effectiveInfo = roleStamp
       ? { ...boundInfo, roleChannel: effectiveChannel }
@@ -1242,7 +1305,8 @@ export class AgentProcessManager {
 
       const agentId = meta.agentId ?? AgentId.create();
       const startedAt = new Date().toISOString();
-      const previous = previousResumeRecord(this.agents.values(),
+      const previous = previousResumeRecord(
+        this.agents.values(),
         meta.cli,
         meta.resumeSessionId,
       );
@@ -1286,9 +1350,17 @@ export class AgentProcessManager {
           : {}),
         ...meta.roleStamp,
         ...(toolProfileAdapter ? { toolProfileAdapter } : {}),
-        ...(meta.phase ? { phaseKind: meta.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
+        ...(meta.phase
+          ? { phaseKind: meta.phase.kind }
+          : previous?.phaseKind
+            ? { phaseKind: previous.phaseKind }
+            : {}),
       };
-      const scopedInfo = stampWorkspaceKey(info, this.spawnEnvironment, previous);
+      const scopedInfo = stampWorkspaceKey(
+        info,
+        this.spawnEnvironment,
+        previous,
+      );
       const effectiveChannel = sdkHandle.getRoleDelivery?.();
       const effectiveInfo =
         effectiveChannel && meta.roleStamp
@@ -1424,13 +1496,22 @@ export class AgentProcessManager {
     };
 
     const previousBudget = info.cliSessionId
-      ? previousResumeRecord(this.agents.values(), info.cli, info.cliSessionId)?.agentBudget
+      ? previousResumeRecord(this.agents.values(), info.cli, info.cliSessionId)
+          ?.agentBudget
       : undefined;
-    const budget = createLaneBudget(this.spawnEnvironment.resolveAgentBudgetSettings(), info.startedAt, previousBudget);
+    const budget = createLaneBudget(
+      this.spawnEnvironment.resolveAgentBudgetSettings(),
+      info.startedAt,
+      previousBudget,
+    );
     tracked.budget = budget;
     tracked.info = { ...tracked.info, agentBudget: budget.record() };
     this.agents.set(agentId, tracked);
-    this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
+    this.budgetTelemetry.armDeadline(
+      agentId,
+      tracked,
+      () => this.agents.get(agentId) === tracked,
+    );
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
     sdkHandle.setAgentId?.(agentId);
@@ -1439,9 +1520,17 @@ export class AgentProcessManager {
       this.flushDelta(agentId);
     };
     const updateCliSessionId = (sessionId: string | undefined): void => {
-      const decision = bindLaneSessionId(tracked, sessionId, this.agents.values());
+      const decision = bindLaneSessionId(
+        tracked,
+        sessionId,
+        this.agents.values(),
+      );
       if (decision) {
-        this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
+        this.budgetTelemetry.armDeadline(
+          agentId,
+          tracked,
+          () => this.agents.get(agentId) === tracked,
+        );
         this.budgetTelemetry.dispatch(agentId, tracked, decision);
       }
     };
@@ -1496,7 +1585,9 @@ export class AgentProcessManager {
       const timeoutDetail = (): string => {
         const attempt = probe.getAttempt?.(agentId, port);
         if (!attempt) return 'no-request-seen';
-        return attempt.reason === 'seen' ? 'seen-but-not-initialize' : `rejected:${attempt.reason}`;
+        return attempt.reason === 'seen'
+          ? 'seen-but-not-initialize'
+          : `rejected:${attempt.reason}`;
       };
       const clearWarning = (): void => {
         if (this.agents.get(agentId) !== tracked) return;
@@ -1518,7 +1609,8 @@ export class AgentProcessManager {
         void probe
           .waitFor(agentId, port, MCP_ATTACHMENT_TIMEOUT_MS)
           .then((entry) => {
-            if (!entry && !tracked.hasExited) warnMcp('handshake-timeout', timeoutDetail());
+            if (!entry && !tracked.hasExited)
+              warnMcp('handshake-timeout', timeoutDetail());
           });
       }
       const onMcpLaneExit = (): void => {
@@ -1540,12 +1632,15 @@ export class AgentProcessManager {
         if (captureSessionId) updateCliSessionId(captureSessionId());
         if (sdkHandle.outcomeUsageIsTurnTotal && segment.usage) {
           tracked.outcomeUsage = this.laneUsageNormalizer.accept(
-            String(agentId), sdkHandle.usageScope ?? 'turn', segment.usage,
+            String(agentId),
+            sdkHandle.usageScope ?? 'turn',
+            segment.usage,
           );
         }
         if (segment.turnTelemetry) {
           const observed = observedModelFrom(info.cli, segment.turnTelemetry);
-          if (observed && tracked.modelLog) tracked.modelLog.actualModel = observed;
+          if (observed && tracked.modelLog)
+            tracked.modelLog.actualModel = observed;
           this.budgetTelemetry.accept(agentId, tracked, segment.turnTelemetry);
         }
         this.outputBuffer.appendSegment(
@@ -1686,14 +1781,17 @@ export class AgentProcessManager {
     const tracked = this.agents.get(agentId);
     if (!tracked || tracked.info.status !== 'running') return;
 
-    this.logger.warn(isAgentBudgetStopReason(stopReason)
-      ? '[AgentProcessManager] Agent budget tripped; stopping'
-      : '[AgentProcessManager] Lane repeat guard tripped; stopping', {
-      agentId,
-      stopReason,
-      repeats,
-      toolCalls,
-    });
+    this.logger.warn(
+      isAgentBudgetStopReason(stopReason)
+        ? '[AgentProcessManager] Agent budget tripped; stopping'
+        : '[AgentProcessManager] Lane repeat guard tripped; stopping',
+      {
+        agentId,
+        stopReason,
+        repeats,
+        toolCalls,
+      },
+    );
     tracked.repeatedCalls = repeats;
     // Stamped before `stop`, which spreads `tracked.info` into the terminal
     // record, the completion signal and `agent:exited`.
@@ -1843,7 +1941,10 @@ export class AgentProcessManager {
       }
       this.foreignLiveAgentIds.delete(agentId);
 
-      const output = applyOutputCheckpoint(ref, this.outputJournal?.read(agentId));
+      const output = applyOutputCheckpoint(
+        ref,
+        this.outputJournal?.read(agentId),
+      );
       const stdout = output.stdout;
       const info: AgentProcessInfo = {
         // Keep corrupt fields present: the account gate must refuse them,
@@ -1858,8 +1959,12 @@ export class AgentProcessManager {
         task: ref.task,
         workingDirectory,
         startedAt: ref.startedAt,
-        ...(ref.effectivePolicy ? { effectivePolicy: ref.effectivePolicy } : {}),
-        ...(ref.requestedPolicy ? { requestedPolicy: ref.requestedPolicy } : {}),
+        ...(ref.effectivePolicy
+          ? { effectivePolicy: ref.effectivePolicy }
+          : {}),
+        ...(ref.requestedPolicy
+          ? { requestedPolicy: ref.requestedPolicy }
+          : {}),
         ...(ref.turnSeq !== undefined ? { turnSeq: ref.turnSeq } : {}),
         ...(ref.cliSessionId ? { cliSessionId: ref.cliSessionId } : {}),
         ...(ref.agentBudget ? { agentBudget: ref.agentBudget } : {}),
@@ -1868,7 +1973,9 @@ export class AgentProcessManager {
         // stays "Unknown owner" and is never given the current owner.
         ...(ref.quotaOwner ? { quotaOwner: ref.quotaOwner } : {}),
         modelScope: ref.modelScope ?? null,
-        ...(output.outputLostAfter ? { outputLostAfter: output.outputLostAfter } : {}),
+        ...(output.outputLostAfter
+          ? { outputLostAfter: output.outputLostAfter }
+          : {}),
       };
       // Seeds the lane's remembered owner, so a lane that only learns its
       // owner from a run still reads its evidence after a reload.
@@ -1915,16 +2022,26 @@ export class AgentProcessManager {
       // process accumulates one record per restored agent per session switch.
       this.scheduleCleanup(agentId);
       if (output.recovered) {
-        this.events.emit('agent:output-recovered', { ...info }, (settled: Promise<void>) =>
-          this.trackRecoveredOutputWrite(agentId, settled));
+        this.events.emit(
+          'agent:output-recovered',
+          { ...info },
+          (settled: Promise<void>) =>
+            this.trackRecoveredOutputWrite(agentId, settled),
+        );
       }
       restored++;
     }
 
     // Durable completions survive any ref replacement: replay by outbox, never by ref.
-    if (parentSessionId) this.laneCompletion.replayOutbox(parentSessionId).catch((error: unknown) =>
-      this.logger.error('[AgentProcessManager] Completion outbox replay failed',
-        error instanceof Error ? error : new Error(String(error))));
+    if (parentSessionId)
+      this.laneCompletion
+        .replayOutbox(parentSessionId)
+        .catch((error: unknown) =>
+          this.logger.error(
+            '[AgentProcessManager] Completion outbox replay failed',
+            error instanceof Error ? error : new Error(String(error)),
+          ),
+        );
 
     if (restored > 0) {
       this.logger.info(
@@ -1967,7 +2084,10 @@ export class AgentProcessManager {
    * the same agent replaces the entry; the old write then cannot drop it.
    * Queue order and retries are untouched.
    */
-  private trackRecoveredOutputWrite(agentId: string, write: Promise<void>): void {
+  private trackRecoveredOutputWrite(
+    agentId: string,
+    write: Promise<void>,
+  ): void {
     const tracked = trackRecoveredWrite(write, () => {
       if (this.recoveredOutputWrites.get(agentId) === tracked) {
         this.recoveredOutputWrites.delete(agentId);
@@ -2252,7 +2372,8 @@ export class AgentProcessManager {
     const tracked = this.agents.get(agentId);
     if (!tracked) return;
     tracked.reportAttempts = Math.min((tracked.reportAttempts ?? 0) + 1, 65535);
-    if (failed) tracked.reportsFailed = Math.min((tracked.reportsFailed ?? 0) + 1, 65535);
+    if (failed)
+      tracked.reportsFailed = Math.min((tracked.reportsFailed ?? 0) + 1, 65535);
   }
 
   /**
@@ -2551,13 +2672,24 @@ export class AgentProcessManager {
     const routedMessage = takeHeldBudgetWarning(tracked, message);
     try {
       const outcome = await this.messageRouter.route(
-        agentId, tracked, routedMessage, this, delivery, messageId,
+        agentId,
+        tracked,
+        routedMessage,
+        this,
+        delivery,
+        messageId,
         allowPartialTurnLoss,
       );
-      if (warning && outcome.mode === 'unsupported') tracked.heldBudgetWarning = warning;
-      else if (warning) this.logger.info('[LaneBudgetTelemetry] Held budget warning delivered with parent message', {
-        agentId, mode: outcome.mode,
-      });
+      if (warning && outcome.mode === 'unsupported')
+        tracked.heldBudgetWarning = warning;
+      else if (warning)
+        this.logger.info(
+          '[LaneBudgetTelemetry] Held budget warning delivered with parent message',
+          {
+            agentId,
+            mode: outcome.mode,
+          },
+        );
       return outcome;
     } catch (error: unknown) {
       if (warning) tracked.heldBudgetWarning = warning;
@@ -2681,8 +2813,14 @@ export class AgentProcessManager {
       );
     }
 
-    if (tracked.budget?.expired() || isAgentBudgetStopReason(tracked.info.stopReason)) {
-      throw new AgentContinueError('released', 'Lane budget exhausted; start a fresh lane.');
+    if (
+      tracked.budget?.expired() ||
+      isAgentBudgetStopReason(tracked.info.stopReason)
+    ) {
+      throw new AgentContinueError(
+        'released',
+        'Lane budget exhausted; start a fresh lane.',
+      );
     }
 
     const turn = Symbol('lane-turn');
@@ -2728,7 +2866,12 @@ export class AgentProcessManager {
     tracked.guardToolCalls = undefined;
     tracked.repeatedCalls = undefined;
     tracked.queuedMessagesDropped = undefined;
-    if (tracked.budget) this.budgetTelemetry.armDeadline(agentId, tracked, () => this.agents.get(agentId) === tracked);
+    if (tracked.budget)
+      this.budgetTelemetry.armDeadline(
+        agentId,
+        tracked,
+        () => this.agents.get(agentId) === tracked,
+      );
     this.armInactivityWatchdog(agentId, tracked);
 
     this.events.emit('agent:spawned', tracked.info);
@@ -3685,9 +3828,15 @@ export class AgentProcessManager {
   private signalLaneCompletion(tracked: TrackedAgent): void {
     const modelLog = tracked.modelLog;
     const completedAt = tracked.info.completedAt;
-    const outcome = modelLog && completedAt
-      ? takeOutcomeLog(modelLog, tracked.info.agentId, tracked.info.cli, completedAt)
-      : undefined;
+    const outcome =
+      modelLog && completedAt
+        ? takeOutcomeLog(
+            modelLog,
+            tracked.info.agentId,
+            tracked.info.cli,
+            completedAt,
+          )
+        : undefined;
     if (outcome) {
       this.logger.info('[AgentProcessManager] Lane model outcome', outcome);
     }

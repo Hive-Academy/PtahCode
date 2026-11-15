@@ -379,11 +379,25 @@ async function handleHttpRequest(
   authenticate?: (input: McpHttpAuthInput) => McpRequestAuth,
 ): Promise<void> {
   const port = req.socket.localPort ?? 0;
-  const recordRejected = (url: string | undefined, reason: 'auth-required' | 'invalid-credential' | 'forbidden' | 'auth-error' | 'invalid-url'): void => {
+  const recordRejected = (
+    url: string | undefined,
+    reason:
+      | 'auth-required'
+      | 'invalid-credential'
+      | 'forbidden'
+      | 'auth-error'
+      | 'invalid-url',
+  ): void => {
     try {
       const agentId = extractCallerAgentId(url);
       if (agentId && /^[A-Za-z0-9-]{1,128}$/.test(agentId))
-        mcpAttachmentObserver.recordRejectedAttempt({ agentId, port, reason, method: req.method === 'POST' ? 'POST' : 'OTHER', time: Date.now() });
+        mcpAttachmentObserver.recordRejectedAttempt({
+          agentId,
+          port,
+          reason,
+          method: req.method === 'POST' ? 'POST' : 'OTHER',
+          time: Date.now(),
+        });
     } catch {
       // A malformed identity cannot be keyed to a lane.
     }
@@ -473,7 +487,14 @@ async function handleHttpRequest(
     return;
   }
   if (!decision.ok) {
-    recordRejected(identityUrl, decision.failure.httpStatus === 403 ? 'forbidden' : decision.failure.message === MCP_CREDENTIAL_INVALID_MESSAGE ? 'invalid-credential' : 'auth-required');
+    recordRejected(
+      identityUrl,
+      decision.failure.httpStatus === 403
+        ? 'forbidden'
+        : decision.failure.message === MCP_CREDENTIAL_INVALID_MESSAGE
+          ? 'invalid-credential'
+          : 'auth-required',
+    );
     discardBody(req);
     endAuthFailure(
       res,
@@ -550,15 +571,27 @@ async function handleHttpRequest(
         _abortSignal: abortOnEarlyClose(res),
       };
 
-      if (mcpRequest._callerAgentId && /^[A-Za-z0-9-]{1,128}$/.test(mcpRequest._callerAgentId))
-        mcpAttachmentObserver.recordAttempt({ agentId: mcpRequest._callerAgentId, port, reason: 'seen', method: mcpRequest.method === 'initialize' || mcpRequest.method === 'tools/list' ? mcpRequest.method : 'other', time: Date.now() });
+      if (
+        mcpRequest._callerAgentId &&
+        /^[A-Za-z0-9-]{1,128}$/.test(mcpRequest._callerAgentId)
+      )
+        mcpAttachmentObserver.recordAttempt({
+          agentId: mcpRequest._callerAgentId,
+          port,
+          reason: 'seen',
+          method:
+            mcpRequest.method === 'initialize' ||
+            mcpRequest.method === 'tools/list'
+              ? mcpRequest.method
+              : 'other',
+          time: Date.now(),
+        });
 
       const mcpResponse = await onMCPRequest(mcpRequest);
       if (
         mcpRequest._callerAgentId &&
         /^[A-Za-z0-9-]{1,128}$/.test(mcpRequest._callerAgentId) &&
-        (mcpRequest.method === 'initialize' ||
-          mcpRequest.method === 'tools/list') &&
+        mcpRequest.method === 'initialize' &&
         !('error' in mcpResponse) &&
         req.socket.localPort
       ) {

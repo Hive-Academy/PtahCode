@@ -317,12 +317,20 @@ export type SessionChildStopResult =
     }
   | SessionChildLookupRefusal
   | SessionChildStopHandedOffRefusal
-  | SessionChildStopStartingRefusal;
+  | SessionChildStopStartingRefusal
+  | SessionChildStopStillActiveRefusal;
 
 /** `stop` on a start that is still in progress: nothing was stopped. */
 export interface SessionChildStopStartingRefusal {
   readonly ok: false;
   readonly reason: 'starting';
+  readonly detail: string;
+}
+
+/** stop could not end the adapter session even with a hard end: not marked stopped. */
+export interface SessionChildStopStillActiveRefusal {
+  readonly ok: false;
+  readonly reason: 'still-active';
   readonly detail: string;
 }
 

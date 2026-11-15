@@ -35,7 +35,8 @@ import {
   type CompactRailState,
 } from '@ptah-extension/chat-ui';
 import { NativePopoverComponent, PtahInputDirective, PtahButtonDirective } from '@ptah-extension/ui';
-import { AttentionPermissionActionsComponent, LoggingService, type AttentionItem } from '@ptah-extension/core';
+import { LoggingService, type AttentionItem } from '@ptah-extension/core';
+import { AttentionPermissionActionsComponent } from '@ptah-extension/notification-center';
 import { CircleAlert, LucideAngularModule } from 'lucide-angular';
 import { CanvasStore } from '../canvas.store';
 import { CanvasDetailService } from '../canvas-detail/canvas-detail.service';

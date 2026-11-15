@@ -34,7 +34,6 @@ import {
   PtahButtonDirective,
   PtahFormSectionComponent,
   PtahIconButtonDirective,
-  PtahSectionHeaderComponent,
 } from '@ptah-extension/ui';
 import {
   ACCOUNT_COPY,
@@ -100,7 +99,6 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
     PtahButtonDirective,
     PtahIconButtonDirective,
     PtahFormSectionComponent,
-    PtahSectionHeaderComponent,
     AmbientAccountRowComponent,
     AddAccountFormComponent,
     AccountDetailViewComponent,
@@ -135,40 +133,39 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
           </div>
         } @else {
           <ptah-form-section heading="Accounts" [error]="loadError()" data-testid="accounts-tab-header">
-            @if (snapshot() && view().stale) {
-              <span aside class="flex flex-wrap items-center gap-[var(--ptah-gap-inline)]">
-                <span
-                  role="status"
-                  ptahBadge tone="warn" class="h-auto gap-[var(--ptah-gap-label)]"
-                  data-testid="accounts-tab-stale"
-                >
-                  <lucide-angular [img]="WarningIcon" class="h-3 w-3" aria-hidden="true" />
-                  Out of date
-                </span>
-                <button
-                  type="button"
-                  ptahButton
-                  variant="ghost"
-                  [busy]="view().status === 'loading'"
-                  (click)="retry()"
-                  data-testid="accounts-tab-stale-retry"
-                >Try again</button>
+            @if (!addOpen() || (snapshot() && view().stale)) {
+              <span aside class="flex flex-wrap items-center gap-[var(--ptah-gap-inline)]" data-testid="accounts-tab-aside">
+                @if (!addOpen()) {
+                  <button
+                    #addButton
+                    type="button"
+                    ptahButton
+                    variant="outline"
+                    [attr.aria-disabled]="addUnavailable() ? 'true' : null"
+                    [attr.title]="held() ? copy.notAvailableOnHost : null"
+                    (click)="openAdd()"
+                    data-testid="accounts-tab-add"
+                  >Add account</button>
+                }
+                @if (snapshot() && view().stale) {
+                  <span
+                    role="status"
+                    ptahBadge tone="warn" class="h-auto gap-[var(--ptah-gap-label)]"
+                    data-testid="accounts-tab-stale"
+                  >
+                    <lucide-angular [img]="WarningIcon" class="h-3 w-3" aria-hidden="true" />
+                    Out of date
+                  </span>
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="ghost"
+                    [busy]="view().status === 'loading'"
+                    (click)="retry()"
+                    data-testid="accounts-tab-stale-retry"
+                  >Try again</button>
+                }
               </span>
-            }
-            @if (!addOpen()) {
-              <ptah-section-header heading="Account list" [level]="4">
-                <button
-                  #addButton
-                  actions
-                  type="button"
-                  ptahButton
-                  variant="outline"
-                  [attr.aria-disabled]="addUnavailable() ? 'true' : null"
-                  [attr.title]="held() ? copy.notAvailableOnHost : null"
-                  (click)="openAdd()"
-                  data-testid="accounts-tab-add"
-                >Add account</button>
-              </ptah-section-header>
             }
 
             @if (snapshot(); as current) {

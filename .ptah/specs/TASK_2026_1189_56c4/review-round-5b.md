@@ -1,0 +1,3 @@
+Verdict: REQUEST_CHANGES
+
+- **High — Completed work can be lost after reconciliation.** [session-handoff.service.ts:440](D:/projects/ptah-extension/.claude-worktrees/fix-session-lifecycle-handoff-a49b5b532596/libs/backend/cli-agent-runtime/src/lib/session-children/session-handoff.service.ts:440) reverts adoption when the successor is absent. If a lane completes before the host later reports success, its completion is sent to the predecessor. The late-success path at line 460 only re-adopts running lanes, then records an acknowledgement that permits the successor to close the predecessor. The successor can therefore miss completed work.
