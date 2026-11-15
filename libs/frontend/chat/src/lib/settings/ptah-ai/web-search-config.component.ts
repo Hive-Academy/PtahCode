@@ -216,7 +216,7 @@ function providerLabel(provider: ProviderId): string {
                         {{ apiKeyConfigured()[opt.value] ? 'Update key' : 'Set key' }}
                       </button>
                       <div content class="p-3 w-72 space-y-2 text-left">
-                        <ptah-field [label]="'API key for ' + opt.label" appearance="stacked"
+                        <ptah-field [label]="'API key for ' + opt.label" size="sm"
                           hint="Stored encrypted on this machine. Use Test connection after saving to check it.">
                           <input [id]="'web-search-api-key-' + opt.value" [type]="keyVisible() ? 'text' : 'password'"
                             ptahInput size="sm" tone="mono" class="w-full pr-9 text-xs"
