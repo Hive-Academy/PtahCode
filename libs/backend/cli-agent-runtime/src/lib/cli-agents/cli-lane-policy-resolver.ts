@@ -70,6 +70,15 @@ export function resolveCliLanePolicy(input: {
 }): EffectiveLanePolicy {
   if (input.resumePolicy) {
     const snapshot = input.resumePolicy;
+    if (input.parentLevel !== 'plan' && !snapshot.permission && !snapshot.network) {
+      throw new LaneSpawnPolicyError({
+        code: 'UNSUPPORTED_LANE_POLICY',
+        field: 'permission',
+        cli: input.cli,
+        requested: snapshot,
+        reason: `Resumed policy is empty: both permission and network are undefined.`,
+      });
+    }
     return validateResolvedPolicy(input.cli, input.manifest, input.parentLevel === 'plan'
       ? { ...snapshot, permission: 'plan', permissionSource: 'parent-plan',
           ...(input.cli === 'codex' ? { network: 'deny' as const, networkSource: 'parent-plan' as const } : {}) }
