@@ -52,18 +52,45 @@ describe('userAgentFiles', () => {
   });
 
   it.each(['{', '{"version":1,"agents":{"writer":{}}}'])(
-    'fails closed on invalid origin store %s',
+    'treats every agent as user-written when the origin store is invalid: %s',
     async (store) => {
       const dir = join(root, '.claude', 'agents');
       const originDir = join(root, '.ptah', 'setup-wizard');
       mkdirSync(dir, { recursive: true });
       mkdirSync(originDir, { recursive: true });
       writeFileSync(join(dir, 'writer.md'), '# Generated');
+      writeFileSync(join(dir, 'custom.md'), '# Custom');
       writeFileSync(join(originDir, 'agent-origins.json'), store);
-      expect(await userAgentFiles(root, log)).toEqual([]);
+      expect(await userAgentFiles(root, log)).toEqual(['custom.md', 'writer.md']);
       expect(log.warn).toHaveBeenCalled();
     },
   );
+
+  it('treats every agent as user-written when the origin store is unreadable', async () => {
+    const dir = join(root, '.claude', 'agents');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'custom.md'), '# Custom');
+    const originFile = join(root, '.ptah', 'setup-wizard', 'agent-origins.json');
+    const fs: UserAgentFileSystem = {
+      readFile: async (path, encoding) => {
+        if (path === originFile) {
+          throw Object.assign(new Error('unreadable'), { code: 'EACCES' });
+        }
+        return import('fs/promises').then((module) => module.readFile(path, encoding));
+      },
+      readdir: async (path, options): Promise<Dirent[]> =>
+        import('fs/promises').then((module) => module.readdir(path, options)),
+    };
+    expect(await userAgentFiles(root, log, fs)).toEqual(['custom.md']);
+    expect(log.error).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
+  });
+
+  it('treats every agent as user-written when the origin store is missing', async () => {
+    const dir = join(root, '.claude', 'agents');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'custom.md'), '# Custom');
+    expect(await userAgentFiles(root, log)).toEqual(['custom.md']);
+  });
 
   it('includes an unreadable origin-backed agent and logs its error', async () => {
     const dir = join(root, '.claude', 'agents');

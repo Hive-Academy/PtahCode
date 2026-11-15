@@ -750,6 +750,8 @@ export class HarnessManifestBuilder {
     hashOptions: ContentHashOptions,
   ): Promise<HarnessDesiredAgent[]> {
     if (workspaceRoot === undefined) return [];
+    // Sync off: read no agent file, so a read error cannot abort the build.
+    if (options.agentSyncEnabled === false) return [];
     const agentsDir = join(workspaceRoot, '.claude', 'agents');
     const claimed = new Map<string, HarnessDesiredAgent>();
     for (const file of await userAgentFiles(workspaceRoot, this.agentLog)) {

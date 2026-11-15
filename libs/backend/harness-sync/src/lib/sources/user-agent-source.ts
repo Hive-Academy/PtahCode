@@ -30,7 +30,14 @@ function realError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-/** Workspace agent files that cannot be proved to be unchanged wizard output. */
+/**
+ * Workspace agent files that cannot be proved to be unchanged wizard output.
+ *
+ * The origin store only proves that a file is wizard output. A missing,
+ * invalid or unreadable store proves nothing, so every `.md` file in
+ * `.claude/agents` is then treated as user-written. A damaged store must
+ * never hide intact custom agents.
+ */
 export async function userAgentFiles(
   workspaceRoot: string,
   log: UserAgentLog,
@@ -44,19 +51,27 @@ export async function userAgentFiles(
       'utf8',
     );
     const parsed = AgentOriginsFileSchema.safeParse(JSON.parse(raw) as unknown);
-    if (!parsed.success) {
-      log.warn('Invalid agent origin store', parsed.error);
-      return [];
+    if (parsed.success) {
+      recorded = parsed.data.agents;
+    } else {
+      log.warn(
+        'Invalid agent origin store; treating all agents as user-written',
+        parsed.error,
+      );
     }
-    recorded = parsed.data.agents;
   } catch (error) {
     if (!isMissing(error)) {
       if (error instanceof SyntaxError) {
-        log.warn('Invalid agent origin store', error);
+        log.warn(
+          'Invalid agent origin store; treating all agents as user-written',
+          error,
+        );
       } else {
-        log.error('Cannot read agent origin store', realError(error));
+        log.error(
+          'Cannot read agent origin store; treating all agents as user-written',
+          realError(error),
+        );
       }
-      return [];
     }
   }
   let entries: Dirent[];

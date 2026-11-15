@@ -227,6 +227,20 @@ describe('HarnessManifestBuilder', () => {
     expect(desired.skills.map((s) => s.slug)).toEqual(['run-tests']);
   });
 
+  it('[286] agentSyncEnabled: false reads no agent file, so a damaged origin store cannot abort the build', async () => {
+    writeAgent(root, 'custom-developer');
+    const originDir = join(root, '.ptah', 'setup-wizard');
+    mkdirSync(originDir, { recursive: true });
+    writeFileSync(join(originDir, 'agent-origins.json'), '{');
+    // The default agent log throws, so any read of the store would reject.
+    const desired = await builder.build(emptyState(root), {
+      agentSyncEnabled: false,
+      workspaceRoot: root,
+    });
+
+    expect(desired.agents).toEqual([]);
+  });
+
   it('[286] an absent agentSyncEnabled option means enabled, so a caller with no opinion never triggers a reap', async () => {
     writeAgent(root, 'custom-developer');
 
