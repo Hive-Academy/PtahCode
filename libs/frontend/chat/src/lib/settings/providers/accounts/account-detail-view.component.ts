@@ -268,7 +268,7 @@ const REMOVE_CONSEQUENCE =
         }
         <ptah-description-list view ariaLabel="Account details" [items]="facts()" data-testid="account-detail-facts" />
         <ng-template ptahEditTemplate>
-          <ptah-field label="Name" appearance="stacked">
+          <ptah-field label="Name">
             <input
               ptahInput
               id="account-detail-name"
