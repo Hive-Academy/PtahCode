@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2193_a7c1
-status: in_progress
+status: in_review
 type: FEATURE
 title: "Replace Choose agents in Analyze with stack skills"
 depends_on: []
