@@ -17,7 +17,7 @@ const RecordSchema = z.object({
   successorSdkId: z.string().min(1).nullable(),
   workspaceRoot: z.string().min(1),
   handoffPath: z.string().min(1),
-  state: z.enum(['recorded', 'closePending', 'closeCompleted']),
+  state: z.enum(['starting', 'recorded', 'closePending', 'closeCompleted']),
 }).strict();
 const DocumentSchema = z.object({ schemaVersion: z.literal(1), records: z.array(z.unknown()) }).strict();
 export type HandoffAckRecord = z.infer<typeof RecordSchema>;
@@ -109,13 +109,26 @@ export class SessionHandoffAckStore {
     ));
   }
 
+  async records(): Promise<readonly HandoffAckRecord[]> {
+    return this.serialized(() => this.read());
+  }
+
+  async discardStarting(predecessorTabId: string): Promise<void> {
+    await this.serialized(async () => {
+      const state = await this.readState();
+      state.records = state.records.filter((entry) =>
+        entry.predecessorTabId !== predecessorTabId || entry.state !== 'starting');
+      await this.write(state);
+    });
+  }
+
   async record(value: HandoffAckRecord): Promise<void> {
     await this.serialized(async () => {
       const state = await this.readState();
       const index = state.records.findIndex((entry) => entry.predecessorTabId === value.predecessorTabId);
       if (index >= 0) {
         const existing = state.records[index];
-        if (existing.state !== 'recorded' || existing.successorTabId === value.successorTabId) {
+        if ((existing.state !== 'recorded' && existing.state !== 'starting') || existing.successorTabId === value.successorTabId) {
           throw new Error('handoff predecessor already recorded');
         }
         state.records[index] = RecordSchema.parse(value);

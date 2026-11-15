@@ -2502,19 +2502,18 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
     });
     expect(successor).not.toBe('');
     expect(h.lifecycleIds.has(successor)).toBe(false);
-    // Kept handoff aliases route both predecessor spellings to the new owner.
-    expect(h.spawner.status({ callerSessionId: PARENT_SDK })).toMatchObject({
-      ok: true,
-      children: [{ childSessionId: child.childSessionId }],
-    });
+    // The caller no longer owns the child or its held completion.
+    expect(h.spawner.takeHeldCompletions(PARENT)).toEqual([]);
     expect(
       h.spawner.status({
         callerSessionId: PARENT,
         childSessionId: child.childSessionId,
       }),
-    ).toMatchObject({ ok: true, children: [{ childSessionId: child.childSessionId }] });
-    expect(h.spawner.status({ callerSessionId: OTHER, childSessionId: child.childSessionId }))
+    ).toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
+    expect(h.spawner.status({ callerSessionId: PARENT_SDK, childSessionId: child.childSessionId }))
       .toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
+    expect(h.spawner.status({ callerSessionId: PARENT_SDK }))
+      .toMatchObject({ ok: true, children: [] });
     // The new session does, by its tab id alone.
     expect(
       h.spawner.status({
@@ -2525,9 +2524,16 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
       ok: true,
       children: [{ childSessionId: child.childSessionId }],
     });
-    expect(h.spawner.takeHeldCompletions(PARENT)).toEqual([envelope(1)]);
-    expect(h.spawner.takeHeldCompletions(PARENT_SDK)).toEqual([]);
+    expect(h.spawner.status({ callerSessionId: successor }))
+      .toMatchObject({ ok: true, children: [{ childSessionId: child.childSessionId }] });
+    expect(await h.spawner.read({ callerSessionId: successor, childSessionId: child.childSessionId }))
+      .toMatchObject({ ok: true });
+    expect(await h.spawner.send({ callerSessionId: successor, childSessionId: child.childSessionId,
+      message: 'continue', mode: 'queue' })).toMatchObject({ delivered: true });
+    expect(h.spawner.takeHeldCompletions(successor)).toEqual([envelope(1)]);
     expect(h.spawner.takeHeldCompletions(successor)).toEqual([]);
+    expect(await h.spawner.stop({ callerSessionId: successor, childSessionId: child.childSessionId }))
+      .toMatchObject({ ok: true });
   });
 });
 

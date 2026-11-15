@@ -1066,9 +1066,9 @@ export class SessionSpawnerService implements ISessionSpawner {
       if (!owned.ok) return owned.refusal;
       return { ok: true, children: [this.snapshotOf(owned.child)] };
     }
-    const caller = this.resolveCaller(query.callerSessionId);
+    const caller = SessionId.safeParse(query.callerSessionId?.trim());
     if (!caller) return unattributed();
-    const callerIds = [caller, this.sdkIdOf(caller)];
+    const callerIds = this.ownerIds(caller);
     const children = [
       ...this.registry.childrenOf(callerIds),
       ...this.registry.pendingOf(callerIds),
@@ -1235,17 +1235,10 @@ export class SessionSpawnerService implements ISessionSpawner {
   }
 
   clearFinished(query: SessionChildClearQuery): SessionChildClearResult {
-    const caller = this.resolveCaller(query.callerSessionId);
+    const caller = SessionId.safeParse(query.callerSessionId?.trim());
     if (!caller) return unattributed();
-    const callerIds = new Set(
-      [caller as string, this.sdkIdOf(caller)].filter(
-        (id): id is string => !!id,
-      ),
-    );
-    const ownChildren = this.registry.childrenOf([
-      caller,
-      this.sdkIdOf(caller),
-    ]);
+    const callerIds = new Set(this.ownerIds(caller));
+    const ownChildren = this.registry.childrenOf(this.ownerIds(caller));
     const startOrder = new Map(
       ownChildren.map((child, index) => [child.childSessionId, index]),
     );
@@ -1336,13 +1329,10 @@ export class SessionSpawnerService implements ISessionSpawner {
   takeHeldCompletions(
     callerSessionId: string | undefined,
   ): readonly SessionChildCompletionEnvelope[] {
-    const caller = this.resolveCaller(callerSessionId);
+    const caller = SessionId.safeParse(callerSessionId?.trim());
     if (!caller) return [];
     const envelopes: SessionChildCompletionEnvelope[] = [];
-    for (const child of this.registry.childrenOf([
-      caller,
-      this.sdkIdOf(caller),
-    ])) {
+    for (const child of this.registry.childrenOf(this.ownerIds(caller))) {
       const held = child.heldCompletion;
       if (!held) continue;
       envelopes.push(held.envelope);
@@ -1898,21 +1888,16 @@ export class SessionSpawnerService implements ISessionSpawner {
    * Helpers
    * ---------------------------------------------------------------------- */
 
-  private resolveCaller(id: string | undefined): ReturnType<typeof SessionId.safeParse> {
-    const parsed = SessionId.safeParse(id?.trim());
-    return parsed ? (SessionId.safeParse(this.registry.resolveCaller(parsed)) ?? parsed) : null;
-  }
-
   /** A pending start (status `starting`) of this caller with this id. */
   private ownedPending(
     callerSessionId: string | undefined,
     childSessionId: string,
   ): SessionChildRecord | undefined {
-    const caller = this.resolveCaller(callerSessionId);
+    const caller = SessionId.safeParse(callerSessionId?.trim());
     if (!caller) return undefined;
     const id = childSessionId.trim();
     return this.registry
-      .pendingOf([caller, this.sdkIdOf(caller)])
+      .pendingOf(this.ownerIds(caller))
       .find((record) => record.childSessionId === id);
   }
 
@@ -1921,7 +1906,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     childSessionId: string,
     follow = true,
   ): OwnedLookup {
-    const caller = this.resolveCaller(callerSessionId);
+    const caller = SessionId.safeParse(callerSessionId?.trim());
     if (!caller) return { ok: false, refusal: unattributed() };
     const child = this.registry.get(childSessionId);
     if (!child) {
@@ -1934,11 +1919,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         },
       };
     }
-    const callerIds = new Set(
-      [caller as string, this.sdkIdOf(caller)].filter(
-        (id): id is string => !!id,
-      ),
-    );
+    const callerIds = new Set(this.ownerIds(caller));
     const owned =
       callerIds.has(child.parentSessionId) ||
       (!!child.parentSdkSessionId && callerIds.has(child.parentSdkSessionId));
@@ -2065,6 +2046,12 @@ export class SessionSpawnerService implements ISessionSpawner {
     )
       return id;
     return undefined;
+  }
+
+  private ownerIds(caller: SessionId): string[] {
+    const record = this.lifecycle.find(caller);
+    return [...new Set([caller, record?.tabId, record?.realSessionId, this.sdkIdOf(caller)]
+      .filter((id): id is string => !!id))];
   }
 
   private async interruptTurn(

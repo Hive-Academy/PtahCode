@@ -20,6 +20,7 @@ import {
   type AgentReportInput,
 } from './agent-report-router.service';
 import { SessionChildRegistry } from '../session-children/session-child.registry';
+import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
 import { ParentEnvelopeStoreService } from './parent-delivery/parent-envelope-store.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { FakeStateStorage } from './parent-delivery/__fixtures__/fake-state-storage';
@@ -664,6 +665,7 @@ describe('AgentReportRouter.deliver — session child', () => {
     );
     return {
       router,
+      logger,
       registry,
       manager,
       active,
@@ -698,6 +700,21 @@ describe('AgentReportRouter.deliver — session child', () => {
     // A session child has no agent tile; the process manager is not touched.
     expect(h.manager.recordAgentNote).not.toHaveBeenCalled();
     expect(h.manager.markReportDelivered).not.toHaveBeenCalled();
+  });
+
+  it('delivers a report addressed to a predecessor to its kept successor', async () => {
+    const h = createSessionHarness({ activeIds: [PARENT_SDK] });
+    const storage = new FakeStateStorage();
+    const handoffs = new SessionHandoffAckStore(storage);
+    await handoffs.record({ predecessorTabId: PARENT, predecessorSdkId: null,
+      successorTabId: PARENT_SDK, successorSdkId: null, workspaceRoot: '/ws',
+      handoffPath: '/ws/HANDOFF.md', state: 'recorded' });
+    const router = new AgentReportRouter(h.logger, h.manager,
+      { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never,
+      h.registry, null, null, new SessionHandoffAckStore(storage));
+    expect(await router.deliver({ childSessionId: CHILD, message: 'done' }))
+      .toMatchObject({ delivered: true, parentSessionId: PARENT_SDK });
+    expect(h.sendMessageToSession).toHaveBeenCalledWith(PARENT_SDK, expect.any(String), expect.any(Object));
   });
 
   it('resolves a report sent under the child SDK id to the same child', async () => {

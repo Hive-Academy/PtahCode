@@ -45,6 +45,7 @@ import { acknowledgeTerminalRead } from './completion-read-ack';
 import { ParentEnvelopeStoreService } from './parent-delivery/parent-envelope-store.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { FakeStateStorage } from './parent-delivery/__fixtures__/fake-state-storage';
+import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
 
 const PARENT = '11111111-2222-4333-8444-555555555555';
 const AGENT_ID = 'agent-abc';
@@ -1285,6 +1286,22 @@ describe('LaneCompletionNotifier.signalSessionChild', () => {
   const CHILD_STARTED = '2026-10-01T10:00:00.000Z';
   const SETTLED = '2026-10-01T10:05:30.000Z';
   const WT = '/wt/auth-fix';
+
+  it('delivers a completion addressed to a predecessor to its kept successor', async () => {
+    const h = createHarness();
+    const handoffs = new SessionHandoffAckStore(new FakeStateStorage());
+    await handoffs.record({ predecessorTabId: PARENT, predecessorSdkId: null,
+      successorTabId: PARENT_SDK, successorSdkId: null, workspaceRoot: '/ws',
+      handoffPath: '/ws/HANDOFF.md', state: 'recorded' });
+    const adapter = { isSessionActive: jest.fn((id: string) => id === PARENT_SDK),
+      sendMessageToSession: h.sendMessageToSession } as never;
+    const notifier = new LaneCompletionNotifier(h.logger,
+      { exists: h.exists, stat: h.stat } as never, adapter, () => null,
+      null, () => null, null, handoffs);
+    const result = await notifier.signalSessionChild(subject(), settle());
+    expect(result).toMatchObject({ delivered: true, parentSessionId: PARENT_SDK });
+    expect(h.sendMessageToSession).toHaveBeenCalledWith(PARENT_SDK, expect.any(String), expect.any(Object));
+  });
 
   function subject(
     overrides: Partial<SessionChildCompletionSubject> = {},

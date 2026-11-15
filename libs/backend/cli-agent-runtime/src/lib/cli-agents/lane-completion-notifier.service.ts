@@ -34,6 +34,8 @@
  */
 import { isAbsolute, resolve } from 'path';
 import { inject, injectable } from 'tsyringe';
+import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
+import { deliveryTarget } from '../session-children/session-handoff-lineage';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
@@ -393,6 +395,8 @@ export class LaneCompletionNotifier {
     private readonly terminalCheckpoint: () => LaneTerminalCheckpoint | null = () =>
       null,
     private readonly coalescer: AgentReportCoalescer | null = null,
+    @inject(SessionHandoffAckStore, { isOptional: true })
+    private readonly handoffs: SessionHandoffAckStore | null = null,
   ) {
     this.pendingReplays = new PendingCompletionReplays(logger);
     this.parentDelivery?.onRetryTick(() => this.retryTick());
@@ -472,9 +476,9 @@ export class LaneCompletionNotifier {
     firstSignal: boolean,
   ): Promise<LaneCompletionResult> {
     let signal = await this.buildSignal(info, completedAt, context);
-    const parentSessionId =
-      SessionId.safeParse(info.parentSessionId?.trim()) ??
+    const recordedParent = SessionId.safeParse(info.parentSessionId?.trim()) ??
       info.parentSessionId?.trim();
+    const parentSessionId = recordedParent ? await deliveryTarget(this.handoffs, recordedParent) : undefined;
     const activeParentSessionId =
       parentSessionId &&
       SessionId.safeParse(parentSessionId) &&
@@ -1040,7 +1044,7 @@ export class LaneCompletionNotifier {
     const adapter = this.agentAdapter;
     // The first recorded parent is the owner. An unreachable owner never
     // authorizes delivery to a later session in the list.
-    const parentSessionId = candidates[0];
+    const parentSessionId = SessionId.from(await deliveryTarget(this.handoffs, candidates[0]));
     if (!adapter.isSessionActive(parentSessionId)) {
       return this.refuseSessionChild('parent-session-not-active', envelope, {
         parentSessionIds: candidates,

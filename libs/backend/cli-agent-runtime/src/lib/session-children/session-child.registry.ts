@@ -126,25 +126,6 @@ function filterByParent(
 
 @injectable()
 export class SessionChildRegistry {
-  /** Kept chat handoffs, keyed by the predecessor tab and SDK ids. */
-  private readonly callerSuccessors = new Map<string, string>();
-
-  recordCallerSuccessor(predecessorTabId: string, predecessorSdkId: string | null, successorTabId: string): void {
-    this.callerSuccessors.set(predecessorTabId, successorTabId);
-    if (predecessorSdkId) this.callerSuccessors.set(predecessorSdkId, successorTabId);
-  }
-
-  resolveCaller(id: string): string {
-    let current = id;
-    const seen = new Set<string>();
-    for (let hops = 0; hops < 64 && !seen.has(current); hops++) {
-      seen.add(current);
-      const next = this.callerSuccessors.get(current);
-      if (!next) break;
-      current = next;
-    }
-    return current;
-  }
   /** Keyed by child tab id (`childSessionId`). Insertion order = start order. */
   private readonly records = new Map<string, SessionChildRecord>();
   /** SDK session id → child tab id. */

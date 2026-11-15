@@ -34,6 +34,8 @@ import { AgentProcessManager } from './agent-process-manager.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { SessionChildRegistry } from '../session-children/session-child.registry';
 import { AgentReportCoalescer, type HeldReport } from './agent-report-coalescer';
+import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
+import { deliveryTarget } from '../session-children/session-handoff-lineage';
 
 /*
  * ---------------------------------------------------------------------------
@@ -272,6 +274,8 @@ export class AgentReportRouter {
     private readonly parentDelivery: ParentDeliveryDrainerService | null = null,
     @inject(AgentReportCoalescer, { isOptional: true })
     private readonly coalescer: AgentReportCoalescer | null = null,
+    @inject(SessionHandoffAckStore, { isOptional: true })
+    private readonly handoffs: SessionHandoffAckStore | null = null,
   ) {}
 
   /**
@@ -329,7 +333,8 @@ export class AgentReportRouter {
     // uuid arrives and `resolveParentSessionId` backfills it, so a value that
     // is not a session id means the parent never resolved one — there is no
     // session to deliver into, and saying so is the honest answer.
-    const parentSessionId = SessionId.safeParse(info.parentSessionId?.trim()) ?? info.parentSessionId?.trim();
+    const recordedParent = SessionId.safeParse(info.parentSessionId?.trim()) ?? info.parentSessionId?.trim();
+    const parentSessionId = recordedParent ? await deliveryTarget(this.handoffs, recordedParent) : undefined;
     if (!parentSessionId) {
       return this.refuse('no-parent-recorded', agentId, {
         detail: info.parentSessionId
@@ -594,7 +599,7 @@ export class AgentReportRouter {
     const adapter = this.agentAdapter;
     // The first recorded parseable parent is the owner. A later live ID
     // does not authorize rerouting a report from an unreachable owner.
-    const parentSessionId = candidates[0];
+    const parentSessionId = SessionId.from(await deliveryTarget(this.handoffs, candidates[0]));
     if (!adapter.isSessionActive(parentSessionId)) {
       this.sessionChildren?.markReportRefused(
         childSessionId,

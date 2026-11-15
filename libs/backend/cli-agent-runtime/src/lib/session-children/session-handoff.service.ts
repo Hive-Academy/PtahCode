@@ -50,6 +50,7 @@ import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import type { AgentProcessManager } from '../cli-agents/agent-process-manager.service';
 import type { IChildChatSessionHost } from './child-chat-session-host.port';
 import { SessionChildRegistry } from './session-child.registry';
+import { bindAdoptedChildOwner } from './bind-adopted-child-owner';
 import type { ISessionSpawner, SessionChildSuccessionRefusalCode } from './session-spawner.port';
 import { safeErrorKind } from './safe-error-kind';
 import { SessionHandoffAckStore } from './session-handoff-ack.store';
@@ -212,11 +213,6 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     return this.acknowledgeOnce(request);
   }
 
-  private resolveSessionId(id: string | undefined): string | undefined {
-    if (!id) return id;
-    return this.registry.resolveLatest(id)?.childSessionId ?? this.registry.resolveCaller(id);
-  }
-
   private async acknowledgeOnce(request: SessionHandoffAckRequest): Promise<SessionHandoffAckResult> {
     const refused = (reason: string): SessionHandoffAckResult => ({ status: 'refused', reason });
     const retry = (reason: string): SessionHandoffAckResult => ({ status: 'retryable-failure', reason });
@@ -227,17 +223,9 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       return refused('handoff identity or storage unavailable');
     }
     try {
-      // A verified successor chain may route a historical ID to a later
-      // handoff; otherwise the predecessor's own record remains authoritative.
-      const resolved = this.resolveSessionId(request.predecessorSessionId);
-      const routed = resolved && resolved !== request.predecessorSessionId
-        ? await this.ackStore.findByPredecessor(resolved)
-        : undefined;
-      const record = routed ?? await this.ackStore.findByPredecessor(request.predecessorSessionId);
+      const record = await this.ackStore.findByPredecessor(request.predecessorSessionId);
       if (!record) return refused('handoff record missing');
-      if (routed && resolved !== record.predecessorTabId && resolved !== record.predecessorSdkId) {
-        return refused('handoff predecessor is not in the successor chain');
-      }
+      if (record.state === 'starting') return retry('handoff session is still starting; retry later');
       // Check the caller before joining an in-flight attempt, so a stranger never
       // receives another caller's result.
       if (request.callerSessionId !== record.successorTabId && request.callerSessionId !== record.successorSdkId) {
@@ -399,6 +387,23 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     const tabId = SessionId.create();
     const adoption = this.adoptWork(record, tabId);
     this.bindPendingChain(record, tabId, paths.root);
+    let recordSaved = false;
+    if (this.ackStore) {
+      try {
+        await this.ackStore.record({
+          predecessorTabId: record.tabId,
+          predecessorSdkId: record.realSessionId,
+          successorTabId: tabId,
+          successorSdkId: null,
+          workspaceRoot: resolve(paths.root),
+          handoffPath: await fs.realpath(request.handoffPath),
+          state: 'starting',
+        });
+        recordSaved = true;
+      } catch (error: unknown) {
+        this.reportError('handoff acknowledgement record failed', error);
+      }
+    }
     // Never rejects; releases the reservation only when the start settles,
     // even after the deadline below has answered the caller.
     const attempt = this.start(host, request, record, paths, tabId)
@@ -418,6 +423,7 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     );
     if (result === TIMED_OUT) {
       this.pending.delete(tabId);
+      if (recordSaved) await this.discardStartingRecord(record.tabId);
       // The session may still open late, but the caller is told it did not
       // start, so the caller keeps its work: a late success adopts nothing.
       this.settleAdoption(adoption, tabId, 'reverted');
@@ -428,31 +434,26 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     }
     if (!result.ok) {
       this.pending.delete(tabId);
+      if (recordSaved) await this.discardStartingRecord(record.tabId);
       this.settleAdoption(adoption, tabId, 'reverted');
       return result;
     }
     this.settleAdoption(adoption, tabId, 'kept');
-    this.registry.recordCallerSuccessor(record.tabId, record.realSessionId, tabId);
+    const successorSdkId = this.pending.get(tabId)?.resolvedSdkId;
+    if (successorSdkId) bindAdoptedChildOwner(this.registry, tabId, successorSdkId);
     this.remember(record.tabId, {
       sdkSessionId: record.realSessionId,
       tabId,
     });
-    let recordSaved = false;
-    try {
-      if (!this.ackStore) throw new Error('handoff acknowledgement storage unavailable');
-      const handoffPath = await fs.realpath(request.handoffPath);
-      await this.ackStore.record({
-        predecessorTabId: record.tabId,
-        predecessorSdkId: record.realSessionId,
-        successorTabId: tabId,
-        successorSdkId: this.pending.get(tabId)?.resolvedSdkId ?? null,
-        workspaceRoot: resolve(paths.root),
-        handoffPath,
-        state: 'recorded',
-      });
-      recordSaved = true;
-    } catch (error: unknown) {
-      this.reportError('handoff acknowledgement record failed', error);
+    if (recordSaved) {
+      try {
+        await this.ackStore!.compareAndSet(record.tabId, 'starting', {
+          state: 'recorded',
+          successorSdkId: this.pending.get(tabId)?.resolvedSdkId ?? null,
+        });
+      } catch (error: unknown) {
+        this.reportError('handoff acknowledgement settlement failed', error);
+      }
     }
     const pending = this.pending.get(tabId);
     if (pending) {
@@ -570,9 +571,8 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
    *   SDK id remap then follows the new session like any lane it spawned
    *   itself. Until {@link settleAdoption}, a lane that finishes has its
    *   completion signal held by the manager.
-   * - Child sessions that are live, or ended with a completion still held,
-   *   get the new tab as parent and lose the recorded parent SDK id, so
-   *   readers resolve the new tab's live SDK id. A child that settles while
+   * - All child records get the new tab as parent and lose the old parent SDK
+   *   id. The new SDK id is bound when it resolves. A child that settles while
    *   the new session is not live yet keeps its completion held, for
    *   whichever parent it ends up with.
    *
@@ -594,7 +594,6 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
     const children: AdoptedChild[] = [];
     try {
       for (const child of this.registry.childrenOf(fromIds)) {
-        if (child.terminalStatus && !child.heldCompletion) continue;
         const moved = this.registry.reparent(
           child.childSessionId,
           successorTabId,
@@ -816,6 +815,7 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       return;
     }
     pending.resolvedSdkId = successorSdkId;
+    if (pending.committed) bindAdoptedChildOwner(this.registry, tabId, successorSdkId);
     if (pending.committed && this.ackStore) {
       void this.ackStore.findBySuccessor(tabId).then((record) => record
         ? this.ackStore!.compareAndSet(record.predecessorTabId, record.state, { successorSdkId }).then(() => undefined)
@@ -833,6 +833,15 @@ export class SessionHandoffService implements ISessionHandoff, IHandoffTurnFlush
       .catch((error: unknown) => {
         this.reportError('handoff chain append failed', error);
       });
+  }
+
+  /** Remove a provisional record of a start that did not keep; never throws. */
+  private async discardStartingRecord(predecessorTabId: string): Promise<void> {
+    try {
+      await this.ackStore?.discardStarting(predecessorTabId);
+    } catch (error: unknown) {
+      this.reportError('handoff acknowledgement rollback failed', error);
+    }
   }
 
   /** Drop a bind whose successor tab is no longer a live session. */
