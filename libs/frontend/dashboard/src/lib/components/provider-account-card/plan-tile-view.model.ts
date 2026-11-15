@@ -125,6 +125,7 @@ export const PLAN_LIMIT_REASON_LABELS: Readonly<
     'No subscription quota for API-key login; local usage only',
   'balance-unavailable':
     'Plan limits unavailable right now; showing request counts',
+  'prepaid-balance-unavailable': 'Prepaid balance unavailable right now',
   'balance-auth-rejected':
     'API key cannot read plan limits; showing request counts',
   'usage-auth-rejected': 'API key cannot read request counts',
