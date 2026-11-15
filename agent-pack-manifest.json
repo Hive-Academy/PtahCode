@@ -7,18 +7,6 @@
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/.claude/agents",
   "agents": [
     {
-      "file": "backend-developer.md",
-      "name": "Backend Developer",
-      "description": "Backend developer specializing in scalable server-side architecture and API design",
-      "category": "development"
-    },
-    {
-      "file": "frontend-developer.md",
-      "name": "Frontend Developer",
-      "description": "Frontend developer specializing in modern UI frameworks and component design",
-      "category": "development"
-    },
-    {
       "file": "software-architect.md",
       "name": "Software Architect",
       "description": "Elite Software Architect for system design and strategic planning",
@@ -58,12 +46,6 @@
       "file": "researcher-expert.md",
       "name": "Research Expert",
       "description": "Deep technical analysis and strategic insights",
-      "category": "specialist"
-    },
-    {
-      "file": "devops-engineer.md",
-      "name": "DevOps Engineer",
-      "description": "CI/CD, containerization, and deployment automation",
       "category": "specialist"
     },
     {

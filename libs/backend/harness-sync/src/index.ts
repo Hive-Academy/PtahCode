@@ -234,7 +234,10 @@ export {
 } from './lib/targets/mcp/mcp-json-format';
 
 // Sources.
-export { createOrchestrationPhaseSources, type OrchestrationPhaseSourceOptions } from './lib/sources/orchestration-phase-sources';
+export {
+  createOrchestrationPhaseSources,
+  type OrchestrationPhaseSourceOptions,
+} from './lib/sources/orchestration-phase-sources';
 export type {
   HarnessSourceLayout,
   HarnessSourceState,
@@ -344,6 +347,17 @@ export {
 } from './lib/abort/pass-abort';
 
 // DI.
+export { isRetiredPtahAgent } from './lib/targets/retired-agent-origin';
+export {
+  WIZARD_STATE_DIR,
+  AGENT_ORIGINS_FILE,
+  AGENT_ORIGINS_VERSION,
+  AgentOriginEntrySchema,
+  AgentOriginsFileSchema,
+  type AgentOriginEntry,
+  type AgentOriginsFile,
+  type AgentOrigins,
+} from './lib/targets/agent-origins-file';
 export { HARNESS_SYNC_TOKENS, type HarnessSyncDIToken } from './lib/di/tokens';
 export {
   registerHarnessSyncServices,

@@ -7,25 +7,25 @@ An agent template is a file named `<name>.template.md` with YAML frontmatter and
 
 ## Example frontmatter
 
-```markdown title="frontend-developer.template.md"
+```markdown title="software-architect.template.md"
 ---
-templateId: frontend-developer-v2
+templateId: software-architect-v2
 templateVersion: 2.3.0
 applicabilityRules:
   projectTypes: [React, Angular, Vue, Svelte, Node]
-  requiredPatterns: ['**/components/**', '**/*.component.*']
-  excludePatterns: ['**/controllers/**']
+  requiredPatterns: ['**/src/**']
+  excludePatterns: ['**/generated/**']
   minimumRelevanceScore: 60
   alwaysInclude: false
   techStack: [React, Angular, TypeScript]
 dependencies: []
-name: frontend-developer
+name: software-architect
 description: >-
-  Writes and changes user-interface code in this repository ...
+  Designs systems and documents architecture decisions ...
 model: opus
 variables:
   CLARIFY_TRIGGER: >-
-    two materially different UI structures ...
+    two materially different architecture options ...
 ---
 ```
 

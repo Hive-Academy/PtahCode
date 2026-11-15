@@ -43,9 +43,6 @@ describe('subagent tool allowlist (N3)', () => {
     ['project-manager', NO_BROWSER_NO_WEB],
     ['software-architect', NO_BROWSER_NO_WEB],
     ['team-leader', NO_BROWSER_NO_WEB],
-    ['backend-developer', NO_WEB_SCRAPE],
-    ['frontend-developer', NO_WEB_SCRAPE],
-    ['devops-engineer', NO_WEB_SCRAPE],
     ['senior-tester', NO_WEB_SCRAPE],
     ['technical-content-writer', NO_WEB_SCRAPE],
     ['ui-ux-designer', NO_WEB_SCRAPE],
@@ -64,7 +61,7 @@ describe('subagent tool allowlist (N3)', () => {
     expect(Object.keys(SUBAGENT_DISALLOWED_TOOLS).sort()).toEqual(
       templateNames,
     );
-    expect(templateNames).toHaveLength(14);
+    expect(templateNames).toHaveLength(11);
   });
 
   it('never uses a form the runtime ignores (bare * or a partial wildcard)', () => {
@@ -83,7 +80,7 @@ describe('subagent tool allowlist (N3)', () => {
   });
 
   it('formats one comma-separated frontmatter line', () => {
-    expect(formatDisallowedToolsFrontmatter('backend-developer')).toBe(
+    expect(formatDisallowedToolsFrontmatter('senior-tester')).toBe(
       'disallowedTools: mcp__firecrawl',
     );
     expect(formatDisallowedToolsFrontmatter('code-logic-reviewer')).toBe(
@@ -152,11 +149,11 @@ describe('least-privilege effective set (Phase C, decision #20)', () => {
     const others = Object.keys(SUBAGENT_DISALLOWED_TOOLS).filter(
       (role) => !SIX_NO_BROWSER_NO_WEB_ROLES.includes(role),
     );
-    expect(others).toHaveLength(8);
+    expect(others).toHaveLength(5);
     for (const role of others) {
       expect(getSubagentDisallowedTools(role).length).toBeLessThanOrEqual(1);
     }
-    expect(formatDisallowedToolsFrontmatter('backend-developer')).toBe(
+    expect(formatDisallowedToolsFrontmatter('senior-tester')).toBe(
       'disallowedTools: mcp__firecrawl',
     );
     expect(formatDisallowedToolsFrontmatter('visual-reviewer')).toBeUndefined();

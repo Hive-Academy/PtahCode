@@ -5,7 +5,7 @@ description: The built-in agent templates in PtahCode, their roles, and when to 
 
 # Built-in Agents
 
-PtahCode has 14 built-in agent templates for planning, implementation, review, research, design, and visual QA. The [setup wizard](/setup/setup-wizard/) selects the templates that apply to your project and writes them to `<workspace-root>/.claude/agents/`.
+PtahCode has 11 built-in agent templates for planning, review, research, design, and visual QA. The [setup wizard](/setup/setup-wizard/) selects the templates that apply to your project and writes them to `<workspace-root>/.claude/agents/`. Implementation work runs as the `implement` phase on a subagent, CLI lane, or session.
 
 ## The catalog
 
@@ -14,9 +14,6 @@ PtahCode has 14 built-in agent templates for planning, implementation, review, r
 | **project-manager**          | Breaks work into tasks, tracks status, coordinates handoffs    | You have a vague goal and need it turned into actionable tickets |
 | **software-architect**       | Designs systems, picks patterns, authors ADRs                  | You're starting a new module or making a cross-cutting change    |
 | **team-leader**              | Recommends batch executors, verifies work, records batch state | A plan needs batches, executor recommendations, and review gates |
-| **backend-developer**        | Server code, APIs, databases, services                         | Implementing endpoints, migrations, business logic, workers      |
-| **frontend-developer**       | UI components, state, routing, accessibility                   | Building pages, components, or fixing frontend bugs              |
-| **devops-engineer**          | CI/CD, containers, infra-as-code, release automation           | Wiring GitHub Actions, Docker, deploy pipelines, monitoring      |
 | **senior-tester**            | Unit, integration, and e2e test strategy                       | You need coverage for new code or a regression suite             |
 | **code-style-reviewer**      | Lint, formatting, naming, idioms, readability                  | Pre-merge style pass or cleanup sprint                           |
 | **code-logic-reviewer**      | Business logic, edge cases, state transitions, concurrency     | Critical paths, payment flows, auth, anything load-bearing       |
@@ -36,9 +33,10 @@ Use this trio when you're kicking off something non-trivial. The project manager
 
 ### Implementation
 
-`backend-developer`, `frontend-developer`, `devops-engineer`
+The `implement` phase covers backend, frontend, and operations changes. It runs on an assigned executor: a subagent, [CLI lane](/agents/cli-agents/), or session. Older records that name `backend-developer`, `frontend-developer`, or `devops-engineer` map to `implement`.
 
-The hands-on-keyboard agents. They write, modify, and ship code. They also know when to spawn CLI helpers for bulk file work — see [CLI agents](/agents/cli-agents/).
+A custom agent with one of these retired names still maps to `implement` in routing. Lane spawn role resolution, mirror, and sync use the setup wizard origin store and matching workspace file hash, so user-authored or edited agents with these names remain available for lane spawn.
+A provider copy is kept after its source is removed only when the workspace agent file proves it is an unchanged wizard-written agent.
 
 ### Quality & Review
 
@@ -50,7 +48,7 @@ The hands-on-keyboard agents. They write, modify, and ship code. They also know 
 
 `researcher-expert`, `modernization-detector`, `ui-ux-designer`, `technical-content-writer`
 
-Non-implementation specialists. They produce specs, briefs, reports, and content artifacts that the implementation agents then execute on.
+These specialists produce specs, briefs, reports, and content artifacts for the assigned executor.
 
 ## How agents are used
 

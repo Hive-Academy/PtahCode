@@ -1,8 +1,8 @@
 {
   "$schema": "https://ptah.live/schemas/content-manifest.json",
   "version": "1.0.0",
-  "contentHash": "sha256:1a195b58544138e015a64b5f0658bd8b67002d3a3e122635be102e73cf7f57cf",
-  "generatedAt": "2026-11-14T16:47:33.285Z",
+  "contentHash": "sha256:95ec24875466a0e88b0d17bb4891e07ee50957cf7c4f824ff6ced4f9bf2e43fa",
+  "generatedAt": "2026-11-15T07:22:15.461Z",
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main",
   "plugins": {
     "basePath": "plugins",
@@ -235,11 +235,8 @@
       "_shared/replacement-policy.md",
       "_shared/reviewer-stance.md",
       "_shared/tooling-precedence.md",
-      "backend-developer.template.md",
       "code-logic-reviewer.template.md",
       "code-style-reviewer.template.md",
-      "devops-engineer.template.md",
-      "frontend-developer.template.md",
       "modernization-detector.template.md",
       "project-manager.template.md",
       "researcher-expert.template.md",

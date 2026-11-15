@@ -1,6 +1,15 @@
 import 'reflect-metadata';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readdir, writeFile, readFile, rm, stat, symlink } from 'fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readdir,
+  writeFile,
+  readFile,
+  rm,
+  stat,
+  symlink,
+} from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -109,7 +118,11 @@ describe('UserLayerMirrorService.mirrorAll', () => {
         lastEnhancedAt: null,
         historyDir: DEFAULT_HISTORY_DIR,
       };
-      await writeFile(join(cloneDir, ORIGIN_SIDECAR_FILENAME), JSON.stringify(sidecar), 'utf8');
+      await writeFile(
+        join(cloneDir, ORIGIN_SIDECAR_FILENAME),
+        JSON.stringify(sidecar),
+        'utf8',
+      );
     }
     if (options.modified) {
       await writeFile(join(cloneDir, 'SKILL.md'), '# user edit', 'utf8');
@@ -126,7 +139,11 @@ describe('UserLayerMirrorService.mirrorAll', () => {
       const result = await service.retireManagedSkills();
       expect(result.removed).toEqual([firstSlug]);
       expect(await fileExists(cloneDir)).toBe(false);
-      const historyRoot = join(service.getUserLayerRoots().skills, DEFAULT_HISTORY_DIR, firstSlug);
+      const historyRoot = join(
+        service.getUserLayerRoots().skills,
+        DEFAULT_HISTORY_DIR,
+        firstSlug,
+      );
       expect(await readdir(historyRoot)).toHaveLength(1);
     });
 
@@ -137,27 +154,40 @@ describe('UserLayerMirrorService.mirrorAll', () => {
         pluginsBasePath: pluginRoot,
         synthesizedSkillsRoot: synthRoot,
       });
-      expect(result.retiredSkills.preserved).toEqual([{ slug: secondSlug, reason: 'modified' }]);
+      expect(result.retiredSkills.preserved).toEqual([
+        { slug: secondSlug, reason: 'modified' },
+      ]);
       expect(result.orphanedClones).toEqual([]);
       expect((await readSidecarJson(cloneDir)).orphaned).toBeUndefined();
-      expect(await readFile(join(cloneDir, 'SKILL.md'), 'utf8')).toBe('# user edit');
-      expect(logger.info).toHaveBeenCalledWith('[UserLayerMirror] retired skill preserved', {
-        slug: secondSlug,
-        reason: 'modified',
-      });
+      expect(await readFile(join(cloneDir, 'SKILL.md'), 'utf8')).toBe(
+        '# user edit',
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        '[UserLayerMirror] retired skill preserved',
+        {
+          slug: secondSlug,
+          reason: 'modified',
+        },
+      );
     });
 
     it('preserves and reports a clone without an origin sidecar', async () => {
       const cloneDir = await seedRetiredClone(firstSlug, { sidecar: false });
       const result = await service.retireManagedSkills();
-      expect(result.preserved).toEqual([{ slug: firstSlug, reason: 'missing-sidecar' }]);
+      expect(result.preserved).toEqual([
+        { slug: firstSlug, reason: 'missing-sidecar' },
+      ]);
       expect(await fileExists(cloneDir)).toBe(true);
     });
 
     it('does nothing on a second pass after removal', async () => {
       await seedRetiredClone(firstSlug);
       await service.retireManagedSkills();
-      expect(await service.retireManagedSkills()).toEqual({ removed: [], preserved: [], errors: 0 });
+      expect(await service.retireManagedSkills()).toEqual({
+        removed: [],
+        preserved: [],
+        errors: 0,
+      });
     });
 
     it('does not follow a symlinked slug directory', async () => {
@@ -165,10 +195,18 @@ describe('UserLayerMirrorService.mirrorAll', () => {
       await mkdir(outside);
       await writeFile(join(outside, 'SKILL.md'), '# outside', 'utf8');
       await mkdir(service.getUserLayerRoots().skills, { recursive: true });
-      await symlink(outside, join(service.getUserLayerRoots().skills, firstSlug), 'junction');
+      await symlink(
+        outside,
+        join(service.getUserLayerRoots().skills, firstSlug),
+        'junction',
+      );
       const result = await service.retireManagedSkills();
-      expect(result.preserved).toEqual([{ slug: firstSlug, reason: 'unsafe-path' }]);
-      expect(await readFile(join(outside, 'SKILL.md'), 'utf8')).toBe('# outside');
+      expect(result.preserved).toEqual([
+        { slug: firstSlug, reason: 'unsafe-path' },
+      ]);
+      expect(await readFile(join(outside, 'SKILL.md'), 'utf8')).toBe(
+        '# outside',
+      );
     });
 
     it('leaves unrelated skills untouched', async () => {
@@ -181,8 +219,15 @@ describe('UserLayerMirrorService.mirrorAll', () => {
 
     it('retires before startup reconciliation and does not re-seed a retired source', async () => {
       const cloneDir = await seedRetiredClone(firstSlug);
-      const pluginPath = await seedPluginSkill('retired-plugin', firstSlug, '# source');
-      const sources = { pluginPaths: [pluginPath], synthesizedSkillsRoot: synthRoot };
+      const pluginPath = await seedPluginSkill(
+        'retired-plugin',
+        firstSlug,
+        '# source',
+      );
+      const sources = {
+        pluginPaths: [pluginPath],
+        synthesizedSkillsRoot: synthRoot,
+      };
       const reconciled = await service.reconcileAll(sources);
       expect(reconciled.retiredSkills.removed).toEqual([firstSlug]);
       expect(reconciled.orphanedClones).toEqual([]);
@@ -519,6 +564,120 @@ describe('UserLayerMirrorService.mirrorAll', () => {
     const clones = await service.listClones();
     expect(clones.map((c) => c.kind).sort()).toEqual(['agent', 'command']);
   });
+
+  it('keeps retired role sources out of a new user-layer scope', async () => {
+    const agentSourceDir = join(workRoot, 'ws', '.claude', 'agents');
+    await mkdir(agentSourceDir, { recursive: true });
+    for (const slug of [
+      'backend-developer',
+      'frontend-developer',
+      'devops-engineer',
+    ]) {
+      await writeFile(
+        join(agentSourceDir, `${slug}.md`),
+        '# retired role',
+        'utf8',
+      );
+    }
+    const storeDir = join(workRoot, 'ws', '.ptah', 'setup-wizard');
+    await mkdir(storeDir, { recursive: true });
+    const hash = `sha256:${createHash('sha256').update('# retired role').digest('hex')}`;
+    await writeFile(
+      join(storeDir, 'agent-origins.json'),
+      JSON.stringify({
+        version: 1,
+        agents: Object.fromEntries(
+          ['backend-developer', 'frontend-developer', 'devops-engineer'].map(
+            (slug) => [slug, { hash, writtenAt: 1 }],
+          ),
+        ),
+      }),
+      'utf8',
+    );
+    const result = await service.mirrorAll({
+      workspaceRoot: join(workRoot, 'ws'),
+      pluginPaths: [],
+      synthesizedSkillsRoot: synthRoot,
+      agentSourceDir,
+    });
+    expect(result.agentsMirrored).toBe(0);
+    for (const slug of [
+      'backend-developer',
+      'frontend-developer',
+      'devops-engineer',
+    ]) {
+      expect(
+        await fileExists(
+          join(
+            service.getUserLayerRoots(join(workRoot, 'ws')).agents,
+            `${slug}.md`,
+          ),
+        ),
+      ).toBe(false);
+      expect(await fileExists(join(agentSourceDir, `${slug}.md`))).toBe(true);
+    }
+  });
+
+  it('mirrors a user-authored agent with a retired slug', async () => {
+    const agentSourceDir = join(workRoot, 'ws', '.claude', 'agents');
+    await mkdir(agentSourceDir, { recursive: true });
+    await writeFile(
+      join(agentSourceDir, 'backend-developer.md'),
+      '# my agent',
+      'utf8',
+    );
+    const result = await service.mirrorAll({
+      workspaceRoot: join(workRoot, 'ws'),
+      pluginPaths: [],
+      synthesizedSkillsRoot: synthRoot,
+      agentSourceDir,
+    });
+    expect(result.agentsMirrored).toBe(1);
+    expect(
+      await readFile(
+        join(
+          service.getUserLayerRoots(join(workRoot, 'ws')).agents,
+          'backend-developer.md',
+        ),
+        'utf8',
+      ),
+    ).toBe('# my agent');
+  });
+
+  it.each(['changed hash', 'unreadable store'])(
+    'mirrors a retired slug with %s',
+    async (state) => {
+      const agentSourceDir = join(workRoot, 'ws', '.claude', 'agents');
+      const storeDir = join(workRoot, 'ws', '.ptah', 'setup-wizard');
+      await mkdir(agentSourceDir, { recursive: true });
+      await mkdir(storeDir, { recursive: true });
+      await writeFile(
+        join(agentSourceDir, 'backend-developer.md'),
+        '# my agent',
+        'utf8',
+      );
+      if (state === 'changed hash') {
+        const hash = `sha256:${createHash('sha256').update('# old agent').digest('hex')}`;
+        await writeFile(
+          join(storeDir, 'agent-origins.json'),
+          JSON.stringify({
+            version: 1,
+            agents: { 'backend-developer': { hash, writtenAt: 1 } },
+          }),
+          'utf8',
+        );
+      } else {
+        await mkdir(join(storeDir, 'agent-origins.json'));
+      }
+      const result = await service.mirrorAll({
+        workspaceRoot: join(workRoot, 'ws'),
+        pluginPaths: [],
+        synthesizedSkillsRoot: synthRoot,
+        agentSourceDir,
+      });
+      expect(result.agentsMirrored).toBe(1);
+    },
+  );
 });
 
 describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
@@ -939,7 +1098,9 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
 
       expect(result.written).toBe(true);
       expect(result.metadataIncomplete).toBe(false);
-      expect(result.currentContentHash).toBe(await computeSourceHash(cloneFile));
+      expect(result.currentContentHash).toBe(
+        await computeSourceHash(cloneFile),
+      );
       expect(result.reconcileProtected).toBe(true);
       expect(await readFile(cloneFile, 'utf8')).toBe('# the user typed this');
 
@@ -963,7 +1124,11 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
     it('refuses a stale skill body without writing a file or history snapshot', async () => {
       const original = '# v1 upstream';
       await seedAndMirrorSkill('plugin-a', 'deep-research', original);
-      const cloneSkill = join(service.getUserLayerRoots().skills, 'deep-research', 'SKILL.md');
+      const cloneSkill = join(
+        service.getUserLayerRoots().skills,
+        'deep-research',
+        'SKILL.md',
+      );
       const expectedSourceHash = `sha256:${createHash('sha256').update(original).digest('hex')}`;
       await writeFile(cloneSkill, '# changed after draft', 'utf8');
       const historyBefore = await service.listHistory('skill', 'deep-research');
@@ -975,15 +1140,26 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
         expectedSourceHash,
       });
 
-      expect(result).toMatchObject({ written: false, reason: 'stale-source', historyTs: null, currentContentHash: null });
+      expect(result).toMatchObject({
+        written: false,
+        reason: 'stale-source',
+        historyTs: null,
+        currentContentHash: null,
+      });
       expect(await readFile(cloneSkill, 'utf8')).toBe('# changed after draft');
-      expect(await service.listHistory('skill', 'deep-research')).toEqual(historyBefore);
+      expect(await service.listHistory('skill', 'deep-research')).toEqual(
+        historyBefore,
+      );
     });
 
     it('saves a skill and snapshots its prior body when the hash matches', async () => {
       const original = '# v1 upstream';
       await seedAndMirrorSkill('plugin-a', 'deep-research', original);
-      const cloneSkill = join(service.getUserLayerRoots().skills, 'deep-research', 'SKILL.md');
+      const cloneSkill = join(
+        service.getUserLayerRoots().skills,
+        'deep-research',
+        'SKILL.md',
+      );
       const expectedSourceHash = `sha256:${createHash('sha256').update(original).digest('hex')}`;
       const historyBefore = await service.listHistory('skill', 'deep-research');
 
@@ -998,9 +1174,13 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
       expect(await readFile(cloneSkill, 'utf8')).toBe('# draft replacement');
       const historyAfter = await service.listHistory('skill', 'deep-research');
       expect(historyAfter).toHaveLength(historyBefore.length + 1);
-      const snapshot = historyAfter.find((entry) => entry.ts === result.historyTs);
+      const snapshot = historyAfter.find(
+        (entry) => entry.ts === result.historyTs,
+      );
       expect(snapshot).toBeDefined();
-      expect(await readFile(join(snapshot!.path, 'SKILL.md'), 'utf8')).toBe(original);
+      expect(await readFile(join(snapshot!.path, 'SKILL.md'), 'utf8')).toBe(
+        original,
+      );
     });
 
     it('refuses a stale flat-file body without writing a file or history snapshot', async () => {
@@ -1018,9 +1198,16 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
         expectedSourceHash,
       });
 
-      expect(result).toMatchObject({ written: false, reason: 'stale-source', historyTs: null, currentContentHash: null });
+      expect(result).toMatchObject({
+        written: false,
+        reason: 'stale-source',
+        historyTs: null,
+        currentContentHash: null,
+      });
       expect(await readFile(cloneFile, 'utf8')).toBe('# changed after draft');
-      expect(await service.listHistory('command', 'review')).toEqual(historyBefore);
+      expect(await service.listHistory('command', 'review')).toEqual(
+        historyBefore,
+      );
     });
 
     it('returns written:false and creates NOTHING when the clone is absent', async () => {
@@ -1108,7 +1295,9 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
       ).toBe(false);
       expect(result.reconcileProtected).toBe(false);
       expect(result.metadataIncomplete).toBe(false);
-      expect(result.currentContentHash).toBe(await computeSourceHash(cloneFile));
+      expect(result.currentContentHash).toBe(
+        await computeSourceHash(cloneFile),
+      );
     });
 
     /**
@@ -1143,7 +1332,9 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
         expect(result.written).toBe(true);
         expect(result.reason).toBeNull();
         expect(result.metadataIncomplete).toBe(true);
-        expect(result.currentContentHash).toBe(await computeSourceHash(cloneDir));
+        expect(result.currentContentHash).toBe(
+          await computeSourceHash(cloneDir),
+        );
         // Nothing was learned about the sidecar, so the conservative answer.
         expect(result.reconcileProtected).toBe(false);
 
@@ -1151,7 +1342,10 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
         expect(await readFile(join(cloneDir, 'SKILL.md'), 'utf8')).toBe(
           '# the user typed this',
         );
-        const historyAfter = await service.listHistory('skill', 'deep-research');
+        const historyAfter = await service.listHistory(
+          'skill',
+          'deep-research',
+        );
         expect(historyAfter).toHaveLength(historyBefore.length + 1);
         expect(result.historyTs).not.toBeNull();
 
@@ -1175,7 +1369,9 @@ describe('UserLayerMirrorService.rebaseClone / keepClone', () => {
 
         expect(result.written).toBe(true);
         expect(result.metadataIncomplete).toBe(true);
-        expect(result.currentContentHash).toBe(await computeSourceHash(cloneFile));
+        expect(result.currentContentHash).toBe(
+          await computeSourceHash(cloneFile),
+        );
         expect(result.reconcileProtected).toBe(false);
         expect(result.historyTs).not.toBeNull();
         expect(await readFile(cloneFile, 'utf8')).toBe('# the user typed this');

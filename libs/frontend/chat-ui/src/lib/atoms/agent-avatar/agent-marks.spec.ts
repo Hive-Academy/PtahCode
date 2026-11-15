@@ -1,8 +1,19 @@
+import { Bot } from 'lucide-angular';
 import {
   PTAH_CLI_PROVIDER_MARK_IDS,
   cliMarkFor,
   ptahCliProviderMarkId,
+  roleIconFor,
 } from './agent-marks';
+
+describe('roleIconFor', () => {
+  it.each(['backend-developer', 'frontend-developer', 'devops-engineer'])(
+    'uses the Bot fallback for the retired %s role',
+    (role) => {
+      expect(roleIconFor(role)).toBe(Bot);
+    },
+  );
+});
 
 describe('ptahCliProviderMarkId', () => {
   it('maps anthropic-api and the Anthropic family to the Anthropic mark', () => {

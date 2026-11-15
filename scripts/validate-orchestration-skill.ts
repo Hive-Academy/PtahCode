@@ -101,7 +101,7 @@ const REQUIRED_STRATEGIES: readonly string[] = [
 ] as const;
 
 /**
- * Required agents that must be documented (the 14 orchestration-roster agents).
+ * Active agents that must be documented and have a shipped template.
  *
  * NOTE: this is the orchestration skill's roster, NOT the full agent-template
  * set. Standalone templates such as `sample-agent` are intentionally absent
@@ -112,9 +112,6 @@ const REQUIRED_AGENTS: readonly string[] = [
   'project-manager',
   'software-architect',
   'team-leader',
-  'backend-developer',
-  'frontend-developer',
-  'devops-engineer',
   'senior-tester',
   'code-style-reviewer',
   'code-logic-reviewer',
@@ -123,6 +120,11 @@ const REQUIRED_AGENTS: readonly string[] = [
   'ui-ux-designer',
   'visual-reviewer',
   'technical-content-writer',
+] as const;
+
+/** Retired role names remain documented only as phase aliases. */
+const IMPLEMENT_ALIASES: readonly string[] = [
+  'backend-developer', 'frontend-developer', 'devops-engineer',
 ] as const;
 
 /** Required sections in SKILL.md */
@@ -550,6 +552,13 @@ function validateAgentsDocumented(
         message: `Missing agent documentation: ${agent}`,
         suggestion: `Add a "| ${agent} |" row to the Profiles table with when it is invoked, what it reads and what runs alongside it`,
       });
+    }
+  }
+
+  for (const alias of IMPLEMENT_ALIASES) {
+    const rowPattern = new RegExp(`^\\|\\s*${alias}\\s*\\|\\s*Retired; alias of.*implement`, 'im');
+    if (!rowPattern.test(content)) {
+      errors.push(error(path.relative(process.cwd(), catalogFile), `Missing retired implement alias: ${alias}`));
     }
   }
 

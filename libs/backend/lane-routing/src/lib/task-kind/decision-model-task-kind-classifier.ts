@@ -1,6 +1,8 @@
 import {
   OUTCOME_TASK_KINDS,
   loggableErrorName,
+  isRetiredRole,
+  phaseKindForRole,
   type LaneTaskKindClassificationInput,
   type LaneTaskKindClassifier,
   type OutcomeTaskKind,
@@ -35,8 +37,12 @@ export class DecisionModelTaskKindClassifier implements LaneTaskKindClassifier {
       if (opened.kind !== 'system-one' && opened.kind !== 'structured') {
         return null;
       }
+      const role = input.role ?? 'none';
+      const canonicalRole = isRetiredRole(role)
+        ? phaseKindForRole(role) ?? role
+        : role;
       const outcome = await runFixedRequest({
-        request: `Role: ${input.role ?? 'none'}\nTask:\n${input.brief}`,
+        request: `Role: ${canonicalRole}\nTask:\n${input.brief}`,
         questions: [
           {
             key: QUESTION_KEY,

@@ -399,14 +399,13 @@ CLI AGENT DELEGATION (3-tier hierarchy):
 CLI agent adapters: ${SYSTEM_CLI_TYPES.join(', ')}, plus ptah-cli for configured providers; which are installed is per-machine, so call ptah.agent.list() first (concurrency cap is the \`ptah.agentOrchestration.maxConcurrentAgents\` setting, default 5; a spawn past the cap fails with a clear error).
 Sub-agents decide when to delegate grunt work vs do it directly.
 
-SPECIALIST AGENTS (14):
+SPECIALIST PHASES AND AGENTS:
 - Planning: project-manager
 - Architecture: software-architect
-- Development: backend-developer, frontend-developer
+- Development and infrastructure: phase kind \`implement\` (not an agent; route it to a lane, session or phase subagent)
 - Testing: senior-tester
 - Review: code-style-reviewer, code-logic-reviewer, visual-reviewer
 - Research: researcher-expert
-- Infrastructure: devops-engineer
 - Coordination: team-leader (3 modes)
 
 IMPORTANT: Always use ptah.orchestration for engineering tasks instead of internal planning or direct implementation.

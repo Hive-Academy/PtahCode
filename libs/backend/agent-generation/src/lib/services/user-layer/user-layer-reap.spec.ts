@@ -419,25 +419,25 @@ describe('UserLayerMirrorService.reconcileAll — deleted-upstream reap (E8)', (
   });
 
   it('reaps an agent clone when its .claude/agents source file is gone', async () => {
-    await seedAgent('backend-developer', '# agent v1');
+    await seedAgent('custom-agent', '# agent v1');
     await service.mirrorAll(sources({ agentSourceDir }));
 
     const roots = service.getUserLayerRoots();
-    await rm(join(agentSourceDir, 'backend-developer.md'), { force: true });
+    await rm(join(agentSourceDir, 'custom-agent.md'), { force: true });
 
     const result = await service.reconcileAll(sources({ agentSourceDir }));
 
     expect(result.reaped).toBe(1);
-    expect(await exists(join(roots.agents, 'backend-developer.md'))).toBe(
+    expect(await exists(join(roots.agents, 'custom-agent.md'))).toBe(
       false,
     );
     expect(
-      await exists(join(roots.agents, 'backend-developer.ptah-origin.json')),
+      await exists(join(roots.agents, 'custom-agent.ptah-origin.json')),
     ).toBe(false);
   });
 
   it('does NOT reap agent clones when no workspace supplied an agent source dir', async () => {
-    await seedAgent('backend-developer', '# agent v1');
+    await seedAgent('custom-agent', '# agent v1');
     await service.mirrorAll(sources({ agentSourceDir }));
     await rm(agentSourceDir, { recursive: true, force: true });
 
@@ -445,7 +445,7 @@ describe('UserLayerMirrorService.reconcileAll — deleted-upstream reap (E8)', (
 
     expect(result.reaped).toBe(0);
     const roots = service.getUserLayerRoots();
-    expect(await exists(join(roots.agents, 'backend-developer.md'))).toBe(true);
+    expect(await exists(join(roots.agents, 'custom-agent.md'))).toBe(true);
   });
 
   it('reaps a command clone and its named sidecar together', async () => {

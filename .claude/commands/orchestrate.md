@@ -45,7 +45,7 @@ Resolve every supplied task ID against an existing `.ptah/specs/<id>/task.md` an
 
 **Strategies**: FEATURE, BUGFIX, REFACTORING, DOCUMENTATION, RESEARCH, DEVOPS, CREATIVE
 
-**Agents** (13): project-manager, software-architect, team-leader, backend-developer, frontend-developer, devops-engineer, senior-tester, code-style-reviewer, code-logic-reviewer, researcher-expert, modernization-detector, ui-ux-designer, technical-content-writer
+**Active agents**: project-manager, software-architect, team-leader, senior-tester, code-style-reviewer, code-logic-reviewer, researcher-expert, modernization-detector, ui-ux-designer, technical-content-writer. Implementation uses the `implement` phase kind.
 
 **Checkpoints**: Scope Clarification, Requirements Validation, Architecture Validation, QA Selection
 

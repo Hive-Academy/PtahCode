@@ -32,7 +32,7 @@ export type AgentCategory =
  * @example
  * ```typescript
  * const recommendation: AgentRecommendation = {
- *   agentId: 'backend-developer',
+ *   agentId: 'senior-tester',
  *   agentName: 'Backend Developer',
  *   relevanceScore: 92,
  *   matchedCriteria: [
