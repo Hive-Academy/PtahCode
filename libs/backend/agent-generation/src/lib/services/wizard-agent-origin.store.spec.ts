@@ -2,6 +2,10 @@ import 'reflect-metadata';
 import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import {
+  AGENT_ORIGINS_VERSION,
+  isRetiredPtahAgent,
+} from '@ptah-extension/harness-sync';
 
 let fakeHome: string;
 
@@ -15,10 +19,7 @@ jest.mock('os', () => ({
   homedir: () => fakeHome,
 }));
 
-import {
-  WizardAgentOriginStore,
-  AGENT_ORIGINS_VERSION,
-} from './wizard-agent-origin.store';
+import { WizardAgentOriginStore } from './wizard-agent-origin.store';
 import { UserLayerMirrorService } from './user-layer/user-layer-mirror.service';
 
 interface MockLogger {
@@ -83,6 +84,26 @@ describe('WizardAgentOriginStore', () => {
     );
   });
 
+  it('recognizes an unchanged CRLF wizard agent and its mirror clone as retired', async () => {
+    const slug = 'backend-developer';
+    const sourceFile = join(harnessRoot, '.claude', 'agents', `${slug}.md`);
+    const cloneFile = join(workRoot, 'clone', `${slug}.md`);
+    const content = '# Backend developer\r\nWizard written guidance.\r\n';
+    await mkdir(join(harnessRoot, '.claude', 'agents'), { recursive: true });
+    await mkdir(join(workRoot, 'clone'), { recursive: true });
+    await writeFile(sourceFile, content, 'utf8');
+    await writeFile(cloneFile, content, 'utf8');
+
+    expect(
+      await store.recordWritten(
+        harnessRoot,
+        slug,
+        await store.hashWrittenFile(sourceFile),
+      ),
+    ).toBe(true);
+    expect(isRetiredPtahAgent(harnessRoot, slug, cloneFile)).toBe(true);
+  });
+
   it('reads a missing file as empty without warning', async () => {
     await expect(store.read(harnessRoot)).resolves.toEqual({});
     expect(logger.warn).not.toHaveBeenCalled();
@@ -91,39 +112,34 @@ describe('WizardAgentOriginStore', () => {
   it('round-trips concurrent records without losing an entry', async () => {
     const before = Date.now();
     const results = await Promise.all([
-      store.recordWritten(harnessRoot, 'frontend-developer', HASH_B),
-      store.recordWritten(harnessRoot, 'backend-developer', HASH_A),
+      store.recordWritten(harnessRoot, 'my-agent', HASH_B),
+      store.recordWritten(harnessRoot, 'custom-agent', HASH_A),
     ]);
 
     expect(results).toEqual([true, true]);
     const origins = await store.read(harnessRoot);
-    expect(origins['backend-developer'].hash).toBe(HASH_A);
-    expect(origins['frontend-developer'].hash).toBe(HASH_B);
-    expect(origins['backend-developer'].writtenAt).toBeGreaterThanOrEqual(
-      before,
-    );
+    expect(origins['custom-agent'].hash).toBe(HASH_A);
+    expect(origins['my-agent'].hash).toBe(HASH_B);
+    expect(origins['custom-agent'].writtenAt).toBeGreaterThanOrEqual(before);
 
     const raw = JSON.parse(
       await readFile(store.originsPath(harnessRoot), 'utf8'),
     ) as { version: number; agents: Record<string, unknown> };
     expect(raw.version).toBe(AGENT_ORIGINS_VERSION);
-    expect(Object.keys(raw.agents)).toEqual([
-      'backend-developer',
-      'frontend-developer',
-    ]);
+    expect(Object.keys(raw.agents)).toEqual(['custom-agent', 'my-agent']);
   });
 
   it('overwrites the record of a slug that is written again', async () => {
-    await store.recordWritten(harnessRoot, 'backend-developer', HASH_A);
-    await store.recordWritten(harnessRoot, 'backend-developer', HASH_B);
+    await store.recordWritten(harnessRoot, 'custom-agent', HASH_A);
+    await store.recordWritten(harnessRoot, 'custom-agent', HASH_B);
 
     const origins = await store.read(harnessRoot);
-    expect(Object.keys(origins)).toEqual(['backend-developer']);
-    expect(origins['backend-developer'].hash).toBe(HASH_B);
+    expect(Object.keys(origins)).toEqual(['custom-agent']);
+    expect(origins['custom-agent'].hash).toBe(HASH_B);
   });
 
   it('treats a legacy unmarked agent as absent', async () => {
-    await store.recordWritten(harnessRoot, 'backend-developer', HASH_A);
+    await store.recordWritten(harnessRoot, 'custom-agent', HASH_A);
 
     const origins = await store.read(harnessRoot);
     expect(origins['legacy-agent']).toBeUndefined();
@@ -146,10 +162,10 @@ describe('WizardAgentOriginStore', () => {
     );
 
     await expect(
-      store.recordWritten(harnessRoot, 'backend-developer', HASH_A),
+      store.recordWritten(harnessRoot, 'custom-agent', HASH_A),
     ).resolves.toBe(true);
     expect(Object.keys(await store.read(harnessRoot))).toEqual([
-      'backend-developer',
+      'custom-agent',
     ]);
   });
 
@@ -162,7 +178,7 @@ describe('WizardAgentOriginStore', () => {
       path,
       JSON.stringify({
         version: 2,
-        agents: { 'backend-developer': { hash: HASH_A, writtenAt: 1 } },
+        agents: { 'custom-agent': { hash: HASH_A, writtenAt: 1 } },
       }),
       'utf8',
     );
@@ -172,27 +188,23 @@ describe('WizardAgentOriginStore', () => {
   });
 
   it('forget removes one slug and keeps the others', async () => {
-    await store.recordWritten(harnessRoot, 'backend-developer', HASH_A);
-    await store.recordWritten(harnessRoot, 'frontend-developer', HASH_B);
+    await store.recordWritten(harnessRoot, 'custom-agent', HASH_A);
+    await store.recordWritten(harnessRoot, 'my-agent', HASH_B);
 
-    await expect(store.forget(harnessRoot, 'backend-developer')).resolves.toBe(
-      true,
-    );
+    await expect(store.forget(harnessRoot, 'custom-agent')).resolves.toBe(true);
 
     const origins = await store.read(harnessRoot);
-    expect(Object.keys(origins)).toEqual(['frontend-developer']);
+    expect(Object.keys(origins)).toEqual(['my-agent']);
   });
 
   it('forget of an unrecorded slug touches nothing on disk', async () => {
-    await expect(store.forget(harnessRoot, 'backend-developer')).resolves.toBe(
-      true,
-    );
+    await expect(store.forget(harnessRoot, 'custom-agent')).resolves.toBe(true);
     expect(await pathExists(store.originsPath(harnessRoot))).toBe(false);
   });
 
   it('refuses an invalid hash or empty slug without writing', async () => {
     await expect(
-      store.recordWritten(harnessRoot, 'backend-developer', 'not-a-hash'),
+      store.recordWritten(harnessRoot, 'custom-agent', 'not-a-hash'),
     ).resolves.toBe(false);
     await expect(store.recordWritten(harnessRoot, '', HASH_A)).resolves.toBe(
       false,
@@ -207,18 +219,18 @@ describe('WizardAgentOriginStore', () => {
     await writeFile(join(harnessRoot, '.ptah'), 'blocker', 'utf8');
 
     await expect(
-      store.recordWritten(harnessRoot, 'backend-developer', HASH_A),
+      store.recordWritten(harnessRoot, 'custom-agent', HASH_A),
     ).resolves.toBe(false);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Failed to persist'),
-      expect.objectContaining({ action: 'record', slug: 'backend-developer' }),
+      expect.objectContaining({ action: 'record', slug: 'custom-agent' }),
     );
     expect(logger.error).not.toHaveBeenCalled();
   });
 
   it("hashes written bytes exactly like the mirror's pendingSourceHash", async () => {
     const agentSourceDir = join(harnessRoot, '.claude', 'agents');
-    const agentFile = join(agentSourceDir, 'backend-developer.md');
+    const agentFile = join(agentSourceDir, 'custom-agent.md');
     const mirror = new UserLayerMirrorService(makeLogger() as never);
     const sources = {
       pluginPaths: [],
@@ -233,23 +245,23 @@ describe('WizardAgentOriginStore', () => {
     // A user edit of the clone makes the next upstream change diverge, which
     // is what records `pendingSourceHash` for the new upstream bytes.
     await writeFile(
-      join(mirror.getUserLayerRoots().agents, 'backend-developer.md'),
+      join(mirror.getUserLayerRoots().agents, 'custom-agent.md'),
       '# edited clone\n',
       'utf8',
     );
-    const wizardBytes = '---\nname: backend-developer\n---\r\n# agent v2\r\n';
+    const wizardBytes = '---\nname: custom-agent\n---\r\n# agent v2\r\n';
     await writeFile(agentFile, wizardBytes, 'utf8');
     const result = await mirror.reconcile(sources);
 
     const diverged = result.divergedSlugs.find(
-      (entry) => entry.kind === 'agent' && entry.slug === 'backend-developer',
+      (entry) => entry.kind === 'agent' && entry.slug === 'custom-agent',
     );
     expect(diverged?.pendingSourceHash).toMatch(/^sha256:/);
 
     const hash = await store.hashWrittenFile(agentFile);
-    await store.recordWritten(harnessRoot, 'backend-developer', hash);
+    await store.recordWritten(harnessRoot, 'custom-agent', hash);
 
     const origins = await store.read(harnessRoot);
-    expect(origins['backend-developer'].hash).toBe(diverged?.pendingSourceHash);
+    expect(origins['custom-agent'].hash).toBe(diverged?.pendingSourceHash);
   });
 });

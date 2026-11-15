@@ -106,7 +106,7 @@ export const LEGACY_BATCHES_FILE = 'tasks.md';
  *
  *  - `design-handoff.md`, `design-assets-inventory.md` —
  *    `ui-ux-designer.template.md:148,152` writes them; `software-architect` and
- *    `frontend-developer` read them back.
+ *    `implement` read them back.
  *  - `design-spec.md` — the visual specification `ui-ux-designer.template.md:104`
  *    writes into the task folder (`.ptah/specs/<TASK_FOLDER>/design-spec.md`);
  *    orchestration checkpoints Gate 1.7 reads it before the next phase runs.

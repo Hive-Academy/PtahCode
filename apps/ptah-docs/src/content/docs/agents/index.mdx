@@ -7,18 +7,18 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 # Agents in PtahCode
 
-Agents are specialized AI workers that PtahCode coordinates for you. Each agent has a focused role, such as backend code, UI review, or research, and a system prompt for that role.
+Agents are specialized AI workers that PtahCode coordinates for you. Each agent has a focused role, such as testing, UI review, or research, and a system prompt for that role.
 
-## The 14 built-in agents
+## The 11 built-in agents
 
-PtahCode has 14 agent templates. The [setup wizard](/setup/setup-wizard/) analyzes your project and writes the agents that apply to it into `.claude/agents/`.
+PtahCode has 11 agent templates. The [setup wizard](/setup/setup-wizard/) analyzes your project and writes the agents that apply to it into `.claude/agents/`.
 
 <CardGrid>
   <Card title="Planning & Leadership" icon="rocket">
     project-manager, software-architect, team-leader
   </Card>
   <Card title="Implementation" icon="laptop">
-    backend-developer, frontend-developer, devops-engineer
+    The `implement` phase runs on a subagent, CLI lane, or session.
   </Card>
   <Card title="Quality & Review" icon="approve-check">
     senior-tester, code-style-reviewer, code-logic-reviewer, visual-reviewer
@@ -66,7 +66,7 @@ Each agent is a Markdown file with YAML frontmatter and a system prompt. Edit th
     Let PtahCode analyze your project and write the agents that apply. [Start here →](/setup/setup-wizard/)
   </Card>
   <Card title="Browse the built-ins" icon="list-format">
-    See all 14 built-in agents and when to reach for each. [Catalog →](/agents/built-in-agents/)
+    See all 11 built-in agents and when to reach for each. [Catalog →](/agents/built-in-agents/)
   </Card>
   <Card title="Spawn CLI agents" icon="seti:shell">
     Run work in parallel on installed CLIs and Ptah CLI providers. [CLI agents →](/agents/cli-agents/)

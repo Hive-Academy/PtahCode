@@ -8,17 +8,17 @@ Both host registrations leave the clone activity callback at its always\-true de
 
 **Evidence**
 
-- [apps/ptah\-electron/src/di/phase\-2\-libraries\.ts:339](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/apps/ptah-electron/src/di/phase-2-libraries.ts#L339) — new PhaseDefinitionFileReader\( \.\.\. getPluginsPath\(\), \)
+- [apps/ptah\-electron/src/di/phase\-2\-libraries\.ts:339](http<worktree> — new PhaseDefinitionFileReader\( \.\.\. getPluginsPath\(\), \)
 
-- [libs/backend/lane\-routing/src/lib/phase\-definition\-file\.reader\.ts:13](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/lane-routing/src/lib/phase-definition-file.reader.ts#L13) — private readonly isCloneActive: \(\) =&gt; boolean \| Promise&lt;boolean&gt; = \(\) =&gt; true
+- [libs/backend/lane\-routing/src/lib/phase\-definition\-file\.reader\.ts:13](http<worktree> — private readonly isCloneActive: \(\) =&gt; boolean \| Promise&lt;boolean&gt; = \(\) =&gt; true
 
-- [libs/backend/lane\-routing/src/lib/phase\-definition\-file\.reader\.ts:20](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/lane-routing/src/lib/phase-definition-file.reader.ts#L20) — const root = await this\.isCloneActive\(\) &amp;&amp; await this\.fs\.exists\(clonePhase\) ? clone : \.\.\.
+- [libs/backend/lane\-routing/src/lib/phase\-definition\-file\.reader\.ts:20](http<worktree> — const root = await this\.isCloneActive\(\) &amp;&amp; await this\.fs\.exists\(clonePhase\) ? clone : \.\.\.
 
-- [libs/backend/harness\-sync/src/lib/manifest/harness\-manifest\.builder\.ts:516](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/harness-sync/src/lib/manifest/harness-manifest.builder.ts#L516) — if \(disabled\.has\(slug\)\) continue;
+- [libs/backend/harness\-sync/src/lib/manifest/harness\-manifest\.builder\.ts:516](http<worktree> — if \(disabled\.has\(slug\)\) continue;
 
-- [libs/backend/harness\-sync/src/lib/manifest/harness\-manifest\.builder\.ts:528](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/harness-sync/src/lib/manifest/harness-manifest.builder.ts#L528) — if \(selected \!== null &amp;&amp; \!selected\.has\(slug\)\) \{
+- [libs/backend/harness\-sync/src/lib/manifest/harness\-manifest\.builder\.ts:528](http<worktree> — if \(selected \!== null &amp;&amp; \!selected\.has\(slug\)\) \{
 
-- [libs/backend/lane\-routing/src/lib/route\-decide\.service\.ts:331](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/lane-routing/src/lib/route-decide.service.ts#L331) — const text = await reader\.read\(phase\.kind\);
+- [libs/backend/lane\-routing/src/lib/route\-decide\.service\.ts:331](http<worktree> — const text = await reader\.read\(phase\.kind\);
 
 <details><summary>Prompt for AI agents</summary>
 
@@ -38,13 +38,13 @@ The phase reader only examines the global user clone and the installed plugin, e
 
 **Evidence**
 
-- [libs/backend/lane\-routing/src/lib/phase\-definition\-file\.reader\.ts:18](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/lane-routing/src/lib/phase-definition-file.reader.ts#L18) — const clone = join\(this\.userSkillsRoot, 'orchestration'\);
+- [libs/backend/lane\-routing/src/lib/phase\-definition\-file\.reader\.ts:18](http<worktree> — const clone = join\(this\.userSkillsRoot, 'orchestration'\);
 
-- [libs/backend/lane\-routing/src/lib/phase\-definition\-file\.reader\.ts:22](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/lane-routing/src/lib/phase-definition-file.reader.ts#L22) — : join\(this\.pluginsRoot, 'ptah\-core', 'skills', 'orchestration'\);
+- [libs/backend/lane\-routing/src/lib/phase\-definition\-file\.reader\.ts:22](http<worktree> — : join\(this\.pluginsRoot, 'ptah\-core', 'skills', 'orchestration'\);
 
-- [libs/backend/harness\-sync/src/lib/targets/claude\-target\.symlink\-migration\.spec\.ts:189](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/harness-sync/src/lib/targets/claude-target.symlink-migration.spec.ts#L189) — leaves the USER's own symlink at a desired path alone and reports it foreign
+- [libs/backend/harness\-sync/src/lib/targets/claude\-target\.symlink\-migration\.spec\.ts:189](http<worktree> — leaves the USER's own symlink at a desired path alone and reports it foreign
 
-- [libs/backend/lane\-routing/src/lib/route\-decide\.service\.ts:331](https://github.com/Hive-Academy/PtahCode/blob/912bb168c566a774a95369a3cb1ed9c233576ca3/libs/backend/lane-routing/src/lib/route-decide.service.ts#L331) — const text = await reader\.read\(phase\.kind\);
+- [libs/backend/lane\-routing/src/lib/route\-decide\.service\.ts:331](http<worktree> — const text = await reader\.read\(phase\.kind\);
 
 <details><summary>Prompt for AI agents</summary>
 

@@ -67,30 +67,6 @@ const AGENT_CATALOG: AgentMetadata[] = [
     icon: 'team',
   },
   {
-    id: 'frontend-developer',
-    name: 'Frontend Developer',
-    description:
-      'Implements UI components, handles state management, and builds responsive interfaces',
-    category: 'development',
-    icon: 'frontend',
-  },
-  {
-    id: 'backend-developer',
-    name: 'Backend Developer',
-    description:
-      'Implements APIs, database logic, business services, and server-side code',
-    category: 'development',
-    icon: 'backend',
-  },
-  {
-    id: 'devops-engineer',
-    name: 'DevOps Engineer',
-    description:
-      'Manages CI/CD pipelines, containerization, deployment, and infrastructure',
-    category: 'development',
-    icon: 'devops',
-  },
-  {
     id: 'senior-tester',
     name: 'Senior Tester',
     description:

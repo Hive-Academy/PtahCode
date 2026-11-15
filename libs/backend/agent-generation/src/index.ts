@@ -32,10 +32,7 @@ export { AnalysisFreshnessService } from './lib/services/analysis-freshness.serv
 export { AnalysisClaudeMdLinker } from './lib/services/analysis-claude-md-linker';
 export type { ResumableRun } from './lib/services/analysis-storage.service';
 export type { OrchestratorGenerationOptions } from './lib/services/orchestrator.service';
-export type {
-  AgentFileGuard,
-  WrittenAgentFile,
-} from './lib/types/core.types';
+export type { AgentFileGuard, WrittenAgentFile } from './lib/types/core.types';
 export type {
   AgentWriteBaseline,
   AgentWriteGuard,
@@ -171,4 +168,4 @@ export { WizardAgentOriginStore } from './lib/services/wizard-agent-origin.store
 export type {
   AgentOriginEntry,
   AgentOrigins,
-} from './lib/services/wizard-agent-origin.store';
+} from '@ptah-extension/harness-sync';

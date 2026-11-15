@@ -24,7 +24,7 @@ import { UserLayerMirrorService } from './user-layer-mirror.service';
  * The defect: `~/.ptah/user/agents` was one directory per MACHINE while its
  * source was the per-workspace `{ws}/.claude/agents`. The setup wizard tailors
  * an agent to a project's stack and names it after the ROLE, so two projects
- * write two different `backend-developer.md` — and the flat root gave them one
+ * write two different `custom-agent.md` — and the flat root gave them one
  * destination. `mirrorAll` is create-if-absent and could not overwrite, but
  * `reconcile`'s fast-forward could and did, on every activation, with the
  * reconciler rewriting `.codex/agents` and `.github/agents` behind it.
@@ -100,8 +100,8 @@ describe('user layer — the agent clone is keyed by workspace', () => {
   });
 
   it('puts each workspace’s agents in its own directory', async () => {
-    await writeAgent(wsA, 'backend-developer', 'ALPHA BODY');
-    await writeAgent(wsB, 'backend-developer', 'BETA BODY');
+    await writeAgent(wsA, 'custom-agent', 'ALPHA BODY');
+    await writeAgent(wsB, 'custom-agent', 'BETA BODY');
 
     await service.mirrorAll(sourcesFor(wsA));
     await service.mirrorAll(sourcesFor(wsB));
@@ -109,10 +109,10 @@ describe('user layer — the agent clone is keyed by workspace', () => {
     const rootA = service.getUserLayerRoots(wsA).agents;
     const rootB = service.getUserLayerRoots(wsB).agents;
     expect(rootA).not.toBe(rootB);
-    expect(await readFile(join(rootA, 'backend-developer.md'), 'utf-8')).toBe(
+    expect(await readFile(join(rootA, 'custom-agent.md'), 'utf-8')).toBe(
       'ALPHA BODY',
     );
-    expect(await readFile(join(rootB, 'backend-developer.md'), 'utf-8')).toBe(
+    expect(await readFile(join(rootB, 'custom-agent.md'), 'utf-8')).toBe(
       'BETA BODY',
     );
   });
@@ -121,20 +121,20 @@ describe('user layer — the agent clone is keyed by workspace', () => {
     // This is the churn itself. Before the key, the second reconcile
     // fast-forwarded the shared clone to the other project's body, and the next
     // harness pass copied it into the first project's rival-CLI directories.
-    await writeAgent(wsA, 'frontend-developer', 'ALPHA V1');
-    await writeAgent(wsB, 'frontend-developer', 'BETA V1');
+    await writeAgent(wsA, 'my-agent', 'ALPHA V1');
+    await writeAgent(wsB, 'my-agent', 'BETA V1');
     await service.mirrorAll(sourcesFor(wsA));
     await service.mirrorAll(sourcesFor(wsB));
 
-    await writeAgent(wsB, 'frontend-developer', 'BETA V2');
+    await writeAgent(wsB, 'my-agent', 'BETA V2');
     await service.reconcile(sourcesFor(wsB));
 
     const rootA = service.getUserLayerRoots(wsA).agents;
     const rootB = service.getUserLayerRoots(wsB).agents;
-    expect(await readFile(join(rootA, 'frontend-developer.md'), 'utf-8')).toBe(
+    expect(await readFile(join(rootA, 'my-agent.md'), 'utf-8')).toBe(
       'ALPHA V1',
     );
-    expect(await readFile(join(rootB, 'frontend-developer.md'), 'utf-8')).toBe(
+    expect(await readFile(join(rootB, 'my-agent.md'), 'utf-8')).toBe(
       'BETA V2',
     );
   });

@@ -196,7 +196,7 @@ describe('rebase / keep across every clone origin (E7)', () => {
 
   it('a diverged AGENT clone rebases from {ws}/.claude/agents/<slug>.md', async () => {
     await mkdir(agentSourceDir, { recursive: true });
-    const upstreamFile = join(agentSourceDir, 'backend-developer.md');
+    const upstreamFile = join(agentSourceDir, 'custom-agent.md');
     await writeFile(upstreamFile, '# agent v1', 'utf8');
 
     await service.mirrorAll({
@@ -206,7 +206,7 @@ describe('rebase / keep across every clone origin (E7)', () => {
     });
 
     const roots = service.getUserLayerRoots();
-    const cloneFile = join(roots.agents, 'backend-developer.md');
+    const cloneFile = join(roots.agents, 'custom-agent.md');
     await writeFile(cloneFile, '# my agent edit', 'utf8');
     await writeFile(upstreamFile, '# agent v2', 'utf8');
 
@@ -218,36 +218,36 @@ describe('rebase / keep across every clone origin (E7)', () => {
     expect(reconciled.divergedSlugs).toEqual([
       {
         kind: 'agent',
-        slug: 'backend-developer',
+        slug: 'custom-agent',
         pendingSourceHash: expect.stringMatching(/^sha256:/),
       },
     ]);
 
     const result = await service.rebaseClone({
       kind: 'agent',
-      slug: 'backend-developer',
+      slug: 'custom-agent',
       sourceDir: upstreamFile,
     });
 
     expect(result.failed).toBeUndefined();
     expect(await readFile(cloneFile, 'utf8')).toBe('# agent v2');
     const sidecar = await readSidecarFile(
-      join(roots.agents, 'backend-developer.ptah-origin.json'),
+      join(roots.agents, 'custom-agent.ptah-origin.json'),
     );
     expect(sidecar.diverged).toBe(false);
     expect(sidecar.pendingSourceHash).toBeUndefined();
 
     const snaps = await readdir(
-      join(roots.agents, DEFAULT_HISTORY_DIR, 'backend-developer'),
+      join(roots.agents, DEFAULT_HISTORY_DIR, 'custom-agent'),
     );
     expect(
       await readFile(
         join(
           roots.agents,
           DEFAULT_HISTORY_DIR,
-          'backend-developer',
+          'custom-agent',
           snaps[0],
-          'backend-developer.md',
+          'custom-agent.md',
         ),
         'utf8',
       ),

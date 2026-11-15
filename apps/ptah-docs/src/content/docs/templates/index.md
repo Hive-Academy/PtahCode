@@ -3,7 +3,7 @@ title: Templates
 description: The agent templates that PtahCode uses to generate project agents.
 ---
 
-**Templates** in PtahCode are agent templates. Each template is a Markdown file that describes one specialist agent, for example `frontend-developer` or `software-architect`. The agent generation in the [setup wizard](/setup/setup-wizard/) uses the templates to write agents for your project.
+**Templates** in PtahCode are agent templates. Each template is a Markdown file that describes one specialist agent, for example `software-architect` or `senior-tester`. The agent generation in the [setup wizard](/setup/setup-wizard/) uses the templates to write agents for your project.
 
 ## Where templates come from
 
@@ -14,11 +14,12 @@ The installer does not include the templates. The [content download](/plugins/pl
 | Group        | Templates                                                                                                 |
 | ------------ | --------------------------------------------------------------------------------------------------------- |
 | Planning     | `project-manager`, `software-architect`, `team-leader`, `researcher-expert`                               |
-| Building     | `backend-developer`, `frontend-developer`, `devops-engineer`                                              |
 | Quality      | `senior-tester`, `code-logic-reviewer`, `code-style-reviewer`, `visual-reviewer`, `modernization-detector` |
 | Design and content | `ui-ux-designer`, `technical-content-writer`                                                        |
 
 The folder `_shared/` holds blocks that many templates include, for example the clarification protocol and the tool rules.
+
+Implementation work runs as the `implement` phase on a subagent, CLI lane, or session.
 
 ## Next steps
 

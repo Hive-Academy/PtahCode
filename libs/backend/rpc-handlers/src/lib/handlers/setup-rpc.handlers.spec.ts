@@ -955,12 +955,12 @@ describe('SetupRpcHandlers', () => {
       expect(result.map((agent) => agent.agentId)).toEqual(
         expect.arrayContaining([
           'project-manager',
-          'backend-developer',
           'senior-tester',
+          'ui-ux-designer',
         ]),
       );
       expect(result.map((agent) => agent.category)).toEqual(
-        expect.arrayContaining(['planning', 'development', 'qa']),
+        expect.arrayContaining(['planning', 'qa', 'creative']),
       );
       expect(result.every((agent) => agent.relevanceScore === 100)).toBe(true);
       expect(
@@ -1025,7 +1025,7 @@ describe('SetupRpcHandlers', () => {
       >(h, 'wizard:recommend-agents', { isMultiPhase: true });
 
       // Every catalog agent is recommended at relevanceScore=100.
-      expect(result.length).toBeGreaterThanOrEqual(14);
+      expect(result.length).toBeGreaterThanOrEqual(11);
       expect(result.every((r) => r.relevanceScore === 100)).toBe(true);
       expect(
         result.every(
@@ -1039,7 +1039,9 @@ describe('SetupRpcHandlers', () => {
       // Spot-check: anchor agents from each category, including the agents
       // that historically drifted out of the catalog.
       const ids = new Set(result.map((r) => r.agentId));
-      expect(ids.has('backend-developer')).toBe(true);
+      for (const retired of ['backend-developer', 'frontend-developer', 'devops-engineer']) {
+        expect(ids.has(retired)).toBe(false);
+      }
       expect(ids.has('ui-ux-designer')).toBe(true);
       expect(ids.has('senior-tester')).toBe(true);
       expect(ids.has('visual-reviewer')).toBe(true);

@@ -401,7 +401,9 @@ function buildFixture(opts: { disabledAgentIds?: string[] } = {}): Fixture {
   );
   // Optional capabilities by token, as tsyringe's `isOptional` resolves them.
   const optional = <T>(token: symbol): T | undefined =>
-    container.isRegistered(token, true) ? container.resolve<T>(token) : undefined;
+    container.isRegistered(token, true)
+      ? container.resolve<T>(token)
+      : undefined;
   const previews = new GenerationPreviewService(
     logger,
     checkpoints,
@@ -577,7 +579,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         workflow: 'setup-agent-generation' as const,
         workspacePath: f.workspace,
       };
-      const params = { selectedAgentIds: ['backend-developer'], tabBinding };
+      const params = { selectedAgentIds: ['code-logic-reviewer'], tabBinding };
       await call<WizardPreviewGenerationResponse>(
         f,
         'wizard:preview-generation',
@@ -587,7 +589,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         f.workspace,
         '.claude',
         'agents',
-        'backend-developer.md',
+        'code-logic-reviewer.md',
       );
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, 'changed after preview');
@@ -628,13 +630,13 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
           score: 0,
         }),
       );
-      const payload = await generate(f, ['backend-developer']);
+      const payload = await generate(f, ['code-logic-reviewer']);
       const content = fs.readFileSync(
-        path.join(f.workspace, '.claude', 'agents', 'backend-developer.md'),
+        path.join(f.workspace, '.claude', 'agents', 'code-logic-reviewer.md'),
         'utf8',
       );
       expect(payload.success).toBe(true);
-      expect(content).toContain('Authored guidance for backend-developer.');
+      expect(content).toContain('Authored guidance for code-logic-reviewer.');
       expect(content).not.toContain('Tailored for this workspace.');
     },
     STEP_TIMEOUT_MS,
@@ -645,7 +647,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
     async () => {
       const f = buildFixture({ disabledAgentIds: ['tester'] });
       f.gate.enable(f.workspace);
-      const ids = ['backend-developer', 'frontend-developer', 'tester'];
+      const ids = ['code-logic-reviewer', 'senior-tester', 'tester'];
 
       const preview = await call<WizardPreviewGenerationResponse>(
         f,
@@ -654,8 +656,8 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       );
       expect(preview.warning).toBeUndefined();
       expect(definiteSet(preview)).toEqual([
-        '.claude/agents/backend-developer.md',
-        '.claude/agents/frontend-developer.md',
+        '.claude/agents/code-logic-reviewer.md',
+        '.claude/agents/senior-tester.md',
         '.claude/agents/tester.md',
       ]);
       // codex/copilot/opencode for the two synced agents; tester opted out.
@@ -683,9 +685,9 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         [...definiteSet(preview), ...conditionalSet(preview)].sort(),
       );
       expect(written).toHaveLength(9);
-      expect(written).toContain('.codex/agents/backend-developer.toml');
-      expect(written).toContain('.github/agents/frontend-developer.agent.md');
-      expect(written).toContain('.opencode/agent/backend-developer.md');
+      expect(written).toContain('.codex/agents/code-logic-reviewer.toml');
+      expect(written).toContain('.github/agents/senior-tester.agent.md');
+      expect(written).toContain('.opencode/agent/code-logic-reviewer.md');
       expect(written).not.toContain('.codex/agents/tester.toml');
     },
     STEP_TIMEOUT_MS,
@@ -700,7 +702,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         enabled: false,
         derived: false,
       });
-      const ids = ['backend-developer', 'reviewer'];
+      const ids = ['code-logic-reviewer', 'reviewer'];
 
       const preview = await call<WizardPreviewGenerationResponse>(
         f,
@@ -727,7 +729,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
     async () => {
       const f = buildFixture();
       expect(f.gate.persist(f.workspace, false)).toBe(true);
-      const ids = ['backend-developer', 'reviewer'];
+      const ids = ['code-logic-reviewer', 'reviewer'];
       // First generation while the gate stays disabled: the consent grant is
       // refused, so the propagation that follows syncs no agent copy.
       const enable = jest.spyOn(f.gate, 'enable').mockReturnValueOnce(false);
@@ -735,7 +737,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       expect(first.writtenCount).toBe(2);
       expect(f.gate.resolve(f.workspace).enabled).toBe(false);
       expect(writtenAgentPaths(f.workspace)).toEqual([
-        '.claude/agents/backend-developer.md',
+        '.claude/agents/code-logic-reviewer.md',
         '.claude/agents/reviewer.md',
       ]);
 
@@ -745,7 +747,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         { selectedAgentIds: ids },
       );
       expect(definiteSet(preview)).toEqual([
-        '.claude/agents/backend-developer.md',
+        '.claude/agents/code-logic-reviewer.md',
         '.claude/agents/reviewer.md',
       ]);
       expect(conditionalSet(preview)).toHaveLength(6);
@@ -770,7 +772,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
     async () => {
       const f = buildFixture();
       f.gate.enable(f.workspace);
-      const ids = ['backend-developer', 'reviewer'];
+      const ids = ['code-logic-reviewer', 'reviewer'];
       const first = await generate(f, ids);
       expect(first.writtenCount).toBe(2);
       expect(writtenAgentPaths(f.workspace)).toHaveLength(8);
@@ -784,7 +786,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       expect(conditionalSet(preview)).toEqual([]);
       expect(definiteSet(preview)).toHaveLength(8);
       expect(definiteSet(preview)).toContain(
-        '.codex/agents/backend-developer.toml',
+        '.codex/agents/code-logic-reviewer.toml',
       );
 
       const second = await generate(f, ids);
@@ -808,7 +810,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       jest
         .spyOn(f.reconciler, 'verify')
         .mockRejectedValueOnce(new Error('verify exploded'));
-      const ids = ['backend-developer', 'tester'];
+      const ids = ['code-logic-reviewer', 'tester'];
 
       const preview = await call<WizardPreviewGenerationResponse>(
         f,
@@ -817,7 +819,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       );
       expect(preview.warning).toMatch(/only the Claude agent files/i);
       expect(definiteSet(preview)).toEqual([
-        '.claude/agents/backend-developer.md',
+        '.claude/agents/code-logic-reviewer.md',
         '.claude/agents/tester.md',
       ]);
 

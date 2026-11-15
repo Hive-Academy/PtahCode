@@ -1212,26 +1212,26 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       registry.getBySlug.mockReturnValue({
         ...sampleRow,
         kind: 'agent' as const,
-        slug: 'backend-developer',
+        slug: 'custom-agent',
         originPluginId: null,
       });
       mirror.rebaseClone.mockResolvedValue(
-        okRebase('agent', 'backend-developer'),
+        okRebase('agent', 'custom-agent'),
       );
 
       await rpcHandler.call('skillSynthesis:rebaseClone', {
         kind: 'agent',
-        slug: 'backend-developer',
+        slug: 'custom-agent',
       });
 
       expect(mirror.rebaseClone).toHaveBeenCalledWith({
         kind: 'agent',
-        slug: 'backend-developer',
+        slug: 'custom-agent',
         sourceDir: join(
           SCOPE,
           '.claude',
           'agents',
-          'backend-developer.md',
+          'custom-agent.md',
         ),
         workspaceRoot: SCOPE,
       });
@@ -1242,14 +1242,14 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       registry.getBySlug.mockReturnValue({
         ...sampleRow,
         kind: 'agent' as const,
-        slug: 'backend-developer',
+        slug: 'custom-agent',
         originPluginId: null,
       });
 
       await expect(
         rpcHandler.call('skillSynthesis:rebaseClone', {
           kind: 'agent',
-          slug: 'backend-developer',
+          slug: 'custom-agent',
         }),
       ).rejects.toMatchObject({ errorCode: 'PERSISTENCE_UNAVAILABLE' });
       expect(mirror.rebaseClone).not.toHaveBeenCalled();

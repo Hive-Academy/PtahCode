@@ -28,33 +28,20 @@
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { inject, injectable } from 'tsyringe';
-import { z } from 'zod';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
-import { atomicWriteWithRetry } from '@ptah-extension/harness-sync';
+import {
+  atomicWriteWithRetry,
+  WIZARD_STATE_DIR,
+  AGENT_ORIGINS_FILE,
+  AGENT_ORIGINS_VERSION,
+  AgentOriginEntrySchema,
+  AgentOriginsFileSchema,
+  type AgentOrigins,
+  type AgentOriginsFile,
+} from '@ptah-extension/harness-sync';
 import { computeSourceHash, isErrnoCode } from './user-layer/source-hash';
 
 const SERVICE_TAG = '[WizardAgentOriginStore]';
-
-/** Directory under the harness root that holds setup-wizard bookkeeping. */
-export const WIZARD_STATE_DIR = join('.ptah', 'setup-wizard');
-export const AGENT_ORIGINS_FILE = 'agent-origins.json';
-export const AGENT_ORIGINS_VERSION = 1;
-
-const AgentOriginEntrySchema = z.object({
-  /** `computeSourceHash` of the bytes the wizard wrote (`sha256:<hex>`). */
-  hash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-  /** Epoch milliseconds of the write. */
-  writtenAt: z.number().int().nonnegative(),
-});
-
-export const AgentOriginsFileSchema = z.object({
-  version: z.literal(AGENT_ORIGINS_VERSION),
-  agents: z.record(z.string().min(1), AgentOriginEntrySchema),
-});
-
-export type AgentOriginEntry = z.infer<typeof AgentOriginEntrySchema>;
-export type AgentOriginsFile = z.infer<typeof AgentOriginsFileSchema>;
-export type AgentOrigins = AgentOriginsFile['agents'];
 
 @injectable()
 export class WizardAgentOriginStore {

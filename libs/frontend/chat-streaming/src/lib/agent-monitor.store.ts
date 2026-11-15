@@ -89,7 +89,7 @@ import {
  * TODO: remove once the shared agent lifecycle events (AgentStartEvent,
  * AgentProgressEvent, AgentStatusEvent, AgentCompletedEvent) and
  * AgentProcessInfo carry workflowRunId/workflowName (backend slice — the
- * backend-developer owns those shared type changes). Until then we read the
+ * senior-tester owns those shared type changes). Until then we read the
  * two fields structurally via this local extension + cast so the frontend
  * slice can consume them without editing libs/shared.
  */

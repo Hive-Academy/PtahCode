@@ -5,6 +5,7 @@
 import {
   LANE_DEFAULT_MODEL,
   SUBAGENT_FAMILY,
+  isRetiredRole,
   type LaneLimitState,
   type OutcomeTaskKind,
 } from '@ptah-extension/shared';
@@ -306,6 +307,8 @@ export function candidatesFor(
     candidates.push({ kind: 'child-session', id: 'child-session', family: SUBAGENT_FAMILY });
   }
   if (phase.role === undefined) {
+    candidates.push(toPhaseSubagentCandidate(phase.kind));
+  } else if (isRetiredRole(phase.role)) {
     candidates.push(toPhaseSubagentCandidate(phase.kind));
   } else if (gathered.roles.includes(phase.role)) {
     candidates.push(toSubagentCandidate(phase.role));

@@ -2,6 +2,7 @@ import { injectable, inject } from 'tsyringe';
 import { join, basename, isAbsolute } from 'path';
 import { lstat, mkdir, readdir, readFile, stat } from 'fs/promises';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
+import { isRetiredPtahAgent } from '@ptah-extension/harness-sync';
 import {
   formatSourceHash,
   resolvePtahHomeDir,
@@ -10,7 +11,14 @@ import {
   USER_LAYER_AGENTS_DIR_NAME,
   userLayerAgentDirName,
 } from '@ptah-extension/shared';
-import { ABSENT_PHASE_MARKER, writeSkillPhaseFile, revertSkillPhaseFile, type SkillPhaseFileOps, type SkillPhaseWriteArgs, type SkillPhaseRevertArgs } from './user-layer-skill-phase-writer';
+import {
+  ABSENT_PHASE_MARKER,
+  writeSkillPhaseFile,
+  revertSkillPhaseFile,
+  type SkillPhaseFileOps,
+  type SkillPhaseWriteArgs,
+  type SkillPhaseRevertArgs,
+} from './user-layer-skill-phase-writer';
 import type {
   OriginKind,
   OriginSidecar,
@@ -66,11 +74,14 @@ const RETIRED_MANAGED_SKILL_SLUGS = [
   'execute-phase-gated-task',
   'extract-and-relocate-angular-component-feature',
 ] as const;
-const retiredManagedSkillSlugs: ReadonlySet<string> = new Set(RETIRED_MANAGED_SKILL_SLUGS);
+const retiredManagedSkillSlugs: ReadonlySet<string> = new Set(
+  RETIRED_MANAGED_SKILL_SLUGS,
+);
 
 export interface RetiredSkillPreserved {
   readonly slug: string;
-  readonly reason: 'missing-sidecar' | 'modified' | 'invalid-origin' | 'unsafe-path';
+  readonly reason:
+    'missing-sidecar' | 'modified' | 'invalid-origin' | 'unsafe-path';
 }
 
 export interface RetiredSkillsResult {
@@ -468,13 +479,19 @@ export class UserLayerMirrorService {
         withSlugLock: (slug, fn) => this.withSlugLock('agent', slug, fn),
       });
       result.errors += quarantine.failed.length;
-      await this.mirrorAgents(sources.agentSourceDir, roots.agents, result);
+      await this.mirrorAgents(
+        sources.workspaceRoot,
+        sources.agentSourceDir,
+        roots.agents,
+        result,
+      );
     }
 
     // After the workspace agents: the legacy seed runs only while the scoped
     // directory is absent, and a workspace agent owns its slug (A8).
     const pluginAgentPass = this.pluginAgentPass(sources, result);
-    if (pluginAgentPass) await this.pluginAgents.mirror(pluginAgentPass, result);
+    if (pluginAgentPass)
+      await this.pluginAgents.mirror(pluginAgentPass, result);
 
     this.logger.info('[UserLayerMirror] mirrorAll complete', {
       ...result,
@@ -713,21 +730,34 @@ export class UserLayerMirrorService {
 
   /** Retire only untouched mirror-owned copies of the two removed pipeline skills. */
   async retireManagedSkills(): Promise<RetiredSkillsResult> {
-    const result: RetiredSkillsResult = { removed: [], preserved: [], errors: 0 };
+    const result: RetiredSkillsResult = {
+      removed: [],
+      preserved: [],
+      errors: 0,
+    };
     const skillsRoot = this.getUserLayerRoots().skills;
-    this.fsOps.excludeSubdirectoriesFromListing(skillsRoot, retiredManagedSkillSlugs);
+    this.fsOps.excludeSubdirectoriesFromListing(
+      skillsRoot,
+      retiredManagedSkillSlugs,
+    );
     try {
       const rootStat = await lstat(skillsRoot);
       if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-        this.logger.warn('[UserLayerMirror] retired skills root is not a real directory', { skillsRoot });
+        this.logger.warn(
+          '[UserLayerMirror] retired skills root is not a real directory',
+          { skillsRoot },
+        );
         return result;
       }
     } catch (error: unknown) {
       if (this.isEnoent(error)) return result;
-      this.logger.warn('[UserLayerMirror] failed to inspect retired skills root', {
-        skillsRoot,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.warn(
+        '[UserLayerMirror] failed to inspect retired skills root',
+        {
+          skillsRoot,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
       result.errors += 1;
       return result;
     }
@@ -754,12 +784,22 @@ export class UserLayerMirrorService {
               result.preserved.push({ slug, reason: 'unsafe-path' });
             } else {
               const sidecar = parseOriginSidecar(await readSidecar(cloneDir));
-              if (sidecar?.kind !== 'skill' || sidecar.slug !== slug || !sidecar.sourceHash) {
+              if (
+                sidecar?.kind !== 'skill' ||
+                sidecar.slug !== slug ||
+                !sidecar.sourceHash
+              ) {
                 result.preserved.push({ slug, reason: 'invalid-origin' });
-              } else if (await computeSourceHash(cloneDir) !== sidecar.sourceHash) {
+              } else if (
+                (await computeSourceHash(cloneDir)) !== sidecar.sourceHash
+              ) {
                 result.preserved.push({ slug, reason: 'modified' });
               } else {
-                await this.fsOps.snapshotDirToRootHistory(skillsRoot, slug, cloneDir);
+                await this.fsOps.snapshotDirToRootHistory(
+                  skillsRoot,
+                  slug,
+                  cloneDir,
+                );
                 await this.fsOps.removePath(cloneDir);
                 result.removed.push(slug);
               }
@@ -767,7 +807,10 @@ export class UserLayerMirrorService {
           }
           const preserved = result.preserved.find((item) => item.slug === slug);
           if (preserved) {
-            this.logger.info('[UserLayerMirror] retired skill preserved', preserved);
+            this.logger.info(
+              '[UserLayerMirror] retired skill preserved',
+              preserved,
+            );
           }
         } catch (error: unknown) {
           // degradation-audit: optional-capability - ENOENT means the retired
@@ -988,7 +1031,10 @@ export class UserLayerMirrorService {
     cloneDir: string,
     slug: string,
   ): Promise<
-    Pick<SaveCloneBodyResult, 'currentContentHash' | 'metadataIncomplete' | 'reconcileProtected'>
+    Pick<
+      SaveCloneBodyResult,
+      'currentContentHash' | 'metadataIncomplete' | 'reconcileProtected'
+    >
   > {
     let reconcileProtected = false;
     let currentContentHash: string | null = null;
@@ -996,13 +1042,21 @@ export class UserLayerMirrorService {
       currentContentHash = await computeSourceHash(cloneDir);
       const existing = await readSidecar(cloneDir);
       if (!existing) {
-        return { currentContentHash, metadataIncomplete: false, reconcileProtected: false };
+        return {
+          currentContentHash,
+          metadataIncomplete: false,
+          reconcileProtected: false,
+        };
       }
       // The sidecar exists, so the divergence rule already protects the body
       // regardless of whether the hash write below lands.
       reconcileProtected = true;
       await writeSidecarAtomic(cloneDir, { ...existing, currentContentHash });
-      return { currentContentHash, metadataIncomplete: false, reconcileProtected };
+      return {
+        currentContentHash,
+        metadataIncomplete: false,
+        reconcileProtected,
+      };
     } catch (error: unknown) {
       this.logger.warn(
         '[UserLayerMirror] clone body saved but sidecar bookkeeping failed',
@@ -1012,7 +1066,11 @@ export class UserLayerMirrorService {
           error: error instanceof Error ? error.message : String(error),
         },
       );
-      return { currentContentHash, metadataIncomplete: true, reconcileProtected };
+      return {
+        currentContentHash,
+        metadataIncomplete: true,
+        reconcileProtected,
+      };
     }
   }
 
@@ -1086,7 +1144,10 @@ export class UserLayerMirrorService {
     cloneFile: string,
     sidecarPath: string,
   ): Promise<
-    Pick<SaveCloneBodyResult, 'currentContentHash' | 'metadataIncomplete' | 'reconcileProtected'>
+    Pick<
+      SaveCloneBodyResult,
+      'currentContentHash' | 'metadataIncomplete' | 'reconcileProtected'
+    >
   > {
     let reconcileProtected = false;
     let currentContentHash: string | null = null;
@@ -1094,14 +1155,22 @@ export class UserLayerMirrorService {
       currentContentHash = await computeSourceHash(cloneFile);
       const existing = await readSidecarAt(sidecarPath);
       if (!existing) {
-        return { currentContentHash, metadataIncomplete: false, reconcileProtected: false };
+        return {
+          currentContentHash,
+          metadataIncomplete: false,
+          reconcileProtected: false,
+        };
       }
       reconcileProtected = true;
       await writeSidecarAtomicAt(sidecarPath, {
         ...existing,
         currentContentHash,
       });
-      return { currentContentHash, metadataIncomplete: false, reconcileProtected };
+      return {
+        currentContentHash,
+        metadataIncomplete: false,
+        reconcileProtected,
+      };
     } catch (error: unknown) {
       this.logger.warn(
         '[UserLayerMirror] clone body saved but sidecar bookkeeping failed',
@@ -1111,7 +1180,11 @@ export class UserLayerMirrorService {
           error: error instanceof Error ? error.message : String(error),
         },
       );
-      return { currentContentHash, metadataIncomplete: true, reconcileProtected };
+      return {
+        currentContentHash,
+        metadataIncomplete: true,
+        reconcileProtected,
+      };
     }
   }
 
@@ -1145,11 +1218,17 @@ export class UserLayerMirrorService {
     });
   }
 
-  async writeEnhancedSkillFile(args: SkillPhaseWriteArgs): ReturnType<typeof writeSkillPhaseFile> {
+  async writeEnhancedSkillFile(
+    args: SkillPhaseWriteArgs,
+  ): ReturnType<typeof writeSkillPhaseFile> {
     return writeSkillPhaseFile(this.skillPhaseFileOps(), args);
   }
 
-  async revertSkillFile(args: SkillPhaseRevertArgs): Promise<{ restored: boolean; revertedFrom: string; newHistoryTs: string | null }> {
+  async revertSkillFile(args: SkillPhaseRevertArgs): Promise<{
+    restored: boolean;
+    revertedFrom: string;
+    newHistoryTs: string | null;
+  }> {
     return revertSkillPhaseFile(this.skillPhaseFileOps(), args);
   }
 
@@ -1163,7 +1242,8 @@ export class UserLayerMirrorService {
       snapshotDirToHistory: (path) => this.snapshotDirToHistory(path),
       writeTextAtomic: (path, text) => this.writeTextAtomic(path, text),
       copyFileAtomic: (source, target) => this.copyFileAtomic(source, target),
-      refreshSidecar: (dir, slug, hash) => this.refreshEnhancedSidecarDir(dir, slug, hash),
+      refreshSidecar: (dir, slug, hash) =>
+        this.refreshEnhancedSidecarDir(dir, slug, hash),
     };
   }
 
@@ -1639,7 +1719,11 @@ export class UserLayerMirrorService {
     }
 
     for (const slug of slugs) {
-      if (slug === SYNTH_CANDIDATES_DIR || slug === DEFAULT_HISTORY_DIR || retiredManagedSkillSlugs.has(slug)) {
+      if (
+        slug === SYNTH_CANDIDATES_DIR ||
+        slug === DEFAULT_HISTORY_DIR ||
+        retiredManagedSkillSlugs.has(slug)
+      ) {
         continue;
       }
       const sourceDir = join(synthesizedSkillsRoot, slug);
@@ -2332,9 +2416,20 @@ export class UserLayerMirrorService {
       return;
     }
 
-    const owned = names.filter((fileName) =>
-      agentSource.slugs.has(fileName.replace(/\.md$/, '')),
-    );
+    const owned: string[] = [];
+    for (const fileName of names) {
+      const slug = fileName.replace(/\.md$/, '');
+      if (
+        agentSource.slugs.has(slug) &&
+        !isRetiredPtahAgent(
+          workspaceRoot,
+          slug,
+          join(agentSource.dir, fileName),
+        )
+      ) {
+        owned.push(fileName);
+      }
+    }
     const notOwned = names.length - owned.length;
     if (owned.length === 0) {
       this.logger.info(
@@ -2457,6 +2552,7 @@ export class UserLayerMirrorService {
   }
 
   private async mirrorAgents(
+    workspaceRoot: string | undefined,
     agentSourceDir: string,
     agentsRoot: string,
     result: MirrorResult,
@@ -2484,6 +2580,13 @@ export class UserLayerMirrorService {
 
     for (const fileName of files) {
       const slug = fileName.replace(/\.md$/, '');
+      // Keep existing clones and their history, but do not seed retired
+      // built-in source files into a new user-layer scope.
+      if (
+        workspaceRoot &&
+        isRetiredPtahAgent(workspaceRoot, slug, join(agentSourceDir, fileName))
+      )
+        continue;
       const sourceFile = join(agentSourceDir, fileName);
       const targetFile = join(agentsRoot, fileName);
       this.assertUnderUserLayer(targetFile);
@@ -2595,7 +2698,11 @@ export class UserLayerMirrorService {
     await this.fsOps.clearCloneTrackedContent(cloneDir);
   }
 
-  private async copyTree(sourceDir: string, targetDir: string, skipRootFile?: string): Promise<void> {
+  private async copyTree(
+    sourceDir: string,
+    targetDir: string,
+    skipRootFile?: string,
+  ): Promise<void> {
     await this.fsOps.copyTree(sourceDir, targetDir, skipRootFile);
   }
 

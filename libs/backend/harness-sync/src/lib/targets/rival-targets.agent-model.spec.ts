@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -7,6 +8,7 @@ import {
 } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   classifyAgentModelValue,
@@ -23,7 +25,7 @@ import {
   scopeAgentsRoot,
 } from '../sources/plugin-config-source-resolver';
 import { HarnessStateStore } from '../gitignore/harness-state-store';
-import { createCodexTarget } from './rival-targets';
+import { createCodexTarget, createOpencodeTarget } from './rival-targets';
 
 jest.mock('os', () => ({
   ...jest.requireActual<typeof import('os')>('os'),
@@ -40,6 +42,33 @@ describe('rival targets — agent model reconciliation', () => {
   const copyRel = `.codex/agents/${slug}.toml`;
   const legacyCopy =
     '# source: ptah\nname = "backend-developer"\ndescription = "an agent"\ndeveloper_instructions = """\ninstructions\n"""\n';
+
+  function recordOrigins(roles: readonly string[]): void {
+    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const dir = join(ws, '.ptah', 'setup-wizard');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'agent-origins.json'),
+      JSON.stringify({
+        version: 1,
+        agents: Object.fromEntries(
+          roles.map((role) => {
+            const content = readFileSync(
+              join(agentsRoot, `${role}.md`),
+              'utf8',
+            ).replace(/\r\n/g, '\n');
+            return [
+              role,
+              {
+                hash: `sha256:${createHash('sha256').update(content).digest('hex')}`,
+                writtenAt: 1,
+              },
+            ];
+          }),
+        ),
+      }),
+    );
+  }
 
   beforeEach(() => {
     tempRoot = mkdtempSync(join(tmpdir(), 'harness-agent-model-'));
@@ -67,7 +96,10 @@ describe('rival targets — agent model reconciliation', () => {
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  function reconciler(withModels = true): HarnessReconcilerService {
+  function reconciler(
+    withModels = true,
+    includeOpencode = false,
+  ): HarnessReconcilerService {
     const logger = {
       debug: jest.fn(),
       info: jest.fn(),
@@ -107,9 +139,161 @@ describe('rival targets — agent model reconciliation', () => {
           detector: { isInstalled: async (target) => target === 'codex' },
           homeDir: tempHome,
         }),
+        ...(includeOpencode
+          ? [
+              createOpencodeTarget({
+                manifestStore: store,
+                detector: {
+                  isInstalled: async (target) => target === 'opencode',
+                },
+                homeDir: tempHome,
+              }),
+            ]
+          : []),
       ],
     );
   }
+
+  it('does not copy retired Ptah clones and leaves tracked agent files in place', async () => {
+    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    for (const role of [
+      'backend-developer',
+      'frontend-developer',
+      'devops-engineer',
+    ]) {
+      writeFileSync(
+        join(agentsRoot, `${role}.md`),
+        `---\nname: ${role}\n---\nold`,
+      );
+      for (const relative of [
+        `.codex/agents/${role}.toml`,
+        `.opencode/agent/${role}.md`,
+      ]) {
+        const copy = join(ws, relative);
+        mkdirSync(join(copy, '..'), { recursive: true });
+        writeFileSync(copy, `tracked ${role}`);
+      }
+    }
+    recordOrigins([
+      'backend-developer',
+      'frontend-developer',
+      'devops-engineer',
+    ]);
+    const workspaceAgents = join(ws, '.claude', 'agents');
+    mkdirSync(workspaceAgents, { recursive: true });
+    for (const role of [
+      'backend-developer',
+      'frontend-developer',
+      'devops-engineer',
+    ]) {
+      writeFileSync(
+        join(workspaceAgents, `${role}.md`),
+        readFileSync(join(agentsRoot, `${role}.md`)),
+      );
+    }
+    const result = await reconciler(true, true).reconcile(ws, {
+      mode: 'full',
+      reason: 'retired roles',
+    });
+    expect(
+      result.targets.find((target) => target.target === 'codex')?.expected,
+    ).toBe(0);
+    expect(
+      result.targets.find((target) => target.target === 'opencode')?.expected,
+    ).toBe(0);
+    for (const role of [
+      'backend-developer',
+      'frontend-developer',
+      'devops-engineer',
+    ]) {
+      for (const relative of [
+        `.codex/agents/${role}.toml`,
+        `.opencode/agent/${role}.md`,
+      ]) {
+        const copy = join(ws, relative);
+        expect(existsSync(copy)).toBe(true);
+        expect(readFileSync(copy, 'utf-8')).toBe(`tracked ${role}`);
+      }
+    }
+  });
+
+  it('keeps a formerly managed retired copy after its source gains Ptah provenance', async () => {
+    const service = reconciler();
+    await service.reconcile(ws, {
+      mode: 'full',
+      reason: 'user-authored agent',
+    });
+    const copy = join(ws, copyRel);
+    const original = readFileSync(copy, 'utf-8');
+    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const workspaceAgents = join(ws, '.claude', 'agents');
+    mkdirSync(workspaceAgents, { recursive: true });
+    writeFileSync(
+      join(workspaceAgents, `${slug}.md`),
+      readFileSync(join(agentsRoot, `${slug}.md`)),
+    );
+    recordOrigins([slug]);
+    await service.reconcile(ws, { mode: 'full', reason: 'retired built-in' });
+    expect(readFileSync(copy, 'utf-8')).toBe(original);
+  });
+
+  it('keeps a retired base entry after its clone disappears', async () => {
+    const service = reconciler();
+    await service.reconcile(ws, { mode: 'full', reason: 'initial agent' });
+    const copy = join(ws, copyRel);
+    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    const workspaceAgents = join(ws, '.claude', 'agents');
+    mkdirSync(workspaceAgents, { recursive: true });
+    writeFileSync(
+      join(workspaceAgents, `${slug}.md`),
+      readFileSync(join(agentsRoot, `${slug}.md`)),
+    );
+    recordOrigins([slug]);
+    rmSync(join(agentsRoot, `${slug}.md`));
+    await service.reconcile(ws, { mode: 'full', reason: 'clone removed' });
+    expect(existsSync(copy)).toBe(true);
+  });
+
+  it.each(['no origin entry', 'hash mismatch'])(
+    'removes a retired provider copy after its source disappears with %s',
+    async (origin) => {
+      const service = reconciler();
+      const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+      const workspaceAgents = join(ws, '.claude', 'agents');
+      mkdirSync(workspaceAgents, { recursive: true });
+      writeFileSync(
+        join(workspaceAgents, `${slug}.md`),
+        readFileSync(join(agentsRoot, `${slug}.md`)),
+      );
+      if (origin === 'hash mismatch') {
+        recordOrigins([slug]);
+        writeFileSync(join(workspaceAgents, `${slug}.md`), '# changed');
+      }
+      await service.reconcile(ws, { mode: 'full', reason: 'initial agent' });
+      expect(existsSync(join(ws, copyRel))).toBe(true);
+      rmSync(join(agentsRoot, `${slug}.md`));
+      await service.reconcile(ws, { mode: 'full', reason: 'source removed' });
+      expect(existsSync(join(ws, copyRel))).toBe(false);
+    },
+  );
+
+  it('syncs a retired slug when its origin hash no longer matches', async () => {
+    recordOrigins([slug]);
+    const { agentsRoot } = scopeAgentsRoot(defaultHarnessSourceLayout(), ws);
+    writeFileSync(join(agentsRoot, `${slug}.md`), '# edited');
+    await reconciler().reconcile(ws, { mode: 'full', reason: 'edited agent' });
+    expect(existsSync(join(ws, copyRel))).toBe(true);
+  });
+
+  it('syncs a retired slug when its origin store is unreadable', async () => {
+    const dir = join(ws, '.ptah', 'setup-wizard', 'agent-origins.json');
+    mkdirSync(dir, { recursive: true });
+    await reconciler().reconcile(ws, {
+      mode: 'full',
+      reason: 'unreadable origins',
+    });
+    expect(existsSync(join(ws, copyRel))).toBe(true);
+  });
 
   it('rewrites a changed Codex model without reporting a local edit, using the normalized root', async () => {
     layers = { workspace: { [slug]: { codex: 'model-one' } } };
@@ -130,8 +314,7 @@ describe('rival targets — agent model reconciliation', () => {
     expect(copy).toContain('model = "model-two"');
     expect(copy).not.toContain('model-one');
     expect(
-      result.targets.find((target) => target.target === 'codex')
-        ?.keptLocalEdit,
+      result.targets.find((target) => target.target === 'codex')?.keptLocalEdit,
     ).toEqual([]);
   });
 
@@ -161,8 +344,7 @@ describe('rival targets — agent model reconciliation', () => {
     });
     expect(readFileSync(join(ws, copyRel), 'utf-8')).toBe(legacyCopy);
     expect(
-      result.targets.find((target) => target.target === 'codex')
-        ?.keptLocalEdit,
+      result.targets.find((target) => target.target === 'codex')?.keptLocalEdit,
     ).toEqual([]);
   });
 });
