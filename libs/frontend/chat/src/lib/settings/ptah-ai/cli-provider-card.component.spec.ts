@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { readFileSync } from 'node:fs';
 import type { SystemCliMatrixRow } from './cli-matrix-rows';
 import { CliProviderCardComponent } from './cli-provider-card.component';
 import { CliProviderGridComponent } from './cli-provider-grid.component';
@@ -31,6 +32,25 @@ describe('CliProviderCardComponent', () => {
     expect(term).toBeDefined();
     expect(term?.closest('[data-ptah-description-row]')?.getAttribute('title')).toContain('Lane default');
     expect(term?.closest('[data-ptah-description-row]')?.querySelector('[data-popover-kind="permission"]')?.textContent?.trim()).toBe('Ask');
+  });
+  it('shows the four defaults in one compact grid with heading actions', () => {
+    const root = setup().nativeElement as HTMLElement;
+    const grid = root.querySelector('.defaults-grid') as HTMLElement;
+    expect(grid.querySelector('h4')?.textContent?.trim()).toBe('Defaults');
+    expect([...grid.querySelectorAll('ptah-field label')].map(label => label.textContent?.trim())).toEqual(['Model', 'Effort', 'Permission', 'Network']);
+    expect([...grid.querySelectorAll('span')].filter(span => span.textContent?.trim() === 'Unavailable')).toHaveLength(2);
+    expect([...grid.querySelectorAll('ptah-field')].map(field => field.querySelector('[data-ptah-field]')?.getAttribute('data-size'))).toEqual(['sm', 'sm', 'sm', 'sm']);
+    for (const kind of ['model', 'effort']) {
+      const button = grid.querySelector<HTMLButtonElement>(`button[data-popover-kind="${kind}"]`);
+      expect(button?.hasAttribute('ptahFieldTrigger')).toBe(true);
+      expect(button?.closest('.ptah-field__body')).not.toBeNull();
+      expect(grid.querySelector(`label[for="${button?.id}"]`)).not.toBeNull();
+      expect(button?.getAttribute('aria-labelledby')).toContain(button?.id);
+    }
+    const css = readFileSync(__dirname + '/cli-provider-card.component.css', 'utf8');
+    expect(css).not.toMatch(/\.ptah-field__body\s*\{\s*flex:\s*0\s+0\s+0/);
+    expect(grid.querySelector('.credential-slot button')?.textContent?.trim()).toBe('Codex settings');
+    expect(grid.querySelectorAll('ptah-field')).toHaveLength(4);
   });
   it('shows read-only facts as one description list with full, unclipped values', () => {
     const root = setup({ ...row(), version: 'codex-cli 0.169.0', versionLabel: 'v0.169.0', codexStatusLine: 'Installed Codex 0.169.0', provider: 'OpenAI Codex' }).nativeElement as HTMLElement;
