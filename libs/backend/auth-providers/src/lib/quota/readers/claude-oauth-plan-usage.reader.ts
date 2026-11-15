@@ -128,6 +128,7 @@ export function createClaudeOauthPlanUsageReader(
         redirect: 'error', signal: controller.signal,
       });
       if (!response.ok) {
+        // degradation-audit: optional-capability - body cancel only frees the socket; the status is returned below.
         await response.body?.cancel().catch(() => undefined);
         return {
           ...unavailable(response.status === 401 || response.status === 403 ? 'usage-auth-rejected' : 'cli-unavailable'),
