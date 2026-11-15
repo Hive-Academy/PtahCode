@@ -76,9 +76,7 @@ export const SHARED_BLOCK_IDS = [
 /** Literal union of every registered shared block id. */
 export type SharedBlockId = (typeof SHARED_BLOCK_IDS)[number];
 
-export const TASK_SPEC_COORDINATOR_TEMPLATES: readonly string[] = [
-  'team-leader',
-];
+export const TASK_SPEC_COORDINATOR_TEMPLATES: readonly string[] = [];
 
 export function taskSpecAudienceFor(templateId: string): TaskSpecAgentAudience {
   return TASK_SPEC_COORDINATOR_TEMPLATES.includes(templateId)

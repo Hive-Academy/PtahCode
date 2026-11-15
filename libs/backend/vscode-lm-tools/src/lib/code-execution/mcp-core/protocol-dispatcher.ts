@@ -50,6 +50,8 @@ import {
   acknowledgeTerminalRead,
 } from '@ptah-extension/cli-agent-runtime';
 import { AgentSpawnArgsSchema } from './agent-spawn-args.schema';
+import { AgentSpawnDedupe, agentSpawnTiming } from './agent-spawn-dedupe';
+import { isSpawnReplayValid } from './agent-spawn-replay-status';
 import {
   AgentMessageAckArgsSchema,
   AgentMessageArgsSchema,
@@ -230,9 +232,15 @@ import {
   type McpCallerKind,
 } from './mcp-caller';
 import { isToolPermitted } from './mcp-caller-policy';
-import { composeEffectiveToolList, buildToolDefinitions } from './effective-tool-list';
+import {
+  composeEffectiveToolList,
+  buildToolDefinitions,
+} from './effective-tool-list';
 import { childPhasePolicyRefusal } from './child-phase-policy';
-import { MCP_CALLER_FORBIDDEN_CODE, MCP_TOOL_DENIED_MESSAGE } from './mcp-caller-auth.types';
+import {
+  MCP_CALLER_FORBIDDEN_CODE,
+  MCP_TOOL_DENIED_MESSAGE,
+} from './mcp-caller-auth.types';
 import type { McpCallerCapability } from '@ptah-extension/platform-core';
 import { isPhaseToolDenied } from './mcp-caller-phase-filter';
 import {
@@ -283,6 +291,7 @@ import {
   appendPendingSpawnLimits,
   evaluateSpawnLimitGate,
   formatAttemptedLimitSuffix,
+  formatPendingSpawnLimitBlock,
   rowsWithSpawnModel,
   settledAgentLimits,
 } from './agent-spawn-limit-gate';
@@ -303,7 +312,9 @@ async function lookupAgentLimits(
   try {
     if (!ptahAPI.agent.limits) return undefined;
     const listed = rows ?? (await ptahAPI.agent.list());
-    const targetRows = spawn ? rowsWithSpawnModel(listed, spawn.target, spawn.model) : listed;
+    const targetRows = spawn
+      ? rowsWithSpawnModel(listed, spawn.target, spawn.model)
+      : listed;
     return await (allowCliFallback
       ? ptahAPI.agent.limits(targetRows, { allowCliFallback: true })
       : ptahAPI.agent.limits(targetRows));
@@ -541,7 +552,11 @@ function handleToolsList(
   const profile = resolveMcpToolProfile(request);
   const capability = requestCapability(request);
   const tools = composeEffectiveToolList(
-    resolveMcpCaller(request), profile, capability, request._callerBinding, deps,
+    resolveMcpCaller(request),
+    profile,
+    capability,
+    request._callerBinding,
+    deps,
   );
 
   markEagerTools(tools, deps, profile);
@@ -729,6 +744,28 @@ export const MCP_SLOW_TOOL_WARN_MS_ENV = 'PTAH_MCP_SLOW_WARN_MS';
  * Nothing logged that cost before this warning existed.
  */
 export const DEFAULT_MCP_SLOW_TOOL_WARN_MS = 2000;
+const agentSpawnDedupes = new WeakMap<
+  PtahAPI,
+  AgentSpawnDedupe<Awaited<ReturnType<PtahAPI['agent']['spawn']>>>
+>();
+class SpawnGateRefusal extends Error {
+  constructor(
+    readonly refusal: NonNullable<
+      Awaited<ReturnType<typeof evaluateSpawnLimitGate>>['refusal']
+    >,
+  ) {
+    super(refusal.text);
+  }
+}
+class SpawnAttemptError extends Error {
+  constructor(
+    readonly original: unknown,
+    readonly gate:
+      Awaited<ReturnType<typeof evaluateSpawnLimitGate>> | undefined,
+  ) {
+    super('Agent spawn attempt failed');
+  }
+}
 
 /**
  * Resolved once at module load.
@@ -928,7 +965,10 @@ async function dispatchToolsCall(
 
   const { name, arguments: args } = params;
   if (name === 'ptah_agent_spawn' || name === 'ptah_session_start') {
-    const refusal = childPhasePolicyRefusal(request._callerBinding, args?.['phase']);
+    const refusal = childPhasePolicyRefusal(
+      request._callerBinding,
+      args?.['phase'],
+    );
     if (refusal) return toolErrorResponse(request, refusal);
   }
   if (APPS_ONLY_TOOL_NAMES.has(name) && getCallerToolProfile() !== 'apps') {
@@ -1131,163 +1171,284 @@ async function handleIndividualTool(
         );
       }
       case 'ptah_agent_spawn': {
-        const callerSessionId = request._callerSessionId?.trim() || undefined;
-        const parsed = AgentSpawnArgsSchema.safeParse(
-          args !== null && typeof args === 'object' ? args : {},
-        );
-        if (!parsed.success) {
-          return toolErrorResponse(
-            request,
-            `Error: invalid ptah_agent_spawn arguments — ${describeZodIssues(
-              parsed.error,
-            )}. Required: "task".`,
-          );
-        }
-        const spawnArgs = parsed.data;
-        const { task, ptahCliId, modelTier } = spawnArgs;
-
-        logger.info('[MCP] ptah_agent_spawn invoked', 'CodeExecutionMCP', {
-          cli: spawnArgs.cli ?? (ptahCliId ? 'ptah-cli' : 'auto-detect'),
-          ptahCliId,
-          model: spawnArgs.model ?? 'default',
-          modelTier: modelTier ?? 'unset',
-          task: task.substring(0, 100) + (task.length > 100 ? '...' : ''),
-          timeout: spawnArgs.timeout,
-          files: spawnArgs.files?.length ?? 0,
-          taskFolder: spawnArgs.taskFolder,
-          resumeSessionId: spawnArgs.resume_session_id,
-          role: spawnArgs.role,
-          effort: spawnArgs.effort,
-        });
-
-        // A named lane is checked before the spawn (bounded by SPAWN_GATE_WAIT_MS);
-        // an auto-detected one bounds the lookup after `agent.spawn` settled.
-        const target = spawnRequestTarget(spawnArgs);
-        const gate = await evaluateSpawnLimitGate(
-          target,
-          spawnArgs.force,
-          (namedTarget) =>
-            lookupAgentLimits(ptahAPI, undefined, {
-              target: namedTarget,
-              model: spawnArgs.model,
-            }),
-        );
-        if (gate.refusal) {
-          const { verdict } = gate.refusal;
-          logger.info(
-            '[MCP] ptah_agent_spawn refused at limit',
-            'CodeExecutionMCP',
-            {
-              cli: verdict.limit.row.cli,
-              ptahCliId: verdict.limit.row.ptahCliId,
-              reason: verdict.block.kind,
-            },
-          );
-          return toolErrorResponse(request, `Error: ${gate.refusal.text}`);
-        }
-        const { forced } = gate;
-
-        let result: Awaited<ReturnType<PtahAPI['agent']['spawn']>>;
+        const startedAt = performance.now();
+        let parsedAt = startedAt;
+        let dedupedAt: number | undefined;
+        let gatedAt: number | undefined;
+        let spawnedAt: number | undefined;
+        let agentId: string | undefined;
+        let spawnCli: string | undefined;
+        const namespaceTiming = {
+          namespaceResolutionMs: null as number | null,
+        };
         try {
-          result = await ptahAPI.agent.spawn({
-            task,
-            cli: spawnArgs.cli,
-            ptahCliId,
-            workingDirectory: spawnArgs.workingDirectory,
-            timeout: spawnArgs.timeout,
-            files: spawnArgs.files,
-            taskFolder: spawnArgs.taskFolder,
-            deliverables: spawnArgs.deliverables,
-            model: spawnArgs.model,
-            modelTier,
-            resumeSessionId: spawnArgs.resume_session_id,
-            parentSessionId: callerSessionId,
-            role: spawnArgs.role,
-            phase: spawnArgs.phase,
-            skills: spawnArgs.skills,
-            effort: spawnArgs.effort,
-            taskKind: spawnArgs.taskKind,
-            routingSource: spawnArgs.routingSource,
-            // Already refused above unless omitted or ambient on a `claude`
-            // lane (`agentSpawnAccountRefusal`), so forwarding admits nothing.
-            accountSelection: spawnArgs.accountSelection,
-            permission: spawnArgs.permission,
-            network: spawnArgs.network,
-          });
-        } catch (error: unknown) {
-          // Any other failure keeps its pre-existing path: re-thrown to the
-          // generic tool error handler, with no limit lookup.
-          if (
-            !(error instanceof AgentRoleError) &&
-            !(error instanceof LaneSpawnPolicyError) &&
-            !(error instanceof CliCommandLineTooLongError)
-          ) {
-            throw error;
-          }
-          // The lane the request named, so a failed spawn shows the same
-          // `Limit state` a successful spawn on that lane would (design §5.2).
-          const limits = await gate.resolveLimits(() =>
-            lookupAgentLimits(ptahAPI),
+          const callerSessionId = request._callerSessionId?.trim() || undefined;
+          const parsed = AgentSpawnArgsSchema.safeParse(
+            args !== null && typeof args === 'object' ? args : {},
           );
-          const limitBlock = formatAttemptedLimitSuffix(limits, target, {
-            forced,
-          });
-          if (error instanceof AgentRoleError) {
+          if (!parsed.success) {
             return toolErrorResponse(
               request,
-              `Error: ptah_agent_spawn role ${error.code}: ${error.message}${limitBlock}`,
+              `Error: invalid ptah_agent_spawn arguments — ${describeZodIssues(
+                parsed.error,
+              )}. Required: "task".`,
             );
           }
-          if (error instanceof LaneSpawnPolicyError) {
-            return toolErrorResponse(request, JSON.stringify(error.refusal));
+          const spawnArgs = parsed.data;
+          parsedAt = performance.now();
+          const { task, ptahCliId, modelTier } = spawnArgs;
+          spawnCli = spawnArgs.cli ?? (ptahCliId ? 'ptah-cli' : 'auto-detect');
+
+          logger.info('[MCP] ptah_agent_spawn invoked', 'CodeExecutionMCP', {
+            cli: spawnArgs.cli ?? (ptahCliId ? 'ptah-cli' : 'auto-detect'),
+            ptahCliId,
+            model: spawnArgs.model ?? 'default',
+            modelTier: modelTier ?? 'unset',
+            task: task.substring(0, 100) + (task.length > 100 ? '...' : ''),
+            timeout: spawnArgs.timeout,
+            files: spawnArgs.files?.length ?? 0,
+            taskFolder: spawnArgs.taskFolder,
+            resumeSessionId: spawnArgs.resume_session_id,
+            role: spawnArgs.role,
+            effort: spawnArgs.effort,
+          });
+
+          const target = spawnRequestTarget(spawnArgs);
+          let gate:
+            Awaited<ReturnType<typeof evaluateSpawnLimitGate>> | undefined;
+          let limitLookupSettled = false;
+
+          let result: Awaited<ReturnType<PtahAPI['agent']['spawn']>>;
+          try {
+            const root = knownWorkspaceFolders(deps)[0] ?? process.cwd();
+            const callerAgentId = getCallerAgentId();
+            const binding = request._callerBinding;
+            const identity = binding?.agentId ?? binding?.sessionId;
+            const scope = JSON.stringify([
+              callerSessionId ?? root,
+              callerAgentId ?? null,
+              !callerSessionId && !callerAgentId && identity
+                ? [binding?.kind, identity]
+                : null,
+            ]);
+            let agentSpawnDedupe = agentSpawnDedupes.get(ptahAPI);
+            if (!agentSpawnDedupe) {
+              agentSpawnDedupe = new AgentSpawnDedupe();
+              agentSpawnDedupes.set(ptahAPI, agentSpawnDedupe);
+            }
+            const deduped = await agentSpawnDedupe.run(
+              scope,
+              root,
+              spawnArgs,
+              async () => {
+                try {
+                  gate = await evaluateSpawnLimitGate(
+                    target,
+                    spawnArgs.force,
+                    (namedTarget) => {
+                      const lookup = lookupAgentLimits(ptahAPI, undefined, {
+                        target: namedTarget,
+                        model: spawnArgs.model,
+                      });
+                      void lookup.then(
+                        () => {
+                          limitLookupSettled = true;
+                        },
+                        () => {
+                          limitLookupSettled = true;
+                        },
+                      );
+                      return lookup;
+                    },
+                  );
+                  gatedAt = performance.now();
+                  if (gate.refusal) throw new SpawnGateRefusal(gate.refusal);
+                  try {
+                    return await agentSpawnTiming.run(namespaceTiming, () =>
+                      ptahAPI.agent.spawn({
+                        task,
+                        cli: spawnArgs.cli,
+                        ptahCliId,
+                        workingDirectory: spawnArgs.workingDirectory,
+                        timeout: spawnArgs.timeout,
+                        files: spawnArgs.files,
+                        taskFolder: spawnArgs.taskFolder,
+                        deliverables: spawnArgs.deliverables,
+                        model: spawnArgs.model,
+                        modelTier,
+                        resumeSessionId: spawnArgs.resume_session_id,
+                        parentSessionId: callerSessionId,
+                        role: spawnArgs.role,
+                        phase: spawnArgs.phase,
+                        skills: spawnArgs.skills,
+                        effort: spawnArgs.effort,
+                        taskKind: spawnArgs.taskKind,
+                        routingSource: spawnArgs.routingSource,
+                        // Already refused above unless omitted or ambient on a `claude`
+                        // lane (`agentSpawnAccountRefusal`), so forwarding admits nothing.
+                        accountSelection: spawnArgs.accountSelection,
+                        permission: spawnArgs.permission,
+                        network: spawnArgs.network,
+                      }),
+                    );
+                  } finally {
+                    spawnedAt = performance.now();
+                  }
+                } catch (error: unknown) {
+                  throw new SpawnAttemptError(error, gate);
+                }
+              },
+              (spawned) =>
+                isSpawnReplayValid(
+                  spawned.agentId,
+                  (id) => ptahAPI.agent.status(id),
+                  (error) =>
+                    logger.warn(
+                      '[MCP] agent spawn replay status unavailable',
+                      'CodeExecutionMCP',
+                      {
+                        agentId: spawned.agentId,
+                        errorName:
+                          error instanceof Error ? error.name : 'unknown',
+                      },
+                    ),
+                ),
+            );
+            dedupedAt = performance.now();
+            result = await deduped.promise;
+            spawnedAt = performance.now();
+            agentId = result.agentId;
+            if (deduped.replay) {
+              return await createToolSuccessResponse(
+                request,
+                `Replay of earlier spawn: ${result.agentId}\n` +
+                  'An identical ptah_agent_spawn call started this lane less than 120 s ago, so no second lane was started. ' +
+                  'Use ptah_agent_status / ptah_agent_read with this agent ID. ' +
+                  'To start another identical lane on purpose, pass force: true or a distinct idempotencyKey.' +
+                  (callerSessionId
+                    ? ''
+                    : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
+                deps,
+              );
+            }
+          } catch (error: unknown) {
+            const failure =
+              error instanceof SpawnAttemptError ? error.original : error;
+            const replyGate =
+              error instanceof SpawnAttemptError ? error.gate : gate;
+            if (failure instanceof SpawnGateRefusal) {
+              const { verdict } = failure.refusal;
+              logger.info(
+                '[MCP] ptah_agent_spawn refused at limit',
+                'CodeExecutionMCP',
+                {
+                  cli: verdict.limit.row.cli,
+                  ptahCliId: verdict.limit.row.ptahCliId,
+                  reason: verdict.block.kind,
+                },
+              );
+              return toolErrorResponse(request, `Error: ${failure.message}`);
+            }
+            // Any other failure keeps its pre-existing path: re-thrown to the
+            // generic tool error handler, with no limit lookup.
+            if (
+              !(failure instanceof AgentRoleError) &&
+              !(failure instanceof LaneSpawnPolicyError) &&
+              !(failure instanceof CliCommandLineTooLongError)
+            ) {
+              throw failure;
+            }
+            // The lane the request named, so a failed spawn shows the same
+            // `Limit state` a successful spawn on that lane would (design §5.2).
+            const limits = replyGate?.peekLimits();
+            const limitBlock = formatAttemptedLimitSuffix(limits, target, {
+              forced: replyGate?.forced,
+            });
+            if (failure instanceof AgentRoleError) {
+              return toolErrorResponse(
+                request,
+                `Error: ptah_agent_spawn role ${failure.code}: ${failure.message}${limitBlock}`,
+              );
+            }
+            if (failure instanceof LaneSpawnPolicyError) {
+              return toolErrorResponse(
+                request,
+                JSON.stringify(failure.refusal),
+              );
+            }
+            return toolErrorResponse(
+              request,
+              `Error: ptah_agent_spawn command line too long (${failure.measured} against a limit of ${failure.limit}): ${failure.message}${limitBlock}`,
+            );
           }
-          return toolErrorResponse(
-            request,
-            `Error: ptah_agent_spawn command line too long (${error.measured} against a limit of ${error.limit}): ${error.message}${limitBlock}`,
-          );
-        }
 
-        logger.info('[MCP] ptah_agent_spawn result', 'CodeExecutionMCP', {
-          agentId: result.agentId,
-          cli: result.cli,
-          status: result.status,
-          cliSessionId: result.cliSessionId,
-          role: result.role,
-        });
+          logger.info('[MCP] ptah_agent_spawn result', 'CodeExecutionMCP', {
+            agentId: result.agentId,
+            cli: result.cli,
+            status: result.status,
+            cliSessionId: result.cliSessionId,
+            role: result.role,
+          });
 
-        if (!callerSessionId) {
-          logger.warn(
-            '[MCP] Lane spawned without parent session',
-            'CodeExecutionMCP',
-            {
-              transport: 'http',
-              agentId: result.agentId,
-            },
-          );
-        }
+          if (!callerSessionId) {
+            logger.warn(
+              '[MCP] Lane spawned without parent session',
+              'CodeExecutionMCP',
+              {
+                transport: 'http',
+                agentId: result.agentId,
+              },
+            );
+          }
 
-        const limits = await gate.resolveLimits(() =>
-          lookupAgentLimits(ptahAPI),
-        );
-        const formattedSpawn = appendPendingSpawnLimits(
-          formatAgentSpawn(
+          // A named lane used its bounded pre-spawn lookup. An auto-detected
+          // lane starts its bounded lookup only after the spawn has settled.
+          const limits = target
+            ? gate?.peekLimits()
+            : await gate?.resolveLimits(() => lookupAgentLimits(ptahAPI));
+          const formattedSpawn = formatAgentSpawn(
             result,
             {
               modelTier: ptahCliId ? (modelTier ?? 'sonnet') : undefined,
-              forced,
+              forced: gate?.forced,
             },
             settledAgentLimits(limits),
-          ),
-          limits,
-        );
-        return await createToolSuccessResponse(
-          request,
-          formattedSpawn +
-            (callerSessionId
-              ? ''
-              : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
-          deps,
-        );
+          );
+          const replyWithLimits =
+            target && !limitLookupSettled && !limits
+              ? `${formattedSpawn}\n\n${formatPendingSpawnLimitBlock()}`
+              : target
+                ? formattedSpawn
+                : appendPendingSpawnLimits(formattedSpawn, limits);
+          return await createToolSuccessResponse(
+            request,
+            replyWithLimits +
+              (callerSessionId
+                ? ''
+                : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
+            deps,
+          );
+        } finally {
+          logger.info('[MCP] agent spawn timing', 'CodeExecutionMCP', {
+            parseDedupeMs: Math.round((dedupedAt ?? parsedAt) - startedAt),
+            limitGateMs:
+              gatedAt === undefined || dedupedAt === undefined
+                ? null
+                : Math.round(gatedAt - dedupedAt),
+            namespaceResolutionMs: namespaceTiming.namespaceResolutionMs,
+            spawnMs:
+              spawnedAt === undefined || gatedAt === undefined
+                ? null
+                : Math.round(spawnedAt - gatedAt),
+            replyFormattingMs:
+              spawnedAt === undefined
+                ? null
+                : Math.round(performance.now() - spawnedAt),
+            totalMs: Math.round(performance.now() - startedAt),
+            agentId: agentId ?? null,
+            cli: spawnCli ?? null,
+          });
+        }
       }
 
       case 'ptah_agent_status': {
@@ -1325,7 +1486,12 @@ async function handleIndividualTool(
             await acknowledgeTerminalRead(status, reader);
           }
         } catch (error: unknown) {
-          logger.warn('[MCP] Completion read acknowledgment failed', error instanceof Error ? error : new Error('Completion read acknowledgment failed'));
+          logger.warn(
+            '[MCP] Completion read acknowledgment failed',
+            error instanceof Error
+              ? error
+              : new Error('Completion read acknowledgment failed'),
+          );
         }
         const view = await renderAgentRead(
           result,
@@ -1513,8 +1679,12 @@ async function handleIndividualTool(
         const { message, summary, final } = parsed.data;
         let reportInput: Parameters<PtahAPI['agent']['report']>[0];
         if (callerAgentId !== undefined) {
-          reportInput = { agentId: callerAgentId, message, summary,
-            ...(final !== undefined ? { final } : {}) };
+          reportInput = {
+            agentId: callerAgentId,
+            message,
+            summary,
+            ...(final !== undefined ? { final } : {}),
+          };
         } else if (callerSessionId !== undefined) {
           reportInput = { childSessionId: callerSessionId, message, summary };
         } else {
@@ -1548,7 +1718,12 @@ async function handleIndividualTool(
       case 'ptah_agent_list': {
         logger.info('[MCP] ptah_agent_list called', 'CodeExecutionMCP');
         const agents = await ptahAPI.agent.list();
-        const limits = await lookupAgentLimits(ptahAPI, agents, undefined, true);
+        const limits = await lookupAgentLimits(
+          ptahAPI,
+          agents,
+          undefined,
+          true,
+        );
         let roles: string[] = [];
         try {
           roles = await ptahAPI.agent.listRoles();
@@ -1592,7 +1767,12 @@ async function handleIndividualTool(
           { ...parsed.data, timeoutSec },
           {
             waitForAgents: async (ids, mode, timeoutMs, signal) => {
-              const result = await ptahAPI.agent.waitForAgents(ids, mode, timeoutMs, signal);
+              const result = await ptahAPI.agent.waitForAgents(
+                ids,
+                mode,
+                timeoutMs,
+                signal,
+              );
               for (const entry of result.entries) {
                 if (entry.state !== 'exited') continue;
                 try {
@@ -1600,9 +1780,14 @@ async function handleIndividualTool(
                   const reader = raw
                     ? (ptahAPI.agent.resolveCallerParentId?.(raw) ?? raw)
                     : undefined;
-                    await acknowledgeTerminalRead(entry.info, reader);
+                  await acknowledgeTerminalRead(entry.info, reader);
                 } catch (error: unknown) {
-                  logger.warn('[MCP] Completion wait acknowledgment failed', error instanceof Error ? error : new Error('Completion wait acknowledgment failed'));
+                  logger.warn(
+                    '[MCP] Completion wait acknowledgment failed',
+                    error instanceof Error
+                      ? error
+                      : new Error('Completion wait acknowledgment failed'),
+                  );
                 }
               }
               return result;

@@ -18,19 +18,19 @@ The `orchestration` skill in `ptah-core` coordinates development work: classify 
 | Role             | Responsibility                                                                                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Orchestrator** | Owns the conversation and checkpoints; spawns sub-agents, batch executors, and phase lanes; verifies what returns.                                                           |
-| **Team-leader**  | Decomposes the plan into batches, recommends executors, verifies and gates batches behind review, and records their states in `batches.md`. It spawns nothing.               |
+| **Batch phase**  | Decomposes the plan into batches, recommends executors, checks evidence, and records batch states in `batches.md`.                                                           |
 | **Specialists**  | Work within their assigned scope and return deliverables with evidence. Eligible specialists may use CLI lanes for focused sub-tasks when lanes are enabled or in auto mode. |
 | **CLI lanes**    | Run self-contained tasks through `ptah_agent_spawn`, using an installed CLI or a configured Ptah CLI provider.                                                               |
 
-The `visual-review` phase uses browser tools. The `design` phase handles interactive discovery. The team-leader recommends work for the orchestrator to assign.
+The `visual-review` phase uses browser tools. The `design` phase handles interactive discovery. The `batch` phase recommends work for the orchestrator to assign. No built-in agent role remains.
 
-Specialists do not allocate task IDs or edit `task.md` or `batches.md`. They report completion and blockers; the team-leader records batch state. In a Relay run without a team-leader, the conductor verifies the implementation report and records `batches.md`.
+Specialists do not allocate task IDs or edit `task.md` or `batches.md`. They report completion and blockers; the `batch` phase records batch state. In a Relay run, the conductor verifies the implementation report and records `batches.md`.
 
 ## Choosing a workflow
 
 The skill covers FEATURE, BUGFIX, REFACTORING, DOCUMENTATION, RESEARCH, DEVOPS, SAAS_INIT, and CREATIVE work. It chooses full, partial, or minimal depth from the request and asks when the type is ambiguous.
 
-A feature typically runs through `plan`, optional `research` and `design`, `architecture`, `team-leader`, `implement`, then `tests` and `review`. The team-leader recommends batch executors; the orchestrator spawns them and acts on each returned next action.
+A feature typically runs through `plan`, optional `research` and `design`, `architecture`, `batch`, `implement`, `tests`, `review`, and `completion`. The `batch` phase recommends executors; the orchestrator spawns them and acts on each returned next action.
 
 ## Skeleton and packs
 

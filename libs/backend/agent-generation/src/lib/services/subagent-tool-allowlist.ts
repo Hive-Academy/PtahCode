@@ -50,21 +50,13 @@ export const WEB_SEARCH_TOOLS: readonly string[] = [
   `${PTAH_TOOL_PREFIX}ptah_web_search`,
 ];
 
-const NO_BROWSER_NO_WEB: readonly string[] = [
-  ...WEB_SCRAPE_SERVERS,
-  ...WEB_SEARCH_TOOLS,
-  ...PTAH_BROWSER_TOOLS,
-];
-
 /**
  * Deny list per agent type (the template `name`). An empty list means the type
  * keeps every tool.
  */
 export const SUBAGENT_DISALLOWED_TOOLS: Readonly<
   Record<string, readonly string[]>
-> = {
-  'team-leader': NO_BROWSER_NO_WEB,
-};
+> = {};
 
 /**
  * Whether the agent type has a known tool policy. An unknown type (a custom or

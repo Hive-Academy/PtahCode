@@ -109,6 +109,7 @@ export const AgentSpawnArgsSchema = z
     routingSource: z.enum(['model', 'ranking', 'pin']).optional(),
     // Overrides the pre-spawn limit gate; never forwarded to `agent.spawn`.
     force: z.boolean().optional(),
+    idempotencyKey: z.string().min(1).max(128).optional(),
     // Optional account route for a `claude` lane: ID or sentinel only, never
     // a path, env, token or owner (strict shared schema).
     accountSelection: ProviderAccountSelectionSchema.optional(),

@@ -251,7 +251,7 @@ describe('buildOrchestrationNamespace — .ptah/specs resolution', () => {
   });
 
   /**
-   * The implementation phase is gated on the team-leader batch breakdown. That
+   * The implementation phase is gated on the batch phase breakdown. That
    * file was renamed `tasks.md` → `batches.md`; both names must satisfy the
    * gate, or a task folder created under either name alone stalls forever.
    */
@@ -304,8 +304,68 @@ describe('buildOrchestrationNamespace — .ptah/specs resolution', () => {
     const ns = buildOrchestrationNamespace(makeDeps());
     const action = await ns.getNextAction(taskId);
 
-    expect(action.action).toBe('invoke-agent');
-    expect(action.agent).toBe('team-leader');
+    expect(action.action).toBe('invoke-phase');
+    expect(action.phaseKind).toBe('batch');
+    expect(action.agent).toBeUndefined();
+  });
+
+  it('routes an approved final batch to completion', async () => {
+    const taskId = 'TASK_FINAL_BATCH';
+    await writeState(taskId, {
+      taskId,
+      phase: 'implementation',
+      currentAgent: null,
+      lastCheckpoint: {
+        type: 'batch-complete',
+        status: 'approved',
+        timestamp: '',
+      },
+      pendingActions: [],
+      strategy: 'DOCUMENTATION',
+      metadata: {},
+    });
+    await writeDoc(taskId, 'batches.md');
+
+    const action =
+      await buildOrchestrationNamespace(makeDeps()).getNextAction(taskId);
+    expect(action).toMatchObject({
+      action: 'invoke-phase',
+      phaseKind: 'completion',
+      context: {
+        taskId,
+        previousPhase: 'implementation',
+        nextPhase: 'complete',
+      },
+    });
+    expect(action.agent).toBeUndefined();
+  });
+
+  it('reads a legacy currentAgent without routing through its retired role', async () => {
+    const taskId = 'TASK_LEGACY_AGENT';
+    await writeState(taskId, {
+      taskId,
+      phase: 'implementation',
+      currentAgent: 'team-leader',
+      lastCheckpoint: {
+        type: 'batch-complete',
+        status: 'rejected',
+        timestamp: '',
+      },
+      pendingActions: [],
+      strategy: 'BUGFIX',
+      metadata: {},
+    });
+
+    const namespace = buildOrchestrationNamespace(makeDeps());
+    expect((await namespace.getState(taskId))?.currentAgent).toBe(
+      'team-leader',
+    );
+    const action = await namespace.getNextAction(taskId);
+    expect(action).toMatchObject({
+      action: 'invoke-phase',
+      phaseKind: 'batch',
+    });
+    expect(action.agent).toBeUndefined();
   });
 
   it('invokes the tests phase after a rejected qa checkpoint', async () => {

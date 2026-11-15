@@ -23,11 +23,6 @@ const BROWSER = [
   'mcp__ptah__ptah_browser_record_start',
   'mcp__ptah__ptah_browser_record_stop',
 ];
-const NO_BROWSER_NO_WEB = [
-  'mcp__firecrawl',
-  'mcp__ptah__ptah_web_search',
-  ...BROWSER,
-];
 
 describe('subagent tool allowlist (N3)', () => {
   it('names every Ptah browser tool in full and the web servers/tools', () => {
@@ -36,10 +31,9 @@ describe('subagent tool allowlist (N3)', () => {
     expect(WEB_SEARCH_TOOLS).toEqual(['mcp__ptah__ptah_web_search']);
   });
 
-  it.each([
-    ['team-leader', NO_BROWSER_NO_WEB],
-  ])('%s denies exactly its row', (agentType, expected) => {
-    expect(getSubagentDisallowedTools(agentType)).toEqual(expected);
+  it('has no built-in policy rows', () => {
+    expect(SUBAGENT_DISALLOWED_TOOLS).toEqual({});
+    expect(getSubagentDisallowedTools('team-leader')).toEqual([]);
   });
 
   it('has a row for every shipped agent template and no other', () => {
@@ -52,7 +46,7 @@ describe('subagent tool allowlist (N3)', () => {
     expect(Object.keys(SUBAGENT_DISALLOWED_TOOLS).sort()).toEqual(
       templateNames,
     );
-    expect(templateNames).toHaveLength(1);
+    expect(templateNames).toHaveLength(0);
   });
 
   it('never uses a form the runtime ignores (bare * or a partial wildcard)', () => {
@@ -70,10 +64,8 @@ describe('subagent tool allowlist (N3)', () => {
     expect(getSubagentDisallowedTools('')).toEqual([]);
   });
 
-  it('formats one comma-separated frontmatter line', () => {
-    expect(formatDisallowedToolsFrontmatter('team-leader')).toBe(
-      `disallowedTools: ${NO_BROWSER_NO_WEB.join(', ')}`,
-    );
+  it('formats no retired-role frontmatter line', () => {
+    expect(formatDisallowedToolsFrontmatter('team-leader')).toBeUndefined();
   });
 
   it('formats nothing for a type that keeps every tool', () => {
@@ -82,11 +74,8 @@ describe('subagent tool allowlist (N3)', () => {
   });
 });
 
-// Phase C regression (decision #20): the remaining NO_BROWSER_NO_WEB roles keep their
-// exact deny set. Literal on purpose, so a shortening attempt fails loudly.
-const NO_BROWSER_NO_WEB_ROLES = [
-  'team-leader',
-];
+// A future restricted built-in must retain its exact deny set.
+const NO_BROWSER_NO_WEB_ROLES: string[] = [];
 const PINNED_DENY_SET_LITERAL = [
   'mcp__firecrawl',
   'mcp__ptah__ptah_web_search',
@@ -110,7 +99,9 @@ describe('least-privilege effective set (Phase C, decision #20)', () => {
     expect(PINNED_DENY_SET_LITERAL).toHaveLength(13);
   });
 
-  it.each(NO_BROWSER_NO_WEB_ROLES)(
+  (NO_BROWSER_NO_WEB_ROLES.length > 0
+    ? it.each(NO_BROWSER_NO_WEB_ROLES)
+    : it.skip.each(['no restricted built-in']))(
     '%s denies exactly the 13 pinned names in order',
     (role) => {
       const tools = getSubagentDisallowedTools(role);
@@ -119,7 +110,9 @@ describe('least-privilege effective set (Phase C, decision #20)', () => {
     },
   );
 
-  it.each(NO_BROWSER_NO_WEB_ROLES)(
+  (NO_BROWSER_NO_WEB_ROLES.length > 0
+    ? it.each(NO_BROWSER_NO_WEB_ROLES)
+    : it.skip.each(['no restricted built-in']))(
     '%s renders the literal unchanged frontmatter line',
     (role) => {
       expect(formatDisallowedToolsFrontmatter(role)).toBe(
@@ -136,7 +129,9 @@ describe('least-privilege effective set (Phase C, decision #20)', () => {
     for (const role of others) {
       expect(getSubagentDisallowedTools(role).length).toBeLessThanOrEqual(1);
     }
-    expect(formatDisallowedToolsFrontmatter('technical-content-writer')).toBeUndefined();
+    expect(
+      formatDisallowedToolsFrontmatter('technical-content-writer'),
+    ).toBeUndefined();
     expect(formatDisallowedToolsFrontmatter('visual-reviewer')).toBeUndefined();
   });
 });

@@ -72,7 +72,7 @@ even if its reset reads `reset unknown`.
 A CLI lane is the default executor for every bounded batch, sequential or parallel, when the batch
 fits the cap and a capable lane is spawnable. Parallel batches still require independent,
 file-disjoint tasks. A subagent executor must carry a `Subagent reason`. You spawn and merge
-parallel lanes: [phase mode compatibility](team-leader-modes.md#spawning-a-batch-executor).
+parallel lanes: [phase mode compatibility](phase-mode-compatibility.md#spawning-a-batch-executor).
 
 ## What each kind hands off
 

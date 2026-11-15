@@ -37,9 +37,7 @@ import {
   SKILLS_ROOT_KEY,
   resolveSkillsRoot,
 } from '@ptah-extension/skill-synthesis';
-import {
-  PLATFORM_TOKENS,
-} from '@ptah-extension/platform-core';
+import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import {
   createMockWorkspaceProvider,
   type MockWorkspaceProvider,
@@ -236,8 +234,12 @@ function emptyScorecard(slug: string) {
 function makeScorecard() {
   return {
     getInvocationStats: jest.fn().mockReturnValue({
-      total: 0, succeeded: 0, failed: 0, distinctContexts: 0,
-      invocationCount: 0, successRate: null,
+      total: 0,
+      succeeded: 0,
+      failed: 0,
+      distinctContexts: 0,
+      invocationCount: 0,
+      successRate: null,
     }),
     getScorecards: jest.fn().mockReturnValue({}),
     // B4.4.3: `skillSynthesis:getScorecards` now merges the win-rate pass into
@@ -362,7 +364,11 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       enhanceMinInvocations: 5,
       enhanceCooldownUntil: 1700000000000 + 24 * 60 * 60 * 1000,
     });
-    expect(scorecard.getInvocationStats).toHaveBeenCalledWith('skill', 'deep-research', '/workspace/project');
+    expect(scorecard.getInvocationStats).toHaveBeenCalledWith(
+      'skill',
+      'deep-research',
+      '/workspace/project',
+    );
     expect(store.getInvocationStats).not.toHaveBeenCalled();
   });
 
@@ -370,8 +376,12 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
     const { rpcHandler, registry, scorecard, store } = buildHandlers();
     registry.listAll.mockReturnValue([sampleRow]);
     scorecard.getInvocationStats.mockReturnValue({
-      total: 0, succeeded: 0, failed: 0, distinctContexts: 3,
-      invocationCount: 8, successRate: null,
+      total: 0,
+      succeeded: 0,
+      failed: 0,
+      distinctContexts: 3,
+      invocationCount: 8,
+      successRate: null,
     });
 
     const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as {
@@ -385,19 +395,40 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
 
   it('keeps every clone when one invocation lookup throws', async () => {
     const { rpcHandler, registry, scorecard, logger } = buildHandlers();
-    registry.listAll.mockReturnValue([sampleRow, { ...sampleRow, slug: 'other' }]);
+    registry.listAll.mockReturnValue([
+      sampleRow,
+      { ...sampleRow, slug: 'other' },
+    ]);
     const failure = new Error('telemetry unavailable');
-    scorecard.getInvocationStats.mockImplementation((_kind: string, slug: string) => {
-      if (slug === 'deep-research') throw failure;
-      return { total: 1, succeeded: 1, failed: 0, distinctContexts: 1,
-        invocationCount: 3, successRate: 1 };
-    });
-    const result = await rpcHandler.call('skillSynthesis:listClones', {}) as {
-      clones: Array<{ slug: string; invocationCount: number; successRate: number | null }>;
+    scorecard.getInvocationStats.mockImplementation(
+      (_kind: string, slug: string) => {
+        if (slug === 'deep-research') throw failure;
+        return {
+          total: 1,
+          succeeded: 1,
+          failed: 0,
+          distinctContexts: 1,
+          invocationCount: 3,
+          successRate: 1,
+        };
+      },
+    );
+    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as {
+      clones: Array<{
+        slug: string;
+        invocationCount: number;
+        successRate: number | null;
+      }>;
     };
     expect(result.clones).toHaveLength(2);
-    expect(result.clones[0]).toMatchObject({ invocationCount: 0, successRate: null });
-    expect(result.clones[1]).toMatchObject({ invocationCount: 3, successRate: 1 });
+    expect(result.clones[0]).toMatchObject({
+      invocationCount: 0,
+      successRate: null,
+    });
+    expect(result.clones[1]).toMatchObject({
+      invocationCount: 3,
+      successRate: 1,
+    });
     expect(logger.warn).toHaveBeenCalledWith(
       '[skill-synthesis] clone invocation stats unavailable',
       expect.objectContaining({ slug: 'deep-research', error: failure }),
@@ -405,7 +436,10 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
   });
 
   it('listClones keeps rows available when the optional scorecard is absent', async () => {
-    const { rpcHandler, registry, store, scorecard } = buildHandlers(['/workspace/project'], false);
+    const { rpcHandler, registry, store, scorecard } = buildHandlers(
+      ['/workspace/project'],
+      false,
+    );
     registry.listAll.mockReturnValue([sampleRow]);
 
     const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as {
@@ -413,7 +447,10 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
     };
 
     expect(result.clones).toHaveLength(1);
-    expect(result.clones[0]).toMatchObject({ invocationCount: 0, successRate: null });
+    expect(result.clones[0]).toMatchObject({
+      invocationCount: 0,
+      successRate: null,
+    });
     expect(scorecard.getInvocationStats).not.toHaveBeenCalled();
     expect(store.getInvocationStats).not.toHaveBeenCalled();
   });
@@ -441,22 +478,34 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
   it.each(['agent', 'command'] as const)(
     'listClones reads %s grades using the clone kind',
     async (kind) => {
-      const { rpcHandler, registry, scorecard, store, mirror } = buildHandlers();
+      const { rpcHandler, registry, scorecard, store, mirror } =
+        buildHandlers();
       registry.listAll.mockReturnValue([{ ...sampleRow, kind }]);
       // An agent row is listed only when its clone is in the scoped Library.
       mirror.listClones.mockResolvedValue([
         { kind, slug: 'deep-research', orphaned: false },
       ]);
       scorecard.getInvocationStats.mockReturnValue({
-        total: 2, succeeded: 1, failed: 1, distinctContexts: 1,
-        invocationCount: 3, successRate: 0.5,
+        total: 2,
+        succeeded: 1,
+        failed: 1,
+        distinctContexts: 1,
+        invocationCount: 3,
+        successRate: 0.5,
       });
 
-      const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as {
+      const result = (await rpcHandler.call(
+        'skillSynthesis:listClones',
+        {},
+      )) as {
         clones: Array<{ successRate: number | null }>;
       };
 
-      expect(scorecard.getInvocationStats).toHaveBeenCalledWith(kind, 'deep-research', '/workspace/project');
+      expect(scorecard.getInvocationStats).toHaveBeenCalledWith(
+        kind,
+        'deep-research',
+        '/workspace/project',
+      );
       expect(result.clones[0].successRate).toBe(0.5);
       expect(store.getInvocationStats).not.toHaveBeenCalled();
     },
@@ -521,7 +570,6 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
     ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
   });
 
-
   it('revertEnhancement delegates to enhancer.revert with kind', async () => {
     const { rpcHandler, enhancer } = buildHandlers();
     enhancer.revert.mockResolvedValue({
@@ -583,10 +631,6 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
     ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
     expect(enhancer.revert).not.toHaveBeenCalled();
   });
-
-
-
-
 
   it('rebaseClone returns PERSISTENCE_UNAVAILABLE for a poisoned originPluginId (no path join)', async () => {
     const { rpcHandler, registry, mirror, contentDownload } = buildHandlers();
@@ -688,7 +732,9 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
 
     function usePhaseRoot(mirror: ReturnType<typeof makeMirror>): void {
       mirror.getUserLayerRoots.mockReturnValue({
-        skills: phaseRoot, agents: join(phaseRoot, 'agents'), commands: join(phaseRoot, 'commands'),
+        skills: phaseRoot,
+        agents: join(phaseRoot, 'agents'),
+        commands: join(phaseRoot, 'commands'),
       });
     }
 
@@ -737,19 +783,22 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       ['a file on kind agent', 'agent', 'phases/plan.md'],
       ['a path escape', 'skill', '../SKILL.md'],
       ['an unknown phase kind', 'skill', 'phases/unknown.md'],
-    ])('revertEnhancement refuses %s with INVALID_PARAMS', async (_label, kind, file) => {
-      const { rpcHandler, enhancer } = buildHandlers();
-      enhancer.supportsPhaseFileWrites.mockReturnValue(true);
-      await expect(
-        rpcHandler.call('skillSynthesis:revertEnhancement', {
-          kind,
-          slug: 'deep-research',
-          historyTs: '1717848000000',
-          file,
-        }),
-      ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
-      expect(enhancer.revert).not.toHaveBeenCalled();
-    });
+    ])(
+      'revertEnhancement refuses %s with INVALID_PARAMS',
+      async (_label, kind, file) => {
+        const { rpcHandler, enhancer } = buildHandlers();
+        enhancer.supportsPhaseFileWrites.mockReturnValue(true);
+        await expect(
+          rpcHandler.call('skillSynthesis:revertEnhancement', {
+            kind,
+            slug: 'deep-research',
+            historyTs: '1717848000000',
+            file,
+          }),
+        ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
+        expect(enhancer.revert).not.toHaveBeenCalled();
+      },
+    );
 
     it('rebaseClone re-syncs the providers after a successful rebase', async () => {
       const { rpcHandler, registry, mirror, repropagation } = buildHandlers();
@@ -864,19 +913,35 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       const { rpcHandler, registry, mirror, repropagation } = buildHandlers();
       registry.getBySlug.mockReturnValue(sampleRow);
       const savedHash = `sha256:${'b'.repeat(64)}`;
-      mirror.saveCloneBody.mockResolvedValue({ kind: 'skill', slug: 'deep-research',
-        historyTs: '1700000000001', written: true, reason: null,
-        currentContentHash: savedHash, metadataIncomplete: false, reconcileProtected: true });
+      mirror.saveCloneBody.mockResolvedValue({
+        kind: 'skill',
+        slug: 'deep-research',
+        historyTs: '1700000000001',
+        written: true,
+        reason: null,
+        currentContentHash: savedHash,
+        metadataIncomplete: false,
+        reconcileProtected: true,
+      });
       const result = await rpcHandler.call('skillSynthesis:saveCloneBody', {
-        kind: 'skill', slug: 'deep-research', body: '# enhanced', origin: 'enhancement',
+        kind: 'skill',
+        slug: 'deep-research',
+        body: '# enhanced',
+        origin: 'enhancement',
         expectedSourceHash: `sha256:${'a'.repeat(64)}`,
       });
       expect(result).toMatchObject({ metadataIncomplete: false });
       expect(registry.markEnhanced).toHaveBeenCalledWith(
-        'skill', 'deep-research', expect.any(Number), savedHash,
+        'skill',
+        'deep-research',
+        expect.any(Number),
+        savedHash,
       );
       expect(repropagation.repropagate).toHaveBeenCalledWith(
-        'skill', 'deep-research', '/workspace/project', { userInitiated: true },
+        'skill',
+        'deep-research',
+        '/workspace/project',
+        { userInitiated: true },
       );
     });
 
@@ -884,74 +949,100 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       const { rpcHandler, registry, mirror, repropagation } = buildHandlers();
       registry.getBySlug.mockReturnValue(sampleRow);
       mirror.saveCloneBody.mockResolvedValue({
-        kind: 'skill', slug: 'deep-research', historyTs: '1700000000001',
-        written: true, reason: null, currentContentHash: null,
-        metadataIncomplete: false, reconcileProtected: true,
+        kind: 'skill',
+        slug: 'deep-research',
+        historyTs: '1700000000001',
+        written: true,
+        reason: null,
+        currentContentHash: null,
+        metadataIncomplete: false,
+        reconcileProtected: true,
       });
 
       const result = await rpcHandler.call('skillSynthesis:saveCloneBody', {
-        kind: 'skill', slug: 'deep-research', body: '# enhanced', origin: 'enhancement',
+        kind: 'skill',
+        slug: 'deep-research',
+        body: '# enhanced',
+        origin: 'enhancement',
       });
 
       expect(result).toMatchObject({ metadataIncomplete: true });
       expect(registry.markEnhanced).not.toHaveBeenCalled();
       expect(repropagation.repropagate).toHaveBeenCalledWith(
-        'skill', 'deep-research', '/workspace/project', { userInitiated: true },
+        'skill',
+        'deep-research',
+        '/workspace/project',
+        { userInitiated: true },
       );
     });
 
     it('does not stamp or repropagate a stale enhancement draft', async () => {
       const { rpcHandler, registry, mirror, repropagation } = buildHandlers();
       registry.getBySlug.mockReturnValue(sampleRow);
-      mirror.saveCloneBody.mockResolvedValue({ kind: 'skill', slug: 'deep-research',
-        historyTs: null, written: false, reason: 'stale-source',
-        currentContentHash: null, metadataIncomplete: false, reconcileProtected: true });
-      await expect(rpcHandler.call('skillSynthesis:saveCloneBody', {
-        kind: 'skill', slug: 'deep-research', body: '# enhanced', origin: 'enhancement',
-        expectedSourceHash: `sha256:${'a'.repeat(64)}`,
-      })).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
+      mirror.saveCloneBody.mockResolvedValue({
+        kind: 'skill',
+        slug: 'deep-research',
+        historyTs: null,
+        written: false,
+        reason: 'stale-source',
+        currentContentHash: null,
+        metadataIncomplete: false,
+        reconcileProtected: true,
+      });
+      await expect(
+        rpcHandler.call('skillSynthesis:saveCloneBody', {
+          kind: 'skill',
+          slug: 'deep-research',
+          body: '# enhanced',
+          origin: 'enhancement',
+          expectedSourceHash: `sha256:${'a'.repeat(64)}`,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
       expect(registry.markEnhanced).not.toHaveBeenCalled();
       expect(repropagation.repropagate).not.toHaveBeenCalled();
     });
 
-    it.each([true, false])('passes the hash to the mirror and maps its result (stale=%s)', async (stale) => {
-      const expectedSourceHash = `sha256:${'a'.repeat(64)}`;
-      const { rpcHandler, registry, mirror } = buildHandlers();
-      registry.getBySlug.mockReturnValue(sampleRow);
-      mirror.saveCloneBody.mockResolvedValue({
-        kind: 'skill',
-        slug: 'deep-research',
-        historyTs: stale ? null : '1700000000001',
-        written: !stale,
-        reason: stale ? 'stale-source' : null,
-        currentContentHash: stale ? null : 'sha256:saved',
-        metadataIncomplete: false,
-        reconcileProtected: !stale,
-      });
-      const save = rpcHandler.call('skillSynthesis:saveCloneBody', {
-        kind: 'skill',
-        slug: 'deep-research',
-        body: 'AFTER',
-        expectedSourceHash,
-      });
-      if (stale) {
-        await expect(save).rejects.toMatchObject({
-          errorCode: 'INVALID_PARAMS',
-          message: expect.stringContaining('changed since the draft'),
+    it.each([true, false])(
+      'passes the hash to the mirror and maps its result (stale=%s)',
+      async (stale) => {
+        const expectedSourceHash = `sha256:${'a'.repeat(64)}`;
+        const { rpcHandler, registry, mirror } = buildHandlers();
+        registry.getBySlug.mockReturnValue(sampleRow);
+        mirror.saveCloneBody.mockResolvedValue({
+          kind: 'skill',
+          slug: 'deep-research',
+          historyTs: stale ? null : '1700000000001',
+          written: !stale,
+          reason: stale ? 'stale-source' : null,
+          currentContentHash: stale ? null : 'sha256:saved',
+          metadataIncomplete: false,
+          reconcileProtected: !stale,
         });
-      } else {
-        await expect(save).resolves.toMatchObject({
-          historyTs: '1700000000001',
+        const save = rpcHandler.call('skillSynthesis:saveCloneBody', {
+          kind: 'skill',
+          slug: 'deep-research',
+          body: 'AFTER',
+          expectedSourceHash,
         });
-      }
-      expect(mirror.saveCloneBody).toHaveBeenCalledWith({
-        kind: 'skill',
-        slug: 'deep-research',
-        body: 'AFTER',
-        workspaceRoot: SCOPE,
-        expectedSourceHash,
-      });
-    });
+        if (stale) {
+          await expect(save).rejects.toMatchObject({
+            errorCode: 'INVALID_PARAMS',
+            message: expect.stringContaining('changed since the draft'),
+          });
+        } else {
+          await expect(save).resolves.toMatchObject({
+            historyTs: '1700000000001',
+          });
+        }
+        expect(mirror.saveCloneBody).toHaveBeenCalledWith({
+          kind: 'skill',
+          slug: 'deep-research',
+          body: 'AFTER',
+          workspaceRoot: SCOPE,
+          expectedSourceHash,
+        });
+      },
+    );
 
     /**
      * The body write is the commit point. A bookkeeping failure after it is a
@@ -1215,9 +1306,7 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
         slug: 'custom-agent',
         originPluginId: null,
       });
-      mirror.rebaseClone.mockResolvedValue(
-        okRebase('agent', 'custom-agent'),
-      );
+      mirror.rebaseClone.mockResolvedValue(okRebase('agent', 'custom-agent'));
 
       await rpcHandler.call('skillSynthesis:rebaseClone', {
         kind: 'agent',
@@ -1227,12 +1316,7 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       expect(mirror.rebaseClone).toHaveBeenCalledWith({
         kind: 'agent',
         slug: 'custom-agent',
-        sourceDir: join(
-          SCOPE,
-          '.claude',
-          'agents',
-          'custom-agent.md',
-        ),
+        sourceDir: join(SCOPE, '.claude', 'agents', 'custom-agent.md'),
         workspaceRoot: SCOPE,
       });
     });
@@ -1288,24 +1372,24 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       registry.getBySlug.mockReturnValue({
         ...sampleRow,
         kind: 'agent' as const,
-        slug: 'team-leader',
+        slug: 'reviewer',
         originPluginId: 'ptah-core',
       });
-      mirror.rebaseClone.mockResolvedValue(okRebase('agent', 'team-leader'));
+      mirror.rebaseClone.mockResolvedValue(okRebase('agent', 'reviewer'));
 
       await rpcHandler.call('skillSynthesis:rebaseClone', {
         kind: 'agent',
-        slug: 'team-leader',
+        slug: 'reviewer',
       });
 
       expect(mirror.rebaseClone).toHaveBeenCalledWith({
         kind: 'agent',
-        slug: 'team-leader',
+        slug: 'reviewer',
         sourceDir: join(
           '/home/.ptah/plugins',
           'ptah-core',
           'agents',
-          'team-leader.md',
+          'reviewer.md',
         ),
         workspaceRoot: SCOPE,
       });
@@ -1447,33 +1531,64 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
       slug: 'deep-research',
     });
 
-    expect(scorecard.getInvocationStats).toHaveBeenCalledWith('skill', 'deep-research', '/workspace/project');
+    expect(scorecard.getInvocationStats).toHaveBeenCalledWith(
+      'skill',
+      'deep-research',
+      '/workspace/project',
+    );
     expect(store.getInvocationStats).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       slug: 'deep-research',
-      stats: { total: 9, succeeded: 3, failed: 2, distinctContexts: 2,
-        graded: 5, passed: 3, successRate: 0.6 },
+      stats: {
+        total: 9,
+        succeeded: 3,
+        failed: 2,
+        distinctContexts: 2,
+        graded: 5,
+        passed: 3,
+        successRate: 0.6,
+      },
     });
     expect(result).toEqual({
       slug: 'deep-research',
-      stats: { total: 9, succeeded: 3, failed: 2, distinctContexts: 2,
-        graded: 5, passed: 3, successRate: 0.6 },
+      stats: {
+        total: 9,
+        succeeded: 3,
+        failed: 2,
+        distinctContexts: 2,
+        graded: 5,
+        passed: 3,
+        successRate: 0.6,
+      },
     });
   });
 
   it('invocationStats reports no graded tasks even when telemetry exists', async () => {
     const { rpcHandler, store, scorecard } = buildHandlers();
     scorecard.getInvocationStats.mockReturnValue({
-      total: 0, succeeded: 0, failed: 0, distinctContexts: 2,
-      invocationCount: 9, successRate: null,
+      total: 0,
+      succeeded: 0,
+      failed: 0,
+      distinctContexts: 2,
+      invocationCount: 9,
+      successRate: null,
     });
 
-    expect(await rpcHandler.call('skillSynthesis:invocationStats', {
+    expect(
+      await rpcHandler.call('skillSynthesis:invocationStats', {
+        slug: 'deep-research',
+      }),
+    ).toEqual({
       slug: 'deep-research',
-    })).toEqual({
-      slug: 'deep-research',
-      stats: { total: 9, succeeded: 0, failed: 0, distinctContexts: 2,
-        graded: 0, passed: 0, successRate: null },
+      stats: {
+        total: 9,
+        succeeded: 0,
+        failed: 0,
+        distinctContexts: 2,
+        graded: 0,
+        passed: 0,
+        successRate: null,
+      },
     });
     expect(store.getInvocationStats).not.toHaveBeenCalled();
   });
@@ -1481,21 +1596,40 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
   it('invocationStats accepts an agent kind', async () => {
     const { rpcHandler, scorecard } = buildHandlers();
     const result = await rpcHandler.call('skillSynthesis:invocationStats', {
-      slug: 'reviewer', kind: 'agent',
+      slug: 'reviewer',
+      kind: 'agent',
     });
-    expect(scorecard.getInvocationStats).toHaveBeenCalledWith('agent', 'reviewer', '/workspace/project');
-    expect(result).toMatchObject({ stats: { total: 0, graded: 0, successRate: null } });
+    expect(scorecard.getInvocationStats).toHaveBeenCalledWith(
+      'agent',
+      'reviewer',
+      '/workspace/project',
+    );
+    expect(result).toMatchObject({
+      stats: { total: 0, graded: 0, successRate: null },
+    });
   });
 
   it('invocationStats returns zeros when the optional scorecard is absent', async () => {
-    const { rpcHandler, scorecard, store } = buildHandlers(['/workspace/project'], false);
+    const { rpcHandler, scorecard, store } = buildHandlers(
+      ['/workspace/project'],
+      false,
+    );
 
-    expect(await rpcHandler.call('skillSynthesis:invocationStats', {
+    expect(
+      await rpcHandler.call('skillSynthesis:invocationStats', {
+        slug: 'deep-research',
+      }),
+    ).toEqual({
       slug: 'deep-research',
-    })).toEqual({
-      slug: 'deep-research',
-      stats: { total: 0, succeeded: 0, failed: 0, distinctContexts: 0,
-        graded: 0, passed: 0, successRate: null },
+      stats: {
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        distinctContexts: 0,
+        graded: 0,
+        passed: 0,
+        successRate: null,
+      },
     });
     expect(scorecard.getInvocationStats).not.toHaveBeenCalled();
     expect(store.getInvocationStats).not.toHaveBeenCalled();
@@ -1523,7 +1657,10 @@ describe('SkillsSynthesisRpcHandlers — skillSynthesis:getScorecards', () => {
       slugs: ['backend-developer'],
     })) as { scorecards: Record<string, { totalInvocations: number }> };
 
-    expect(scorecard.getScorecards).toHaveBeenCalledWith(['backend-developer'], '/workspace/project');
+    expect(scorecard.getScorecards).toHaveBeenCalledWith(
+      ['backend-developer'],
+      '/workspace/project',
+    );
     expect(result.scorecards['backend-developer'].totalInvocations).toBe(12);
   });
 
@@ -1535,10 +1672,12 @@ describe('SkillsSynthesisRpcHandlers — skillSynthesis:getScorecards', () => {
     });
 
     expect(scorecard.getScorecards).toHaveBeenCalledWith(
-      ['backend-developer'], '/workspace/active',
+      ['backend-developer'],
+      '/workspace/active',
     );
     expect(scorecard.getWinRates).toHaveBeenCalledWith(
-      ['backend-developer'], '/workspace/active',
+      ['backend-developer'],
+      '/workspace/active',
     );
   });
 
@@ -1601,11 +1740,10 @@ describe('SkillsSynthesisRpcHandlers — skillSynthesis:getScorecards', () => {
     expect(result.scorecards['measured-loser'].winRate).toBe(0);
     expect(result.scorecards['never-settled'].winRate).toBeNull();
     expect(result.scorecards['no-events-at-all'].winRate).toBeNull();
-    expect(scorecard.getWinRates).toHaveBeenCalledWith([
-      'measured-loser',
-      'never-settled',
-      'no-events-at-all',
-    ], '/workspace/project');
+    expect(scorecard.getWinRates).toHaveBeenCalledWith(
+      ['measured-loser', 'never-settled', 'no-events-at-all'],
+      '/workspace/project',
+    );
   });
 
   it('returns {} scorecards when the scorecard service is unbound', async () => {
@@ -1657,7 +1795,9 @@ describe('SkillsSynthesisRpcHandlers — skillSynthesis:getScorecards', () => {
       slugs: ['a'],
     })) as { phaseScorecards: unknown[] };
 
-    expect(scorecard.getPhaseScorecards).toHaveBeenCalledWith('/workspace/active');
+    expect(scorecard.getPhaseScorecards).toHaveBeenCalledWith(
+      '/workspace/active',
+    );
     expect(result.phaseScorecards).toEqual([phaseRow, legacyRow]);
   });
 
@@ -1950,10 +2090,13 @@ describe('SkillsSynthesisRpcHandlers — previewEnhancement / applyProposal', ()
         skipReason,
       });
 
-      const result = await rpcHandler.call('skillSynthesis:previewEnhancement', {
-        kind: 'skill',
-        slug: 'deep-research',
-      });
+      const result = await rpcHandler.call(
+        'skillSynthesis:previewEnhancement',
+        {
+          kind: 'skill',
+          slug: 'deep-research',
+        },
+      );
 
       expect(enhancer.generateProposal).toHaveBeenCalledWith(
         'deep-research',
@@ -2065,14 +2208,30 @@ describe('SkillsSynthesisRpcHandlers — previewEnhancement / applyProposal', ()
       PROPOSAL_ID,
       { userInitiated: true },
     );
-    expect(result).toEqual({ applied: true, historyTs: '1700000000000', skipReason: null });
+    expect(result).toEqual({
+      applied: true,
+      historyTs: '1700000000000',
+      skipReason: null,
+    });
   });
 
   it('returns the refusal reason when a proposal is not applied', async () => {
     const { rpcHandler, enhancer } = buildHandlers();
-    enhancer.applyProposal.mockResolvedValue({ applied: false, historyTs: null, skipReason: 'cooldown' });
-    const result = await rpcHandler.call('skillSynthesis:applyProposal', { kind: 'skill', slug: 'deep-research', proposalId: PROPOSAL_ID });
-    expect(result).toEqual({ applied: false, historyTs: null, skipReason: 'cooldown' });
+    enhancer.applyProposal.mockResolvedValue({
+      applied: false,
+      historyTs: null,
+      skipReason: 'cooldown',
+    });
+    const result = await rpcHandler.call('skillSynthesis:applyProposal', {
+      kind: 'skill',
+      slug: 'deep-research',
+      proposalId: PROPOSAL_ID,
+    });
+    expect(result).toEqual({
+      applied: false,
+      historyTs: null,
+      skipReason: 'cooldown',
+    });
   });
 
   it('applyProposal maps an unknown proposalId to a clean INVALID_PARAMS', async () => {
@@ -2219,9 +2378,14 @@ describe('SkillsSynthesisRpcHandlers — getHistoryBody', () => {
 
   it('returns null for a phase absent from a snapshot without phases folder', async () => {
     const { rpcHandler, mirror } = withRealRoots();
-    mirror.listHistory.mockResolvedValue([{ ts: TS, path: snapshotDir, hasSkillMd: true }]);
+    mirror.listHistory.mockResolvedValue([
+      { ts: TS, path: snapshotDir, hasSkillMd: true },
+    ]);
     const result = await rpcHandler.call('skillSynthesis:getHistoryBody', {
-      kind: 'skill', slug: 'deep-research', ts: TS, file: 'phases/plan.md',
+      kind: 'skill',
+      slug: 'deep-research',
+      ts: TS,
+      file: 'phases/plan.md',
     });
     expect(result).toEqual({ body: null, ts: TS });
   });
@@ -2772,7 +2936,10 @@ describe('SkillsSynthesisRpcHandlers — agent models get / set (C6)', () => {
     }
     child.registerInstance(CliModelListService, {
       listForClassification,
-    } as Pick<CliModelListService, 'listForClassification'> as CliModelListService);
+    } as Pick<
+      CliModelListService,
+      'listForClassification'
+    > as CliModelListService);
     child.register(SkillsSynthesisRpcHandlers, {
       useClass: SkillsSynthesisRpcHandlers,
     });
@@ -3167,9 +3334,12 @@ describe('SkillsSynthesisRpcHandlers — preview while skills are paused', () =>
   it('refuses a paused preview before generating a proposal', async () => {
     const { rpcHandler, enhancer, workspaceProvider } = buildHandlers();
     workspaceProvider.__state.config.set('ptah.skillSynthesis.enabled', false);
-    await expect(rpcHandler.call('skillSynthesis:previewEnhancement', {
-      kind: 'skill', slug: 'deep-research',
-    })).rejects.toMatchObject({ errorCode: 'PAUSED' });
+    await expect(
+      rpcHandler.call('skillSynthesis:previewEnhancement', {
+        kind: 'skill',
+        slug: 'deep-research',
+      }),
+    ).rejects.toMatchObject({ errorCode: 'PAUSED' });
     expect(enhancer.generateProposal).not.toHaveBeenCalled();
   });
 });
@@ -3232,7 +3402,10 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
       originStore,
       configure: (child: DependencyContainer) => {
         child.registerInstance(SDK_TOKENS.SDK_PLUGIN_LOADER, pluginLoader);
-        child.registerInstance(AGENT_GENERATION_TOKENS.AGENT_ORIGIN_STORE, originStore);
+        child.registerInstance(
+          AGENT_GENERATION_TOKENS.AGENT_ORIGIN_STORE,
+          originStore,
+        );
       },
     };
   }
@@ -3245,40 +3418,73 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
   it('two external plugins with the same basename show their own names', async () => {
     const sources = withSources({
       descriptors: {
-        [ACME_PATH]: { sourceRef: 'external:acme/toolkit/toolkit', label: 'Acme Toolkit' },
-        [BETA_PATH]: { sourceRef: 'external:beta/plugins/toolkit', label: 'Beta Toolkit' },
+        [ACME_PATH]: {
+          sourceRef: 'external:acme/toolkit/toolkit',
+          label: 'Acme Toolkit',
+        },
+        [BETA_PATH]: {
+          sourceRef: 'external:beta/plugins/toolkit',
+          label: 'Beta Toolkit',
+        },
       },
       active: [ACME_PATH, BETA_PATH],
     });
-    const { rpcHandler, registry, mirror } = buildHandlers(undefined, true, sources.configure);
+    const { rpcHandler, registry, mirror } = buildHandlers(
+      undefined,
+      true,
+      sources.configure,
+    );
     registry.listAll.mockReturnValue([
       row({ slug: 'api-design' }),
       row({ slug: 'schema-migrate' }),
     ]);
-    mirror.readCloneEditState.mockImplementation(async (_kind: string, slug: string) => ({
-      exists: true,
-      edited: false,
-      pluginId: 'toolkit',
-      sourceRef:
-        slug === 'api-design'
-          ? 'external:acme/toolkit/toolkit'
-          : 'external:beta/plugins/toolkit',
-      contentDigest: 'sha256:x',
-    }));
+    mirror.readCloneEditState.mockImplementation(
+      async (_kind: string, slug: string) => ({
+        exists: true,
+        edited: false,
+        pluginId: 'toolkit',
+        sourceRef:
+          slug === 'api-design'
+            ? 'external:acme/toolkit/toolkit'
+            : 'external:beta/plugins/toolkit',
+        contentDigest: 'sha256:x',
+      }),
+    );
 
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
 
     expect(result.clones.map((clone) => clone['provenance'])).toEqual([
-      { kind: 'plugin', pluginId: 'external:acme/toolkit/toolkit', name: 'Acme Toolkit', state: 'active' },
-      { kind: 'plugin', pluginId: 'external:beta/plugins/toolkit', name: 'Beta Toolkit', state: 'active' },
+      {
+        kind: 'plugin',
+        pluginId: 'external:acme/toolkit/toolkit',
+        name: 'Acme Toolkit',
+        state: 'active',
+      },
+      {
+        kind: 'plugin',
+        pluginId: 'external:beta/plugins/toolkit',
+        name: 'Beta Toolkit',
+        state: 'active',
+      },
     ]);
   });
 
   it('uninstall of a plugin whose display name differs from its id keeps the display name', async () => {
     const sources = withSources({ descriptors: {} });
-    const { rpcHandler, registry, mirror } = buildHandlers(undefined, true, sources.configure);
+    const { rpcHandler, registry, mirror } = buildHandlers(
+      undefined,
+      true,
+      sources.configure,
+    );
     registry.listAll.mockReturnValue([
-      row({ kind: 'agent', slug: 'legacy-linter', originPluginId: 'former-helper-plugin' }),
+      row({
+        kind: 'agent',
+        slug: 'legacy-linter',
+        originPluginId: 'former-helper-plugin',
+      }),
     ]);
     mirror.listClones.mockResolvedValue([
       { kind: 'agent', slug: 'legacy-linter', orphaned: true },
@@ -3292,7 +3498,10 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
       contentDigest: 'sha256:x',
     });
 
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
 
     expect(result.clones[0]).toMatchObject({
       orphaned: true,
@@ -3306,8 +3515,14 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
   });
 
   it('labels a wizard-written agent setup-wizard and names the wizard as the diverged reason', async () => {
-    const sources = withSources({ wizardAgents: { 'backend-developer': WIZARD_HASH } });
-    const { rpcHandler, registry, mirror } = buildHandlers(undefined, true, sources.configure);
+    const sources = withSources({
+      wizardAgents: { 'backend-developer': WIZARD_HASH },
+    });
+    const { rpcHandler, registry, mirror } = buildHandlers(
+      undefined,
+      true,
+      sources.configure,
+    );
     registry.listAll.mockReturnValue([
       row({
         kind: 'agent',
@@ -3327,7 +3542,10 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
       contentDigest: 'sha256:x',
     });
 
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
 
     expect(result.clones[0]).toMatchObject({
       provenance: { kind: 'setup-wizard' },
@@ -3339,13 +3557,24 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
   it('a plugin update names the plugin as the diverged reason', async () => {
     const sources = withSources({
       descriptors: {
-        [ACME_PATH]: { sourceRef: 'external:acme/toolkit/toolkit', label: 'Acme Toolkit' },
+        [ACME_PATH]: {
+          sourceRef: 'external:acme/toolkit/toolkit',
+          label: 'Acme Toolkit',
+        },
       },
       active: [ACME_PATH],
     });
-    const { rpcHandler, registry, mirror } = buildHandlers(undefined, true, sources.configure);
+    const { rpcHandler, registry, mirror } = buildHandlers(
+      undefined,
+      true,
+      sources.configure,
+    );
     registry.listAll.mockReturnValue([
-      row({ slug: 'api-design', diverged: true, pendingSourceHash: 'sha256:new' }),
+      row({
+        slug: 'api-design',
+        diverged: true,
+        pendingSourceHash: 'sha256:new',
+      }),
     ]);
     mirror.readCloneEditState.mockResolvedValue({
       exists: true,
@@ -3355,7 +3584,10 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
       contentDigest: 'sha256:x',
     });
 
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
 
     expect(result.clones[0]['divergedReason']).toEqual({
       kind: 'plugin',
@@ -3365,10 +3597,17 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
 
   it('omits provenance when the resolver cannot read the sources; the listing still succeeds', async () => {
     const sources = withSources({ loaderThrows: true });
-    const { rpcHandler, registry } = buildHandlers(undefined, true, sources.configure);
+    const { rpcHandler, registry } = buildHandlers(
+      undefined,
+      true,
+      sources.configure,
+    );
     registry.listAll.mockReturnValue([row({})]);
 
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
 
     expect(result.clones).toHaveLength(1);
     expect(result.clones[0]).not.toHaveProperty('provenance');
@@ -3377,25 +3616,40 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
 
   it('omits provenance for one row whose sidecar is unreadable, not for the others', async () => {
     const sources = withSources({});
-    const { rpcHandler, registry, mirror } = buildHandlers(undefined, true, sources.configure);
+    const { rpcHandler, registry, mirror } = buildHandlers(
+      undefined,
+      true,
+      sources.configure,
+    );
     registry.listAll.mockReturnValue([
       row({ slug: 'broken', originPluginId: null }),
       row({ slug: 'fine', originPluginId: null }),
     ]);
-    mirror.readCloneEditState.mockImplementation(async (_kind: string, slug: string) => {
-      if (slug === 'broken') throw new Error('EACCES');
-      return null;
-    });
+    mirror.readCloneEditState.mockImplementation(
+      async (_kind: string, slug: string) => {
+        if (slug === 'broken') throw new Error('EACCES');
+        return null;
+      },
+    );
 
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
 
     expect(result.clones[0]).not.toHaveProperty('provenance');
     expect(result.clones[1]['provenance']).toEqual({ kind: 'workspace' });
   });
 
   it('getClone carries the same provenance as the list', async () => {
-    const sources = withSources({ wizardAgents: { 'backend-developer': WIZARD_HASH } });
-    const { rpcHandler, registry } = buildHandlers(undefined, true, sources.configure);
+    const sources = withSources({
+      wizardAgents: { 'backend-developer': WIZARD_HASH },
+    });
+    const { rpcHandler, registry } = buildHandlers(
+      undefined,
+      true,
+      sources.configure,
+    );
     registry.getBySlug.mockReturnValue(
       row({ kind: 'agent', slug: 'backend-developer', originPluginId: null }),
     );
@@ -3415,11 +3669,19 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
       row({ kind: 'agent', slug: 'other-workspace', originPluginId: null }),
       row({ kind: 'skill', slug: 'shared-skill' }),
     ]);
-    mirror.listClones.mockResolvedValue([{ kind: 'agent', slug: 'mine', orphaned: false }]);
+    mirror.listClones.mockResolvedValue([
+      { kind: 'agent', slug: 'mine', orphaned: false },
+    ]);
 
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
 
-    expect(result.clones.map((clone) => clone['slug'])).toEqual(['mine', 'shared-skill']);
+    expect(result.clones.map((clone) => clone['slug'])).toEqual([
+      'mine',
+      'shared-skill',
+    ]);
   });
 
   it('A-rows: keeps every row when the scoped listing cannot be read', async () => {
@@ -3429,7 +3691,10 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
     ]);
     mirror.listClones.mockRejectedValue(new Error('sidecar read failed'));
 
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
 
     expect(result.clones.map((clone) => clone['slug'])).toEqual(['mine']);
   });
@@ -3453,7 +3718,10 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
     it('lists the harness-root agents and returns scopeRoot equal to the broadcast root', async () => {
       const { rpcHandler, mirror } = buildHandlers([subFolder]);
 
-      const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+      const result = (await rpcHandler.call(
+        'skillSynthesis:listClones',
+        {},
+      )) as ListResult;
 
       const harnessRoot = resolveHarnessWorkspaceRoot(subFolder);
       expect(harnessRoot).toBe(resolve(repo));
@@ -3475,7 +3743,10 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
         failed: false,
       });
 
-      await rpcHandler.call('skillSynthesis:rebaseClone', { kind: 'agent', slug: 'reviewer' });
+      await rpcHandler.call('skillSynthesis:rebaseClone', {
+        kind: 'agent',
+        slug: 'reviewer',
+      });
 
       const harnessRoot = resolve(repo);
       expect(mirror.rebaseClone).toHaveBeenCalledWith({
@@ -3489,7 +3760,10 @@ describe('SkillsSynthesisRpcHandlers — Library provenance and scope (B13)', ()
 
   it('omits scopeRoot with no folder open', async () => {
     const { rpcHandler } = buildHandlers([]);
-    const result = (await rpcHandler.call('skillSynthesis:listClones', {})) as ListResult;
+    const result = (await rpcHandler.call(
+      'skillSynthesis:listClones',
+      {},
+    )) as ListResult;
     expect(result).not.toHaveProperty('scopeRoot');
   });
 });
