@@ -35,8 +35,17 @@ describe('parseAntigravityUsageJson', () => {
     const row = { kind: 'weekly', remaining_fraction: 0.5 };
     const result = parseAntigravityUsageJson(output([group([row], '☀'), group([row], '☂')]), 1);
     expect(result?.map((window) => window.key)).toEqual([
-      'other:cli-group-0-weekly', 'other:cli-group-1-weekly',
+      'other:cli-group_0-weekly', 'other:cli-group_1-weekly',
     ]);
+  });
+  it('keeps a collision key distinct from a real slug that ends in an index', () => {
+    const row = { kind: 'weekly', remaining_fraction: 0.5 };
+    const result = parseAntigravityUsageJson(output([
+      group([row], 'Placeholder Group'), group([row], 'Placeholder-Group'),
+      group([row], 'Placeholder Group 1'), group([row], 'Group 0'), group([row], '☀'),
+    ]), 1);
+    expect(result).toHaveLength(5);
+    expect(new Set(result?.map((window) => window.key)).size).toBe(5);
   });
   it('keeps both groups when their names have the same slug', () => {
     const row = { kind: 'weekly', remaining_fraction: 0.5 };

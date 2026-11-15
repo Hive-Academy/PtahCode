@@ -69,6 +69,23 @@ describe('fallback runner', () => {
     expect(start).toHaveBeenCalledTimes(1);
     await expect(runFallbackUsage(request)).resolves.toMatchObject({ ok: true });
   });
+  it('times out a stuck cwd creation and removes the late directory', async () => {
+    jest.useFakeTimers();
+    let finishCreate!: (cwd: string) => void;
+    const created = new Promise<string>((resolve) => { finishCreate = resolve; });
+    const remove = jest.fn(async () => undefined);
+    const start = jest.fn();
+    const pending = runFallbackUsage({ sourceId: `stuck-create-${++serial}`, ownerKey: 'owner',
+      executable: 'fake', version: 'v1', accountFingerprint: 'placeholder', args: [],
+      executor: { start }, parse: (value: string) => value, timeoutMs: 1_000,
+      temporaryCwd: { create: () => created, remove } });
+    await jest.advanceTimersByTimeAsync(1_000);
+    await expect(pending).resolves.toMatchObject({ ok: false, reason: 'cli-timeout' });
+    expect(start).not.toHaveBeenCalled();
+    finishCreate('late');
+    await jest.advanceTimersByTimeAsync(0);
+    expect(remove).toHaveBeenCalledWith('late');
+  });
   it('does not start an executor after the deadline', async () => {
     const h = harness();
     await expect(h.run({ deadline: 100, now: () => 101 })).resolves.toMatchObject({ reason: 'cli-timeout' });

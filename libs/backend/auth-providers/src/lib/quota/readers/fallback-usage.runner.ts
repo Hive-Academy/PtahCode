@@ -134,9 +134,24 @@ async function execute<T>(request: FallbackRequest<T>): Promise<FallbackResult<T
   let timer: ReturnType<typeof setTimeout> | undefined;
   let runAbort: (() => void) | undefined;
   try {
+    // The budget covers the directory creation too, so a stuck mkdtemp cannot hold the flight.
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('fallback-timeout')), ms);
+    });
     if (request.temporaryCwd) {
-      try { cwd = await request.temporaryCwd.create(); }
+      const temporaryCwd = request.temporaryCwd;
+      const creation = temporaryCwd.create();
+      try { cwd = await Promise.race([creation, timeout]); }
       catch (error: unknown) {
+        if (error instanceof Error && error.message === 'fallback-timeout') {
+          void creation.then((late) => temporaryCwd.remove(late)).catch((lateError: unknown) => {
+            request.logger?.warn('[PlanUsage] late temporary usage directory cleanup failed', {
+              reason: lateError instanceof Error ? lateError.name : 'unknown',
+            });
+          });
+          reason = 'cli-timeout';
+          return failure(reason);
+        }
         reason = 'cli-unavailable';
         request.logger?.warn('[PlanUsage] temporary usage directory creation failed', {
           reason: error instanceof Error ? error.name : 'unknown',
@@ -147,9 +162,6 @@ async function execute<T>(request: FallbackRequest<T>): Promise<FallbackResult<T
     if (request.runSignal?.aborted) return failure('cli-unavailable');
     processHandle = request.executor.start(request.executable, request.args, cwd);
     liveRuns.add(processHandle);
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('fallback-timeout')), ms);
-    });
     const aborted = new Promise<never>((_, reject) => {
       runAbort = () => reject(new Error('fallback-aborted'));
       request.runSignal?.addEventListener('abort', runAbort, { once: true });
