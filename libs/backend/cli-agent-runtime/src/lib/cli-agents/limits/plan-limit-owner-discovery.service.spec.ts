@@ -956,6 +956,7 @@ describe('PlanLimitOwnerDiscoveryService', () => {
         recordWindowEvidence: jest.fn(),
         recordOwnerEvidence: jest.fn(),
         clearProviderOwnerEvidence: jest.fn(),
+        clearOwnerEvidenceByPattern: jest.fn(),
         removeProviderWindowEvidence: jest.fn(),
       };
       const service = new PlanUsageService(

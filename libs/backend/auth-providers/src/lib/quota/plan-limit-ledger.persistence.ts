@@ -67,6 +67,7 @@ const ScopeSchema = z.string().trim().min(1).max(64);
 const PersistedEvidenceSchema = z.strictObject({
   observedAt: z.number(),
   source: z.enum(SOURCES),
+  pattern: z.string().max(100).optional(),
   resetsAt: z.number(),
   resetSource: z.enum(SOURCES).optional(),
   modelScope: ScopeSchema.optional(),
@@ -168,6 +169,7 @@ function definedFields(evidence: OwnerLimitEvidence): OwnerLimitEvidence {
   return {
     observedAt: evidence.observedAt,
     source: evidence.source,
+    ...(evidence.pattern !== undefined && { pattern: evidence.pattern }),
     ...(evidence.resetsAt !== undefined && { resetsAt: evidence.resetsAt }),
     ...(evidence.resetSource !== undefined && {
       resetSource: evidence.resetSource,

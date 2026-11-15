@@ -163,8 +163,12 @@ describe('classifyLaneLimit', () => {
     it('classifies Grok HTTP 402 balance exhaustion as owner evidence', () => {
       const result = classify('grok', 'API error (status 402 Payment Required): Grok Build usage balance exhausted');
       expect(result).toMatchObject({ failureKind: 'quota', pattern: 'grok-balance-exhausted' });
+      if (!result) throw new Error('expected a classification');
+      expect(laneLimitEvidence(result, NOON)).toMatchObject({
+        kind: 'owner', evidence: { source: 'error-derived', pattern: 'grok-balance-exhausted' },
+      });
       expect(result && laneLimitEvidence(result, 1)).toEqual({
-        kind: 'owner', evidence: { observedAt: 1, source: 'error-derived' },
+        kind: 'owner', evidence: { observedAt: 1, source: 'error-derived', pattern: 'grok-balance-exhausted' },
       });
       expect(classify('grok', 'Grok Build usage balance exhausted')).toBeNull();
     });

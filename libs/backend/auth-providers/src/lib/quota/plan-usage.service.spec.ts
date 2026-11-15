@@ -11,6 +11,7 @@ import {
   type PlanLimitSessionOwnerResolver,
   type PlanLimitSignalSource,
 } from './plan-limit-ledger.service';
+import { PLAN_LIMIT_LEDGER_STORAGE_KEY } from './plan-limit-ledger.persistence';
 import {
   PlanSecret,
   type PlanCredentialResolution,
@@ -100,11 +101,11 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function harness() {
+function harness(storageOverride?: IStateStorage) {
   let clock = T0;
   const now = () => clock;
   const logger = createMockLogger();
-  const storage = {
+  const storage = storageOverride ?? {
     get: () => undefined,
     update: async () => undefined,
     keys: () => [],
@@ -685,7 +686,46 @@ describe('PlanUsageService', () => {
       const snapshot = await h.service.getOwnerSnapshot(target, { refresh: true });
       expect(snapshot.windows).toHaveLength(0);
       expect(snapshot.credits).toEqual({ balance: '12', hasCredits: true, unlimited: false });
+      expect(snapshot).toMatchObject({ source: 'provider-api', readAt: T0 + 1 });
       expect(h.ledger.snapshotFor(ownerRef.key)?.windows ?? []).toHaveLength(0);
+    });
+
+    it('clears only older Grok balance exhaustion after a positive provider reading', async () => {
+      const stored = new Map<string, unknown>();
+      const storage: IStateStorage = {
+        get: <T>(key: string, fallback?: T) => stored.has(key) ? stored.get(key) as T : fallback,
+        update: jest.fn(async (key: string, value: unknown) => { stored.set(key, value); }),
+        keys: () => [...stored.keys()],
+      };
+      const h = harness(storage);
+      const ownerRef = quotaOwnerRefFromKey(cliStoreOwnerKey('grok', '/cli'));
+      const readers = Reflect.get(h.service, 'readers') as Record<string, jest.Mock>;
+      readers.grok = jest.fn(async () => ({
+        status: 'available', source: 'provider-api', fetchedAt: T0 + 2, requestedAt: T0,
+        windowSetEstablished: true, windows: [],
+        credits: { balance: '12', hasCredits: true, unlimited: false },
+      }));
+      h.ledger.recordOwnerEvidence(ownerRef, {
+        observedAt: T0 - 1, source: 'error-derived', pattern: 'grok-balance-exhausted',
+        resetsAt: T0 + 60_000,
+      });
+      expect(h.ledger.snapshotFor(ownerRef.key)?.ownerEvidence).toHaveLength(1);
+      expect(JSON.stringify(stored.get(PLAN_LIMIT_LEDGER_STORAGE_KEY))).toContain('grok-balance-exhausted');
+      const target = { providerId: 'grok', ownerRef };
+      expect((await h.service.getOwnerSnapshot(target)).ownerEvidence).toHaveLength(0);
+      expect(JSON.stringify(stored.get(PLAN_LIMIT_LEDGER_STORAGE_KEY))).not.toContain('grok-balance-exhausted');
+      expect(harness(storage).ledger.snapshotFor(ownerRef.key)?.ownerEvidence ?? []).toEqual([]);
+      h.ledger.recordOwnerEvidence(ownerRef, {
+        observedAt: T0 + 1, source: 'error-derived', pattern: 'grok-balance-exhausted',
+      });
+      expect((await h.service.getOwnerSnapshot(target, { refresh: true })).ownerEvidence).toHaveLength(1);
+      expect(harness(storage).ledger.snapshotFor(ownerRef.key)?.ownerEvidence ?? []).toEqual([]);
+      h.ledger.recordOwnerEvidence(ownerRef, {
+        observedAt: T0 + 2, source: 'error-derived', pattern: 'grok-free-usage',
+      });
+      expect((await h.service.getOwnerSnapshot(target, { refresh: true })).ownerEvidence).toEqual([
+        { observedAt: T0 + 2, source: 'error-derived', pattern: 'grok-free-usage' },
+      ]);
     });
 
     it('F31: OpenCode with no local usage answers its reader status and no evidence', async () => {

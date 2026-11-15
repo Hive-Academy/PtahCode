@@ -55,7 +55,7 @@ function harness() {
   const logger: Pick<Logger, 'debug' | 'warn'> = createMockLogger();
   const service = new PlanUsageService(
     logger as Logger,
-    { snapshotFor: () => undefined, recordWindowEvidence, recordOwnerEvidence: jest.fn(), clearProviderOwnerEvidence: jest.fn(), removeProviderWindowEvidence: jest.fn() },
+    { snapshotFor: () => undefined, recordWindowEvidence, recordOwnerEvidence: jest.fn(), clearProviderOwnerEvidence: jest.fn(), clearOwnerEvidenceByPattern: jest.fn(), removeProviderWindowEvidence: jest.fn() },
     { resolve: jest.fn() },
     { readAccountForRoute, readPlanUsageForRoute, readPlanUsage },
     { getAccountUsage: jest.fn() },

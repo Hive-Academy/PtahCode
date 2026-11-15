@@ -351,6 +351,22 @@ describe('PlanLimitLedgerService — removeProviderWindowEvidence', () => {
       percent: 30,
     });
   });
+  it('uses the exhaustion stamp for the cutoff and removes a passed cutoff', () => {
+    const { ledger } = harness();
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0);
+    ledger.recordWindowEvidence(OWNER_A, readWindow(KEY, T0 - 1, 100, {
+      exhaustion: { observedAt: T0 + 1, source: 'provider-api' },
+    }));
+    expect(windowOf(ledger, OWNER_A, KEY)).toBeDefined();
+    expect(Reflect.get(ledger, 'providerWindowRemovalCutoffs').has(OWNER_A.key)).toBe(false);
+  });
+
+  it('prunes cutoffs older than a minute when another removal is recorded', () => {
+    const { ledger } = harness();
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0);
+    ledger.removeProviderWindowEvidence(OWNER_B, KEY, T0 + 60_001);
+    expect(Reflect.get(ledger, 'providerWindowRemovalCutoffs').has(OWNER_A.key)).toBe(false);
+  });
 
   it('does not apply the provider cutoff to lane-error evidence', () => {
     const { ledger } = harness();
@@ -1171,6 +1187,28 @@ describe('PlanLimitLedgerService — session signals (G2, F62, F79)', () => {
 });
 
 describe('PlanLimitLedgerService — persistence (P6, F24, F74)', () => {
+  it('persists a targeted owner clear and restores unrelated evidence', () => {
+    const storage = memoryStorage();
+    const first = harness({ storage });
+    first.ledger.recordOwnerEvidence(OWNER_A, {
+      observedAt: T0 - 1, source: 'error-derived',
+      pattern: 'grok-balance-exhausted', resetsAt: T0 + HOUR,
+    });
+    first.ledger.recordOwnerEvidence(OWNER_B, {
+      observedAt: T0 - 1, source: 'error-derived',
+      pattern: 'grok-free-usage', resetsAt: T0 + HOUR,
+    });
+    first.ledger.clearOwnerEvidenceByPattern(OWNER_A, 'grok-balance-exhausted', T0);
+    first.ledger.clearOwnerEvidenceByPattern(OWNER_B, 'grok-balance-exhausted', T0);
+    expect(first.ledger.snapshotFor(OWNER_A.key)?.ownerEvidence ?? []).toEqual([]);
+    const restarted = harness({ storage });
+    expect(restarted.ledger.snapshotFor(OWNER_A.key)?.ownerEvidence ?? []).toEqual([]);
+    expect(restarted.ledger.snapshotFor(OWNER_B.key)?.ownerEvidence).toEqual([{
+      observedAt: T0 - 1, source: 'error-derived',
+      pattern: 'grok-free-usage', resetsAt: T0 + HOUR,
+    }]);
+  });
+
   it('F24: after a restart known-reset exhaustion survives and unknown-reset does not', () => {
     const storage = memoryStorage();
     const first = harness({ storage });

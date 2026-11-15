@@ -125,6 +125,7 @@ export type PlanUsageLedger = Pick<
   | 'recordWindowEvidence'
   | 'recordOwnerEvidence'
   | 'clearProviderOwnerEvidence'
+  | 'clearOwnerEvidenceByPattern'
   | 'removeProviderWindowEvidence'
 >;
 /** The credential surface the service reads secrets through. */
@@ -401,7 +402,7 @@ export class PlanUsageService {
     if (signal.aborted) throw abortError();
     if (
       (reading.status === 'stale' || (reading.status === 'available' &&
-        reading.windowSetEstablished && reading.windows.length > 0)) &&
+        reading.windowSetEstablished && (reading.windows.length > 0 || providerId === 'grok'))) &&
       !reading.sourceInvalid
     ) {
       reading = {
@@ -452,6 +453,10 @@ export class PlanUsageService {
       this.evictCache();
     }
     if (reading.status === 'available') {
+      if (owner.providerId === 'grok' && reading.source === 'provider-api' &&
+        reading.credits?.hasCredits === true && reading.requestedAt !== undefined) {
+        this.ledger.clearOwnerEvidenceByPattern(owner, 'grok-balance-exhausted', reading.requestedAt);
+      }
       if (reading.providerOwnerClear && reading.source === 'provider-api') {
         this.ledger.clearProviderOwnerEvidence(owner, reading.fetchedAt ?? this.now());
       }
@@ -461,7 +466,7 @@ export class PlanUsageService {
       if (
         owner.providerId === 'grok' && reading.windows.length === 0 &&
         reading.fetchedAt !== undefined &&
-        (reading.credits?.hasCredits || reading.statusReason === 'balance-unavailable')
+        (reading.credits?.hasCredits || reading.statusReason === 'prepaid-balance-unavailable')
       ) {
         this.ledger.removeProviderWindowEvidence(owner, 'other:subscription', reading.fetchedAt);
       }

@@ -129,6 +129,7 @@ export function createGrokAccountPlanUsageReader(
       const abort = () => controller.abort();
       signal?.addEventListener('abort', abort, { once: true });
       try {
+        const requestedAt = now();
         const response = await fetcher(GROK_BILLING_URL, {
           headers: { Authorization: `Bearer ${key}` },
           redirect: 'error',
@@ -189,10 +190,12 @@ export function createGrokAccountPlanUsageReader(
               ];
         return {
           status: 'available',
+          source: 'provider-api',
           fetchedAt: observedAt,
+          requestedAt,
           windowSetEstablished: !(malformedBalance && percent !== undefined && percent >= 100),
           windows,
-          ...(malformedBalance && { statusReason: 'balance-unavailable' as const }),
+          ...(malformedBalance && { statusReason: 'prepaid-balance-unavailable' as const }),
           ...(balance !== undefined && {
             credits: { balance: String(balance), hasCredits: balance > 0, unlimited: false },
           }),

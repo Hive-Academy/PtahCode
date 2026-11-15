@@ -41,7 +41,7 @@ describe('Grok account plan reader', () => {
     } else if (balance === 5) {
       expect(result.credits).toEqual({ balance: '5', hasCredits: true, unlimited: false });
     } else if (balance === 'invalid') {
-      expect(result.statusReason).toBe('balance-unavailable');
+      expect(result.statusReason).toBe('prepaid-balance-unavailable');
       expect(result.credits).toBeUndefined();
     } else {
       expect(result.statusReason).toBeUndefined();
@@ -53,7 +53,7 @@ describe('Grok account plan reader', () => {
     { percent: 110, prepaidBalance: { val: 0 }, count: 1, reason: undefined, credit: '0' },
     { percent: 100, prepaidBalance: null, count: 1, reason: undefined, credit: undefined },
     { percent: 100, prepaidBalance: { val: '12' }, count: 0, reason: undefined, credit: '12' },
-    { percent: 100, prepaidBalance: { val: -1 }, count: 0, reason: 'balance-unavailable', credit: undefined },
+    { percent: 100, prepaidBalance: { val: -1 }, count: 0, reason: 'prepaid-balance-unavailable', credit: undefined },
   ])('parses balance $prepaidBalance at $percent percent', async ({ percent, prepaidBalance, count, reason, credit }) => {
     const fetcher = jest.fn(async () => new Response(JSON.stringify({ config: {
       creditUsagePercent: percent, prepaidBalance,
@@ -138,6 +138,16 @@ describe('Grok account plan reader', () => {
     });
     expect(JSON.stringify(result)).not.toContain('private@example.test');
     expect(JSON.stringify(result)).not.toContain('secret');
+  });
+  it('stamps the request before the response is parsed', async () => {
+    const now = jest.fn().mockReturnValueOnce(10).mockReturnValueOnce(20);
+    const result = await createGrokAccountPlanUsageReader(
+      now,
+      jest.fn(async () => new Response(JSON.stringify({ config: { prepaidBalance: { val: 5 } } }))),
+      auth as never,
+      {},
+    )(request);
+    expect(result).toMatchObject({ requestedAt: 10, fetchedAt: 20 });
   });
   it('returns no plan for API-key mode and 403', async () => {
     const fetcher = jest.fn();

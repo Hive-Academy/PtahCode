@@ -256,6 +256,9 @@ export function laneLimitEvidence(
   const exhaustion: OwnerLimitEvidence = {
     observedAt,
     source: 'error-derived',
+    ...(classification.pattern === 'grok-balance-exhausted' && {
+      pattern: classification.pattern,
+    }),
     ...reset,
     ...scope,
   };
