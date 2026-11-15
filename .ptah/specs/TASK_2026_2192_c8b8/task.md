@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2192_c8b8
-status: backlog
+status: in_review
 type: FEATURE
 title: "Phase 6: General workflow"
 depends_on: []
