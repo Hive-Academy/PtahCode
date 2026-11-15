@@ -67,13 +67,13 @@ describe('selectInvocablePluginSkills', () => {
 
   it('lists no skill when the disabled-skill policy is unknown', () => {
     expect(
-      selectInvocablePluginSkills('software-architect', skills, null),
+      selectInvocablePluginSkills('team-leader', skills, null),
     ).toEqual([]);
   });
 
   it('excludes a disabled skill for a known type that may invoke Skill', () => {
     expect(
-      selectInvocablePluginSkills('software-architect', skills, [
+      selectInvocablePluginSkills('team-leader', skills, [
         'review-code',
       ]),
     ).toEqual([skills[0]]);
@@ -82,7 +82,7 @@ describe('selectInvocablePluginSkills', () => {
   it('excludes a skill by its directory id when its name differs', () => {
     expect(
       selectInvocablePluginSkills(
-        'software-architect',
+        'team-leader',
         [acmeReview],
         ['code-review'],
       ),
@@ -92,7 +92,7 @@ describe('selectInvocablePluginSkills', () => {
   it('keeps a skill whose name equals another skill disabled directory id', () => {
     expect(
       selectInvocablePluginSkills(
-        'software-architect',
+        'team-leader',
         [acmeReview, nameCollision],
         ['code-review'],
       ),
@@ -102,7 +102,7 @@ describe('selectInvocablePluginSkills', () => {
   it('does not exclude a skill by its frontmatter name', () => {
     expect(
       selectInvocablePluginSkills(
-        'software-architect',
+        'team-leader',
         [acmeReview],
         ['Acme Code Review'],
       ),
@@ -111,7 +111,7 @@ describe('selectInvocablePluginSkills', () => {
 
   it('keeps every skill when nothing is disabled', () => {
     expect(
-      selectInvocablePluginSkills('software-architect', skills, []),
+      selectInvocablePluginSkills('team-leader', skills, []),
     ).toEqual(skills);
   });
 });

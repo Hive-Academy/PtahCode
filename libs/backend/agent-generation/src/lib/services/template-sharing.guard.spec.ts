@@ -49,7 +49,7 @@ const TEMPLATES_DIR = path.join(
 const PARTIALS_DIR = path.join(TEMPLATES_DIR, SHARED_PARTIALS_DIR);
 
 /** The corpus is a fixed set of specialists, not a growing directory. */
-const EXPECTED_TEMPLATE_COUNT = 7;
+const EXPECTED_TEMPLATE_COUNT = 1;
 
 function templateFiles(): string[] {
   return fs
@@ -365,10 +365,6 @@ describe('LLM markers', () => {
 const SKELETON_HEADINGS: ReadonlyArray<{ heading: string; why: string }> = [
   { heading: 'role', why: 'Opens every agent file: who this specialist is.' },
   { heading: 'inputs', why: 'What the agent is handed when it is invoked.' },
-  {
-    heading: 'method',
-    why: 'The specialist-specific procedure. Body differs.',
-  },
   { heading: 'output contract', why: 'What the agent returns. Body differs.' },
   {
     heading: 'return value',
@@ -946,7 +942,6 @@ const SKILL_USE_PHRASES = [
   'required miss stops the dependent work',
 ] as const;
 
-const SKILL_USE_PERMISSION = 'not permission to perform the denied action';
 
 describe('partial resolution', () => {
   const resolver = new TemplatePartialResolver({
@@ -1036,21 +1031,8 @@ const REPLACE: SharedBlockId = 'REPLACEMENT_POLICY';
 const DELEGATE: SharedBlockId = 'CLI_DELEGATION';
 
 const ROLE_PARTIALS: Readonly<Record<string, readonly SharedBlockId[]>> = {
-  'modernization-detector': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE],
-  'project-manager': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
-  'researcher-expert': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE],
-  'software-architect': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
   'team-leader': [TOOLING, TASK_SPEC, CLARIFY, REPLACE, DELEGATE],
-  'technical-content-writer': [TOOLING, TASK_SPEC, CLARIFY, DELEGATE],
-  'ui-ux-designer': [TOOLING, TASK_SPEC, CLARIFY, REPLACE],
 };
-
-const NON_DELEGATING_ROLES: ReadonlyArray<{ role: string; why: string }> = [
-  {
-    role: 'ui-ux-designer',
-    why: 'Design discovery is a dialogue routed through the orchestrator. A lane that shares none of that context invents the answers.',
-  },
-];
 
 function staticIdsOf(file: string): string[] {
   return markersOf(matter(read(file)).content)
@@ -1095,18 +1077,6 @@ describe('role grants', () => {
     },
   );
 
-  it.each(NON_DELEGATING_ROLES)(
-    '$role does not expand CLI_DELEGATION',
-    async ({ role, why }) => {
-      expect(why.length).toBeGreaterThan(20);
-      expect(ROLE_PARTIALS[role]).not.toContain(DELEGATE);
-      const { blocks, content } = await resolveTemplate(`${role}.template.md`);
-      expect(blocks.map((b) => b.id)).not.toContain(DELEGATE);
-      expect(content).toContain(SKILL_USE_PERMISSION);
-      expect(content).not.toContain('ptah_agent_list');
-    },
-  );
-
   it('keeps the skill-use section free of tooling tokens', () => {
     const tooling = fs.readFileSync(
       path.join(PARTIALS_DIR, partialFileName(TOOLING)),
@@ -1137,42 +1107,11 @@ describe('role grants', () => {
 });
 
 // ---------------------------------------------------------------------------
-// (j) the engineering-hygiene block lives INLINE in four roles, nowhere else
+// (j) the removed engineering-hygiene partial stays absent
 // ---------------------------------------------------------------------------
 
-/**
- * The hygiene rules have no shared partial. Released apps (electron v0.1.69 /
- * v0.1.70) download templates from main and reject any STATIC id their
- * compiled SHARED_BLOCK_IDS does not list, so a `STATIC:ENGINEERING_HYGIENE`
- * marker would stop template loading for those users. software-architect
- * retains the reference block; generic review guidance lives in phases/review.md.
- * The block runs from its first "- Engineering hygiene:" line through the
- * end of its "- Runtime cost:" line.
- */
+/** The removed hygiene partial must not appear in shipped templates. */
 describe('engineering hygiene inlining', () => {
-  const HYGIENE_START = '- Engineering hygiene:';
-  const HYGIENE_LAST_LINE = '- Runtime cost:';
-
-  /** The hygiene block of `body`, or `null` when either boundary is absent. */
-  function hygieneBlock(body: string): string | null {
-    const start = body.indexOf(HYGIENE_START);
-    if (start === -1) return null;
-    const last = body.indexOf(HYGIENE_LAST_LINE, start);
-    if (last === -1) return null;
-    const lineEnd = body.indexOf('\n', last);
-    return body.slice(start, lineEnd === -1 ? body.length : lineEnd).trimEnd();
-  }
-
-  const REFERENCE_ROLE = 'software-architect';
-  const REFERENCE_BLOCK = hygieneBlock(read(`${REFERENCE_ROLE}.template.md`));
-
-  it(`${REFERENCE_ROLE} carries a hygiene block that ends at Runtime cost`, () => {
-    expect(REFERENCE_BLOCK).not.toBeNull();
-    // Seven rules, one per line: hygiene, simplicity, structure, boundaries,
-    // external calls, tests, runtime cost.
-    expect(REFERENCE_BLOCK?.split('\n')).toHaveLength(7);
-  });
-
   it('no template references the deleted ENGINEERING_HYGIENE partial', () => {
     // Both the substring and the parsed marker ids: a loose marker such as
     // `<!-- STATIC: ENGINEERING_HYGIENE -->` still reaches the resolver.
@@ -1222,7 +1161,6 @@ describe('task-spec audience', () => {
         taskSpecAudienceFor(file.replace('.template.md', '')) === 'coordinator',
     );
     expect(coordinators).toEqual([
-      'project-manager.template.md',
       'team-leader.template.md',
     ]);
   });

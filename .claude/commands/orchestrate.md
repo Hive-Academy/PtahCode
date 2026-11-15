@@ -45,7 +45,7 @@ Resolve every supplied task ID against an existing `.ptah/specs/<id>/task.md` an
 
 **Strategies**: FEATURE, BUGFIX, REFACTORING, DOCUMENTATION, RESEARCH, DEVOPS, CREATIVE
 
-**Active agents**: project-manager, software-architect, team-leader, researcher-expert, modernization-detector, ui-ux-designer, technical-content-writer. Verification uses the `review`, `tests` and `visual-review` phase kinds. Implementation uses the `implement` phase kind.
+**Active agent**: team-leader. Requirements, architecture, research, design and docs use the `plan`, `architecture`, `research`, `design` and `docs` phase kinds. Verification uses the `review`, `tests` and `visual-review` phase kinds. Implementation uses the `implement` phase kind.
 
 **Checkpoints**: Scope Clarification, Requirements Validation, Architecture Validation, QA Selection
 

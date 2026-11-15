@@ -1283,7 +1283,7 @@ export class AgentGenerationOrchestratorService {
 
   /**
    * Convert kebab-case template name to Title Case.
-   * e.g., "software-architect" -> "Software Architect"
+   * e.g., "team-leader" -> "Team Leader"
    */
   private humanizeName(name: string): string {
     return name

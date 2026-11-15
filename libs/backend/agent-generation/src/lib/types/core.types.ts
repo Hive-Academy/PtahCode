@@ -34,7 +34,7 @@ import type { AgentWriteGuard } from '../interfaces/agent-file-writer.interface'
  * @example
  * ```typescript
  * const template: AgentTemplate = {
- *   id: 'software-architect',
+ *   id: 'team-leader',
  *   name: 'Backend Developer',
  *   version: '1.0.0',
  *   content: '# Backend Developer\n\n{{projectContext}}\n\n<!-- LLM:architecture -->...',
@@ -62,7 +62,7 @@ import type { AgentWriteGuard } from '../interfaces/agent-file-writer.interface'
  */
 export interface AgentTemplate {
   /**
-   * Unique template identifier (e.g., 'software-architect', 'orchestrate').
+   * Unique template identifier (e.g., 'team-leader', 'orchestrate').
    * Must be kebab-case and match the filename without extension.
    */
   id: string;
@@ -478,7 +478,7 @@ export interface LlmCustomization {
  * @example
  * ```typescript
  * const generated: GeneratedAgent = {
- *   sourceTemplateId: 'software-architect',
+ *   sourceTemplateId: 'team-leader',
  *   sourceTemplateVersion: '1.0.0',
  *   content: '# Backend Developer\n\n...',
  *   variables: {
@@ -493,7 +493,7 @@ export interface LlmCustomization {
  *     tokensUsed: 850
  *   }],
  *   generatedAt: new Date(),
- *   filePath: '.claude/agents/software-architect.md'
+ *   filePath: '.claude/agents/team-leader.md'
  * };
  * ```
  */
@@ -536,7 +536,7 @@ export interface GeneratedAgent {
 
   /**
    * Target file path where this agent should be written.
-   * Relative to workspace root (e.g., '.claude/agents/software-architect.md').
+   * Relative to workspace root (e.g., '.claude/agents/team-leader.md').
    */
   filePath: string;
 }
@@ -652,7 +652,7 @@ export interface OrchestratorGenerationOptions {
  *   successful: 4,
  *   failed: 1,
  *   durationMs: 45000,
- *   warnings: ['LLM customization failed for software-architect section "examples", using fallback'],
+ *   warnings: ['LLM customization failed for team-leader section "examples", using fallback'],
  *   agents: [...generatedAgents]
  * };
  * ```

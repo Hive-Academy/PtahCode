@@ -629,53 +629,11 @@ export class SetupRpcHandlers {
             category: AgentCategory;
           }> = [
             {
-              id: 'project-manager',
-              name: 'Project Manager',
-              description:
-                'Analyzes requirements, creates task descriptions, and validates delivery',
-              category: 'planning',
-            },
-            {
-              id: 'software-architect',
-              name: 'Software Architect',
-              description:
-                'Investigates codebase, designs implementation plans, and defines architecture',
-              category: 'planning',
-            },
-            {
               id: 'team-leader',
               name: 'Team Leader',
               description:
                 'Decomposes plans into tasks, coordinates developers, and manages batches',
               category: 'planning',
-            },
-            {
-              id: 'researcher-expert',
-              name: 'Researcher Expert',
-              description:
-                'Investigates technologies, researches solutions, and provides technical guidance',
-              category: 'specialist',
-            },
-            {
-              id: 'modernization-detector',
-              name: 'Modernization Detector',
-              description:
-                'Identifies outdated patterns, suggests improvements, and detects technical debt',
-              category: 'specialist',
-            },
-            {
-              id: 'technical-content-writer',
-              name: 'Technical Content Writer',
-              description:
-                'Creates documentation, blog posts, video scripts, and marketing content',
-              category: 'creative',
-            },
-            {
-              id: 'ui-ux-designer',
-              name: 'UI/UX Designer',
-              description:
-                'Designs user interfaces, creates visual specifications, and improves user experience',
-              category: 'creative',
             },
           ];
 

@@ -44,6 +44,12 @@ export const RETIRED_ROLES: readonly RetiredRoleV1[] = Object.freeze([
   { slug: 'code-style-reviewer', phaseKind: 'review', step: 2 },
   { slug: 'senior-tester', phaseKind: 'tests', step: 2 },
   { slug: 'visual-reviewer', phaseKind: 'visual-review', step: 2 },
+  { slug: 'project-manager', phaseKind: 'plan', step: 3 },
+  { slug: 'software-architect', phaseKind: 'architecture', step: 3 },
+  { slug: 'researcher-expert', phaseKind: 'research', step: 3 },
+  { slug: 'modernization-detector', phaseKind: 'research', step: 3 },
+  { slug: 'technical-content-writer', phaseKind: 'docs', step: 3 },
+  { slug: 'ui-ux-designer', phaseKind: 'design', step: 3 },
 ]);
 
 function normalize(slug: string): string {

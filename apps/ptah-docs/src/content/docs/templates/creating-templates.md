@@ -7,9 +7,9 @@ An agent template is a file named `<name>.template.md` with YAML frontmatter and
 
 ## Example frontmatter
 
-```markdown title="software-architect.template.md"
+```markdown title="example-agent.template.md"
 ---
-templateId: software-architect-v2
+templateId: example-agent-v2
 templateVersion: 2.3.0
 applicabilityRules:
   projectTypes: [React, Angular, Vue, Svelte, Node]
@@ -19,7 +19,7 @@ applicabilityRules:
   alwaysInclude: false
   techStack: [React, Angular, TypeScript]
 dependencies: []
-name: software-architect
+name: example-agent
 description: >-
   Designs systems and documents architecture decisions ...
 model: opus

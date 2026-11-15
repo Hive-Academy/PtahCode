@@ -47,6 +47,7 @@ describe('AgentRecommendationService', () => {
     const service = createService();
     const recommendations = service.calculateRecommendations(MINIMAL_ANALYSIS);
     const recommendedIds = recommendations.map((r) => r.agentId).sort();
+    expect(recommendedIds).toEqual(['team-leader']);
 
     // Every template on disk must be reachable through the wizard picker.
     for (const id of templateIdsOnDisk()) {
@@ -65,6 +66,12 @@ describe('AgentRecommendationService', () => {
       'code-style-reviewer',
       'code-logic-reviewer',
       'visual-reviewer',
+      'project-manager',
+      'software-architect',
+      'researcher-expert',
+      'modernization-detector',
+      'technical-content-writer',
+      'ui-ux-designer',
     ]) {
       expect(recommendedIds).not.toContain(retired);
     }

@@ -57,7 +57,7 @@ export const SPEC_CONTRACT_VERSION = 1;
 /** The agent-owned prose document. Machines never write it. */
 export const CONTEXT_FILE = 'context.md';
 
-/** The project-manager's scoped requirements. */
+/** The plan phase's scoped requirements. */
 export const TASK_DESCRIPTION_FILE = 'task-description.md';
 
 /** The architect's implementation plan. */
@@ -78,14 +78,14 @@ export const CODE_LOGIC_REVIEW_FILE = 'code-logic-review.md';
 /** The visual-review phase report filename. */
 export const VISUAL_REVIEW_FILE = 'visual-review.md';
 
-/** The designer's section-by-section visual specification. */
+/** The design phase's section-by-section visual specification. */
 export const VISUAL_DESIGN_SPECIFICATION_FILE =
   'visual-design-specification.md';
 
-/** The designer's visual specification (`ui-ux-designer.template.md:104`). */
+/** The design phase's visual specification. */
 export const DESIGN_SPEC_FILE = 'design-spec.md';
 
-/** The designer's developer handoff (`ui-ux-designer.template.md:148`). */
+/** The design phase's developer handoff. */
 export const DESIGN_HANDOFF_FILE = 'design-handoff.md';
 
 /** Permanent fallback name for {@link BATCHES_FILE}. */
@@ -106,12 +106,12 @@ export const LEGACY_BATCHES_FILE = 'tasks.md';
  * delete working workflow outputs:
  *
  *  - `design-handoff.md`, `design-assets-inventory.md` —
- *    `ui-ux-designer.template.md:148,152` writes them; `software-architect` and
+ *    the design phase writes them; the architecture phase and
  *    `implement` read them back.
- *  - `design-spec.md` — the visual specification `ui-ux-designer.template.md:104`
+ *  - `design-spec.md` — the visual specification the design phase
  *    writes into the task folder (`.ptah/specs/<TASK_FOLDER>/design-spec.md`);
  *    orchestration checkpoints Gate 1.7 reads it before the next phase runs.
- *  - `content-specification.md` — `technical-content-writer.template.md:555`.
+ *  - `content-specification.md` — the docs phase deliverable.
  *  - `testing-infrastructure-escalation.md` — `phases/tests.md`.
  *
  * A fifth offender, `code-review.md`, was NOT admitted: the reviewer templates
@@ -590,7 +590,7 @@ function renderSpecialistBlock(): string {
 - \`${CARRIER_FILE}\` is machine-owned: read it, never edit it. \`${CONTEXT_FILE}\` holds intent.
   \`${BATCHES_FILE}\` holds the team-leader batch breakdown; its former name \`${LEGACY_BATCHES_FILE}\` is still read.
 - State is not yours: the carrier \`status:\` and task states in \`${BATCHES_FILE}\` belong to the team-leader alone
-  (status also to the orchestrator and project-manager). Report what you finished, with evidence.
+  (status also to the orchestrator and plan phase owner). Report what you finished, with evidence.
 - Write only the deliverable your output contract names. Read from a task folder: ${recognisedDocList()}.
 - ${SUBAGENT_HANDOFF_RULE}
 `;

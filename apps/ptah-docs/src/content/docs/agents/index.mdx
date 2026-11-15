@@ -9,13 +9,13 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 Agents are specialized AI workers that PtahCode coordinates for you. Each agent has a focused role, such as testing, UI review, or research, and a system prompt for that role.
 
-## The 7 built-in agents
+## Built-in agent and phases
 
-PtahCode has 7 agent templates. The [setup wizard](/setup/setup-wizard/) analyzes your project and writes the agents that apply to it into `.claude/agents/`.
+PtahCode ships the `team-leader` agent template. The [setup wizard](/setup/setup-wizard/) analyzes your project and writes the agents that apply to it into `.claude/agents/`.
 
 <CardGrid>
   <Card title="Planning & Leadership" icon="rocket">
-    project-manager, software-architect, team-leader
+    The `plan` and `architecture` phases prepare work; `team-leader` coordinates batches.
   </Card>
   <Card title="Implementation" icon="laptop">
     The `implement` phase runs on a subagent, CLI lane, or session.
@@ -24,8 +24,7 @@ PtahCode has 7 agent templates. The [setup wizard](/setup/setup-wizard/) analyze
     Phase kinds: tests, review, visual-review
   </Card>
   <Card title="Research & Design" icon="magnifier">
-    researcher-expert, modernization-detector, ui-ux-designer,
-    technical-content-writer
+    Phase kinds: research, design, docs
   </Card>
 </CardGrid>
 
@@ -39,7 +38,7 @@ PtahCode uses a three-tier orchestration model:
 2. **Senior leads** — specialists (architect, backend-dev, reviewer, etc.) spawned as sub-agents.
 3. **CLI lanes** — installed CLIs or configured Ptah CLI providers assigned focused sub-tasks or whole phases. Running every phase on a lane is [Relay](/tribunal/relay/), requested through the `tribunal` skill in main chat.
 
-The orchestrator spawns sub-agents and phase or batch executors. The team-leader recommends executors and records batch state, but spawns nothing. `ui-ux-designer` does not delegate to CLI lanes. The `visual-review` phase uses browser tools. Specialists report evidence without editing `task.md` or `batches.md`.
+The orchestrator spawns sub-agents and phase or batch executors. The team-leader recommends executors and records batch state, but spawns nothing. The `visual-review` phase uses browser tools. Specialists report evidence without editing `task.md` or `batches.md`.
 
 :::tip[When to use what]
 
@@ -68,7 +67,7 @@ Each agent is a Markdown file with YAML frontmatter and a system prompt. Edit th
     here →](/setup/setup-wizard/)
   </Card>
   <Card title="Browse the built-ins" icon="list-format">
-    See all 7 built-in agents and when to reach for each. [Catalog
+    See the built-in agent and the phase workflow. [Catalog
     →](/agents/built-in-agents/)
   </Card>
   <Card title="Spawn CLI agents" icon="seti:shell">

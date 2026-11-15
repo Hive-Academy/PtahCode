@@ -56,22 +56,14 @@ const NO_BROWSER_NO_WEB: readonly string[] = [
   ...PTAH_BROWSER_TOOLS,
 ];
 
-const NO_WEB_SCRAPE: readonly string[] = [...WEB_SCRAPE_SERVERS];
-
 /**
  * Deny list per agent type (the template `name`). An empty list means the type
- * keeps every tool: researcher-expert needs web search and scraping.
+ * keeps every tool.
  */
 export const SUBAGENT_DISALLOWED_TOOLS: Readonly<
   Record<string, readonly string[]>
 > = {
-  'modernization-detector': NO_BROWSER_NO_WEB,
-  'project-manager': NO_BROWSER_NO_WEB,
-  'software-architect': NO_BROWSER_NO_WEB,
   'team-leader': NO_BROWSER_NO_WEB,
-  'technical-content-writer': NO_WEB_SCRAPE,
-  'ui-ux-designer': NO_WEB_SCRAPE,
-  'researcher-expert': [],
 };
 
 /**

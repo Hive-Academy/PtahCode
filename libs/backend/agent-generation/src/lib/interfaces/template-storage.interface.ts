@@ -56,12 +56,12 @@ export interface ITemplateStorageService {
    * Loads a single template file, parses its content, and validates structure.
    * Template ID must match the filename without the .template.md extension.
    *
-   * @param templateId - Unique template identifier (e.g., 'software-architect')
+   * @param templateId - Unique template identifier (e.g., 'team-leader')
    * @returns Result containing the template, or Error if not found or invalid
    *
    * @example
    * ```typescript
-   * const result = await service.loadTemplate('software-architect');
+   * const result = await service.loadTemplate('team-leader');
    * if (result.isOk()) {
    *   console.log(`Loaded template: ${result.value.name}`);
    * }

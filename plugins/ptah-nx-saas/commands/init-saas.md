@@ -31,7 +31,7 @@ Standalone command that runs Stage A of the `saas-workspace-initializer` skill: 
 - `.ptah/scope-decisions.md` — Step a discovery answers, one section per question with chosen value and rationale.
 - `.ptah/roadmap.md` — Step b output, phased checklist with charters.
 
-**Stage B**: every unchecked roadmap item is its own task, run later via `/orchestrate <slug>` or the project-manager agent, in a new chat session.
+**Stage B**: every unchecked roadmap item is its own task, run later via `/orchestrate <slug>` or the `plan` phase, in a new chat session.
 
 ## Skill Path
 

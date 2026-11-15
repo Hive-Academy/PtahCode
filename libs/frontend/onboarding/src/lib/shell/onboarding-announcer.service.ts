@@ -2,7 +2,7 @@ import { Injectable, signal } from '@angular/core';
 
 /**
  * Short polite announcements for the shell's one visually hidden
- * `role="status"` region ("Agent software-architect written", "Command copied").
+ * `role="status"` region ("Agent team-leader written", "Command copied").
  *
  * The card grids and the proposal are not live regions; pages announce
  * discrete events through here instead.

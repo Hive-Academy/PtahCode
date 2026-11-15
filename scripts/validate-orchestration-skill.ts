@@ -114,13 +114,7 @@ const REQUIRED_STRATEGIES: readonly string[] = [
  * into agent-catalog.md or the shipped agent templates by this validator.
  */
 const REQUIRED_AGENTS: readonly string[] = [
-  'project-manager',
-  'software-architect',
   'team-leader',
-  'researcher-expert',
-  'modernization-detector',
-  'ui-ux-designer',
-  'technical-content-writer',
 ] as const;
 
 /** Each retired role must remain documented as an alias of its phase kind. */

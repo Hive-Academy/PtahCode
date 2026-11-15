@@ -7,46 +7,10 @@
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main/.claude/agents",
   "agents": [
     {
-      "file": "software-architect.md",
-      "name": "Software Architect",
-      "description": "Elite Software Architect for system design and strategic planning",
-      "category": "planning"
-    },
-    {
-      "file": "project-manager.md",
-      "name": "Project Manager",
-      "description": "Technical Lead for task orchestration and strategic planning",
-      "category": "planning"
-    },
-    {
       "file": "team-leader.md",
       "name": "Team Leader",
       "description": "Task Decomposition and Batch Orchestration Specialist",
       "category": "planning"
-    },
-    {
-      "file": "researcher-expert.md",
-      "name": "Research Expert",
-      "description": "Deep technical analysis and strategic insights",
-      "category": "specialist"
-    },
-    {
-      "file": "modernization-detector.md",
-      "name": "Modernization Detector",
-      "description": "Identifies technology modernization opportunities",
-      "category": "specialist"
-    },
-    {
-      "file": "ui-ux-designer.md",
-      "name": "UI/UX Designer",
-      "description": "Visual design systems and production-ready specifications",
-      "category": "creative"
-    },
-    {
-      "file": "technical-content-writer.md",
-      "name": "Technical Content Writer",
-      "description": "Marketing pages, blogs, documentation, and video scripts",
-      "category": "creative"
     }
   ]
 }

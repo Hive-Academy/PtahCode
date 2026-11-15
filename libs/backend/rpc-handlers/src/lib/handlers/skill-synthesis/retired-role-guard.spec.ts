@@ -43,12 +43,18 @@ describe('assertRoleMutable', () => {
     ).not.toThrow();
   });
 
-  it('allows every role while RETIRED_ROLES is empty (default predicate)', () => {
+  it('allows a non-retired agent with the default predicate', () => {
     for (const action of ACTIONS) {
       expect(() =>
-        assertRoleMutable(action, 'agent', RETIRED_SLUG),
+        assertRoleMutable(action, 'agent', 'team-leader'),
       ).not.toThrow();
     }
+  });
+
+  it('refuses a retired agent with the default predicate', () => {
+    expect(() => assertRoleMutable('save', 'agent', RETIRED_SLUG)).toThrow(
+      RpcUserError,
+    );
   });
 });
 

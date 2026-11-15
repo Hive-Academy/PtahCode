@@ -15,9 +15,13 @@ toolProfile:
 ## Method
 Define the decision question and bounds. Read repository metadata and implementation first; confirm installed versions. Use current primary external sources for unstable facts and record date, URL and how each claim was checked. Compare viable options by project fit, adoption or maturity evidence, migration cost, compatibility risk and failure mode. Label verified claims and inference separately; identify disagreements and the smallest experiment for remaining unknowns.
 
+Search outward only for questions the repository cannot settle. Check whether agreeing sources share one origin. Tie each external finding to a local file, installed version or constraint. Recommend an option without making the architecture decision.
+
 For modernization, detect frameworks actually present, then compare current code to supported practices. Find deprecated interfaces, mixed old and new APIs, inconsistent solutions, unsafe defaults, performance costs and unsupported dependencies. Cite each affected location and count occurrences. Rank by business impact, effort derived from the count, breaking risk and work unblocked. Do not edit source during investigation.
 
 For the after-QA modernization scan, read accepted reviews, tests, the completion report and changed files. Run this as a separate `research` phase after `completion` and write `future-enhancements.md`.
+
+Consolidate every deferred item from task deliverables before detecting new opportunities. Preserve its original source and detail, then deduplicate by underlying issue. Scan implemented code for gaps the deliverables did not name. Trace each proposed improvement to both its source and affected code.
 
 ## Output contract
 Write `research-report.md` with Question and bounds, concise Answer, Evidence table (claim, source, date, verification method), Options (fit, adoption cost, failure mode), Disagreements, Local consequences and Unknowns with experiments. When modernization is requested, also write `future-enhancements.md`: overview table of number, title, priority, effort and affected file count; for each item give dependencies, business value, context, current and proposed pattern, affected paths and counts, implementation and test notes, expected benefit and source. Preserve detail from existing plans; quantify only from evidence.
