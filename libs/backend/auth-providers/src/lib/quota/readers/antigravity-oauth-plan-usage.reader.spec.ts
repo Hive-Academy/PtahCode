@@ -161,15 +161,17 @@ describe('Antigravity OAuth quota', () => {
     const missing = async () => {
       throw Object.assign(new Error('missing'), { code: 'ENOENT' });
     };
+    const fetcher = jest.fn();
     await expect(
       readAntigravityOAuthQuota(
         undefined,
         () => 1,
-        jest.fn(),
+        fetcher,
         missing as never,
         {},
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ status: 'no-usage-source', statusReason: 'no-oauth', windows: [] });
+    expect(fetcher).not.toHaveBeenCalled();
   });
   it('continues to a second endpoint after a quota 403 without refreshing the token', async () => {
     let tokenReads = 0;

@@ -134,11 +134,30 @@ function windowExhaustion(
 export function activeWindowExhaustion(
   window: PlanLimitWindow,
   now: number,
+  ctx?: PlanLimitStateContext,
 ): OwnerLimitEvidence | undefined {
   const exhaustion = windowExhaustion(window);
-  return exhaustion !== undefined && isActiveLimitEvidence(exhaustion, now)
-    ? exhaustion
-    : undefined;
+  if (exhaustion !== undefined && isActiveLimitEvidence(exhaustion, now)) {
+    return exhaustion;
+  }
+  if (
+    ctx?.status === 'available' &&
+    window.usedSource === 'provider-api' &&
+    (usedPercent(window.used) ?? 0) >= 100 &&
+    now - windowObservedAt(window) <= ctx.freshnessMs &&
+    resetPassage(window, now) === undefined &&
+    (window.resetsAt === undefined || window.resetsAt > now)
+  ) {
+    return {
+      source: 'provider-api',
+      observedAt: windowObservedAt(window),
+      ...(window.resetsAt !== undefined && {
+        resetsAt: window.resetsAt,
+        resetSource: window.resetSource,
+      }),
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -204,7 +223,7 @@ export function classifyWindow(
   window: PlanLimitWindow,
   ctx: PlanLimitStateContext,
 ): PlanWindowState {
-  if (activeWindowExhaustion(window, ctx.now) !== undefined) {
+  if (activeWindowExhaustion(window, ctx.now, ctx) !== undefined) {
     return 'limit-reached';
   }
   if (resetPassage(window, ctx.now) !== undefined) return 'reset-usage-unknown';

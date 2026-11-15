@@ -138,6 +138,12 @@ export class FollowUpQueueService {
     destroyRef.onDestroy(
       this.tabManager.onTabClosed((event) => this.onTabClosed(event)),
     );
+    // A timed-out start that never bound a session: held prompts can never
+    // drain (the pump needs a bound session), so they go back to the composer.
+    const offAbandoned = this.sender.onStartAbandoned?.((tabId) =>
+      this.draftHeld(tabId),
+    );
+    if (offAbandoned) destroyRef.onDestroy(offAbandoned);
     destroyRef.onDestroy(() => {
       for (const id of this.receiptChecks.keys()) this.cancelReceiptCheck(id);
       this.uncertainRetries.clear();

@@ -22,16 +22,19 @@ export interface IMcpSubagentRootRegistrar {
    *
    * Never rejects. `registered: false` (with a `reason`) means no entry is on
    * disk for `root` and nothing was retained: the session may still start, but
-   * its subagents have no Ptah tools. Retaining a root that is already retained
-   * is not counted; one {@link releaseRoot} gives it back.
+   * its subagents have no Ptah tools. Retention is counted per root: each
+   * successful retain needs exactly one {@link releaseRoot}, so sessions that
+   * share a worktree keep the entry until the last one releases it.
    */
   retainRoot(root: string): Promise<McpSubagentRootRetention>;
 
   /**
-   * Give `root` back. Its entry is removed unless the folder is also an open
-   * workspace folder (which keeps its own entry).
+   * Give back one hold on `root`. When the last hold is released, its entry is
+   * removed unless the folder is also an open workspace folder (which keeps
+   * its own entry).
    *
-   * Idempotent: releasing a root that is not retained does nothing. Never
+   * Call it once per successful retain: a second call for the same hold drops
+   * another holder's count. Releasing a root that is not retained does nothing. Never
    * rejects; a failed removal is logged and retried by the server's next
    * reconcile or stop.
    */
