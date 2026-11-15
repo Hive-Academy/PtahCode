@@ -377,6 +377,14 @@ async function codex(): Promise<ProbeResult & { delivery?: CodexDelivery }> {
           window,
         ]);
       },
+      removeProviderWindowEvidence: (owner: { key: string }, key: unknown) => {
+        windowsByOwner.set(
+          owner.key,
+          (windowsByOwner.get(owner.key) ?? []).filter(
+            (window) => (window as { key?: unknown }).key !== key,
+          ),
+        );
+      },
       sessionOwners: () => ({}),
     };
     const planUsage = new PlanUsageService(

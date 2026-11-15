@@ -15,7 +15,9 @@
  * - OpenCode    "Free usage exceeded" (provisional)
  * - Ollama      HTTP 429 with a limit wording (provisional)
  * - Grok        "subscription:free-usage-exhausted" (the `-32003` data), or
- *               "reached your free Grok Build usage limit" (`grok -p`)
+ *               "reached your free Grok Build usage limit" (`grok -p`);
+ *               "HTTP 402 ... usage balance exhausted" (prepaid balance,
+ *               pattern `grok-balance-exhausted`)
  *
  * A Ptah CLI lane is checked against its provider's wordings (Claude for
  * `anthropic`, Ollama for `ollama-cloud`) once its owner names the provider,
@@ -62,6 +64,18 @@ const OLLAMA_LIMIT_REGEX =
 const GROK_LIMIT_REGEX =
   /subscription:free-usage-exhausted|reached your free Grok Build usage limit/i;
 
+/**
+ * Grok prepaid-balance exhaustion: HTTP 402 next to "usage balance exhausted".
+ * The 402 must carry a status prefix (`HTTP`, `HTTP/1.1`, `status`,
+ * `statusCode`, `"status":`, `API error`), before or after the wording, so a
+ * bare "402" or the wording alone is not misread.
+ */
+const GROK_BALANCE_STATUS = String.raw`(?:\bHTTP(?:/\d(?:\.\d)?)?|\bAPI error|\bstatus(?:Code)?)[\s:=("]{0,6}402\b`;
+const GROK_BALANCE_REGEX = new RegExp(
+  `${GROK_BALANCE_STATUS}[^\\n]{0,160}\\busage balance exhausted\\b|\\busage balance exhausted\\b[^\\n]{0,80}${GROK_BALANCE_STATUS}`,
+  'i',
+);
+
 /** Capacity, not quota (Req 3.9). A text carrying it is never classified. */
 const MODEL_CAPACITY_REGEX = /MODEL_CAPACITY_EXHAUSTED/i;
 
@@ -87,7 +101,8 @@ export type LaneLimitPattern =
   | 'antigravity-resource-exhausted'
   | 'opencode-free-usage'
   | 'ollama-429'
-  | 'grok-free-usage';
+  | 'grok-free-usage'
+  | 'grok-balance-exhausted';
 
 export interface LaneLimitClassification {
   readonly failureKind: 'quota';
@@ -155,7 +170,11 @@ const matchOllama: PatternMatcher = (text) =>
   OLLAMA_LIMIT_REGEX.test(text) ? quota('ollama-429', {}) : null;
 
 const matchGrok: PatternMatcher = (text) =>
-  GROK_LIMIT_REGEX.test(text) ? quota('grok-free-usage', {}) : null;
+  GROK_LIMIT_REGEX.test(text)
+    ? quota('grok-free-usage', {})
+    : GROK_BALANCE_REGEX.test(text)
+      ? quota('grok-balance-exhausted', {})
+      : null;
 
 /**
  * Wordings per CLI or provider. A Ptah CLI lane is classified by its provider

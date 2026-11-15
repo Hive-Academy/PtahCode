@@ -77,12 +77,13 @@ as a limit).
 | Batch | Scope | PR | State |
 | --- | --- | --- | --- |
 | research | usage-sources.md | - | done |
-| a1 | codex false AT LIMIT, 100% reads limit-reached (codex lane 8e067b33) | #1298 | in_review |
-| a2 | spawn bounded lookup wait, grok deadline (antigravity lane aa2f8cb4) | #1298 | in_review |
-| a3 | review fixes 1, 3, 4 (codex lane 370c5eef); review: review-batch-a.md | #1298 | in_review |
-| b | antigravity reader (agy JSON, branch fix/antigravity-usage-reader) | #1301 | in_review |
+| a1 | codex false AT LIMIT, 100% reads limit-reached (codex lane 8e067b33) | #1298 | merged |
+| a2 | spawn bounded lookup wait, grok deadline (antigravity lane aa2f8cb4) | #1298 | merged |
+| a3 | review fixes 1, 3, 4 (codex lane 370c5eef); review: review-batch-a.md | #1298 | merged |
+| b | antigravity reader (agy JSON, branch fix/antigravity-usage-reader) | #1301 | merged |
 | c1 | codex `ordinaryUsageAllowed` gate (branch fix/lane-usage-sources); review: review-batch-c1-r3.md | #1308 | in_review |
-| c | fallback reader port coverage: claude OAuth usage, grok, copilot | - | pending |
+| c2 | grok `prepaidBalance`, 402 classification, credits in snapshot (branch fix/lane-usage-readers-c2); review: review-batch-c2-r2.md | pending PR | in_review |
+| c3 | claude OAuth usage, copilot quota sources | - | pending |
 | d | per-model limit state | - | pending |
 
 ### Batch (a) decisions
@@ -94,3 +95,13 @@ as a limit).
   plan-usage cache TTL, a slow lane with an active exhaustion can spawn with
   `unknown (limit lookup pending)`. The spawn dispatchers reach limits only through the async
   `PtahAPI.agent.limits`. A synchronous last-known read needs a new port (follow-up).
+
+### Batch (c2) notes
+
+- Two codex spawns that returned an MCP timeout started later, at the same second, together
+  with an antigravity retry. Three lanes ran one brief at the same time (cause 5). The final
+  diff was checked after the last write.
+- Follow-ups: 402 owner evidence clears only after 7 days or a plan success (needs
+  `providerOwnerClear` from #1308); `balance-unavailable` label text; a generic reading field
+  in place of the grok branch in `PlanUsageService.settle`; removal tombstone; balance unit
+  and wire shape of `prepaidBalance`; a lane-state integration spec.

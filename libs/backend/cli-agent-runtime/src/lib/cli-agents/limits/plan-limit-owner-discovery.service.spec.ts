@@ -951,7 +951,7 @@ describe('PlanLimitOwnerDiscoveryService', () => {
       kimiAuth?: Pick<IKimiCodeAuthService, 'resolveRequestCredential' | 'forceRefresh'>,
     ) {
       const credentials = { resolve: jest.fn(async () => resolution) };
-      const usageLedger = { snapshotFor: jest.fn(), recordWindowEvidence: jest.fn() };
+      const usageLedger = { snapshotFor: jest.fn(), recordWindowEvidence: jest.fn(), removeProviderWindowEvidence: jest.fn() };
       const service = new PlanUsageService(
         createMockLogger() as unknown as Logger,
         usageLedger,

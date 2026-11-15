@@ -121,7 +121,7 @@ const ELIGIBILITY_STATUSES: ReadonlySet<ProviderAccountUsageStatus> = new Set([
 /** The ledger surface the service reads and feeds. */
 export type PlanUsageLedger = Pick<
   PlanLimitLedgerService,
-  'snapshotFor' | 'recordWindowEvidence'
+  'snapshotFor' | 'recordWindowEvidence' | 'removeProviderWindowEvidence'
 >;
 /** The credential surface the service reads secrets through. */
 export type PlanUsageCredentials = Pick<PlanCredentialSource, 'resolve'>;
@@ -448,6 +448,13 @@ export class PlanUsageService {
       this.evictCache();
     }
     if (reading.status === 'available') {
+      if (
+        owner.providerId === 'grok' && reading.windows.length === 0 &&
+        reading.fetchedAt !== undefined &&
+        (reading.credits?.hasCredits || reading.statusReason === 'balance-unavailable')
+      ) {
+        this.ledger.removeProviderWindowEvidence(owner, 'other:subscription', reading.fetchedAt);
+      }
       for (const window of reading.windows) {
         this.ledger.recordWindowEvidence(owner, window);
       }
@@ -502,6 +509,11 @@ export class PlanUsageService {
       ...(reading.account && { account: reading.account }),
       ...(reading.activity && { activity: reading.activity }),
       ...(reading.localUsage && { localUsage: reading.localUsage }),
+      ...(reading.credits && { credits: reading.credits }),
+      ...(reading.allowances && { allowances: reading.allowances }),
+      ...(reading.individualAllowance && { individualAllowance: reading.individualAllowance }),
+      ...(reading.resetCreditsAvailable !== undefined && { resetCreditsAvailable: reading.resetCreditsAvailable }),
+      ...(reading.upsellAvailable !== undefined && { upsellAvailable: reading.upsellAvailable }),
       ...(reading.unavailableReason && {
         unavailableReason: reading.unavailableReason,
       }),

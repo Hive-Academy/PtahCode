@@ -227,6 +227,26 @@ export class PlanLimitLedgerService {
     this.changed(owner.key);
   }
 
+  /** A newer provider table can omit a window that no longer gates use. */
+  removeProviderWindowEvidence(
+    owner: QuotaOwnerRef,
+    key: PlanLimitWindow['key'],
+    observedAt: number,
+  ): void {
+    const state = this.owners.get(owner.key);
+    if (!state) return;
+    let removed = false;
+    for (const [id, entry] of state.windows) {
+      if (entry.window.key !== key || entry.window.usedSource !== 'provider-api') continue;
+      // Keep an exhaustion that a non-provider source (e.g. a lane error) added.
+      if (entry.window.exhaustion && entry.window.exhaustion.source !== 'provider-api') continue;
+      if (windowStamp(entry).observedAt > observedAt) continue;
+      state.windows.delete(id);
+      removed = true;
+    }
+    if (removed) this.changed(owner.key);
+  }
+
   /** Record a limit hit whose window is unknown; one entry per model scope. */
   recordOwnerEvidence(
     owner: QuotaOwnerRef,

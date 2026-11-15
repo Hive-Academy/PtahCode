@@ -162,6 +162,24 @@ function harness() {
 }
 
 describe('PlanUsageService', () => {
+  it('carries Codex credits and optional allowance fields into the owner snapshot', async () => {
+    const h = harness();
+    h.getAccountUsage.mockResolvedValue({
+      ...codexAvailable(T0),
+      buckets: [{ id: 'codex', label: 'Codex',
+        credits: { balance: '12', hasCredits: true, unlimited: false },
+        individualLimit: { limit: '100', used: '10', remainingPercent: 90, resetsAt: T0 + 60_000 },
+      }],
+      resetCreditsAvailable: true,
+      upsellAvailable: true,
+    });
+    const snapshot = await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
+    expect(snapshot.credits).toEqual({ balance: '12', hasCredits: true, unlimited: false });
+    expect(snapshot.allowances).toHaveLength(1);
+    expect(snapshot.individualAllowance?.remainingPercent).toBe(90);
+    expect(snapshot.resetCreditsAvailable).toBe(true);
+    expect(snapshot.upsellAvailable).toBe(true);
+  });
   it('registers Kimi and lets its reader resolve a direct lane key', async () => {
     const mockFetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true, status: 200,
@@ -522,9 +540,9 @@ describe('PlanUsageService', () => {
     it('keeps cached Grok windows stale on transient account failure without a session', async () => {
       const h = harness();
       const ownerRef = quotaOwnerRefFromKey(cliStoreOwnerKey('grok', '/cli'));
-      const readers = h.service as unknown as {
-        readers: Record<string, jest.Mock>;
-        localReaders: Record<string, jest.Mock>;
+      const readers = {
+        readers: Reflect.get(h.service, 'readers') as Record<string, jest.Mock>,
+        localReaders: Reflect.get(h.service, 'localReaders') as Record<string, jest.Mock>,
       };
       readers.readers.grok = jest.fn(async () => ({
         status: 'available',
@@ -566,9 +584,9 @@ describe('PlanUsageService', () => {
         usedSource: 'provider-api' as const,
         observedAt: T0,
       };
-      const readers = h.service as unknown as {
-        readers: Record<string, jest.Mock>;
-        localReaders: Record<string, jest.Mock>;
+      const readers = {
+        readers: Reflect.get(h.service, 'readers') as Record<string, jest.Mock>,
+        localReaders: Reflect.get(h.service, 'localReaders') as Record<string, jest.Mock>,
       };
       readers.readers.grok = jest.fn(async () => ({
         status: 'available',
@@ -589,6 +607,34 @@ describe('PlanUsageService', () => {
         }),
       );
       expect(readers.localReaders.grok).not.toHaveBeenCalled();
+    });
+
+    it('passes credits through and clears a held Grok subscription window after a top-up', async () => {
+      const h = harness();
+      const ownerRef = quotaOwnerRefFromKey(cliStoreOwnerKey('grok', '/cli'));
+      const readers = {
+        readers: Reflect.get(h.service, 'readers') as Record<string, jest.Mock>,
+        localReaders: Reflect.get(h.service, 'localReaders') as Record<string, jest.Mock>,
+      };
+      const target = { providerId: 'grok', ownerRef };
+      readers.localReaders.grok = jest.fn();
+      readers.readers.grok = jest.fn(async () => ({
+        status: 'available', windowSetEstablished: true, fetchedAt: T0,
+        windows: [{ key: 'other:subscription', kind: 'weekly', label: 'Weekly',
+          used: { kind: 'percent', percent: 100 }, usedSource: 'provider-api',
+          observedAt: T0, resetsAt: T0 + 60_000, resetSource: 'provider-api' }],
+        credits: { balance: '0', hasCredits: false, unlimited: false },
+      }));
+      expect((await h.service.getOwnerSnapshot(target)).windows).toHaveLength(1);
+      h.advance(1);
+      readers.readers.grok.mockResolvedValue({
+        status: 'available', windowSetEstablished: true, fetchedAt: T0 + 1,
+        windows: [], credits: { balance: '12', hasCredits: true, unlimited: false },
+      });
+      const snapshot = await h.service.getOwnerSnapshot(target, { refresh: true });
+      expect(snapshot.windows).toHaveLength(0);
+      expect(snapshot.credits).toEqual({ balance: '12', hasCredits: true, unlimited: false });
+      expect(h.ledger.snapshotFor(ownerRef.key)?.windows ?? []).toHaveLength(0);
     });
 
     it('F31: OpenCode with no local usage answers its reader status and no evidence', async () => {

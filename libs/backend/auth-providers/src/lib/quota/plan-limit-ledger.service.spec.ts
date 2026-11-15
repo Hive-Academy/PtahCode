@@ -268,6 +268,55 @@ describe('PlanLimitLedgerService — window and owner evidence', () => {
   });
 });
 
+describe('PlanLimitLedgerService — removeProviderWindowEvidence', () => {
+  const KEY = 'other:subscription' as PlanLimitWindow['key'];
+
+  it('removes an older provider-api window at the key, keeps others, and persists', () => {
+    const { ledger, storage } = harness();
+    ledger.recordWindowEvidence(
+      OWNER_A,
+      readWindow(KEY, T0, 100, {
+        exhaustion: { observedAt: T0, source: 'provider-api' },
+        resetsAt: T0 + DAY,
+        resetSource: 'provider-api',
+      }),
+    );
+    ledger.recordWindowEvidence(OWNER_A, readWindow('weekly', T0, 40));
+    storage.update.mockClear();
+
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0 + MINUTE);
+
+    expect(windowOf(ledger, OWNER_A, KEY)).toBeUndefined();
+    expect(windowOf(ledger, OWNER_A, 'weekly')).toBeDefined();
+    expect(storage.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a window observed after the removing reading', () => {
+    const { ledger, storage } = harness();
+    ledger.recordWindowEvidence(OWNER_A, readWindow(KEY, T0 + MINUTE, 100));
+    storage.update.mockClear();
+
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0);
+
+    expect(windowOf(ledger, OWNER_A, KEY)).toBeDefined();
+    expect(storage.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps a provider-api window that carries non-provider exhaustion', () => {
+    const { ledger } = harness();
+    ledger.recordWindowEvidence(
+      OWNER_A,
+      readWindow(KEY, T0, 100, {
+        exhaustion: { observedAt: T0, source: 'error-derived' },
+      }),
+    );
+
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0 + MINUTE);
+
+    expect(windowOf(ledger, OWNER_A, KEY)).toBeDefined();
+  });
+});
+
 describe('PlanLimitLedgerService — precedence (F21, ledger side)', () => {
   it('rule 1: estimated never supersedes real evidence observed after the last reset', () => {
     const { ledger } = harness();
