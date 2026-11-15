@@ -144,8 +144,8 @@ export function onboardingHarnessTarget(
  * `segments` is the primary segment path (without matrix parameters) and
  * `queryParams` the parsed query, both as the Router parsed them.
  *
- * - `/onboarding/analyze/agents` and `/onboarding/analyze/generate` bind an
- *   agent generation tab;
+ * - Retired `/onboarding/analyze/agents` and `/onboarding/analyze/generate`
+ *   URLs still identify their original tab before the onboarding redirect;
  * - `/onboarding/analyze/guidance` and `/onboarding/guidance` bind a project
  *   guidance tab.
  */

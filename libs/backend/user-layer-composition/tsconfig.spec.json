@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true, "types": ["jest", "node"], "module": "commonjs", "moduleResolution": "node10", "ignoreDeprecations": "6.0", "strict": true }
+}

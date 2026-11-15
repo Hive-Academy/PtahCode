@@ -1,5 +1,5 @@
 /**
- * B3b Electron visual gate for onboarding A3, A4, and A5.
+ * B3b Electron visual gate for project guidance and Done.
  * Mirrors B3a's four themes, 1280/464 px viewports, screenshot and axe capture.
  * Run after the coordinator builds the webview with grep: onboarding-generate-visual.
  */
@@ -17,15 +17,12 @@ import {
   type OnboardingTheme,
 } from './onboarding-ready.fixtures';
 import {
-  AGENT_CHECKPOINT,
-  AGENT_RUN_ID,
   AGENT_TAB,
   GUIDANCE_BINDING,
   GUIDANCE_CONTENT,
   GUIDANCE_RUN_ID,
   GUIDANCE_STATUS,
   GUIDANCE_TAB,
-  agentRun,
   doneAgentRun,
   bootOnboardingGenerate,
   guidanceRun,
@@ -42,10 +39,8 @@ const SIZES: readonly { viewport: Size; prefix: string }[] = [
   { viewport: NARROW, prefix: 'narrow-' },
 ];
 const CAPTURE_DIR = resolve(ONBOARDING_ANALYZE_CAPTURE_DIR, '../generate');
-const GENERATE = '[data-testid="generate-agents-page"]';
 const GUIDANCE = '[data-testid="project-guidance-page"]';
 const DONE = '[data-testid="analyze-done-page"]';
-const AGENT_ROUTE = `/onboarding/analyze/generate?tab=${AGENT_TAB}&run=${AGENT_RUN_ID}`;
 const GUIDANCE_ROUTE = `/onboarding/analyze/guidance?tab=${GUIDANCE_TAB}&run=${GUIDANCE_RUN_ID}`;
 const GUIDANCE_IDLE_ROUTE = `/onboarding/guidance?tab=${GUIDANCE_TAB}`;
 const DONE_ROUTE = `/onboarding/analyze/done?gen=${AGENT_TAB}&tab=${GUIDANCE_TAB}`;
@@ -57,7 +52,7 @@ async function shoot(
   const result = await captureOnboarding(page, {
     ...options,
     outputDir: CAPTURE_DIR,
-    busyExempt: `${GENERATE}, ${GUIDANCE}, [data-testid="details-log"]`,
+    busyExempt: `${GUIDANCE}, [data-testid="details-log"]`,
   });
   test.info().annotations.push({
     type: 'axe',
@@ -90,105 +85,6 @@ async function expectState(
 for (const theme of ONBOARDING_CAPTURE_THEMES) {
   test.describe(`onboarding-generate-visual (${theme})`, () => {
     for (const size of SIZES) {
-      test(`${size.prefix}generate-running`, async ({
-        page,
-        fixtureServer,
-      }) => {
-        await boot(page, fixtureServer.url, theme, size.viewport, AGENT_ROUTE, {
-          'wizard:get-generation-run-state': { run: agentRun('running') },
-          'wizard:get-resumable-run': {
-            analysis: null,
-            generation: AGENT_CHECKPOINT,
-          },
-        });
-        await expect(page.locator(GENERATE)).toBeVisible();
-        await expectState(page, 'generate', 'running');
-        await expect(
-          page.locator('[data-testid="generate-agent-cards"]'),
-        ).toBeVisible();
-        await expect(
-          page.getByRole('progressbar', { name: 'Agent generation progress' }),
-        ).toBeVisible();
-        await shoot(page, { view: `${size.prefix}generate-running`, theme });
-      });
-
-      test(`${size.prefix}generate-completed`, async ({
-        page,
-        fixtureServer,
-      }) => {
-        await boot(page, fixtureServer.url, theme, size.viewport, AGENT_ROUTE, {
-          'wizard:get-generation-run-state': { run: agentRun('completed') },
-        });
-        await expect(page.locator(GENERATE)).toBeVisible();
-        await expectState(page, 'generate', 'completed');
-        await expect(
-          page.locator('[data-testid="generate-agent-card"]'),
-        ).toHaveCount(3);
-        await expect(
-          page.locator('[data-testid="generate-agent-file"]'),
-        ).toHaveCount(3);
-        await expect(
-          page.locator('[data-testid="generate-facts"]'),
-        ).toContainText('1 written');
-        await shoot(page, { view: `${size.prefix}generate-completed`, theme });
-      });
-
-      test(`${size.prefix}generate-failed`, async ({ page, fixtureServer }) => {
-        await boot(page, fixtureServer.url, theme, size.viewport, AGENT_ROUTE, {
-          'wizard:get-generation-run-state': { run: agentRun('failed') },
-        });
-        await expect(page.locator(GENERATE)).toBeVisible();
-        await expectState(page, 'generate', 'failed');
-        await expect(
-          page.getByRole('button', { name: 'Retry', exact: true }),
-        ).toBeVisible();
-        await shoot(page, { view: `${size.prefix}generate-failed`, theme });
-      });
-
-      test(`${size.prefix}generate-mismatch`, async ({
-        page,
-        fixtureServer,
-      }) => {
-        await boot(
-          page,
-          fixtureServer.url,
-          theme,
-          size.viewport,
-          `/onboarding/analyze/generate?tab=${AGENT_TAB}&run=stale-agent-run`,
-          {
-            'wizard:get-generation-run-state': { run: agentRun('running') },
-          },
-        );
-        await expect(page.locator(GENERATE)).toBeVisible();
-        await expect(
-          page.locator('[data-testid="generate-recovery-panel"]'),
-        ).toBeVisible();
-        await shoot(page, { view: `${size.prefix}generate-mismatch`, theme });
-      });
-
-      test(`${size.prefix}generate-lookup-exhausted`, async ({
-        page,
-        fixtureServer,
-      }) => {
-        await boot(page, fixtureServer.url, theme, size.viewport, AGENT_ROUTE, {
-          'wizard:get-generation-run-state': () =>
-            rpcError('Generation state unavailable'),
-        });
-        await expect(page.locator(GENERATE)).toBeVisible();
-        await expect(
-          page.locator('[data-testid="generate-lookup-exhausted"]'),
-        ).toBeVisible({ timeout: 20_000 });
-        await expect(
-          page
-            .locator('[data-testid="generate-lookup-exhausted"]')
-            .getByRole('button', { name: 'Retry' }),
-        ).toBeVisible();
-        await shoot(page, {
-          view: `${size.prefix}generate-lookup-exhausted`,
-          theme,
-        });
-      });
-
       test(`${size.prefix}guidance-idle`, async ({ page, fixtureServer }) => {
         await boot(
           page,

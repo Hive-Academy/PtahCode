@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import type { AgentOutcomeSignals, CloneSummary } from '@ptah-extension/shared';
+import { ROLE_PHASE_ALIASES, type AgentOutcomeSignals, type CloneSummary } from '@ptah-extension/shared';
 import { makeLibraryAgreementFixtures } from '@ptah-extension/shared/testing';
 
 import {
@@ -82,6 +82,20 @@ describe('CloneDetailDrawerComponent — body edit mode', () => {
 
     expect(button.tagName).toBe('BUTTON');
     expect(button.getAttribute('aria-label')).toContain('deep-research');
+  });
+
+  it('hides body editing for unchanged retired wizard agents', async () => {
+    const fixture = await setup({ canEditBody: true });
+    const [slug = 'missing-role'] = Object.keys(ROLE_PHASE_ALIASES);
+    fixture.componentRef.setInput('clone', clone({
+      slug,
+      kind: 'agent',
+      provenance: { kind: 'setup-wizard' },
+      wizardOriginUnchanged: true,
+    }));
+    fixture.detectChanges();
+    expect(find(fixture, 'drawer-retired-note')).not.toBeNull();
+    expect(find(fixture, 'drawer-body-edit-btn')).toBeNull();
   });
 
   it('disables the Edit affordance while another action is in flight', async () => {

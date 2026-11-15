@@ -119,3 +119,89 @@ describe('CloneDetailDrawerComponent — phase files (U-D13 (1))', () => {
     ]);
   });
 });
+
+describe('CloneDetailDrawerComponent — retired roles and user-written agents', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('shows history and no active actions for a retired role', async () => {
+    const [retiredSlug] = Object.keys(ROLE_PHASE_ALIASES);
+    const fixture = await setup(
+      clone({
+        kind: 'agent',
+        slug: retiredSlug ?? 'x',
+        diverged: true,
+        provenance: { kind: 'setup-wizard' },
+        wizardOriginUnchanged: true,
+      }),
+    );
+    expect(all(fixture, 'drawer-retired-note')).toHaveLength(1);
+    const revert = all(
+      fixture,
+      'clones-history-revert-btn',
+    ) as HTMLButtonElement[];
+    expect(revert).toHaveLength(1);
+    expect(revert[0]?.disabled).toBe(true);
+    expect(all(fixture, 'drawer-history-diff-btn')).toHaveLength(1);
+    expect(all(fixture, 'drawer-enhance-btn')).toHaveLength(0);
+    expect(all(fixture, 'drawer-rebase-btn')).toHaveLength(0);
+    expect(all(fixture, 'drawer-keep-btn')).toHaveLength(0);
+    expect(all(fixture, 'drawer-scorecard')).toHaveLength(1);
+  });
+
+  it('keeps every action and revert for a user-written agent with a retired slug', async () => {
+    const [retiredSlug] = Object.keys(ROLE_PHASE_ALIASES);
+    const fixture = await setup(
+      clone({
+        kind: 'agent',
+        slug: retiredSlug ?? 'x',
+        diverged: true,
+        cloneStatus: 'clone',
+        upstreamSource: 'upstream-path',
+      } as Partial<CloneSummary>),
+    );
+    expect(all(fixture, 'drawer-retired-note')).toHaveLength(0);
+    expect(all(fixture, 'drawer-enhance-btn')).toHaveLength(1);
+    const revert = all(
+      fixture,
+      'clones-history-revert-btn',
+    ) as HTMLButtonElement[];
+    expect(revert[0]?.disabled).toBe(false);
+  });
+
+  it('keeps Enhance and revert for an edited wizard agent with a retired slug', async () => {
+    const [retiredSlug] = Object.keys(ROLE_PHASE_ALIASES);
+    const fixture = await setup(
+      clone({
+        kind: 'agent',
+        slug: retiredSlug ?? 'x',
+        diverged: true,
+        cloneStatus: 'clone',
+        upstreamSource: 'upstream-path',
+        provenance: { kind: 'setup-wizard' },
+        wizardOriginUnchanged: false,
+      } as Partial<CloneSummary>),
+    );
+    expect(all(fixture, 'drawer-retired-note')).toHaveLength(0);
+    expect(all(fixture, 'drawer-enhance-btn')).toHaveLength(1);
+    const revert = all(
+      fixture,
+      'clones-history-revert-btn',
+    ) as HTMLButtonElement[];
+    expect(revert[0]?.disabled).toBe(false);
+  });
+
+  it('keeps enhance, rebase and keep-mine for a user-written agent', async () => {
+    const fixture = await setup(
+      clone({
+        kind: 'agent',
+        slug: 'my-own-agent',
+        diverged: true,
+        cloneStatus: 'clone',
+        upstreamSource: 'upstream-path',
+      } as Partial<CloneSummary>),
+    );
+    expect(all(fixture, 'drawer-retired-note')).toHaveLength(0);
+    expect(all(fixture, 'drawer-enhance-btn')).toHaveLength(1);
+    expect(all(fixture, 'drawer-keep-btn')).toHaveLength(1);
+  });
+});

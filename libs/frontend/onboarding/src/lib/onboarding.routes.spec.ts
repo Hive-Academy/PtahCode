@@ -30,12 +30,6 @@ jest.mock('./ready/ready-settings-step.page', () => ({
 jest.mock('./analyze/analyze-workspace.page', () => ({
   AnalyzeWorkspacePage: stubPage('ptah-analyze-workspace-page'),
 }));
-jest.mock('./analyze/choose-agents.page', () => ({
-  ChooseAgentsPage: stubPage('ptah-choose-agents-page'),
-}));
-jest.mock('./analyze/generate-agents.page', () => ({
-  GenerateAgentsPage: stubPage('ptah-generate-agents-page'),
-}));
 jest.mock('./analyze/project-guidance.page', () => ({
   ProjectGuidancePage: stubPage('ptah-project-guidance-page'),
 }));
@@ -106,8 +100,6 @@ describe('ONBOARDING_ROUTES', () => {
   });
   it.each([
     '/onboarding/analyze',
-    '/onboarding/analyze/agents?source=catalog',
-    '/onboarding/analyze/generate?tab=t&run=r',
     '/onboarding/analyze/guidance?tab=t&run=r&gen=g',
     '/onboarding/analyze/done?gen=g&tab=t',
     '/onboarding/guidance?tab=t&run=r',
@@ -117,6 +109,15 @@ describe('ONBOARDING_ROUTES', () => {
     const router = configure(true);
     await router.navigateByUrl(url);
     expect(router.url).toBe(url);
+  });
+
+  it.each([
+    '/onboarding/analyze/agents?source=catalog',
+    '/onboarding/analyze/generate?tab=t&run=r',
+  ])('redirects retired %s to project guidance', async (url) => {
+    const router = configure(true);
+    await router.navigateByUrl(url);
+    expect(router.url).toBe('/onboarding/analyze/guidance');
   });
 
   it.each([

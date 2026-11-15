@@ -125,11 +125,6 @@ export interface WorkspaceHarnessTargetOptions {
    */
   coOwners?: HarnessTargetId[];
   /**
-   * A HOME directory swept of `ptah-`/`ptahsynth-` leftovers. Copilot resolves
-   * agents home-first, so a stale home copy shadows the workspace copy (E19).
-   */
-  homeReap?: { dir: () => string; prefixes: readonly string[] };
-  /**
    * Answers whether git tracks a path, for the retired-copy proof (D-D7).
    * Defaults to `git ls-files --error-unmatch` ({@link createGitTrackingProbe});
    * specs substitute a runner to reach git-missing and timeout outcomes.
@@ -193,7 +188,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       adopted,
       hashOptions,
     );
-    this.planHomeReap(migrations, desired, baseEntries);
 
     const ownership = this.ownershipOracle(workspaceRoot, baseEntries);
     const desiredEntries = this.desiredEntries(desired, workspaceRoot);
@@ -266,12 +260,13 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       baseEntries,
       retired?.mcpServerKeys ?? [],
     );
-    const removals = this.planRemovals(
+    const removals = await this.planRemovals(
       workspaceRoot,
       baseEntries,
       desiredEntries,
       mcpPlan,
       retired?.skillSourceRoots ?? [],
+      keptLocalEdit,
     );
     this.scanForeignDirs(workspaceRoot, desiredEntries, ownership, foreign);
 
@@ -651,33 +646,34 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
    * A copy whose manifest source lies under a retired skills.sh root carries
    * that root's item id (D-2).
    */
-  private planRemovals(
+  private async planRemovals(
     workspaceRoot: string,
     baseEntries: ManagedEntries,
     desiredEntries: Map<string, DesiredEntry>,
     mcpPlan: McpFacetPlan,
     retiredSkillRoots: readonly string[],
-  ): HarnessPlanRemove[] {
+    keptLocalEdit: string[],
+  ): Promise<HarnessPlanRemove[]> {
     const removals: HarnessPlanRemove[] = [];
     for (const relPath of Object.keys(baseEntries)) {
       if (desiredEntries.has(relPath)) continue;
       const entry = baseEntries[relPath];
       if (entry.kind === 'mcp') continue; // owned by the facet planner
-      if (
-        entry.kind === 'agent' &&
-        this.options.agentTransformer !== undefined &&
-        isRetiredPtahAgent(
-          workspaceRoot,
-          basenameWithoutSuffix(relPath, this.options.agentTransformer),
-          join(
-            workspaceRoot,
-            '.claude',
-            'agents',
-            `${basenameWithoutSuffix(relPath, this.options.agentTransformer)}.md`,
-          ),
-        )
-      )
-        continue;
+      if (entry.kind === 'agent') {
+        // Routine passes retain managed agent copies pending explicit removal.
+        // A copy already absent on disk only needs its stale claim removed.
+        try {
+          lstatSync(toAbsolute(workspaceRoot, relPath));
+          const actual = await hashFile(toAbsolute(workspaceRoot, relPath));
+          if (actual !== entry.hash) keptLocalEdit.push(relPath);
+          continue;
+        } catch (error) {
+          if (!isMissingFile(error)) {
+            keptLocalEdit.push(relPath);
+            continue;
+          }
+        }
+      }
       if (mcpPlan.ownedKeys.has(relPath)) continue;
       const retiredItemId = retiredSourceItemId(
         entry.source,
@@ -832,106 +828,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     }
   }
 
-  /**
-   * Queue leftovers in the CLI's home directory that Ptah can PROVE it wrote
-   * (E19).
-   *
-   * Copilot resolves agents home-first, so a stale `~/.copilot/agents/ptah-x.md`
-   * silently shadows the workspace copy this pass just wrote. Reaping it is
-   * necessary — but the original rule, "delete anything whose name starts with
-   * `ptah-` or `ptahsynth-`", was a name-prefix heuristic aimed at a directory
-   * Ptah does not own, applied to files it may never have written, with no
-   * report. A user with `~/.copilot/agents/ptah-notes.agent.md` lost it silently
-   * on the next activation.
-   *
-   * Two independent proofs, either of which is enough:
-   *
-   * - **The writer signature.** The deleted `MultiCliAgentWriterService` emitted
-   *   `source: ptah` in the frontmatter of every agent it produced, via the same
-   *   `rewriteFrontmatter` this lib now uses (`transformers/transform-rules.ts`).
-   *   A file carrying it came out of that pipeline, whatever it is called.
-   * - **A known agent id.** `<prefix><id>` where `id` is an agent the desired
-   *   state carries or the manifest already records. Covers a legacy file whose
-   *   frontmatter a user hand-edited away, without covering names Ptah never had
-   *   a reason to produce.
-   *
-   * Everything reaped lands in `result.removed` (see `applyMigrations`), because
-   * deleting a file in the user's home directory must never be invisible.
-   */
-  private planHomeReap(
-    migrations: HarnessMigration[],
-    desired: HarnessDesiredState,
-    baseEntries: ManagedEntries,
-  ): void {
-    const reap = this.options.homeReap;
-    if (reap === undefined) return;
-
-    let dir: string;
-    try {
-      dir = reap.dir();
-    } catch {
-      // degradation-audit: optional-capability - locating legacy home entries
-      // is best-effort cleanup, so failure leaves every home file untouched.
-      return;
-    }
-
-    let names: string[];
-    try {
-      names = readdirSync(dir);
-    } catch {
-      // degradation-audit: optional-capability - legacy home reaping is
-      // best-effort cleanup, so an unreadable directory is left untouched.
-      return;
-    }
-
-    const knownAgentIds = this.knownAgentIds(desired, baseEntries);
-    for (const name of names) {
-      const prefix = reap.prefixes.find((candidate) =>
-        name.startsWith(candidate),
-      );
-      if (prefix === undefined) continue;
-      const path = join(dir, name);
-      const owned =
-        hasPtahWriterSignature(path) ||
-        knownAgentIds.has(this.homeEntryAgentId(name, prefix));
-      if (!owned) continue;
-      migrations.push({ kind: 'reap-home-entry', path });
-    }
-  }
-
-  /**
-   * Agent ids this target has EVER been asked to write: the ones desired now,
-   * plus the ones its manifest still records.
-   *
-   * The manifest half is what makes a reap of a just-disabled agent work — the
-   * home copy has to go on the same pass that removes the workspace copy, and by
-   * then the id is no longer in the desired state.
-   */
-  private knownAgentIds(
-    desired: HarnessDesiredState,
-    baseEntries: ManagedEntries,
-  ): ReadonlySet<string> {
-    const ids = new Set<string>(desired.agents.map((agent) => agent.slug));
-    const transformer = this.options.agentTransformer;
-    if (transformer !== undefined) {
-      for (const [relPath, entry] of Object.entries(baseEntries)) {
-        if (entry.kind !== 'agent') continue;
-        ids.add(basenameWithoutSuffix(relPath, transformer));
-      }
-    }
-    return ids;
-  }
-
-  /** `ptah-senior-tester.agent.md` -> `senior-tester`. */
-  private homeEntryAgentId(name: string, prefix: string): string {
-    const withoutPrefix = name.slice(prefix.length);
-    const transformer = this.options.agentTransformer;
-    const suffix = transformer?.relPathFor('').split('/').pop() ?? '.md';
-    return withoutPrefix.endsWith(suffix) && suffix !== ''
-      ? withoutPrefix.slice(0, withoutPrefix.length - suffix.length)
-      : withoutPrefix.replace(/\.md$/i, '');
-  }
-
   // ------------------------------------------------------------------- apply
 
   /**
@@ -976,11 +872,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       try {
         if (migration.kind === 'unlink-junction') {
           await withWindowsRetry(() => unlink(migration.path));
-        } else if (migration.kind === 'reap-home-entry') {
-          await withWindowsRetry(() =>
-            rm(migration.path, { recursive: true, force: true }),
-          );
-          result.removed.push(migration.path);
         } else {
           await withWindowsRetry(() => rm(migration.path, { force: true }));
         }
@@ -1181,33 +1072,8 @@ function lstatSyncOrNull(path: string): Stats | null {
   }
 }
 
-/**
- * `source: ptah` inside the leading YAML frontmatter — the marker every agent
- * the Ptah pipeline has ever emitted carries.
- *
- * `rewriteFrontmatter` (`transformers/transform-rules.ts`) writes it today and
- * wrote it in `agent-generation` before this lib absorbed the transformers
- * verbatim, so it identifies both the current output and the home-directory
- * leftovers of the deleted `MultiCliAgentWriterService`.
- *
- * Scoped to the frontmatter block on purpose: the same two words appearing in
- * the prose of an agent a user wrote must not authorise deleting it. A
- * directory, an unreadable path, or a file with no frontmatter all answer
- * `false` — the safe direction.
- */
-function hasPtahWriterSignature(path: string): boolean {
-  let content: string;
-  try {
-    content = readFileSync(path, 'utf-8');
-  } catch {
-    // degradation-audit: optional-capability - signature detection is an
-    // ownership probe, and false prevents deletion when provenance cannot be
-    // proven.
-    return false;
-  }
-  const frontmatter = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-  if (frontmatter === null) return false;
-  return /^source:\s*ptah\s*$/m.test(frontmatter[1]);
+function isMissingFile(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
 /** Names recorded under `key` in a legacy `.ptah-managed.json`. */

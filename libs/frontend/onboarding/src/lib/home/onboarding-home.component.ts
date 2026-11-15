@@ -9,7 +9,7 @@ import {
 import { RouterLink } from '@angular/router';
 import { Router } from '@angular/router';
 import { SetupStatusStore } from '@ptah-extension/chat-ui';
-import { AppStateManager, ONBOARDING_QUERY } from '@ptah-extension/core';
+import { AppStateManager } from '@ptah-extension/core';
 import {
   BookOpen,
   CircleCheck,
@@ -163,7 +163,7 @@ interface StatusChip {
           class="min-[721px]:row-span-2"
           testId="analyze"
           title="Analyze current project"
-          description="Best when you already have code. Ptah reads your workspace, recommends agents, writes them and prepares project guidance."
+          description="Best when you already have code. Ptah reads your workspace and prepares project guidance."
           callToAction="Start analysis"
           [icon]="icons.scanSearch"
           [link]="analyzeLink"
@@ -179,22 +179,6 @@ interface StatusChip {
                 aria-hidden="true"
               />
               Analyze workspace
-            </li>
-            <li class="flex items-center gap-2">
-              <lucide-angular
-                [img]="icons.listChecks"
-                class="size-4 text-base-content"
-                aria-hidden="true"
-              />
-              Choose agents
-            </li>
-            <li class="flex items-center gap-2">
-              <lucide-angular
-                [img]="icons.wandSparkles"
-                class="size-4 text-base-content"
-                aria-hidden="true"
-              />
-              Generate agents
             </li>
             <li class="flex items-center gap-2">
               <lucide-angular
@@ -260,13 +244,6 @@ interface StatusChip {
 
           @if (!disabledReason()) {
             <p class="relative z-10 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-              <a
-                class="link link-hover"
-                [routerLink]="agentsOnlyLink.commands"
-                [queryParams]="agentsOnlyLink.queryParams"
-                data-testid="onboarding-link-agents-only"
-                >Only generate agents</a
-              >
               <a
                 class="link link-hover"
                 [routerLink]="guidanceOnlyLink.commands"
@@ -361,10 +338,6 @@ export class OnboardingHomeComponent {
   } as const;
 
   protected readonly analyzeLink = onboardingStepLink('analyze', 'analyze', {});
-  protected readonly agentsOnlyLink = {
-    commands: ['/onboarding', 'analyze', 'agents'],
-    queryParams: { [ONBOARDING_QUERY.source]: 'catalog' },
-  };
   protected readonly guidanceOnlyLink = onboardingStepLink(
     'guidance-only',
     'guidance-only',

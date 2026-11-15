@@ -319,7 +319,12 @@ describe('role agents (Phase 4 U-D13)', () => {
 
   it('shows history only for a retired role', () => {
     const model = cloneActionModel(
-      diverged({ slug: RETIRED_SLUG, kind: 'agent' }),
+      diverged({
+        slug: RETIRED_SLUG,
+        kind: 'agent',
+        provenance: { kind: 'setup-wizard' },
+        wizardOriginUnchanged: true,
+      }),
       NOW,
       isBackendRetired,
     );
@@ -329,6 +334,38 @@ describe('role agents (Phase 4 U-D13)', () => {
     expect(model.enhance.enabled).toBe(false);
     expect(model.revert.enabled).toBe(false);
     expect(model.enhance.reason).toBe(RETIRED_ROLE_REASON);
+  });
+
+  it('keeps a user-written agent with a retired slug active', () => {
+    const own = diverged({ slug: RETIRED_SLUG, kind: 'agent' });
+    expect(isRetiredRoleClone(own, isBackendRetired)).toBe(false);
+    expect(
+      isRetiredRoleClone(
+        { ...own, provenance: { kind: 'workspace' } },
+        isBackendRetired,
+      ),
+    ).toBe(false);
+    expect(cloneActionModel(own, NOW, isBackendRetired).retired).toBe(false);
+  });
+
+  it('keeps an edited wizard agent with a retired slug active', () => {
+    const edited = diverged({
+      slug: RETIRED_SLUG,
+      kind: 'agent',
+      provenance: { kind: 'setup-wizard' },
+      wizardOriginUnchanged: false,
+    });
+    const absent = diverged({
+      slug: RETIRED_SLUG,
+      kind: 'agent',
+      provenance: { kind: 'setup-wizard' },
+    });
+    expect(isRetiredRoleClone(edited, isBackendRetired)).toBe(false);
+    expect(isRetiredRoleClone(absent, isBackendRetired)).toBe(false);
+    const model = cloneActionModel(edited, NOW, isBackendRetired);
+    expect(model.retired).toBe(false);
+    expect(model.revert.enabled).toBe(true);
+    expect(model.enhance.reason).not.toBe(RETIRED_ROLE_REASON);
   });
 
   it('does not treat a skill with a retired role slug as retired', () => {

@@ -1,8 +1,8 @@
 {
   "$schema": "https://ptah.live/schemas/content-manifest.json",
   "version": "1.0.0",
-  "contentHash": "sha256:e22ac8aded73bb082fbe5ffc6d4888805920c32c9ec27a3bca2bbdad24b91625",
-  "generatedAt": "2026-11-15T18:21:37.038Z",
+  "contentHash": "sha256:7631fbd50864c46097ae2c5cc9542b8c3b4b747720a8855ddb3db0698bf12fa3",
+  "generatedAt": "2026-11-15T21:41:41.757Z",
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main",
   "plugins": {
     "basePath": "plugins",
@@ -233,12 +233,6 @@
   },
   "templates": {
     "basePath": "libs/backend/agent-generation/templates/agents",
-    "files": [
-      "_shared/clarification-protocol.md",
-      "_shared/cli-delegation.md",
-      "_shared/replacement-policy.md",
-      "_shared/reviewer-stance.md",
-      "_shared/tooling-precedence.md"
-    ]
+    "files": []
   }
 }

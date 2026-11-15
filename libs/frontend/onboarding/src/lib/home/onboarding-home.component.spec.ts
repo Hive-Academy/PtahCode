@@ -251,13 +251,9 @@ describe('OnboardingHomeComponent', () => {
     );
   });
 
-  it('offers the Analyze secondary links', () => {
+  it('offers the guidance secondary link', () => {
     render();
-    expect(
-      byTestId<HTMLAnchorElement>('onboarding-link-agents-only')?.getAttribute(
-        'href',
-      ),
-    ).toBe('/onboarding/analyze/agents?source=catalog');
+    expect(byTestId<HTMLAnchorElement>('onboarding-link-agents-only')).toBeNull();
     expect(
       byTestId<HTMLAnchorElement>(
         'onboarding-link-guidance-only',

@@ -675,14 +675,11 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
 
       const written = writtenAgentPaths(f.workspace);
       expectFaithful(preview, written);
-      // This run wrote, so every conditional copy was synced too.
-      expect(written).toEqual(
-        [...definiteSet(preview), ...conditionalSet(preview)].sort(),
-      );
-      expect(written).toHaveLength(9);
-      expect(written).toContain('.codex/agents/reviewer.toml');
-      expect(written).toContain('.github/agents/reviewer.agent.md');
-      expect(written).toContain('.opencode/agent/reviewer.md');
+      expect(written).toEqual(definiteSet(preview));
+      expect(written).toHaveLength(3);
+      expect(written).not.toContain('.codex/agents/reviewer.toml');
+      expect(written).not.toContain('.github/agents/reviewer.agent.md');
+      expect(written).not.toContain('.opencode/agent/reviewer.md');
       expect(written).not.toContain('.codex/agents/tester.toml');
     },
     STEP_TIMEOUT_MS,
@@ -714,7 +711,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       expect(f.gate.resolve(f.workspace).enabled).toBe(true);
       const written = writtenAgentPaths(f.workspace);
       expectFaithful(preview, written);
-      expect(written).toHaveLength(8);
+      expect(written).toHaveLength(2);
     },
     STEP_TIMEOUT_MS,
   );
@@ -770,7 +767,7 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
       const ids = ['architect', 'reviewer'];
       const first = await generate(f, ids);
       expect(first.writtenCount).toBe(2);
-      expect(writtenAgentPaths(f.workspace)).toHaveLength(8);
+      expect(writtenAgentPaths(f.workspace)).toHaveLength(2);
 
       const preview = await call<WizardPreviewGenerationResponse>(
         f,
@@ -778,9 +775,9 @@ describe('wizard:preview-generation fidelity against the real wizard:submit-sele
         { selectedAgentIds: ids },
       );
       expect(preview.warning).toBeUndefined();
-      expect(conditionalSet(preview)).toEqual([]);
-      expect(definiteSet(preview)).toHaveLength(8);
-      expect(definiteSet(preview)).toContain('.codex/agents/reviewer.toml');
+      expect(conditionalSet(preview)).toHaveLength(6);
+      expect(definiteSet(preview)).toHaveLength(2);
+      expect(definiteSet(preview)).not.toContain('.codex/agents/reviewer.toml');
 
       const second = await generate(f, ids);
 

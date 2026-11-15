@@ -117,8 +117,7 @@ export class WizardAnalysisState {
   /**
    * Load a saved multi-phase analysis into state.
    * Sets multiPhaseResult and marks as loaded from history.
-   * Does NOT set recommendations — caller should fetch them separately
-   * via recommendAgents() after loading.
+   * Does not set agent recommendations when loading historical analysis.
    *
    * @param multiPhase - Multi-phase analysis response
    */

@@ -34,12 +34,25 @@ import { isRoleAgentClone } from '../../role-agent-clone';
 
 export { isRoleAgentClone };
 
-/** True for an agent clone whose role Phase 4 retired. Read-only history. */
+/**
+ * True for an agent clone whose role Phase 4 retired and whose file the setup
+ * wizard wrote and nobody changed (`setup-wizard` origin and
+ * `wizardOriginUnchanged === true`). Read-only history. A file with a retired
+ * slug and no wizard origin, or a wizard file that a hand edit changed, is
+ * user-owned and stays active (same rule as `AgentRoleResolver`). The
+ * `setup-wizard` provenance survives a hand edit, so the unchanged signal is
+ * required.
+ */
 export function isRetiredRoleClone(
   clone: CloneSummary,
   isRetired: (slug: string) => boolean = isRetiredRole,
 ): boolean {
-  return clone.kind === 'agent' && isRetired(clone.slug);
+  return (
+    clone.kind === 'agent' &&
+    isRetired(clone.slug) &&
+    clone.provenance?.kind === 'setup-wizard' &&
+    clone.wizardOriginUnchanged === true
+  );
 }
 
 /** Reason shown when an action is not available for a retired role. */

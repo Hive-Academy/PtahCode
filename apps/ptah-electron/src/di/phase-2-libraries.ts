@@ -107,8 +107,8 @@ import {
 import {
   registerAgentGenerationServices,
   AGENT_GENERATION_TOKENS,
-  type UserLayerMirrorService,
 } from '@ptah-extension/agent-generation';
+import { registerUserLayerCompositionServices, USER_LAYER_COMPOSITION_TOKENS, type UserLayerMirrorService } from '@ptah-extension/user-layer-composition';
 import {
   registerPersistenceSqliteServices,
   PERSISTENCE_TOKENS,
@@ -432,6 +432,7 @@ export function registerPhase2Libraries(
     );
   }
   registerAgentGenerationServices(container, logger);
+  registerUserLayerCompositionServices(container);
   container.register(AGENT_GENERATION_TOKENS.SETUP_WIZARD_SERVICE, {
     useClass: ElectronSetupWizardService,
   });
@@ -685,7 +686,7 @@ export function registerPhase2Libraries(
   // Register the skill trigger and telemetry seam for library RPC handlers.
   registerSkillSynthesisServices(container, logger);
   container.register<SkillFileWriterPort>(SKILL_FILE_WRITER_TOKEN, {
-    useFactory: (c) => c.resolve<UserLayerMirrorService>(AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE),
+    useFactory: (c) => c.resolve<UserLayerMirrorService>(USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE),
   });
   registerTaskSpecsServices(container, logger);
   // Task-end hook (TASK_2026_886): binds the seven host ports, then the

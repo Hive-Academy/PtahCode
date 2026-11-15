@@ -20,9 +20,6 @@ jest.mock('@ptah-extension/agent-generation', () => ({
   ProjectAnalysisResultSchema: require('zod').z.object({}),
   normalizeAgentOutput: (analysis: unknown) => analysis,
 }));
-jest.mock('./setup/pack-install.service', () => ({
-  PackInstallService: class PackInstallServiceStub {},
-}));
 
 import { SetupRpcHandlers } from './setup-rpc.handlers';
 import {

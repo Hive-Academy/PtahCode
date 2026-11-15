@@ -121,13 +121,8 @@ export interface HarnessMigration {
    * - `drop-legacy-manifest` — a `.ptah-managed.json` written inside a target
    *   directory by `SkillJunctionService` or by the rival-CLI installers, whose
    *   entries have already been adopted into the new manifest.
-   * - `reap-home-entry` — a leftover in a CLI's HOME directory that carries the
-   *   legacy Ptah writer signature, or whose name is `<prefix><known agent id>`.
-   *   Copilot resolves agents home-first, so a stale home copy silently shadows
-   *   the workspace copy Ptah just wrote (E19). The prefix ALONE is not proof of
-   *   ownership — see `WorkspaceHarnessTarget.planHomeReap`.
    */
-  kind: 'unlink-junction' | 'drop-legacy-manifest' | 'reap-home-entry';
+  kind: 'unlink-junction' | 'drop-legacy-manifest';
   /** Absolute path of the artifact being migrated. */
   path: string;
 }

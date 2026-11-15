@@ -45,8 +45,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const DONE_STEPS: readonly OnboardingStep[] = [
   { id: 'analyze', label: 'Analyze', state: 'completed' },
-  { id: 'agents', label: 'Choose agents', state: 'completed' },
-  { id: 'generate', label: 'Generate agents', state: 'completed' },
   { id: 'guidance', label: 'Project guidance', state: 'completed' },
   { id: 'done', label: 'Done', state: 'current-complete' },
 ];

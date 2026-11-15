@@ -4,7 +4,7 @@ const FALLBACK = 'Something went wrong.';
 
 describe('safeFailureCopy', () => {
   it.each([
-    ['RPC timeout: wizard:install-pack-agents', 'timeout'],
+    ['RPC timeout: wizard:recommend-skills', 'timeout'],
     ['EACCES: permission denied, open /etc/x', 'permission'],
     ['ENOSPC: no space left on device', 'disk-full'],
     ['2 file(s) failed to install', 'partial'],

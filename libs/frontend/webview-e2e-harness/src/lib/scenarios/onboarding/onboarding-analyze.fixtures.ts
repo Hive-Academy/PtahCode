@@ -1,5 +1,5 @@
 /**
- * Analyze workspace (A1) and Choose agents (A2) capture fixtures
+ * Analyze workspace capture fixtures
  * (TASK_2026_ONBOARDING B3a). Wizard RPCs are mocked so captures do not depend
  * on a live analysis run. This file imports nothing from
  * `@ptah-extension/onboarding`; state text is asserted by the spec as literals.
@@ -96,28 +96,6 @@ function analysisResponse(
 export const COMPLETED_ANALYSIS = analysisResponse('completed');
 export const INTERRUPTED_ANALYSIS = analysisResponse('paused');
 
-/** Backend 0–100 scores; the 92% row is the visual reference. */
-export const ANALYZE_RECOMMENDATIONS = [
-  {
-    agentId: 'backend-developer',
-    agentName: 'Backend Developer',
-    relevanceScore: 92,
-    matchedCriteria: ['NestJS framework detected', 'REST API routes detected'],
-    category: 'development',
-    recommended: true,
-    description: 'Implements APIs, database logic, and server-side code',
-  },
-  {
-    agentId: 'reviewer',
-    agentName: 'Reviewer',
-    relevanceScore: 40,
-    matchedCriteria: [],
-    category: 'planning',
-    recommended: false,
-    description: 'Reviews changes in this workspace',
-  },
-] as const;
-
 export const PHASE_TWO_SCAN_PROGRESS = {
   filesScanned: 80,
   totalFiles: 160,
@@ -175,16 +153,6 @@ export function onboardingAnalyzeFixtures(
     'wizard:list-analyses': { analyses: [] },
     'wizard:get-resumable-run': { analysis: null, generation: null },
     'wizard:get-generation-run-state': { run: null },
-    'wizard:recommend-agents': [...ANALYZE_RECOMMENDATIONS],
-    'wizard:list-agent-packs': { packs: [] },
-    'wizard:preview-generation': {
-      agents: [{ agentId: 'backend-developer', files: [] }],
-      previewToken: 'preview-e2e-analyze',
-    },
-    'wizard:submit-selection': {
-      success: false,
-      rejection: { reason: 'blocked', ownerTabId: 'other-generation-tab' },
-    },
     ...overrides,
   };
   for (const [method, value] of Object.entries(fixtures)) {

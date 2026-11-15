@@ -72,8 +72,8 @@ describe('HarnessManifestBuilder agent selection', () => {
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'harness-agent-enablement-'));
-    const agentsRoot = join(root, 'agents');
-    mkdirSync(agentsRoot);
+    const agentsRoot = join(root, '.claude', 'agents');
+    mkdirSync(agentsRoot, { recursive: true });
     for (const slug of ['reviewer', 'writer']) {
       writeFileSync(join(agentsRoot, `${slug}.md`), `# ${slug}\n`, 'utf-8');
     }
@@ -125,7 +125,7 @@ describe('HarnessManifestBuilder agent selection', () => {
     async ({ agentSyncEnabled, disabledAgentIds, expected }) => {
       const desired = await new HarnessManifestBuilder().build(
         { ...sources, disabledAgentIds },
-        { agentSyncEnabled },
+        { agentSyncEnabled, workspaceRoot: root },
       );
 
       expect(desired.agents.map(({ slug }) => slug)).toEqual(expected);

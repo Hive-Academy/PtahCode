@@ -93,6 +93,8 @@ import { MEMORY_CONTRACT_TOKENS } from '@ptah-extension/memory-contracts';
 import { PLUGIN_MARKETPLACE_TOKENS } from '@ptah-extension/plugin-marketplace';
 import { HARNESS_SYNC_TOKENS } from '@ptah-extension/harness-sync';
 import { AGENT_GENERATION_TOKENS } from '@ptah-extension/agent-generation';
+import { USER_LAYER_COMPOSITION_TOKENS } from '@ptah-extension/user-layer-composition';
+
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
 import {
   AgentRpcHandlers,
@@ -135,6 +137,12 @@ import { registerTaskEndHookComposition } from './task-end-hook-composition';
 import { UPDATE_MANAGER_TOKEN } from '../services/update/update-tokens';
 import { GitRootWatcherPool } from '../services/git-root-watcher-pool';
 import { createElectronRpcHostProfile } from '../rpc-host-profile';
+
+it('shares the user-layer mirror token with the existing Electron binding', () => {
+  expect(USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE).toBe(
+    AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE,
+  );
+});
 
 describe('Electron DI — usage reconciliation guard', () => {
   it('expects the trigger, reconciler and backfill registrations', () => {
@@ -1121,7 +1129,7 @@ describe('Electron DI — app updater token aliasing (Risk R1)', () => {
     });
 
     registerPhase4Handlers(c, logger);
-    expect(c.isRegistered(EXPECTED_RESOLVABLE_TOKENS[0][1])).toBe(true);
+    expect(c.isRegistered(UPDATE_MANAGER_TOKEN)).toBe(true);
 
     const viaPort = c.resolve(PLATFORM_TOKENS.APP_UPDATER);
     const viaConcreteToken = c.resolve(UPDATE_MANAGER_TOKEN);

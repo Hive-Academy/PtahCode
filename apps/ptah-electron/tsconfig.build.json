@@ -127,6 +127,9 @@
       ],
       "@ptah-extension/settings-core": [
         "../../libs/backend/settings-core/src/index.ts"
+      ],
+      "@ptah-extension/user-layer-composition": [
+        "../../libs/backend/user-layer-composition/src/index.ts"
       ]
     }
   }

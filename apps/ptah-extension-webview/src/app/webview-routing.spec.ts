@@ -536,7 +536,7 @@ describe('webview routing composition', () => {
           },
         ],
       });
-      const route = `/onboarding/analyze/agents?tab=${tabId}`;
+      const route = `/onboarding/analyze/guidance?tab=${tabId}`;
       installHost(savedRoute(route, 'chat'), 'chat');
       hostIsElectron(true);
 
@@ -546,7 +546,7 @@ describe('webview routing composition', () => {
 
       tabs.findTabByIdAcrossWorkspaces.mockReturnValue({
         workspacePath: '/ws',
-        tab: { workflow: 'setup-agent-generation' },
+        tab: { workflow: 'setup-project-prompt' },
       });
       workspaceResolved.set(true);
 
@@ -582,7 +582,7 @@ describe('webview routing composition', () => {
         ],
       });
       installHost(
-        savedRoute(`/onboarding/analyze/agents?tab=${tabId}`, 'chat'),
+        savedRoute(`/onboarding/analyze/guidance?tab=${tabId}`, 'chat'),
         'chat',
       );
       hostIsElectron(true);

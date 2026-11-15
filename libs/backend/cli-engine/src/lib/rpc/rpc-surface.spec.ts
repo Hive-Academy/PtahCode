@@ -19,6 +19,13 @@
  */
 
 import 'reflect-metadata';
+import { USER_LAYER_COMPOSITION_TOKENS } from '@ptah-extension/user-layer-composition';
+
+it('keeps user-layer bootstrap outside the RPC surface', () => {
+  expect(USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_BOOTSTRAP).toBe(
+    Symbol.for('PtahUserLayerBootstrap'),
+  );
+});
 
 import {
   deriveRpcSurface,
@@ -178,14 +185,12 @@ describe('CLI RPC surface', () => {
     );
   });
 
-  it('serves the community pack install plan (TASK_2026_701 B8)', () => {
-    expect(surface.registered).toEqual(
-      expect.arrayContaining([
-        'wizard:plan-pack-install',
-        'wizard:install-pack-agents',
-      ]),
-    );
-    expect(surface.excluded).not.toContain('wizard:plan-pack-install');
+  it('does not serve retired setup and agent methods', () => {
+    expect(surface.registered).not.toContain('setup-wizard:launch');
+    expect(surface.registered).not.toContain('wizard:recommend-agents');
+    expect(surface.registered).not.toContain('wizard:list-agent-packs');
+    expect(surface.registered).not.toContain('wizard:plan-pack-install');
+    expect(surface.registered).not.toContain('wizard:install-pack-agents');
   });
 
   it('serves the plugin kept-item and config-home methods (TASK_2026_701 B12)', () => {

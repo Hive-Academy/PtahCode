@@ -1,11 +1,9 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ClaudeRpcService } from '@ptah-extension/core';
-import type { MultiPhaseAnalysisResponse, SetupGenerationRejection, SetupGenerationTabBinding } from '@ptah-extension/shared';
-import { GenerationWorkflowStore, SetupWizardStateService, WizardAnalysisRunner, WizardRpcService } from '@ptah-extension/setup-wizard';
+import type { MultiPhaseAnalysisResponse } from '@ptah-extension/shared';
+import { SetupWizardStateService, WizardAnalysisRunner, WizardRpcService } from '@ptah-extension/setup-wizard';
 import { AnalysisStepStore } from './analysis-step.store';
 
-const binding: SetupGenerationTabBinding = { tabId: 'tab', workspacePath: '/ws', workflow: 'setup-agent-generation' };
 const completed = { isMultiPhase: true, manifest: { version: 3, runId: 'r', slug: 'saved', analyzedAt: '', updatedAt: '', lifecycle: 'completed', model: 'm', totalDurationMs: 1000,
   phases: { 'project-profile': { status: 'completed', file: 'profile.md', durationMs: 1000 } } }, phaseContents: { 'project-profile': 'Done' }, analysisDir: '/ws/.ptah/analysis/saved' } as MultiPhaseAnalysisResponse;
 const unfinished = { ...completed, manifest: { ...completed.manifest, lifecycle: 'paused' as const } } as MultiPhaseAnalysisResponse;
@@ -19,21 +17,14 @@ describe('AnalysisStepStore', () => {
   const current = signal<number | null>(null);
   const total = signal<number | null>(null);
   const stream = signal<{ kind: 'text'; content: string; timestamp: number }[]>([]);
-  const rpc = { listAnalyses: jest.fn(), loadAnalysis: jest.fn(), recommendAgents: jest.fn() };
-  const catalogCall = jest.fn();
-  const bound = signal<SetupGenerationTabBinding | null>(null);
-  const generation = { bind: jest.fn((value: SetupGenerationTabBinding) => bound.set(value)), binding: bound,
-    startAgents: jest.fn(), acceptedRun: signal<{ runId: string; revision: number } | null>(null),
-    rejection: signal<SetupGenerationRejection | null>(null), startError: signal<string | null>(null) };
+  const rpc = { listAnalyses: jest.fn(), loadAnalysis: jest.fn() };
   beforeEach(() => {
     live.set(null); running.set(false); phases.set([]); current.set(null); total.set(null); stream.set([]);
-    jest.clearAllMocks(); rpc.listAnalyses.mockResolvedValue(saved); rpc.loadAnalysis.mockResolvedValue(completed); rpc.recommendAgents.mockResolvedValue([]);
-    catalogCall.mockResolvedValue({ isSuccess: () => true, data: [] });
-    bound.set(null); generation.acceptedRun.set(null); generation.rejection.set(null); generation.startError.set(null);
+    jest.clearAllMocks(); rpc.listAnalyses.mockResolvedValue(saved); rpc.loadAnalysis.mockResolvedValue(completed);
     TestBed.configureTestingModule({ providers: [AnalysisStepStore,
-      { provide: WizardRpcService, useValue: rpc }, { provide: ClaudeRpcService, useValue: { call: catalogCall } },
+      { provide: WizardRpcService, useValue: rpc },
       { provide: SetupWizardStateService, useValue: { multiPhaseResult: live, phaseStatuses: phases, currentPhaseNumber: current, totalPhaseCount: total, analysisStream: stream } },
-      { provide: WizardAnalysisRunner, useValue: { isRunning: running } }, { provide: GenerationWorkflowStore, useValue: generation },
+      { provide: WizardAnalysisRunner, useValue: { isRunning: running } },
     ] });
     store = TestBed.inject(AnalysisStepStore);
   });
@@ -50,45 +41,15 @@ describe('AnalysisStepStore', () => {
     expect(store.loaded()).toEqual(completed);
     store.clearSelection(); expect(store.loaded()).toBeNull();
   });
-  it('uses the chosen analysis for recommendations and the catalog RPC for catalog mode', async () => {
+  it('keeps completed analysis available', async () => {
     await store.listAnalyses(); await store.selectAnalysis('saved');
-    await store.loadRecommendations(binding, 'analysis');
-    expect(rpc.recommendAgents).toHaveBeenCalledWith(completed);
-    await store.loadRecommendations(binding, 'catalog');
-    expect(catalogCall).toHaveBeenCalledWith('wizard:recommend-agents', { mode: 'workspace-catalog', tabBinding: binding }, { timeout: 60_000 });
+    expect(store.loaded()).toEqual(completed);
   });
   it('shows stream counts only while attached', () => {
     running.set(true); stream.set([{ kind: 'text', content: 'x', timestamp: 1 }]);
     expect(store.streamCounts()).toBeNull();
     store.attachStream(); expect(store.streamCounts()?.total).toBe(1);
     store.detachStream(); expect(store.streamCounts()).toBeNull();
-  });
-  it('does not forward a previously accepted run when a new start fails', async () => {
-    generation.acceptedRun.set({ runId: 'old-run', revision: 1 });
-    generation.startAgents.mockImplementationOnce(async () => generation.startError.set('Could not start'));
-    expect(await store.submit(binding)).toEqual({ error: 'Could not start' });
-    generation.startAgents.mockImplementationOnce(async () => {
-      generation.acceptedRun.set({ runId: 'new-run', revision: 2 });
-    });
-    expect(await store.submit(binding)).toEqual({ runId: 'new-run' });
-  });
-  it('submits explicit row ids without changing the selected agents', async () => {
-    store.toggleAgent('agent-a');
-    await store.submit(binding, undefined, ['agent-b']);
-    expect(generation.startAgents).toHaveBeenCalledWith(['agent-b'], undefined);
-    expect([...store.selection()]).toEqual(['agent-a']);
-  });
-  it('does not reuse a stale blocked or preview-required rejection when start exits early', async () => {
-    for (const reason of ['blocked', 'preview-required'] as const) {
-      generation.rejection.set({ reason });
-      generation.startAgents.mockResolvedValueOnce(undefined);
-      expect(await store.submit(binding)).toEqual({ error: 'Generation could not start. Try again.' });
-    }
-  });
-  it('fails with fixed copy when the generation binding was not accepted', async () => {
-    generation.bind.mockImplementationOnce(() => undefined);
-    expect(await store.submit(binding)).toEqual({ error: 'Generation tab is unavailable. Try again.' });
-    expect(generation.startAgents).not.toHaveBeenCalled();
   });
   it('distinguishes a saved-list failure from an empty list', async () => {
     rpc.listAnalyses.mockRejectedValueOnce(new Error('offline'));
@@ -106,16 +67,5 @@ describe('AnalysisStepStore', () => {
     expect(await pending).toBe('not-found');
     expect(store.selected()).toBeNull();
     expect(store.loaded()).toBeNull();
-  });
-  it('normalizes catalog rows with missing criteria and drops malformed rows', async () => {
-    catalogCall.mockResolvedValueOnce({ isSuccess: () => true, data: [
-      { agentId: 'a', agentName: 'Agent A', relevanceScore: 75, recommended: true, category: 'development' },
-      { agentId: 'bad', recommended: true },
-    ] });
-    await store.loadRecommendations(binding, 'catalog');
-    expect(store.recommendations()).toEqual([expect.objectContaining({ agentId: 'a', matchedCriteria: [] })]);
-    expect([...store.selection()]).toEqual(['a']);
-    catalogCall.mockResolvedValueOnce({ isSuccess: () => true, data: {} });
-    await expect(store.loadRecommendations(binding, 'catalog')).rejects.toThrow('Catalog unavailable');
   });
 });

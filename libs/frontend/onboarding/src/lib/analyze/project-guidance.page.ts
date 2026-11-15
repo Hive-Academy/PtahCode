@@ -451,17 +451,6 @@ export class ProjectGuidancePage implements OnInit {
         ]
       : [
           { id: 'analyze', label: 'Analyze', state: 'completed' },
-          { id: 'agents', label: 'Choose agents', state: 'completed' },
-          {
-            id: 'generate',
-            label: 'Generate agents',
-            state: 'completed',
-            link: onboardingStepLink(
-              'guidance',
-              'generate',
-              this.route.snapshot.queryParams,
-            ),
-          },
           { id: 'guidance', label: 'Project guidance', state: 'current' },
           { id: 'done', label: 'Done', state: 'upcoming' },
         ],
@@ -506,7 +495,17 @@ export class ProjectGuidancePage implements OnInit {
       workspacePath,
       workflow: 'setup-project-prompt',
     };
-    if (!tabId || !findBoundGenerationTab(this.tabs, binding)) {
+    if (!tabId) {
+      const result = await this.launcher.open({
+        workspacePath,
+        workflow: 'setup-project-prompt',
+        origin: 'analysis-result-continue',
+      });
+      if (result.outcome === 'landed') return;
+      this.recovery.set('missing-tab');
+      return;
+    }
+    if (!findBoundGenerationTab(this.tabs, binding)) {
       this.recovery.set('missing-tab');
       return;
     }

@@ -49,7 +49,7 @@ function writeSkill(
 }
 
 function writeAgent(root: string, slug: string): void {
-  const agentsRoot = join(root, 'agents');
+  const agentsRoot = join(root, '.claude', 'agents');
   mkdirSync(agentsRoot, { recursive: true });
   writeFileSync(
     join(agentsRoot, `${slug}.md`),
@@ -198,25 +198,26 @@ describe('HarnessManifestBuilder', () => {
   });
 
   it('[286] an agent in disabledAgentIds never enters the desired state, and its siblings still do', async () => {
-    writeAgent(root, 'backend-developer');
-    writeAgent(root, 'senior-tester');
+    writeAgent(root, 'custom-developer');
+    writeAgent(root, 'custom-tester');
 
     const state: HarnessSourceState = {
       ...emptyState(root),
-      disabledAgentIds: ['senior-tester'],
+      disabledAgentIds: ['custom-tester'],
     };
 
-    const desired = await builder.build(state);
+    const desired = await builder.build(state, { workspaceRoot: root });
 
-    expect(desired.agents.map((a) => a.slug)).toEqual(['backend-developer']);
+    expect(desired.agents.map((a) => a.slug)).toEqual(['custom-developer']);
   });
 
   it('[286] agentSyncEnabled: false empties the agent facet entirely, and leaves skills and commands alone', async () => {
-    writeAgent(root, 'backend-developer');
+    writeAgent(root, 'custom-developer');
     writeSkill(join(root, 'skills'), 'run-tests');
 
     const desired = await builder.build(emptyState(root), {
       agentSyncEnabled: false,
+      workspaceRoot: root,
     });
 
     // Empty is a REAP, not a skip — agents are manifest-owned, so the removal
@@ -226,12 +227,40 @@ describe('HarnessManifestBuilder', () => {
     expect(desired.skills.map((s) => s.slug)).toEqual(['run-tests']);
   });
 
+  it('[286] agentSyncEnabled: false reads no agent file, so a damaged origin store cannot abort the build', async () => {
+    writeAgent(root, 'custom-developer');
+    const originDir = join(root, '.ptah', 'setup-wizard');
+    mkdirSync(originDir, { recursive: true });
+    writeFileSync(join(originDir, 'agent-origins.json'), '{');
+    // The default agent log throws, so any read of the store would reject.
+    const desired = await builder.build(emptyState(root), {
+      agentSyncEnabled: false,
+      workspaceRoot: root,
+    });
+
+    expect(desired.agents).toEqual([]);
+  });
+
+  it('rejects an unreadable origin store with the default throwing logger when sync is enabled', async () => {
+    writeAgent(root, 'custom-developer');
+    const originFile = join(root, '.ptah', 'setup-wizard', 'agent-origins.json');
+    mkdirSync(originFile, { recursive: true });
+    await expect(builder.build(emptyState(root), { workspaceRoot: root }))
+      .rejects.toThrow();
+  });
+
   it('[286] an absent agentSyncEnabled option means enabled, so a caller with no opinion never triggers a reap', async () => {
-    writeAgent(root, 'backend-developer');
+    writeAgent(root, 'custom-developer');
 
+    const desired = await builder.build(emptyState(root), { workspaceRoot: root });
+
+    expect(desired.agents.map((a) => a.slug)).toEqual(['custom-developer']);
+  });
+
+  it('does not read the broad agent layer without a workspace root', async () => {
+    writeAgent(root, 'user-agent');
     const desired = await builder.build(emptyState(root));
-
-    expect(desired.agents.map((a) => a.slug)).toEqual(['backend-developer']);
+    expect(desired.agents).toEqual([]);
   });
 
   it('[E2] resolves to sources-missing with zero artifacts when the source roots do not exist', async () => {
@@ -272,7 +301,7 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
     root = mkdtempSync(join(tmpdir(), 'harness-sync-agent-models-'));
     warn = jest.fn();
     builder = new HarnessManifestBuilder(warn);
-    writeAgent(root, 'backend-developer');
+    writeAgent(root, 'custom-developer');
   });
 
   afterEach(() => {
@@ -283,14 +312,14 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
     const desired = await builder.build({
       ...emptyState(root),
       ...(agentModels === undefined ? {} : { agentModels }),
-    });
+    }, { workspaceRoot: root });
     expect(desired.agents).toHaveLength(1);
     return desired.agents[0];
   }
 
   it('[AC4] a Claude-only setting gives a rival agent no models field', async () => {
     const agent = await buildAgent({
-      workspace: { 'backend-developer': { claude: 'opus' } },
+      workspace: { 'custom-developer': { claude: 'opus' } },
       machine: { '*': { claude: 'sonnet' } },
     });
 
@@ -302,13 +331,13 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
   });
 
   it('[AC8] without models the agent and every target source hash are unchanged', async () => {
-    const sourceFile = join(root, 'agents', 'backend-developer.md');
+    const sourceFile = join(root, '.claude', 'agents', 'custom-developer.md');
     const fileHash = await hashFile(sourceFile);
     const withoutLayers = await buildAgent();
     const withEmptyLayers = await buildAgent({ workspace: {}, machine: null });
 
     expect(withoutLayers).toEqual({
-      slug: 'backend-developer',
+      slug: 'custom-developer',
       sourceFile,
       contentHash: fileHash,
     });
@@ -320,18 +349,18 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
 
   it('a present model changes only that target source hash', async () => {
     const agent = await buildAgent({
-      workspace: { 'backend-developer': { codex: 'gpt-5-codex' } },
+      workspace: { 'custom-developer': { codex: 'gpt-5-codex' } },
     });
 
     expect(agent.models).toEqual({ codex: 'gpt-5-codex' });
     expect(agent.contentHash).toBe(
-      await hashFile(join(root, 'agents', 'backend-developer.md')),
+      await hashFile(join(root, '.claude', 'agents', 'custom-developer.md')),
     );
     expect(desiredAgentSourceHash(agent, 'codex')).not.toBe(agent.contentHash);
     expect(desiredAgentSourceHash(agent, 'cursor')).toBe(agent.contentHash);
 
     const other = await buildAgent({
-      workspace: { 'backend-developer': { codex: 'gpt-5' } },
+      workspace: { 'custom-developer': { codex: 'gpt-5' } },
     });
     expect(desiredAgentSourceHash(other, 'codex')).not.toBe(
       desiredAgentSourceHash(agent, 'codex'),
@@ -341,7 +370,7 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
   it('skips a non-emittable value with a warning and keeps the others', async () => {
     const agent = await buildAgent({
       workspace: {
-        'backend-developer': {
+        'custom-developer': {
           opencode: 'no-provider-prefix',
           copilot: 'gpt\n5',
           cursor: 'sonnet-4',
@@ -354,14 +383,14 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('not emittable'),
       expect.objectContaining({
-        slug: 'backend-developer',
+        slug: 'custom-developer',
         provider: 'opencode',
       }),
     );
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('not emittable'),
       expect.objectContaining({
-        slug: 'backend-developer',
+        slug: 'custom-developer',
         provider: 'copilot',
       }),
     );
@@ -370,11 +399,11 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
   it('the workspace layer beats the machine layer, per provider', async () => {
     const agent = await buildAgent({
       workspace: {
-        'backend-developer': { codex: 'ws-codex' },
+        'custom-developer': { codex: 'ws-codex' },
         '*': { opencode: 'anthropic/ws-wildcard' },
       },
       machine: {
-        'backend-developer': { codex: 'machine-codex', opencode: 'x/machine' },
+        'custom-developer': { codex: 'machine-codex', opencode: 'x/machine' },
         '*': { cursor: 'machine-cursor' },
       },
     });
@@ -389,6 +418,7 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
   it('a target writes the bytes it planned, model included', async () => {
     const workspace = join(root, 'ws');
     mkdirSync(workspace, { recursive: true });
+    writeAgent(workspace, 'custom-developer');
     const seen: HarnessAgentSource[] = [];
     const transformer: IHarnessAgentTransformer = {
       target: 'codex',
@@ -414,9 +444,9 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
       agentTransformer: transformer,
     });
     const desired = await builder.build({
-      ...emptyState(root),
+      ...emptyState(workspace),
       agentModels: { workspace: { '*': { codex: 'gpt-5-codex' } } },
-    });
+    }, { workspaceRoot: workspace });
 
     const plan = await target.plan(
       desired,
@@ -429,7 +459,7 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
     );
 
     const result = await target.apply(plan, workspace);
-    const relPath = '.codex/agents/backend-developer.toml';
+    const relPath = '.codex/agents/custom-developer.toml';
     const written = readFileSync(join(workspace, relPath), 'utf-8');
 
     expect(written).toContain('model = "gpt-5-codex"');

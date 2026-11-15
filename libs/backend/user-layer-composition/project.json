@@ -1,0 +1,34 @@
+{
+  "name": "@ptah-extension/user-layer-composition",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/backend/user-layer-composition/src",
+  "tags": ["scope:extension", "type:feature"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/backend/user-layer-composition",
+        "main": "libs/backend/user-layer-composition/src/index.ts",
+        "tsConfig": "libs/backend/user-layer-composition/tsconfig.lib.json",
+        "assets": [],
+        "format": ["cjs"],
+        "external": ["vscode", "tsyringe", "zod", "eventemitter3"]
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit --project libs/backend/user-layer-composition/tsconfig.lib.json"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "libs/backend/user-layer-composition",
+        "command": "eslint ."
+      }
+    }
+  }
+}

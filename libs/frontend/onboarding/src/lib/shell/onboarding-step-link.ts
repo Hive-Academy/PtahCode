@@ -5,8 +5,7 @@ import { ONBOARDING_QUERY } from '@ptah-extension/core';
  * they share.
  */
 const STEP_OWNERS = {
-  // Analyze A1-A3: the saved analysis or catalog source, then the agent
-  // generation tab and run.
+  // Retired agent routes remain here so old links can resolve safely.
   analyze: ['analyze', 'agents', 'generate'],
 } as const;
 
@@ -53,10 +52,8 @@ export interface OnboardingStepLink {
  * query, or a caller-prepared hand-off object) as an explicit, complete query.
  *
  * Never use `queryParamsHandling: 'merge'` for step links: merging would carry
- * one owner's `run` into another owner's page. Within one owner, that owner's
- * keys are copied. Cross-owner Analyze transitions follow the A2 table: agent
- * `run` is never written on the way to guidance; `gen` is always written when
- * an agent tab is known.
+ * one owner's `run` into another owner's page. Analysis carries only its
+ * saved-analysis identity to guidance.
  */
 export function onboardingStepLink(
   from: OnboardingStepId,
@@ -74,6 +71,9 @@ function queryForTransition(
   to: OnboardingStepId,
   identity: Readonly<Record<string, unknown>>,
 ): Record<string, string> {
+  if (from === 'analyze' && to === 'guidance') {
+    return pickKeys(identity, [ONBOARDING_QUERY.analysis]);
+  }
   if (from === 'generate' && to === 'guidance') {
     return agentToGuidanceQuery(identity);
   }

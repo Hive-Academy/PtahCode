@@ -26,11 +26,11 @@ import {
   type HarnessHealth,
 } from '@ptah-extension/shared';
 import {
-  AGENT_GENERATION_TOKENS,
+  USER_LAYER_COMPOSITION_TOKENS,
   userLayerPassFailures,
   type MirrorSources,
   type UserLayerMirrorService,
-} from '@ptah-extension/agent-generation';
+} from '@ptah-extension/user-layer-composition';
 import { initializePluginMarketplace } from '@ptah-extension/plugin-marketplace';
 import { PERSISTENCE_TOKENS } from '@ptah-extension/persistence-sqlite';
 import {
@@ -406,7 +406,7 @@ export async function mirrorUserLayer(
 ): Promise<UserLayerStepStatus> {
   try {
     const mirror = container.resolve<UserLayerMirrorService>(
-      AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE,
+      USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE,
     );
     const stateStorage = container.resolve<IStateStorage>(
       PLATFORM_TOKENS.STATE_STORAGE,
@@ -517,7 +517,7 @@ export async function reconcileUserLayer(
 ): Promise<UserLayerStepStatus> {
   try {
     const mirror = container.resolve<UserLayerMirrorService>(
-      AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE,
+      USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE,
     );
 
     const result = await mirror.reconcileAll(

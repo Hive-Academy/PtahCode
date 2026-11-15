@@ -20,7 +20,7 @@ jest.mock('os', () => ({
 }));
 
 import { WizardAgentOriginStore } from './wizard-agent-origin.store';
-import { UserLayerMirrorService } from './user-layer/user-layer-mirror.service';
+import { UserLayerMirrorService } from '@ptah-extension/user-layer-composition';
 
 interface MockLogger {
   info: jest.Mock;

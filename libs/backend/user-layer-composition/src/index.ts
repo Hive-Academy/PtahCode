@@ -1,0 +1,13 @@
+import 'reflect-metadata';
+
+export type { UserLayerMirrorSources, UserLayerBootstrap, UserLayerMirror } from './lib/contracts';
+export * from './lib/tokens';
+export * from './lib/register';
+export { UserLayerMirrorService, userLayerPassFailures } from './lib/user-layer/user-layer-mirror.service';
+export type { UserLayerRoots, MirrorSources, MirrorResult, CloneEntry, ReconcileResult, DivergedClone, RebaseCloneArgs, RebaseResult, KeepCloneArgs, KeepResult, WriteEnhancedSkillArgs, WriteEnhancedFileCloneArgs, WriteEnhancedResult, RevertCloneArgs, RevertResult, HistoryEntry, OrphanedClone, ReapResult, UpstreamLiveness, QuarantinedAgentItem, QuarantinedAgentState, QuarantinedAgentsListing, QuarantineRestoreOutcome, QuarantineRestoreResult, MirrorPluginDescriptor, MirrorPluginDescriptors, CloneEditState } from './lib/user-layer/user-layer-mirror.service';
+export type { OriginSidecar, OriginKind } from './lib/user-layer/origin-sidecar.types';
+export { HARNESS_PLUGIN_ID_PREFIX } from './lib/user-layer/origin-sidecar.types';
+export { classifyUpstream, collectUpstreamLiveness, UserLayerOrphanReaper } from './lib/user-layer/user-layer-orphan-reaper';
+export type { ReapKeptReason, ReapClonePath, ReapedClonePath, KeptClonePath, FailedClonePath } from './lib/user-layer/user-layer-orphan-reaper';
+export { UserLayerFsOps } from './lib/user-layer/user-layer-fs-ops';
+export { computeSourceHash, isErrnoCode } from './lib/user-layer/source-hash';
