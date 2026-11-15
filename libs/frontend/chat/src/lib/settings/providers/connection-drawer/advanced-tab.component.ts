@@ -116,7 +116,7 @@ export function parsePricing(input: string, output: string): { readonly ok: true
           <h3 id="advanced-help-heading" class="sr-only">Documentation URL</h3>
           <div class="flex gap-2">
             <ptah-field label="Documentation URL" class="min-w-0 flex-1">
-            <input ptahInput id="advanced-help-url" type="url" aria-labelledby="advanced-help-heading" class="min-w-0 flex-1 text-xs"
+            <input ptahInput id="advanced-help-url" type="url" class="min-w-0 flex-1 text-xs"
               [value]="helpUrl()" placeholder="https://" (input)="helpUrlDraft.set(value($event))" data-testid="advanced-help-url" />
             </ptah-field>
             <button type="button" ptahButton [busy]="busy()" [disabled]="helpUrlDraft() === null || !!helpUrlError()"

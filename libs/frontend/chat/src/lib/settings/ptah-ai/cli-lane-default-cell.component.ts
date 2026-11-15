@@ -3,6 +3,7 @@ import {
   NativePopoverComponent,
   PtahButtonDirective,
   PtahFieldComponent,
+  PtahFieldTriggerDirective,
   PtahIconButtonDirective,
   PtahSelectDirective,
 } from '@ptah-extension/ui';
@@ -20,7 +21,7 @@ let nextTitleId = 0;
 @Component({
   selector: 'ptah-cli-lane-default-cell',
   standalone: true,
-  imports: [LucideAngularModule, NativePopoverComponent, PtahButtonDirective, PtahIconButtonDirective, PtahFieldComponent, PtahSelectDirective],
+  imports: [LucideAngularModule, NativePopoverComponent, PtahButtonDirective, PtahFieldTriggerDirective, PtahIconButtonDirective, PtahFieldComponent, PtahSelectDirective],
   // Layout comes from the host data-layout attribute, not class bindings (ui-class-audit). Spacing uses --ptah-* tokens.
   host: { '[attr.data-layout]': 'layout()' },
   styles: `:host { display: block; min-width: 0; max-width: 100%; }
@@ -51,7 +52,7 @@ let nextTitleId = 0;
           @if (effectivePermission() === undefined) { <option value="" disabled [selected]="true">Choose</option> }
           @for (mode of permissions(); track mode) { <option [value]="mode" [selected]="mode === effectivePermission()">{{ mode }}</option> }
         </select>
-      } @else { <span ptahFieldTrailing class="text-base-content-muted" [title]="reason()">Unavailable</span> }
+      } @else { <button ptahFieldTrigger type="button" disabled class="text-base-content-muted" [title]="reason()">Unavailable</button> }
       </ptah-field>
       <ptah-field label="Network" size="sm" class="min-w-0" [hint]="!networks().length ? reason() : ''">
       @if (networks().length) {
@@ -59,7 +60,7 @@ let nextTitleId = 0;
           [disabled]="disabled() || pending() !== null" (change)="chooseNetwork($event)">
           @for (mode of networks(); track mode) { <option [value]="mode" [selected]="mode === effectiveNetwork()">{{ mode }}</option> }
         </select>
-      } @else { <span ptahFieldTrailing class="text-base-content-muted" [title]="reason()">Unavailable</span> }
+      } @else { <button ptahFieldTrigger type="button" disabled class="text-base-content-muted" [title]="reason()">Unavailable</button> }
       </ptah-field>
       @if ((networks().length || saved()) && unsupportedCombination(); as warningText) { <span class="defaults-warning text-base-content-muted" role="status">⚠ Unsupported combination: {{ warningText }}</span> }
     } @else {
