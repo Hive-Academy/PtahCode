@@ -181,5 +181,19 @@ describe('CLI lane policy resolver', () => {
         permission: 'plan', network: 'deny', permissionSource: 'built-in', networkSource: 'built-in',
       });
     });
+
+    it('fails closed when adapter does not support plan', () => {
+      const noPlanManifest: CliAdapterManifest = { ...manifest,
+        permissionModes: {
+          'auto-edit': { ...supported, networkModes: ['allow', 'deny'] },
+          yolo: { ...supported, networkModes: ['allow'] },
+        },
+      };
+      const error = refusalFrom(() => resolveCliLanePolicy({ cli: 'codex', manifest: noPlanManifest,
+        saved: {},
+        request: {} }));
+      expect(error.refusal).toMatchObject({ code: 'UNSUPPORTED_LANE_POLICY' });
+      expect(error.message).toContain('does not support plan');
+    });
   });
 });

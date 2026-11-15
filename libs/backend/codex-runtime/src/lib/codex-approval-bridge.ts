@@ -307,13 +307,15 @@ export class CodexApprovalBridge {
       }
       return { response };
     }
+    const isParent = () => params['threadId'] === identity.threadId;
+    const isChild = () =>
+      typeof params['threadId'] === 'string' &&
+      typeof params['turnId'] === 'string' &&
+      params['turnId'] === turnId &&
+      this.options.isChildTurn?.(params['threadId'], turnId) === true;
     const current = () =>
       !this.disposed &&
-      (params['threadId'] === identity.threadId ||
-        (typeof params['threadId'] === 'string' &&
-          typeof params['turnId'] === 'string' &&
-          params['turnId'] === turnId &&
-          this.options.isChildTurn?.(params['threadId'], turnId) === true)) &&
+      (isParent() || isChild()) &&
       (params['turnId'] == null
         ? request.kind === 'mcpElicitation' && turnId.length > 0
         : params['turnId'] === turnId) &&
@@ -321,12 +323,15 @@ export class CodexApprovalBridge {
     const target = this.target(request, params);
     let reply: unknown = 'decline';
     if (current() && !signal.aborted) {
-      const policy = codexPermissionPolicy(
-        this.options.permissionLevel(),
-        request.kind,
-        target !== undefined && this.options.rules.matches(identity, target),
-        request.details,
-      );
+      const isChildRequest = isChild();
+      const policy = isChildRequest
+        ? 'present'
+        : codexPermissionPolicy(
+            this.options.permissionLevel(),
+            request.kind,
+            target !== undefined && this.options.rules.matches(identity, target),
+            request.details,
+          );
       reply = await this.interact(request, signal, policy);
     }
     const edited = record(reply);

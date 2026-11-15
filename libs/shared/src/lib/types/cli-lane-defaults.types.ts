@@ -59,6 +59,8 @@ export function resolveCliLaneDefaultPair(
     }
   }
   if (saved.permission || saved.network) return { unsupported: 'Saved CLI lane default has no supported permission/network pair.' };
+  const planSupported = capabilities.permissionModes['plan']?.state === 'supported';
+  if (!saved.permission && !planSupported) return { unsupported: 'Adapter does not support plan permission; no default possible.' };
   return {};
 }
 

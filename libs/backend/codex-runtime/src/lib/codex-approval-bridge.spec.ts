@@ -921,4 +921,53 @@ describe('CodexApprovalBridge', () => {
     ).rejects.toThrow();
     expect(request).not.toHaveBeenCalled();
   });
+
+  describe('Finding 2: terminal child turns', () => {
+    it('fails closed when isChildTurn detects a terminal turn', async () => {
+      const { bridge, request } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'live-turn',
+      });
+      const result = await bridge.handle(
+        frame(command, 4, { threadId: 'child', turnId: 'terminal-turn' }),
+        'terminal-turn',
+        signal(),
+      );
+      expect(result).toEqual({ response: { decision: 'cancel' } });
+      expect(request).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Finding 1: child approvals must reach parent sink', () => {
+    it.each<CodexPermissionLevel>(['plan', 'ask', 'auto-edit', 'yolo'])(
+      'routes child approval to sink in %s permission level',
+      async (permLevel) => {
+        const { bridge, request } = setup({
+          isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+          permissionLevel: () => permLevel,
+        });
+        request.mockResolvedValue('accept');
+        const result = await bridge.handle(
+          frame(command, 5, { threadId: 'child', turnId: 'cturn' }),
+          'cturn',
+          signal(),
+        );
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(result.response).toEqual({ decision: 'accept' });
+      },
+    );
+
+    it('applies parent denial to child approval', async () => {
+      const { bridge, request } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+      });
+      request.mockResolvedValue({ decision: 'decline', denialReason: 'safety' });
+      const result = await bridge.handle(
+        frame(command, 6, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(result.response).toEqual({ decision: 'decline' });
+    });
+  });
 });
