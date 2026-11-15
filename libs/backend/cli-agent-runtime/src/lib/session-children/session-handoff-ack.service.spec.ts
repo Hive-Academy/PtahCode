@@ -216,6 +216,34 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     expect(h.closer.close).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the unsettled close when the settlement write reports no change', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    const service = h.makeService(store);
+    await armAndFlush(service, h.request);
+    const original = store.compareAndSet.bind(store);
+    jest
+      .spyOn(store, 'compareAndSet')
+      .mockRejectedValueOnce(new Error('disk unavailable'))
+      .mockResolvedValueOnce(false)
+      .mockImplementation(original);
+    expect(await service.acknowledge(h.request)).toMatchObject({
+      status: 'closed',
+    });
+    h.closer.close.mockResolvedValue({ kind: 'absent' });
+    expect(await service.acknowledge(h.request)).toMatchObject({
+      status: 'retryable-failure',
+    });
+    expect(await service.acknowledge(h.request)).toMatchObject({
+      status: 'already-closed',
+    });
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closeCompleted',
+    });
+    expect(h.closer.close).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses an absent predecessor on the first acknowledgement', async () => {
     const h = harness();
     const store = h.makeStore();

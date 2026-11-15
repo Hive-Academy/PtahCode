@@ -401,6 +401,8 @@ export class SessionHandoffService
         { state: 'closePending' },
         record.successorTabId,
       );
+      if (transition === 'superseded' || transition === 'completed')
+        this.closedUnsettled.delete(record.predecessorTabId);
       if (transition === 'superseded')
         return refused('handoff record superseded by a newer handoff');
       if (transition === 'completed')
@@ -416,13 +418,17 @@ export class SessionHandoffService
       }
       if (this.closedUnsettled.has(record.predecessorTabId)) {
         // This service closed the predecessor but could not persist it.
-        // A rejected write here gives a retry through the outer catch.
-        await this.ackStore!.compareAndSet(
+        // A rejected write gives a retry through the outer catch. A false
+        // result means the record changed after the transition: keep the
+        // marker and let the next acknowledgement read the new state.
+        const settled = await this.ackStore!.compareAndSet(
           record.predecessorTabId,
           'closePending',
           { state: 'closeCompleted' },
           record.successorTabId,
         );
+        if (!settled)
+          return retry('handoff record changed during settlement; retry later');
         this.closedUnsettled.delete(record.predecessorTabId);
         return {
           status: 'already-closed',

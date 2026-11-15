@@ -98,3 +98,10 @@ Checks: targeted Jest 3 suites, 105 tests passed. `npm run verify -- -p cli-agen
   predecessors it closed without a persisted completion. The next ack settles the record without
   another close. The set does not survive a restart; then an absent tab is refused, as before.
 - Gate `npm run verify -- -p cli-agent-runtime` and `-t typecheck -p ptah-electron`: passed.
+
+## PR bot findings on 5de0e3ab1 (coordinator)
+
+- Finding: the recovery path ignored a `false` result of `compareAndSet` and cleared the marker.
+- Fix: a `false` result keeps the `closedUnsettled` marker and returns a retry. The marker is
+  cleared when `transition` reports `superseded` or `completed`.
+- Codex review round 8 approved 5de0e3ab1. Gate and Electron typecheck passed for this change.
