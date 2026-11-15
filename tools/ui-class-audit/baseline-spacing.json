@@ -455,11 +455,6 @@
     "pb-1.5": 1,
     "space-y-2": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-capability-cells.component.ts": {
-    "gap-1": 2,
-    "mt-1": 1,
-    "py-0.5": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-capability-detail.component.ts": {
     "gap-1.5": 1,
     "gap-2": 1,
