@@ -379,6 +379,14 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
   });
 
   describe('preferred order popover (#73, plan §3 row 892)', () => {
+    it('keeps the dialog scrollable and inside the viewport, with initial focus on its title', async () => {
+      await openOrder();
+      expect(popover()?.className).toContain('max-h-[calc(100vh_-_var(--ptah-space-8))]');
+      expect(popover()?.className).toContain('overflow-y-auto');
+      expect(q('#policy-order-title')?.getAttribute('tabindex')).toBe('-1');
+      expect(popover()?.querySelector('button:focus')).toBeNull();
+      expect(button('policy-order-edit')?.getAttribute('aria-label')).toContain('Edit order');
+    });
     it('opens a dialog listing the installed agents in the matrix order, with 24 px ▲/▼ per row', async () => {
       await openOrder();
       expect(popover()?.getAttribute('role')).toBe('dialog');

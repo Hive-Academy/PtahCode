@@ -96,7 +96,7 @@ const BADGE_TONE: Readonly<Record<MainAgentTone, PtahBadgeTone>> = {
                   <ng-container *ngTemplateOutlet="changeAction" />
                 </div>
                 <div ptahDescriptionItem term="Model" data-testid="routing-main-model-row">
-                  <span class="min-w-0 break-words font-mono text-base-content" data-testid="routing-main-model">{{ main().model }}</span>
+                  <span class="min-w-0 break-words text-base-content" [class.font-mono]="main().modelIsId" data-testid="routing-main-model">{{ main().model }}</span>
                 </div>
                 <div ptahDescriptionItem term="Effort" data-testid="routing-main-effort-row">
                   <span class="break-words text-base-content" data-testid="routing-node-footer">{{ main().effort }}</span>
@@ -150,7 +150,7 @@ export class MainAgentSectionComponent {
       ? (this.state.connections().data?.find((entry) => entry.id === driver)?.name ?? driver)
       : null;
     return {
-      state, tone, model, provider,
+      state, tone, model, provider, modelIsId: data?.resolvedModel.kind === 'model',
       status: !driver ? 'Not set' : data?.ready ? 'Active' : 'Needs attention',
       effort: effortText,
     };
