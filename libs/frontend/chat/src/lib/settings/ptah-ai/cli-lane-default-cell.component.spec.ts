@@ -205,4 +205,13 @@ describe('CliLaneDefaultCellComponent', () => {
     const fixture = setup('codex', { permission: 'plan', network: 'allow' });
     expect(fixture.nativeElement.textContent).toContain('Unsupported combination');
   });
+
+  it('shows an unsupported saved pair in the card layout when no network choice remains', () => {
+    const fixture = setup('codex', { permission: 'plan', network: 'allow' });
+    fixture.componentRef.setInput('layout', 'card');
+    fixture.componentRef.setInput('manifest', { ...manifest, permissionModes: { ask: { ...unsupported, networkModes: [] } } });
+    fixture.detectChanges();
+    const warning = fixture.nativeElement.querySelector('.defaults-warning');
+    expect(warning?.textContent).toContain('Saved CLI lane default has no supported permission/network pair.');
+  });
 });

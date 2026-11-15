@@ -61,7 +61,7 @@ let nextTitleId = 0;
         </select>
       } @else { <span ptahFieldTrailing class="text-base-content-muted" [title]="reason()">Unavailable</span> }
       </ptah-field>
-      @if (networks().length && unsupportedCombination(); as warningText) { <span class="defaults-warning text-base-content-muted" role="status">⚠ Unsupported combination: {{ warningText }}</span> }
+      @if ((networks().length || saved()) && unsupportedCombination(); as warningText) { <span class="defaults-warning text-base-content-muted" role="status">⚠ Unsupported combination: {{ warningText }}</span> }
     } @else {
     <div class="flex min-w-0 max-w-full flex-col gap-[var(--ptah-gap-controls)] text-xs text-base-content [overflow-wrap:anywhere]">
       @if (cli() === 'ptah-cli') { <span>Shared by all Ptah CLI providers</span> }
