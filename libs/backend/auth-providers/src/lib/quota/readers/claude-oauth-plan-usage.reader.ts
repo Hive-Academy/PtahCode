@@ -26,11 +26,12 @@ const Identity = z.object({
   organization_uuid: z.string().min(1).optional(),
 });
 type Identity = z.infer<typeof Identity>;
+/** Both spellings name one id. A side without an id cannot contradict the other. */
+const differs = (a: string | undefined, b: string | undefined): boolean =>
+  a !== undefined && b !== undefined && a !== b;
 const identityMismatch = (source: Identity, account: Identity): boolean =>
-  (source.accountUuid !== undefined && source.accountUuid !== account.accountUuid) ||
-  (source.account_uuid !== undefined && source.account_uuid !== account.account_uuid) ||
-  (source.organizationUuid !== undefined && source.organizationUuid !== account.organizationUuid) ||
-  (source.organization_uuid !== undefined && source.organization_uuid !== account.organization_uuid);
+  differs(source.accountUuid ?? source.account_uuid, account.accountUuid ?? account.account_uuid) ||
+  differs(source.organizationUuid ?? source.organization_uuid, account.organizationUuid ?? account.organization_uuid);
 const Credentials = z.object({
   claudeAiOauth: Identity.extend({
     accessToken: z.string().min(1),

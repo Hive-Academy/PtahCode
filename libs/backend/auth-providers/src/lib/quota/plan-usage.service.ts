@@ -210,7 +210,10 @@ export class PlanUsageService {
           const oauth = await claudeOauthReader(request);
           if (request.signal?.aborted) return live;
           if (oauth.sourceInvalid) {
-            // An unverified owner is not cached; the cooldown stops a re-read on each snapshot.
+            // An unverified owner is not cached, and an earlier reading for it is dropped.
+            // The cooldown stops a re-read on each snapshot.
+            this.cache.delete(ownerKey);
+            this.failingSince.delete(ownerKey);
             this.recordClaudeOauthFailure(ownerKey, oauth.retryAfterMs);
             return oauth;
           }

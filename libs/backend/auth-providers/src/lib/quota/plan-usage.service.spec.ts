@@ -228,6 +228,21 @@ describe('PlanUsageService', () => {
     expect(second).toMatchObject({ unavailableReason: 'no-open-session', windows: [] });
     expect(h.oauthReader).toHaveBeenCalledTimes(1);
   });
+  it('drops an earlier cached owner reading after an OAuth identity mismatch', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const cached = await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(cached.windows.length).toBeGreaterThan(0);
+    h.oauthReader.mockResolvedValueOnce({ status: 'service-unavailable', statusReason: 'account-unverified', windowSetEstablished: false, windows: [], sourceInvalid: true });
+    await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    const liveReads = h.readPlanUsage.mock.calls.length;
+    // Not a cache hit: the live source is read again and the result is not the cached reading.
+    // Ledger windows from the earlier verified read stay; they are real owner observations.
+    const after = await h.service.getOwnerSnapshot(claudeTarget());
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(liveReads + 1);
+    expect(after.status).not.toBe('available');
+  });
   it('uses OAuth windows after one live no-session read and preserves live data when OAuth fails', async () => {
     const h = harness();
     h.readPlanUsage.mockResolvedValue(null);

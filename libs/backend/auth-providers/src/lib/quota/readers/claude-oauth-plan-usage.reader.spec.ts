@@ -74,6 +74,18 @@ describe('Claude OAuth plan usage', () => {
     expect(result).toMatchObject({ statusReason: 'account-unverified', windows: [], sourceInvalid: true });
     expect(h.fetcher).not.toHaveBeenCalled();
   });
+  it('accepts matching ids under either spelling and ids that metadata does not carry', async () => {
+    const credentialFile = JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-token', expiresAt: NOW + 60_000, account_uuid: 'account-owner' } });
+    const accountFile = JSON.stringify({ oauthAccount: { emailAddress: 'person@example.test', organizationName: 'Example', accountUuid: 'account-owner' } });
+    const result = await harness(credentialFile, { ...full, organization_uuid: 'org-unknown-to-metadata' }, accountFile).reader({ target, refresh: true });
+    expect(result.status).toBe('available');
+    expect(result.sourceInvalid).toBeFalsy();
+  });
+  it('rejects a conflicting id under the other spelling', async () => {
+    const accountFile = JSON.stringify({ oauthAccount: { emailAddress: 'person@example.test', organizationName: 'Example', organizationUuid: 'org-owner' } });
+    const result = await harness(credentials, { ...full, organization_uuid: 'org-other' }, accountFile).reader({ target, refresh: true });
+    expect(result).toMatchObject({ statusReason: 'account-unverified', windows: [], sourceInvalid: true });
+  });
   it('rejects a response organization that conflicts with metadata', async () => {
     const accountFile = JSON.stringify({ oauthAccount: { emailAddress: 'person@example.test', organizationName: 'Example', organizationUuid: 'org-owner' } });
     const result = await harness(credentials, { ...full, organizationUuid: 'org-other' }, accountFile).reader({ target, refresh: true });
