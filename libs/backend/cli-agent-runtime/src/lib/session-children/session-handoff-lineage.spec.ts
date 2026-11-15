@@ -24,7 +24,18 @@ describe('kept handoff lineage', () => {
     const records = await restarted.records();
     // A `starting` record (T -> U) is not committed and gives no route.
     expect(latestDeliveryTarget(records, 'sdk-P')).toBe('T');
-    expect(await deliveryTarget(restarted, 'P')).toBe('T');
+    expect(await deliveryTarget(restarted, 'P', () => undefined)).toBe('T');
     expect(latestDeliveryTarget(records, 'T')).toBe('T');
+  });
+
+  it('keeps the recorded target and reports the error when the store cannot be read', async () => {
+    const storage: IStateStorage = {
+      get: () => { throw new Error('storage offline'); },
+      update: async () => undefined,
+      keys: () => [],
+    };
+    const onError = jest.fn();
+    expect(await deliveryTarget(new SessionHandoffAckStore(storage), 'P', onError)).toBe('P');
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'storage offline' }));
   });
 });

@@ -197,10 +197,11 @@ it.each([
   fixture.componentInstance.selected.set(selected);
   fixture.componentInstance.selectedAs.set(as);
   fixture.detectChanges();
-  const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
-  expect(button.hasAttribute('data-selected')).toBe(active);
-  expect(button.getAttribute('aria-pressed')).toBe(pressed);
-  expect(button.getAttribute('aria-current')).toBe(current);
+  const button = (fixture.nativeElement as HTMLElement).querySelector('button');
+  expect(button).toBeTruthy();
+  expect(button?.hasAttribute('data-selected')).toBe(active);
+  expect(button?.getAttribute('aria-pressed')).toBe(pressed);
+  expect(button?.getAttribute('aria-current')).toBe(current);
 });
 it('keeps the button type default when a binding removes the type', () => {
   const fixture = TestBed.createComponent(TypeHost);

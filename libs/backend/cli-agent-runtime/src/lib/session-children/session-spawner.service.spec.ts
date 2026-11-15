@@ -134,7 +134,13 @@ export function makeHarness(
     sendMessageToSession: jest.fn().mockResolvedValue(undefined),
     claimHeldPeerMessages: jest.fn().mockReturnValue([]),
     interruptCurrentTurn: jest.fn().mockResolvedValue(true),
-    interruptSession: jest.fn().mockResolvedValue(undefined),
+    // A parent-stop interrupt ends the session, as the Codex adapter now does.
+    interruptSession: jest.fn(async (id: string) => {
+      active.delete(id);
+    }),
+    endSession: jest.fn((id: string) => {
+      active.delete(id);
+    }),
   };
   const host = {
     listChildModels: jest.fn(async () => ['claude-haiku-4', 'claude-opus-4']),
@@ -2063,6 +2069,57 @@ describe('SessionSpawnerService.stop', () => {
   });
 });
 
+describe('SessionSpawnerService.stop - hard stop verification (D13)', () => {
+  it('hard-ends the session when the soft interrupt leaves it active', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.adapter.interruptSession.mockImplementationOnce(async () => undefined);
+
+    const result = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+
+    expect(h.adapter.endSession).toHaveBeenCalledWith(child.childSessionId);
+    expect(h.active.has(child.childSessionId)).toBe(false);
+    expect(result).toMatchObject({ ok: true, child: { status: 'stopped' } });
+  });
+
+  it('refuses and does not mark stopped while the adapter stays active', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.adapter.interruptSession.mockImplementation(async () => undefined);
+    h.adapter.endSession.mockImplementation(() => undefined);
+
+    const result = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'still-active' });
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeFalsy();
+    expect(h.sessionBudget.release).not.toHaveBeenCalled();
+  });
+
+  it('checks and ends the SDK session id when it differs from the child id', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    const sdkId = '00000000-0000-4000-8000-0000000000aa';
+    h.registry.bindSdkSessionId(child.childSessionId, sdkId);
+    h.active.delete(child.childSessionId);
+    h.active.add(sdkId);
+    h.adapter.interruptSession.mockImplementation(async () => undefined);
+
+    const result = await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+
+    expect(h.adapter.endSession).toHaveBeenCalledWith(sdkId);
+    expect(h.active.has(sdkId)).toBe(false);
+    expect(result).toMatchObject({ ok: true, child: { status: 'stopped' } });
+  });
+});
 describe('SessionSpawnerService — child session end grace', () => {
   it.each(['user-stop', 'stream-exit', 'no-activity-timeout'] as const)(
     'signals one failed completion when a generating child ends with %s',

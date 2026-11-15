@@ -29,6 +29,21 @@ export function latestDeliveryTarget(records: readonly HandoffAckRecord[], targe
   return current;
 }
 
-export async function deliveryTarget(store: SessionHandoffAckStore | null, target: string): Promise<string> {
-  return store ? latestDeliveryTarget(await store.records(), target) : target;
+/**
+ * Resolve the forward delivery target from the persisted ack records. When
+ * the store cannot be read, `onError` receives the error and the recorded
+ * target is returned, which is the delivery behaviour without any handoff.
+ */
+export async function deliveryTarget(
+  store: SessionHandoffAckStore | null,
+  target: string,
+  onError: (error: Error) => void,
+): Promise<string> {
+  if (!store) return target;
+  try {
+    return latestDeliveryTarget(await store.records(), target);
+  } catch (error: unknown) {
+    onError(error instanceof Error ? error : new Error(String(error)));
+    return target;
+  }
 }

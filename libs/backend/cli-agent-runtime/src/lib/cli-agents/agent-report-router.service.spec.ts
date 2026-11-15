@@ -105,27 +105,65 @@ function createHarness(
 
 describe('AgentReportRouter.deliver', () => {
   it('records a failed lane report without retaining its message', async () => {
-    const h = createHarness({ sendImpl: async () => { throw new Error('send failed'); } });
-    const result = await h.router.deliver({ agentId: AGENT_ID, message: 'private report' });
+    const h = createHarness({
+      sendImpl: async () => {
+        throw new Error('send failed');
+      },
+    });
+    const result = await h.router.deliver({
+      agentId: AGENT_ID,
+      message: 'private report',
+    });
     expect(result.delivered).toBe(false);
     expect(h.markReportAttempt).toHaveBeenCalledWith(AGENT_ID, true);
   });
   it('holds only final reports and keeps the tile truthful until delivery', async () => {
     const h = createHarness();
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
-    const manager = { findAgentInfo: h.findAgentInfo,
-      recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
+    const manager = {
+      findAgentInfo: h.findAgentInfo,
+      recordAgentNote: h.recordAgentNote,
+      markReportDelivered: h.markReportDelivered,
+    } as never;
     const coalescer = new AgentReportCoalescer();
-    const router = new AgentReportRouter(h.logger, manager, adapter, null, drainer, coalescer);
-    const held = await router.deliver({ agentId: AGENT_ID, message: 'finished', final: true });
-    expect(held).toMatchObject({ delivered: false, pending: true,
-      reason: 'held-for-completion' });
+    const router = new AgentReportRouter(
+      h.logger,
+      manager,
+      adapter,
+      null,
+      drainer,
+      coalescer,
+    );
+    const held = await router.deliver({
+      agentId: AGENT_ID,
+      message: 'finished',
+      final: true,
+    });
+    expect(held).toMatchObject({
+      delivered: false,
+      pending: true,
+      reason: 'held-for-completion',
+    });
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
     expect(h.markReportDelivered).not.toHaveBeenCalled();
-    const urgent = await router.deliver({ agentId: AGENT_ID, message: 'Need a decision' });
+    const urgent = await router.deliver({
+      agentId: AGENT_ID,
+      message: 'Need a decision',
+    });
     expect(urgent.delivered).toBe(true);
     expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
     coalescer.dispose();
@@ -134,18 +172,50 @@ describe('AgentReportRouter.deliver', () => {
 
   it('refuses an identical final report without flushing the held one', async () => {
     const h = createHarness();
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
-    const manager = { findAgentInfo: h.findAgentInfo,
-      recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
+    const manager = {
+      findAgentInfo: h.findAgentInfo,
+      recordAgentNote: h.recordAgentNote,
+      markReportDelivered: h.markReportDelivered,
+    } as never;
     const coalescer = new AgentReportCoalescer();
-    const router = new AgentReportRouter(h.logger, manager, adapter, null, drainer, coalescer);
+    const router = new AgentReportRouter(
+      h.logger,
+      manager,
+      adapter,
+      null,
+      drainer,
+      coalescer,
+    );
     try {
-      await router.deliver({ agentId: AGENT_ID, message: 'closing', final: true });
-      const repeat = await router.deliver({ agentId: AGENT_ID, message: 'closing', final: true });
-      expect(repeat).toMatchObject({ delivered: false, reason: 'duplicate-report' });
+      await router.deliver({
+        agentId: AGENT_ID,
+        message: 'closing',
+        final: true,
+      });
+      const repeat = await router.deliver({
+        agentId: AGENT_ID,
+        message: 'closing',
+        final: true,
+      });
+      expect(repeat).toMatchObject({
+        delivered: false,
+        reason: 'duplicate-report',
+      });
       expect(h.sendMessageToSession).not.toHaveBeenCalled();
       expect(coalescer.peek(AGENT_ID)?.message).toBe('closing');
     } finally {
@@ -157,16 +227,41 @@ describe('AgentReportRouter.deliver', () => {
   it('delivers a held report standalone when its window expires', async () => {
     jest.useFakeTimers();
     const h = createHarness();
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
-    const manager = { findAgentInfo: h.findAgentInfo,
-      recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
+    const manager = {
+      findAgentInfo: h.findAgentInfo,
+      recordAgentNote: h.recordAgentNote,
+      markReportDelivered: h.markReportDelivered,
+    } as never;
     const coalescer = new AgentReportCoalescer();
-    const router = new AgentReportRouter(h.logger, manager, adapter, null, drainer, coalescer);
+    const router = new AgentReportRouter(
+      h.logger,
+      manager,
+      adapter,
+      null,
+      drainer,
+      coalescer,
+    );
     try {
-      await router.deliver({ agentId: AGENT_ID, message: 'closing', final: true });
+      await router.deliver({
+        agentId: AGENT_ID,
+        message: 'closing',
+        final: true,
+      });
       await jest.advanceTimersByTimeAsync(120_000);
       expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
       expect(h.markReportDelivered).toHaveBeenCalledTimes(1);
@@ -178,22 +273,55 @@ describe('AgentReportRouter.deliver', () => {
 
   it('does not infer completion from report prose', async () => {
     const h = createHarness();
-    await h.router.deliver({ agentId: AGENT_ID, message: 'Progress: wrote a draft' });
-    await h.router.deliver({ agentId: AGENT_ID, message: 'Completed step 2 of 5' });
+    await h.router.deliver({
+      agentId: AGENT_ID,
+      message: 'Progress: wrote a draft',
+    });
+    await h.router.deliver({
+      agentId: AGENT_ID,
+      message: 'Completed step 2 of 5',
+    });
     expect(h.markReportDelivered).toHaveBeenNthCalledWith(1, AGENT_ID);
     expect(h.markReportDelivered).toHaveBeenNthCalledWith(2, AGENT_ID);
   });
   it('queues a tab-id report and delivers it after session resolution', async () => {
     const h = createHarness({ info: createInfo({ parentSessionId: 'tab-1' }) });
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
-    const manager = { findAgentInfo: h.findAgentInfo,
-      recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
-    const router = new AgentReportRouter(h.logger, manager, adapter, null, drainer);
-    const pending = await router.deliver({ agentId: AGENT_ID, message: 'progress' });
-    expect(pending).toMatchObject({ delivered: false, recorded: true, pending: true });
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
+    const manager = {
+      findAgentInfo: h.findAgentInfo,
+      recordAgentNote: h.recordAgentNote,
+      markReportDelivered: h.markReportDelivered,
+    } as never;
+    const router = new AgentReportRouter(
+      h.logger,
+      manager,
+      adapter,
+      null,
+      drainer,
+    );
+    const pending = await router.deliver({
+      agentId: AGENT_ID,
+      message: 'progress',
+    });
+    expect(pending).toMatchObject({
+      delivered: false,
+      recorded: true,
+      pending: true,
+    });
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
     await drainer.resolveParentSessionId('tab-1', PARENT);
     expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
@@ -201,29 +329,74 @@ describe('AgentReportRouter.deliver', () => {
 
   it('limits attempted reports while the parent remains inactive', async () => {
     const h = createHarness({ sessionActive: false });
-    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
-    const adapter = { isSessionActive: h.isSessionActive,
-      sendMessageToSession: h.sendMessageToSession } as never;
-    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
-    const manager = { findAgentInfo: h.findAgentInfo,
-      recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
-    const router = new AgentReportRouter(h.logger, manager, adapter, null, drainer);
+    const store = new ParentEnvelopeStoreService(
+      h.logger,
+      new FakeStateStorage(),
+    );
+    const adapter = {
+      isSessionActive: h.isSessionActive,
+      sendMessageToSession: h.sendMessageToSession,
+    } as never;
+    const drainer = new ParentDeliveryDrainerService(
+      h.logger,
+      store,
+      adapter,
+      null,
+      null,
+    );
+    const manager = {
+      findAgentInfo: h.findAgentInfo,
+      recordAgentNote: h.recordAgentNote,
+      markReportDelivered: h.markReportDelivered,
+    } as never;
+    const router = new AgentReportRouter(
+      h.logger,
+      manager,
+      adapter,
+      null,
+      drainer,
+    );
     for (let i = 0; i < AGENT_REPORT_BURST_LIMIT; i++)
-      expect((await router.deliver({ agentId: AGENT_ID, message: `report ${i}` })).pending).toBe(true);
-    expect(await router.deliver({ agentId: AGENT_ID, message: 'overflow' }))
-      .toMatchObject({ delivered: false, reason: 'rate-limited' });
+      expect(
+        (await router.deliver({ agentId: AGENT_ID, message: `report ${i}` }))
+          .pending,
+      ).toBe(true);
+    expect(
+      await router.deliver({ agentId: AGENT_ID, message: 'overflow' }),
+    ).toMatchObject({ delivered: false, reason: 'rate-limited' });
   });
 
   describe('durable parent inbox refusals', () => {
     async function durableRouter(h: Harness, storage: FakeStateStorage) {
       const store = new ParentEnvelopeStoreService(h.logger, storage);
       await store.ready;
-      const adapter = { isSessionActive: h.isSessionActive,
-        sendMessageToSession: h.sendMessageToSession } as never;
-      const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
-      const manager = { findAgentInfo: h.findAgentInfo,
-        recordAgentNote: h.recordAgentNote, markReportDelivered: h.markReportDelivered } as never;
-      return { store, drainer, router: new AgentReportRouter(h.logger, manager, adapter, null, drainer) };
+      const adapter = {
+        isSessionActive: h.isSessionActive,
+        sendMessageToSession: h.sendMessageToSession,
+      } as never;
+      const drainer = new ParentDeliveryDrainerService(
+        h.logger,
+        store,
+        adapter,
+        null,
+        null,
+      );
+      const manager = {
+        findAgentInfo: h.findAgentInfo,
+        recordAgentNote: h.recordAgentNote,
+        markReportDelivered: h.markReportDelivered,
+      } as never;
+      return {
+        store,
+        drainer,
+        router: new AgentReportRouter(
+          h.logger,
+          manager,
+          adapter,
+          null,
+          drainer,
+        ),
+      };
     }
 
     it('maps a failed persist to storage-unavailable and lets the lane report again', async () => {
@@ -231,33 +404,49 @@ describe('AgentReportRouter.deliver', () => {
       const storage = new FakeStateStorage();
       const { router, drainer } = await durableRouter(h, storage);
       storage.failWrites = () => true;
-      expect(await router.deliver({ agentId: AGENT_ID, message: 'progress' }))
-        .toEqual({ delivered: false, reason: 'storage-unavailable' });
+      expect(
+        await router.deliver({ agentId: AGENT_ID, message: 'progress' }),
+      ).toEqual({ delivered: false, reason: 'storage-unavailable' });
       storage.failWrites = () => false;
-      expect(await router.deliver({ agentId: AGENT_ID, message: 'progress' }))
-        .toMatchObject({ delivered: true, recorded: true });
+      expect(
+        await router.deliver({ agentId: AGENT_ID, message: 'progress' }),
+      ).toMatchObject({ delivered: true, recorded: true });
       drainer.dispose();
     });
 
     it('maps a frozen parent to parent-session-deleted', async () => {
       const h = createHarness();
-      const { router, store, drainer } = await durableRouter(h, new FakeStateStorage());
+      const { router, store, drainer } = await durableRouter(
+        h,
+        new FakeStateStorage(),
+      );
       await store.markIntent(PARENT);
-      expect(await router.deliver({ agentId: AGENT_ID, message: 'progress' }))
-        .toEqual({ delivered: false, reason: 'parent-session-deleted' });
+      expect(
+        await router.deliver({ agentId: AGENT_ID, message: 'progress' }),
+      ).toEqual({ delivered: false, reason: 'parent-session-deleted' });
       expect(h.sendMessageToSession).not.toHaveBeenCalled();
       drainer.dispose();
     });
 
     it('maps a full parent inbox to parent-inbox-full', async () => {
       const h = createHarness({ sessionActive: false });
-      const { router, store, drainer } = await durableRouter(h, new FakeStateStorage());
-      for (let n = 0; n < 64; n++) await store.enqueue({
-        id: `lane-delivery:report:other:${n}:h`, dedupeKey: `report:other:${n}:h`,
-        agentId: 'other', parentSessionId: PARENT, kind: 'report', body: 'b', createdAt: n,
-      });
-      expect(await router.deliver({ agentId: AGENT_ID, message: 'progress' }))
-        .toEqual({ delivered: false, reason: 'parent-inbox-full' });
+      const { router, store, drainer } = await durableRouter(
+        h,
+        new FakeStateStorage(),
+      );
+      for (let n = 0; n < 64; n++)
+        await store.enqueue({
+          id: `lane-delivery:report:other:${n}:h`,
+          dedupeKey: `report:other:${n}:h`,
+          agentId: 'other',
+          parentSessionId: PARENT,
+          kind: 'report',
+          body: 'b',
+          createdAt: n,
+        });
+      expect(
+        await router.deliver({ agentId: AGENT_ID, message: 'progress' }),
+      ).toEqual({ delivered: false, reason: 'parent-inbox-full' });
       drainer.dispose();
     });
   });
@@ -620,6 +809,8 @@ describe('AgentReportRouter.deliver — session child', () => {
       activeIds?: readonly string[];
       sendImpl?: () => Promise<void>;
       withRegistry?: boolean;
+      handoffBinding?: { successorTabId: string; successorSdkId: string };
+      findBySuccessor?: jest.Mock;
     } = {},
   ) {
     const logger = createLogger();
@@ -662,6 +853,18 @@ describe('AgentReportRouter.deliver — session child', () => {
       manager,
       { isSessionActive, sendMessageToSession } as never,
       options.withRegistry === false ? null : registry,
+      null,
+      null,
+      options.findBySuccessor
+        ? ({ findBySuccessor: options.findBySuccessor, records: jest.fn().mockResolvedValue([]) } as never)
+        : options.handoffBinding
+          ? ({
+              findBySuccessor: jest
+                .fn()
+                .mockResolvedValue({ ...options.handoffBinding, state: 'recorded' }),
+              records: jest.fn().mockResolvedValue([]),
+            } as never)
+          : null,
     );
     return {
       router,
@@ -715,6 +918,83 @@ describe('AgentReportRouter.deliver — session child', () => {
     expect(await router.deliver({ childSessionId: CHILD, message: 'done' }))
       .toMatchObject({ delivered: true, parentSessionId: PARENT_SDK });
     expect(h.sendMessageToSession).toHaveBeenCalledWith(PARENT_SDK, expect.any(String), expect.any(Object));
+  });
+  it('delivers an adopted child report to the active successor tab', async () => {
+    const successor = 'dddddddd-2222-4333-8444-555555555555';
+    const successorSdk = 'eeeeeeee-2222-4333-8444-555555555555';
+    const h = createSessionHarness({ activeIds: [successor, successorSdk] });
+    h.registry.reparent(CHILD, successor, successorSdk);
+    const result = await h.router.deliver({
+      childSessionId: CHILD_SDK,
+      message: 'adopted report',
+    });
+    expect(result).toEqual({ delivered: true, parentSessionId: successor });
+    expect(h.sendMessageToSession).toHaveBeenCalledWith(
+      successor,
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+
+  it('delivers to the active SDK id only when the handoff binds it to the owner tab', async () => {
+    const successor = 'dddddddd-2222-4333-8444-555555555555';
+    const successorSdk = 'eeeeeeee-2222-4333-8444-555555555555';
+    const h = createSessionHarness({
+      activeIds: [successorSdk],
+      handoffBinding: {
+        successorTabId: successor,
+        successorSdkId: successorSdk,
+      },
+    });
+    h.registry.reparent(CHILD, successor, successorSdk);
+    expect(
+      await h.router.deliver({
+        childSessionId: CHILD_SDK,
+        message: 'adopted report',
+      }),
+    ).toEqual({ delivered: true, parentSessionId: successorSdk });
+    expect(h.sendMessageToSession).toHaveBeenCalledWith(
+      successorSdk,
+      expect.any(String),
+      expect.any(Object),
+    );
+    const mismatch = createSessionHarness({
+      activeIds: [successorSdk],
+      handoffBinding: { successorTabId: PARENT, successorSdkId: successorSdk },
+    });
+    mismatch.registry.reparent(CHILD, successor, successorSdk);
+    expect(
+      await mismatch.router.deliver({
+        childSessionId: CHILD_SDK,
+        message: 'report',
+      }),
+    ).toMatchObject({ delivered: false, reason: 'parent-session-not-active' });
+  });
+
+  it('does not reroute to the SDK id when the child is reparented during the binding lookup', async () => {
+    const successor = 'dddddddd-2222-4333-8444-555555555555';
+    const successorSdk = 'eeeeeeee-2222-4333-8444-555555555555';
+    const next = 'ffffffff-2222-4333-8444-555555555555';
+    const nextSdk = 'abababab-2222-4333-8444-555555555555';
+    const findBySuccessor = jest.fn();
+    const h = createSessionHarness({
+      activeIds: [successorSdk],
+      findBySuccessor,
+    });
+    h.registry.reparent(CHILD, successor, successorSdk);
+    findBySuccessor.mockImplementation(async () => {
+      h.registry.reparent(CHILD, next, nextSdk);
+      // The former owner tab comes back to life during the lookup.
+      h.active.add(successor);
+      return { successorTabId: successor, successorSdkId: successorSdk, state: 'recorded' };
+    });
+    expect(
+      await h.router.deliver({
+        childSessionId: CHILD_SDK,
+        message: 'raced report',
+      }),
+    ).toMatchObject({ delivered: false, reason: 'parent-session-not-active' });
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
   });
 
   it('resolves a report sent under the child SDK id to the same child', async () => {

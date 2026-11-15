@@ -15,6 +15,7 @@ import {
   SESSION_HANDOFF_START_FAILED_DETAIL,
   SESSION_HANDOFF_START_TIMEOUT_DETAIL,
   SESSION_HANDOFF_START_TIMEOUT_MS,
+  SESSION_HANDOFF_RECONCILE_MS,
   SessionHandoffService,
 } from './session-handoff.service';
 import type { SessionHandoffRequest } from './session-handoff.port';
@@ -131,6 +132,13 @@ function makeHarness() {
   }): void => {
     for (const cb of [...idListeners]) cb({ timestamp: 1, ...payload });
   };
+  const endListeners: Array<(event: { sessionId: string }) => void> = [];
+  const sessionEnds = {
+    register: (cb: (event: { sessionId: string }) => void) => {
+      endListeners.push(cb);
+      return () => undefined;
+    },
+  };
   const children = new Set<string>();
   // The depth guard is faked; the parent links are a real registry.
   const links = new SessionChildRegistry();
@@ -225,6 +233,7 @@ function makeHarness() {
       ('chain' in overrides ? overrides.chain : chain) as never,
       ackStore,
       ('spawner' in overrides ? overrides.spawner : null) as never,
+      sessionEnds as never,
     );
 
   const request = (
@@ -258,6 +267,8 @@ function makeHarness() {
     ackStore,
     closer,
     notifyResolved,
+    notifyEnded: (sessionId: string) =>
+      endListeners.forEach((cb) => cb({ sessionId })),
   };
 }
 
@@ -325,6 +336,70 @@ describe('SessionHandoffService', () => {
     expect(h.closer.close).toHaveBeenCalledTimes(1);
     expect(h.closer.close).toHaveBeenCalledWith(CALLER, CALLER_SDK);
   });
+  it('removes a reservation when the predecessor ends', async () => {
+    const h = makeHarness();
+    await h.service.handoff(h.request());
+    expect(h.service['handedOff'].has(CALLER)).toBe(true);
+    h.notifyEnded(CALLER);
+    expect(h.service['handedOff'].has(CALLER)).toBe(false);
+  });
+
+  it('acknowledges after the handoff file is removed during start', async () => {
+    const h = makeHarness();
+    const path = join(root, 'removed-handoff.md');
+    writeFileSync(path, 'handoff');
+    h.host.startHandoffSession.mockImplementationOnce(async () => {
+      rmSync(path);
+      return { started: true, uiAnnounced: true };
+    });
+    const started = await h.service.handoff(h.request({ handoffPath: path }));
+    if (!started.ok) throw new Error('handoff should start');
+    h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+    expect(
+      await h.service.acknowledge({
+        callerSessionId: started.tabId,
+        predecessorSessionId: CALLER,
+        handoffPath: path,
+      }),
+    ).toMatchObject({ status: 'closed' });
+  });
+
+  it('recovers an unpersisted acknowledgement by predecessor SDK id', async () => {
+    const h = makeHarness();
+    jest
+      .spyOn(h.ackStore, 'record')
+      .mockRejectedValueOnce(new Error('temporary'));
+    const started = await h.service.handoff(h.request());
+    if (!started.ok) throw new Error('handoff should start');
+    h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+    expect(
+      await h.service.acknowledge({
+        callerSessionId: started.tabId,
+        predecessorSessionId: CALLER_SDK,
+        handoffPath,
+      }),
+    ).toMatchObject({ status: 'closed' });
+  });
+
+  it('recovers an unpersisted acknowledgement after the successor SDK id resolves', async () => {
+    const h = makeHarness();
+    jest
+      .spyOn(h.ackStore, 'record')
+      .mockRejectedValueOnce(new Error('temporary'));
+    const started = await h.service.handoff(h.request());
+    if (!started.ok) throw new Error('handoff should start');
+    const sdkId = '99999999-aaaa-4bbb-8ccc-dddddddddddd';
+    h.notifyResolved({ tabId: started.tabId, realSessionId: sdkId });
+    h.service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+    expect(
+      await h.service.acknowledge({
+        callerSessionId: sdkId,
+        predecessorSessionId: CALLER,
+        handoffPath,
+      }),
+    ).toMatchObject({ status: 'closed' });
+  });
+
   it('starts a top-level session in the caller cwd with its permission, model and descriptor', async () => {
     const h = makeHarness();
 
@@ -492,6 +567,16 @@ describe('SessionHandoffService', () => {
         reason:
           'A successor child needs no acknowledgement; the host retires its predecessor.',
       });
+    });
+    it('lets a successor retry while its late-start record is being written', async () => {
+      const h = makeHarness();
+      await expect(
+        h.service.acknowledge({
+          callerSessionId: CALLER_NEW_TAB,
+          predecessorSessionId: CALLER,
+          handoffPath,
+        }),
+      ).resolves.toMatchObject({ status: 'retryable-failure' });
     });
     it('chat-runtime-unavailable: no host registered', async () => {
       const h = makeHarness();
@@ -758,7 +843,7 @@ describe('SessionHandoffService', () => {
       expect(second).toEqual({
         ok: false,
         refusal: 'already-handed-off',
-        detail: 'a handoff from this session is already in progress',
+        detail: `a handoff from this session to tab ${h.host.startHandoffSession.mock.calls[0]?.[0].tabId} is already in progress`,
       });
       await expect(first).resolves.toMatchObject({ ok: true });
       expect(h.host.startHandoffSession).toHaveBeenCalledTimes(1);
@@ -816,16 +901,112 @@ describe('SessionHandoffService', () => {
 
       expect(result).toEqual({
         ok: false,
-        refusal: 'session-start-failed',
+        refusal: 'session-start-timeout',
         detail: SESSION_HANDOFF_START_TIMEOUT_DETAIL,
       });
       expect(SESSION_HANDOFF_START_TIMEOUT_DETAIL).toContain(
         'may still open late',
       );
-      expect(jest.getTimerCount()).toBe(0);
+      expect(jest.getTimerCount()).toBe(1);
     });
 
-    it('gives the work back at the deadline; a late success adopts nothing', async () => {
+    it('retains a predecessor reservation beyond 64 subsequent handoffs', async () => {
+      const h = makeHarness();
+      await h.service.handoff(h.request());
+      for (let i = 0; i < 65; i++) {
+        h.service['remember'](`other-${i}`, {
+          sdkSessionId: null,
+          tabId: `successor-${i}`,
+        });
+      }
+      await expect(h.service.handoff(h.request())).resolves.toMatchObject({
+        refusal: 'already-handed-off',
+      });
+      expect(h.host.startHandoffSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-adopts work after absent reconciliation and late success but the ack never closes the predecessor', async () => {
+      const h = makeHarness();
+      h.agents.adoptLanes.mockReturnValue(['lane-a']);
+      addLink(h.links, 'child-live');
+      const { settle } = await startHanging(h);
+      const tab = h.host.startHandoffSession.mock.calls[0][0].tabId;
+      jest.advanceTimersByTime(SESSION_HANDOFF_RECONCILE_MS);
+      await flush();
+      expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith(
+        ['lane-a'],
+        'reverted',
+      );
+      await expect(h.service.handoff(h.request())).resolves.toMatchObject({
+        refusal: 'already-handed-off',
+      });
+      settle({ started: true, uiAnnounced: true });
+      for (
+        let i = 0;
+        i < 30 && h.links.get('child-live')?.parentSessionId !== tab;
+        i++
+      )
+        await flush();
+      for (let i = 0; i < 10; i++) await flush();
+      // Results that completed after the revert went to the predecessor:
+      // the record keeps the identity binding but never permits the close.
+      expect(await h.ackStore.findBySuccessor(tab)).toMatchObject({
+        successorTabId: tab,
+        keepPredecessor: true,
+      });
+      const ack = await h.service.acknowledge({
+        callerSessionId: tab,
+        predecessorSessionId: CALLER,
+        handoffPath,
+      });
+      expect(ack.status).toBe('refused');
+      expect(h.closer.close).not.toHaveBeenCalled();
+      expect(h.lifecycle.endSession).not.toHaveBeenCalled();
+      expect(h.links.get('child-live')?.parentSessionId).toBe(tab);
+      expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith(
+        ['lane-a'],
+        'kept',
+      );
+      await expect(h.service.handoff(h.request())).resolves.toMatchObject({
+        refusal: 'already-handed-off',
+      });
+      expect(h.host.startHandoffSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('withholds acknowledgement when re-adoption fails', async () => {
+      const h = makeHarness();
+      addLink(h.links, 'child-live');
+      const { settle } = await startHanging(h);
+      const tab = h.host.startHandoffSession.mock.calls[0][0].tabId;
+      jest.advanceTimersByTime(SESSION_HANDOFF_RECONCILE_MS);
+      await flush();
+      h.agents.adoptLanes.mockImplementationOnce(() => {
+        throw new Error('adoption failed');
+      });
+      settle({ started: true, uiAnnounced: true });
+      for (let i = 0; i < 30; i++) await flush();
+      expect(await h.ackStore.findBySuccessor(tab)).toBeUndefined();
+      expect(h.links.get('child-live')?.parentSessionId).toBe(CALLER);
+      expect(h.closer.close).not.toHaveBeenCalled();
+    });
+
+    it('retries a transient late acknowledgement record failure', async () => {
+      const h = makeHarness();
+      const record = jest
+        .spyOn(h.ackStore, 'record')
+        .mockRejectedValueOnce(new Error('temporary'));
+      const { settle } = await startHanging(h);
+      const tab = h.host.startHandoffSession.mock.calls[0][0].tabId;
+      settle({ started: true, uiAnnounced: true });
+      while (record.mock.calls.length === 0) await flush();
+      await flush();
+      jest.advanceTimersByTime(100);
+      while (record.mock.calls.length < 2) await flush();
+      await record.mock.results[1].value;
+      expect(await h.ackStore.findBySuccessor(tab)).toBeDefined();
+    });
+
+    it('keeps adoption after a late success and records its real SDK id for acknowledgement', async () => {
       const h = makeHarness();
       h.agents.adoptLanes.mockReturnValue(['lane-a']);
       addLink(h.links, 'child-live');
@@ -833,20 +1014,30 @@ describe('SessionHandoffService', () => {
       const { result, settle } = await startHanging(h);
 
       expect(result).toMatchObject({ ok: false });
-      expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith(
-        ['lane-a'],
-        'reverted',
-      );
-      expect(h.links.get('child-live')?.parentSessionId).toBe(CALLER);
+      expect(h.agents.settleLaneAdoption).not.toHaveBeenCalled();
+      const lateTab = h.host.startHandoffSession.mock.calls[0]?.[0].tabId;
+      h.notifyResolved({
+        tabId: lateTab,
+        realSessionId: '99999999-aaaa-4bbb-8ccc-dddddddddddd',
+      });
 
       settle({ started: true, uiAnnounced: true });
-      await flush();
+      while (h.agents.settleLaneAdoption.mock.calls.length === 0) await flush();
 
-      expect(h.agents.settleLaneAdoption).toHaveBeenCalledTimes(1);
-      expect(h.links.get('child-live')?.parentSessionId).toBe(CALLER);
+      expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith(
+        ['lane-a'],
+        'kept',
+      );
+      expect(h.links.get('child-live')).toMatchObject({
+        parentSessionId: lateTab,
+        parentSdkSessionId: '99999999-aaaa-4bbb-8ccc-dddddddddddd',
+      });
+      expect(await h.ackStore.findBySuccessor(lateTab)).toMatchObject({
+        successorSdkId: '99999999-aaaa-4bbb-8ccc-dddddddddddd',
+      });
     });
 
-    it('keeps the caller reserved until a late success, then does not record it', async () => {
+    it('keeps the caller reserved and refuses another handoff after a late success', async () => {
       const h = makeHarness();
       const { settle } = await startHanging(h);
 
@@ -855,7 +1046,7 @@ describe('SessionHandoffService', () => {
       ).resolves.toEqual({
         ok: false,
         refusal: 'already-handed-off',
-        detail: 'a handoff from this session is already in progress',
+        detail: `a handoff from this session to tab ${h.host.startHandoffSession.mock.calls[0]?.[0].tabId} is already in progress`,
       });
 
       settle({ started: true, uiAnnounced: true });
@@ -865,22 +1056,32 @@ describe('SessionHandoffService', () => {
         tabId: lateTab,
         realSessionId: '99999999-aaaa-4bbb-8ccc-dddddddddddd',
       });
-      await flush();
+      for (let i = 0; i < 50 && h.chain.append.mock.calls.length === 0; i++)
+        await flush();
 
       await expect(h.service.handoff(h.request())).resolves.toMatchObject({
-        ok: true,
+        ok: false,
+        refusal: 'already-handed-off',
+        detail: `this session already handed off to tab ${lateTab}`,
       });
-      expect(h.host.startHandoffSession).toHaveBeenCalledTimes(2);
+      expect(h.host.startHandoffSession).toHaveBeenCalledTimes(1);
       expect(h.lifecycle.endSession).not.toHaveBeenCalled();
-      expect(h.chain.append).not.toHaveBeenCalled();
+      expect(h.chain.append).toHaveBeenCalledTimes(1);
     });
 
     it('frees the caller after a late failure', async () => {
       const h = makeHarness();
+      h.agents.adoptLanes.mockReturnValue(['lane-a']);
+      addLink(h.links, 'child-live');
       const { settle } = await startHanging(h);
 
       settle({ started: false, error: 'boom' });
       await flush();
+      expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith(
+        ['lane-a'],
+        'reverted',
+      );
+      expect(h.links.get('child-live')?.parentSessionId).toBe(CALLER);
 
       await expect(h.service.handoff(h.request())).resolves.toMatchObject({
         ok: true,

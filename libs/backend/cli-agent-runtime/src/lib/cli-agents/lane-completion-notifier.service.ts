@@ -395,12 +395,19 @@ export class LaneCompletionNotifier {
     private readonly terminalCheckpoint: () => LaneTerminalCheckpoint | null = () =>
       null,
     private readonly coalescer: AgentReportCoalescer | null = null,
-    @inject(SessionHandoffAckStore, { isOptional: true })
+    /** Built by the `register.ts` factory, which passes the ack store. */
     private readonly handoffs: SessionHandoffAckStore | null = null,
   ) {
     this.pendingReplays = new PendingCompletionReplays(logger);
     this.parentDelivery?.onRetryTick(() => this.retryTick());
     void this.scheduleStartupOutboxReplay();
+  }
+
+  /** Delivery only: a completion addressed to a handed-off session goes to its successor. */
+  private forwardTarget(target: string): Promise<string> {
+    return deliveryTarget(this.handoffs, target, (error) =>
+      this.logger.error('Handoff delivery lineage read failed', error),
+    );
   }
 
   /**
@@ -478,7 +485,7 @@ export class LaneCompletionNotifier {
     let signal = await this.buildSignal(info, completedAt, context);
     const recordedParent = SessionId.safeParse(info.parentSessionId?.trim()) ??
       info.parentSessionId?.trim();
-    const parentSessionId = recordedParent ? await deliveryTarget(this.handoffs, recordedParent) : undefined;
+    const parentSessionId = recordedParent ? await this.forwardTarget(recordedParent) : undefined;
     const activeParentSessionId =
       parentSessionId &&
       SessionId.safeParse(parentSessionId) &&
@@ -1044,7 +1051,7 @@ export class LaneCompletionNotifier {
     const adapter = this.agentAdapter;
     // The first recorded parent is the owner. An unreachable owner never
     // authorizes delivery to a later session in the list.
-    const parentSessionId = SessionId.from(await deliveryTarget(this.handoffs, candidates[0]));
+    const parentSessionId = SessionId.from(await this.forwardTarget(candidates[0]));
     if (!adapter.isSessionActive(parentSessionId)) {
       return this.refuseSessionChild('parent-session-not-active', envelope, {
         parentSessionIds: candidates,

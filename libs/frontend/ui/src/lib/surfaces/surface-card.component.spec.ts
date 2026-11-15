@@ -41,6 +41,7 @@ import { SurfaceCardComponent } from './surface-card.component';
     <p data-testid="body">Body <button type="button" data-testid="nested">Act</button></p>
     <span data-card-ignore data-testid="ignored">Ignored</span>
     <span title="More details" data-testid="tooltip">Tooltip</span>
+    <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events,@angular-eslint/template/interactive-supports-focus -->
     <span data-card-interactive data-testid="custom-action"
       (click)="nestedClicks = nestedClicks + 1">Custom action</span>
     <div card-footer data-testid="footer">Footer</div>
@@ -256,6 +257,30 @@ describe('SurfaceCardComponent', () => {
     by('header').click();
     card().click();
     expect(fixture.componentInstance.activations).toBe(2);
+  });
+
+  it('emits activated exactly once per Enter/Space on the activator', () => {
+    const { fixture, by, update } = setup();
+    update((h) => { h.interactive.set(true); h.label.set('Open details'); });
+    const activator = by('surface-card-activator') as HTMLButtonElement;
+    activator.click();
+    expect(fixture.componentInstance.activations).toBe(1);
+    activator.click();
+    expect(fixture.componentInstance.activations).toBe(2);
+  });
+
+  it('ensures non-interactive card has no tabindex', () => {
+    const { card } = setup();
+    expect(card().getAttribute('tabindex')).toBeNull();
+  });
+
+  it('prevents wrapper keyboard events from triggering activation', () => {
+    const { fixture, card, by, update } = setup();
+    update((h) => { h.interactive.set(true); h.label.set('Open details'); });
+    const wrapper = card();
+    wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(fixture.componentInstance.activations).toBe(0);
   });
 
   describe('mouse activation', () => {

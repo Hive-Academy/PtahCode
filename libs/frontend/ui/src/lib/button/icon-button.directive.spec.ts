@@ -72,9 +72,10 @@ it('maps icon size lg to a square btn-lg host', () => {
   fixture.detectChanges();
   const button = (fixture.nativeElement as HTMLElement).querySelector(
     'button',
-  )!;
-  expect(button.classList.contains('btn-lg')).toBe(true);
-  expect(button.classList.contains('btn-square')).toBe(true);
+  );
+  expect(button).toBeTruthy();
+  expect(button?.classList.contains('btn-lg')).toBe(true);
+  expect(button?.classList.contains('btn-square')).toBe(true);
 });
 
 it.each([
@@ -93,8 +94,9 @@ it.each([
     fixture.detectChanges();
     const button = (fixture.nativeElement as HTMLElement).querySelector(
       'button',
-    )!;
-    expect(button.hasAttribute('data-selected')).toBe(active);
+    );
+    expect(button).toBeTruthy();
+    expect(button?.hasAttribute('data-selected')).toBe(active);
     expect(button.getAttribute('aria-pressed')).toBe(pressed);
     expect(button.getAttribute('aria-current')).toBe(current);
   },

@@ -37,6 +37,7 @@ import type { ISdkProcessSpawner } from '../spawn/sdk-process-spawner.port';
 import { ClaudeCliAdapter } from '../cli-agents/cli-adapters/claude-cli.adapter';
 import { ClaudeSdkLaneRunner } from '../claude/claude-sdk-lane-runner';
 import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
+import { LaneCompletionNotifier } from '../cli-agents/lane-completion-notifier.service';
 
 function createMockLogger(): Logger {
   return {
@@ -134,6 +135,15 @@ function buildSmokeContainer(): DependencyContainer {
       onDidChangeWorkspaceFolders: jest.fn(() => ({ dispose: jest.fn() })),
     },
   });
+  // LaneCompletionNotifier needs a file system; this spec never reads files.
+  c.register(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, { useValue: {} });
+  c.register(PLATFORM_TOKENS.STATE_STORAGE, {
+    useValue: {
+      get: jest.fn(() => undefined),
+      update: jest.fn(async () => undefined),
+      keys: jest.fn(() => []),
+    },
+  });
   c.register(PLATFORM_TOKENS.WORKSPACE_STATE_STORAGE, {
     useValue: {
       get: jest.fn(() => undefined),
@@ -162,6 +172,11 @@ describe('registerCliAgentRuntimeServices — PtahCliRegistry DI smoke', () => {
   it('binds one acknowledgement store singleton to the public token', () => {
     expect(container.resolve(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF_ACK_STORE))
       .toBe(container.resolve(SessionHandoffAckStore));
+  });
+
+  it('gives the lane completion notifier the acknowledgement store for forward delivery', () => {
+    const notifier = container.resolve(LaneCompletionNotifier);
+    expect(Reflect.get(notifier, 'handoffs')).toBe(container.resolve(SessionHandoffAckStore));
   });
 
   it('registers a cached constructible Claude adapter with the real SDK runner and spawner', () => {
