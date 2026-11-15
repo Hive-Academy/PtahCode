@@ -62,6 +62,13 @@
   line-height: var(--ptah-text-label-leading);
 }
 
+/* The resting label of an empty compact control matches the compact control text. It stays before
+   the floated rule below (same specificity), so focus still floats the label. */
+.ptah-field[data-size='sm'][data-appearance='floating']:has(.ptah-field__body :is(input, textarea):placeholder-shown) .ptah-field__label {
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+}
+
 .ptah-field[data-size='sm'][data-appearance='floating'] .ptah-field__body:has(textarea) .ptah-field__label {
   top: calc(var(--ptah-field-textarea-pad-y) + var(--ptah-text-label-leading) / 2);
 }

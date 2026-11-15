@@ -189,5 +189,9 @@ describe('compact field and trigger', () => {
     expect(css).toMatch(/\.ptah-field\[data-size='sm'\]\s*\{[^}]*--ptah-field-textarea-min-h: var\(--ptah-field-h-sm\);[^}]*--ptah-field-textarea-pad-y: var\(--ptah-space-2\)/);
     expect(css).toMatch(/\[data-size='sm'\] \.ptah-field__box\s*\{\s*min-height: var\(--ptah-field-h-sm\)/);
     expect(css).toContain('.ptah-field .ptah-field__box:has(.ptah-field__body :focus)');
+    const compactResting = css.indexOf("[data-size='sm'][data-appearance='floating']:has(.ptah-field__body :is(input, textarea):placeholder-shown) .ptah-field__label");
+    const compactFloated = css.indexOf("[data-size='sm'][data-appearance='floating']:is(:focus-within");
+    expect(compactResting).toBeGreaterThan(-1);
+    expect(compactResting).toBeLessThan(compactFloated);
   });
 });
