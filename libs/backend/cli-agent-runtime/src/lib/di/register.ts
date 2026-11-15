@@ -336,6 +336,13 @@ export function registerCliAgentRuntimeServices(
                 )
               : null,
           c.resolve(AgentReportCoalescer),
+          // Forward delivery after a kept handoff. Registered below; the
+          // factory runs on first resolve, after registration completes.
+          c.isRegistered(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF_ACK_STORE, true)
+            ? c.resolve<SessionHandoffAckStore>(
+                CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF_ACK_STORE,
+              )
+            : null,
         ),
     ),
   });

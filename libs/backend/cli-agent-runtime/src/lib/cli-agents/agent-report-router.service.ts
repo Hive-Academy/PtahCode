@@ -39,6 +39,7 @@ import {
 } from './agent-report-coalescer';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import type { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
+import { deliveryTarget } from '../session-children/session-handoff-lineage';
 
 /*
  * ---------------------------------------------------------------------------
@@ -283,6 +284,13 @@ export class AgentReportRouter {
     private readonly handoffAcks: SessionHandoffAckStore | null = null,
   ) {}
 
+  /** Delivery only: a report addressed to a handed-off session goes to its successor. */
+  private forwardTarget(target: string): Promise<string> {
+    return deliveryTarget(this.handoffAcks, target, (error) =>
+      this.logger.error('Handoff delivery lineage read failed', error),
+    );
+  }
+
   /**
    * Deliver one report, or refuse it with a reason.
    *
@@ -347,9 +355,8 @@ export class AgentReportRouter {
     // uuid arrives and `resolveParentSessionId` backfills it, so a value that
     // is not a session id means the parent never resolved one — there is no
     // session to deliver into, and saying so is the honest answer.
-    const parentSessionId =
-      SessionId.safeParse(info.parentSessionId?.trim()) ??
-      info.parentSessionId?.trim();
+    const recordedParent = SessionId.safeParse(info.parentSessionId?.trim()) ?? info.parentSessionId?.trim();
+    const parentSessionId = recordedParent ? await this.forwardTarget(recordedParent) : undefined;
     if (!parentSessionId) {
       return this.refuse('no-parent-recorded', agentId, {
         detail: info.parentSessionId
@@ -684,34 +691,32 @@ export class AgentReportRouter {
     const adapter = this.agentAdapter;
     // The first recorded parseable parent is the owner. A later live ID
     // does not authorize rerouting a report from an unreachable owner.
-    let parentSessionId = candidates[0];
-    let ownerChanged = false;
+    let parentSessionId = SessionId.from(await this.forwardTarget(candidates[0]));
     if (
       !adapter.isSessionActive(parentSessionId) &&
-      candidates[1] &&
       this.handoffAcks
     ) {
       try {
         const binding = await this.handoffAcks.findBySuccessor(parentSessionId);
         if (
           binding?.successorTabId === parentSessionId &&
-          binding.successorSdkId === candidates[1] &&
-          adapter.isSessionActive(candidates[1])
+          binding.state !== 'starting' &&
+          binding.successorSdkId &&
+          adapter.isSessionActive(SessionId.from(binding.successorSdkId))
         )
-          parentSessionId = candidates[1];
+          parentSessionId = SessionId.from(binding.successorSdkId);
       } catch (error: unknown) {
         this.logger.error(
           'Failed to verify handoff report parent',
           error instanceof Error ? error : new Error(String(error)),
         );
       }
-      // The lookup is async: a handoff can reparent the child meanwhile.
-      // Refuse when the owner changed, whatever the liveness of either id.
-      const current = this.sessionChildren?.get(childSessionId);
-      ownerChanged =
-        current?.parentSessionId?.trim() !== candidates[0] ||
-        current?.parentSdkSessionId?.trim() !== candidates[1];
     }
+    // Both lineage and binding reads are async; refuse a stale owner snapshot.
+    const current = this.sessionChildren?.get(childSessionId);
+    const ownerChanged =
+      current?.parentSessionId?.trim() !== candidates[0] ||
+      current?.parentSdkSessionId?.trim() !== candidates[1];
     if (ownerChanged || !adapter.isSessionActive(parentSessionId)) {
       this.sessionChildren?.markReportRefused(
         childSessionId,

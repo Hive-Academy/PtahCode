@@ -1008,7 +1008,6 @@ describe('SessionHandoffService', () => {
 
     it('keeps adoption after a late success and records its real SDK id for acknowledgement', async () => {
       const h = makeHarness();
-      const recordAck = jest.spyOn(h.ackStore, 'record');
       h.agents.adoptLanes.mockReturnValue(['lane-a']);
       addLink(h.links, 'child-live');
 
@@ -1023,8 +1022,7 @@ describe('SessionHandoffService', () => {
       });
 
       settle({ started: true, uiAnnounced: true });
-      while (recordAck.mock.results.length === 0) await flush();
-      await recordAck.mock.results[0].value;
+      while (h.agents.settleLaneAdoption.mock.calls.length === 0) await flush();
 
       expect(h.agents.settleLaneAdoption).toHaveBeenCalledWith(
         ['lane-a'],
@@ -1201,7 +1199,7 @@ describe('SessionHandoffService', () => {
       );
     });
 
-    it('re-parents live children and ended children with a held completion; leaves the rest', async () => {
+    it('re-parents all children, including terminal children, to the successor', async () => {
       const h = makeHarness();
       addLink(h.links, 'child-by-tab', { parentSdkSessionId: CALLER_SDK });
       // Started while the caller ran under an older tab of the same SDK session.
@@ -1233,21 +1231,35 @@ describe('SessionHandoffService', () => {
         'child-by-tab',
         'child-by-sdk',
         'child-held',
+        'child-ended',
       ]);
-      for (const id of ['child-by-tab', 'child-by-sdk', 'child-held']) {
+      for (const id of ['child-by-tab', 'child-by-sdk', 'child-held', 'child-ended']) {
         const child = h.links.get(id);
         expect(child?.parentSessionId).toBe(result.tabId);
         // The new session has no SDK id yet: readers follow its tab.
         expect(child && 'parentSdkSessionId' in child).toBe(false);
       }
-      expect(h.links.get('child-ended')?.parentSessionId).toBe(CALLER);
       expect(h.links.get('child-of-other')?.parentSessionId).toBe(OTHER_PARENT);
       expect(
         h.links.childrenOf([CALLER, CALLER_SDK]).map((c) => c.childSessionId),
-      ).toEqual(['child-ended']);
+      ).toEqual([]);
       expect(
         h.links.childrenOf([result.tabId]).map((c) => c.childSessionId),
-      ).toEqual(['child-by-tab', 'child-by-sdk', 'child-held']);
+      ).toEqual(['child-by-tab', 'child-by-sdk', 'child-held', 'child-ended']);
+    });
+
+    it('binds the successor SDK spelling to adopted children when it resolves', async () => {
+      const h = makeHarness();
+      addLink(h.links, 'child-live');
+      const result = await h.service.handoff(h.request());
+      if (!result.ok) throw new Error('handoff should start');
+      const successorSdkId = '44444444-5555-4666-8777-888888888888';
+      h.notifyResolved({ tabId: result.tabId, realSessionId: successorSdkId });
+
+      expect(h.links.get('child-live')?.parentSdkSessionId).toBe(successorSdkId);
+      expect(h.links.childrenOf([successorSdkId]).map((c) => c.childSessionId))
+        .toEqual(['child-live']);
+      expect(h.links.childrenOf([CALLER, CALLER_SDK])).toEqual([]);
     });
 
     it('adopts nothing when the handoff is refused before the start', async () => {
@@ -1306,6 +1318,22 @@ describe('SessionHandoffService', () => {
   describe('kept-handoff stop and chain bind (TASK_2026_876)', () => {
     const SUCCESSOR_SDK = '99999999-aaaa-4bbb-8ccc-dddddddddddd';
     const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+    it('publishes a provisional record before the successor first turn', async () => {
+      const h = makeHarness();
+      h.host.startHandoffSession.mockImplementationOnce(async (input: HandoffChatSessionStartInput) => {
+        const record = await h.ackStore.findByPredecessor(CALLER_SDK);
+        expect(record).toMatchObject({ successorTabId: input.tabId, state: 'starting' });
+        expect(await h.service.acknowledge({ callerSessionId: input.tabId,
+          predecessorSessionId: CALLER_SDK, handoffPath }))
+          .toMatchObject({ status: 'retryable-failure' });
+        return { started: true, uiAnnounced: true };
+      });
+      const result = await h.service.handoff(h.request());
+      expect(result.ok).toBe(true);
+      expect(await h.ackStore.findByPredecessor(CALLER_SDK))
+        .toMatchObject({ state: 'recorded' });
+    });
 
     it('waits for acknowledgement after flush and stops only the caller tab', async () => {
       const h = makeHarness();

@@ -2567,6 +2567,10 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
         childSessionId: child.childSessionId,
       }),
     ).toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
+    expect(h.spawner.status({ callerSessionId: PARENT_SDK, childSessionId: child.childSessionId }))
+      .toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
+    expect(h.spawner.status({ callerSessionId: PARENT_SDK }))
+      .toMatchObject({ ok: true, children: [] });
     // The new session does, by its tab id alone.
     expect(
       h.spawner.status({
@@ -2577,8 +2581,16 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
       ok: true,
       children: [{ childSessionId: child.childSessionId }],
     });
+    expect(h.spawner.status({ callerSessionId: successor }))
+      .toMatchObject({ ok: true, children: [{ childSessionId: child.childSessionId }] });
+    expect(await h.spawner.read({ callerSessionId: successor, childSessionId: child.childSessionId }))
+      .toMatchObject({ ok: true });
+    expect(await h.spawner.send({ callerSessionId: successor, childSessionId: child.childSessionId,
+      message: 'continue', mode: 'queue' })).toMatchObject({ delivered: true });
     expect(h.spawner.takeHeldCompletions(successor)).toEqual([envelope(1)]);
     expect(h.spawner.takeHeldCompletions(successor)).toEqual([]);
+    expect(await h.spawner.stop({ callerSessionId: successor, childSessionId: child.childSessionId }))
+      .toMatchObject({ ok: true });
   });
 });
 

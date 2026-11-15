@@ -25,6 +25,24 @@ describe('SessionHandoffAckStore', () => {
     expect(await restarted.compareAndSet('before', 'recorded', { state: 'closePending' })).toBe(true);
     await expect(restarted.record({ ...old, successorTabId: 'third' })).rejects.toThrow();
   });
+  it('replaces a starting record left by a stopped host, but not its own', async () => {
+    const stale = { predecessorTabId: 'before', predecessorSdkId: null,
+      successorTabId: 'lost', successorSdkId: null, workspaceRoot: '/workspace',
+      handoffPath: '/workspace/HANDOFF.md', state: 'starting' as const };
+    const values = new Map<string, unknown>([[HANDOFF_ACK_STORAGE_KEY,
+      { schemaVersion: 1, records: [stale] }]]);
+    const storage: IStateStorage = {
+      get: <T>(key: string) => values.get(key) as T | undefined,
+      update: async (key, value) => { values.set(key, value); },
+      keys: () => [...values.keys()],
+    };
+    const restarted = new SessionHandoffAckStore(storage);
+    await expect(restarted.record({ ...stale })).rejects.toThrow('already recorded');
+    await restarted.record({ ...stale, successorTabId: 'next' });
+    expect(await restarted.findBySuccessor('lost')).toBeUndefined();
+    expect(await restarted.findBySuccessor('next')).toMatchObject({ state: 'starting' });
+    expect(await restarted.compareAndSet('before', 'starting', { state: 'recorded' })).toBe(true);
+  });
   it('recovers invalid state and prunes oldest completed records', async () => {
     const values = new Map<string, unknown>([[HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 99, records: [] }]]);
     const logger = { error: jest.fn() };

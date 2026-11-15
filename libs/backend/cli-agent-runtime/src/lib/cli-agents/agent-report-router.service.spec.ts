@@ -20,6 +20,7 @@ import {
   type AgentReportInput,
 } from './agent-report-router.service';
 import { SessionChildRegistry } from '../session-children/session-child.registry';
+import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
 import { ParentEnvelopeStoreService } from './parent-delivery/parent-envelope-store.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { FakeStateStorage } from './parent-delivery/__fixtures__/fake-state-storage';
@@ -855,17 +856,19 @@ describe('AgentReportRouter.deliver — session child', () => {
       null,
       null,
       options.findBySuccessor
-        ? ({ findBySuccessor: options.findBySuccessor } as never)
+        ? ({ findBySuccessor: options.findBySuccessor, records: jest.fn().mockResolvedValue([]) } as never)
         : options.handoffBinding
           ? ({
               findBySuccessor: jest
                 .fn()
-                .mockResolvedValue(options.handoffBinding),
+                .mockResolvedValue({ ...options.handoffBinding, state: 'recorded' }),
+              records: jest.fn().mockResolvedValue([]),
             } as never)
           : null,
     );
     return {
       router,
+      logger,
       registry,
       manager,
       active,
@@ -902,6 +905,20 @@ describe('AgentReportRouter.deliver — session child', () => {
     expect(h.manager.markReportDelivered).not.toHaveBeenCalled();
   });
 
+  it('delivers a report addressed to a predecessor to its kept successor', async () => {
+    const h = createSessionHarness({ activeIds: [PARENT_SDK] });
+    const storage = new FakeStateStorage();
+    const handoffs = new SessionHandoffAckStore(storage);
+    await handoffs.record({ predecessorTabId: PARENT, predecessorSdkId: null,
+      successorTabId: PARENT_SDK, successorSdkId: null, workspaceRoot: '/ws',
+      handoffPath: '/ws/HANDOFF.md', state: 'recorded' });
+    const router = new AgentReportRouter(h.logger, h.manager,
+      { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never,
+      h.registry, null, null, new SessionHandoffAckStore(storage));
+    expect(await router.deliver({ childSessionId: CHILD, message: 'done' }))
+      .toMatchObject({ delivered: true, parentSessionId: PARENT_SDK });
+    expect(h.sendMessageToSession).toHaveBeenCalledWith(PARENT_SDK, expect.any(String), expect.any(Object));
+  });
   it('delivers an adopted child report to the active successor tab', async () => {
     const successor = 'dddddddd-2222-4333-8444-555555555555';
     const successorSdk = 'eeeeeeee-2222-4333-8444-555555555555';
@@ -969,7 +986,7 @@ describe('AgentReportRouter.deliver — session child', () => {
       h.registry.reparent(CHILD, next, nextSdk);
       // The former owner tab comes back to life during the lookup.
       h.active.add(successor);
-      return { successorTabId: successor, successorSdkId: successorSdk };
+      return { successorTabId: successor, successorSdkId: successorSdk, state: 'recorded' };
     });
     expect(
       await h.router.deliver({

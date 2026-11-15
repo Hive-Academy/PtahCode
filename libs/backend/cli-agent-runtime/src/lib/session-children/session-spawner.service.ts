@@ -1068,7 +1068,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     }
     const caller = SessionId.safeParse(query.callerSessionId?.trim());
     if (!caller) return unattributed();
-    const callerIds = [caller, this.sdkIdOf(caller)];
+    const callerIds = this.ownerIds(caller);
     const children = [
       ...this.registry.childrenOf(callerIds),
       ...this.registry.pendingOf(callerIds),
@@ -1285,15 +1285,8 @@ export class SessionSpawnerService implements ISessionSpawner {
   clearFinished(query: SessionChildClearQuery): SessionChildClearResult {
     const caller = SessionId.safeParse(query.callerSessionId?.trim());
     if (!caller) return unattributed();
-    const callerIds = new Set(
-      [caller as string, this.sdkIdOf(caller)].filter(
-        (id): id is string => !!id,
-      ),
-    );
-    const ownChildren = this.registry.childrenOf([
-      caller,
-      this.sdkIdOf(caller),
-    ]);
+    const callerIds = new Set(this.ownerIds(caller));
+    const ownChildren = this.registry.childrenOf(this.ownerIds(caller));
     const startOrder = new Map(
       ownChildren.map((child, index) => [child.childSessionId, index]),
     );
@@ -1387,10 +1380,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     const caller = SessionId.safeParse(callerSessionId?.trim());
     if (!caller) return [];
     const envelopes: SessionChildCompletionEnvelope[] = [];
-    for (const child of this.registry.childrenOf([
-      caller,
-      this.sdkIdOf(caller),
-    ])) {
+    for (const child of this.registry.childrenOf(this.ownerIds(caller))) {
       const held = child.heldCompletion;
       if (!held) continue;
       envelopes.push(held.envelope);
@@ -1955,7 +1945,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (!caller) return undefined;
     const id = childSessionId.trim();
     return this.registry
-      .pendingOf([caller, this.sdkIdOf(caller)])
+      .pendingOf(this.ownerIds(caller))
       .find((record) => record.childSessionId === id);
   }
 
@@ -1977,11 +1967,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         },
       };
     }
-    const callerIds = new Set(
-      [caller as string, this.sdkIdOf(caller)].filter(
-        (id): id is string => !!id,
-      ),
-    );
+    const callerIds = new Set(this.ownerIds(caller));
     const owned =
       callerIds.has(child.parentSessionId) ||
       (!!child.parentSdkSessionId && callerIds.has(child.parentSdkSessionId));
@@ -2108,6 +2094,12 @@ export class SessionSpawnerService implements ISessionSpawner {
     )
       return id;
     return undefined;
+  }
+
+  private ownerIds(caller: SessionId): string[] {
+    const record = this.lifecycle.find(caller);
+    return [...new Set([caller, record?.tabId, record?.realSessionId, this.sdkIdOf(caller)]
+      .filter((id): id is string => !!id))];
   }
 
   private async interruptTurn(

@@ -18,7 +18,7 @@ const RecordSchema = z
     successorSdkId: z.string().min(1).nullable(),
     workspaceRoot: z.string().min(1),
     handoffPath: z.string().min(1),
-    state: z.enum(['recorded', 'closePending', 'closeCompleted']),
+    state: z.enum(['starting', 'recorded', 'closePending', 'closeCompleted']),
     /** Set when the predecessor holds results the successor never adopted: an ack must not close it. */
     keepPredecessor: z.boolean().optional(),
   })
@@ -134,6 +134,19 @@ export class SessionHandoffAckStore {
     );
   }
 
+  async records(): Promise<readonly HandoffAckRecord[]> {
+    return this.serialized(() => this.read());
+  }
+
+  async discardStarting(predecessorTabId: string): Promise<void> {
+    await this.serialized(async () => {
+      const state = await this.readState();
+      state.records = state.records.filter((entry) =>
+        entry.predecessorTabId !== predecessorTabId || entry.state !== 'starting');
+      await this.write(state);
+    });
+  }
+
   async record(value: HandoffAckRecord): Promise<void> {
     await this.serialized(async () => {
       const state = await this.readState();
@@ -142,10 +155,12 @@ export class SessionHandoffAckStore {
       );
       if (index >= 0) {
         const existing = state.records[index];
-        if (
-          existing.state !== 'recorded' ||
-          existing.successorTabId === value.successorTabId
-        ) {
+        // A `starting` record of another successor is left by a host stop
+        // before the start settled. The in-flight reservation stops two live
+        // handoffs of one predecessor, so the new attempt can replace it.
+        const replaceable =
+          existing.state === 'recorded' || existing.state === 'starting';
+        if (!replaceable || existing.successorTabId === value.successorTabId) {
           throw new Error('handoff predecessor already recorded');
         }
         state.records[index] = RecordSchema.parse(value);
@@ -159,7 +174,7 @@ export class SessionHandoffAckStore {
   async compareAndSet(
     predecessorTabId: string,
     expected: HandoffAckRecord['state'],
-    patch: Partial<Pick<HandoffAckRecord, 'state' | 'successorSdkId'>>,
+    patch: Partial<Pick<HandoffAckRecord, 'state' | 'successorSdkId' | 'keepPredecessor'>>,
   ): Promise<boolean> {
     return this.serialized(async () => {
       const state = await this.readState();

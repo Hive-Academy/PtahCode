@@ -128,6 +128,9 @@ ptah-settings-export.json
 # ...and the shared workspace analysis; its own .gitignore keeps machine-local files out.
 !.ptah/analysis/
 !.ptah/analysis/**
+# Session handoff notes are per-session working state, never history.
+.ptah/specs/**/HANDOFF.md
+/HANDOFF.md
 # Screenshots stay local: they are large binary evidence, not history.
 .ptah/specs/**/*.png
 .ptah/specs/**/*.jpg
