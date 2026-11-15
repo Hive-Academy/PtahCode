@@ -46,7 +46,7 @@ export function resolveCliLaneDefaultPair(
 ): { permission?: LanePermissionMode; network?: LaneNetworkMode;
   permissionSource?: 'saved' | 'built-in'; networkSource?: 'saved' | 'built-in' }
   | { unsupported: string } {
-  const permissions = saved.permission ? [saved.permission] : PERMISSIONS;
+  const permissions = saved.permission ? [saved.permission] : ['plan'];
   const networks = saved.network ? [saved.network] : NETWORKS;
   for (const permission of permissions) {
     const support = capabilities.permissionModes[permission];
@@ -59,9 +59,7 @@ export function resolveCliLaneDefaultPair(
     }
   }
   if (saved.permission || saved.network) return { unsupported: 'Saved CLI lane default has no supported permission/network pair.' };
-  const planSupported = capabilities.permissionModes['plan']?.state === 'supported';
-  if (!saved.permission && !planSupported) return { unsupported: 'Adapter does not support plan permission; no default possible.' };
-  return {};
+  return { unsupported: 'Adapter does not support plan permission; no default possible.' };
 }
 
 /** Shared permission contract used by the Ptah CLI registry and settings RPC. */

@@ -323,8 +323,7 @@ export class CodexApprovalBridge {
     const target = this.target(request, params);
     let reply: unknown = 'decline';
     if (current() && !signal.aborted) {
-      const isChildRequest = isChild();
-      const policy = isChildRequest
+      const policy = isChild()
         ? 'present'
         : codexPermissionPolicy(
             this.options.permissionLevel(),
@@ -346,12 +345,14 @@ export class CodexApprovalBridge {
           'followUpMessage',
         ].some((key) => Object.hasOwn(edited, key)));
     const live = current() && !signal.aborted;
+    const isChildRequest = isChild();
     const decision: CodexApprovalDecision = this.disposed
       ? 'decline'
       : !live
         ? 'cancel'
         : isEdit ||
-            (request.kind !== 'userInput' &&
+            (!isChildRequest &&
+              request.kind !== 'userInput' &&
               this.options.permissionLevel() === 'plan')
           ? 'decline'
           : reply === 'accept' ||
