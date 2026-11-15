@@ -81,8 +81,8 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
       <!-- Advanced orchestration values (TASK_2026_658): one chunk, loaded when scrolled into view, below the session
            budget and the always-available Lane guards; the placeholder is one row. -->
       @defer (on viewport) {
-        <ptah-advanced-settings-group groupId="context-budgets" />
-        <ptah-advanced-settings-group groupId="background-queries" />
+        <ptah-advanced-settings-group groupId="context-budgets" headingStyle="section" />
+        <ptah-advanced-settings-group groupId="background-queries" headingStyle="section" />
       } @placeholder {
         <div
           class="min-h-[2.75rem] border-b border-base-content/10"
