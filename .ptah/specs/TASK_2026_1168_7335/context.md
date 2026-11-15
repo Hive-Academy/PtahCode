@@ -21,6 +21,10 @@ visibility, completion-notice dedup. Regression tests plus real Electron UI evid
 | B attribution | TASK_2026_1171_7664 | https://github.com/Hive-Academy/PtahCode/pull/1265 | done; merged by the user 2026-11-14T20:37Z as f763ebbd3 (head 54e73aa0b) |
 | C native subagents | TASK_2026_1173_c17f | https://github.com/Hive-Academy/PtahCode/pull/1263 | done; merged by the user 2026-11-14T20:36Z as e8343561f (head de562341c; local merge commit 025c23df4 was never pushed) |
 | Side: axe contrast on main | TASK_2026_1178_9339 | https://github.com/Hive-Academy/PtahCode/pull/1273 | merged 2026-11-14T19:05Z as 9cb890ad6; all CI green; both commits reviewed APPROVE |
+| D session lifecycle | TASK_2026_1189_56c4 | https://github.com/Hive-Academy/PtahCode/pull/1291 | done; merged 2026-11-15T02:05Z as 7f75228a4 (head 66a48b29d); Codex review-round-5 APPROVE; all CI green after one rerun of an unrelated flaky mcp-bench test; `--admin` for REVIEW_REQUIRED only (D31) |
+| E MCP handshake race | mcp-handshake-fixes | https://github.com/Hive-Academy/PtahCode/pull/1287 | done; merged 2026-11-15T02:31Z as cd56bc502 (head 13e89df1f); Antigravity review-round-2 APPROVE; all CI green; `--admin` for REVIEW_REQUIRED only (D31) |
+| F lane policy defaults (D24, D17) | TASK_2026_2178_7e73 | https://github.com/Hive-Academy/PtahCode/pull/1288 | done; merged by the user 2026-11-15T06:10Z as a34a09857 (head b3fd94342); spec fix 14ab6bf16 for 225 CI test failures; chat fix b3fd94342 (Cursor could not pick a first permission); Codex review-round-8 and round-9 APPROVE; all CI green; 4 bot threads answered and resolved |
+| G UI lint in CI | TASK_2026_1195_7222 | https://github.com/Hive-Academy/PtahCode/pull/1289 | done; merged 2026-11-15T04:07Z as d83acb844 (head 02acfccbd); Codex code-style-review and review-round-3 APPROVE; all CI green |
 
 ## Decisions (recovered summary)
 
@@ -28,6 +32,8 @@ visibility, completion-notice dedup. Regression tests plus real Electron UI evid
 - D7: user chose "Keep full access" for an explicit yolo Codex lane.
 - D10: user chose "Resume both" A and B after the stop button.
 - D11 / D24: no-row lane built-in yolo default is pre-existing on main. Kept. Follow-up.
+  Resolved in PR #1288: the no-row default is plan, and a spawn fails closed with
+  `UNSUPPORTED_LANE_POLICY` when plan is unsupported and no permission is given.
 - D12: after a child handoff times out, never start a replacement. Check `ptah_session_status`.
 - D13: `ptah_session_stop` marked a session stopped, but it kept running. Needs its own task.
 - D25 (new): Phase A option A. Fix `agent-process-manager.service.ts:989` so requested equals
