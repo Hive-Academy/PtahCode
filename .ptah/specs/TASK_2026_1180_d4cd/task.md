@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_1180_d4cd
-status: done
+status: in_review
 type: BUGFIX
 title: Fix lane plan-limit state per CLI
 depends_on: []

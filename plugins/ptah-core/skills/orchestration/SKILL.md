@@ -163,7 +163,7 @@ Templates, skip conditions and rejection handling: [checkpoints.md](references/c
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` and `CLAUDE_CODE_EFFORT_LEVEL` can override.
   When no chosen roster row exists, keep the agent frontmatter `model:` default. Record requested vs observed model when observable.
 - **Batch guidance** is advisory and spawns nothing. The orchestrator follows the
-  [acceptance step](references/team-leader-modes.md#acceptance-step) and records state in `batches.md` or `decisions.md`.
+  [acceptance step](references/phase-mode-compatibility.md#acceptance-step) and records state in `batches.md` or `decisions.md`.
 - **CLI lanes**: Gate 0.1 decides whether they are used. Who may spawn them and how phases,
   batches or whole runs are assigned to lanes: [lane-assignment.md](references/lane-assignment.md).
   How to run a lane: the [agent-lanes skill](../agent-lanes/SKILL.md).
@@ -248,7 +248,7 @@ Every tool call in any agent or lane resends its whole thread, so cost is reques
 | [strategies.md](references/strategies.md)               | Running a strategy's phases                                                       |
 | [checkpoints.md](references/checkpoints.md)             | Presenting any gate                                                               |
 | [agent-catalog.md](references/agent-catalog.md)         | Choosing or invoking an agent                                                     |
-| [team-leader-modes.md](references/team-leader-modes.md) | Invoking a batch executor or acting on its return                                      |
+| [phase-mode-compatibility.md](references/phase-mode-compatibility.md) | Invoking a batch executor or acting on its return                                      |
 | [task-tracking.md](references/task-tracking.md)         | Creating or continuing a task folder                                              |
 | [lane-assignment.md](references/lane-assignment.md)     | Whenever `ptah_route_decide` is listed (any lane mode), or the user pinned a phase to a lane                      |
 | [fleet.md](references/fleet.md)                         | `/orchestrate TASK_A TASK_B ...` or an explicit fleet request; validate IDs first |

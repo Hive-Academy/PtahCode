@@ -927,8 +927,7 @@ Return a JSON object: { "sections": { "<sectionId>": "<markdown or empty string>
   /**
    * What each registered section id is FOR, in the words the model needs.
    *
-   * The ids are role-assigned — a developer's template carries
-   * `FRAMEWORK_CONVENTIONS`, a reviewer's carries `REVIEW_FOCUS` — so the topic
+   * The ids are template-assigned. The topic
    * is the one place the prompt can say what a section of that name should
    * contain. Left to a de-kebabbed id ("Framework Conventions") the model wrote
    * whatever "conventions" suggested, which is how a lib census ended up under
@@ -949,8 +948,6 @@ Return a JSON object: { "sections": { "<sectionId>": "<markdown or empty string>
       'where tests live relative to the code they cover, how they are named and executed, what the harness provides, and the rules a new test has to follow to run at all',
     EXISTING_PATTERNS:
       'the patterns already established here that a new design must extend rather than replace — the established way to add a unit of behaviour, and the seams a change is expected to use',
-    REVIEW_FOCUS:
-      'what a reviewer of THIS repository looks at first: the conventions most often broken here, the boundaries most often crossed by accident, and the files where a mistake is expensive',
   };
 
   /**

@@ -63,7 +63,7 @@ export const TASK_DESCRIPTION_FILE = 'task-description.md';
 /** The architect's implementation plan. */
 export const IMPLEMENTATION_PLAN_FILE = 'implementation-plan.md';
 
-/** Current name of the team-leader batch breakdown. */
+/** Current name of the batch phase breakdown. */
 export const BATCHES_FILE = 'batches.md';
 
 /** The tests phase evidence report. */
@@ -500,7 +500,7 @@ Never put narrative in \`${CARRIER_FILE}\`. Its body is a banner, a one-line
 summary, and a pointer — that is the entire body contract.
 
 - \`${CONTEXT_FILE}\` — user intent, background, the settled plan.
-- \`${BATCHES_FILE}\` — the team-leader batch breakdown. This is a DIFFERENT file
+- \`${BATCHES_FILE}\` — the batch phase breakdown. This is a DIFFERENT file
   from \`${CARRIER_FILE}\`; do not confuse the two. Its former name
   \`${LEGACY_BATCHES_FILE}\` is still read, permanently.
 
@@ -588,8 +588,8 @@ function renderSpecialistBlock(): string {
 
 - Folder \`TASK_YYYY_NNN_xxxx\` (name = canonical id). Never create, allocate or rename a task folder.
 - \`${CARRIER_FILE}\` is machine-owned: read it, never edit it. \`${CONTEXT_FILE}\` holds intent.
-  \`${BATCHES_FILE}\` holds the team-leader batch breakdown; its former name \`${LEGACY_BATCHES_FILE}\` is still read.
-- State is not yours: the carrier \`status:\` and task states in \`${BATCHES_FILE}\` belong to the team-leader alone
+  \`${BATCHES_FILE}\` holds the batch phase breakdown; its former name \`${LEGACY_BATCHES_FILE}\` is still read.
+- State is not yours: the carrier \`status:\` and task states in \`${BATCHES_FILE}\` belong to the batch phase owner
   (status also to the orchestrator and plan phase owner). Report what you finished, with evidence.
 - Write only the deliverable your output contract names. Read from a task folder: ${recognisedDocList()}.
 - ${SUBAGENT_HANDOFF_RULE}
@@ -605,11 +605,11 @@ function renderCoordinatorBlock(): string {
   frontmatter \`id:\` is a warning — never rename the folder to match it.
 - \`${CARRIER_FILE}\` is the machine-owned carrier: frontmatter (\`status\`, \`type\`, \`title\`) plus a
   short pointer body, never prose. Without it the task is invisible to the board.
-- \`${CONTEXT_FILE}\` holds intent. \`${BATCHES_FILE}\` holds the team-leader batch breakdown and is a
+- \`${CONTEXT_FILE}\` holds intent. \`${BATCHES_FILE}\` holds the batch phase breakdown and is a
   DIFFERENT file from \`${CARRIER_FILE}\`; its former name \`${LEGACY_BATCHES_FILE}\` is still read.
 - To change status, \`Edit\` exactly the \`status:\` line (\`${statuses}\`). Never rewrite the carrier
   with \`Write\` — Ptah writes it too, and a stale whole-file write discards the other writer's change.
-- The team-leader alone sets task states in \`${BATCHES_FILE}\`. Specialists never edit
+- The batch phase owner sets task states in \`${BATCHES_FILE}\`. Specialists never edit
   \`${CARRIER_FILE}\` or \`${BATCHES_FILE}\`; do not ask them to. They do set the \`status:\`
   line of a subagent handoff record they continue (below).
 - ${SUBAGENT_HANDOFF_RULE}

@@ -291,7 +291,7 @@ describe('spawnGateVerdict', () => {
   });
 
   it('treats a pending or failed lookup as unknown, never blocked', () => {
-    expect(SPAWN_GATE_WAIT_MS).toBe(4_000);
+    expect(SPAWN_GATE_WAIT_MS).toBe(1_000);
     const pending = spawnGateVerdict(
       LIMIT_LOOKUP_PENDING,
       { cli: 'codex' },

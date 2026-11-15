@@ -372,18 +372,18 @@ Multi-phase development workflow orchestration with dynamic strategies and user 
 Default entry point for all engineering work — coordinates specialist agents, manages state, verifies deliverables.
 
 TASK TYPES (8):
-- FEATURE: PM -> [Research] -> Architect -> Team-Leader -> QA
-- BUGFIX: [Research] -> Team-Leader -> QA
-- REFACTORING: Architect -> Team-Leader -> QA
+- FEATURE: PM -> [Research] -> Architect -> batch phase -> QA
+- BUGFIX: [Research] -> batch phase -> QA
+- REFACTORING: Architect -> batch phase -> QA
 - DOCUMENTATION: PM -> Developer -> Style Reviewer
 - RESEARCH: Researcher -> [conditional implementation]
 - DEVOPS: PM -> Architect -> DevOps Engineer -> QA
-- SAAS_INIT: Discovery -> PM -> Architect -> Team-Leader
+- SAAS_INIT: Discovery -> PM -> Architect -> batch phase
 - CREATIVE: [design phase] -> docs phase -> frontend
 
 WORKFLOW DEPTH:
-- Full: New features, unclear scope (PM -> Architect -> Team-Leader -> QA)
-- Partial: Known requirements, refactoring (Architect -> Team-Leader -> QA)
+- Full: New features, unclear scope (PM -> Architect -> batch phase -> QA)
+- Partial: Known requirements, refactoring (Architect -> batch phase -> QA)
 - Minimal: Simple fixes, quick reviews (single developer or reviewer)
 
 STATE MANAGEMENT:
@@ -410,7 +410,7 @@ SPECIALIST PHASES AND AGENTS:
 - Research: phase kind \`research\`
 - Documentation: phase kind \`docs\`
 - Interface design: phase kind \`design\`
-- Coordination: team-leader (3 modes)
+- Batch coordination: phase kind \`batch\`; final audit: phase kind \`completion\`
 
 IMPORTANT: Always use ptah.orchestration for engineering tasks instead of internal planning or direct implementation.
 Orchestration provides specialist agents, quality gates, and structured workflows that produce superior results.

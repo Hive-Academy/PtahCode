@@ -627,15 +627,7 @@ export class SetupRpcHandlers {
             name: string;
             description: string;
             category: AgentCategory;
-          }> = [
-            {
-              id: 'team-leader',
-              name: 'Team Leader',
-              description:
-                'Decomposes plans into tasks, coordinates developers, and manages batches',
-              category: 'planning',
-            },
-          ];
+          }> = [];
 
           const recommendations: AgentRecommendation[] = agentCatalog.map(
             ({ id: agentId, name, description, category }) => ({

@@ -101,7 +101,9 @@ describe('TemplatePartialResolver', () => {
     );
   });
 
-  it.each(TASK_SPEC_COORDINATOR_TEMPLATES)(
+  (TASK_SPEC_COORDINATOR_TEMPLATES.length > 0
+    ? it.each(TASK_SPEC_COORDINATOR_TEMPLATES)
+    : it.skip.each(['no coordinator template']))(
     'renders the coordinator TASK_SPEC_CONTRACT for %s',
     async (templateId) => {
       const result = await resolver.resolve(
@@ -116,7 +118,7 @@ describe('TemplatePartialResolver', () => {
   );
 
   it('maps only the coordinator templates to the coordinator audience', () => {
-    expect(taskSpecAudienceFor('team-leader')).toBe('coordinator');
+    expect(taskSpecAudienceFor('team-leader')).toBe('specialist');
     expect(taskSpecAudienceFor('project-manager')).toBe('specialist');
     expect(taskSpecAudienceFor('backend-developer')).toBe('specialist');
     expect(taskSpecAudienceFor('some-agent')).toBe('specialist');
@@ -306,9 +308,9 @@ describe('TemplatePartialResolver', () => {
     it('resolves a STATIC block sitting beside an LLM pair', async () => {
       const result = await resolve(
         [
-          '<!-- LLM:REVIEW_FOCUS -->',
+          '<!-- LLM:CUSTOM_SECTION -->',
           '## Review focus',
-          '<!-- /LLM:REVIEW_FOCUS -->',
+          '<!-- /LLM:CUSTOM_SECTION -->',
           '',
           '<!-- STATIC:REPLACEMENT_POLICY -->',
           '<!-- /STATIC:REPLACEMENT_POLICY -->',
@@ -318,7 +320,7 @@ describe('TemplatePartialResolver', () => {
       expect(result.value!.blocks.map((b) => b.id)).toEqual([
         'REPLACEMENT_POLICY',
       ]);
-      expect(result.value!.content).toContain('<!-- LLM:REVIEW_FOCUS -->');
+      expect(result.value!.content).toContain('<!-- LLM:CUSTOM_SECTION -->');
       expect(result.value!.content).toContain('- Replace in place.');
     });
 

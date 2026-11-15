@@ -37,6 +37,7 @@ jest.mock('./subagent-tool-allowlist', () => {
   );
   const policy: Readonly<Record<string, readonly string[]>> = {
     ...actual.SUBAGENT_DISALLOWED_TOOLS,
+    reviewer: [],
     'skill-less-fixture': ['Skill'],
   };
   const has = (type: string): boolean =>
@@ -679,7 +680,6 @@ Generic fallback.
         ['BUILD_AND_DEPLOY_SURFACE', 'build, packaging and release surface'],
         ['TEST_INFRASTRUCTURE', 'where tests live relative to the code'],
         ['EXISTING_PATTERNS', 'extend rather than replace'],
-        ['REVIEW_FOCUS', 'looks at first'],
       ])('gives %s a role-appropriate topic', async (id, marker) => {
         expect(await promptFor(id)).toContain(marker);
       });
@@ -1003,7 +1003,7 @@ Default
 
       const template = {
         ...baseTemplate,
-        name: 'team-leader',
+        name: 'reviewer',
         content: `<!-- LLM:SECTION_A -->
 Default
 <!-- /LLM:SECTION_A -->`,
@@ -1204,7 +1204,7 @@ default
 
       const template = {
         ...baseTemplate,
-        name: 'team-leader',
+        name: 'reviewer',
         content: `<!-- LLM:S -->
 default
 <!-- /LLM:S -->`,
@@ -1221,7 +1221,7 @@ default
         7,
         'sdk-block-id',
       );
-      expect(id).toMatch(/^gen-team-leader-7-\d+$/);
+      expect(id).toMatch(/^gen-reviewer-7-\d+$/);
     });
 
     it('should fall back to "unknown" agentId in toolCallIdFactory when agentId is empty', async () => {
@@ -2429,10 +2429,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
 
   it('carries every rubric instruction verbatim in a RUBRIC RULES block', async () => {
     const { service, execute } = build(knownPolicy());
-    await service.generateContent(
-      templateFor('team-leader'),
-      mockContext,
-    );
+    await service.generateContent(templateFor('reviewer'), mockContext);
 
     const systemPrompt = execute.mock.calls[0][0].systemPromptAppend as string;
     expect(systemPrompt).toContain('RUBRIC RULES');
@@ -2446,7 +2443,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
     stubLlmFromPrompt(execute);
 
     const result = await service.generateContent(
-      templateFor('team-leader'),
+      templateFor('reviewer'),
       mockContext,
       { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
     );
@@ -2472,11 +2469,10 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
   it('omits a disabled skill and drops the block when none is left', async () => {
     const policy = knownPolicy([ROLE_SKILL.skillId]);
     const { service, execute } = build(policy);
-    await service.generateContent(
-      templateFor('team-leader'),
-      mockContext,
-      { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
-    );
+    await service.generateContent(templateFor('reviewer'), mockContext, {
+      mcpServerRunning: false,
+      pluginPaths: ['/plugins/ptah-core'],
+    });
 
     expect(policy.getEffectivePluginConfig).toHaveBeenCalledWith(
       mockContext.rootPath,
@@ -2494,7 +2490,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
     };
     const unreadable = build(failing);
     await unreadable.service.generateContent(
-      templateFor('team-leader'),
+      templateFor('reviewer'),
       mockContext,
       { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
     );
@@ -2507,11 +2503,10 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
     );
 
     const absent = build(null);
-    await absent.service.generateContent(
-      templateFor('team-leader'),
-      mockContext,
-      { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
-    );
+    await absent.service.generateContent(templateFor('reviewer'), mockContext, {
+      mcpServerRunning: false,
+      pluginPaths: ['/plugins/ptah-core'],
+    });
     expect(
       absent.execute.mock.calls[0][0].systemPromptAppend as string,
     ).not.toContain('## Available Plugin Skills');
@@ -2581,7 +2576,7 @@ describe('ContentGenerationService — rubric rules and plugin-skill gate', () =
     stubLlmFromPrompt(execute);
 
     const result = await service.generateContent(
-      templateFor('team-leader'),
+      templateFor('reviewer'),
       mockContext,
       { mcpServerRunning: false, pluginPaths: ['/plugins/ptah-core'] },
     );

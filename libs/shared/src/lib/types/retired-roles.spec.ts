@@ -71,7 +71,7 @@ describe('retired roles', () => {
     expect(Object.isFrozen(RETIRED_ROLES)).toBe(true);
   });
 
-  it('retires implementation, verification, and definition roles in steps 1 to 3', () => {
+  it('retires the built-in roles in steps 1 to 4', () => {
     expect(RETIRED_ROLES).toEqual([
       { slug: 'backend-developer', phaseKind: 'implement', step: 1 },
       { slug: 'frontend-developer', phaseKind: 'implement', step: 1 },
@@ -86,8 +86,10 @@ describe('retired roles', () => {
       { slug: 'modernization-detector', phaseKind: 'research', step: 3 },
       { slug: 'technical-content-writer', phaseKind: 'docs', step: 3 },
       { slug: 'ui-ux-designer', phaseKind: 'design', step: 3 },
+      { slug: 'team-leader', phaseKind: 'batch', step: 4 },
     ]);
-    expect(isRetiredRole('team-leader')).toBe(false);
+    expect(isRetiredRole('team-leader')).toBe(true);
+    expect(phaseKindForRole('team-leader')).toBe('batch');
   });
 
   it('keeps each retired entry equal to its alias', () => {

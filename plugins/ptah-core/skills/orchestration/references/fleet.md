@@ -33,7 +33,7 @@ Write an artifact before reporting stage completion. `context.md` records planni
 
 `taskId` identifies the task, `round` is the judge round number, `pass` is a boolean, `defects[]` holds the cited findings, `testsRan` records the verification actually run or why none ran, and `mentorNote` explains the verdict. An empty `defects[]` with `pass: true` is an approval; a failed verdict identifies work to revise. Do not invent test results.
 
-Only the orchestrator/team-leader writes the `task.md` `status:` line, and only after checking the relevant artifact. Workers and judges never edit `task.md`. Change exactly the status line, following [task tracking](task-tracking.md); do not rewrite the task carrier. The orchestrator can move a verified implementation to `in_review`, and a task to `done` only after the required review and verification pass.
+Only the orchestrator writes the `task.md` `status:` line, and only after checking the relevant artifact. Workers and judges never edit `task.md`. Change exactly the status line, following [task tracking](task-tracking.md); do not rewrite the task carrier. The orchestrator can move a verified implementation to `in_review`, and a task to `done` only after the required review and verification pass.
 
 ## Disjoint batching
 

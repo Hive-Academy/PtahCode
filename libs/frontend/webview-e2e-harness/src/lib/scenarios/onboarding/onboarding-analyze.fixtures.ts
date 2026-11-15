@@ -9,10 +9,16 @@
  * and analysis-stream events are injected over the postMessage bridge.
  */
 import { expect, type Page } from '@playwright/test';
-import { installPostMessageBridge, type PostMessageBridge } from '../../postmessage-bridge';
+import {
+  installPostMessageBridge,
+  type PostMessageBridge,
+} from '../../postmessage-bridge';
 import { installCspStub } from '../../csp-stub';
 import { rpcError } from '../marketplace/marketplace.fixtures';
-import { installHost, installRpcAutoResponder } from '../settings/settings.fixtures';
+import {
+  installHost,
+  installRpcAutoResponder,
+} from '../settings/settings.fixtures';
 import {
   CHECKED_AT,
   FLAG_DONE,
@@ -37,14 +43,26 @@ export const ANALYZE_SAVED_METADATA = {
 } as const;
 
 const PHASES_COMPLETED = {
-  'project-profile': { status: 'completed', file: '1-project-profile.md', durationMs: 10_000 },
+  'project-profile': {
+    status: 'completed',
+    file: '1-project-profile.md',
+    durationMs: 10_000,
+  },
   'architecture-assessment': {
     status: 'completed',
     file: '2-architecture-assessment.md',
     durationMs: 10_000,
   },
-  'quality-audit': { status: 'completed', file: '3-quality-audit.md', durationMs: 10_000 },
-  'elevation-plan': { status: 'completed', file: '4-elevation-plan.md', durationMs: 12_000 },
+  'quality-audit': {
+    status: 'completed',
+    file: '3-quality-audit.md',
+    durationMs: 10_000,
+  },
+  'elevation-plan': {
+    status: 'completed',
+    file: '4-elevation-plan.md',
+    durationMs: 12_000,
+  },
 } as const;
 
 const PHASE_CONTENTS = {
@@ -90,13 +108,13 @@ export const ANALYZE_RECOMMENDATIONS = [
     description: 'Implements APIs, database logic, and server-side code',
   },
   {
-    agentId: 'software-architect',
-    agentName: 'Software Architect',
+    agentId: 'reviewer',
+    agentName: 'Reviewer',
     relevanceScore: 40,
     matchedCriteria: [],
     category: 'planning',
     recommended: false,
-    description: 'Shapes the system',
+    description: 'Reviews changes in this workspace',
   },
 ] as const;
 
@@ -136,10 +154,24 @@ export function onboardingAnalyzeFixtures(
 ): Record<string, unknown> {
   const fixtures: Record<string, unknown> = {
     ...onboardingReadyFixtures('ready'),
-    'config:models-list': { models: [
-      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', description: 'Balanced model', isSelected: true, providerModelId: null },
-      { id: 'claude-opus-4-1', name: 'Claude Opus 4.1', description: 'Deep reasoning model', isSelected: false, providerModelId: null },
-    ] },
+    'config:models-list': {
+      models: [
+        {
+          id: 'claude-sonnet-4-5',
+          name: 'Claude Sonnet 4.5',
+          description: 'Balanced model',
+          isSelected: true,
+          providerModelId: null,
+        },
+        {
+          id: 'claude-opus-4-1',
+          name: 'Claude Opus 4.1',
+          description: 'Deep reasoning model',
+          isSelected: false,
+          providerModelId: null,
+        },
+      ],
+    },
     'wizard:list-analyses': { analyses: [] },
     'wizard:get-resumable-run': { analysis: null, generation: null },
     'wizard:get-generation-run-state': { run: null },
@@ -173,13 +205,22 @@ export async function bootOnboardingAnalyze(
   await installCspStub(page);
   const bridge = await installPostMessageBridge(page);
   await installHost(page, 'electron', 'chat');
-  await installRpcAutoResponder(page, onboardingAnalyzeFixtures(options.rpc ?? {}));
+  await installRpcAutoResponder(
+    page,
+    onboardingAnalyzeFixtures(options.rpc ?? {}),
+  );
   await page.addInitScript(
-    (seed: { theme: string; flag: string; scene: string | null; accent: string | null }) => {
+    (seed: {
+      theme: string;
+      flag: string;
+      scene: string | null;
+      accent: string | null;
+    }) => {
       localStorage.setItem('ptah-theme-v2', seed.theme);
       localStorage.setItem('ptah.onboarding.v1', seed.flag);
       if (seed.scene !== null) localStorage.setItem('ptah-scene', seed.scene);
-      if (seed.accent !== null) localStorage.setItem('ptah-accent', seed.accent);
+      if (seed.accent !== null)
+        localStorage.setItem('ptah-accent', seed.accent);
     },
     {
       theme: options.theme,
@@ -195,15 +236,22 @@ export async function bootOnboardingAnalyze(
   return bridge;
 }
 
-export async function injectScanProgress(bridge: PostMessageBridge): Promise<void> {
+export async function injectScanProgress(
+  bridge: PostMessageBridge,
+): Promise<void> {
   await bridge.inject({
     type: 'setup-wizard:scan-progress',
     payload: { ...PHASE_TWO_SCAN_PROGRESS },
   });
 }
 
-export async function injectRunningStream(bridge: PostMessageBridge): Promise<void> {
+export async function injectRunningStream(
+  bridge: PostMessageBridge,
+): Promise<void> {
   for (const payload of RUNNING_STREAM_EVENTS) {
-    await bridge.inject({ type: 'setup-wizard:analysis-stream', payload: { ...payload } });
+    await bridge.inject({
+      type: 'setup-wizard:analysis-stream',
+      payload: { ...payload },
+    });
   }
 }

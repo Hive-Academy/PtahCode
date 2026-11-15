@@ -13,7 +13,7 @@
  * internal subagents already consume over HTTP.
  *
  * The last tool, `session_submit`, is unique to the stdio surface — it
- * fires the full Team Leader harness in Phase 3. Phase 2 returns a stable
+ * fires the full orchestration workflow in Phase 3. Phase 2 returns a stable
  * schema definition so external hosts can see it advertised on `tools/list`
  * before dispatch logic ships.
  */
@@ -144,9 +144,9 @@ export function buildMcpOutcomeReportTool(): MCPToolDefinition {
 }
 
 /**
- * Builder for the composite `session_submit` tool. Wraps the Team Leader
+ * Builder for the composite `session_submit` tool. Wraps the orchestration
  * harness as a single MCP tool: the supplied task is decomposed into a
- * Team Leader prompt, executed through the configured agent SDK session,
+ * workflow prompt, executed through the configured agent SDK session,
  * and aggregated into a single MCP result. Sub-agent fan-out happens via
  * the agent SDK's Task tool when `allowSubagents` is true; cost + token
  * deltas stream as `notifications/message` frames during execution.
@@ -155,10 +155,10 @@ export function buildMcpSessionSubmitTool(): MCPToolDefinition {
   return {
     name: 'session_submit',
     description:
-      "Delegate an entire coding task to Ptah's Team Leader. Builds a Team " +
-      'Leader prompt from the supplied task text, runs it through the ' +
+      'Delegate an entire coding task to the orchestration workflow. Builds a ' +
+      'workflow prompt from the supplied task text, runs it through the ' +
       'configured agent SDK session, and aggregates the result. When ' +
-      'allowSubagents is true (default), the Team Leader fans out work to ' +
+      'allowSubagents is true (default), the workflow fans out work to ' +
       'sub-agents via the SDK Task tool and aggregates their results ' +
       'before reporting back. Mid-flight progress streams as MCP ' +
       '`notifications/progress` (when the host supplies a progressToken) ' +
@@ -184,7 +184,7 @@ export function buildMcpSessionSubmitTool(): MCPToolDefinition {
         allowSubagents: {
           type: 'boolean',
           description:
-            'When true (default), the Team Leader is instructed to fan ' +
+            'When true (default), the orchestration workflow can fan ' +
             'out subtasks via the agent SDK Task tool. When false, the ' +
             'task runs in a single session.',
         },

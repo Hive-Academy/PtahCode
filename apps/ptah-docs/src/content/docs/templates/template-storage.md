@@ -1,9 +1,9 @@
 ---
 title: Template Storage
-description: How PtahCode downloads and caches the agent templates.
+description: How PtahCode downloads and caches template content.
 ---
 
-Templates use the same download as [plugins](/plugins/plugin-storage/). They are listed in the same `content-manifest.json`.
+Template content uses the same download as [plugins](/plugins/plugin-storage/). No built-in agent role template remains.
 
 ## Storage layout
 
@@ -13,7 +13,6 @@ Templates use the same download as [plugins](/plugins/plugin-storage/). They are
   templates/
     agents/
       _shared/
-      team-leader.template.md
 ```
 
 | Path                          | Purpose                                      |
@@ -27,7 +26,7 @@ Templates use the same download as [plugins](/plugins/plugin-storage/). They are
 {
   "templates": {
     "basePath": "libs/backend/agent-generation/templates/agents",
-    "files": ["team-leader.template.md"]
+    "files": []
   }
 }
 ```

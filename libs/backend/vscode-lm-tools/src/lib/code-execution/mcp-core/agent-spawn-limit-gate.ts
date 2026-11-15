@@ -33,7 +33,7 @@ import {
 } from './bounded-limit-lookup';
 
 /** Longest wait (ms) a spawn tool spends on a plan-limit lookup before continuing. */
-export const SPAWN_GATE_WAIT_MS = 4_000;
+export const SPAWN_GATE_WAIT_MS = 1_000;
 
 export type SpawnGateVerdict =
   | { readonly kind: 'clear' }
@@ -117,6 +117,7 @@ export interface EvaluatedSpawnGate {
   resolveLimits(
     startLookup: () => Promise<readonly AgentLimit[] | undefined>,
   ): Promise<readonly AgentLimit[] | LimitLookupPending | undefined>;
+  peekLimits(): readonly AgentLimit[] | undefined;
 }
 
 /** Run the bounded pre-spawn gate check and return the post-spawn resolver. */
@@ -146,6 +147,8 @@ export async function evaluateSpawnLimitGate(
       startLookup,
       SPAWN_GATE_WAIT_MS,
     );
+  const peekLimits = (): readonly AgentLimit[] | undefined =>
+    preLimits === LIMIT_LOOKUP_PENDING ? settlement?.value?.result : preLimits;
   if (
     preLimits &&
     preLimits !== LIMIT_LOOKUP_PENDING &&
@@ -159,11 +162,13 @@ export async function evaluateSpawnLimitGate(
         verdict,
       },
       resolveLimits,
+      peekLimits,
     };
   }
   return {
     forced: verdict?.kind === 'blocked' && force === true,
     resolveLimits,
+    peekLimits,
   };
 }
 

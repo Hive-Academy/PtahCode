@@ -1504,13 +1504,13 @@ describe('AgentGenerationOrchestratorService', () => {
       expect(writtenAgent.content).not.toContain('model:');
     });
 
-    it('emits the N3 `disallowedTools:` line for a restricted agent type', async () => {
+    it('does not add a built-in tool policy to a custom agent', async () => {
       const { service, mocks } = createOrchestrator();
       wireHappyPath(
         mocks,
         createMockTemplate({
-          id: 'team-leader',
-          name: 'team-leader',
+          id: 'reviewer',
+          name: 'reviewer',
           model: 'opus',
         }),
       );
@@ -1521,13 +1521,8 @@ describe('AgentGenerationOrchestratorService', () => {
 
       const writtenAgent = mocks.fileWriter.writeAgent.mock.calls[0]![0];
       const frontmatter = writtenAgent.content.split('\n---\n')[0];
-      expect(frontmatter).toContain(
-        'disallowedTools: mcp__firecrawl, mcp__ptah__ptah_web_search, mcp__ptah__ptah_browser_navigate,',
-      );
-      // Inside the one frontmatter block, after `model:`.
-      expect(frontmatter.indexOf('disallowedTools:')).toBeGreaterThan(
-        frontmatter.indexOf('model: opus'),
-      );
+      expect(frontmatter).toContain('model: opus');
+      expect(frontmatter).not.toContain('disallowedTools:');
     });
 
     it('omits `disallowedTools:` for a type that keeps every tool', async () => {
@@ -1553,8 +1548,8 @@ describe('AgentGenerationOrchestratorService', () => {
       wireHappyPath(
         mocks,
         createMockTemplate({
-          id: 'team-leader',
-          name: 'team-leader',
+          id: 'reviewer',
+          name: 'reviewer',
         }),
       );
       // The content pass echoes a previous generation's frontmatter.
@@ -1562,7 +1557,7 @@ describe('AgentGenerationOrchestratorService', () => {
         Result.ok({
           content: [
             '---',
-            'name: team-leader',
+            'name: reviewer',
             'disallowedTools: mcp__firecrawl',
             '---',
             '# Team Leader',
@@ -1578,10 +1573,7 @@ describe('AgentGenerationOrchestratorService', () => {
       });
 
       const writtenAgent = mocks.fileWriter.writeAgent.mock.calls[0]![0];
-      expect(writtenAgent.content.match(/disallowedTools:/g)).toHaveLength(1);
-      expect(writtenAgent.content).toContain(
-        'disallowedTools: mcp__firecrawl, mcp__ptah__ptah_web_search,',
-      );
+      expect(writtenAgent.content).not.toContain('disallowedTools:');
     });
   });
 
@@ -1819,24 +1811,20 @@ describe('AgentGenerationOrchestratorService', () => {
       expect(frontmatter).toContain('model: sonnet');
     });
 
-    it('keeps the disallowedTools line, after the overridden model:', async () => {
+    it('keeps the custom agent unrestricted after a model override', async () => {
       const settings = settingsReturning({
-        workspace: { 'team-leader': { claude: 'haiku' } },
+        workspace: { reviewer: { claude: 'haiku' } },
       });
       const { frontmatter } = await frontmatterFor(
         settings,
         createMockTemplate({
-          id: 'team-leader',
-          name: 'team-leader',
+          id: 'reviewer',
+          name: 'reviewer',
           model: 'opus',
         }),
       );
-      expect(frontmatter).toContain(
-        'disallowedTools: mcp__firecrawl, mcp__ptah__ptah_web_search, mcp__ptah__ptah_browser_navigate,',
-      );
-      expect(frontmatter.indexOf('disallowedTools:')).toBeGreaterThan(
-        frontmatter.indexOf('model: haiku'),
-      );
+      expect(frontmatter).toContain('model: haiku');
+      expect(frontmatter).not.toContain('disallowedTools:');
     });
 
     it('applies the same override on the authored-fallback path', async () => {
@@ -2070,9 +2058,9 @@ describe('stripCompositionMarkers', () => {
       'delegation rules',
       '<!-- /STATIC:CLI_DELEGATION -->',
       '',
-      '<!-- LLM:REVIEW_FOCUS -->',
+      '<!-- LLM:CUSTOM_SECTION -->',
       '## Review focus',
-      '<!-- /LLM:REVIEW_FOCUS -->',
+      '<!-- /LLM:CUSTOM_SECTION -->',
     ].join('\n');
 
     const out = stripCompositionMarkers(content);

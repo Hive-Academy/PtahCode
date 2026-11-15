@@ -49,11 +49,7 @@ export const AGENT_CHECKPOINT = {
   analysisDirectory: null,
   outputDirectory: `${WORKSPACE}\\.claude\\agents`,
   lifecycle: 'running',
-  selectedAgentIds: [
-    'backend-developer',
-    'software-architect',
-    'test-engineer',
-  ],
+  selectedAgentIds: ['backend-developer', 'reviewer', 'test-engineer'],
   agents: [
     {
       agentId: 'backend-developer',
@@ -63,8 +59,8 @@ export const AGENT_CHECKPOINT = {
       tailoredSections: 4,
     },
     {
-      agentId: 'software-architect',
-      filePath: 'software-architect.md',
+      agentId: 'reviewer',
+      filePath: 'reviewer.md',
       status: 'running',
       rejectedSections: 0,
       tailoredSections: 2,
@@ -94,9 +90,9 @@ export const AGENT_RESULT = {
       tailoredSections: 4,
     },
     {
-      agentId: 'software-architect',
+      agentId: 'reviewer',
       status: 'unchanged',
-      fileName: 'software-architect.md',
+      fileName: 'reviewer.md',
       rejectedSections: 0,
       tailoredSections: 2,
     },

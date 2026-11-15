@@ -32,6 +32,7 @@ import type {
   PlanOwnerTarget,
   PlanUsageReading,
 } from './readers/plan-usage-reader.types';
+import { mapClaudePlanUsage } from './readers/claude-plan-usage.reader';
 
 const T0 = Date.UTC(2026, 9, 4, 12, 0, 0);
 const SECRET = 'sk-plan-usage-secret-123';
@@ -136,6 +137,7 @@ function harness(storageOverride?: IStateStorage) {
   const resolve = jest.fn<Promise<PlanCredentialResolution>, [unknown]>(
     async () => ({ kind: 'available', secret: new PlanSecret(SECRET) }),
   );
+  const oauthReader = jest.fn(async (): Promise<PlanUsageReading> => ({ status: 'no-usage-source', statusReason: 'no-oauth', windowSetEstablished: false, windows: [] }));
   const service = new PlanUsageService(
     logger as unknown as Logger,
     ledger,
@@ -147,12 +149,14 @@ function harness(storageOverride?: IStateStorage) {
       resolveRequestCredential: async () => ({ kind: 'apiKey', apiKey: 'kimi-shared' }),
       forceRefresh: async () => false,
     },
+    oauthReader,
   );
   return {
     service,
     ledger,
     logger,
     readPlanUsage,
+    oauthReader,
     getAccountUsage,
     resolve,
     advance: (ms: number) => {
@@ -163,6 +167,99 @@ function harness(storageOverride?: IStateStorage) {
 }
 
 describe('PlanUsageService', () => {
+  it('backs off failed OAuth reads per owner while preserving each live no-session result', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    const first = await h.service.getOwnerSnapshot(claudeTarget());
+    const second = await h.service.getOwnerSnapshot(claudeTarget());
+    expect(first).toMatchObject({ unavailableReason: 'no-open-session' });
+    expect(second).toMatchObject({ unavailableReason: 'no-open-session' });
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(2);
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    const otherOwner = { ...claudeTarget(), ownerRef: quotaOwnerRefFromKey(accountOwnerKey('anthropic', 'other@fixture.test\0')) };
+    await h.service.getOwnerSnapshot(otherOwner);
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+    await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(3);
+    h.advance(60_000);
+    await h.service.getOwnerSnapshot(claudeTarget());
+    expect(h.oauthReader).toHaveBeenCalledTimes(4);
+  });
+  it('honors a rate limit cooldown even on refresh', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    h.oauthReader.mockResolvedValueOnce({ status: 'service-unavailable', statusReason: 'cli-unavailable', windowSetEstablished: false, windows: [], retryAfterMs: 120_000 });
+    await h.service.getOwnerSnapshot(claudeTarget());
+    await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    h.advance(120_000);
+    await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+  });
+  it.each(['result', 'throw'])('does not cool down an OAuth read cancelled before its %s', async outcome => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    let finish: ((reading: PlanUsageReading) => void) | undefined;
+    let fail: ((error: Error) => void) | undefined;
+    h.oauthReader.mockImplementationOnce(() => new Promise<PlanUsageReading>((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    }));
+    const controller = new AbortController();
+    const pending = h.service.getOwnerSnapshot(claudeTarget(), { signal: controller.signal });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    if (outcome === 'result') finish?.({ status: 'service-unavailable', windowSetEstablished: false, windows: [] });
+    else fail?.(new Error('cancelled'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await h.service.getOwnerSnapshot(claudeTarget());
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+  });
+  it('does not cache an OAuth account identity mismatch', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    h.oauthReader.mockResolvedValue({ status: 'service-unavailable', statusReason: 'account-unverified', windowSetEstablished: false, windows: [], sourceInvalid: true });
+    const first = await h.service.getOwnerSnapshot(claudeTarget());
+    const second = await h.service.getOwnerSnapshot(claudeTarget());
+    expect(first).toMatchObject({ statusReason: 'account-unverified', windows: [] });
+    // The cooldown skips OAuth; the mismatched reading was not cached.
+    expect(second).toMatchObject({ unavailableReason: 'no-open-session', windows: [] });
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+  });
+  it('drops an earlier cached owner reading after an OAuth identity mismatch', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const cached = await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(cached.windows.length).toBeGreaterThan(0);
+    h.oauthReader.mockResolvedValueOnce({ status: 'service-unavailable', statusReason: 'account-unverified', windowSetEstablished: false, windows: [], sourceInvalid: true });
+    await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    const liveReads = h.readPlanUsage.mock.calls.length;
+    // Not a cache hit: the live source is read again and the result is not the cached reading.
+    // Ledger windows from the earlier verified read stay; they are real owner observations.
+    const after = await h.service.getOwnerSnapshot(claudeTarget());
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(liveReads + 1);
+    expect(after.status).not.toBe('available');
+  });
+  it('uses OAuth windows after one live no-session read and preserves live data when OAuth fails', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    const live = await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(live).toMatchObject({ status: 'service-unavailable', unavailableReason: 'no-open-session' });
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(1);
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const oauth = await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(oauth.status).toBe('available');
+    expect(oauth.windows.map(w => w.key)).toEqual(['five_hour']);
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(2);
+    h.oauthReader.mockRejectedValueOnce(new Error('offline'));
+    const failed = await h.service.getOwnerSnapshot(claudeTarget(), { refresh: true });
+    expect(failed).toMatchObject({ status: 'service-unavailable', unavailableReason: 'no-open-session' });
+  });
+
   it('keeps the newer owner reading when an older flight settles last', async () => {
     const h = harness();
     const older = deferred<CodexAccountUsageResult>();

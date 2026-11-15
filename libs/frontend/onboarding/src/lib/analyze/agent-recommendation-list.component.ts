@@ -74,7 +74,7 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
           ptahButton
           type="button"
           data-testid="agent-recommendation-select-recommended"
-          [disabled]="disabled()"
+          [disabled]="disabled() || recommendations().length === 0"
           (click)="selectRecommended.emit()"
         >
           Select recommended
@@ -84,7 +84,7 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
           variant="ghost"
           type="button"
           data-testid="agent-recommendation-clear"
-          [disabled]="disabled()"
+          [disabled]="disabled() || recommendations().length === 0"
           (click)="clearSelection.emit()"
         >
           Clear
@@ -96,6 +96,24 @@ export function criteriaOf(agent: AgentRecommendation): readonly string[] {
           {{ selectedCount() }} selected
         </span>
       </div>
+      @if (recommendations().length === 0) {
+        <div
+          class="rounded-[14px] border border-base-300 bg-base-200 p-5 text-center"
+          data-glass-surface="tile"
+          data-testid="agent-recommendation-empty"
+          role="status"
+        >
+          <lucide-angular
+            [img]="icons.bot"
+            class="mx-auto mb-2 size-6 text-base-content-muted"
+            aria-hidden="true"
+          />
+          <p class="font-medium">No built-in agents available</p>
+          <p class="mt-1 text-sm text-base-content-muted">
+            You can create and manage custom agents separately.
+          </p>
+        </div>
+      }
       @for (group of groups(); track group.key) {
         <section class="space-y-2" [attr.aria-label]="group.label">
           <h3 class="text-sm font-semibold">{{ group.label }}</h3>
