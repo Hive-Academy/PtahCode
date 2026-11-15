@@ -38,7 +38,7 @@ describe('CliProviderCardComponent', () => {
     const grid = root.querySelector('.defaults-grid') as HTMLElement;
     expect(grid.querySelector('h4')?.textContent?.trim()).toBe('Defaults');
     expect([...grid.querySelectorAll('ptah-field label')].map(label => label.textContent?.trim())).toEqual(['Model', 'Effort', 'Permission', 'Network']);
-    expect([...grid.querySelectorAll('span')].filter(span => span.textContent?.trim() === 'Unavailable')).toHaveLength(2);
+    expect([...grid.querySelectorAll('button[ptahFieldTrigger]')].filter(button => button.textContent?.trim() === 'Unavailable')).toHaveLength(2);
     expect([...grid.querySelectorAll('ptah-field')].map(field => field.querySelector('[data-ptah-field]')?.getAttribute('data-size'))).toEqual(['sm', 'sm', 'sm', 'sm']);
     for (const kind of ['model', 'effort']) {
       const button = grid.querySelector<HTMLButtonElement>(`button[data-popover-kind="${kind}"]`);
@@ -51,6 +51,20 @@ describe('CliProviderCardComponent', () => {
     expect(css).not.toMatch(/\.ptah-field__body\s*\{\s*flex:\s*0\s+0\s+0/);
     expect(grid.querySelector('.credential-slot button')?.textContent?.trim()).toBe('Codex settings');
     expect(grid.querySelectorAll('ptah-field')).toHaveLength(4);
+  });
+  it('ties the absent Effort label and every other field label to a control', () => {
+    const root = setup(row('cursor')).nativeElement as HTMLElement;
+    const labels = root.querySelectorAll<HTMLLabelElement>('ptah-field label[for]');
+    expect(labels).toHaveLength(4);
+    for (const label of labels) {
+      const control = root.querySelector<HTMLElement>(`[id="${label.htmlFor}"]`);
+      expect(control).not.toBeNull();
+      expect(control?.id).toBe(label.htmlFor);
+    }
+    const effort = [...labels].find(label => label.textContent?.trim() === 'Effort');
+    const control = root.querySelector<HTMLButtonElement>(`button[id="${effort?.htmlFor}"]`);
+    expect(control?.disabled).toBe(true);
+    expect(control?.textContent?.trim()).toBe('n/a');
   });
   it('shows read-only facts as one description list with full, unclipped values', () => {
     const root = setup({ ...row(), version: 'codex-cli 0.169.0', versionLabel: 'v0.169.0', codexStatusLine: 'Installed Codex 0.169.0', provider: 'OpenAI Codex' }).nativeElement as HTMLElement;

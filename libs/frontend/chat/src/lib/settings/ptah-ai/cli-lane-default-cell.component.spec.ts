@@ -91,9 +91,30 @@ describe('CliLaneDefaultCellComponent', () => {
     fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
     const fields = host.querySelectorAll('ptah-field');
-    expect(fields[1].querySelector('[ptahFieldTrailing]')?.textContent?.trim()).toBe('Unavailable');
+    expect(fields[1].querySelector('button[ptahFieldTrigger]')?.textContent?.trim()).toBe('Unavailable');
     expect(fields[1].querySelector('.ptah-field__message')?.textContent?.trim()).toBe('Grok exposes no native read-only plan flag.');
+    for (const label of host.querySelectorAll<HTMLLabelElement>('label[for]')) {
+      const control = host.querySelector<HTMLElement>(`[id="${label.htmlFor}"]`);
+      expect(control).not.toBeNull();
+      expect(control?.id).toBe(label.htmlFor);
+    }
     expect(host.querySelector('.defaults-warning')).toBeNull();
+  });
+
+  it('ties unavailable Permission and Network labels to disabled controls', () => {
+    const fixture = setup('codex');
+    fixture.componentRef.setInput('layout', 'card');
+    fixture.componentRef.setInput('manifest', { ...manifest, permissionModes: {}, networkModes: {} });
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const labels = host.querySelectorAll<HTMLLabelElement>('label[for]');
+    expect(labels).toHaveLength(2);
+    for (const label of labels) {
+      const control = host.querySelector<HTMLButtonElement>(`button[id="${label.htmlFor}"]`);
+      expect(control).not.toBeNull();
+      expect(control?.disabled).toBe(true);
+      expect(control?.textContent?.trim()).toBe('Unavailable');
+    }
   });
 
   it('shows the saved choice when the manifest and the saved row arrive together', () => {

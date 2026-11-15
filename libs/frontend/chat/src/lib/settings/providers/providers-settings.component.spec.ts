@@ -732,9 +732,12 @@ describe('ProvidersSettingsComponent', () => {
       connect?.click(); await render();
       expect(catalogDialog()?.hasAttribute('open')).toBe(true);
       const search = element.querySelector<HTMLInputElement>('[data-testid="provider-catalog-search"]');
+      expect(search).not.toBeNull();
       const searchField = search?.closest('ptah-field');
       expect(searchField).not.toBeNull();
-      expect(searchField?.querySelector('label')?.htmlFor).toBe(search?.id);
+      const searchLabel = searchField?.querySelector('label');
+      expect(searchLabel).not.toBeNull();
+      expect(searchLabel?.htmlFor).toBe(search?.id);
     });
     it('the filter narrows the cards by name, says when nothing matches, and Clear filter restores them', async () => {
       state.connections.set(ready([connection('first'), { ...connection('second'), name: 'Kimi Code' }])); await render();
@@ -743,7 +746,9 @@ describe('ProvidersSettingsComponent', () => {
       expect(input.getAttribute('aria-label')).toBe('Filter connections');
       const filterField = input.closest('ptah-field');
       expect(filterField).not.toBeNull();
-      expect(filterField?.querySelector('label')?.htmlFor).toBe(input.id);
+      const filterLabel = filterField?.querySelector('label');
+      expect(filterLabel).not.toBeNull();
+      expect(filterLabel?.htmlFor).toBe(input.id);
       input.value = 'kimi'; input.dispatchEvent(new Event('input')); await render();
       expect(element.querySelectorAll('ptah-provider-connection-card')).toHaveLength(1);
       input.value = 'zzz'; input.dispatchEvent(new Event('input')); await render();
