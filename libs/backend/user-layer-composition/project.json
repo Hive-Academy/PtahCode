@@ -1,0 +1,7 @@
+{
+  "name": "@ptah-extension/user-layer-composition",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/backend/user-layer-composition/src",
+  "tags": ["scope:extension", "type:feature"]
+}

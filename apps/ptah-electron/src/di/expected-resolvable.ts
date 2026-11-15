@@ -1,4 +1,5 @@
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import { USER_LAYER_COMPOSITION_TOKENS } from '@ptah-extension/user-layer-composition';
 import { MEMORY_TOKENS } from '@ptah-extension/memory-curator';
 import { CLI_AGENT_RUNTIME_TOKENS } from '@ptah-extension/cli-agent-runtime';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
@@ -66,6 +67,7 @@ export const EXPECTED_RESOLVABLE = [
 
 /** Lib-owned tokens composed by Electron in addition to handler classes. */
 export const EXPECTED_RESOLVABLE_TOKENS = [
+  ['USER_LAYER_MIRROR_SERVICE', USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE],
   ['SKILL_RECOMMENDATION_SERVICE', SKILL_RECOMMENDATION_SERVICE],
   ['SKILL_PROJECT_GUIDANCE_SERVICE', SKILL_PROJECT_GUIDANCE_SERVICE],
   ['SKILL_SELECTION_SERVICE', SKILL_SELECTION_SERVICE],

@@ -17,7 +17,7 @@
  * - `bootHarness` is the one-shot boot pass.
  *
  * Both resolve everything lazily. `registerHarnessSyncServices` runs in DI
- * phase 2 and `registerAgentGenerationServices` a few lines later, so a
+ * phase 2 and user-layer composition is registered later, so a
  * refresher that captured the mirror service at construction would capture
  * nothing.
  */
@@ -35,11 +35,12 @@ import {
   type PluginLoaderService,
 } from '@ptah-extension/agent-sdk';
 import {
-  AGENT_GENERATION_TOKENS,
+  USER_LAYER_COMPOSITION_TOKENS,
   userLayerPassFailures,
   type MirrorSources,
   type UserLayerMirrorService,
-} from '@ptah-extension/agent-generation';
+  type UserLayerBootstrap,
+} from '@ptah-extension/user-layer-composition';
 import {
   HARNESS_SYNC_TOKENS,
   resolveAgentMirrorSource,
@@ -119,7 +120,7 @@ function resolveAgentSyncGate(
 /**
  * Reports `refreshed` when both halves completed, `failed` when either threw
  * (logged here, never rethrown: the port must not reject), and `skipped` in a
- * container without agent-generation. Never broadcasts `library:changed`: the
+ * container without user-layer composition. Never broadcasts `library:changed`: the
  * Library is desktop-only (D3).
  */
 export function createCliUserLayerRefresher(
@@ -131,14 +132,14 @@ export function createCliUserLayerRefresher(
     ): Promise<UserLayerRefreshStatus> {
       if (
         !container.isRegistered(
-          AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE,
+          USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE,
         )
       ) {
         return 'skipped';
       }
       try {
         const mirror = container.resolve<UserLayerMirrorService>(
-          AGENT_GENERATION_TOKENS.USER_LAYER_MIRROR_SERVICE,
+          USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE,
         );
         const sources = buildMirrorSources(container, workspaceRoot);
         // Create-if-absent first (new slugs), then fast-forward + reap. The CLI
@@ -217,6 +218,12 @@ export async function bootHarness(
     if (workspaceRoot === undefined) {
       logger.debug('[CLI harness] Boot reconcile skipped — no workspace root');
       return;
+    }
+    if (container.isRegistered(USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_BOOTSTRAP)) {
+      const bootstrap = container.resolve<UserLayerBootstrap>(
+        USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_BOOTSTRAP,
+      );
+      await bootstrap.prepare(workspaceRoot);
     }
     const propagation = container.resolve<HarnessPropagationService>(
       HARNESS_SYNC_TOKENS.PROPAGATION,

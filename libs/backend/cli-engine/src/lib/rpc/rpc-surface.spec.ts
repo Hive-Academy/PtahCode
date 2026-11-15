@@ -19,6 +19,13 @@
  */
 
 import 'reflect-metadata';
+import { USER_LAYER_COMPOSITION_TOKENS } from '@ptah-extension/user-layer-composition';
+
+it('keeps user-layer bootstrap outside the RPC surface', () => {
+  expect(USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_BOOTSTRAP).toBe(
+    Symbol.for('PtahUserLayerBootstrap'),
+  );
+});
 
 import {
   deriveRpcSurface,

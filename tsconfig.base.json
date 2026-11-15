@@ -19,6 +19,7 @@
       "@ptah-extension/codex-runtime": [
         "./libs/backend/codex-runtime/src/index.ts"
       ],
+      "@ptah-extension/user-layer-composition": ["./libs/backend/user-layer-composition/src/index.ts"],
       "@ptah-extension/agent-generation": [
         "./libs/backend/agent-generation/src/index.ts"
       ],
