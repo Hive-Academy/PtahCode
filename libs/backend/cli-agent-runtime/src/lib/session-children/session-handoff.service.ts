@@ -145,6 +145,8 @@ export class SessionHandoffService
   private readonly armed = new Map<string, ArmedCallerStop>();
   private readonly stopping = new Set<string>();
   private readonly stopped = new Set<string>();
+  /** Predecessors this service closed without a persisted closeCompleted. */
+  private readonly closedUnsettled = new Set<string>();
   private readonly flushed = new Set<string>();
   private readonly recoverableRecords = new Map<
     string,
@@ -299,12 +301,25 @@ export class SessionHandoffService
         return retry('handoff record not yet available; retry later');
       if (record.state === 'starting')
         return retry('handoff session is still starting; retry later');
-      const resolvedSdkId = this.resolvedSuccessorIds.get(record.successorTabId);
-      if (resolvedSdkId && resolvedSdkId === request.callerSessionId && record.successorSdkId !== resolvedSdkId) {
-        await this.ackStore.compareAndSet(record.predecessorTabId, record.state, {
-          successorSdkId: resolvedSdkId,
-        });
-        record = (await this.ackStore.findByPredecessor(record.predecessorTabId)) ?? record;
+      const resolvedSdkId = this.resolvedSuccessorIds.get(
+        record.successorTabId,
+      );
+      if (
+        resolvedSdkId &&
+        resolvedSdkId === request.callerSessionId &&
+        record.successorSdkId !== resolvedSdkId
+      ) {
+        await this.ackStore.compareAndSet(
+          record.predecessorTabId,
+          record.state,
+          {
+            successorSdkId: resolvedSdkId,
+          },
+          record.successorTabId,
+        );
+        record =
+          (await this.ackStore.findByPredecessor(record.predecessorTabId)) ??
+          record;
       }
       // Check the caller before joining an in-flight attempt, so a stranger never
       // receives another caller's result.
@@ -376,17 +391,49 @@ export class SessionHandoffService
       ) {
         return refused('predecessor close is unavailable in this host');
       }
-      if (record.state === 'recorded') {
-        const moved = await this.ackStore!.compareAndSet(
-          record.predecessorTabId,
-          'recorded',
-          { state: 'closePending' },
+      // Every closable state goes through the guarded transition: it reads
+      // all documents and checks the successor, so a stale copy from a
+      // partial lookup cannot authorize the close. 'already' means the
+      // record is closePending for this successor; nothing is written.
+      const transition = await this.ackStore!.transition(
+        record.predecessorTabId,
+        'recorded',
+        { state: 'closePending' },
+        record.successorTabId,
+      );
+      if (transition === 'superseded' || transition === 'completed')
+        this.closedUnsettled.delete(record.predecessorTabId);
+      if (transition === 'superseded')
+        return refused('handoff record superseded by a newer handoff');
+      if (transition === 'completed')
+        return {
+          status: 'already-closed',
+          reason: 'predecessor already closed',
+        };
+      if (transition === 'missing') {
+        this.logger?.warn(
+          `${LOG_PREFIX} handoff acknowledgement record disappeared for predecessor ${record.predecessorTabId} in workspace ${record.workspaceRoot}`,
         );
-        if (
-          !moved &&
-          !(await this.ackStore!.findByPredecessor(record.predecessorTabId))
-        )
-          return refused('handoff record missing');
+        return retry('handoff record not yet available; retry later');
+      }
+      if (this.closedUnsettled.has(record.predecessorTabId)) {
+        // This service closed the predecessor but could not persist it.
+        // A rejected write gives a retry through the outer catch. A false
+        // result means the record changed after the transition: keep the
+        // marker and let the next acknowledgement read the new state.
+        const settled = await this.ackStore!.compareAndSet(
+          record.predecessorTabId,
+          'closePending',
+          { state: 'closeCompleted' },
+          record.successorTabId,
+        );
+        if (!settled)
+          return retry('handoff record changed during settlement; retry later');
+        this.closedUnsettled.delete(record.predecessorTabId);
+        return {
+          status: 'already-closed',
+          reason: 'predecessor already closed',
+        };
       }
       const closer = this.container!.resolve<HandoffPredecessorCloser>(
         CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER,
@@ -423,11 +470,18 @@ export class SessionHandoffService
         await closer.close(record.predecessorTabId, record.predecessorSdkId),
       );
       if (closeResult.status !== 'closed') return closeResult;
-      await this.ackStore!.compareAndSet(
-        record.predecessorTabId,
-        'closePending',
-        { state: 'closeCompleted' },
-      );
+      try {
+        await this.ackStore!.compareAndSet(
+          record.predecessorTabId,
+          'closePending',
+          { state: 'closeCompleted' },
+        );
+      } catch (error: unknown) {
+        // The predecessor is closed; report that. The next acknowledgement
+        // settles the record without another close.
+        this.closedUnsettled.add(record.predecessorTabId);
+        this.reportError('handoff close completion was not persisted', error);
+      }
       return { status: 'closed', reason: 'predecessor closed' };
     } catch (error: unknown) {
       this.reportError('handoff acknowledgement failed', error);
@@ -642,16 +696,19 @@ export class SessionHandoffService
           try {
             // The record still binds the successor tab to its SDK id for
             // report delivery. After a revert it never permits the close.
-            await this.recordLateAck({
-              predecessorTabId: record.tabId,
-              predecessorSdkId: record.realSessionId,
-              successorTabId: tabId,
-              successorSdkId,
-              workspaceRoot: resolve(paths.root),
-              handoffPath: handoffFile,
-              state: 'recorded',
-              ...(reverted ? { keepPredecessor: true } : {}),
-            }, recordSaved);
+            await this.recordLateAck(
+              {
+                predecessorTabId: record.tabId,
+                predecessorSdkId: record.realSessionId,
+                successorTabId: tabId,
+                successorSdkId,
+                workspaceRoot: resolve(paths.root),
+                handoffPath: handoffFile,
+                state: 'recorded',
+                ...(reverted ? { keepPredecessor: true } : {}),
+              },
+              recordSaved,
+            );
           } catch (error: unknown) {
             this.reportError('handoff late-completion record failed', error);
           }
@@ -671,6 +728,7 @@ export class SessionHandoffService
                     saved.predecessorTabId,
                     saved.state,
                     { successorSdkId: pending.resolvedSdkId },
+                    saved.successorTabId,
                   );
               } catch (error: unknown) {
                 this.reportError('handoff successor binding failed', error);
@@ -704,7 +762,8 @@ export class SessionHandoffService
     }
     this.settleAdoption(adoption, tabId, 'kept');
     const successorSdkId = this.pending.get(tabId)?.resolvedSdkId;
-    if (successorSdkId) bindAdoptedChildOwner(this.registry, tabId, successorSdkId);
+    if (successorSdkId)
+      bindAdoptedChildOwner(this.registry, tabId, successorSdkId);
     this.remember(record.tabId, {
       sdkSessionId: record.realSessionId,
       tabId,
@@ -725,11 +784,17 @@ export class SessionHandoffService
       if (!this.ackStore)
         throw new Error('handoff acknowledgement storage unavailable');
       if (recordSaved) {
-        const settled = await this.ackStore.compareAndSet(record.tabId, 'starting', {
-          state: 'recorded',
-          successorSdkId: ackRecord.successorSdkId,
-        });
-        if (!settled) throw new Error('handoff starting record changed before settlement');
+        const settled = await this.ackStore.compareAndSet(
+          record.tabId,
+          'starting',
+          {
+            state: 'recorded',
+            successorSdkId: ackRecord.successorSdkId,
+          },
+          ackRecord.successorTabId,
+        );
+        if (!settled)
+          throw new Error('handoff starting record changed before settlement');
       } else {
         await this.ackStore.record(ackRecord);
       }
@@ -752,6 +817,7 @@ export class SessionHandoffService
               saved.predecessorTabId,
               saved.state,
               { successorSdkId: pending.resolvedSdkId },
+              saved.successorTabId,
             );
           }
         } catch (error: unknown) {
@@ -1142,7 +1208,8 @@ export class SessionHandoffService
     }
     pending.resolvedSdkId = successorSdkId;
     this.resolvedSuccessorIds.set(tabId, successorSdkId);
-    if (pending.committed) bindAdoptedChildOwner(this.registry, tabId, successorSdkId);
+    if (pending.committed)
+      bindAdoptedChildOwner(this.registry, tabId, successorSdkId);
     for (const record of this.recoverableRecords.values()) {
       if (record.successorTabId === tabId)
         record.successorSdkId = successorSdkId;
@@ -1156,6 +1223,7 @@ export class SessionHandoffService
                 record.predecessorTabId,
                 record.state,
                 { successorSdkId },
+                record.successorTabId,
               ).then(() => undefined)
             : undefined,
         )
@@ -1224,12 +1292,20 @@ export class SessionHandoffService
         if (!this.ackStore)
           throw new Error('handoff acknowledgement storage unavailable');
         if (hadStartingRecord) {
-          const settled = await this.ackStore.compareAndSet(record.predecessorTabId, 'starting', {
-            state: 'recorded',
-            successorSdkId: record.successorSdkId,
-            ...(record.keepPredecessor ? { keepPredecessor: true } : {}),
-          });
-          if (!settled) throw new Error('handoff starting record changed before late settlement');
+          const settled = await this.ackStore.compareAndSet(
+            record.predecessorTabId,
+            'starting',
+            {
+              state: 'recorded',
+              successorSdkId: record.successorSdkId,
+              ...(record.keepPredecessor ? { keepPredecessor: true } : {}),
+            },
+            record.successorTabId,
+          );
+          if (!settled)
+            throw new Error(
+              'handoff starting record changed before late settlement',
+            );
         } else {
           await this.ackStore.record(record);
         }

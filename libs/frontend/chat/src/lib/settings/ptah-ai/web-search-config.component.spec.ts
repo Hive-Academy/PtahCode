@@ -128,6 +128,28 @@ describe('WebSearchConfigComponent', () => {
     return slider;
   }
 
+  it('floats each provider key label and connects every rendered label to its control', async () => {
+    await render();
+    for (const [provider, name] of [['tavily', 'Tavily'], ['serper', 'Serper'], ['exa', 'Exa']]) {
+      byTestId<HTMLButtonElement>(`settings-web-search-key-btn-${provider}`).click();
+      await settle();
+      const control = byTestId<HTMLInputElement>('settings-web-search-key-input');
+      expect(control.id).toBe(`web-search-api-key-${provider}`);
+      const field = control.closest('ptah-field');
+      expect(field).not.toBeNull();
+      expect(field?.querySelector('[data-ptah-field]')?.getAttribute('data-appearance')).toBe('floating');
+      const label = field?.querySelector<HTMLLabelElement>('label');
+      expect(label).not.toBeNull();
+      expect(label?.textContent?.trim()).toBe(`API key for ${name}`);
+      expect(label?.htmlFor).toBe(control.id);
+      for (const renderedLabel of element.querySelectorAll<HTMLLabelElement>('label[for]')) {
+        expect(element.ownerDocument.getElementById(renderedLabel.htmlFor)).not.toBeNull();
+      }
+      byTestId<HTMLButtonElement>(`settings-web-search-key-btn-${provider}`).click();
+      await settle();
+    }
+  });
+
   it('loads config and every key status, and keeps the harness selectors', async () => {
     responses['webSearch:getApiKeyStatus'] = () => ok({ configured: true });
     await render();

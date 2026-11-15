@@ -122,7 +122,12 @@ const ELIGIBILITY_STATUSES: ReadonlySet<ProviderAccountUsageStatus> = new Set([
 /** The ledger surface the service reads and feeds. */
 export type PlanUsageLedger = Pick<
   PlanLimitLedgerService,
-  'snapshotFor' | 'recordWindowEvidence' | 'recordOwnerEvidence' | 'clearProviderOwnerEvidence'
+  | 'snapshotFor'
+  | 'recordWindowEvidence'
+  | 'recordOwnerEvidence'
+  | 'clearProviderOwnerEvidence'
+  | 'clearOwnerEvidenceByPattern'
+  | 'removeProviderWindowEvidence'
 >;
 /** The credential surface the service reads secrets through. */
 export type PlanUsageCredentials = Pick<PlanCredentialSource, 'resolve'>;
@@ -138,6 +143,7 @@ export interface PlanUsageRequestOptions {
 interface CachedReading {
   readonly reading: PlanUsageReading;
   readonly readAt: number;
+  readonly sequence: number;
 }
 
 interface Flight {
@@ -157,6 +163,7 @@ export class PlanUsageService {
   private readonly readers: Readonly<Record<string, PlanUsageReader>>;
   private readonly localReaders: Readonly<Record<string, PlanUsageReader>>;
   private readonly cache = new Map<string, CachedReading>();
+  private nextReadSequence = 0;
   private readonly failingSince = new Map<string, number>();
   private readonly flights = new Map<string, Flight>();
   private readonly claudeOauthFailures = new Map<string, { until: number; rateLimited: boolean }>();
@@ -288,7 +295,8 @@ export class PlanUsageService {
 
   private startFlight(target: PlanOwnerTarget, refresh: boolean, allowCliFallback: boolean): Flight {
     const controller = new AbortController();
-    const read = this.read(target, refresh, controller.signal, allowCliFallback);
+    const sequence = ++this.nextReadSequence;
+    const read = this.read(target, refresh, controller.signal, allowCliFallback, sequence);
     const flight: Flight = {
       key: flightKey(target) + (allowCliFallback ? ':cli' : ''),
       ownerKey: target.ownerRef.key,
@@ -350,20 +358,21 @@ export class PlanUsageService {
     refresh: boolean,
     signal: AbortSignal,
     allowCliFallback: boolean,
+    sequence: number,
   ): Promise<PlanLimitOwnerSnapshot> {
     const owner = target.ownerRef;
     const providerId = normaliseOwnerProviderId(target.providerId);
     if (NO_USAGE_SOURCE_PROVIDERS.has(providerId)) {
-      return this.settle(owner, statusOnly('no-usage-source'));
+      return this.settle(owner, statusOnly('no-usage-source'), sequence);
     }
     const reader = this.readers[providerId];
-    if (!reader) return this.settle(owner, statusOnly('provider-unsupported'));
+    if (!reader) return this.settle(owner, statusOnly('provider-unsupported'), sequence);
 
     let credential: PlanSecret | undefined;
     if (target.credentialRef && providerId !== 'grok' && providerId !== 'kimi-code') {
       const resolution = await this.credentials.resolve(target.credentialRef);
       if (resolution.kind === 'unavailable') {
-        return this.settle(owner, statusOnly(resolution.status));
+        return this.settle(owner, statusOnly(resolution.status), sequence);
       }
       credential = resolution.secret;
       // An Ollama Cloud agent's owner and key are read from its slot at
@@ -375,7 +384,7 @@ export class PlanUsageService {
         owner.identityKind === 'credential' &&
         credentialOwnerKey(providerId, credential.reveal()) !== owner.key
       ) {
-        return this.settle(owner, statusOnly('service-unavailable'));
+        return this.settle(owner, statusOnly('service-unavailable'), sequence);
       }
     }
 
@@ -435,13 +444,13 @@ export class PlanUsageService {
         providerId,
         reason: errorKind(error),
       });
-      return this.settle(owner, statusOnly('service-unavailable'));
+      return this.settle(owner, statusOnly('service-unavailable'), sequence);
     }
     // A failure caused by the cancellation itself is not the owner's state.
     if (signal.aborted) throw abortError();
     if (
       (reading.status === 'stale' || (reading.status === 'available' &&
-        reading.windowSetEstablished && reading.windows.length > 0)) &&
+        reading.windowSetEstablished && (reading.windows.length > 0 || providerId === 'grok'))) &&
       !reading.sourceInvalid
     ) {
       reading = {
@@ -450,25 +459,27 @@ export class PlanUsageService {
         readAt: reading.readAt ?? reading.fetchedAt ?? this.now(),
       };
     }
-    return this.settle(owner, reading);
+    return this.settle(owner, reading, sequence);
   }
 
   /** Apply the cache and stale rules to one reading. */
   private settle(
     owner: QuotaOwnerRef,
     reading: PlanUsageReading,
+    sequence: number,
   ): PlanLimitOwnerSnapshot {
     if (this.disposed) throw abortError();
     if (reading.sourceInvalid) return this.assemble(owner, reading);
     const key = owner.key;
+    const cached = this.cache.get(key);
+    if (cached && cached.sequence > sequence) return this.assemble(owner, cached.reading);
     if (isTransientFailure(reading)) {
       const since = this.failingSince.get(key) ?? this.now();
-      const cached = this.cache.get(key)?.reading;
       const staleFrom =
         reading.status === 'stale'
           ? reading
-          : cached?.status === 'available'
-            ? cached
+          : cached?.reading.status === 'available'
+            ? cached.reading
             : undefined;
       if (!staleFrom) return this.assemble(owner, reading);
       if (this.cache.has(key)) this.failingSince.set(key, since);
@@ -488,15 +499,26 @@ export class PlanUsageService {
     this.failingSince.delete(key);
     // No open session says nothing about the owner; the next read retries.
     if (reading.unavailableReason !== 'no-open-session') {
-      this.cache.set(key, { reading, readAt: this.now() });
+      this.cache.set(key, { reading, readAt: this.now(), sequence });
       this.evictCache();
     }
     if (reading.status === 'available') {
+      if (owner.providerId === 'grok' && reading.source === 'provider-api' &&
+        reading.credits?.hasCredits === true && reading.requestedAt !== undefined) {
+        this.ledger.clearOwnerEvidenceByPattern(owner, 'grok-balance-exhausted', reading.requestedAt);
+      }
       if (reading.providerOwnerClear && reading.source === 'provider-api') {
         this.ledger.clearProviderOwnerEvidence(owner, reading.fetchedAt ?? this.now());
       }
       if (reading.providerOwnerEvidence) {
         this.ledger.recordOwnerEvidence(owner, reading.providerOwnerEvidence);
+      }
+      if (
+        owner.providerId === 'grok' && reading.windows.length === 0 &&
+        reading.fetchedAt !== undefined &&
+        (reading.credits?.hasCredits || reading.statusReason === 'prepaid-balance-unavailable')
+      ) {
+        this.ledger.removeProviderWindowEvidence(owner, 'other:subscription', reading.fetchedAt);
       }
       for (const window of reading.windows) {
         this.ledger.recordWindowEvidence(owner, window);
@@ -552,6 +574,11 @@ export class PlanUsageService {
       ...(reading.account && { account: reading.account }),
       ...(reading.activity && { activity: reading.activity }),
       ...(reading.localUsage && { localUsage: reading.localUsage }),
+      ...(reading.credits && { credits: reading.credits }),
+      ...(reading.allowances && { allowances: reading.allowances }),
+      ...(reading.individualAllowance && { individualAllowance: reading.individualAllowance }),
+      ...(reading.resetCreditsAvailable !== undefined && { resetCreditsAvailable: reading.resetCreditsAvailable }),
+      ...(reading.upsellAvailable !== undefined && { upsellAvailable: reading.upsellAvailable }),
       ...(reading.unavailableReason && {
         unavailableReason: reading.unavailableReason,
       }),

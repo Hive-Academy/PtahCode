@@ -38,6 +38,17 @@ export function isLocalProductionBuild(): boolean {
 
 export type DistributionChannel = 'microsoft-store' | 'direct';
 
+/** Formats only validated package metadata for the startup log. */
+export function formatBuildIdentitySummary(
+  version: string,
+  channel: DistributionChannel,
+  identity: unknown,
+): string {
+  const parsed = BuildIdentitySchema.safeParse(identity);
+  const commit = parsed.success ? parsed.data.gitSha : 'unknown';
+  return `Electron build identity: version=${version} channel=${channel} commit=${commit}`;
+}
+
 /**
  * Reports how this install was distributed. Electron sets
  * `process.windowsStore` from the MSIX package identity, so no environment

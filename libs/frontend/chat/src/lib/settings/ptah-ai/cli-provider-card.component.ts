@@ -119,7 +119,7 @@ const NATIVE_BEHAVIOR_HINT =
                 [attr.data-busy]="busy() ? '' : null" [attr.aria-disabled]="busy() ? 'true' : null" [attr.aria-busy]="busy() ? 'true' : null" [attr.aria-expanded]="openKind() === 'effort'" (click)="!busy() && requestPopover('effort')">{{ row().effort?.value || 'default' }}</button>
               @if (openKind() === 'effort') { <ptah-cli-model-effort-popover content [row]="row()" field="effort" (closed)="popoverClosed.emit()" /> }
             </ptah-native-popover>
-          } @else { <span ptahFieldTrailing class="flex items-center text-base-content-muted">n/a</span> }
+          } @else { <button ptahFieldTrigger type="button" disabled class="default-trigger min-w-0 text-base-content-muted">n/a</button> }
         </ptah-field>
         <ptah-cli-lane-default-cell [cli]="row().cli" [name]="row().name" [manifest]="row().manifest"
           [saved]="saved()" [disabled]="busy() || !canWrite()" layout="card"

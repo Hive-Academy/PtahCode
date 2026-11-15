@@ -19,6 +19,7 @@
 
 import { CodexChatOptionError } from '../codex-host/codex-chat-profile-options';
 import { endCauseForAbortSource } from './abort-end-cause';
+import { ChatAdmissionTiming } from './chat-admission-timing';
 import { injectable, inject } from 'tsyringe';
 import { isAbsolute, resolve } from 'node:path';
 import {
@@ -237,6 +238,7 @@ interface AgentSessionPathLabels {
 
 /** What {@link ChatSessionService.launchSdkSession} needs from its callers. */
 interface SdkSessionLaunch {
+  readonly admissionTiming?: ChatAdmissionTiming;
   readonly phase?: PhaseDispatchV1;
   /** Label in the launch log lines (`chat:start` keeps its existing text). */
   readonly logLabel: string;
@@ -1152,6 +1154,8 @@ export class ChatSessionService {
     launch?: CarryOverLaunch,
   ): Promise<ChatStartResult> {
     const admissionDeadline = namedAdmissionDeadline();
+    const timing = new ChatAdmissionTiming(this.logger, 'chat:start');
+    let timingResult: 'ok' | 'error' = 'ok';
     this.driverLock.beginRecordAdmission(params.tabId);
     try {
       const { prompt, tabId, options, name } = params;
@@ -1159,6 +1163,7 @@ export class ChatSessionService {
         // eslint-disable-next-line no-restricted-properties -- chat:start creates a session, it does not act for one; with no caller path the host default (app folder or CLI --cwd) is the new session's folder
         params.workspacePath || this.workspaceProvider.getWorkspaceRoot();
       if (!workspacePath) {
+        timingResult = 'error';
         return {
           success: false,
           error:
@@ -1169,6 +1174,7 @@ export class ChatSessionService {
         params.workspacePath &&
         !isAuthorizedWorkspace(params.workspacePath, this.workspaceProvider)
       ) {
+        timingResult = 'error';
         return {
           success: false,
           error: 'Access denied: workspace path is not an open folder.',
@@ -1178,7 +1184,10 @@ export class ChatSessionService {
         workspacePath,
         'chat:start',
       );
-      if (unsafeStart) return unsafeStart;
+      if (unsafeStart) {
+        timingResult = 'error';
+        return unsafeStart;
+      }
       this.logger.debug('RPC: chat:start called', {
         tabId,
         workspacePath,
@@ -1200,6 +1209,7 @@ export class ChatSessionService {
             params.surfaceMode,
           );
         }
+        if (!dispatch.result.success) timingResult = 'error';
         return dispatch.result;
       }
       const interceptResult = prompt
@@ -1227,10 +1237,10 @@ export class ChatSessionService {
         });
         return { success: true };
       }
-      const accountSelection = await this.gateAccount({
+      const accountSelection = await timing.measure('accountGate', () => this.gateAccount({
         workspacePath,
         accountSelection: params.accountSelection,
-      });
+      }));
       let mcpServerRunning = this.sdkContext.isMcpServerRunning();
 
       this.logger.info('[ptah.main] chat:start - session config', {
@@ -1248,8 +1258,8 @@ export class ChatSessionService {
         // config lock started this session claiming MCP was available while the
         // entry subagents look for was absent. `false` is the honest answer and
         // the SDK path already supports it.
-        const registration =
-          await this.codeExecutionMcp.ensureRegisteredForSubagents();
+        const registration = await timing.measure('mcpRegistration', () =>
+          this.codeExecutionMcp.ensureRegisteredForSubagents());
         if (!registration.registered && registration.reason === 'timeout') {
           // The registration is still queued and lands in the background. The
           // session's own Ptah MCP config is built per session and does not read
@@ -1283,6 +1293,7 @@ export class ChatSessionService {
         ptahUiFence: params.ptahUiFence,
         accountSelection,
         admissionDeadline,
+        admissionTiming: timing,
         ...(launch
           ? {
               expectedProviderId: launch.expectedProviderId,
@@ -1302,6 +1313,7 @@ export class ChatSessionService {
 
       return { success: true };
     } catch (error) {
+      timingResult = 'error';
       if (launch) return this.carryOverStartFailure(error, params.tabId);
       if (error instanceof RpcUserError)
         return {
@@ -1324,6 +1336,7 @@ export class ChatSessionService {
         ...this.authErrorFields(error),
       };
     } finally {
+      timing.emit(timingResult);
       this.driverLock.endRecordAdmission(params.tabId);
     }
   }
@@ -1742,7 +1755,7 @@ export class ChatSessionService {
     const files = options?.files ?? [];
     const images = options?.images ?? [];
 
-    const { config, execution } = await this.withinNamedAdmissionDeadline(
+    const prepare = () => this.withinNamedAdmissionDeadline(
       !!input.accountSelection,
       input.admissionDeadline,
       async () => {
@@ -1824,6 +1837,9 @@ export class ChatSessionService {
         return { config, execution };
       },
     );
+    const { config, execution } = input.admissionTiming
+      ? await input.admissionTiming.measure('promptRuntime', prepare)
+      : await prepare();
     // No await between this pin and the adapter call below.
     if (input.expectedProviderId !== undefined) {
       this.assertCarryOverProvider(
@@ -1868,13 +1884,16 @@ export class ChatSessionService {
         ...startConfig,
         pluginConfigAncestorRoots: undefined,
       };
-      const stream =
+      const startAdapter = () =>
         execution.runtime === 'codex-app-server'
-          ? await this.sessionMetadataStore.withCodexStartLineage(
+          ? this.sessionMetadataStore.withCodexStartLineage(
               input.pluginConfigAncestorRoots ?? [],
               () => this.sdkAdapter.startChatSession(codexStartConfig),
             )
-          : await this.sdkAdapter.startChatSession(startConfig);
+          : this.sdkAdapter.startChatSession(startConfig);
+      const stream = input.admissionTiming
+        ? await input.admissionTiming.measure('sdkStart', startAdapter)
+        : await startAdapter();
       if (execution.runtime === 'codex-app-server') {
         this.pendingLineage.delete(tabId);
         try {
@@ -2398,22 +2417,26 @@ export class ChatSessionService {
     params: ChatResumeParams & MainSessionAccountSelection,
   ): Promise<ChatResumeResult> {
     const admissionDeadline = namedAdmissionDeadline();
+    const timing = new ChatAdmissionTiming(this.logger, 'chat:resume');
+    let timingResult: 'ok' | 'error' = 'ok';
     let driveAttempt: string | undefined;
     try {
       const { sessionId } = params;
       if (!params.ptahCliId) {
-        await this.gateAccount({
+        await timing.measure('accountGate', () => this.gateAccount({
           sessionId,
           accountSelection: params.accountSelection,
-        });
+        }));
       }
-      const metadata = await this.sessionMetadataStore.get(sessionId);
+      const metadata = await timing.measure('metadataLoad', () =>
+        this.sessionMetadataStore.get(sessionId));
       const savedFolder = metadata?.workingDirectory;
-      if (savedFolder && this.fileSystemProvider) {
+      const fileSystemProvider = this.fileSystemProvider;
+      if (savedFolder && fileSystemProvider) {
         let present = false;
         let unreadable = false;
         try {
-          await this.fileSystemProvider.stat(savedFolder);
+          await timing.measure('folderCheck', () => fileSystemProvider.stat(savedFolder));
           present = true;
         } catch (error: unknown) {
           // degradation-audit: reported - logged here; an unreadable folder is
@@ -2436,6 +2459,7 @@ export class ChatSessionService {
           );
         }
         if (!present) {
+          timingResult = 'error';
           return {
             success: false,
             errorCode: 'SESSION_FOLDER_UNAVAILABLE',
@@ -2447,9 +2471,21 @@ export class ChatSessionService {
           };
         }
       }
-      const result = await this.historyRead.readForResume(sessionId, {
-        includeBlockOwners: params.historyBlockOwners === true,
+      const historyPromise = timing.measure('jsonlRead', () =>
+        this.historyRead.readForResume(sessionId, {
+          includeBlockOwners: params.historyBlockOwners === true,
+        }));
+      const cliPromise = timing.measure('cliRestore', () =>
+        this.sessionMetadataStore.getCliSessionsForRestore(sessionId)
+      ).catch((error: unknown) => {
+        // degradation-audit: reported - CLI cards are optional; history remains usable.
+        this.logger.debug('[RPC] Could not query CLI sessions', {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return [];
       });
+      const [result, restoredCliSessions] = await Promise.all([historyPromise, cliPromise]);
       const resolvedWorkspacePath = result.resolvedWorkspacePath;
       this.logger.info('RPC: chat:resume called', {
         sessionId,
@@ -2510,8 +2546,7 @@ export class ChatSessionService {
         // The webview fetches each agent's output in bounded pages through
         // `session:cli-output-page`. Must agree with `session:cli-sessions`,
         // the other restore path.
-        const restored =
-          await this.sessionMetadataStore.getCliSessionsForRestore(sessionId);
+        const restored = restoredCliSessions;
         if (restored.length > 0) {
           cliSessions = restored;
           this.logger.info('[RPC] CLI sessions found for session', {
@@ -2530,9 +2565,9 @@ export class ChatSessionService {
           const manager = this.agentProcessManager;
           if (manager) {
             // A recovered checkpoint must be stored before the webview pages it.
-            await manager.awaitRecoveredOutput(
+            await timing.measure('recoveredOutput', () => manager.awaitRecoveredOutput(
               restored.map((ref) => String(ref.agentId)),
-            );
+            ));
             cliSessions = withRestoredOutputLoss(restored, (id) =>
               manager.findAgentInfo(id),
             );
@@ -2576,6 +2611,7 @@ export class ChatSessionService {
           // transcript still reaches the tab, read-only, with the reason.
           if (!(error instanceof RpcUserError)) throw error;
           activationError = error.message;
+          timingResult = 'error';
           activationErrorCode = error.errorCode;
           this.logger.warn('[RPC] chat:resume activate:true — drive refused', {
             sessionId,
@@ -2586,7 +2622,7 @@ export class ChatSessionService {
         if (!driveAttempt) {
           activated = false;
         } else if (!this.hasLiveSessionStream(sessionId, params.tabId)) {
-          const activateResult = await this.autoResumeIfInactive(
+          const activateResult = await timing.measure('sdkActivation', () => this.autoResumeIfInactive(
             sessionId,
             params.tabId,
             '',
@@ -2599,18 +2635,20 @@ export class ChatSessionService {
               accountSelection: params.accountSelection,
               admissionDeadline,
             },
-          );
+          ));
           if ('justResumed' in activateResult) {
             activated =
               activateResult.justResumed ||
               this.sdkAdapter.isSessionActive(sessionId);
           } else if (activateResult.error.cancelled) {
             await this.driverLock.abandonDrive(sessionId, driveAttempt);
+            timingResult = 'error';
             return { success: false, cancelled: true };
           } else {
             await this.driverLock.abandonDrive(sessionId, driveAttempt);
             activationError =
               activateResult.error.error ?? 'Auto-resume failed';
+            timingResult = 'error';
             activationErrorCode = activateResult.error.errorCode;
             this.logger.warn(
               '[RPC] chat:resume activate:true — auto-resume failed',
@@ -2665,6 +2703,7 @@ export class ChatSessionService {
         ...(activationErrorCode ? { activationErrorCode } : {}),
       };
     } catch (error) {
+      timingResult = 'error';
       if (driveAttempt)
         await this.driverLock.abandonDrive(params.sessionId, driveAttempt);
       const codexFailure = this.codexFailure(error);
@@ -2693,6 +2732,7 @@ export class ChatSessionService {
         ...this.authErrorFields(error),
       };
     } finally {
+      timing.emit(timingResult);
       if (driveAttempt)
         await this.driverLock.settleDrive(params.sessionId, driveAttempt);
     }

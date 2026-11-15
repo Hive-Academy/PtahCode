@@ -24,6 +24,20 @@ const payload = {
 };
 
 describe('OpenCode Go plan reader', () => {
+  it.each([
+    [{ type: 'error', error: { type: 'EntitlementError', message: 'Go unavailable' } }, 'no-usage-source'],
+    [{ type: 'error', error: { type: 'OtherError' } }, 'no-usage-source'],
+  ])('preserves the 403 status mapping for %j', async (body, status) => {
+    const reader = createOpenCodeGoPlanUsageReader(
+      () => 1,
+      jest.fn(async () => new Response(JSON.stringify(body), { status: 403 })),
+      auth as never,
+      {},
+    );
+    const result = await reader(request);
+    expect(result.status).toBe(status);
+    expect(result.windows).toEqual([]);
+  });
   it('uses the stored key for credential owners without reading CLI auth', async () => {
     const fetcher = jest.fn(
       async (_url: RequestInfo | URL, _init?: RequestInit) =>

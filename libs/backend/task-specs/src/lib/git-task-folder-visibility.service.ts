@@ -13,6 +13,11 @@
  *     A task filed on a branch that was pushed but never merged into this
  *     checkout is invisible any other way.
  *
+ * The two sources run concurrently, and the worktree reads run with a bounded
+ * concurrency, because a sequential scan of many worktrees took tens of
+ * seconds on the `create` path (TASK_2026_2181). Concurrent callers for one
+ * root share one scan.
+ *
  * ## Nothing here throws
  *
  * This runs on the `create` path. Every step is independently guarded and
@@ -53,6 +58,23 @@ import type { ITaskFolderVisibility } from './task-folder-visibility.port';
 
 /** How long one workspace's union is reused before git is consulted again. */
 export const VISIBILITY_CACHE_TTL_MS = 60_000;
+const SCAN_CONCURRENCY = 8;
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  visit: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await visit(items[index]);
+    }
+  }));
+  return results;
+}
 
 /**
  * The fetch gets its own, shorter budget than the other two steps.
@@ -158,6 +180,7 @@ export function specDirsFromWorktreeList(stdout: string): string[] {
 export class GitTaskFolderVisibility implements ITaskFolderVisibility {
   private readonly exec: ExecGitFn;
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly inFlight = new Map<string, Promise<readonly string[]>>();
 
   constructor(
     @inject(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER)
@@ -182,18 +205,30 @@ export class GitTaskFolderVisibility implements ITaskFolderVisibility {
   async listBeyondWorkspace(
     workspaceRoot: string,
   ): Promise<readonly string[]> {
-    const started = performance.now();
     const root = normalizeWorkspaceRoot(workspaceRoot);
 
     const cached = this.cache.get(root);
     if (cached && Date.now() - cached.at < VISIBILITY_CACHE_TTL_MS) {
       return cached.names;
     }
+    const running = this.inFlight.get(root);
+    if (running) return running;
+
+    const scan = this.scanBeyondWorkspace(root);
+    this.inFlight.set(root, scan);
+    try {
+      return await scan;
+    } finally {
+      this.inFlight.delete(root);
+    }
+  }
+
+  private async scanBeyondWorkspace(root: string): Promise<readonly string[]> {
+    const started = performance.now();
 
     const names = new Set<string>();
     const specDirs = await this.worktreeSpecDirs(root);
     const discoveryMs = performance.now() - started;
-    const siblingStarted = performance.now();
     let siblingScanMs = 0;
     let fetchMs = 0;
     let lsTreeMs = 0;
@@ -202,25 +237,32 @@ export class GitTaskFolderVisibility implements ITaskFolderVisibility {
     // per-worktree scan and the `origin/main` read below are unreachable.
     if (specDirs !== null) {
       const ownSpecs = path.resolve(root, '.ptah', 'specs');
-      for (const dir of specDirs) {
-        // `path.relative` is case-insensitive on win32, which is what makes
-        // this comparison safe against git's own path casing.
-        if (path.relative(path.resolve(dir), ownSpecs) === '') continue;
-        for (const name of await this.scanSpecsDir(dir)) names.add(name);
-      }
-
-      siblingScanMs = performance.now() - siblingStarted;
-
-      // Best effort, and deliberately unchecked: a failed fetch still leaves a
-      // usable (if stale) `origin/main` for `ls-tree` to read.
-      const fetchStarted = performance.now();
-      try { await this.fetchOriginMain(root); }
-      finally { fetchMs = performance.now() - fetchStarted; }
-      const treeStarted = performance.now();
-      for (const name of await this.remoteSpecFolderNames(root)) {
-        names.add(name);
-      }
-      lsTreeMs = performance.now() - treeStarted;
+      // `path.relative` preserves the existing own-worktree exclusion.
+      const siblings = specDirs.filter(
+        (dir) => path.relative(path.resolve(dir), ownSpecs) !== '',
+      );
+      const siblingScan = (async () => {
+        const siblingStarted = performance.now();
+        try {
+          return await mapWithConcurrency(
+            siblings, SCAN_CONCURRENCY, (dir) => this.scanSpecsDir(dir),
+          );
+        } finally {
+          siblingScanMs = performance.now() - siblingStarted;
+        }
+      })();
+      const remoteScan = (async () => {
+        // A failed fetch still leaves a usable (if stale) origin/main.
+        const fetchStarted = performance.now();
+        try { await this.fetchOriginMain(root); }
+        finally { fetchMs = performance.now() - fetchStarted; }
+        const treeStarted = performance.now();
+        try { return await this.remoteSpecFolderNames(root); }
+        finally { lsTreeMs = performance.now() - treeStarted; }
+      })();
+      const [siblingNames, remoteNames] = await Promise.all([siblingScan, remoteScan]);
+      for (const group of siblingNames) for (const name of group) names.add(name);
+      for (const name of remoteNames) names.add(name);
     }
 
     const result = [...names];
@@ -230,6 +272,7 @@ export class GitTaskFolderVisibility implements ITaskFolderVisibility {
       gitDiscoveryMs: Math.round(discoveryMs), siblingScanMs: Math.round(siblingScanMs),
       fetchMs: Math.round(fetchMs), lsTreeMs: Math.round(lsTreeMs),
       totalMs: Math.round(totalMs), siblings: specDirs?.length ?? 0, folders: names.size,
+      scanConcurrency: SCAN_CONCURRENCY,
     };
     this.logTiming(totalMs, metrics);
     return result;

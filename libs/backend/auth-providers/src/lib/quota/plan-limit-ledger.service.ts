@@ -166,6 +166,10 @@ interface SessionState {
 @injectable()
 export class PlanLimitLedgerService {
   private readonly owners = new Map<string, OwnerState>();
+  private readonly providerWindowRemovalCutoffs = new Map<
+    string,
+    Map<PlanLimitWindow['key'], number>
+  >();
   private readonly sessions = new Map<string, SessionState>();
   private readonly listeners = new Set<PlanLimitLedgerListener>();
   private readonly disposers: Array<() => void>;
@@ -206,10 +210,20 @@ export class PlanLimitLedgerService {
     window: PlanLimitWindow,
     options: PlanLimitWindowRecordOptions = {},
   ): void {
+    const next: WindowEntry = { window, stale: options.stale === true };
+    const cutoff = this.providerWindowRemovalCutoffs
+      .get(owner.key)
+      ?.get(window.key);
+    if (
+      windowStamp(next).source === 'provider-api' &&
+      cutoff !== undefined &&
+      windowStamp(next).observedAt <= cutoff
+    ) {
+      return;
+    }
     const now = this.now();
     const id = allowanceId(window);
     const prev = this.owners.get(owner.key)?.windows.get(id);
-    const next: WindowEntry = { window, stale: options.stale === true };
     if (
       prev &&
       !supersedes(
@@ -224,7 +238,49 @@ export class PlanLimitLedgerService {
       window: carryUsage(prev, carryExhaustion(prev, next, now)),
       stale: next.stale,
     });
+    if (cutoff !== undefined && windowStamp(next).source === 'provider-api' &&
+      windowStamp(next).observedAt > cutoff) {
+      const cutoffs = this.providerWindowRemovalCutoffs.get(owner.key);
+      cutoffs?.delete(window.key);
+      if (cutoffs?.size === 0) this.providerWindowRemovalCutoffs.delete(owner.key);
+    }
     this.changed(owner.key);
+  }
+
+  /** A newer provider table can omit a window that no longer gates use. */
+  removeProviderWindowEvidence(
+    owner: QuotaOwnerRef,
+    key: PlanLimitWindow['key'],
+    observedAt: number,
+  ): void {
+    // A read started before this removal cannot arrive after the request timeout.
+    for (const [ownerKey, entries] of this.providerWindowRemovalCutoffs) {
+      for (const [windowKey, cutoff] of entries) {
+        if (observedAt - cutoff > 60_000) entries.delete(windowKey);
+      }
+      if (entries.size === 0) this.providerWindowRemovalCutoffs.delete(ownerKey);
+    }
+    let cutoffs = this.providerWindowRemovalCutoffs.get(owner.key);
+    if (!cutoffs) {
+      cutoffs = new Map();
+      this.providerWindowRemovalCutoffs.set(owner.key, cutoffs);
+    }
+    cutoffs.set(
+      key,
+      Math.max(cutoffs.get(key) ?? Number.NEGATIVE_INFINITY, observedAt),
+    );
+    const state = this.owners.get(owner.key);
+    if (!state) return;
+    let removed = false;
+    for (const [id, entry] of state.windows) {
+      if (entry.window.key !== key || entry.window.usedSource !== 'provider-api') continue;
+      // Keep an exhaustion that a non-provider source (e.g. a lane error) added.
+      if (entry.window.exhaustion && entry.window.exhaustion.source !== 'provider-api') continue;
+      if (windowStamp(entry).observedAt > observedAt) continue;
+      state.windows.delete(id);
+      removed = true;
+    }
+    if (removed) this.changed(owner.key);
   }
 
   /** Record a limit hit whose window is unknown; one entry per model scope. */
@@ -248,6 +304,20 @@ export class PlanLimitLedgerService {
     if (evidence?.source !== 'provider-api' || evidence.observedAt >= observedAt) return;
     this.owners.get(owner.key)?.ownerEvidence.delete(ALL_MODELS);
     this.changed(owner.key);
+  }
+
+  /** Release older evidence for one classified cause after a fresh provider reading. */
+  clearOwnerEvidenceByPattern(owner: QuotaOwnerRef, pattern: string, observedAt: number): void {
+    if (!Number.isFinite(observedAt)) return;
+    const state = this.owners.get(owner.key);
+    if (!state) return;
+    let removed = false;
+    for (const [scope, evidence] of state.ownerEvidence) {
+      if (evidence.pattern !== pattern || evidence.observedAt >= observedAt) continue;
+      state.ownerEvidence.delete(scope);
+      removed = true;
+    }
+    if (removed) this.changed(owner.key);
   }
 
   /** Record a provider-imposed wait. The later deadline wins. */

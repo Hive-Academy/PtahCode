@@ -532,6 +532,59 @@ describe('TaskIndexService specs README (self-write suppression)', () => {
 });
 
 describe('TaskIndexService watcher debounce', () => {
+  it('rebuilds a folder changed after the scan read it', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      const name = 'TASK_2026_001';
+      fs.setFile(carrier(name), validTask(name));
+      const { service, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const original = scanner.scan.bind(scanner);
+      const scan = jest.spyOn(scanner, 'scan').mockImplementationOnce(async (root) => {
+        const snapshot = await original(root);
+        fs.setFile(carrier(name), validTask(name).replace('backlog', 'in_review'));
+        fs.fireChange(carrier(name));
+        return snapshot;
+      }).mockImplementation(original);
+      await service.reindex(ROOT);
+      expect((await service.list(ROOT)).tasks[0].status).toBe('backlog');
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(2);
+      expect((await service.list(ROOT)).tasks[0].status).toBe('in_review');
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+  it('skips an unchanged child and rebuilds after a same-size edit or deletion', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      fs.setFile(carrier('TASK_2026_001'), validTask('TASK_2026_001'));
+      const logger = makeLogger();
+      const store = new InMemoryTaskIndexStore(logger);
+      const service = buildServiceWith(fs, logger, store);
+      const replace = jest.spyOn(store, 'replaceWorkspace');
+      await service.ensureStarted(ROOT);
+      expect(replace).toHaveBeenCalledTimes(1);
+      fs.fireChange(carrier('TASK_2026_001'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(replace).toHaveBeenCalledTimes(1);
+      fs.setFile(carrier('TASK_2026_001'), validTask('TASK_2026_001').replace('backlog', 'active '));
+      fs.fireChange(carrier('TASK_2026_001'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(replace).toHaveBeenCalledTimes(2);
+      fs.deleteFile(carrier('TASK_2026_001'));
+      fs.fireDelete(carrier('TASK_2026_001'));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(replace).toHaveBeenCalledTimes(3);
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
   it('coalesces a burst of N events into ONE flush + ONE event', async () => {
     jest.useFakeTimers({ doNotFake: ['setImmediate'] });
     try {
@@ -809,7 +862,7 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
     } finally { jest.useRealTimers(); }
   });
 
-  it('stops watcher retries after 1s, 5s and 30s backoff', async () => {
+  it('keeps a watcher change pending after capped backoff', async () => {
     jest.useFakeTimers({ doNotFake: ['setImmediate'] });
     try {
       const fs = new FakeFs();
@@ -824,9 +877,9 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
         await flush(); await flush();
         expect(scan).toHaveBeenCalledTimes(index + 1);
       }
-      jest.advanceTimersByTime(60000);
-      await flush();
-      expect(scan).toHaveBeenCalledTimes(4);
+      jest.advanceTimersByTime(30000);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(5);
       service.dispose();
     } finally { jest.useRealTimers(); }
   });

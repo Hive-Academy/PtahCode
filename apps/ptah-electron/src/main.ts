@@ -8,6 +8,11 @@ import { readFile } from 'node:fs/promises';
 import { readMotionPreference } from './config/motion-preference';
 import { installMotionEmulation } from './config/motion-emulation';
 import {
+  formatBuildIdentitySummary,
+  readBuildIdentity,
+  readDistributionChannel,
+} from './config/build-identity';
+import {
   registerArtifactHandler,
   registerArtifactScheme,
   type ArtifactResolver,
@@ -290,6 +295,13 @@ if (!gotLock) {
       bootStep('bootstrapElectron done');
       bootContainer = boot.container;
       motionLogger = boot.container.resolve<Logger>(TOKENS.LOGGER);
+      motionLogger.info(
+        formatBuildIdentitySummary(
+          app.getVersion(),
+          readDistributionChannel(),
+          readBuildIdentity(),
+        ),
+      );
       for (const warning of agentBudgetMigrationWarnings) motionLogger.warn(warning);
       for (const error of pendingMotionErrors) reportMotionError(error);
       pendingMotionErrors.length = 0;

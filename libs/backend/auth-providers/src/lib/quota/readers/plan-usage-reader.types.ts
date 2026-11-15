@@ -89,6 +89,8 @@ export type PlanUsageReading = Omit<
   readonly providerOwnerClear?: true;
   /** Private source cooldown hint in milliseconds; never copied to a snapshot. */
   readonly retryAfterMs?: number;
+  /** Start of the provider request; evidence observed later must survive its response. */
+  readonly requestedAt?: number;
 };
 
 /** Reads one provider's plan usage. A throw maps to `service-unavailable`. */

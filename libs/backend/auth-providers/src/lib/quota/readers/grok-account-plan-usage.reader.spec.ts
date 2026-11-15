@@ -17,6 +17,54 @@ const auth = async (path: string) =>
     : '';
 
 describe('Grok account plan reader', () => {
+  it.each([
+    { balance: 0, windowCount: 1, exhausted: false },
+    { balance: 5, windowCount: 0, exhausted: false },
+    { balance: 'invalid', windowCount: 0, exhausted: false },
+    { balance: undefined, windowCount: 1, exhausted: false },
+  ])('handles prepaid balance $balance with a 100% period', async ({ balance, windowCount, exhausted }) => {
+    const fetcher = jest.fn(async () => new Response(JSON.stringify({
+      config: {
+        creditUsagePercent: 100,
+        currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2030-01-01T00:00:00Z' },
+        ...(balance !== undefined && { prepaidBalance: { val: balance } }),
+      },
+    })));
+    const result = await createGrokAccountPlanUsageReader(() => 1, fetcher, auth as never, {})(request);
+    expect(result.status).toBe('available');
+    expect(result.windowSetEstablished).toBe(balance !== 'invalid');
+    expect(result.windows).toHaveLength(windowCount);
+    if (windowCount) expect(result.windows[0].used).toMatchObject({ kind: 'percent', percent: 100 });
+    expect(result.windows[0]?.exhaustion?.source).toBe(exhausted ? 'provider-api' : undefined);
+    if (balance === 0) {
+      expect(result.credits).toEqual({ balance: '0', hasCredits: false, unlimited: false });
+    } else if (balance === 5) {
+      expect(result.credits).toEqual({ balance: '5', hasCredits: true, unlimited: false });
+    } else if (balance === 'invalid') {
+      expect(result.statusReason).toBe('prepaid-balance-unavailable');
+      expect(result.credits).toBeUndefined();
+    } else {
+      expect(result.statusReason).toBeUndefined();
+      expect(result.credits).toBeUndefined();
+    }
+  });
+  it.each([
+    { percent: 75, prepaidBalance: { val: 0 }, count: 1, reason: undefined, credit: '0' },
+    { percent: 110, prepaidBalance: { val: 0 }, count: 1, reason: undefined, credit: '0' },
+    { percent: 100, prepaidBalance: null, count: 1, reason: undefined, credit: undefined },
+    { percent: 100, prepaidBalance: { val: '12' }, count: 0, reason: undefined, credit: '12' },
+    { percent: 100, prepaidBalance: { val: -1 }, count: 0, reason: 'prepaid-balance-unavailable', credit: undefined },
+  ])('parses balance $prepaidBalance at $percent percent', async ({ percent, prepaidBalance, count, reason, credit }) => {
+    const fetcher = jest.fn(async () => new Response(JSON.stringify({ config: {
+      creditUsagePercent: percent, prepaidBalance,
+      currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2030-01-01T00:00:00Z' },
+    } })));
+    const result = await createGrokAccountPlanUsageReader(() => 1, fetcher, auth as never, {})(request);
+    expect(result.windows).toHaveLength(count);
+    expect(result.windows[0]?.exhaustion).toBeUndefined();
+    expect(result.statusReason).toBe(reason);
+    expect(result.credits?.balance).toBe(credit);
+  });
   it('does not read CLI auth for a credential owner', async () => {
     const readAuth = jest.fn(auth);
     const result = await createGrokAccountPlanUsageReader(
@@ -90,6 +138,16 @@ describe('Grok account plan reader', () => {
     });
     expect(JSON.stringify(result)).not.toContain('private@example.test');
     expect(JSON.stringify(result)).not.toContain('secret');
+  });
+  it('stamps the request before the response is parsed', async () => {
+    const now = jest.fn().mockReturnValueOnce(10).mockReturnValueOnce(20);
+    const result = await createGrokAccountPlanUsageReader(
+      now,
+      jest.fn(async () => new Response(JSON.stringify({ config: { prepaidBalance: { val: 5 } } }))),
+      auth as never,
+      {},
+    )(request);
+    expect(result).toMatchObject({ requestedAt: 10, fetchedAt: 20 });
   });
   it('returns no plan for API-key mode and 403', async () => {
     const fetcher = jest.fn();

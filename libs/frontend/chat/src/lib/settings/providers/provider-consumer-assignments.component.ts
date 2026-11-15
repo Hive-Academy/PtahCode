@@ -26,6 +26,7 @@ import {
   ProviderModelPickerComponent,
   PtahButtonDirective,
   PtahBadgeDirective,
+  PtahFieldComponent,
   PtahIconButtonDirective,
   PtahInputDirective,
   type ProviderIdentityOption,
@@ -86,6 +87,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
     LucideAngularModule,
     NativePopoverComponent,
     PtahBadgeDirective,
+    PtahFieldComponent,
     ProviderMarkComponent,
     ProviderModelPickerComponent,
     PtahButtonDirective,
@@ -424,23 +426,23 @@ const TIMEOUT_DEFAULT_SEC = 120;
               @if (isEditingTimeout()) {
                 <div class="space-y-1" data-testid="timeout-editor">
                   <div class="flex flex-wrap items-center gap-1.5">
-                    <label for="enhance-timeout-input" class="sr-only"
-                      >Enhancement time limit in seconds</label
-                    >
-                    <input
-                      ptahInput
-                      size="sm"
-                      #timeoutInput
-                      id="enhance-timeout-input"
-                      type="number"
-                      class="w-24 text-sm text-base-content"
-                      [min]="timeoutMinSec()"
-                      [max]="timeoutMaxSec()"
-                      [value]="timeoutDraftSec()"
-                      [disabled]="busy() || disabled()"
-                      (input)="onTimeoutInput($event)"
-                      data-testid="timeout-input"
-                    />
+                    <ptah-field label="Time limit (sec)" size="sm" class="w-36 shrink-0">
+                      <input
+                        ptahInput
+                        size="sm"
+                        #timeoutInput
+                        id="enhance-timeout-input"
+                        type="number"
+                        aria-label="Enhancement time limit in seconds"
+                        class="w-full text-sm text-base-content"
+                        [min]="timeoutMinSec()"
+                        [max]="timeoutMaxSec()"
+                        [value]="timeoutDraftSec()"
+                        [disabled]="busy() || disabled()"
+                        (input)="onTimeoutInput($event)"
+                        data-testid="timeout-input"
+                      />
+                    </ptah-field>
                     <span class="text-xs text-base-content">seconds</span>
                     <button
                       type="button"

@@ -23,11 +23,16 @@ const BillingSchema = z.object({
   config: z
     .object({
       creditUsagePercent: z.number().finite().optional(),
+      prepaidBalance: z.unknown().optional(),
       currentPeriod: z
         .object({ type: z.string().optional(), end: z.string().optional() })
         .optional(),
     })
     .optional(),
+});
+const PrepaidBalanceSchema = z.object({
+  val: z.union([z.number(), z.string().regex(/^\d+(?:\.\d+)?$/).transform(Number)])
+    .pipe(z.number().finite().nonnegative()),
 });
 const noPlan = (): PlanUsageReading => ({
   status: 'no-usage-source',
@@ -124,6 +129,7 @@ export function createGrokAccountPlanUsageReader(
       const abort = () => controller.abort();
       signal?.addEventListener('abort', abort, { once: true });
       try {
+        const requestedAt = now();
         const response = await fetcher(GROK_BILLING_URL, {
           headers: { Authorization: `Bearer ${key}` },
           redirect: 'error',
@@ -141,6 +147,12 @@ export function createGrokAccountPlanUsageReader(
         if (!parsed.success) return unavailable();
         const observedAt = now();
         const percent = parsed.data.config?.creditUsagePercent;
+        const rawBalance = parsed.data.config?.prepaidBalance;
+        const parsedBalance = rawBalance == null
+          ? undefined
+          : PrepaidBalanceSchema.safeParse(rawBalance);
+        const balance = parsedBalance?.success ? parsedBalance.data.val : undefined;
+        const malformedBalance = parsedBalance !== undefined && !parsedBalance.success;
         const period = parsed.data.config?.currentPeriod;
         const type = period?.type?.replace(/^USAGE_PERIOD_TYPE_/, '');
         const kind =
@@ -151,7 +163,7 @@ export function createGrokAccountPlanUsageReader(
               : 'other';
         const resetsAt = Date.parse(period?.end ?? '');
         const windows: PlanLimitWindow[] =
-          percent === undefined
+          percent === undefined || (percent >= 100 && (malformedBalance || (balance !== undefined && balance > 0)))
             ? []
             : [
                 {
@@ -178,9 +190,15 @@ export function createGrokAccountPlanUsageReader(
               ];
         return {
           status: 'available',
+          source: 'provider-api',
           fetchedAt: observedAt,
-          windowSetEstablished: true,
+          requestedAt,
+          windowSetEstablished: !(malformedBalance && percent !== undefined && percent >= 100),
           windows,
+          ...(malformedBalance && { statusReason: 'prepaid-balance-unavailable' as const }),
+          ...(balance !== undefined && {
+            credits: { balance: String(balance), hasCredits: balance > 0, unlimited: false },
+          }),
         };
       } finally {
         clearTimeout(timeout);

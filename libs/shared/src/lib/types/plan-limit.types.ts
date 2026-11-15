@@ -69,6 +69,8 @@ export type PlanLimitUsed =
 export interface OwnerLimitEvidence {
   readonly observedAt: number;
   readonly source: PlanLimitSource;
+  /** Optional cause for targeted release after authoritative provider readings. */
+  readonly pattern?: string;
   /** Absent when the reset is unknown; the evidence then clears only by rule. */
   readonly resetsAt?: number;
   readonly resetSource?: PlanLimitSource;
@@ -220,6 +222,7 @@ export type PlanLimitStatusReason =
   | 'account-unverified'
   | 'api-key-no-subscription-quota'
   | 'balance-unavailable'
+  | 'prepaid-balance-unavailable'
   | 'balance-auth-rejected'
   | 'usage-auth-rejected';
 

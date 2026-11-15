@@ -18,10 +18,12 @@
  *   - 36 px control height and the 2 px focus outline on every button
  */
 
+import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
 import { VSCodeService } from '@ptah-extension/core';
+import * as shared from '@ptah-extension/shared';
 import type {
   AuthCancelDraftVerificationParams,
   AuthCancelDraftVerificationResult,
@@ -173,6 +175,34 @@ function selectProvider(
   if (!radio) throw new Error(`missing provider radio ${id}`);
   radio.click();
   fixture.detectChanges();
+}
+
+function expectFloatingControl(
+  fixture: ComponentFixture<ProviderSetupWizardComponent>,
+  testId: string,
+  labelText: string,
+): void {
+  const control = query(fixture, testId) as HTMLInputElement | null;
+  expect(control).not.toBeNull();
+  const field = control?.closest('ptah-field');
+  expect(field).not.toBeNull();
+  expect(field?.querySelector('[data-ptah-field]')?.getAttribute('data-appearance')).toBe('floating');
+  const label = field?.querySelector('label[for]') as HTMLLabelElement | null;
+  expect(label).not.toBeNull();
+  expect(label?.textContent?.trim()).toBe(labelText);
+  expect(control?.id).toBeTruthy();
+  expect(label?.htmlFor).toBe(control?.id);
+}
+
+function expectResolvedLabels(fixture: ComponentFixture<ProviderSetupWizardComponent>): void {
+  const root = fixture.nativeElement as HTMLElement;
+  for (const label of root.querySelectorAll<HTMLLabelElement>('label[for]')) {
+    expect(label.htmlFor).toBeTruthy();
+    expect(root.querySelectorAll(`[id="${label.htmlFor}"]`)).toHaveLength(1);
+  }
+  for (const control of root.querySelectorAll<HTMLInputElement>('input:not([type="radio"]):not([type="checkbox"]), select, textarea')) {
+    expect(control.closest('ptah-field')).not.toBeNull();
+  }
 }
 
 /** Walks: provider → credential (key) → verify (verified) → models → scope. */
@@ -1392,6 +1422,55 @@ describe('ProviderSetupWizardComponent', () => {
   });
 
   describe('accessibility', () => {
+    it('wires every floating control to a visible field label in each wizard branch', () => {
+      const provider = createComponent();
+      expectFloatingControl(provider, 'wizard-provider-search', 'Search providers');
+      expect(query(provider, 'wizard-provider-search')?.closest('ptah-field')?.querySelector('[data-ptah-field]')?.getAttribute('data-size')).toBe('sm');
+      expectResolvedLabels(provider);
+
+      const custom = createComponent();
+      click(custom, 'wizard-provider-custom-radio');
+      expectFloatingControl(custom, 'wizard-custom-name', 'Name for this connection');
+      expectResolvedLabels(custom);
+      typeInto(custom, 'wizard-custom-name', 'My gateway');
+      click(custom, 'wizard-protocol-anthropic');
+      click(custom, 'wizard-continue');
+      expectFloatingControl(custom, 'wizard-base-url', 'Server URL');
+      expectFloatingControl(custom, 'wizard-api-key', 'API key');
+      expectResolvedLabels(custom);
+
+      for (const [providerId, controls] of [
+        ['requesty', [['wizard-api-key', 'API key']]],
+        ['ollama', [['wizard-base-url', 'Server URL']]],
+        ['lm-studio', [['wizard-base-url', 'Server URL']]],
+        ['ollama-cloud', [['wizard-api-key', 'API key']]],
+      ] as const) {
+        const fixture = createComponent();
+        selectProvider(fixture, providerId);
+        click(fixture, 'wizard-continue');
+        for (const [testId, label] of controls) expectFloatingControl(fixture, testId, label);
+        expectResolvedLabels(fixture);
+      }
+    });
+
+    it('wires the optional key in both local credential branches', () => {
+      for (const providerId of ['ollama', 'lm-studio']) {
+        const entry = shared.getAnthropicProvider(providerId);
+        expect(entry).not.toBeNull();
+        if (!entry) throw new Error(`missing provider ${providerId}`);
+        const fixture = createComponent();
+        // No current local registry entry enables the optional-key branch.
+        Object.defineProperty(fixture.componentInstance, 'selectedEntry', {
+          value: signal({ ...entry, supportsOptionalApiKey: true }),
+        });
+        selectProvider(fixture, providerId);
+        click(fixture, 'wizard-continue');
+        expectFloatingControl(fixture, 'wizard-base-url', 'Server URL');
+        expectFloatingControl(fixture, 'wizard-optional-key', 'API key (optional)');
+        expectResolvedLabels(fixture);
+      }
+    });
+
     it('gives every wizard button the family look and the 2 px focus outline', async () => {
       const fixture = createComponent();
       selectProvider(fixture, 'requesty');

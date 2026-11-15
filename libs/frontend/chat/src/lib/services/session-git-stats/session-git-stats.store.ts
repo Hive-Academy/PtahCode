@@ -3,6 +3,7 @@ import {
   Injectable,
   inject,
   signal,
+  effect,
   untracked,
 } from '@angular/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
@@ -43,6 +44,7 @@ export type SessionGitState =
   | Exclude<CompactGitState, { readonly kind: 'known' }>
   | (Extract<CompactGitState, { readonly kind: 'known' }> & {
       readonly branch: string | null;
+      readonly unavailable?: boolean;
     });
 
 const NONE: SessionGitState = { kind: 'none' };
@@ -53,7 +55,7 @@ function sameSessionGitState(
   b: SessionGitState,
 ): boolean {
   if (!sameGitState(a, b)) return false;
-  return a?.kind !== 'known' || b.kind !== 'known' || a.branch === b.branch;
+  return a?.kind !== 'known' || b.kind !== 'known' || (a.branch === b.branch && a.unavailable === b.unavailable);
 }
 
 /**
@@ -141,6 +143,8 @@ interface RootEntry {
   rerun: boolean;
   backoffUntil?: number;
   unavailable?: boolean;
+  latest?: GitInfoResult;
+  explicit?: boolean;
 }
 
 /**
@@ -194,7 +198,21 @@ export class SessionGitStatsStore implements MessageHandler {
   ] as const;
 
   constructor() {
+    effect(() => {
+      this.tabManager.activeTabSessionId?.();
+      untracked(() => {
+        for (const entry of this.entries.values()) {
+          if (this.isVisible(entry) && (entry.readAt === 0 || Date.now() - entry.readAt >= FRESHNESS_MS)) this.request(entry, false);
+        }
+      });
+    });
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      for (const entry of this.entries.values()) this.request(entry, true);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     inject(DestroyRef).onDestroy(() => {
+      document.removeEventListener('visibilitychange', onVisibility);
       this.destroyed = true;
       for (const entry of this.entries.values()) {
         if (entry.timer !== null) clearTimeout(entry.timer);
@@ -227,9 +245,9 @@ export class SessionGitStatsStore implements MessageHandler {
         unavailable: this.missingSessions.has(key),
       };
       this.entries.set(key, entry);
-      if (!entry.unavailable && !this.pendingRoots.has(key)) this.request(entry, false);
     }
     entry.tabs.set(tabId, (entry.tabs.get(tabId) ?? 0) + 1);
+    if (entry.readAt === 0 && !entry.unavailable && !this.pendingRoots.has(key)) this.request(entry, false);
     const trackedSession = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab.claudeSessionId ?? null;
     if (entry.unavailable && this.missingSessions.get(key)?.sessionId !== trackedSession) {
       this.missingSessions.delete(key);
@@ -258,6 +276,24 @@ export class SessionGitStatsStore implements MessageHandler {
       : NONE;
   }
 
+  /** A validated recent result shared with other renderer Git consumers. */
+  freshInfoFor(root: string): GitInfoResult | null {
+    const entry = this.entries.get(normalizeWorkspaceRoot(root));
+    return entry?.latest && Date.now() - entry.readAt < FRESHNESS_MS ? entry.latest : null;
+  }
+
+  refresh(root: string): void {
+    const entry = this.entries.get(normalizeWorkspaceRoot(root));
+    if (entry) this.request(entry, true, true);
+  }
+
+  private isVisible(entry: RootEntry): boolean {
+    if (document.visibilityState === 'hidden') return false;
+    const active = this.tabManager.activeTabSessionId?.();
+    if (!active) return true;
+    return [...entry.tabs.keys()].some((id) => this.tabManager.findTabByIdAcrossWorkspaces(id)?.tab.claudeSessionId === active);
+  }
+
   handleMessage(message: { type: string; payload?: unknown }): void {
     if (message.type === MESSAGE_TYPES.GIT_STATUS_UPDATE) {
       const payload = message.payload;
@@ -277,13 +313,11 @@ export class SessionGitStatsStore implements MessageHandler {
       if (entry.timer !== null) clearTimeout(entry.timer);
       entry.timer = null;
       this.removeQueued(entry);
-      entry.readAt = Date.now();
-      this.setState(
-        entry,
-        isGitInfo(payload)
-          ? toState(payload)
-          : { kind: 'unknown', reason: 'unavailable' },
-      );
+      entry.readAt = isGitInfo(payload) ? Date.now() : 0;
+      entry.latest = isGitInfo(payload) ? payload : undefined;
+      if (entry.latest?.statusUnavailable) this.markFailed(entry, 'unavailable');
+      else this.setState(entry, entry.latest ? toState(entry.latest) : { kind: 'unknown', reason: 'unavailable' });
+      if (!entry.latest) this.request(entry, true);
       return;
     }
     if (
@@ -308,10 +342,12 @@ export class SessionGitStatsStore implements MessageHandler {
     }
   }
 
-  private request(entry: RootEntry, forced: boolean): void {
-    if (entry.unavailable) return;
+  private request(entry: RootEntry, forced: boolean, explicit = false): void {
+    if (explicit) entry.explicit = true;
+    if (!explicit && !this.isVisible(entry)) return;
+    if (entry.unavailable && !explicit) return;
     if (this.pendingRoots.has(normalizeWorkspaceRoot(entry.root)) && !entry.inFlight) return;
-    if ((entry.backoffUntil ?? 0) > Date.now()) return;
+    if (!explicit && (entry.backoffUntil ?? 0) > Date.now()) return;
     if (!forced && Date.now() - entry.readAt < FRESHNESS_MS) return;
     if (entry.inFlight) {
       entry.rerun = true;
@@ -349,7 +385,8 @@ export class SessionGitStatsStore implements MessageHandler {
       entry.queued = false;
       if (this.entries.get(normalizeWorkspaceRoot(entry.root)) !== entry)
         continue;
-      if (entry.unavailable) continue;
+      if ((entry.unavailable || !this.isVisible(entry)) && !entry.explicit) continue;
+      entry.explicit = false;
       void this.read(entry);
     }
   }
@@ -371,10 +408,14 @@ export class SessionGitStatsStore implements MessageHandler {
         entry.generation === generation
       ) {
         if (result.success && isGitInfo(result.data)) {
+          entry.unavailable = false;
+          this.missingSessions.delete(normalizeWorkspaceRoot(entry.root));
+          entry.latest = result.data;
           this.loggedMissingRoots.delete(normalizeWorkspaceRoot(entry.root));
           this.unavailableRoots.clear(entry.root);
           entry.backoffUntil = undefined;
-          this.setState(entry, toState(result.data));
+          if (result.data.statusUnavailable) this.markFailed(entry, 'unavailable');
+          else this.setState(entry, toState(result.data));
         } else {
           if (result.error === GIT_ROOT_MISSING_MESSAGE) {
             const key = normalizeWorkspaceRoot(entry.root);
@@ -389,7 +430,7 @@ export class SessionGitStatsStore implements MessageHandler {
             });
             entry.unavailable = true;
             this.unavailableRoots.mark(entry.root);
-            this.setState(entry, { kind: 'unknown', reason: 'unavailable' });
+            this.markFailed(entry, 'unavailable');
             entry.readAt = Date.now();
             return;
           }
@@ -400,12 +441,13 @@ export class SessionGitStatsStore implements MessageHandler {
           if (result.error === GIT_ROOT_PROBE_FAILED_MESSAGE) {
             entry.backoffUntil = Date.now() + TIMEOUT_BACKOFF_MS;
             entry.readAt = Date.now();
+            this.markFailed(entry);
             return;
           }
           if (typeof result.error === 'string' && result.error.includes('RPC timeout')) {
             entry.backoffUntil = Date.now() + TIMEOUT_BACKOFF_MS;
           }
-          this.setState(entry, { kind: 'unknown', reason: 'failed' });
+          this.markFailed(entry);
         }
         entry.readAt = Date.now();
       }
@@ -418,7 +460,7 @@ export class SessionGitStatsStore implements MessageHandler {
         if (error instanceof Error && error.message.includes('RPC timeout')) {
           entry.backoffUntil = Date.now() + TIMEOUT_BACKOFF_MS;
         }
-        this.setState(entry, { kind: 'unknown', reason: 'failed' });
+        this.markFailed(entry);
         entry.readAt = Date.now();
       }
     } finally {
@@ -435,7 +477,7 @@ export class SessionGitStatsStore implements MessageHandler {
         entry.rerun
       ) {
         entry.rerun = false;
-        this.request(entry, true);
+        this.request(entry, true, entry.explicit);
       }
       this.drain();
     }
@@ -446,5 +488,13 @@ export class SessionGitStatsStore implements MessageHandler {
     const key = normalizeWorkspaceRoot(entry.root);
     if (sameSessionGitState(current.get(key), state)) return;
     this.states.set(new Map(current).set(key, state));
+  }
+
+  private markFailed(entry: RootEntry, reason: 'failed' | 'unavailable' = 'failed'): void {
+    entry.latest = undefined;
+    const current = this.stateFor(entry.root);
+    this.setState(entry, current.kind === 'known'
+      ? { ...current, unavailable: true }
+      : { kind: 'unknown', reason });
   }
 }

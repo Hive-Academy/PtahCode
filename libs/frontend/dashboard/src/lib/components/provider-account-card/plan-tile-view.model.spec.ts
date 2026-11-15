@@ -554,6 +554,9 @@ describe('plan-tile-view.model', () => {
       expect(planLimitReasonLabel('balance-unavailable')).toBe(
         'Plan limits unavailable right now; showing request counts',
       );
+      expect(planLimitReasonLabel('prepaid-balance-unavailable')).toBe(
+        'Prepaid balance unavailable right now',
+      );
       expect(planLimitReasonLabel('balance-auth-rejected')).toBe(
         'API key cannot read plan limits; showing request counts',
       );

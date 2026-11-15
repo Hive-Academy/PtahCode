@@ -222,7 +222,7 @@ describe('GitTaskFolderVisibility — all three steps succeed', () => {
     expect(timings[0][1]).toEqual(expect.objectContaining({
       gitDiscoveryMs: expect.any(Number), siblingScanMs: expect.any(Number),
       fetchMs: expect.any(Number), lsTreeMs: expect.any(Number),
-      totalMs: expect.any(Number), siblings: 2, folders: 3,
+      totalMs: expect.any(Number), siblings: 2, folders: 3, scanConcurrency: 8,
     }));
   });
   it('still returns the folders when the timing log throws', async () => {
@@ -483,6 +483,123 @@ describe('GitTaskFolderVisibility — the 60 s cache', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('concurrent visibility scans', () => {
+  const worktrees = (count: number): string => [
+    `worktree ${ROOT.split(path.sep).join('/')}`,
+    '',
+    ...Array.from({ length: count }, (_, i) => [`worktree D:/repos/sibling-${i}`, '']).flat(),
+  ].join('\n');
+
+  it('overlaps sibling reads without exceeding eight in flight', async () => {
+    const { service, fs } = makeService({ worktree: { stdout: worktrees(12) } });
+    fs.exists.mockResolvedValue(true);
+    let active = 0;
+    let peak = 0;
+    let serial = 0;
+    const release: Array<() => void> = [];
+    fs.readDirectory.mockImplementation(() => new Promise((resolve) => {
+      active++;
+      peak = Math.max(peak, active);
+      const name = `TASK_${serial++}`;
+      release.push(() => {
+        active--;
+        resolve([{ name, type: FileType.Directory }]);
+      });
+    }));
+    const scan = service.listBeyondWorkspace(ROOT);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(peak).toBe(8);
+    while (release.length > 0) {
+      release.splice(0).forEach((finish) => finish());
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    }
+    await expect(scan).resolves.toHaveLength(12);
+    expect(peak).toBe(8);
+  });
+
+  it('isolates a failed sibling while a slow sibling completes', async () => {
+    const { service, fs, degradation } = makeService({ worktree: { stdout: worktrees(3) } });
+    fs.exists.mockResolvedValue(true);
+    let releaseSlow: (() => void) | undefined;
+    fs.readDirectory.mockImplementation((target: string) => {
+      if (target.includes('sibling-0')) throw new Error('unreadable');
+      if (target.includes('sibling-1')) return new Promise((resolve) => {
+        releaseSlow = () => resolve([{ name: 'TASK_SLOW', type: FileType.Directory }]);
+      });
+      return Promise.resolve([{ name: 'TASK_FAST', type: FileType.Directory }]);
+    });
+    const scan = service.listBeyondWorkspace(ROOT);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(releaseSlow).toBeDefined();
+    expect(fs.readDirectory.mock.calls.some(([target]) => target.includes('sibling-2'))).toBe(true);
+    releaseSlow?.();
+    await expect(scan).resolves.toEqual(['TASK_SLOW', 'TASK_FAST']);
+    expect(degradation.report).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'task-visibility.worktree-scan-failed',
+    }));
+  });
+
+  it('shares an in-flight scan and then serves the TTL cache', async () => {
+    const { service, fs, subcommands } = makeService({ worktree: { stdout: WORKTREE_LIST } });
+    let release: (() => void) | undefined;
+    fs.readDirectory.mockImplementation(() => new Promise((resolve) => {
+      release = () => resolve([{ name: 'TASK_SHARED', type: FileType.Directory }]);
+    }));
+    const first = service.listBeyondWorkspace(ROOT);
+    const second = service.listBeyondWorkspace(ROOT);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(subcommands().filter((command) => command === 'worktree')).toHaveLength(1);
+    release?.();
+    expect(await second).toEqual(await first);
+    expect(await service.listBeyondWorkspace(ROOT)).toEqual(await first);
+    expect(subcommands().filter((command) => command === 'worktree')).toHaveLength(1);
+  });
+
+  it('includes remote names while a sibling is slow and orders ls-tree after fetch', async () => {
+    const fs = createMockFileSystemProvider();
+    fs.exists.mockResolvedValue(true);
+    let releaseSibling: (() => void) | undefined;
+    fs.readDirectory.mockImplementation(() => new Promise((resolve) => {
+      releaseSibling = () => resolve([{ name: 'TASK_SIBLING', type: FileType.Directory }]);
+    }));
+    const commands: string[] = [];
+    let releaseFetch: (() => void) | undefined;
+    const exec: ExecGitFn = async (args) => {
+      commands.push(args[0]);
+      if (args[0] === 'worktree') return { exitCode: 0, stdout: WORKTREE_LIST, stderr: '' };
+      if (args[0] === 'fetch') return new Promise((resolve) => {
+        releaseFetch = () => resolve({ exitCode: 0, stdout: '', stderr: '' });
+      });
+      return { exitCode: 0, stdout: LS_TREE, stderr: '' };
+    };
+    const service = new GitTaskFolderVisibility(fs, makeLogger(), null, null, exec);
+    const scan = service.listBeyondWorkspace(ROOT);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(commands).toEqual(['worktree', 'fetch']);
+    expect(releaseSibling).toBeDefined();
+    releaseFetch?.();
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(commands).toEqual(['worktree', 'fetch', 'ls-tree']);
+    releaseSibling?.();
+    expect(await scan).toEqual(expect.arrayContaining([
+      'TASK_SIBLING', 'TASK_2026_401_11aa', 'TASK_2026_402_22bb',
+    ]));
+  });
+
+  it('removes a rejected in-flight scan before retrying', async () => {
+    const { service, logger, subcommands } = makeService({
+      worktree: new Error('git unavailable'),
+    });
+    jest.mocked(logger.warn).mockImplementationOnce(() => { throw new Error('logger closed'); });
+    const first = service.listBeyondWorkspace(ROOT);
+    const second = service.listBeyondWorkspace(ROOT);
+    await expect(first).rejects.toThrow('logger closed');
+    await expect(second).rejects.toThrow('logger closed');
+    await expect(service.listBeyondWorkspace(ROOT)).resolves.toEqual([]);
+    expect(subcommands().filter((command) => command === 'worktree')).toHaveLength(2);
+  });
+});
+
 // The mirrored symbol and the DI binding (R-8)
 // ---------------------------------------------------------------------------
 
