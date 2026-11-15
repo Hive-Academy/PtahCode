@@ -67,16 +67,6 @@ const ROW_DOT: Readonly<Record<ProviderAccountState, string>> = {
   'signed-in': 'bg-state-done',
   'signed-out': 'bg-state-idle',
 };
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-const SPINNER =
-  'inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none';
-/** List and row spacing from tokens (pattern-spec D4: the account list stays a list). */
-const LIST = 'flex flex-col gap-[var(--ptah-gap-heading)]';
-const ROW =
-  'flex flex-wrap items-center gap-x-[var(--ptah-gap-heading)] gap-y-[var(--ptah-gap-inline)] rounded-box border border-base-content/15 bg-base-100 px-[var(--ptah-surface-pad)] py-[var(--ptah-gap-heading)]';
-const CHIP =
-  'inline-flex h-5 items-center rounded-full border border-base-content/25 px-[var(--ptah-gap-inline)] text-xs leading-none text-base-content';
 const LOAD_FAILED = 'Could not load accounts';
 /** The detail's heading (component 7 contract): the B-2 fallback target of detail actions and of a newly added account. */
 const DETAIL_HEADING = '[data-testid="account-detail-heading"]';
@@ -171,7 +161,8 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                   #addButton
                   actions
                   type="button"
-                  [class]="'btn btn-outline btn-sm min-h-8 ' + focusRing"
+                  ptahButton
+                  variant="outline"
                   [attr.aria-disabled]="addUnavailable() ? 'true' : null"
                   [attr.title]="held() ? copy.notAvailableOnHost : null"
                   (click)="openAdd()"
@@ -191,7 +182,7 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                   />
                 </div>
               } @else {
-                <ul role="list" aria-label="Claude accounts" [class]="listClass" data-testid="accounts-tab-list">
+                <ul role="list" aria-label="Claude accounts" class="flex flex-col gap-[var(--ptah-gap-heading)]" data-testid="accounts-tab-list">
                   <li>
                     <ptah-ambient-account-row
                       [ambient]="ambientView()"
@@ -201,7 +192,9 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                   </li>
                   @for (row of rows(); track row.account.profileId) {
                     <li
-                      [class]="rowClass + (row.attention ? ' border-l-4 border-l-state-err' : '')"
+                      class="flex flex-wrap items-center gap-x-[var(--ptah-gap-heading)] gap-y-[var(--ptah-gap-inline)] rounded-box border border-base-content/15 bg-base-100 px-[var(--ptah-surface-pad)] py-[var(--ptah-gap-heading)]"
+                      [class.border-l-4]="row.attention"
+                      [class.border-l-state-err]="row.attention"
                       data-testid="accounts-tab-row"
                     >
                       <span
@@ -216,9 +209,13 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                         >{{ row.account.label }}</span>
                         <span class="flex min-w-0 items-center gap-[var(--ptah-gap-inline)] text-base-content-muted">
                           @if (row.pending) {
-                            <span [class]="spinner" aria-hidden="true" data-testid="accounts-tab-row-spinner"></span>
+                            <span class="inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none" aria-hidden="true" data-testid="accounts-tab-row-spinner"></span>
                           } @else {
-                            <span [class]="'inline-block h-2 w-2 shrink-0 rounded-full ' + row.dot" aria-hidden="true"></span>
+                            <span class="inline-block h-2 w-2 shrink-0 rounded-full"
+                              [class.bg-state-idle]="row.dot === 'bg-state-idle'"
+                              [class.bg-state-run]="row.dot === 'bg-state-run'"
+                              [class.bg-state-err]="row.dot === 'bg-state-err'"
+                              [class.bg-state-done]="row.dot === 'bg-state-done'" aria-hidden="true"></span>
                           }
                           <span data-testid="accounts-tab-row-state">{{ row.status }}</span>
                         </span>
@@ -229,7 +226,7 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                           >
                             <span class="text-base-content-muted">Used by</span>
                             @for (chip of row.chips; track chip) {
-                              <span [class]="chipClass" data-testid="accounts-tab-row-chip">{{ chip }}</span>
+                              <span class="inline-flex h-5 items-center rounded-full border border-base-content/25 px-[var(--ptah-gap-inline)] text-xs leading-none text-base-content" data-testid="accounts-tab-row-chip">{{ chip }}</span>
                             }
                           </span>
                         }
@@ -268,12 +265,12 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                 <button type="button" ptahButton (click)="retry()">Try again</button>
               </div>
             } @else {
-              <ul role="list" aria-label="Claude accounts" aria-busy="true" [class]="listClass" data-testid="accounts-tab-list">
-                <li [class]="rowClass + ' text-base-content-muted'" data-testid="accounts-tab-loading">
+              <ul role="list" aria-label="Claude accounts" aria-busy="true" class="flex flex-col gap-[var(--ptah-gap-heading)]" data-testid="accounts-tab-list">
+                <li class="flex flex-wrap items-center gap-x-[var(--ptah-gap-heading)] gap-y-[var(--ptah-gap-inline)] rounded-box border border-base-content/15 bg-base-100 px-[var(--ptah-surface-pad)] py-[var(--ptah-gap-heading)] text-base-content-muted" data-testid="accounts-tab-loading">
                   @if (view().status === 'idle') {
                     Open a workspace
                   } @else {
-                    <span [class]="spinner" aria-hidden="true"></span>
+                    <span class="inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none" aria-hidden="true"></span>
                     Loading…
                   }
                 </li>
@@ -293,11 +290,6 @@ export class AccountsTabComponent implements OnInit {
   private readonly injector = inject(Injector);
   private destroyed = false;
 
-  protected readonly focusRing = FOCUS;
-  protected readonly spinner = SPINNER;
-  protected readonly listClass = LIST;
-  protected readonly rowClass = ROW;
-  protected readonly chipClass = CHIP;
   protected readonly copy = ACCOUNT_COPY;
   protected readonly ambientKey = AMBIENT_ROW_KEY;
   protected readonly noChips: readonly UsedByChip[] = [];
@@ -721,7 +713,13 @@ export class AccountsTabComponent implements OnInit {
           if (!anyView && this.tabView() !== wait.view) return;
           const active = this.document.activeElement;
           if (active === wait.target && wait.target.isConnected) return;
-          const fell = !wait.target.isConnected && (active === null || active === this.document.body);
+          const onBody = active === null || active === this.document.body;
+          if (wait.target.isConnected && onBody) {
+            // The target lost focus while it was disabled for the save (S1): give it back.
+            if (wait.target instanceof HTMLElement) wait.target.focus();
+            return;
+          }
+          const fell = !wait.target.isConnected && onBody;
           if (!fell) return;
         }
         target()?.focus();

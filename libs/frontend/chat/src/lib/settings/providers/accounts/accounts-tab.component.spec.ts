@@ -199,7 +199,6 @@ describe('AccountsTabComponent', () => {
       const add = byTestId('accounts-tab-add');
       expect(add?.textContent?.trim()).toBe('Add account');
       expect(add?.className).toContain('btn-outline');
-      expect(add?.className).toContain('min-h-8');
       expect(add?.getAttribute('aria-disabled')).toBeNull();
       expect(add?.closest('[data-testid="section-header-actions"]')).not.toBeNull();
     });
