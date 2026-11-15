@@ -251,9 +251,6 @@
     "space-y-2": 5,
     "space-y-4": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/connection-drawer/codex-agent-behavior.component.ts": {
-    "gap-4": 1
-  },
   "libs/frontend/chat/src/lib/settings/providers/connection-drawer/codex-sign-in-block.component.ts": {
     "gap-2": 3,
     "ml-2": 1,
@@ -600,10 +597,6 @@
     "p-2": 1,
     "px-1": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/orchestration-settings.component.ts": {
-    "gap-8": 1,
-    "py-3": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
     "gap-1": 5,
     "gap-1.5": 2,
@@ -689,10 +682,6 @@
     "pr-9": 1,
     "px-1": 1,
     "space-y-2": 2
-  },
-  "libs/frontend/chat/src/lib/settings/search-voice-settings.component.ts": {
-    "py-3": 1,
-    "space-y-8": 1
   },
   "libs/frontend/chat/src/lib/settings/settings.component.html": {
     "gap-3": 1,

@@ -16,7 +16,7 @@ import { GoVetConsentConfigComponent } from './ptah-ai/go-vet-consent-config.com
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [WebSearchConfigComponent, VoiceConfigComponent, GoVetConsentConfigComponent],
   template: `
-    <div class="space-y-8 py-3">
+    <div class="flex flex-col gap-[var(--ptah-gap-section)] py-[var(--ptah-gap-heading)]">
       <ptah-web-search-config />
 
       @if (isElectron) {

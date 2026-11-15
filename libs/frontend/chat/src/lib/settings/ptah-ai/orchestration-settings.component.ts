@@ -45,7 +45,7 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
   ],
   template: `
     <!-- Same box and rhythm as the Providers page: the Settings shell sets the width, centring and side padding. -->
-    <div class="flex flex-col gap-8 py-3 font-sans text-sm text-base-content">
+    <div class="flex flex-col gap-[var(--ptah-gap-section)] py-[var(--ptah-gap-heading)] font-sans text-sm text-base-content">
       <!-- Subagent prompt-cache TTL (TASK_2026_597 N1): its own chunk, loaded when scrolled into view. -->
       @defer (on viewport) {
         <ptah-subagent-cache-ttl-setting />
