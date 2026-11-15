@@ -113,9 +113,7 @@ const REQUIRED_STRATEGIES: readonly string[] = [
  * here — they are not part of the /orchestrate workflow and must not be forced
  * into agent-catalog.md or the shipped agent templates by this validator.
  */
-const REQUIRED_AGENTS: readonly string[] = [
-  'team-leader',
-] as const;
+const REQUIRED_AGENTS: readonly string[] = ['team-leader'] as const;
 
 /** Each retired role must remain documented as an alias of its phase kind. */
 const RETIRED_ALIASES = RETIRED_ROLES.map(({ slug, phaseKind }) => ({
@@ -440,6 +438,40 @@ function validatePhase(
       errors.push(
         error(relative, `Retired role name in phase definition: ${role}`),
       );
+  return errors;
+}
+
+const PACK_REQUIRED_SECTIONS = [
+  'Discipline',
+  'Skeleton mapping',
+  'Phase flow',
+] as const;
+
+function validatePacks(): ValidationError[] {
+  const directory = path.join(SKILL_ROOT, 'packs');
+  if (!fs.existsSync(directory)) return [];
+  const errors: ValidationError[] = [];
+  const files = fs.readdirSync(directory).filter((n) => n.endsWith('.md'));
+  for (const name of files) {
+    const relative = `packs/${name}`;
+    const content = fs.readFileSync(path.join(directory, name), 'utf8');
+    if (!content.trim()) {
+      errors.push(error(relative, 'Pack file is empty'));
+      continue;
+    }
+    if (!/^# Pack: \S+/m.test(content))
+      errors.push(error(relative, 'Missing "# Pack: <name>" title'));
+    const headings = maskFences(content).match(/^## .+$/gm) ?? [];
+    for (const section of PACK_REQUIRED_SECTIONS) {
+      const count = headings.filter(
+        (h) => h.slice(3).trim() === section,
+      ).length;
+      if (count === 0)
+        errors.push(error(relative, `Missing pack section: ${section}`));
+      else if (count > 1)
+        errors.push(error(relative, `Duplicate pack section: ${section}`));
+    }
+  }
   return errors;
 }
 
@@ -1135,6 +1167,7 @@ function validateOrchestrationSkill(): ValidationResult {
   result.errors.push(...validateLanesFirstRules());
   result.errors.push(...validateMirror());
   result.errors.push(...validatePhases());
+  result.errors.push(...validatePacks());
   result.passed = result.errors.length === 0;
 
   return result;

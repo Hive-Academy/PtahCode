@@ -64,6 +64,58 @@ const PHASE_KIND_BY_PHASE: Partial<Record<OrchestrationPhase, PhaseKind>> = {
   qa: 'tests',
 };
 
+/**
+ * Phase flow of each work pack. The names match the files in the
+ * orchestration skill `packs/` folder. The software pack is the default flow.
+ */
+const PACK_PHASE_FLOWS: Readonly<Record<string, readonly PhaseKind[]>> = {
+  software: [
+    'plan',
+    'architecture',
+    'implement',
+    'tests',
+    'review',
+    'completion',
+  ],
+  research: ['research', 'plan', 'completion'],
+  content: ['plan', 'docs', 'implement', 'review', 'completion'],
+  operations: ['plan', 'implement', 'tests', 'review', 'completion'],
+};
+
+/**
+ * Resolve a pack name to its ordered phase list.
+ * Returns null when the name is not a known pack.
+ */
+export function resolvePackPhases(
+  packName: string,
+): readonly PhaseKind[] | null {
+  const key = packName.trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(PACK_PHASE_FLOWS, key)
+    ? PACK_PHASE_FLOWS[key]
+    : null;
+}
+
+/**
+ * Convert a pack phase list to an orchestration phase sequence.
+ * Returns null when the name is not a known pack.
+ */
+function packPhaseSequence(packName: string): OrchestrationPhase[] | null {
+  const kinds = resolvePackPhases(packName);
+  if (!kinds) return null;
+  const sequence: OrchestrationPhase[] = [];
+  const push = (phase: OrchestrationPhase): void => {
+    if (!sequence.includes(phase)) sequence.push(phase);
+  };
+  for (const kind of kinds) {
+    if (kind === 'plan' || kind === 'research') push('planning');
+    else if (kind === 'architecture' || kind === 'design') push('design');
+    else if (kind === 'tests' || kind === 'review') push('qa');
+    else if (kind !== 'completion') push('implementation');
+  }
+  push('complete');
+  return sequence;
+}
+
 function phaseAction(
   phase: OrchestrationPhase,
   context: OrchestrationNextAction['context'],
@@ -170,7 +222,9 @@ export function buildOrchestrationNamespace(
     strategy: string,
   ): OrchestrationPhase | null => {
     const sequence =
-      STRATEGY_PHASE_SEQUENCE[strategy] || STRATEGY_PHASE_SEQUENCE['FEATURE'];
+      packPhaseSequence(strategy) ??
+      STRATEGY_PHASE_SEQUENCE[strategy] ??
+      STRATEGY_PHASE_SEQUENCE['FEATURE'];
     const currentIndex = sequence.indexOf(currentPhase);
 
     if (currentIndex === -1 || currentIndex === sequence.length - 1) {

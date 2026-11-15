@@ -19,6 +19,28 @@ export const PHASE_KINDS = [
 
 export type PhaseKind = (typeof PHASE_KINDS)[number];
 
+export const SKELETON_STEPS = [
+  'clarify',
+  'plan',
+  'do',
+  'check',
+  'deliver',
+] as const;
+
+/** The five general steps that every pack maps its phases onto. */
+export type SkeletonStep = (typeof SKELETON_STEPS)[number];
+
+/** A work pack: the ordered phases for one kind of work. */
+export interface PackDefinitionV1 {
+  /** Lowercase kebab-case id, for example "software" or "research". */
+  readonly name: string;
+  readonly displayName: string;
+  /** Task types this pack applies to, for example "FEATURE" and "BUGFIX". */
+  readonly workTypes: readonly string[];
+  readonly phaseFlow: readonly PhaseKind[];
+  readonly version: 1;
+}
+
 export interface PhaseDefinitionV1 {
   readonly version: 1 | 2;
   readonly kind: PhaseKind;
