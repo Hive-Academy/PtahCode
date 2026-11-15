@@ -99,7 +99,7 @@ function formatValue(
         @if (headingStyle() === 'section') {
           <div
             section-header
-            class="mb-[var(--ptah-gap-heading)] border-b border-base-content/10 pb-[var(--ptah-space-2)]"
+            class="border-b border-base-content/10 pb-[var(--ptah-space-2)]"
           >
             <h3
               [id]="idPrefix() + '-heading'"

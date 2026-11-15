@@ -184,7 +184,7 @@ function storedNumberIsValid(
       aria-labelledby="session-budget-heading"
       data-testid="settings-section-session-budget"
     >
-      <div section-header class="mb-3 border-b border-base-content/10 pb-2">
+      <div section-header class="border-b border-base-content/10 pb-2">
         <h3
           id="session-budget-heading"
           class="text-base font-semibold text-base-content"
