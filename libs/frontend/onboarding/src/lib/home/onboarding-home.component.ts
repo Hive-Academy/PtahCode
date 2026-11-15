@@ -164,6 +164,7 @@ interface StatusChip {
           testId="analyze"
           title="Analyze current project"
           description="Best when you already have code. Ptah reads your workspace, recommends project skills and prepares project guidance."
+
           callToAction="Start analysis"
           [icon]="icons.scanSearch"
           [link]="analyzeLink"
@@ -198,6 +199,7 @@ interface StatusChip {
             </li>
             <li class="flex items-center gap-2">
               <lucide-angular
+
                 [img]="icons.bookOpen"
                 class="size-4 text-base-content"
                 aria-hidden="true"
@@ -262,13 +264,14 @@ interface StatusChip {
             <p class="relative z-10 flex flex-wrap gap-x-4 gap-y-1 text-sm">
               <a
                 class="link link-hover"
-                [routerLink]="agentsOnlyLink.commands"
-                [queryParams]="agentsOnlyLink.queryParams"
+                [routerLink]="analyzeSkillsLink.commands"
+                [queryParams]="analyzeSkillsLink.queryParams"
                 data-testid="onboarding-link-skills"
                 >Analyze and review skills</a
               >
               <a
                 class="link link-hover"
+
                 [routerLink]="guidanceOnlyLink.commands"
                 [queryParams]="guidanceOnlyLink.queryParams"
                 data-testid="onboarding-link-guidance-only"
@@ -361,10 +364,11 @@ export class OnboardingHomeComponent {
   } as const;
 
   protected readonly analyzeLink = onboardingStepLink('analyze', 'analyze', {});
-  protected readonly agentsOnlyLink = {
+  protected readonly analyzeSkillsLink = {
     commands: ['/onboarding', 'analyze'],
     queryParams: {},
   };
+
   protected readonly guidanceOnlyLink = onboardingStepLink(
     'guidance-only',
     'guidance-only',

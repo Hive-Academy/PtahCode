@@ -588,13 +588,13 @@ describe('SurfaceRouterService', () => {
       const service = createServiceWithOnboardingChildren();
 
       await expect(
-        service.navigateToSurface('onboarding', ['analyze', 'generate'], {
+        service.navigateToSurface('onboarding', ['analyze', 'guidance'], {
           queryParams: { tab: 'tab-1', run: 'run-7' },
         }),
       ).resolves.toBe('navigated');
 
       expect(TestBed.inject(Router).url).toBe(
-        '/onboarding/analyze/generate?tab=tab-1&run=run-7',
+        '/onboarding/analyze/guidance?tab=tab-1&run=run-7',
       );
       expect(service.currentSurface()).toBe('onboarding');
     });
@@ -664,10 +664,10 @@ describe('SurfaceRouterService', () => {
       });
       const service = TestBed.inject(SurfaceRouterService);
       await expect(
-        service.navigateToUrl('/onboarding/analyze/generate?tab=deleted-tab'),
+        service.navigateToUrl('/onboarding/analyze/guidance?tab=deleted-tab'),
       ).resolves.toBe('failed');
       await expect(
-        service.navigateToUrl('/onboarding/analyze/generate?tab=deleted-tab'),
+        service.navigateToUrl('/onboarding/analyze/guidance?tab=deleted-tab'),
       ).resolves.toBe('failed');
       expect(TestBed.inject(Router).url).toBe('/');
     });

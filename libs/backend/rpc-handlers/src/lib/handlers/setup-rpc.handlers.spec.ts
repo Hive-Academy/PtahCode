@@ -1,24 +1,15 @@
 /**
  * SetupRpcHandlers — unit specs.
  *
- * Surface under test: setup RPC methods covering status, wizard launch,
- * analysis (deep-analyze / recommend-agents / cancel-analysis), saved
- * analyses (list/load), and the agent pack browser (list/install).
+ * Surface under test: setup RPC methods covering status, deep analysis,
+ * cancellation, and saved analyses (list/load).
  *
  * Behavioural contracts locked in here:
  *   - Registration: `register()` wires every method into the mock RpcHandler.
- *   - Workspace gating: `setup-status:get-status`, `setup-wizard:launch`,
- *     and `wizard:deep-analyze` throw when no workspace is open.
+ *   - Workspace gating: status and deep analysis require an open workspace.
  *   - DI container dispatch: `resolveService()` routes through
  *     `container.resolve()`; specs drive each method by mocking only the
  *     services the method actually calls.
- *   - `wizard:recommend-agents`:
- *       * `isMultiPhase: true` branch bypasses validation and returns the
- *         full 13-agent catalog with `recommended: true`.
- *       * Absent input throws a "Missing analysis input" error.
- *       * Invalid single-phase input throws an "Invalid analysis input"
- *         error sourced from the real Zod validation in
- *         `@ptah-extension/agent-generation`.
  *   - `wizard:cancel-analysis` is best-effort — it returns
  *     `{ cancelled: true }` as soon as any service cancels, and
  *     `{ cancelled: false }` only when every service throws.
@@ -158,8 +149,11 @@ import {
   type MockLogger,
 } from '@ptah-extension/shared/testing';
 
-import { SetupRpcHandlers, type PackInstaller } from './setup-rpc.handlers';
-import { SKILL_PROJECT_GUIDANCE_SERVICE } from '../di/tokens';
+import { SetupRpcHandlers } from './setup-rpc.handlers';
+import {
+  SKILL_PROJECT_GUIDANCE_SERVICE,
+  SKILL_RECOMMENDATION_SERVICE,
+} from '../di/tokens';
 
 // ---------------------------------------------------------------------------
 // Token re-declaration (via Symbol.for) — avoids transitively loading the
@@ -246,19 +240,8 @@ function createMockContainer(): MockContainer {
 
 const WORKSPACE = '/fake/workspace';
 
-type MockPackInstaller = jest.Mocked<PackInstaller>;
-
-function createMockPackInstaller(): MockPackInstaller {
-  return {
-    listPacks: jest.fn().mockResolvedValue([]),
-    plan: jest.fn(),
-    install: jest.fn(),
-  };
-}
-
 interface Harness {
   handlers: SetupRpcHandlers;
-  packInstall: MockPackInstaller;
   logger: MockLogger;
   rpcHandler: MockRpcHandler;
   pluginLoader: MockPluginLoader;
@@ -276,7 +259,6 @@ function makeHarness(opts: { workspaceFolders?: string[] } = {}): Harness {
   });
   const container = createMockContainer();
   const sentry = createMockSentryService();
-  const packInstall = createMockPackInstaller();
 
   const handlers = new SetupRpcHandlers(
     logger as unknown as Logger,
@@ -285,16 +267,14 @@ function makeHarness(opts: { workspaceFolders?: string[] } = {}): Harness {
     workspace as unknown as IWorkspaceProvider,
     container as unknown as DependencyContainer,
     sentry as unknown as SentryService,
-    packInstall,
     {
       search: jest.fn(),
       invalidateInstallCaches: jest.fn(),
-    } as unknown as ConstructorParameters<typeof SetupRpcHandlers>[7],
+    } as unknown as ConstructorParameters<typeof SetupRpcHandlers>[6],
   );
 
   return {
     handlers,
-    packInstall,
     logger,
     rpcHandler,
     pluginLoader,
@@ -388,21 +368,17 @@ describe('SetupRpcHandlers', () => {
       expect(h.rpcHandler.getRegisteredMethods().sort()).toEqual(
         [
           'setup-status:get-status',
-          'setup-wizard:launch',
           'wizard:cancel-analysis',
           'wizard:deep-analyze',
           'wizard:get-project-guidance',
           'wizard:get-resumable-run',
           'wizard:analysis-status',
-          'wizard:install-pack-agents',
           'wizard:install-skills-with-consent',
-          'wizard:list-agent-packs',
-          'wizard:plan-pack-install',
           'wizard:preview-skills-for-consent',
           'wizard:list-analyses',
           'wizard:load-analysis',
-          'wizard:recommend-agents',
           'wizard:recommend-skills',
+          'wizard:recommend-analysis-skills',
           'wizard:search-skills',
         ].sort(),
       );
@@ -502,18 +478,6 @@ describe('SetupRpcHandlers', () => {
 
       const response = await callRaw(h, 'wizard:deep-analyze', {
         resume: 'yes',
-      });
-      expect(response.success).toBe(false);
-      expect(response.errorCode).toBe('INVALID_PARAMS');
-    });
-
-    it('rejects wizard:install-pack-agents with an empty agentFiles list as INVALID_PARAMS', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-
-      const response = await callRaw(h, 'wizard:install-pack-agents', {
-        source: 'https://example.com/pack',
-        agentFiles: [],
       });
       expect(response.success).toBe(false);
       expect(response.errorCode).toBe('INVALID_PARAMS');
@@ -810,36 +774,6 @@ describe('SetupRpcHandlers', () => {
   });
 
   // -------------------------------------------------------------------------
-  // setup-wizard:launch
-  // -------------------------------------------------------------------------
-
-  describe('setup-wizard:launch', () => {
-    it('returns WORKSPACE_NOT_OPEN typed error (no Sentry) when no workspace is open', async () => {
-      const h = makeHarness({ workspaceFolders: [] });
-      h.handlers.register();
-
-      const response = await callRaw(h, 'setup-wizard:launch');
-      expect(response.success).toBe(false);
-      expect(response.error).toMatch(/No workspace folder/);
-      expect(response.errorCode).toBe('WORKSPACE_NOT_OPEN');
-      expect(h.sentry.captureException).not.toHaveBeenCalled();
-    });
-
-    it('delegates to SetupWizardService and returns { success: true } on Ok', async () => {
-      const h = makeHarness();
-      const launchMock = jest.fn().mockResolvedValue({ isErr: () => false });
-      h.container.__register(AGENT_GENERATION_TOKENS.SETUP_WIZARD_SERVICE, {
-        launchWizard: launchMock,
-      });
-      h.handlers.register();
-
-      const result = await call<{ success: boolean }>(h, 'setup-wizard:launch');
-      expect(result.success).toBe(true);
-      expect(launchMock).toHaveBeenCalledWith(WORKSPACE);
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // wizard:deep-analyze — MCP gating
   // -------------------------------------------------------------------------
 
@@ -941,138 +875,6 @@ describe('SetupRpcHandlers', () => {
   });
 
   // -------------------------------------------------------------------------
-  // wizard:recommend-agents
-  // -------------------------------------------------------------------------
-
-  describe('wizard:recommend-agents', () => {
-    it('returns the static catalog for an explicit unbound request', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-      const result = await call<
-        Array<{
-          agentId: string;
-          category: string;
-          relevanceScore: number;
-          matchedCriteria: string[];
-        }>
-      >(h, 'wizard:recommend-agents', { mode: 'workspace-catalog' });
-      expect(result.map((agent) => agent.agentId)).toEqual([]);
-      expect(result.map((agent) => agent.category)).toEqual([]);
-      expect(result.every((agent) => agent.relevanceScore === 100)).toBe(true);
-      expect(
-        result.every(
-          (agent) =>
-            agent.matchedCriteria.join(',') ===
-            'Workspace catalog,All agents available',
-        ),
-      ).toBe(true);
-    });
-
-    it('returns INVALID_PARAMS for a malformed catalog request', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-      const response = await callRaw(h, 'wizard:recommend-agents', {
-        mode: 'workspace-catalog',
-        tabBinding: {
-          tabId: '',
-          workflow: 'setup-agent-generation',
-          workspacePath: '/workspace',
-        },
-      });
-      expect(response.success).toBe(false);
-      expect(response.error).toMatch(/Invalid catalog request/);
-      expect(response.errorCode).toBe('INVALID_PARAMS');
-    });
-
-    it('rejects a catalog request bound to another workspace', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-      const response = await callRaw(h, 'wizard:recommend-agents', {
-        mode: 'workspace-catalog',
-        tabBinding: {
-          tabId: 'foreign-tab',
-          workflow: 'setup-agent-generation',
-          workspacePath: '/foreign/workspace',
-        },
-      });
-      expect(response.success).toBe(false);
-      expect(response.data).toBeUndefined();
-    });
-    it('throws when input is missing', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-
-      const response = await callRaw(h, 'wizard:recommend-agents', null);
-      expect(response.success).toBe(false);
-      expect(response.error).toMatch(/Missing analysis input/);
-    });
-
-    it('short-circuits to the full agent catalog on isMultiPhase input', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-
-      const result = await call<
-        Array<{
-          agentId: string;
-          recommended: boolean;
-          relevanceScore: number;
-          matchedCriteria: string[];
-        }>
-      >(h, 'wizard:recommend-agents', { isMultiPhase: true });
-
-      // Every catalog agent is recommended at relevanceScore=100.
-      expect(result.length).toBe(0);
-      expect(result.every((r) => r.relevanceScore === 100)).toBe(true);
-      expect(
-        result.every(
-          (r) =>
-            r.matchedCriteria.join(',') ===
-            'Deep codebase analysis,All agents recommended',
-        ),
-      ).toBe(true);
-      expect(result.every((r) => r.recommended)).toBe(true);
-
-      // Spot-check: anchor agents from each category, including the agents
-      // that historically drifted out of the catalog.
-      const ids = new Set(result.map((r) => r.agentId));
-      for (const retired of [
-        'backend-developer',
-        'frontend-developer',
-        'devops-engineer',
-      ]) {
-        expect(ids.has(retired)).toBe(false);
-      }
-      expect(ids.has('team-leader')).toBe(false);
-      for (const retired of [
-        'senior-tester',
-        'code-style-reviewer',
-        'code-logic-reviewer',
-        'visual-reviewer',
-        'project-manager',
-        'software-architect',
-        'researcher-expert',
-        'modernization-detector',
-        'technical-content-writer',
-        'ui-ux-designer',
-      ]) {
-        expect(ids.has(retired)).toBe(false);
-      }
-    });
-
-    it('throws "Invalid analysis input" for malformed single-phase input', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-
-      // Not multi-phase → Zod validation runs. Empty object is missing
-      // every required field in ProjectAnalysisZodSchema.
-      const response = await callRaw(h, 'wizard:recommend-agents', {});
-
-      expect(response.success).toBe(false);
-      expect(response.error).toMatch(/Invalid analysis input/);
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // wizard:cancel-analysis — best-effort
   // -------------------------------------------------------------------------
 
@@ -1143,6 +945,121 @@ describe('SetupRpcHandlers', () => {
     });
   });
 
+  describe('wizard:recommend-analysis-skills', () => {
+    it('uses the matching saved run and its structured stack', async () => {
+      const h = makeHarness();
+      const item = {
+        kind: 'framework',
+        name: 'Angular',
+        evidence: 'package.json',
+        sourcePhase: 'profile',
+      };
+      const recommendAnalysis = jest.fn().mockResolvedValue({
+        skills: [],
+        detectedItems: [item],
+        unmatchedItems: [],
+        searchFailures: [],
+        summarySource: 'structured',
+      });
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest
+          .fn()
+          .mockResolvedValue({
+            manifest: { runId: 'run-1' },
+            stackSummary: { source: 'structured', items: [item] },
+          }),
+      });
+      h.container.__register(SKILL_RECOMMENDATION_SERVICE, {
+        recommendAnalysis,
+      });
+      h.handlers.register();
+      const result = await call<{ detectedItems: unknown[] }>(
+        h,
+        'wizard:recommend-analysis-skills',
+        { runId: 'run-1' },
+      );
+      expect(result.detectedItems).toEqual([item]);
+      expect(recommendAnalysis).toHaveBeenCalledWith(
+        expect.objectContaining({ items: [item], summarySource: 'structured' }),
+      );
+    });
+
+    it('returns an empty explanation when the run is missing', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest.fn().mockResolvedValue(null),
+      });
+      h.handlers.register();
+      const result = await call<{ skills: unknown[]; warning: string }>(
+        h,
+        'wizard:recommend-analysis-skills',
+        { runId: 'missing' },
+      );
+      expect(result.skills).toEqual([]);
+      expect(result.warning).toMatch(/not found/);
+    });
+
+    it('returns an empty result when the saved run has no stack summary', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest
+          .fn()
+          .mockResolvedValue({ manifest: { runId: 'run-1' } }),
+      });
+      h.handlers.register();
+      const result = await call<{
+        skills: unknown[];
+        detectedItems: unknown[];
+        warning: string;
+      }>(h, 'wizard:recommend-analysis-skills', { runId: 'run-1' });
+      expect(result.skills).toEqual([]);
+      expect(result.detectedItems).toEqual([]);
+      expect(result.warning).not.toMatch(/raw error/i);
+    });
+
+    it('returns an empty result when no workspace is open', async () => {
+      const h = makeHarness({ workspaceFolders: [] });
+      h.handlers.register();
+      const result = await call<{
+        skills: unknown[];
+        detectedItems: unknown[];
+        warning: string;
+      }>(h, 'wizard:recommend-analysis-skills', { runId: 'run-1' });
+      expect(result.skills).toEqual([]);
+      expect(result.detectedItems).toEqual([]);
+      expect(result.warning).toMatch(/Open a workspace/);
+      expect(result.warning).not.toMatch(/raw error/i);
+    });
+
+    it('returns an empty result without exposing a storage error', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest
+          .fn()
+          .mockRejectedValue(new Error('raw error: secret path')),
+      });
+      h.handlers.register();
+      const result = await call<{
+        skills: unknown[];
+        detectedItems: unknown[];
+        warning: string;
+      }>(h, 'wizard:recommend-analysis-skills', { runId: 'run-1' });
+      expect(result.skills).toEqual([]);
+      expect(result.detectedItems).toEqual([]);
+      expect(result.warning).not.toMatch(/raw error|secret path/i);
+    });
+
+    it('rejects invalid params before loading storage', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const result = await callRaw(h, 'wizard:recommend-analysis-skills', {
+        runId: '',
+      });
+      expect(result.success).toBe(false);
+      expect(h.container.resolve).not.toHaveBeenCalled();
+    });
+  });
+
   describe('wizard:load-analysis', () => {
     it('links a completed loaded analysis without changing the load result', async () => {
       const h = makeHarness();
@@ -1207,125 +1124,6 @@ describe('SetupRpcHandlers', () => {
       // The handler calls path.basename() before forwarding — ensures the
       // storage layer never sees the traversal-y path.
       expect(loadMock).toHaveBeenCalledWith(WORKSPACE, 'passwd');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // wizard:install-pack-agents — untrusted source rejection
-  // -------------------------------------------------------------------------
-
-  describe('community pack methods (delegate to PackInstallService)', () => {
-    const SOURCE = 'https://example.com/pack/agent-pack-manifest.json';
-
-    it('lists packs through the pack install service', async () => {
-      const h = makeHarness();
-      h.packInstall.listPacks.mockResolvedValue([
-        {
-          name: 'Pack',
-          version: '1.0.0',
-          description: 'd',
-          agents: [],
-          source: SOURCE,
-        },
-      ]);
-      h.handlers.register();
-
-      const result = await call<{ packs: unknown[] }>(
-        h,
-        'wizard:list-agent-packs',
-      );
-
-      expect(result.packs).toHaveLength(1);
-    });
-
-    it('passes parsed plan params through and returns the plan', async () => {
-      const h = makeHarness();
-      const plan = {
-        planToken: '00000000-0000-4000-8000-000000000001',
-        target: {
-          harnessRoot: WORKSPACE,
-          openedFolder: WORKSPACE,
-          chosen: 'harness-root' as const,
-          openedIsHarnessRoot: true,
-        },
-        files: [],
-      };
-      h.packInstall.plan.mockResolvedValue(plan);
-      h.handlers.register();
-
-      const result = await call(h, 'wizard:plan-pack-install', {
-        source: SOURCE,
-        agentFiles: ['a.md'],
-        target: 'opened-folder',
-      });
-
-      expect(h.packInstall.plan).toHaveBeenCalledWith({
-        source: SOURCE,
-        agentFiles: ['a.md'],
-        target: 'opened-folder',
-      });
-      expect(result).toEqual(plan);
-    });
-
-    it('rejects an invalid plan request as INVALID_PARAMS without planning', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-
-      const response = await callRaw(h, 'wizard:plan-pack-install', {
-        source: SOURCE,
-        agentFiles: ['a.md'],
-        target: 'elsewhere',
-      });
-
-      expect(response.success).toBe(false);
-      expect(response.errorCode).toBe('INVALID_PARAMS');
-      expect(h.packInstall.plan).not.toHaveBeenCalled();
-    });
-
-    it('passes the token, decisions and target of an install through', async () => {
-      const h = makeHarness();
-      h.packInstall.install.mockResolvedValue({
-        success: true,
-        agentsDownloaded: 1,
-        fromCache: true,
-        files: [{ file: 'a.md', outcome: 'written' }],
-        libraryPass: 'updated',
-      });
-      h.handlers.register();
-      const params = {
-        source: SOURCE,
-        agentFiles: ['a.md'],
-        planToken: '00000000-0000-4000-8000-000000000001',
-        decisions: { 'a.md': { decision: 'replace', revision: 'r1' } },
-        target: 'harness-root',
-      };
-
-      const result = await call<{ libraryPass: string }>(
-        h,
-        'wizard:install-pack-agents',
-        params,
-      );
-
-      expect(h.packInstall.install).toHaveBeenCalledWith(params);
-      expect(result.libraryPass).toBe('updated');
-    });
-
-    it('surfaces a refused install as a failed RPC', async () => {
-      const h = makeHarness();
-      h.packInstall.install.mockRejectedValue(
-        new Error(
-          'Untrusted agent pack source: "https://evil.example.com". Only curated sources are allowed.',
-        ),
-      );
-      h.handlers.register();
-
-      const response = await callRaw(h, 'wizard:install-pack-agents', {
-        source: 'https://evil.example.com',
-        agentFiles: ['attack.md'],
-      });
-
-      expect(response.success).toBe(false);
-      expect(response.error).toMatch(/Untrusted agent pack source/);
     });
   });
 

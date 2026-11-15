@@ -155,6 +155,7 @@ describe('AnalyzeWorkspacePage rendered actions', () => {
     continueButton?.click();
     expect(router.navigate).toHaveBeenCalledWith(
       ['/onboarding', 'analyze', 'skills'],
+
       expect.objectContaining({ queryParams: { analysis: 'saved' } }),
     );
   });

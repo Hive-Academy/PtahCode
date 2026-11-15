@@ -82,6 +82,7 @@ import { PhaseListComponent } from './phase-list.component';
           </h1>
           <p class="text-sm text-base-content-muted">
             Understand this project and find relevant skills.
+
           </p>
         </div>
       </header>
@@ -159,6 +160,7 @@ import { PhaseListComponent } from './phase-list.component';
             'Completed in ' + duration(result.manifest.totalDurationMs)
           "
           (continueRun)="reviewSkills()"
+
         >
           <ptah-phase-list [phases]="store.phaseRows()" />
         </ptah-run-panel>
@@ -312,6 +314,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   protected readonly steps: readonly OnboardingStep[] = [
     { id: 'analyze', label: 'Analyze', state: 'current' },
     { id: 'skills', label: 'Review skills', state: 'upcoming' },
+
     { id: 'guidance', label: 'Project guidance', state: 'upcoming' },
     { id: 'done', label: 'Done', state: 'upcoming' },
   ];
@@ -489,6 +492,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       analysis: this.store.selected() ?? this.store.loaded()?.manifest.slug,
     };
     const link = onboardingStepLink('analyze', 'skills', identity);
+
     await this.router.navigate([...link.commands], {
       queryParams: link.queryParams,
       state: { explicitBack: false },

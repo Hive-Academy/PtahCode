@@ -18,6 +18,7 @@
     "@ptah-extension/agent-sdk": "0.0.1",
     "@ptah-extension/codex-runtime": "0.0.1",
     "@ptah-extension/shared": "0.0.1",
+    "@ptah-extension/user-layer-composition": "0.0.1",
     "@ptah-extension/vscode-lm-tools": "0.0.1",
     "@ptah-extension/workspace-intelligence": "0.0.1",
     "@ptah-extension/agent-generation": "0.0.1",

@@ -6,7 +6,6 @@
  *
  * Used by:
  * - AgenticAnalysisService (SDK-powered analysis)
- * - SetupRpcHandlers (wizard:recommend-agents input validation)
  *
  * @module @ptah-extension/agent-generation
  */

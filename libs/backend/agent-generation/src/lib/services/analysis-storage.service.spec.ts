@@ -161,22 +161,38 @@ describe('AnalysisStorageService', () => {
 
   it('normalizes phase files to LF and creates sharing rules only when absent', async () => {
     const slug = join(ANALYSIS_ROOT, 'demo');
-    await service.writePhaseFile(slug, '01-project-profile.md', 'one\r\ntwo\r\n');
-    expect(await fs.readFile(join(slug, '01-project-profile.md'))).toBe('one\ntwo\n');
+    await service.writePhaseFile(
+      slug,
+      '01-project-profile.md',
+      'one\r\ntwo\r\n',
+    );
+    expect(await fs.readFile(join(slug, '01-project-profile.md'))).toBe(
+      'one\ntwo\n',
+    );
     await service.ensureSharingFiles(WORKSPACE);
-    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitignore'))).toContain('*/generation-manifest.json');
-    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitattributes'))).toBe('manifest.json text eol=lf\n*.md text eol=lf\n');
+    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitignore'))).toContain(
+      '*/generation-manifest.json',
+    );
+    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitattributes'))).toBe(
+      'manifest.json text eol=lf\n*.md text eol=lf\n',
+    );
     await fs.writeFile(join(ANALYSIS_ROOT, '.gitignore'), '# user rules\n');
     await fs.writeFile(join(ANALYSIS_ROOT, '.gitattributes'), '# user attrs\n');
     await service.ensureSharingFiles(WORKSPACE);
-    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitignore'))).toBe('# user rules\n');
-    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitattributes'))).toBe('# user attrs\n');
+    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitignore'))).toBe(
+      '# user rules\n',
+    );
+    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitattributes'))).toBe(
+      '# user attrs\n',
+    );
   });
 
   it('logs a sharing-file write failure and continues with the other file', async () => {
     jest.spyOn(fs, 'writeFile').mockRejectedValueOnce(new Error('denied'));
 
-    await expect(service.ensureSharingFiles(WORKSPACE)).resolves.toBeUndefined();
+    await expect(
+      service.ensureSharingFiles(WORKSPACE),
+    ).resolves.toBeUndefined();
 
     expect(logger.warn).toHaveBeenCalled();
     expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitattributes'))).toBe(
@@ -925,6 +941,56 @@ describe('AnalysisStorageService', () => {
   });
 
   describe('list / loadMultiPhase', () => {
+    it('loads the run matching its manifest run ID', async () => {
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'other'),
+        manifestV3({ slug: 'other', runId: 'RUN-OTHER' }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'target'),
+        manifestV3({ slug: 'target' }),
+      );
+      await service.writePhaseFile(
+        join(ANALYSIS_ROOT, 'target'),
+        '01-project-profile.md',
+        'TARGET',
+      );
+
+      const loaded = await service.loadByRunId(WORKSPACE, 'RUN-1');
+
+      expect(loaded?.manifest.runId).toBe('RUN-1');
+      expect(loaded?.phaseContents['project-profile']).toBe('TARGET');
+      expect(loaded?.analysisDir).toBe(join(ANALYSIS_ROOT, 'target'));
+    });
+
+    it('returns null when no manifest has the run ID', async () => {
+      await service.writeManifest(join(ANALYSIS_ROOT, 'other'), manifestV3());
+      expect(await service.loadByRunId(WORKSPACE, 'RUN-MISSING')).toBeNull();
+    });
+
+    it('skips an unreadable other run while loading the target', async () => {
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'broken'),
+        manifestV3({ slug: 'broken', runId: 'RUN-BROKEN' }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'target'),
+        manifestV3({ slug: 'target' }),
+      );
+      const readFile = fs.readFile.getMockImplementation();
+      fs.readFile.mockImplementation(async (filePath: string) => {
+        if (filePath === join(ANALYSIS_ROOT, 'broken', 'manifest.json')) {
+          throw new Error('unreadable other run');
+        }
+        if (!readFile) throw new Error('Missing file reader');
+        return readFile(filePath);
+      });
+
+      const loaded = await service.loadByRunId(WORKSPACE, 'RUN-1');
+
+      expect(loaded?.manifest.runId).toBe('RUN-1');
+    });
+
     it('lists valid runs newest first with completed-phase counts', async () => {
       const partial = manifestV3({
         slug: 'partial',

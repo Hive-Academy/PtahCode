@@ -1,5 +1,6 @@
 import { ONBOARDING_QUERY } from '@ptah-extension/core';
 
+
 export type OnboardingStepId =
   | 'analyze' | 'skills' | 'guidance' | 'done'
   | 'guidance-only' | 'new-project' | 'team-builder';
@@ -19,6 +20,7 @@ export interface OnboardingStepLink {
   readonly queryParams: Readonly<Record<string, string>>;
 }
 
+
 export function onboardingStepLink(
   from: OnboardingStepId,
   to: OnboardingStepId,
@@ -33,6 +35,7 @@ export function onboardingStepLink(
       ? [ONBOARDING_QUERY.tab]
       : [];
   const queryParams: Record<string, string> = {};
+
   for (const key of keys) {
     const value = identity[key];
     if (typeof value === 'string' && value) queryParams[key] = value;

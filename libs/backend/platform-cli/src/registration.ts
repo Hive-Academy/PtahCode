@@ -11,11 +11,17 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import { homedir } from 'os';
 import type { DependencyContainer } from 'tsyringe';
+import { mkdir } from 'fs/promises';
+import {
+  USER_LAYER_COMPOSITION_TOKENS,
+  type UserLayerBootstrap,
+} from '@ptah-extension/user-layer-composition';
 import {
   PLATFORM_TOKENS,
   ContentDownloadService,
   DesktopOnlyDisplayWindowHost,
   createSessionDriverLock,
+  resolvePtahHomeDir,
 } from '@ptah-extension/platform-core';
 import type { IPlatformInfo } from '@ptah-extension/platform-core';
 import { PlatformType } from '@ptah-extension/platform-core';
@@ -55,6 +61,15 @@ export function registerPlatformCliServices(
     useFactory: child => new TaskCleanupAdapter(child.resolve<Logger>(LOGGER_TOKEN)),
   });
   const userDataPath = options.userDataPath ?? path.join(homedir(), '.ptah');
+  container.register<UserLayerBootstrap>(USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_BOOTSTRAP, {
+    useValue: {
+      async prepare(_workspaceRoot: string): Promise<void> {
+        await Promise.all(['skills', 'agents', 'commands'].map((name) =>
+          mkdir(path.join(resolvePtahHomeDir(), 'user', name), { recursive: true }),
+        ));
+      },
+    },
+  });
   const logsPath = options.logsPath ?? path.join(userDataPath, 'logs');
   const workspacePath = options.workspacePath
     ? path.resolve(options.workspacePath)

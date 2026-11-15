@@ -86,6 +86,7 @@ describe('AnalyzeWorkspacePage', () => {
     await fixture.componentInstance['reviewSkills']();
     expect(navigate).toHaveBeenCalledWith(
       ['/onboarding', 'analyze', 'skills'],
+
       expect.objectContaining({
         queryParams: { analysis: 'saved' },
         state: { explicitBack: false },

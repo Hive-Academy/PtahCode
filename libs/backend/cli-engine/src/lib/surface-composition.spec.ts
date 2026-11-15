@@ -35,6 +35,13 @@
  */
 
 import 'reflect-metadata';
+import { USER_LAYER_COMPOSITION_TOKENS } from '@ptah-extension/user-layer-composition';
+
+it('exposes the CLI bootstrap composition token', () => {
+  expect(USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_BOOTSTRAP).toBe(
+    Symbol.for('PtahUserLayerBootstrap'),
+  );
+});
 import { UsageReconciliationService, USAGE_RECONCILIATION_TOKENS, registerUsageAnalytics } from '@ptah-extension/usage-analytics';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 

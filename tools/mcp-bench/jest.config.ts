@@ -12,5 +12,8 @@ export default {
     ],
   },
   moduleFileExtensions: ['ts', 'js', 'html'],
+  moduleNameMapper: {
+    '^vscode$': '<rootDir>/../../__mocks__/vscode.ts',
+  },
   coverageDirectory: '../../coverage/tools/mcp-bench',
 };

@@ -31,6 +31,7 @@ import {
 } from './origin-sidecar.types';
 import {
   computeSourceHash,
+  isErrnoCode,
   writeSidecarAtomic,
   writeSidecarAtomicAt,
   readSidecar,
@@ -2398,7 +2399,16 @@ export class UserLayerMirrorService {
       names = (await readdir(legacyRoot, { withFileTypes: true }))
         .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
         .map((entry) => entry.name);
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - no flat clone directory means
+      // there is nothing to migrate; other read failures are logged.
+      if (!isErrnoCode(error, 'ENOENT') && !isErrnoCode(error, 'ENOTDIR')) {
+        this.logger.warn(
+          '[UserLayerMirror] legacy agent seed skipped: flat clone scan failed',
+          error instanceof Error ? error : new Error(String(error)),
+          { legacyRoot },
+        );
+      }
       return;
     }
     if (names.length === 0) return;

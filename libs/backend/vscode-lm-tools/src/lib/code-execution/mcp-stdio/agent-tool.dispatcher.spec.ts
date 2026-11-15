@@ -496,6 +496,34 @@ describe('AgentToolDispatcher — agent_list roles', () => {
     expect(out.text).toMatch(/role delivery: preamble\/task-prompt/);
   });
 
+  it('lists only the user-file roster it receives and adds no built-in names', async () => {
+    const { dispatcher } = createListHarness(
+      jest.fn().mockResolvedValue(['reviewer']),
+    );
+
+    const out = listResult(
+      await dispatcher.dispatch('agent_list', request, {}),
+    );
+
+    expect(out.structuredContent).toMatchObject({ roles: ['reviewer'] });
+    expect(out.text).toMatch(/Roles in this workspace: reviewer/);
+    expect(out.text).not.toMatch(/senior-tester|backend-developer|team-leader/);
+  });
+
+  it('forwards a user role name on spawn', async () => {
+    const { dispatcher, spawn } = createHarness();
+
+    await dispatcher.dispatch(
+      'agent_spawn',
+      request,
+      { task: 'Review the diff', cli: 'antigravity', role: 'reviewer' },
+    );
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'reviewer' }),
+    );
+  });
+
   it('returns an empty role list when none were generated', async () => {
     const { dispatcher } = createListHarness(jest.fn().mockResolvedValue([]));
 

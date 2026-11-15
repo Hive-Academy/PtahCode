@@ -113,7 +113,7 @@ describe('SurfaceRoutePersistence', () => {
               children: [
                 {
                   path: 'analyze',
-                  children: [{ path: 'generate', children: [] }],
+                  children: [{ path: 'guidance', children: [] }],
                 },
               ],
             }
@@ -124,7 +124,7 @@ describe('SurfaceRoutePersistence', () => {
     await surfaceRouter.navigateToSurface('settings');
     await surfaceRouter.navigateToSurface(
       'onboarding',
-      ['analyze', 'generate'],
+      ['analyze', 'guidance'],
       {
         queryParams: { tab: 'stale-tab' },
       },
@@ -217,7 +217,7 @@ describe('SurfaceRoutePersistence', () => {
               children: [
                 {
                   path: 'analyze',
-                  children: [{ path: 'generate', children: [] }],
+                  children: [{ path: 'guidance', children: [] }],
                 },
               ],
             }
@@ -228,13 +228,13 @@ describe('SurfaceRoutePersistence', () => {
 
     await surfaceRouter.navigateToSurface(
       'onboarding',
-      ['analyze', 'generate'],
+      ['analyze', 'guidance'],
       { queryParams: { tab: 'valid-tab' } },
     );
 
     expect(api.writes).toHaveLength(1);
     expect(parseWebviewRouteState(api.state)?.route).toBe(
-      '/onboarding/analyze/generate?tab=valid-tab',
+      '/onboarding/analyze/guidance?tab=valid-tab',
     );
   });
 
@@ -251,7 +251,7 @@ describe('SurfaceRoutePersistence', () => {
               children: [
                 {
                   path: 'analyze',
-                  children: [{ path: 'generate', children: [] }],
+                  children: [{ path: 'guidance', children: [] }],
                 },
               ],
             }
@@ -263,11 +263,11 @@ describe('SurfaceRoutePersistence', () => {
     await surfaceRouter.navigateToUrl('/chat/tab-1');
     await surfaceRouter.navigateToSurface(
       'onboarding',
-      ['analyze', 'generate'],
+      ['analyze', 'guidance'],
       { queryParams: { tab: '' } },
     );
 
-    expect(router.url).toBe('/onboarding/analyze/generate?tab=');
+    expect(router.url).toBe('/onboarding/analyze/guidance?tab=');
     expect(validator).not.toHaveBeenCalled();
     expect(api.writes).toHaveLength(1);
     expect(parseWebviewRouteState(api.state)?.route).toBe('/chat/tab-1');

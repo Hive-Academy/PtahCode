@@ -1,16 +1,13 @@
 import type {
   GenerationPreviewAgent,
-  WizardPlanPackInstallResult,
   WizardPreviewGenerationResponse,
 } from '@ptah-extension/shared';
 import {
   TARGET_CHANGED_STATUS,
   agentsFolder,
-  buildPackRows,
   buildWizardRows,
   bulkCountLabel,
   confirmLabel,
-  controllableCount,
   decisionEntries,
   nextSnapshot,
   replaceAriaLabel,
@@ -55,21 +52,6 @@ function preview(
   ...agents: GenerationPreviewAgent[]
 ): WizardPreviewGenerationResponse {
   return { agents };
-}
-
-function packPlan(
-  files: WizardPlanPackInstallResult['files'],
-): WizardPlanPackInstallResult {
-  return {
-    planToken: 'plan-token',
-    target: {
-      harnessRoot: 'D:/work/acme',
-      openedFolder: 'D:/work/acme/packages/api',
-      chosen: 'harness-root',
-      openedIsHarnessRoot: false,
-    },
-    files,
-  };
 }
 
 function first(
@@ -118,36 +100,6 @@ describe('preview-decisions.state', () => {
         preview({ agentId: 'odd', files: [] }, agent('ok', 'new')),
       );
       expect(rows.map((row) => row.id)).toEqual(['ok']);
-    });
-  });
-
-  describe('buildPackRows', () => {
-    it('maps every plan file, with texts for the diff', () => {
-      const rows = buildPackRows(
-        packPlan([
-          { file: 'a.md', state: 'new', revision: 'n' },
-          { file: 'b.md', state: 'identical', revision: 'i' },
-          {
-            file: 'c.md',
-            state: 'differs',
-            revision: 'd',
-            localText: 'old',
-            incomingText: 'new',
-          },
-          { file: 'd.md', state: 'unreadable', revision: 'u' },
-        ]),
-      );
-      expect(rows.map(stateBadge)).toEqual([
-        'New',
-        'Already current',
-        'Differs from local file',
-        'Could not read file',
-      ]);
-      expect(rows.every((row) => row.decision === 'keep')).toBe(true);
-      expect(rows[2].localText).toBe('old');
-      expect(rows[2].incomingText).toBe('new');
-      expect(rows[3].forcedKeep).toBe(true);
-      expect(controllableCount(rows)).toBe(1);
     });
   });
 
@@ -277,22 +229,6 @@ describe('preview-decisions.state', () => {
       expect(after.status).toBe(TARGET_CHANGED_STATUS);
     });
 
-    it('pack differs(A) -> differs(B) resets Replace to Keep', () => {
-      const plan = (revision: string) =>
-        buildPackRows(
-          packPlan([{ file: 'perf-tuner.md', state: 'differs', revision }]),
-        );
-      const before = setDecision(
-        nextSnapshot(null, plan('A'), 'harness-root'),
-        'perf-tuner.md',
-        'replace',
-      );
-      expect(before.rows[0].decision).toBe('replace');
-      const same = nextSnapshot(before, plan('A'), 'harness-root');
-      expect(same.rows[0].decision).toBe('replace');
-      const changed = nextSnapshot(before, plan('B'), 'harness-root');
-      expect(changed.rows[0].decision).toBe('keep');
-    });
   });
 
   describe('labels', () => {
@@ -365,7 +301,7 @@ describe('preview-decisions.state', () => {
         'D:\\work\\acme\\.claude\\agents',
       );
       expect(
-        targetFolder(packPlan([]).target, 'opened-folder'),
+        targetFolder({ harnessRoot: 'D:/work/acme', openedFolder: 'D:/work/acme/packages/api', chosen: 'opened-folder', openedIsHarnessRoot: false }, 'opened-folder'),
       ).toBe('D:/work/acme/packages/api/.claude/agents');
     });
   });

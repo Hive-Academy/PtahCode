@@ -15,7 +15,7 @@ description: Start a new project from an empty folder with a phased roadmap and 
 4. Answer the questions, starting with **What are you building?**
 5. Under **Check your answers:**, examine your answers and continue.
 
-If the folder is not empty, Ptah shows **Folder is not empty. Starting a new project here may use existing files.** Click **Continue in this folder** only if you accept this. For an existing codebase, use [Analyze current project](/setup/setup-wizard/) instead.
+If the folder is not empty, Ptah shows **Folder is not empty. Starting a new project here may use existing files.** Click **Continue in this folder** only if you accept this. For an existing codebase, use [Analyze current project](/workspace/project-analysis/) instead.
 
 ## What the agent does
 

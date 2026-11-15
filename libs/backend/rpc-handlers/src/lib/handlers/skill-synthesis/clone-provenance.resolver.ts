@@ -40,6 +40,8 @@ import {
   AGENT_GENERATION_TOKENS,
   type WizardAgentOriginStore,
 } from '@ptah-extension/agent-generation';
+import { USER_LAYER_MIRROR_SERVICE_TOKEN } from '@ptah-extension/skill-synthesis';
+import type { UserLayerMirrorService } from '@ptah-extension/user-layer-composition';
 import type {
   DivergedReason,
   LibraryPluginState,
@@ -72,6 +74,12 @@ export interface ResolvedCloneOrigin {
   provenance: LibraryProvenance;
   /** Present only for a diverged clone. */
   divergedReason?: DivergedReason;
+  /**
+   * Present only for a `setup-wizard` agent: `true` when the file on disk still
+   * hashes to the hash the wizard recorded, `false` after a hand edit or when
+   * the file cannot be read.
+   */
+  wizardOriginUnchanged?: boolean;
 }
 
 /** The live sources and wizard records one listing resolves against. */
@@ -80,6 +88,8 @@ interface ResolutionContext {
   descriptors: ReadonlyArray<readonly [string, PluginSourceDescriptor]>;
   /** Resolved plugin paths in the workspace's current overlay. */
   activePaths: ReadonlySet<string>;
+  /** Harness root the listing resolves against, when a folder is open. */
+  scopeRoot: string | undefined;
   /** Wizard-written agent slug → the hash the wizard wrote. */
   wizardAgents: ReadonlyMap<string, string>;
   /** skills.sh root path → its recorded `owner/repo`, read once. */
@@ -94,6 +104,8 @@ export class CloneProvenanceResolver {
     private readonly pluginLoader: PluginLoaderService | null,
     @inject(AGENT_GENERATION_TOKENS.AGENT_ORIGIN_STORE, { isOptional: true })
     private readonly wizardOrigins: WizardAgentOriginStore | null,
+    @inject(USER_LAYER_MIRROR_SERVICE_TOKEN, { isOptional: true })
+    private readonly mirror: UserLayerMirrorService | null,
   ) {}
 
   /**
@@ -149,6 +161,7 @@ export class CloneProvenanceResolver {
     return {
       descriptors,
       activePaths,
+      scopeRoot,
       wizardAgents,
       skillsShSources: new Map(),
     };
@@ -159,8 +172,58 @@ export class CloneProvenanceResolver {
     clone: CloneOriginFacts,
   ): Promise<ResolvedCloneOrigin> {
     const provenance = await this.provenanceOf(context, clone);
-    if (!clone.diverged) return { provenance };
-    return { provenance, divergedReason: this.divergedReasonOf(context, clone, provenance) };
+    const wizardUnchanged =
+      provenance.kind === 'setup-wizard'
+        ? await this.wizardFileUnchanged(context, clone)
+        : undefined;
+    const unchanged =
+      wizardUnchanged === undefined
+        ? {}
+        : { wizardOriginUnchanged: wizardUnchanged };
+    if (!clone.diverged) return { provenance, ...unchanged };
+    return {
+      provenance,
+      divergedReason: this.divergedReasonOf(context, clone, provenance),
+      ...unchanged,
+    };
+  }
+
+  /**
+   * True when the agent file still hashes to the hash the wizard recorded. The
+   * hash is the origin store's own (UTF-8 SHA-256 after CRLF to LF), the same
+   * rule `AgentRoleResolver` applies. A missing file is not unchanged (`false`).
+   * An unexpected read error leaves the state unknown (`undefined`).
+   */
+  private async wizardFileUnchanged(
+    context: ResolutionContext,
+    clone: CloneOriginFacts,
+  ): Promise<boolean | undefined> {
+    const recorded = context.wizardAgents.get(clone.slug);
+    if (
+      recorded === undefined ||
+      !this.wizardOrigins ||
+      !this.mirror ||
+      !context.scopeRoot
+    ) {
+      return false;
+    }
+    const filePath = join(
+      this.mirror.getUserLayerRoots(context.scopeRoot).agents,
+      `${clone.slug}.md`,
+    );
+    try {
+      return (await this.wizardOrigins.hashWrittenFile(filePath)) === recorded;
+    } catch (error: unknown) {
+      // degradation-audit: reported - missing files are absent; other read
+      // failures are logged and leave the state unknown.
+      if (isMissingFileError(error)) return false;
+      this.logger.warn(
+        '[clone-provenance] wizard agent file hash failed; state unknown',
+        error instanceof Error ? error : new Error(String(error)),
+        { slug: clone.slug },
+      );
+      return undefined;
+    }
   }
 
   private async provenanceOf(
@@ -278,6 +341,14 @@ export class CloneProvenanceResolver {
       return null;
     }
   }
+}
+
+/** True for a Node error that says the file or a path part does not exist. */
+function isMissingFileError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false;
+  }
+  return error.code === 'ENOENT' || error.code === 'ENOTDIR';
 }
 
 function isSkillsShId(pluginId: string | null): boolean {

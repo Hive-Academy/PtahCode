@@ -97,7 +97,7 @@ describe('HarnessReconcilerService — local-edit report and keep policy (TASK_2
   // ---------------------------------------------------------------- fixtures
 
   function writeAgentSources(...slugs: string[]): void {
-    const agentsRoot = join(sourcesRoot, 'agents');
+    const agentsRoot = join(ws, '.claude', 'agents');
     mkdirSync(agentsRoot, { recursive: true });
     for (const slug of slugs) {
       writeFileSync(
@@ -110,7 +110,7 @@ describe('HarnessReconcilerService — local-edit report and keep policy (TASK_2
 
   function writeAgentSourceBody(slug: string, body: string): void {
     writeFileSync(
-      join(sourcesRoot, 'agents', `${slug}.md`),
+      join(ws, '.claude', 'agents', `${slug}.md`),
       `---
 name: ${slug}
 description: the ${slug} agent

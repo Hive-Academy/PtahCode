@@ -18,22 +18,18 @@ The PtahCode installer does not include the plugins. The content download gets t
 │   ├── ptah-dotnet/
 │   ├── ptah-angular/
 │   └── ptah-react/
-├── templates/
-│   └── agents/
 └── .content-cache.json
 ```
 
 | Path                          | Purpose                                         |
 | ----------------------------- | ----------------------------------------------- |
 | `~/.ptah/plugins/`            | Downloaded plugin files                         |
-| `~/.ptah/templates/agents/`   | Downloaded agent templates                      |
 | `~/.ptah/.content-cache.json` | The last downloaded `contentHash` and counts    |
 
 On Windows, `~` is `%USERPROFILE%`. On macOS and Linux, it is `$HOME`.
 
 ## The content manifest
 
-The file `content-manifest.json` at the root of the [PtahCode repository](https://github.com/Hive-Academy/PtahCode) lists all downloadable files. It has a `plugins` list (base path `plugins`) and a `templates` list (base path `libs/backend/agent-generation/templates/agents`). The script `scripts/generate-content-manifest.js` makes the manifest. One `contentHash` covers the full manifest.
 
 ## The download
 
@@ -63,4 +59,3 @@ Your plugin selection is not in this file, so it stays.
 ## Next steps
 
 - [Create your own plugin](/plugins/creating-plugins/)
-- [Template storage](/templates/template-storage/)

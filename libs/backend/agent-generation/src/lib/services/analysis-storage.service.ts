@@ -228,14 +228,20 @@ export class AnalysisStorageService {
     content: string,
   ): Promise<void> {
     await this.fs.createDirectory(slugDir);
-    await this.fs.writeFile(join(slugDir, filename), content.replace(/\r\n/g, '\n'));
+    await this.fs.writeFile(
+      join(slugDir, filename),
+      content.replace(/\r\n/g, '\n'),
+    );
   }
 
   /** Create sharing rules once, preserving user-maintained versions. */
   async ensureSharingFiles(workspacePath: string): Promise<void> {
     const analysisDir = this.getAnalysisDir(workspacePath);
     const files = [
-      ['.gitignore', '*/generation-manifest.json\n*/enhanced-prompt.*\ngeneration-manifest.json\nenhanced-prompt.*\n'],
+      [
+        '.gitignore',
+        '*/generation-manifest.json\n*/enhanced-prompt.*\ngeneration-manifest.json\nenhanced-prompt.*\n',
+      ],
       ['.gitattributes', 'manifest.json text eol=lf\n*.md text eol=lf\n'],
     ] as const;
     for (const [name, content] of files) {
@@ -681,6 +687,16 @@ export class AnalysisStorageService {
     return items;
   }
 
+  /** Load only the saved run whose manifest has the requested run ID. */
+  async loadByRunId(
+    workspacePath: string,
+    runId: string,
+  ): Promise<MultiPhaseAnalysisResponse | null> {
+    const runs = await this.listValidRuns(workspacePath);
+    const match = runs.find(({ manifest }) => manifest.runId === runId);
+    return match ? this.loadMultiPhase(workspacePath, match.entry) : null;
+  }
+
   /**
    * Load a multi-phase analysis by slug directory name.
    * Reads the manifest and all completed phase markdown files.
@@ -725,7 +741,9 @@ export class AnalysisStorageService {
   ): MultiPhaseAnalysisResponse {
     const extraction = extractStackSummary(phaseContents);
     if (extraction.warning) {
-      this.logger.warn(`${SERVICE_TAG} ${extraction.warning}`, { runId: manifest.runId });
+      this.logger.warn(`${SERVICE_TAG} ${extraction.warning}`, {
+        runId: manifest.runId,
+      });
     }
     return {
       isMultiPhase: true,

@@ -12,6 +12,7 @@ const completed = {
   phaseContents: { 'project-profile': 'Done' }, analysisDir: '/ws/.ptah/analysis/saved',
 } as MultiPhaseAnalysisResponse;
 
+
 describe('AnalysisStepStore', () => {
   const live = signal<MultiPhaseAnalysisResponse | null>(null);
   const running = signal(false);
@@ -29,6 +30,7 @@ describe('AnalysisStepStore', () => {
         multiPhaseResult: live, phaseStatuses: signal([]), currentPhaseNumber: signal(null),
         totalPhaseCount: signal(null), analysisStream: signal([]),
       } },
+
       { provide: WizardAnalysisRunner, useValue: { isRunning: running } },
     ] });
     store = TestBed.inject(AnalysisStepStore);
@@ -41,6 +43,7 @@ describe('AnalysisStepStore', () => {
   it('drops a late load after workspace reset', async () => {
     let finish!: (value: MultiPhaseAnalysisResponse) => void;
     rpc.loadAnalysis.mockReturnValueOnce(new Promise<MultiPhaseAnalysisResponse>((resolve) => { finish = resolve; }));
+
     const pending = store.useAnalysis('saved');
     store.resetForWorkspace();
     finish(completed);

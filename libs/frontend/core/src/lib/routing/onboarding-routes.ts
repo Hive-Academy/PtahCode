@@ -103,16 +103,17 @@ export function isOnboardingIdentityValue(value: unknown): value is string {
 /**
  * Where a generation workflow tab is shown.
  *
- * Agent generation opens on Choose agents, which forwards to Generate agents
- * itself when the tab already has a run. Project guidance opens on the
- * guidance-only entry.
+ * Agent generation opens at the analyze/skills step. Project guidance opens
+ * on the guidance-only entry.
  */
 export function onboardingGenerationTarget(
   workflow: SetupGenerationWorkflow,
   tabId: string,
 ): OnboardingTarget {
   const subPath =
-    workflow === 'setup-agent-generation' ? ['analyze', 'skills'] : ['guidance'];
+    workflow === 'setup-agent-generation'
+      ? ['analyze', 'skills']
+      : ['guidance'];
   return { subPath, queryParams: { [ONBOARDING_QUERY.tab]: tabId } };
 }
 
@@ -144,8 +145,8 @@ export function onboardingHarnessTarget(
  * `segments` is the primary segment path (without matrix parameters) and
  * `queryParams` the parsed query, both as the Router parsed them.
  *
- * - `/onboarding/analyze/agents` and `/onboarding/analyze/generate` bind an
- *   agent generation tab;
+ * - Retired `/onboarding/analyze/agents` and `/onboarding/analyze/generate`
+ *   URLs still identify their original tab before the onboarding redirect;
  * - `/onboarding/analyze/guidance` and `/onboarding/guidance` bind a project
  *   guidance tab.
  */
@@ -173,4 +174,3 @@ function generationWorkflowForPath(
   }
   return second === 'guidance' ? 'setup-project-prompt' : null;
 }
-

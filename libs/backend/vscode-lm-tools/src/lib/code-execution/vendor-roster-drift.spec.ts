@@ -191,7 +191,6 @@ function findRepoRoot(): string {
 const REPO_ROOT = findRepoRoot();
 
 const ASSET_ROOTS = [
-  'libs/backend/agent-generation/templates/agents',
   'plugins',
 ] as const;
 
@@ -319,7 +318,7 @@ describe('agent-readable assets assert no roster', () => {
     expect(missing).toEqual([]);
   });
 
-  it('actually scanned both asset trees (a zero-file scan is a lie)', () => {
+  it('actually scanned the plugin tree (a zero-file scan is a lie)', () => {
     const files = assetMarkdownFiles();
     for (const root of ASSET_ROOTS) {
       expect(files.some((f) => f.startsWith(root))).toBe(true);

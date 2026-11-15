@@ -255,13 +255,6 @@ export class WizardAnalysisRunner {
     try {
       const existingMultiPhase = this.wizardState.multiPhaseResult();
       if (existingMultiPhase) {
-        if (this.wizardState.recommendations().length === 0) {
-          this._statusText.set('Calculating agent recommendations...');
-          const recommendations =
-            await this.wizardRpc.recommendAgents(existingMultiPhase);
-          if (token !== this.runToken) return;
-          this.wizardState.setRecommendations(recommendations);
-        }
         this.wizardState.setCurrentStep('analysis');
         return;
       }
@@ -274,12 +267,6 @@ export class WizardAnalysisRunner {
       const multiPhaseResult = await this.wizardRpc.deepAnalyze({ resume });
       if (token !== this.runToken) return;
       this.wizardState.setMultiPhaseResult(multiPhaseResult);
-
-      this._statusText.set('Calculating agent recommendations...');
-      const recommendations =
-        await this.wizardRpc.recommendAgents(multiPhaseResult);
-      if (token !== this.runToken) return;
-      this.wizardState.setRecommendations(recommendations);
 
       this.wizardState.setCurrentStep('analysis');
     } catch (error: unknown) {

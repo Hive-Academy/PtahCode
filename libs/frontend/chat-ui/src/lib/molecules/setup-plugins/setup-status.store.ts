@@ -1,4 +1,5 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
+import { Router } from '@angular/router';
 import { isActiveWorkspaceTabSet, TabManagerService } from '@ptah-extension/chat-state';
 import { ClaudeRpcService, ElectronLayoutService, PluginCatalogService, VSCodeService, WorkspaceScopeService } from '@ptah-extension/core';
 import type { SetupGenerationWorkflow, SetupStatusGetResponse } from '@ptah-extension/shared';
@@ -53,6 +54,7 @@ function toScanFacts(data: unknown): Omit<ScanSnapshot, 'key'> | null {
 @Injectable({ providedIn: 'root' })
 export class SetupStatusStore {
   private readonly rpc = inject(ClaudeRpcService);
+  private readonly router = inject(Router);
   private readonly catalog = inject(PluginCatalogService);
   private readonly scope = inject(WorkspaceScopeService);
   private readonly tabs = inject(TabManagerService);
@@ -226,8 +228,8 @@ export class SetupStatusStore {
     this.launching.set(true);
     this.launchError.set(null);
     try {
-      const result = await this.rpc.call('setup-wizard:launch', {}, { timeout: 5000 });
-      if (!result.isSuccess()) this.launchError.set('Could not launch setup. Please try again.');
+      const opened = await this.router.navigate(['/onboarding']);
+      if (!opened) this.launchError.set('Could not launch setup. Please try again.');
     } catch {
       this.launchError.set('Could not launch setup. Please try again.');
     } finally {

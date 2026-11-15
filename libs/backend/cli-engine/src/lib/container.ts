@@ -136,6 +136,7 @@ import {
   type EnhancedPromptsService,
   type IMultiPhaseAnalysisReader,
 } from '@ptah-extension/agent-generation';
+import { registerUserLayerCompositionServices } from '@ptah-extension/user-layer-composition';
 import {
   registerVsCodeLmToolsServices,
   BROWSER_CAPABILITIES_TOKEN,
@@ -900,6 +901,7 @@ export class CliDIContainer {
       );
     }
     registerAgentGenerationServices(container, logger);
+    registerUserLayerCompositionServices(container);
     container.register(AGENT_GENERATION_TOKENS.SETUP_WIZARD_SERVICE, {
       useValue: {
         startWizard: async () => {

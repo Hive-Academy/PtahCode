@@ -1,6 +1,3 @@
-import { readdirSync } from 'fs';
-import * as path from 'path';
-import { isRetiredRole } from '@ptah-extension/shared';
 import {
   PTAH_BROWSER_TOOLS,
   SUBAGENT_DISALLOWED_TOOLS,
@@ -36,17 +33,8 @@ describe('subagent tool allowlist (N3)', () => {
     expect(getSubagentDisallowedTools('team-leader')).toEqual([]);
   });
 
-  it('has a row for every shipped agent template and no other', () => {
-    const templateDir = path.resolve(__dirname, '../../../templates/agents');
-    const templateNames = readdirSync(templateDir)
-      .filter((file) => file.endsWith('.template.md'))
-      .map((file) => file.replace(/\.template\.md$/, ''))
-      .filter((name) => !isRetiredRole(name))
-      .sort();
-    expect(Object.keys(SUBAGENT_DISALLOWED_TOOLS).sort()).toEqual(
-      templateNames,
-    );
-    expect(templateNames).toHaveLength(0);
+  it('has no built-in policy rows after template retirement', () => {
+    expect(Object.keys(SUBAGENT_DISALLOWED_TOOLS)).toEqual([]);
   });
 
   it('never uses a form the runtime ignores (bare * or a partial wildcard)', () => {

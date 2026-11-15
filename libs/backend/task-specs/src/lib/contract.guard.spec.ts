@@ -223,15 +223,11 @@ describe('contract guard — per-task filename literals', () => {
 // Duty 2 — assets may only name documents the contract recognises
 // ---------------------------------------------------------------------------
 
-const AGENT_TEMPLATE_DIR = 'libs/backend/agent-generation/templates/agents';
 const ORCHESTRATION_SKILL_DIR =
   'plugins/ptah-core/skills/orchestration';
 
 function assetFiles(): string[] {
   return [
-    ...walkFiles(path.join(REPO_ROOT, AGENT_TEMPLATE_DIR), (n) =>
-      n.endsWith('.md'),
-    ),
     ...walkFiles(path.join(REPO_ROOT, ORCHESTRATION_SKILL_DIR), (n) =>
       n.endsWith('.md'),
     ),
@@ -241,7 +237,7 @@ function assetFiles(): string[] {
 /**
  * A per-task document is a `*.md` sitting in a TASK-FOLDER POSITION, i.e.
  * `<SPEC_ROOT>/<folder>/<name>.md`. Detection is positional on purpose: agent
- * templates also name `CLAUDE.md`, `SKILL.md`, `README.md` and design-system
+ * skill assets also name `CLAUDE.md`, `SKILL.md`, `README.md` and design-system
  * docs, none of which are per-task documents, and a bare filename scan would
  * drown the real signal.
  */
@@ -274,34 +270,18 @@ describe('contract guard — asset document names', () => {
     expect([...new Set(offenders)]).toEqual([]);
   });
 
-  it('actually scanned both asset trees (a silent zero-file scan is a lie)', () => {
+  it('actually scanned the orchestration skill tree (a silent zero-file scan is a lie)', () => {
     const files = assetFiles();
-    expect(files.some((f) => f.startsWith(AGENT_TEMPLATE_DIR))).toBe(true);
     expect(files.some((f) => f.startsWith(ORCHESTRATION_SKILL_DIR))).toBe(true);
   });
 
-  /**
-   * The shared partials are a NEW position for the same text: one file that
-   * fifteen templates include. `walkFiles` already recurses into it, so this
-   * asserts the coverage rather than adding it — a `_shared` tree that stopped
-   * being scanned would silently exempt the most-read prose in the corpus.
-   */
-  it('reaches the shared template partials', () => {
-    const shared = assetFiles().filter((f) =>
-      f.startsWith(`${AGENT_TEMPLATE_DIR}/_shared/`),
-    );
-    expect(shared.length).toBeGreaterThan(0);
-  });
 });
 
 // ---------------------------------------------------------------------------
 // Duty 3 — dead identifiers cannot come back
 // ---------------------------------------------------------------------------
 
-const SKILL_ASSET_ROOTS = [
-  'plugins',
-  AGENT_TEMPLATE_DIR,
-];
+const SKILL_ASSET_ROOTS = ['plugins'];
 
 function skillAssetFiles(): string[] {
   return SKILL_ASSET_ROOTS.flatMap((rel) =>

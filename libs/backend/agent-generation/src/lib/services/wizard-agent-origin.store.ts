@@ -39,7 +39,7 @@ import {
   type AgentOrigins,
   type AgentOriginsFile,
 } from '@ptah-extension/harness-sync';
-import { computeSourceHash, isErrnoCode } from './user-layer/source-hash';
+import { computeSourceHash, isErrnoCode } from '@ptah-extension/user-layer-composition';
 
 const SERVICE_TAG = '[WizardAgentOriginStore]';
 

@@ -20,6 +20,7 @@ jest.mock('./analyze/analyze-done.page', () => ({ AnalyzeDonePage: stubPage('pta
 jest.mock('./proposal/new-project-intake.page', () => ({ NewProjectIntakePage: stubPage('ptah-new-project-intake-page') }));
 jest.mock('./proposal/team-builder-start.page', () => ({ TeamBuilderStartPage: stubPage('ptah-team-builder-start-page') }));
 
+
 describe('ONBOARDING_ROUTES', () => {
   function configure(): Router {
     TestBed.configureTestingModule({ providers: [
@@ -42,5 +43,6 @@ describe('ONBOARDING_ROUTES', () => {
     const router = configure();
     await router.navigateByUrl('/onboarding/analyze/skills');
     expect(router.url).toBe('/onboarding/analyze/skills');
+
   });
 });

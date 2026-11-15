@@ -111,7 +111,7 @@ describe('HarnessReconcilerService — reconcile and verify agree', () => {
   function writeSources(): HarnessSourceState {
     const skillsRoot = join(sourcesRoot, 'skills');
     const commandsRoot = join(sourcesRoot, 'commands');
-    const agentsRoot = join(sourcesRoot, 'agents');
+    const agentsRoot = join(ws, '.claude', 'agents');
     mkdirSync(commandsRoot, { recursive: true });
     mkdirSync(agentsRoot, { recursive: true });
 

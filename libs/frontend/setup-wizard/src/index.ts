@@ -14,7 +14,6 @@ export {
 export { provideWizardInternalState } from './lib/services/wizard-internal-state.provider';
 export { GenerationSourceStatusComponent } from './lib/components/generation-source-status.component';
 export { GenerationModelPickerComponent } from './lib/components/generation-model-picker.component';
-export { CommunityPacksPanelComponent } from './lib/components/community-packs-panel.component';
 export { AgentPreviewDialogComponent } from './lib/components/agent-preview-dialog.component';
 export { AgentNextStepsComponent } from './lib/components/agent-next-steps.component';
 export { OutcomeSummaryComponent } from './lib/components/completion/outcome-summary.component';

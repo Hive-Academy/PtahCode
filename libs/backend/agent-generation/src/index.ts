@@ -112,59 +112,9 @@ export type {
   RegeneratePromptsResponse,
   IMultiPhaseAnalysisReader,
 } from './lib/services/enhanced-prompts';
-export {
-  UserLayerMirrorService,
-  userLayerPassFailures,
-} from './lib/services/user-layer/user-layer-mirror.service';
-export type {
-  UserLayerRoots,
-  MirrorSources,
-  MirrorResult,
-  CloneEntry,
-  ReconcileResult,
-  DivergedClone,
-  RebaseCloneArgs,
-  RebaseResult,
-  KeepCloneArgs,
-  KeepResult,
-  WriteEnhancedSkillArgs,
-  WriteEnhancedFileCloneArgs,
-  WriteEnhancedResult,
-  RevertCloneArgs,
-  RevertResult,
-  HistoryEntry,
-  OrphanedClone,
-  ReapResult,
-  UpstreamLiveness,
-  QuarantinedAgentItem,
-  QuarantinedAgentState,
-  QuarantinedAgentsListing,
-  QuarantineRestoreOutcome,
-  QuarantineRestoreResult,
-  MirrorPluginDescriptor,
-  MirrorPluginDescriptors,
-  CloneEditState,
-} from './lib/services/user-layer/user-layer-mirror.service';
-export type {
-  OriginSidecar,
-  OriginKind,
-} from './lib/services/user-layer/origin-sidecar.types';
-export { HARNESS_PLUGIN_ID_PREFIX } from './lib/services/user-layer/origin-sidecar.types';
-export {
-  classifyUpstream,
-  collectUpstreamLiveness,
-  UserLayerOrphanReaper,
-} from './lib/services/user-layer/user-layer-orphan-reaper';
-// `ReapResult` is already exported above through the mirror service.
-export type {
-  ReapKeptReason,
-  ReapClonePath,
-  ReapedClonePath,
-  KeptClonePath,
-  FailedClonePath,
-} from './lib/services/user-layer/user-layer-orphan-reaper';
-export { UserLayerFsOps } from './lib/services/user-layer/user-layer-fs-ops';
 export { WizardAgentOriginStore } from './lib/services/wizard-agent-origin.store';
+export { UserLayerMirrorService, userLayerPassFailures, UserLayerFsOps, UserLayerOrphanReaper, collectUpstreamLiveness, classifyUpstream, HARNESS_PLUGIN_ID_PREFIX } from '@ptah-extension/user-layer-composition';
+export type { UserLayerRoots, MirrorSources, MirrorResult, CloneEntry, ReconcileResult, DivergedClone, RebaseCloneArgs, RebaseResult, KeepCloneArgs, KeepResult, WriteEnhancedSkillArgs, WriteEnhancedFileCloneArgs, WriteEnhancedResult, RevertCloneArgs, RevertResult, HistoryEntry, OrphanedClone, ReapResult, UpstreamLiveness, QuarantinedAgentItem, QuarantinedAgentState, QuarantinedAgentsListing, QuarantineRestoreOutcome, QuarantineRestoreResult, MirrorPluginDescriptor, MirrorPluginDescriptors, CloneEditState, OriginSidecar, OriginKind, ReapKeptReason, ReapClonePath, ReapedClonePath, KeptClonePath, FailedClonePath } from '@ptah-extension/user-layer-composition';
 export type {
   AgentOriginEntry,
   AgentOrigins,

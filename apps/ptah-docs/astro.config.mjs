@@ -9,8 +9,6 @@ const EDIT_BASE = `${GITHUB_REPO}/edit/main/apps/ptah-docs/`;
 export default defineConfig({
   site: 'https://docs.ptah.live',
   redirects: {
-    // Setup Wizard moved out of the Agents section into its own Setup group.
-    '/agents/setup-wizard': '/setup/setup-wizard/',
     // The file tree page documented @ptah-extension/editor's left-sidebar
     // panel. That library is being retired (TASK_2026_385); the git surface
     // it used to host lives in the Git dock now.
@@ -92,7 +90,6 @@ export default defineConfig({
           label: 'Setup',
           items: [
             { label: 'Project Setup', slug: 'setup' },
-            { label: 'Analyze Current Project', slug: 'setup/setup-wizard' },
             { label: 'AI Team Builder', slug: 'setup/ai-team-builder' },
             { label: 'New Project', slug: 'setup/new-project' },
           ],
@@ -190,15 +187,6 @@ export default defineConfig({
             { label: 'Harness Plugins', slug: 'plugins/harness-plugins' },
             { label: 'Plugin Storage', slug: 'plugins/plugin-storage' },
             { label: 'Creating Plugins', slug: 'plugins/creating-plugins' },
-          ],
-        },
-        {
-          label: 'Templates',
-          items: [
-            { label: 'Overview', slug: 'templates' },
-            { label: 'How Templates Are Used', slug: 'templates/using-templates' },
-            { label: 'Template Storage', slug: 'templates/template-storage' },
-            { label: 'Creating Templates', slug: 'templates/creating-templates' },
           ],
         },
         {

@@ -93,8 +93,10 @@ import {
   canEditCloneBody,
   bulkSkippedRoleCount,
   eligibleForBulkRebase,
+  isRetiredRoleClone,
   KEEP_MINE_EXPLANATION,
   REBASE_EXPLANATION,
+  RETIRED_ROLE_REASON,
 } from './clone-action-gating';
 import {
   agentSyncChips,
@@ -779,6 +781,8 @@ export class SkillClonesViewComponent implements OnInit {
     if (!this.onAgentTab()) return chips;
     const health = this.harness.health();
     for (const c of this.visibleClones()) {
+      // A retired role has no active provider copy; show history only.
+      if (isRetiredRoleClone(c)) continue;
       chips.set(c.slug, agentSyncChips(health, c.slug));
     }
     return chips;
@@ -926,6 +930,10 @@ export class SkillClonesViewComponent implements OnInit {
   }
 
   protected async onRevertTo(req: CloneHistoryRequest): Promise<void> {
+    if (isRetiredRoleClone(req.clone)) {
+      this.showToast(RETIRED_ROLE_REASON, 'error');
+      return;
+    }
     this.busySlug.set(req.clone.slug);
     try {
       const result = await this.rpc.revertEnhancement(

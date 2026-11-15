@@ -4,7 +4,7 @@
  * Types for setup-status:*, setup-wizard:*, wizard:*, enhancedPrompts:*
  */
 
-import type { ProjectAnalysisResult, AgentRecommendation } from '../wizard';
+import type { ProjectAnalysisResult } from '../wizard';
 import type { HarnessTargetId } from '../harness-sync.types';
 import type { GenerationAgentOutcome } from '../wizard/phase';
 import type {
@@ -16,7 +16,6 @@ import type {
   GenerationTargetInfo,
   LibraryPassStatus,
   LocalFileState,
-  PackFileOutcome,
 } from './rpc-setup-decisions.types';
 
 export type SetupGenerationWorkflow =
@@ -140,14 +139,6 @@ export interface SetupStatusGetResponse {
   ruleCount: number;
   lastUpdated: string | null;
   hasClaudeConfig: boolean;
-}
-
-/** Parameters for setup-wizard:launch RPC method */
-export type SetupWizardLaunchParams = Record<string, never>;
-
-/** Response from setup-wizard:launch RPC method */
-export interface SetupWizardLaunchResponse {
-  success: boolean;
 }
 
 /** Parameters for wizard:deep-analyze RPC method */
@@ -306,25 +297,6 @@ export function isMultiPhaseResponse(
  * Always returns MultiPhaseAnalysisResponse (MCP server required).
  */
 export type WizardDeepAnalyzeResponse = MultiPhaseAnalysisResponse;
-
-/** Parameters for wizard:recommend-agents RPC method */
-export type WizardRecommendAgentsParams = unknown; // DeepProjectAnalysis input
-
-/** Explicit static catalog request; legacy analysis input remains supported. */
-export interface WizardRecommendAgentsCatalogParams {
-  mode: 'workspace-catalog';
-  tabBinding?: SetupGenerationTabBinding & {
-    workflow: 'setup-agent-generation';
-  };
-}
-
-/**
- * Response from wizard:recommend-agents RPC method
- *
- * Agent recommendations based on project analysis.
- * Returns array of AgentRecommendation (from setup-wizard.types.ts).
- */
-export type WizardRecommendAgentsResponse = AgentRecommendation[];
 
 /** Parameters for wizard:cancel-analysis RPC method */
 export type WizardCancelAnalysisParams = Record<string, never>;
@@ -691,55 +663,4 @@ export interface WizardGetGenerationRunStateParams {
 export interface WizardGetGenerationRunStateResponse {
   run: SetupGenerationRunState | null;
   rejection?: SetupGenerationRejection;
-}
-
-/** A single agent entry within a pack (frontend-facing DTO) */
-export interface AgentPackEntryDto {
-  file: string;
-  name: string;
-  description: string;
-  category: string;
-}
-
-/** Public info about an agent pack (frontend-facing DTO) */
-export interface AgentPackInfoDto {
-  name: string;
-  version: string;
-  description: string;
-  agents: AgentPackEntryDto[];
-  source: string;
-}
-
-/** Parameters for wizard:list-agent-packs RPC method */
-export type WizardListAgentPacksParams = Record<string, never>;
-
-/** Response from wizard:list-agent-packs RPC method */
-export interface WizardListAgentPacksResult {
-  packs: AgentPackInfoDto[];
-}
-
-/** Parameters for wizard:install-pack-agents RPC method */
-export interface WizardInstallPackAgentsParams {
-  source: string;
-  agentFiles: string[];
-  /** Optional explicit workspace path; overrides the backend's detected root. */
-  workspacePath?: string;
-  /** Token from `wizard:plan-pack-install`; required for any replace. */
-  planToken?: string;
-  /** Keep/replace per pack file name. Absent = keep. */
-  decisions?: Record<string, FileDecisionEntry>;
-  /** Root to write to. Absent = the harness root. */
-  target?: GenerationTargetChoice;
-}
-
-/** Response from wizard:install-pack-agents RPC method */
-export interface WizardInstallPackAgentsResult {
-  success: boolean;
-  agentsDownloaded: number;
-  fromCache: boolean;
-  error?: string;
-  /** Per-file outcome, in plan order. */
-  files?: PackFileOutcome[];
-  /** Whether the Library was refreshed after the install. */
-  libraryPass?: LibraryPassStatus;
 }

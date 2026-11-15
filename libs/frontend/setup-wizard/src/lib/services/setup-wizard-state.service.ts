@@ -11,7 +11,6 @@ import {
   StreamingSurfaceRegistry,
 } from '@ptah-extension/chat-routing';
 import type {
-  AgentPackInfoDto,
   AgentRecommendation,
   AnalysisStreamPayload,
   EnhancedPromptsSummary,
@@ -28,7 +27,6 @@ import { WizardFlowState } from './setup-wizard/wizard-flow-state';
 import { WizardScanState } from './setup-wizard/wizard-scan-state';
 import { WizardAnalysisState } from './setup-wizard/wizard-analysis-state';
 import { WizardGenerationState } from './setup-wizard/wizard-generation-state';
-import { WizardCommunityPacksState } from './setup-wizard/wizard-community-packs-state';
 import { WizardComputeds } from './setup-wizard/wizard-computeds';
 import type { WizardInternalState } from './setup-wizard/wizard-internal-state';
 import type {
@@ -173,12 +171,6 @@ export class SetupWizardStateService implements MessageHandler {
     signal<MultiPhaseAnalysisResponse | null>(null);
   private readonly savedAnalysesSignal = signal<SavedAnalysisMetadata[]>([]);
   private readonly analysisLoadedFromHistorySignal = signal(false);
-  private readonly communityPacksSignal = signal<AgentPackInfoDto[]>([]);
-  private readonly communityPacksLoadingSignal = signal(false);
-  private readonly agentInstallStatusSignal = signal<
-    Record<string, 'idle' | 'installing' | 'installed' | 'error'>
-  >({});
-  private readonly expandedPackSourceSignal = signal<string | null>(null);
   public readonly currentStep = this.currentStepSignal.asReadonly();
   public readonly projectContext = this.projectContextSignal.asReadonly();
   public readonly availableAgents = this.availableAgentsSignal.asReadonly();
@@ -216,13 +208,6 @@ export class SetupWizardStateService implements MessageHandler {
   public readonly savedAnalyses = this.savedAnalysesSignal.asReadonly();
   public readonly analysisLoadedFromHistory =
     this.analysisLoadedFromHistorySignal.asReadonly();
-  public readonly communityPacks = this.communityPacksSignal.asReadonly();
-  public readonly communityPacksLoading =
-    this.communityPacksLoadingSignal.asReadonly();
-  public readonly agentInstallStatus =
-    this.agentInstallStatusSignal.asReadonly();
-  public readonly expandedPackSource =
-    this.expandedPackSourceSignal.asReadonly();
   public readonly currentPhaseNumber = this._currentPhaseNumber.asReadonly();
   public readonly totalPhaseCount = this._totalPhaseCount.asReadonly();
   public readonly phaseStatuses = this._phaseStatuses.asReadonly();
@@ -243,9 +228,7 @@ export class SetupWizardStateService implements MessageHandler {
   private readonly scanState: WizardScanState;
   private readonly analysisState: WizardAnalysisState;
   private readonly generationState: WizardGenerationState;
-  private readonly communityPacksState: WizardCommunityPacksState;
   private readonly computeds: WizardComputeds;
-  public readonly installedCommunityAgentCount: WizardComputeds['installedCommunityAgentCount'];
   public readonly isMultiPhaseAnalysis: WizardComputeds['isMultiPhaseAnalysis'];
   public readonly hasMultiPhaseResult: WizardComputeds['hasMultiPhaseResult'];
   public readonly selectedCount: WizardComputeds['selectedCount'];
@@ -292,10 +275,6 @@ export class SetupWizardStateService implements MessageHandler {
       enhancedPromptsError: this.enhancedPromptsErrorSignal,
       enhancedPromptsDetectedStack: this.enhancedPromptsDetectedStackSignal,
       enhancedPromptsSummary: this.enhancedPromptsSummarySignal,
-      communityPacks: this.communityPacksSignal,
-      communityPacksLoading: this.communityPacksLoadingSignal,
-      agentInstallStatus: this.agentInstallStatusSignal,
-      expandedPackSource: this.expandedPackSourceSignal,
     };
     const surfaceFacade: WizardSurfaceFacade = {
       ensurePhaseSurface: (phaseKey): SurfaceId =>
@@ -340,12 +319,7 @@ export class SetupWizardStateService implements MessageHandler {
     this.scanState = new WizardScanState(this.internalState);
     this.analysisState = new WizardAnalysisState(this.internalState);
     this.generationState = new WizardGenerationState(this.internalState);
-    this.communityPacksState = new WizardCommunityPacksState(
-      this.internalState,
-    );
     this.computeds = new WizardComputeds(this.internalState);
-    this.installedCommunityAgentCount =
-      this.computeds.installedCommunityAgentCount;
     this.isMultiPhaseAnalysis = this.computeds.isMultiPhaseAnalysis;
     this.hasMultiPhaseResult = this.computeds.hasMultiPhaseResult;
     this.selectedCount = this.computeds.selectedCount;
@@ -418,7 +392,6 @@ export class SetupWizardStateService implements MessageHandler {
     this.scanState.reset();
     this.analysisState.reset();
     this.generationState.reset();
-    this.communityPacksState.reset();
     this.phaseGeneration.resetPassState();
     this.scanProgressSignal.set(null);
     this.analysisStreamSignal.set([]);
@@ -426,25 +399,6 @@ export class SetupWizardStateService implements MessageHandler {
     this.generationStreamSignal.set([]);
     this.enhanceStreamSignal.set([]);
     this.resetPhaseSurfaces();
-  }
-
-  public setCommunityPacks(packs: AgentPackInfoDto[]): void {
-    this.communityPacksState.setCommunityPacks(packs);
-  }
-
-  public setCommunityPacksLoading(loading: boolean): void {
-    this.communityPacksState.setCommunityPacksLoading(loading);
-  }
-
-  public setAgentInstallStatus(
-    key: string,
-    status: 'idle' | 'installing' | 'installed' | 'error',
-  ): void {
-    this.communityPacksState.setAgentInstallStatus(key, status);
-  }
-
-  public toggleExpandedPack(source: string): void {
-    this.communityPacksState.toggleExpandedPack(source);
   }
 
   public setDeepAnalysis(analysis: ProjectAnalysisResult): void {

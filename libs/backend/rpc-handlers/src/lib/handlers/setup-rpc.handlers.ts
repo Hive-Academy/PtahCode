@@ -3,9 +3,9 @@
  *
  * Handles setup-related RPC methods:
  * - setup-status:get-status - Get agent configuration status
- * - setup-wizard:launch - Launch setup wizard webview
  * - wizard:deep-analyze - Perform deep project analysis
- * - wizard:recommend-agents - Calculate agent recommendations
+ * - wizard:get-resumable-run - Resume paused analysis
+ * - wizard:cancel-analysis - Cancel running analysis
  */
 
 import * as path from 'path';
@@ -29,15 +29,9 @@ import type {
   MemoryWriteRequest,
 } from '@ptah-extension/platform-core';
 import { deriveWorkspaceFingerprint } from '@ptah-extension/memory-curator';
-import type {
-  AgentRecommendation,
-  DeepProjectAnalysis,
-} from '@ptah-extension/agent-generation';
 import {
   AGENT_GENERATION_TOKENS,
-  ProjectAnalysisZodSchema,
   normalizeAgentOutput,
-  AgentRecommendationService,
   AnalysisStorageService,
   AnalysisFreshnessService,
   AnalysisClaudeMdLinker,
@@ -46,20 +40,15 @@ import { SDK_TOKENS, PluginLoaderService } from '@ptah-extension/agent-sdk';
 import type {
   MultiPhaseAnalysisResponse,
   SavedAnalysisMetadata,
-  AgentCategory,
   WizardDeepAnalyzeParams,
   WizardGetResumableRunParams,
   WizardGetResumableRunResponse,
   WizardAnalysisStatusParams,
   WizardAnalysisStatusResponse,
-  WizardListAgentPacksParams,
-  WizardListAgentPacksResult,
-  WizardInstallPackAgentsParams,
-  WizardInstallPackAgentsResult,
-  WizardPlanPackInstallParams,
-  WizardPlanPackInstallResult,
   WizardRecommendSkillsParams,
   WizardRecommendSkillsResponse,
+  WizardRecommendAnalysisSkillsParams,
+  WizardRecommendAnalysisSkillsResult,
   WizardSearchSkillsParams,
   WizardSearchSkillsResponse,
   WizardGetProjectGuidanceParams,
@@ -73,23 +62,20 @@ import { Result } from '@ptah-extension/shared';
 import type { MultiPhaseManifest } from '@ptah-extension/agent-generation';
 import type { RpcMethodName } from '@ptah-extension/shared';
 import { isAuthorizedWorkspace } from '../utils/workspace-authorization';
-import { authorizeTabWorkspace } from './wizard-generation-binding';
 import { toResumableGenerationRun } from './wizard-generation-checkpoint.service';
 import {
   WizardDeepAnalyzeParamsSchema,
   WizardGetResumableRunParamsSchema,
   WizardAnalysisStatusParamsSchema,
-  WizardInstallPackAgentsParamsSchema,
   WizardListAnalysesParamsSchema,
   WizardLoadAnalysisParamsSchema,
-  WizardPlanPackInstallParamsSchema,
   WizardRecommendSkillsParamsSchema,
+  WizardRecommendAnalysisSkillsParamsSchema,
   WizardSearchSkillsParamsSchema,
   WizardGetProjectGuidanceParamsSchema,
   WizardPreviewSkillsForConsentParamsSchema,
   WizardInstallSkillsWithConsentParamsSchema,
 } from './setup-rpc.schema';
-import { PackInstallService } from './setup/pack-install.service';
 import { SkillsShApiClient } from '@ptah-extension/cli-agent-runtime';
 import { SkillsShRpcHandlers } from './skills-sh-rpc.handlers';
 import { stageSkillsInstall, STAGED_SKILLS_REL } from '../utils/skills-sh-cli';
@@ -115,12 +101,6 @@ type SkillConsentPort = {
   recordConsent(skillName: string, contentHash: string): void;
 };
 
-/** The pack operations the setup handler delegates to. */
-export type PackInstaller = Pick<
-  PackInstallService,
-  'listPacks' | 'plan' | 'install'
->;
-
 /**
  * SetupStatus response type for setup-status:get-status RPC method
  */
@@ -139,12 +119,11 @@ interface SetupStatusResponse {
 export class SetupRpcHandlers {
   static readonly METHODS = [
     'setup-status:get-status',
-    'setup-wizard:launch',
     'wizard:deep-analyze',
     'wizard:get-resumable-run',
     'wizard:analysis-status',
-    'wizard:recommend-agents',
     'wizard:recommend-skills',
+    'wizard:recommend-analysis-skills',
     'wizard:search-skills',
     'wizard:get-project-guidance',
     'wizard:preview-skills-for-consent',
@@ -152,9 +131,6 @@ export class SetupRpcHandlers {
     'wizard:cancel-analysis',
     'wizard:list-analyses',
     'wizard:load-analysis',
-    'wizard:list-agent-packs',
-    'wizard:plan-pack-install',
-    'wizard:install-pack-agents',
   ] as const satisfies readonly RpcMethodName[];
 
   constructor(
@@ -168,8 +144,6 @@ export class SetupRpcHandlers {
     private readonly container: DependencyContainer,
     @inject(TOKENS.SENTRY_SERVICE)
     private readonly sentryService: SentryService,
-    @inject(PackInstallService)
-    private readonly packInstall: PackInstaller,
     @inject(SkillsShApiClient)
     private readonly skillsShApi: SkillsShApiClient,
   ) {}
@@ -223,12 +197,11 @@ export class SetupRpcHandlers {
    */
   register(): void {
     this.registerGetStatus();
-    this.registerLaunchWizard();
     this.registerDeepAnalyze();
     this.registerGetResumableRun();
     this.registerAnalysisStatus();
-    this.registerRecommendAgents();
     this.registerRecommendSkills();
+    this.registerRecommendAnalysisSkills();
     this.registerSearchSkills();
     this.registerGetProjectGuidance();
     this.registerPreviewSkillsForConsent();
@@ -236,9 +209,6 @@ export class SetupRpcHandlers {
     this.registerCancelAnalysis();
     this.registerListAnalyses();
     this.registerLoadAnalysis();
-    this.registerListAgentPacks();
-    this.registerPlanPackInstall();
-    this.registerInstallPackAgents();
 
     this.logger.debug('Setup RPC handlers registered', {
       methods: [...SetupRpcHandlers.METHODS],
@@ -292,44 +262,6 @@ export class SetupRpcHandlers {
         }
 
         return result.value as SetupStatusResponse;
-      },
-    );
-  }
-
-  /**
-   * setup-wizard:launch - Launch setup wizard webview
-   */
-  private registerLaunchWizard(): void {
-    this.rpcHandler.registerMethod<void, { success: boolean }>(
-      'setup-wizard:launch',
-      async () => {
-        this.logger.debug('RPC: setup-wizard:launch called');
-
-        const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
-        if (!workspaceRoot) {
-          throw new RpcUserError(
-            'No workspace folder open. Please open a folder first.',
-            'WORKSPACE_NOT_OPEN',
-          );
-        }
-
-        const setupWizardService = this.resolveService<{
-          launchWizard: (workspacePath: string) => Promise<{
-            isErr: () => boolean;
-            error?: Error;
-          }>;
-        }>(AGENT_GENERATION_TOKENS.SETUP_WIZARD_SERVICE, 'SetupWizardService');
-
-        const result = await setupWizardService.launchWizard(workspaceRoot);
-
-        if (result.isErr()) {
-          this.logger.error('Failed to launch setup wizard', result.error);
-          throw new Error(
-            result.error?.message || 'Failed to launch setup wizard',
-          );
-        }
-
-        return { success: true };
       },
     );
   }
@@ -557,163 +489,6 @@ export class SetupRpcHandlers {
   }
 
   /**
-   * wizard:recommend-agents - Calculate agent recommendations
-   */
-  private registerRecommendAgents(): void {
-    this.rpcHandler.registerMethod<unknown, AgentRecommendation[]>(
-      'wizard:recommend-agents',
-      async (rawAnalysis) => {
-        this.logger.debug('RPC: wizard:recommend-agents called');
-
-        const catalogRequest = z.object({
-          mode: z.literal('workspace-catalog'),
-          tabBinding: z
-            .object({
-              tabId: z.string().min(1).max(200),
-              workflow: z.literal('setup-agent-generation'),
-              workspacePath: z.string().min(1).max(4096),
-            })
-            .optional(),
-        });
-        const catalogMode =
-          typeof rawAnalysis === 'object' &&
-          rawAnalysis !== null &&
-          'mode' in rawAnalysis &&
-          rawAnalysis.mode === 'workspace-catalog';
-        if (catalogMode) {
-          const parsed = catalogRequest.safeParse(rawAnalysis);
-          if (!parsed.success)
-            throw new RpcUserError(
-              'Invalid catalog request.',
-              'INVALID_PARAMS',
-            );
-          const request = parsed.data;
-          if (request.tabBinding) {
-            const host = this.workspaceProvider.getWorkspaceRoot();
-            if (
-              !host ||
-              !isAuthorizedWorkspace(
-                request.tabBinding.workspacePath,
-                this.workspaceProvider,
-              ) ||
-              !(await authorizeTabWorkspace(
-                host,
-                request.tabBinding,
-                this.logger,
-              ))
-            ) {
-              throw new RpcUserError(
-                'Workspace is not authorized for this catalog request.',
-                'UNAUTHORIZED_WORKSPACE',
-              );
-            }
-          }
-        }
-
-        if (!rawAnalysis) {
-          throw new Error(
-            'Missing analysis input. Please run wizard:deep-analyze first.',
-          );
-        }
-
-        const input = rawAnalysis as Record<string, unknown>;
-        if (catalogMode || input['isMultiPhase'] === true) {
-          this.logger.info(
-            'Multi-phase analysis detected, returning all agents recommended',
-          );
-
-          const agentCatalog: Array<{
-            id: string;
-            name: string;
-            description: string;
-            category: AgentCategory;
-          }> = [];
-
-          const recommendations: AgentRecommendation[] = agentCatalog.map(
-            ({ id: agentId, name, description, category }) => ({
-              agentId,
-              agentName: name,
-              category,
-              relevanceScore: 100,
-              recommended: true,
-              matchedCriteria: catalogMode
-                ? ['Workspace catalog', 'All agents available']
-                : ['Deep codebase analysis', 'All agents recommended'],
-              description,
-            }),
-          );
-
-          this.logger.info('All agents recommended (multi-phase)', {
-            totalAgents: recommendations.length,
-          });
-
-          return recommendations;
-        }
-
-        const validationResult =
-          ProjectAnalysisZodSchema.safeParse(rawAnalysis);
-
-        if (!validationResult.success) {
-          const errors = validationResult.error.issues
-            .map((e) => `${String(e.path.join('.'))}: ${e.message}`)
-            .join('; ');
-
-          this.logger.error('Invalid analysis input', {
-            errors,
-            receivedKeys: Object.keys(rawAnalysis as object),
-          });
-
-          throw new Error(`Invalid analysis input: ${errors}`);
-        }
-
-        const analysis = normalizeAgentOutput(validationResult.data);
-
-        this.logger.debug('Analysis input validated and normalized', {
-          projectType: String(analysis.projectType),
-          frameworkCount: analysis.frameworks.length,
-          patternCount: analysis.architecturePatterns.length,
-          hasKeyFileLocations: !!analysis.keyFileLocations,
-        });
-
-        type RecommendationServiceType = {
-          calculateRecommendations: (
-            analysis: DeepProjectAnalysis,
-          ) => AgentRecommendation[];
-        };
-
-        let recommendationService: RecommendationServiceType;
-
-        try {
-          recommendationService =
-            this.resolveService<RecommendationServiceType>(
-              AGENT_GENERATION_TOKENS.AGENT_RECOMMENDATION_SERVICE,
-              'AgentRecommendationService',
-            );
-        } catch {
-          this.logger.debug(
-            'AgentRecommendationService not registered via token, using direct class resolution',
-          );
-          recommendationService =
-            this.resolveService<RecommendationServiceType>(
-              AgentRecommendationService as unknown as symbol,
-              'AgentRecommendationService (direct)',
-            );
-        }
-
-        const recommendations =
-          recommendationService.calculateRecommendations(analysis);
-
-        this.logger.info('Agent recommendations calculated', {
-          totalAgents: recommendations.length,
-          recommendedCount: recommendations.filter((r) => r.recommended).length,
-        });
-
-        return recommendations;
-      },
-    );
-  }
-
-  /**
    * wizard:cancel-analysis - Cancel a running workspace analysis
    */
   private registerCancelAnalysis(): void {
@@ -859,46 +634,56 @@ export class SetupRpcHandlers {
     });
   }
 
-  /**
-   * wizard:list-agent-packs - List available community agent packs
-   */
-  private registerListAgentPacks(): void {
+  private registerRecommendAnalysisSkills(): void {
     this.rpcHandler.registerMethod<
-      WizardListAgentPacksParams,
-      WizardListAgentPacksResult
-    >('wizard:list-agent-packs', async () => {
-      this.logger.debug('RPC: wizard:list-agent-packs called');
-      return { packs: await this.packInstall.listPacks() };
+      WizardRecommendAnalysisSkillsParams,
+      WizardRecommendAnalysisSkillsResult
+    >('wizard:recommend-analysis-skills', async (rawParams) => {
+      const { runId } = this.parse(
+        WizardRecommendAnalysisSkillsParamsSchema,
+        rawParams,
+      );
+      const empty = (warning: string): WizardRecommendAnalysisSkillsResult => ({
+        skills: [],
+        detectedItems: [],
+        unmatchedItems: [],
+        searchFailures: [],
+        summarySource: 'none',
+        warning,
+      });
+      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+      if (!workspaceRoot)
+        return empty('Open a workspace to review recommended skills.');
+      try {
+        const storage = this.resolveService<AnalysisStorageService>(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          'AnalysisStorageService',
+        );
+        const saved = await storage.loadByRunId(workspaceRoot, runId);
+        if (!saved)
+          return empty(
+            'The saved analysis run was not found in this workspace.',
+          );
+        const summary = saved.stackSummary;
+        if (!summary?.items.length)
+          return empty('No technology stack was found in this analysis.');
+        const recommendation = this.resolveService<SkillRecommendationService>(
+          SKILL_RECOMMENDATION_SERVICE,
+          'SkillRecommendationService',
+        );
+        return await recommendation.recommendAnalysis({
+          items: summary.items,
+          summarySource: summary.source,
+          search: (query) => this.skillsShApi.search(query),
+        });
+      } catch (error: unknown) {
+        this.logger.error(
+          'Could not recommend skills from saved analysis',
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        return empty('Could not read the saved analysis or search for skills.');
+      }
     });
-  }
-
-  /**
-   * wizard:plan-pack-install - Compare pack files with the destination and
-   * mint a plan token. Writes nothing.
-   */
-  private registerPlanPackInstall(): void {
-    this.rpcHandler.registerMethod<
-      WizardPlanPackInstallParams,
-      WizardPlanPackInstallResult
-    >('wizard:plan-pack-install', (rawParams) =>
-      this.packInstall.plan(
-        this.parse(WizardPlanPackInstallParamsSchema, rawParams),
-      ),
-    );
-  }
-
-  /**
-   * wizard:install-pack-agents - Install pack files under keep/replace guards
-   */
-  private registerInstallPackAgents(): void {
-    this.rpcHandler.registerMethod<
-      WizardInstallPackAgentsParams,
-      WizardInstallPackAgentsResult
-    >('wizard:install-pack-agents', (rawParams) =>
-      this.packInstall.install(
-        this.parse(WizardInstallPackAgentsParamsSchema, rawParams),
-      ),
-    );
   }
 
   private registerRecommendSkills(): void {
