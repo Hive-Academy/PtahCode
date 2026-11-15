@@ -142,6 +142,7 @@ export interface PlanUsageRequestOptions {
 interface CachedReading {
   readonly reading: PlanUsageReading;
   readonly readAt: number;
+  readonly sequence: number;
 }
 
 interface Flight {
@@ -161,6 +162,7 @@ export class PlanUsageService {
   private readonly readers: Readonly<Record<string, PlanUsageReader>>;
   private readonly localReaders: Readonly<Record<string, PlanUsageReader>>;
   private readonly cache = new Map<string, CachedReading>();
+  private nextReadSequence = 0;
   private readonly failingSince = new Map<string, number>();
   private readonly flights = new Map<string, Flight>();
 
@@ -249,7 +251,8 @@ export class PlanUsageService {
 
   private startFlight(target: PlanOwnerTarget, refresh: boolean, allowCliFallback: boolean): Flight {
     const controller = new AbortController();
-    const read = this.read(target, refresh, controller.signal, allowCliFallback);
+    const sequence = ++this.nextReadSequence;
+    const read = this.read(target, refresh, controller.signal, allowCliFallback, sequence);
     const flight: Flight = {
       key: flightKey(target) + (allowCliFallback ? ':cli' : ''),
       ownerKey: target.ownerRef.key,
@@ -311,20 +314,21 @@ export class PlanUsageService {
     refresh: boolean,
     signal: AbortSignal,
     allowCliFallback: boolean,
+    sequence: number,
   ): Promise<PlanLimitOwnerSnapshot> {
     const owner = target.ownerRef;
     const providerId = normaliseOwnerProviderId(target.providerId);
     if (NO_USAGE_SOURCE_PROVIDERS.has(providerId)) {
-      return this.settle(owner, statusOnly('no-usage-source'));
+      return this.settle(owner, statusOnly('no-usage-source'), sequence);
     }
     const reader = this.readers[providerId];
-    if (!reader) return this.settle(owner, statusOnly('provider-unsupported'));
+    if (!reader) return this.settle(owner, statusOnly('provider-unsupported'), sequence);
 
     let credential: PlanSecret | undefined;
     if (target.credentialRef && providerId !== 'grok' && providerId !== 'kimi-code') {
       const resolution = await this.credentials.resolve(target.credentialRef);
       if (resolution.kind === 'unavailable') {
-        return this.settle(owner, statusOnly(resolution.status));
+        return this.settle(owner, statusOnly(resolution.status), sequence);
       }
       credential = resolution.secret;
       // An Ollama Cloud agent's owner and key are read from its slot at
@@ -336,7 +340,7 @@ export class PlanUsageService {
         owner.identityKind === 'credential' &&
         credentialOwnerKey(providerId, credential.reveal()) !== owner.key
       ) {
-        return this.settle(owner, statusOnly('service-unavailable'));
+        return this.settle(owner, statusOnly('service-unavailable'), sequence);
       }
     }
 
@@ -396,7 +400,7 @@ export class PlanUsageService {
         providerId,
         reason: errorKind(error),
       });
-      return this.settle(owner, statusOnly('service-unavailable'));
+      return this.settle(owner, statusOnly('service-unavailable'), sequence);
     }
     // A failure caused by the cancellation itself is not the owner's state.
     if (signal.aborted) throw abortError();
@@ -411,25 +415,27 @@ export class PlanUsageService {
         readAt: reading.readAt ?? reading.fetchedAt ?? this.now(),
       };
     }
-    return this.settle(owner, reading);
+    return this.settle(owner, reading, sequence);
   }
 
   /** Apply the cache and stale rules to one reading. */
   private settle(
     owner: QuotaOwnerRef,
     reading: PlanUsageReading,
+    sequence: number,
   ): PlanLimitOwnerSnapshot {
     if (this.disposed) throw abortError();
     if (reading.sourceInvalid) return this.assemble(owner, reading);
     const key = owner.key;
+    const cached = this.cache.get(key);
+    if (cached && cached.sequence > sequence) return this.assemble(owner, cached.reading);
     if (isTransientFailure(reading)) {
       const since = this.failingSince.get(key) ?? this.now();
-      const cached = this.cache.get(key)?.reading;
       const staleFrom =
         reading.status === 'stale'
           ? reading
-          : cached?.status === 'available'
-            ? cached
+          : cached?.reading.status === 'available'
+            ? cached.reading
             : undefined;
       if (!staleFrom) return this.assemble(owner, reading);
       if (this.cache.has(key)) this.failingSince.set(key, since);
@@ -449,7 +455,7 @@ export class PlanUsageService {
     this.failingSince.delete(key);
     // No open session says nothing about the owner; the next read retries.
     if (reading.unavailableReason !== 'no-open-session') {
-      this.cache.set(key, { reading, readAt: this.now() });
+      this.cache.set(key, { reading, readAt: this.now(), sequence });
       this.evictCache();
     }
     if (reading.status === 'available') {

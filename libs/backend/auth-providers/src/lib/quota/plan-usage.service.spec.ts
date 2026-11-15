@@ -163,6 +163,41 @@ function harness(storageOverride?: IStateStorage) {
 }
 
 describe('PlanUsageService', () => {
+  it('keeps the newer owner reading when an older flight settles last', async () => {
+    const h = harness();
+    const older = deferred<CodexAccountUsageResult>();
+    const newer = deferred<CodexAccountUsageResult>();
+    h.getAccountUsage.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+
+    const target = codexTarget();
+    const first = h.service.getOwnerSnapshot(target, { refresh: true });
+    const second = h.service.getOwnerSnapshot(target, { refresh: true, allowCliFallback: true });
+    const positive = {
+      ...codexAvailable(T0 + 1),
+      buckets: [{ id: 'codex', label: 'Codex',
+        primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: RESET_SECONDS },
+        credits: { balance: '12', hasCredits: true, unlimited: false },
+      }],
+    } satisfies CodexAccountUsageResult;
+    newer.resolve(positive);
+    await second;
+    older.resolve({
+      ...codexAvailable(T0),
+      buckets: [{ id: 'codex', label: 'Codex',
+        primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: RESET_SECONDS },
+        credits: { balance: '0', hasCredits: false, unlimited: false },
+      }],
+    });
+    await first;
+
+    const cached = await h.service.getOwnerSnapshot(target);
+    expect(h.getAccountUsage).toHaveBeenCalledTimes(2);
+    expect(cached.credits).toEqual(positive.buckets[0].credits);
+    expect(cached.windows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ used: { kind: 'percent', percent: 20 } }),
+    ]));
+  });
+
   it('carries Codex credits and optional allowance fields into the owner snapshot', async () => {
     const h = harness();
     h.getAccountUsage.mockResolvedValue({
