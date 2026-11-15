@@ -1215,8 +1215,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       throw error;
     }
     if (stop.interruptError) {
-      // degradation-audit: reported - the interrupt error is recorded in the
-      // end reason when the hard path still ended the session.
+      // The interrupt error is recorded in the end reason when the hard path
+      // still ended the session.
       reason = `stopped-by-parent (interrupt failed: ${stop.interruptError})`;
     }
     if (!stop.stopped) {
@@ -2370,7 +2370,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         child.sdkSessionId,
       );
       if (!stop.stopped || stop.interruptError) {
-        // degradation-audit: reported - failure still allows succession.
+        // Incomplete stop is logged; succession proceeds anyway (degradation path).
         this.log(
           `${childSessionId} grace stop incomplete (stopped=${stop.stopped}): ${stop.interruptError ?? 'still active'}`,
         );
