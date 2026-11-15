@@ -976,9 +976,15 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       let resolveAttachment: (
         entry: import('./mcp-attachment-probe.port').McpAttachment | undefined,
       ) => void = () => undefined;
-      const probe = {
+      const probe: import('./mcp-attachment-probe.port').IMcpAttachmentProbe = {
         get: () => attachmentRef.current,
-        getAttempt: () => ({ agentId: 'lane-a', port: 51821, reason: 'forbidden' as const, method: 'POST', time: Date.now() }),
+        getAttempt: () => ({
+          agentId: 'agent-under-test',
+          port: 4888,
+          reason: 'forbidden',
+          method: 'POST',
+          time: Date.now(),
+        }),
         waitFor: () =>
           new Promise<import('./mcp-attachment-probe.port').McpAttachment | undefined>((resolve) => {
             resolveAttachment = resolve;

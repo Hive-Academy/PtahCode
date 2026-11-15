@@ -126,14 +126,16 @@ describe('NativePopoverComponent', () => {
   });
 
   it('shows and focuses an unpositioned panel when no anchor is connected', async () => {
-    const trigger = (fixture.nativeElement as HTMLElement).querySelector('.popover-trigger')!;
-    trigger.remove();
+    const trigger = (fixture.nativeElement as HTMLElement).querySelector('.popover-trigger');
+    expect(trigger).toBeTruthy();
+    trigger?.remove();
     host.anchor.set(document.createElement('button'));
     host.isOpen.set(true);
     fixture.detectChanges();
     await flushAll();
-    const panel = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('.popover-panel')!;
-    expect(panel.style.visibility).toBe('visible');
+    const panel = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('.popover-panel');
+    expect(panel).toBeTruthy();
+    expect(panel?.style.visibility).toBe('visible');
     expect(document.activeElement).toBe(panel);
     expect(host.openedCount).toBe(1);
     expect(mockedCompute).not.toHaveBeenCalled();
@@ -280,9 +282,10 @@ describe('NativePopoverComponent', () => {
     it('closes on Escape while focus remains on the trigger', () => {
       host.isOpen.set(true);
       fixture.detectChanges();
-      const trigger = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('#trigger-btn')!;
-      trigger.focus();
-      trigger.dispatchEvent(
+      const trigger = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('#trigger-btn');
+      expect(trigger).toBeTruthy();
+      trigger?.focus();
+      trigger?.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
       );
       expect(host.closedCount).toBe(1);
@@ -517,10 +520,12 @@ describe('NativePopoverComponent', () => {
 
       host.isOpen.set(true);
       fixture.detectChanges();
-      const layer = root.querySelector<HTMLElement>('.ptah-popover-layer')!;
-      const panel = layer.querySelector<HTMLElement>('.popover-panel')!;
-      expect(layer.getAttribute('popover')).toBe('manual');
-      expect(layer.contains(panel)).toBe(true);
+      const layer = root.querySelector<HTMLElement>('.ptah-popover-layer');
+      expect(layer).toBeTruthy();
+      const panel = layer?.querySelector<HTMLElement>('.popover-panel');
+      expect(panel).toBeTruthy();
+      expect(layer?.getAttribute('popover')).toBe('manual');
+      expect(layer?.contains(panel)).toBe(true);
 
       // jest-preset-angular removes inline styles; verify the rendered shell lifecycle here.
       host.isOpen.set(false);

@@ -21,6 +21,17 @@ import { AddAccountFormComponent } from './add-account-form.component';
 import { AmbientAccountRowComponent } from './ambient-account-row.component';
 import { AccountsTabComponent } from './accounts-tab.component';
 
+/** A browser moves focus to the body when it disables the focused field; jsdom does not, so a spec drops it. */
+function dropFocusToBody(): void {
+  const probe = document.createElement('button');
+  document.body.appendChild(probe);
+  probe.focus();
+  probe.remove();
+}
+
+/** Raw spacing utilities. The tab's layout uses tokens instead (pattern-spec 0.2). */
+const RAW_SPACING = /(?:^|\s)(?:gap(?:-[xy])?|p[xytblr]?|m[xytblr]?|space-[xy])-\d/;
+
 type StatusReadOutcome = Awaited<ReturnType<ProviderAccountsStateService['refreshAccountStatus']>>;
 
 const account = (profileId: string, label: string, state: ProviderAccountState = 'signed-in'): ProviderAccountSummary => ({
@@ -40,6 +51,7 @@ const WORK = account('p-work-0001', 'Work');
 const TEAM = account('p-team-0002', 'Team plan', 'not-signed-in');
 const CONNECTED: ClaudeAmbientStatusView = {
   status: 'ready', result: { state: 'connected', checkedAt: '2026-10-26T10:00:00.000Z' }, localFailure: false,
+  transportTimeout: false,
 };
 
 interface Deferred<T> { readonly promise: Promise<T>; resolve(value: T): void }
@@ -129,6 +141,7 @@ describe('AccountsTabComponent', () => {
   });
 
   const root = () => fixture.nativeElement as HTMLElement;
+  const accountsHeading = () => byTestId('accounts-tab-header')?.querySelector<HTMLElement>('h3') ?? null;
   const byTestId = (id: string) => root().querySelector<HTMLElement>(`[data-testid="${id}"]`);
   const all = (id: string) => Array.from(root().querySelectorAll<HTMLElement>(`[data-testid="${id}"]`));
   const rowOf = (label: string) =>
@@ -166,7 +179,8 @@ describe('AccountsTabComponent', () => {
       const region = root().querySelector<HTMLElement>('[role="region"]');
       expect(region?.getAttribute('aria-label')).toBe('Claude accounts');
       expect(region?.getAttribute('aria-labelledby')).toBeNull();
-      expect(region?.className).toContain('space-y-6');
+      expect(region?.className).toContain('gap-[var(--ptah-gap-group)]');
+      expect(region?.className).not.toMatch(RAW_SPACING);
       expect(region?.className).toContain('text-sm');
       expect(region?.getAttribute('aria-busy')).toBe('false');
       expect(root().querySelector('[aria-live]')).toBeNull();
@@ -176,15 +190,17 @@ describe('AccountsTabComponent', () => {
       expect(region?.getAttribute('aria-busy')).toBe('true');
     });
 
-    it('header: Accounts heading (focusable by script) and Add account', () => {
-      const heading = byTestId('accounts-tab-heading');
+    it('header: the form section "Accounts" heading (focusable by script); Add account in the list header actions', () => {
+      const heading = accountsHeading();
       expect(heading?.tagName).toBe('H3');
+      expect(heading?.textContent?.trim()).toBe('Accounts');
+      expect(heading?.closest('ptah-form-section')).toBe(byTestId('accounts-tab-header'));
       expect(heading?.getAttribute('tabindex')).toBe('-1');
       const add = byTestId('accounts-tab-add');
       expect(add?.textContent?.trim()).toBe('Add account');
       expect(add?.className).toContain('btn-outline');
-      expect(add?.className).toContain('min-h-8');
       expect(add?.getAttribute('aria-disabled')).toBeNull();
+      expect(add?.closest('[data-testid="section-header-actions"]')).not.toBeNull();
     });
 
     it('loading: busy list with a "Loading…" row; Add aria-disabled and inert', () => {
@@ -203,11 +219,13 @@ describe('AccountsTabComponent', () => {
       expect(byTestId('accounts-tab-loading')?.textContent?.trim()).toBe('Open a workspace');
     });
 
-    it('first-load failure: an alert row with Try again', () => {
+    it('first-load failure: the form section error alert with Try again below it', () => {
       setView({ status: 'error', snapshot: null, stale: false, error: 'Could not load accounts. Retry.' });
+      const alert = byTestId('form-section-error')?.querySelector('[role="alert"]');
+      expect(alert?.getAttribute('role')).toBe('alert');
+      expect(alert?.textContent).toContain('Could not load accounts');
       const error = byTestId('accounts-tab-error');
-      expect(error?.getAttribute('role')).toBe('alert');
-      expect(error?.textContent).toContain('Could not load accounts');
+      expect(error?.querySelector('button')?.textContent?.trim()).toBe('Try again');
       error?.querySelector('button')?.click();
       expect(accounts.refresh).toHaveBeenCalledWith('claude');
     });
@@ -234,16 +252,21 @@ describe('AccountsTabComponent', () => {
   });
 
   describe('rows', () => {
-    it('list spacing has no inline margin; rows px-4 py-3, signed-in first, names as truncated titled text', () => {
+    it('list and row spacing from tokens only; signed-in first, names as truncated titled text', () => {
       const list = byTestId('accounts-tab-list');
       expect(list?.getAttribute('aria-label')).toBe('Claude accounts');
-      expect(list?.className).toContain('space-y-3');
+      // D4: the account list stays a list, in the default slot of the "Accounts" form section.
+      expect(list?.closest('[data-testid="form-section-fields"]')).not.toBeNull();
+      expect(list?.className).toContain('gap-[var(--ptah-gap-heading)]');
       expect(list?.className).not.toMatch(/\bm[tby]?-/);
+      for (const id of ['accounts-tab-list', 'accounts-tab-row', 'accounts-tab-row-actions', 'accounts-tab-row-used-by']) {
+        for (const node of all(id)) expect(node.className).not.toMatch(RAW_SPACING);
+      }
       const names = all('accounts-tab-row-name');
       expect(names.map((name) => name.textContent?.trim())).toEqual(['Work', 'Team plan']);
       expect(names[0].getAttribute('title')).toBe('Work');
       expect(names[0].className).toContain('truncate');
-      expect(all('accounts-tab-row')[0].className).toContain('px-4 py-3');
+      expect(all('accounts-tab-row')[0].className).toContain('px-[var(--ptah-surface-pad)] py-[var(--ptah-gap-heading)]');
     });
 
     it('Manage chevron on every named row; Sign in only for not-signed-in, failed and cancelled; no row button', () => {
@@ -290,7 +313,7 @@ describe('AccountsTabComponent', () => {
       await openDetailOf('Team plan');
       expect(detail()?.account().profileId).toBe(TEAM.profileId);
       expect(detail()?.accounts()).toEqual([WORK, TEAM]);
-      expect(byTestId('accounts-tab-heading')).toBeNull();
+      expect(accountsHeading()).toBeNull();
       expect(byTestId('accounts-tab-list')).toBeNull();
       expect(document.activeElement).toBe(detailHeading());
     });
@@ -309,7 +332,7 @@ describe('AccountsTabComponent', () => {
       await settle();
       expect(detail()).toBeUndefined();
       expect(announce).toHaveBeenCalledWith(ACCOUNT_COPY.accountGone, 'status');
-      expect(document.activeElement).toBe(byTestId('accounts-tab-heading'));
+      expect(document.activeElement).toBe(accountsHeading());
     });
 
     it('a push that removes the open account while focus is outside the tab leaves focus there', async () => {
@@ -578,7 +601,7 @@ describe('AccountsTabComponent', () => {
       detail()?.remove.emit(WORK.profileId);
       accounts.commit(snapshot([TEAM]));
       await settle();
-      expect(document.activeElement).toBe(byTestId('accounts-tab-heading'));
+      expect(document.activeElement).toBe(accountsHeading());
     });
 
     it('focus moved outside the tab during the removal stays there', async () => {
@@ -628,6 +651,20 @@ describe('AccountsTabComponent', () => {
       await settle();
       expect(announce).toHaveBeenCalledWith(ACCOUNT_COPY.accountAdded, 'status');
       expect(accounts.setSelection).not.toHaveBeenCalled();
+      expect(detail()?.account().profileId).toBe(NEW.profileId);
+      expect(document.activeElement).toBe(detailHeading());
+    });
+
+    it('success after the pending form dropped focus to the body: the new detail still opens (B-2)', async () => {
+      const form = await openAdd();
+      root().querySelector<HTMLElement>('ptah-add-account-form input')?.focus();
+      form.submitted.emit('Side');
+      fixture.detectChanges();
+      // The pattern disables its fields while saving.
+      dropFocusToBody();
+      expect(document.activeElement).toBe(document.body);
+      accounts.commit(snapshot([WORK, TEAM, NEW]));
+      await settle();
       expect(detail()?.account().profileId).toBe(NEW.profileId);
       expect(document.activeElement).toBe(detailHeading());
     });

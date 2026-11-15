@@ -8,14 +8,21 @@ export interface McpAttachment {
 export interface McpAttachmentAttempt {
   readonly agentId: string;
   readonly port: number;
-  readonly reason: 'auth-required' | 'invalid-credential' | 'forbidden' | 'auth-error' | 'invalid-url' | 'seen';
+  readonly reason:
+    | 'auth-required'
+    | 'invalid-credential'
+    | 'forbidden'
+    | 'auth-error'
+    | 'invalid-url'
+    | 'seen';
   readonly method: string;
   readonly time: number;
 }
 
 export interface IMcpAttachmentProbe {
   get(agentId: string, port: number): McpAttachment | undefined;
-  getAttempt(agentId: string, port: number): McpAttachmentAttempt | undefined;
+  /** Last request seen for the lane that did not complete the handshake. */
+  getAttempt?(agentId: string, port: number): McpAttachmentAttempt | undefined;
   waitFor(
     agentId: string,
     port: number,

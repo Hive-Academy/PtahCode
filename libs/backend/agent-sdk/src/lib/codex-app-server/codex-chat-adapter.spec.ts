@@ -2176,6 +2176,112 @@ describe('CodexChatAdapter', () => {
       await published;
     }
   });
+  it('closes an idle session on a parent-stop interrupt (D13)', async () => {
+    const { adapter, context } = setup();
+    const stream = await adapter.startChatSession({ tabId });
+    for await (const event of stream) void event;
+    expect(adapter.isSessionActive(id)).toBe(true);
+
+    await adapter.interruptSession(id, 'parent-stop');
+
+    expect(adapter.isSessionActive(id)).toBe(false);
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });
+  it('keeps an idle session open on a soft interrupt without a stop cause', async () => {
+    const { adapter, context } = setup();
+    const stream = await adapter.startChatSession({ tabId });
+    for await (const event of stream) void event;
+
+    await adapter.interruptSession(id);
+
+    expect(adapter.isSessionActive(id)).toBe(true);
+    expect(context.close).not.toHaveBeenCalled();
+    adapter.endSession(id);
+  });
+  it('closes a busy session whose interrupt was accepted on a parent-stop (D13)', async () => {
+    const { adapter, context } = setup();
+    context.events.mockImplementation(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn',
+          sequence: 1,
+          type: 'textDelta' as const,
+          itemId: 'item',
+          delta: 'hello',
+        };
+        yield terminal;
+      })(),
+    );
+    const stream = await adapter.startChatSession({ tabId });
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next();
+    context.interrupt.mockResolvedValue(true);
+
+    await adapter.interruptSession(id, 'parent-stop');
+
+    expect(context.interrupt).toHaveBeenCalled();
+    expect(adapter.isSessionActive(id)).toBe(false);
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });
+  it('closes session after accepted interrupt with parent-stop cause', async () => {
+    const { adapter, context, lifecycle } = setup();
+    context.events.mockImplementation(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn',
+          sequence: 1,
+          type: 'textDelta' as const,
+          itemId: 'item',
+          delta: 'hello',
+        };
+        yield terminal;
+      })(),
+    );
+    const stream = await adapter.startChatSession({ tabId });
+    const iterator = stream[Symbol.asyncIterator]();
+    const first = await iterator.next();
+    expect(first.done).toBe(false);
+    context.interrupt.mockResolvedValue(true);
+
+    await adapter.interruptSession(id, 'parent-stop');
+    // The stream settles with the cancelled turn error once the hard stop lands.
+    await expect(
+      (async () => {
+        for (let r = await iterator.next(); !r.done; r = await iterator.next());
+      })(),
+    ).rejects.toThrow('cancelled');
+
+    expect(lifecycle.closed).toHaveBeenCalledTimes(1);
+    expect(lifecycle.closed).toHaveBeenCalledWith(id);
+    expect(adapter.isSessionActive(id)).toBe(false);
+  });
+  it('closes session on user-stop cause', async () => {
+    const { adapter, context } = setup();
+    context.events.mockImplementation(() =>
+      (async function* () {
+        yield {
+          ...identity,
+          turnId: 'turn',
+          sequence: 1,
+          type: 'textDelta' as const,
+          itemId: 'item',
+          delta: 'hello',
+        };
+        yield terminal;
+      })(),
+    );
+    const stream = await adapter.startChatSession({ tabId });
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next();
+    context.interrupt.mockResolvedValue(true);
+
+    await adapter.interruptSession(id, 'user-stop');
+
+    expect(adapter.isSessionActive(id)).toBe(false);
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });
   it('keeps the thread when a matching token arrives after a completed turn stream', async () => {
     const { adapter, context, dispose, lifecycle } = setup();
     const stream = await adapter.startChatSession({ tabId });

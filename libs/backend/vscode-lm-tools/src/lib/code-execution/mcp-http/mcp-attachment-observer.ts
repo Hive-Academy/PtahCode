@@ -1,21 +1,10 @@
 import type {
   IMcpAttachmentProbe,
   McpAttachment,
+  McpAttachmentAttempt,
 } from '@ptah-extension/cli-agent-runtime';
 
-export interface McpAttachmentAttempt {
-  readonly agentId: string;
-  readonly port: number;
-  readonly reason:
-    | 'auth-required'
-    | 'invalid-credential'
-    | 'forbidden'
-    | 'auth-error'
-    | 'invalid-url'
-    | 'seen';
-  readonly method: string;
-  readonly time: number;
-}
+export type { McpAttachmentAttempt };
 
 const RETENTION_MS = 60 * 60 * 1000;
 

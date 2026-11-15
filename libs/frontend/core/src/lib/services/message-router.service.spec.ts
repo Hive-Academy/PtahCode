@@ -346,6 +346,8 @@ describe('MessageRouterService burst coalescing (TASK_2026_437 C18)', () => {
     log = [];
     errorHandler = { handleError: jest.fn() };
     channel = installControlledMessageChannel();
+    // Drain boundaries in these specs come from the message cap, not CPU time.
+    jest.spyOn(performance, 'now').mockReturnValue(0);
   });
 
   afterEach(() => {
@@ -855,11 +857,13 @@ describe('MessageRouterService with the real RpcClient (R-P8)', () => {
   beforeEach(() => {
     order = [];
     channel = installControlledMessageChannel();
+    jest.spyOn(performance, 'now').mockReturnValue(0);
   });
 
   afterEach(() => {
     TestBed.resetTestingModule();
     globalThis.MessageChannel = originalMessageChannel;
+    jest.restoreAllMocks();
   });
 
   it.each([

@@ -29,7 +29,13 @@ import {
   type ProviderAccountsSnapshot,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
-import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahFormSectionComponent,
+  PtahIconButtonDirective,
+  PtahSectionHeaderComponent,
+} from '@ptah-extension/ui';
 import {
   ACCOUNT_COPY,
   AMBIENT_ROW_KEY,
@@ -61,10 +67,7 @@ const ROW_DOT: Readonly<Record<ProviderAccountState, string>> = {
   'signed-in': 'bg-state-done',
   'signed-out': 'bg-state-idle',
 };
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-const SPINNER =
-  'inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none';
+const LOAD_FAILED = 'Could not load accounts';
 /** The detail's heading (component 7 contract): the B-2 fallback target of detail actions and of a newly added account. */
 const DETAIL_HEADING = '[data-testid="account-detail-heading"]';
 
@@ -96,6 +99,8 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahFormSectionComponent,
+    PtahSectionHeaderComponent,
     AmbientAccountRowComponent,
     AddAccountFormComponent,
     AccountDetailViewComponent,
@@ -107,7 +112,7 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
         #region
         role="region"
         aria-label="Claude accounts"
-        class="space-y-6 text-sm text-base-content"
+        class="flex flex-col gap-[var(--ptah-gap-group)] text-sm text-base-content"
         data-testid="accounts-tab"
         [attr.aria-busy]="regionBusy()"
       >
@@ -129,18 +134,12 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
             />
           </div>
         } @else {
-          <div class="flex flex-wrap items-center justify-between gap-2" data-testid="accounts-tab-header">
-            <h3
-              #accountsHeading
-              tabindex="-1"
-              class="text-[15px] font-semibold outline-none"
-              data-testid="accounts-tab-heading"
-            >Accounts</h3>
-            <span class="flex flex-wrap items-center gap-2">
-              @if (snapshot() && view().stale) {
+          <ptah-form-section heading="Accounts" [error]="loadError()" data-testid="accounts-tab-header">
+            @if (snapshot() && view().stale) {
+              <span aside class="flex flex-wrap items-center gap-[var(--ptah-gap-inline)]">
                 <span
                   role="status"
-                  ptahBadge tone="warn" class="h-auto gap-1"
+                  ptahBadge tone="warn" class="h-auto gap-[var(--ptah-gap-label)]"
                   data-testid="accounts-tab-stale"
                 >
                   <lucide-angular [img]="WarningIcon" class="h-3 w-3" aria-hidden="true" />
@@ -154,125 +153,130 @@ type FocusFallback = 'detail-heading' | 'accounts-heading';
                   (click)="retry()"
                   data-testid="accounts-tab-stale-retry"
                 >Try again</button>
-              }
-              @if (!addOpen()) {
+              </span>
+            }
+            @if (!addOpen()) {
+              <ptah-section-header heading="Account list" [level]="4">
                 <button
                   #addButton
+                  actions
                   type="button"
-                  [class]="'btn btn-outline btn-sm min-h-8 ' + focusRing"
+                  ptahButton
+                  variant="outline"
                   [attr.aria-disabled]="addUnavailable() ? 'true' : null"
                   [attr.title]="held() ? copy.notAvailableOnHost : null"
                   (click)="openAdd()"
                   data-testid="accounts-tab-add"
                 >Add account</button>
-              }
-            </span>
-          </div>
+              </ptah-section-header>
+            }
 
-          @if (snapshot(); as current) {
-            @if (addOpen()) {
-              <div #addArea data-testid="accounts-tab-add-area">
-                <ptah-add-account-form
-                  [accounts]="current.accounts"
-                  [pending]="addPending()"
-                  (submitted)="add($event)"
-                  (cancelled)="cancelAdd()"
-                />
+            @if (snapshot(); as current) {
+              @if (addOpen()) {
+                <div #addArea data-testid="accounts-tab-add-area">
+                  <ptah-add-account-form
+                    [accounts]="current.accounts"
+                    [pending]="addPending()"
+                    (submitted)="add($event)"
+                    (cancelled)="cancelAdd()"
+                  />
+                </div>
+              } @else {
+                <ul role="list" aria-label="Claude accounts" class="flex flex-col gap-[var(--ptah-gap-heading)]" data-testid="accounts-tab-list">
+                  <li>
+                    <ptah-ambient-account-row
+                      [ambient]="ambientView()"
+                      [chips]="chips().get(ambientKey) ?? noChips"
+                      (checkRequested)="checkAmbient()"
+                    />
+                  </li>
+                  @for (row of rows(); track row.account.profileId) {
+                    <li
+                      class="flex flex-wrap items-center gap-x-[var(--ptah-gap-heading)] gap-y-[var(--ptah-gap-inline)] rounded-box border border-base-content/15 bg-base-100 px-[var(--ptah-surface-pad)] py-[var(--ptah-gap-heading)]"
+                      [class.border-l-4]="row.attention"
+                      [class.border-l-state-err]="row.attention"
+                      data-testid="accounts-tab-row"
+                    >
+                      <span
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-base-300 font-bold"
+                        aria-hidden="true"
+                      >{{ row.initial }}</span>
+                      <span class="flex min-w-0 flex-1 basis-36 flex-col gap-[var(--ptah-gap-label)]">
+                        <span
+                          class="block truncate font-semibold"
+                          [title]="row.account.label"
+                          data-testid="accounts-tab-row-name"
+                        >{{ row.account.label }}</span>
+                        <span class="flex min-w-0 items-center gap-[var(--ptah-gap-inline)] text-base-content-muted">
+                          @if (row.pending) {
+                            <span class="inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none" aria-hidden="true" data-testid="accounts-tab-row-spinner"></span>
+                          } @else {
+                            <span class="inline-block h-2 w-2 shrink-0 rounded-full"
+                              [class.bg-state-idle]="row.dot === 'bg-state-idle'"
+                              [class.bg-state-run]="row.dot === 'bg-state-run'"
+                              [class.bg-state-err]="row.dot === 'bg-state-err'"
+                              [class.bg-state-done]="row.dot === 'bg-state-done'" aria-hidden="true"></span>
+                          }
+                          <span data-testid="accounts-tab-row-state">{{ row.status }}</span>
+                        </span>
+                        @if (row.chips.length > 0) {
+                          <span
+                            class="flex min-w-0 flex-wrap items-center gap-[var(--ptah-gap-label)]"
+                            data-testid="accounts-tab-row-used-by"
+                          >
+                            <span class="text-base-content-muted">Used by</span>
+                            @for (chip of row.chips; track chip) {
+                              <span class="inline-flex h-5 items-center rounded-full border border-base-content/25 px-[var(--ptah-gap-inline)] text-xs leading-none text-base-content" data-testid="accounts-tab-row-chip">{{ chip }}</span>
+                            }
+                          </span>
+                        }
+                      </span>
+                      <span
+                        class="flex shrink-0 items-center justify-end gap-[var(--ptah-gap-inline)] [margin-inline-start:auto]"
+                        data-testid="accounts-tab-row-actions"
+                      >
+                        @if (row.canSignIn) {
+                          <button
+                            type="button"
+                            ptahButton
+                            variant="primary"
+                            [busy]="row.busy"
+                            (click)="rowSignIn(row.account.profileId)"
+                            data-testid="accounts-tab-row-sign-in"
+                          >Sign in</button>
+                        }
+                        <button
+                          #manage
+                          type="button"
+                          ptahIconButton
+                          [label]="'Manage ' + row.account.label"
+                          (click)="openDetail(row.account.profileId)"
+                          data-testid="accounts-tab-row-manage"
+                        >
+                          <lucide-angular [img]="ManageIcon" class="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      </span>
+                    </li>
+                  }
+                </ul>
+              }
+            } @else if (view().status === 'error') {
+              <div data-testid="accounts-tab-error">
+                <button type="button" ptahButton (click)="retry()">Try again</button>
               </div>
             } @else {
-              <ul role="list" aria-label="Claude accounts" class="space-y-3" data-testid="accounts-tab-list">
-                <li>
-                  <ptah-ambient-account-row
-                    [ambient]="ambientView()"
-                    [chips]="chips().get(ambientKey) ?? noChips"
-                    (checkRequested)="checkAmbient()"
-                  />
+              <ul role="list" aria-label="Claude accounts" aria-busy="true" class="flex flex-col gap-[var(--ptah-gap-heading)]" data-testid="accounts-tab-list">
+                <li class="flex flex-wrap items-center gap-x-[var(--ptah-gap-heading)] gap-y-[var(--ptah-gap-inline)] rounded-box border border-base-content/15 bg-base-100 px-[var(--ptah-surface-pad)] py-[var(--ptah-gap-heading)] text-base-content-muted" data-testid="accounts-tab-loading">
+                  @if (view().status === 'idle') {
+                    Open a workspace
+                  } @else {
+                    <span class="inline-block h-3 w-3 shrink-0 loading loading-spinner text-base-content-muted motion-reduce:animate-none" aria-hidden="true"></span>
+                    Loading…
+                  }
                 </li>
-                @for (row of rows(); track row.account.profileId) {
-                  <li
-                    [class]="'flex flex-wrap items-center gap-x-3 gap-y-2 rounded-box border border-base-content/15 bg-base-100 px-4 py-3 ' +
-                      (row.attention ? 'border-l-4 border-l-state-err' : '')"
-                    data-testid="accounts-tab-row"
-                  >
-                    <span
-                      class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-base-300 font-bold"
-                      aria-hidden="true"
-                    >{{ row.initial }}</span>
-                    <span class="min-w-0 flex-1 basis-36 space-y-1">
-                      <span
-                        class="block truncate font-semibold"
-                        [title]="row.account.label"
-                        data-testid="accounts-tab-row-name"
-                      >{{ row.account.label }}</span>
-                      <span class="flex min-w-0 items-center gap-1.5 text-base-content-muted">
-                        @if (row.pending) {
-                          <span [class]="spinner" aria-hidden="true" data-testid="accounts-tab-row-spinner"></span>
-                        } @else {
-                          <span [class]="'inline-block h-2 w-2 shrink-0 rounded-full ' + row.dot" aria-hidden="true"></span>
-                        }
-                        <span data-testid="accounts-tab-row-state">{{ row.status }}</span>
-                      </span>
-                      @if (row.chips.length > 0) {
-                        <span class="flex min-w-0 flex-wrap items-center gap-1" data-testid="accounts-tab-row-used-by">
-                          <span class="text-base-content-muted">Used by</span>
-                          @for (chip of row.chips; track chip) {
-                            <span class="inline-flex h-5 items-center rounded-full border border-base-content/25 px-2 text-xs leading-none text-base-content" data-testid="accounts-tab-row-chip">{{ chip }}</span>
-                          }
-                        </span>
-                      }
-                    </span>
-                    <span class="ml-auto flex shrink-0 items-center justify-end gap-2" data-testid="accounts-tab-row-actions">
-                      @if (row.canSignIn) {
-                        <button
-                          type="button"
-                          ptahButton
-                          variant="primary"
-                          [busy]="row.busy"
-                          (click)="rowSignIn(row.account.profileId)"
-                          data-testid="accounts-tab-row-sign-in"
-                        >Sign in</button>
-                      }
-                      <button
-                        #manage
-                        type="button"
-                        ptahIconButton
-                        [label]="'Manage ' + row.account.label"
-                        (click)="openDetail(row.account.profileId)"
-                        data-testid="accounts-tab-row-manage"
-                      >
-                        <lucide-angular [img]="ManageIcon" class="h-4 w-4" aria-hidden="true" />
-                      </button>
-                    </span>
-                  </li>
-                }
               </ul>
             }
-          } @else if (view().status === 'error') {
-            <div
-              role="alert"
-              class="flex flex-wrap items-center gap-2 rounded-box border border-error bg-base-100 px-4 py-3"
-              data-testid="accounts-tab-error"
-            >
-              <span class="min-w-0 flex-1 break-words">Could not load accounts</span>
-              <button type="button" ptahButton (click)="retry()">
-                Try again
-              </button>
-            </div>
-          } @else {
-            <ul role="list" aria-label="Claude accounts" aria-busy="true" class="space-y-3" data-testid="accounts-tab-list">
-              <li
-                class="flex items-center gap-2 rounded-box border border-base-content/15 bg-base-100 px-4 py-3 text-base-content-muted"
-                data-testid="accounts-tab-loading"
-              >
-                @if (view().status === 'idle') {
-                  Open a workspace
-                } @else {
-                  <span [class]="spinner" aria-hidden="true"></span>
-                  Loading…
-                }
-              </li>
-            </ul>
-          }
+          </ptah-form-section>
         }
       </div>
     }
@@ -286,8 +290,6 @@ export class AccountsTabComponent implements OnInit {
   private readonly injector = inject(Injector);
   private destroyed = false;
 
-  protected readonly focusRing = FOCUS;
-  protected readonly spinner = SPINNER;
   protected readonly copy = ACCOUNT_COPY;
   protected readonly ambientKey = AMBIENT_ROW_KEY;
   protected readonly noChips: readonly UsedByChip[] = [];
@@ -315,6 +317,10 @@ export class AccountsTabComponent implements OnInit {
   private readonly settledByWrite = new Set<string>();
 
   protected readonly snapshot = computed(() => this.view().snapshot);
+  /** First-load failure: the form section shows it as its error alert; Try again sits below it. */
+  protected readonly loadError = computed(() =>
+    this.snapshot() === null && this.view().status === 'error' ? LOAD_FAILED : null,
+  );
   protected readonly addUnavailable = computed(() => this.snapshot() === null || this.held());
   protected readonly chips = computed(() => {
     const snapshot = this.snapshot();
@@ -347,7 +353,7 @@ export class AccountsTabComponent implements OnInit {
   });
 
   private readonly region = viewChild<ElementRef<HTMLElement>>('region');
-  private readonly accountsHeading = viewChild<ElementRef<HTMLElement>>('accountsHeading');
+  private readonly formSection = viewChild(PtahFormSectionComponent);
   private readonly detailArea = viewChild<ElementRef<HTMLElement>>('detailArea');
   private readonly addArea = viewChild<ElementRef<HTMLElement>>('addArea');
   private readonly addButton = viewChild<ElementRef<HTMLButtonElement>>('addButton');
@@ -371,7 +377,7 @@ export class AccountsTabComponent implements OnInit {
         this.tabView.set(list);
         if (ownRemoval) return;
         this.feedback.announce(ACCOUNT_COPY.accountGone, 'status');
-        if (focusInside) this.focusAfterRender(() => this.accountsHeading()?.nativeElement);
+        if (focusInside) this.focusAfterRender(() => this.accountsHeading());
       });
     });
     // A pending sign-in that a later push ends (finished or failed in the Claude window) is announced once. While a
@@ -414,7 +420,7 @@ export class AccountsTabComponent implements OnInit {
     this.tabView.set({ kind: 'list' });
     this.focusAfterRender(() => {
       const index = this.rows().findIndex((row) => row.account.profileId === profileId);
-      return index < 0 ? this.accountsHeading()?.nativeElement : this.manageButtons()[index]?.nativeElement;
+      return index < 0 ? this.accountsHeading() : this.manageButtons()[index]?.nativeElement;
     });
   }
 
@@ -443,6 +449,7 @@ export class AccountsTabComponent implements OnInit {
     this.addPending.set(true);
     const viewAtIntent = this.tabView();
     const known = new Set(this.snapshot()?.accounts.map((account) => account.profileId) ?? []);
+    const focusAtIntent = this.focusInside(this.addArea()?.nativeElement);
     const outcome = await this.accounts.addAccount(PROVIDER, label);
     this.addPending.set(false);
     if (outcome.status === 'failed' || outcome.status === 'unavailable') {
@@ -450,8 +457,11 @@ export class AccountsTabComponent implements OnInit {
       this.announceRefusal(outcome);
       return;
     }
-    // P6-9: focus is still inside the Add form and the view is unchanged.
-    const focusInForm = this.focusInside(this.addArea()?.nativeElement) && this.tabView() === viewAtIntent;
+    // P6-9: focus is still inside the Add form and the view is unchanged. The pending form disables its fields, so
+    // focus that was in the form at intent and fell to the body counts as still in the form (B-2).
+    const focusInForm =
+      this.tabView() === viewAtIntent &&
+      (this.focusInside(this.addArea()?.nativeElement) || (focusAtIntent && this.focusOnBody()));
     this.addOpen.set(false);
     if (outcome.status === 'unconfirmed') {
       this.feedback.announce(ACCOUNT_COPY.unconfirmed, 'alert');
@@ -655,6 +665,17 @@ export class AccountsTabComponent implements OnInit {
     return this.detailArea()?.nativeElement.querySelector<HTMLElement>(DETAIL_HEADING) ?? undefined;
   }
 
+  private focusOnBody(): boolean {
+    const active = this.document.activeElement;
+    return !this.destroyed && (active === null || active === this.document.body);
+  }
+
+  /** The form section's `Accounts` heading as a focus target, present in the list view only. */
+  private accountsHeading(): { focus(): void } | undefined {
+    const section = this.formSection();
+    return section ? { focus: () => section.focusHeading() } : undefined;
+  }
+
   private focusInside(area: HTMLElement | undefined): boolean {
     const active = this.document.activeElement;
     return !this.destroyed && !!area && !!active && active !== this.document.body && area.contains(active);
@@ -675,7 +696,7 @@ export class AccountsTabComponent implements OnInit {
   private restoreFocus(wait: FocusWait | null, fallback: FocusFallback, anyView: boolean): void {
     if (!wait || this.destroyed) return;
     if (!anyView && this.tabView() !== wait.view) return;
-    const target = fallback === 'accounts-heading' ? () => this.accountsHeading()?.nativeElement : () => this.detailHeading();
+    const target = fallback === 'accounts-heading' ? () => this.accountsHeading() : () => this.detailHeading();
     this.focusAfterRender(target, wait, anyView);
   }
 
@@ -683,7 +704,7 @@ export class AccountsTabComponent implements OnInit {
    * Moves focus after the next render. With `wait`, only while focus has not moved since the intent: it is still on
    * the waiting target (then it stays), or that target was removed and focus fell to the body.
    */
-  private focusAfterRender(target: () => HTMLElement | undefined, wait?: FocusWait, anyView = false): void {
+  private focusAfterRender(target: () => { focus(): void } | undefined, wait?: FocusWait, anyView = false): void {
     if (this.destroyed) return;
     afterNextRender(
       () => {
@@ -692,7 +713,13 @@ export class AccountsTabComponent implements OnInit {
           if (!anyView && this.tabView() !== wait.view) return;
           const active = this.document.activeElement;
           if (active === wait.target && wait.target.isConnected) return;
-          const fell = !wait.target.isConnected && (active === null || active === this.document.body);
+          const onBody = active === null || active === this.document.body;
+          if (wait.target.isConnected && onBody) {
+            // The target lost focus while it was disabled for the save (S1): give it back.
+            if (wait.target instanceof HTMLElement) wait.target.focus();
+            return;
+          }
+          const fell = !wait.target.isConnected && onBody;
           if (!fell) return;
         }
         target()?.focus();

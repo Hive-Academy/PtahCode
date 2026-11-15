@@ -1494,7 +1494,7 @@ export class AgentProcessManager {
       const port = mcp.mcpPort;
       const probe = this.attachmentProbe;
       const timeoutDetail = (): string => {
-        const attempt = probe.getAttempt(agentId, port);
+        const attempt = probe.getAttempt?.(agentId, port);
         if (!attempt) return 'no-request-seen';
         return attempt.reason === 'seen' ? 'seen-but-not-initialize' : `rejected:${attempt.reason}`;
       };
