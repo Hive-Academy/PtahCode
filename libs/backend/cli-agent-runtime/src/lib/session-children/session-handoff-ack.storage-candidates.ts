@@ -15,6 +15,11 @@ function hasDefaultStorage(storage: IStateStorage): storage is IStateStorage & {
 }
 
 function rootKey(root: string): string {
+  const windowsRoot =
+    process.platform === 'win32' || /^[a-zA-Z]:[\\/]/.test(root);
+  // path.posix keeps literal backslashes distinct, including when a test
+  // models POSIX roots on a Windows host.
+  if (!windowsRoot) return path.posix.resolve(root).replace(/\/+$/, '');
   const unified = root.replace(/\\/g, '/');
   if (/^[a-zA-Z]:\//.test(unified)) {
     return path.win32
@@ -23,7 +28,13 @@ function rootKey(root: string): string {
       .toLowerCase();
   }
   const normalized = normalizeWorkspaceRoot(unified);
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+  return normalized.toLowerCase();
+}
+
+export function defaultStorage(
+  storage: IStateStorage,
+): IStateStorage | undefined {
+  return hasDefaultStorage(storage) ? storage.getDefaultStorage() : undefined;
 }
 
 export function storageForRoot(
@@ -41,16 +52,13 @@ export function storageForRoot(
 }
 
 export function storageCandidates(storage: IStateStorage): IStateStorage[] {
-  const candidates = [storage];
-  if (isWorkspaceScopedStateStorage(storage)) {
-    for (const root of storage.getAllWorkspacePaths()) {
-      const delegate = storage.getStorageForWorkspace(root);
-      if (delegate && !candidates.includes(delegate)) candidates.push(delegate);
-    }
+  if (!isWorkspaceScopedStateStorage(storage)) return [storage];
+  const candidates: IStateStorage[] = [];
+  for (const root of storage.getAllWorkspacePaths()) {
+    const delegate = storage.getStorageForWorkspace(root);
+    if (delegate && !candidates.includes(delegate)) candidates.push(delegate);
   }
-  if (hasDefaultStorage(storage)) {
-    const fallback = storage.getDefaultStorage();
-    if (!candidates.includes(fallback)) candidates.push(fallback);
-  }
-  return candidates;
+  const fallback = defaultStorage(storage);
+  if (fallback && !candidates.includes(fallback)) candidates.push(fallback);
+  return candidates.length ? candidates : [storage];
 }

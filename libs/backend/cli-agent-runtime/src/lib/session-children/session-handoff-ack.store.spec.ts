@@ -5,6 +5,7 @@ import {
   HANDOFF_ACK_QUARANTINE_KEY,
   HANDOFF_ACK_STORAGE_KEY,
 } from './session-handoff-ack.store';
+import { storageForRoot } from './session-handoff-ack.storage-candidates';
 
 describe('SessionHandoffAckStore', () => {
   it('replaces a stale recorded successor after restart and acknowledges the new one', async () => {
@@ -210,8 +211,13 @@ describe('SessionHandoffAckStore', () => {
       ['/a', new Map()],
       ['/b', new Map()],
     ]);
+    let switchDuringRead = false;
     const delegate = (path: string): IStateStorage => ({
-      get: <T>(key: string) => documents.get(path)?.get(key) as T | undefined,
+      get: <T>(key: string) => {
+        const value = documents.get(path)?.get(key) as T | undefined;
+        if (path === '/a' && switchDuringRead) active = b;
+        return value;
+      },
       update: async (key, value) => {
         documents.get(path)?.set(key, value);
       },
@@ -248,6 +254,8 @@ describe('SessionHandoffAckStore', () => {
     expect(await store.findBySuccessor('after')).toMatchObject({
       workspaceRoot: '/a',
     });
+    active = a;
+    switchDuringRead = true;
     expect(
       await store.transition('before', 'recorded', { state: 'closePending' }),
     ).toBe('moved');
@@ -396,13 +404,14 @@ describe('SessionHandoffAckStore', () => {
       ).records[0].state,
     ).toBe('closePending');
 
-    active = fallback;
+    active = b;
     await store.record({
       ...base,
       predecessorTabId: 'default-before',
       successorTabId: 'default-after',
       workspaceRoot: '/unregistered',
     });
+    expect(documents.get('/b')?.has(HANDOFF_ACK_STORAGE_KEY)).toBe(false);
     active = b;
     expect(await store.findByPredecessor('default-before')).toBeDefined();
     expect(
@@ -470,5 +479,99 @@ describe('SessionHandoffAckStore', () => {
         }
       ).records,
     ).toHaveLength(1);
+  });
+
+  it('prefers a pinned duplicate for lookup, transition, and enumeration', async () => {
+    const stale = {
+      predecessorTabId: 'before',
+      predecessorSdkId: null,
+      successorTabId: 'stale',
+      successorSdkId: null,
+      workspaceRoot: '/b',
+      handoffPath: '/b/HANDOFF.md',
+      state: 'recorded' as const,
+    };
+    const pinned = {
+      ...stale,
+      successorTabId: 'current',
+      state: 'starting' as const,
+    };
+    const documents = new Map<string, Map<string, unknown>>([
+      [
+        '/a',
+        new Map([
+          [HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: [stale] }],
+        ]),
+      ],
+      [
+        '/b',
+        new Map([
+          [HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: [pinned] }],
+        ]),
+      ],
+    ]);
+    const delegate = (root: string): IStateStorage => ({
+      get: <T>(key: string) => documents.get(root)?.get(key) as T | undefined,
+      update: async (key, value) => {
+        documents.get(root)?.set(key, value);
+      },
+      keys: () => [...(documents.get(root)?.keys() ?? [])],
+    });
+    const a = delegate('/a');
+    const b = delegate('/b');
+    const storage = {
+      get: <T>(key: string) => a.get<T>(key),
+      update: (key: string, value: unknown) => a.update(key, value),
+      keys: () => a.keys(),
+      getStorageForWorkspace: (root: string) =>
+        root === '/a' ? a : root === '/b' ? b : undefined,
+      getAllWorkspacePaths: () => ['/a', '/b'],
+    };
+    const store = new SessionHandoffAckStore(storage);
+    expect(await store.findByPredecessor('before')).toMatchObject({
+      successorTabId: 'current',
+    });
+    expect(await store.records()).toEqual([pinned]);
+    expect(
+      await store.transition('before', 'starting', { state: 'closePending' }),
+    ).toBe('moved');
+    expect(
+      (
+        documents.get('/a')?.get(HANDOFF_ACK_STORAGE_KEY) as {
+          records: { state: string }[];
+        }
+      ).records[0].state,
+    ).toBe('recorded');
+    expect(
+      (
+        documents.get('/b')?.get(HANDOFF_ACK_STORAGE_KEY) as {
+          records: { state: string }[];
+        }
+      ).records[0].state,
+    ).toBe('closePending');
+  });
+
+  it('keeps POSIX backslashes distinct from separators', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: 'linux',
+    });
+    try {
+      const document: IStateStorage = {
+        get: <T>() => undefined as T | undefined,
+        update: async () => undefined,
+        keys: () => [],
+      };
+      const scoped = {
+        ...document,
+        getAllWorkspacePaths: () => ['/a\\b'],
+        getStorageForWorkspace: () => document,
+      };
+      expect(storageForRoot(scoped, '/a\\b')).toBe(document);
+      expect(storageForRoot(scoped, '/a/b')).toBeUndefined();
+    } finally {
+      if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+    }
   });
 });

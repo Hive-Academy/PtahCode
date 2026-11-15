@@ -44,3 +44,13 @@ No functional requirement remains open. This CLI session had no native skill inv
 - `git diff --check` — PASS.
 
 Open: no known functional issue. The store is 335 formatted lines after extracting the storage candidate helper; further split would require moving document parsing and persistence logic and was outside this focused review change. Skill discovery was unavailable in this CLI lane; no matching skill could be loaded.
+
+
+## PR review round 1 (#1312)
+
+- A: Workspace-scoped candidate enumeration now returns deduplicated concrete workspace documents and the default document. The switching proxy is used only when neither exists. Lookup, enumeration, and subsequent mutations therefore stay on a concrete document. A spec switches the active proxy during a read and verifies only the original document changes.
+- B: An unregistered root now writes to `getDefaultStorage()` when available; the warning and comment describe that fallback. A spec starts with another workspace active and verifies it remains untouched.
+- C: Lookup scans candidates and prefers a record in its pinned workspace document. Enumeration uses the same preference. A duplicate spec verifies lookup, transition, and enumeration choose the pinned record.
+- D: Root matching treats backslashes as separators and folds case only for Windows or drive-letter roots. POSIX roots retain literal backslashes. The POSIX branch uses `path.posix.resolve` so the platform-mocked spec also behaves correctly on a Windows test host; this has the same normalization behavior as `normalizeWorkspaceRoot` on a POSIX host.
+
+Checks: Prettier passed on the three changed source/spec files. Jest passed (3 suites, 99 tests). `tsc --noEmit` passed for both lib and spec configs. ESLint passed on the three changed files. `git diff --check` passed. An initial Jest run found the mocked-POSIX path issue; it was corrected before the passing run. No commit or push was made.

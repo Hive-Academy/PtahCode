@@ -8,6 +8,7 @@ import {
   type IStateStorage,
 } from '@ptah-extension/platform-core';
 import {
+  defaultStorage,
   storageCandidates,
   storageForRoot,
 } from './session-handoff-ack.storage-candidates';
@@ -127,12 +128,11 @@ export class SessionHandoffAckStore {
     if (!this.storage) return null;
     const pinned = storageForRoot(this.storage, workspaceRoot);
     if (pinned) return pinned;
-    // The interface discourages ambient fallback, but losing this handoff is worse.
-    // Lookups search every document, including the default document.
+    // An unregistered root belongs in the stable default document when available.
     this.logger?.warn(
-      `Handoff acknowledgement workspace storage unavailable for ${workspaceRoot}; using active storage`,
+      `Handoff acknowledgement workspace storage unavailable for ${workspaceRoot}; using default storage when available`,
     );
-    return this.storage;
+    return defaultStorage(this.storage) ?? this.storage;
   }
 
   private async locate(
@@ -147,12 +147,23 @@ export class SessionHandoffAckStore {
   > {
     if (!this.storage)
       throw new Error('handoff acknowledgement storage unavailable');
+    let first:
+      | {
+          record: HandoffAckRecord;
+          state: AckDocumentState;
+          storage: IStateStorage;
+        }
+      | undefined;
     for (const candidate of storageCandidates(this.storage)) {
       const state = await this.readState(candidate);
       const record = state.records.find(predicate);
-      if (record) return { record, state, storage: candidate };
+      if (!record) continue;
+      const match = { record, state, storage: candidate };
+      if (storageForRoot(this.storage, record.workspaceRoot) === candidate)
+        return match;
+      first ??= match;
     }
-    return undefined;
+    return first;
   }
 
   private async stateForPredecessor(id: string): Promise<
@@ -210,20 +221,21 @@ export class SessionHandoffAckStore {
     return this.serialized(async () => {
       if (!this.storage)
         throw new Error('handoff acknowledgement storage unavailable');
-      const found = new Map<string, HandoffAckRecord>();
+      const found = new Map<
+        string,
+        { record: HandoffAckRecord; pinned: boolean }
+      >();
       for (const candidate of storageCandidates(this.storage)) {
         const state = await this.readState(candidate);
         for (const record of state.records) {
           const existing = found.get(record.predecessorTabId);
-          if (
-            !existing ||
-            candidate === storageForRoot(this.storage, record.workspaceRoot)
-          ) {
-            found.set(record.predecessorTabId, record);
-          }
+          const pinned =
+            candidate === storageForRoot(this.storage, record.workspaceRoot);
+          if (!existing || (pinned && !existing.pinned))
+            found.set(record.predecessorTabId, { record, pinned });
         }
       }
-      return [...found.values()];
+      return [...found.values()].map(({ record }) => record);
     });
   }
 
@@ -276,8 +288,7 @@ export class SessionHandoffAckStore {
       // recoverable duplicate instead of losing the handoff.
       await this.write(state, storage);
       if (previous && previous.storage !== storage) {
-        // Re-read: the previous storage can be the proxy of the same document
-        // just written. Remove only the replaced successor's entry.
+        // Re-read the previous concrete document and remove only the replaced successor.
         const stale = previous.record.successorTabId;
         const prior = await this.readState(previous.storage);
         const kept = prior.records.filter(
