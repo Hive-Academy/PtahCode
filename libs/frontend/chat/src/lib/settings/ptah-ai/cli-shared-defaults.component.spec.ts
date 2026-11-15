@@ -19,7 +19,7 @@ describe('CliSharedDefaultsComponent', () => {
     fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
     expect(host.textContent).toContain('Inherited by all Ptah CLI providers');
-    expect(host.querySelector('ptah-cli-lane-default-cell .wide')).toBeTruthy();
+    expect(host.querySelector('ptah-cli-lane-default-cell[data-layout="wide"]')).toBeTruthy();
     const selected = jest.fn();
     fixture.componentInstance.selected.subscribe(selected);
     const select = host.querySelector('select') as HTMLSelectElement;

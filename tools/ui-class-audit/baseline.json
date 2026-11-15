@@ -512,8 +512,7 @@
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-lane-default-cell.component.ts": {
     "btn": 1,
     "btn-sm": 1,
-    "btn-warning": 1,
-    "card-layout": 1
+    "btn-warning": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-model-effort-popover.component.ts": {
     "<dynamic>": 2
