@@ -1312,6 +1312,9 @@ export class SkillsSynthesisRpcHandlers {
           : null,
       orphaned,
       ...(origin !== undefined ? { provenance: origin.provenance } : {}),
+      ...(origin?.wizardOriginUnchanged !== undefined
+        ? { wizardOriginUnchanged: origin.wizardOriginUnchanged }
+        : {}),
       ...(origin?.divergedReason !== undefined
         ? { divergedReason: origin.divergedReason }
         : {}),

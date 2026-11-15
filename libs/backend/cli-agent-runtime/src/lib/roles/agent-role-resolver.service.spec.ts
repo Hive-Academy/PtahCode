@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { createHash } from 'crypto';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -14,12 +14,16 @@ import {
   MAX_ROLE_BYTES,
   type AgentRoleErrorCode,
 } from './agent-role-resolver.service';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 interface FakeFileSystem {
-  provider: IFileSystemProvider;
+  provider: Pick<IFileSystemProvider, 'exists' | 'readDirectory' | 'readFile'>;
   exists: jest.Mock;
   readDirectory: jest.Mock;
   readFile: jest.Mock;
+  logger: Pick<Logger, 'warn' | 'error'>;
+  loggerError: jest.Mock;
+  loggerWarn: jest.Mock;
   totalCalls(): number;
 }
 
@@ -48,9 +52,15 @@ function createFakeFileSystem(
     exists,
     readDirectory,
     readFile,
-  } as unknown as IFileSystemProvider;
+  };
+  const loggerError = jest.fn();
+  const loggerWarn = jest.fn();
+  const logger = { error: loggerError, warn: loggerWarn };
   return {
     provider,
+    logger,
+    loggerError,
+    loggerWarn,
     exists,
     readDirectory,
     readFile,
@@ -96,23 +106,26 @@ describe('AgentRoleResolver', () => {
     agentsDir = join(workspaceRoot, '.claude', 'agents');
   });
 
-  function recordRetiredRole(role: string, content: string): void {
-    mkdirSync(agentsDir, { recursive: true });
-    writeFileSync(join(agentsDir, `${role}.md`), content);
-    const storeDir = join(workspaceRoot, '.ptah', 'setup-wizard');
-    mkdirSync(storeDir, { recursive: true });
-    writeFileSync(
-      join(storeDir, 'agent-origins.json'),
-      JSON.stringify({
+  const originStorePath = (): string =>
+    join(workspaceRoot, '.ptah', 'setup-wizard', 'agent-origins.json');
+
+  function sha(content: string): string {
+    return `sha256:${createHash('sha256').update(content).digest('hex')}`;
+  }
+
+  /** Fake-provider files for a role with a wizard origin entry. */
+  function originFiles(
+    role: string,
+    content: string,
+    originContent: string = content,
+  ): Record<string, string> {
+    return {
+      [join(agentsDir, `${role}.md`)]: content,
+      [originStorePath()]: JSON.stringify({
         version: 1,
-        agents: {
-          [role]: {
-            hash: `sha256:${createHash('sha256').update(content).digest('hex')}`,
-            writtenAt: 1,
-          },
-        },
+        agents: { [role]: { hash: sha(originContent), writtenAt: 1 } },
       }),
-    );
+    };
   }
 
   afterEach(() => {
@@ -122,7 +135,7 @@ describe('AgentRoleResolver', () => {
   describe('listRoles', () => {
     it('returns an empty list when the agents directory is missing', async () => {
       const fs = createFakeFileSystem({}, {});
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([]);
       expect(fs.readDirectory).not.toHaveBeenCalled();
@@ -130,7 +143,7 @@ describe('AgentRoleResolver', () => {
 
     it('returns an empty list when the agents directory is empty', async () => {
       const fs = createFakeFileSystem({ [agentsDir]: [] }, {});
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([]);
     });
@@ -149,7 +162,7 @@ describe('AgentRoleResolver', () => {
         },
         {},
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
         'Architect',
@@ -164,7 +177,7 @@ describe('AgentRoleResolver', () => {
       fs.readDirectory.mockRejectedValue(
         new Error('EACCES: permission denied'),
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const error = await expectRoleError(
         resolver.listRoles(workspaceRoot),
@@ -180,7 +193,7 @@ describe('AgentRoleResolver', () => {
       'listRoles(%j) raises no_workspace before any filesystem call',
       async (root) => {
         const fs = createFakeFileSystem({}, {});
-        const resolver = new AgentRoleResolver(fs.provider);
+        const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
         const error = await expectRoleError(
           resolver.listRoles(root),
@@ -197,7 +210,7 @@ describe('AgentRoleResolver', () => {
       'resolve(%j, "x") raises no_workspace before any filesystem call',
       async (root) => {
         const fs = createFakeFileSystem({}, {});
-        const resolver = new AgentRoleResolver(fs.provider);
+        const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
         const error = await expectRoleError(
           resolver.resolve(root, 'x'),
@@ -210,7 +223,7 @@ describe('AgentRoleResolver', () => {
 
     it('checks the role name before the workspace root', async () => {
       const fs = createFakeFileSystem({}, {});
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       await expectRoleError(resolver.resolve('', '../x'), 'invalid_role_name');
       expect(fs.totalCalls()).toBe(0);
@@ -220,7 +233,7 @@ describe('AgentRoleResolver', () => {
   describe('resolve', () => {
     it('raises no_roles when the agents directory is missing', async () => {
       const fs = createFakeFileSystem({}, {});
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const error = await expectRoleError(
         resolver.resolve(workspaceRoot, 'senior-tester'),
@@ -228,14 +241,15 @@ describe('AgentRoleResolver', () => {
       );
       expect(error.availableRoles).toEqual([]);
       expect(error.message).toContain(workspaceRoot);
-      expect(error.message).toContain('setup wizard');
+      expect(error.message).toContain('.claude/agents/');
+      expect(error.message).not.toContain('setup wizard');
       expect(error.message).toContain('Spawning without "role" is valid');
       expect(fs.readFile).not.toHaveBeenCalled();
     });
 
     it('raises no_roles when the agents directory is empty', async () => {
       const fs = createFakeFileSystem({ [agentsDir]: [] }, {});
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       await expectRoleError(
         resolver.resolve(workspaceRoot, 'senior-tester'),
@@ -247,12 +261,14 @@ describe('AgentRoleResolver', () => {
     it.each(['backend-developer', 'frontend-developer', 'devops-engineer'])(
       'rejects retired role %s with an implement phase hint',
       async (role) => {
-        recordRetiredRole(role, '# wizard role');
         const fs = createFakeFileSystem(
           { [agentsDir]: [file(`${role}.md`), file('team-leader.md')] },
-          {},
+          {
+            ...originFiles(role, '# wizard role'),
+            [join(agentsDir, 'team-leader.md')]: '# lead',
+          },
         );
-        const resolver = new AgentRoleResolver(fs.provider);
+        const resolver = new AgentRoleResolver(fs.provider, fs.logger);
         await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
           'team-leader',
         ]);
@@ -263,7 +279,9 @@ describe('AgentRoleResolver', () => {
         expect(error.availableRoles).toEqual(['team-leader']);
         expect(error.message).toContain('implement');
         expect(error.message).toContain(`Role "${role}" is retired.`);
-        expect(fs.readFile).not.toHaveBeenCalled();
+        expect(fs.readFile).not.toHaveBeenCalledWith(
+          join(agentsDir, 'team-leader.md'),
+        );
       },
     );
 
@@ -273,12 +291,14 @@ describe('AgentRoleResolver', () => {
       ['senior-tester', 'tests'],
       ['visual-reviewer', 'visual-review'],
     ])('rejects retired role %s with a %s phase hint', async (role, kind) => {
-      recordRetiredRole(role, '# wizard role');
       const fs = createFakeFileSystem(
         { [agentsDir]: [file(`${role}.md`), file('team-leader.md')] },
-        {},
+        {
+          ...originFiles(role, '# wizard role'),
+          [join(agentsDir, 'team-leader.md')]: '# lead',
+        },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
       await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
         'team-leader',
       ]);
@@ -297,17 +317,17 @@ describe('AgentRoleResolver', () => {
     ])(
       'lists and resolves a custom retired slug %s with %s',
       async (role, origin) => {
-        if (origin === 'hash mismatch')
-          recordRetiredRole(role, '# wizard role');
-        else {
-          mkdirSync(agentsDir, { recursive: true });
-        }
-        writeFileSync(join(agentsDir, `${role}.md`), '# custom role');
+        const path = join(agentsDir, `${role}.md`);
+        const files: Record<string, string> =
+          origin === 'hash mismatch'
+            ? originFiles(role, '# custom role', '# wizard role')
+            : { [path]: '# custom role' };
+        files[join(agentsDir, 'team-leader.md')] = '# lead';
         const fs = createFakeFileSystem(
           { [agentsDir]: [file(`${role}.md`), file('team-leader.md')] },
-          { [join(agentsDir, `${role}.md`)]: '# custom role' },
+          files,
         );
-        const resolver = new AgentRoleResolver(fs.provider);
+        const resolver = new AgentRoleResolver(fs.provider, fs.logger);
         await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
           role,
           'team-leader',
@@ -320,13 +340,134 @@ describe('AgentRoleResolver', () => {
         });
       },
     );
+
+    it('lists and resolves a non-retired custom slug that has a wizard origin entry', async () => {
+      const fs = createFakeFileSystem(
+        { [agentsDir]: [file('my-custom.md')] },
+        originFiles('my-custom', '# custom wizard agent'),
+      );
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
+
+      await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
+        'my-custom',
+      ]);
+      await expect(
+        resolver.resolve(workspaceRoot, 'my-custom'),
+      ).resolves.toMatchObject({ name: 'my-custom' });
+      expect(fs.readFile).not.toHaveBeenCalledWith(originStorePath());
+    });
+
+    it('reads the origin store once per call and hashes only retired origin-backed files', async () => {
+      const fs = createFakeFileSystem(
+        {
+          [agentsDir]: [
+            file('backend-developer.md'),
+            file('team-leader.md'),
+            file('senior-tester.md'),
+          ],
+        },
+        {
+          ...originFiles('backend-developer', '# wizard role'),
+          [join(agentsDir, 'team-leader.md')]: '# lead',
+          [join(agentsDir, 'senior-tester.md')]: '# own tester',
+        },
+      );
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
+
+      await resolver.listRoles(workspaceRoot);
+
+      const reads = fs.readFile.mock.calls.map((call) => call[0]);
+      expect(reads.filter((p) => p === originStorePath())).toHaveLength(1);
+      expect(reads).toContain(join(agentsDir, 'backend-developer.md'));
+      expect(reads).not.toContain(join(agentsDir, 'team-leader.md'));
+      expect(reads).not.toContain(join(agentsDir, 'senior-tester.md'));
+    });
+
+    it('treats a missing origin store as no evidence without logging', async () => {
+      const fs = createFakeFileSystem(
+        { [agentsDir]: [file('backend-developer.md')] },
+        { [join(agentsDir, 'backend-developer.md')]: '# mine' },
+      );
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
+
+      await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
+        'backend-developer',
+      ]);
+      expect(fs.loggerError).not.toHaveBeenCalled();
+      expect(fs.loggerWarn).not.toHaveBeenCalled();
+    });
+
+    it('logs an Error and treats the role as user-written when the origin store read fails', async () => {
+      const fs = createFakeFileSystem(
+        { [agentsDir]: [file('backend-developer.md')] },
+        { [join(agentsDir, 'backend-developer.md')]: '# mine' },
+      );
+      fs.readFile.mockImplementation(async (path: string) => {
+        if (path === originStorePath()) {
+          throw new Error('EBUSY: locked');
+        }
+        return '# mine';
+      });
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
+
+      await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
+        'backend-developer',
+      ]);
+      expect(fs.loggerError).toHaveBeenCalledWith(
+        expect.stringContaining('origin store'),
+        expect.any(Error),
+      );
+    });
+
+    it('logs an Error when the origin store holds invalid JSON', async () => {
+      const fs = createFakeFileSystem(
+        { [agentsDir]: [file('backend-developer.md')] },
+        {
+          [join(agentsDir, 'backend-developer.md')]: '# mine',
+          [originStorePath()]: '{not json',
+        },
+      );
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
+
+      await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
+        'backend-developer',
+      ]);
+      expect(fs.loggerError).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Error),
+      );
+    });
+
+    it('logs an Error and keeps the role visible when the hash read fails', async () => {
+      const fs = createFakeFileSystem(
+        { [agentsDir]: [file('backend-developer.md')] },
+        originFiles('backend-developer', '# wizard role'),
+      );
+      const original = fs.readFile.getMockImplementation();
+      fs.readFile.mockImplementation(async (path: string) => {
+        if (path === join(agentsDir, 'backend-developer.md')) {
+          throw new Error('EACCES: denied');
+        }
+        return original ? original(path) : '';
+      });
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
+
+      await expect(resolver.listRoles(workspaceRoot)).resolves.toEqual([
+        'backend-developer',
+      ]);
+      expect(fs.loggerError).toHaveBeenCalledWith(
+        expect.stringContaining('backend-developer.md'),
+        expect.any(Error),
+      );
+    });
+
     it('raises unknown_role listing the available roles', async () => {
       const fs = createFakeFileSystem(
         { [agentsDir]: [file('team-leader.md'), file('senior-tester.md')] },
         {},
       );
 
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const error = await expectRoleError(
         resolver.resolve(workspaceRoot, 'designer'),
@@ -335,7 +476,9 @@ describe('AgentRoleResolver', () => {
       expect(error.availableRoles).toEqual(['senior-tester', 'team-leader']);
       expect(error.message).toContain('senior-tester, team-leader');
       expect(error.message).toContain(workspaceRoot);
-      expect(fs.readFile).not.toHaveBeenCalled();
+      expect(
+        fs.readFile.mock.calls.filter((call) => call[0] !== originStorePath()),
+      ).toEqual([]);
     });
 
     it.each([
@@ -354,7 +497,7 @@ describe('AgentRoleResolver', () => {
           { [agentsDir]: [file('x.md')] },
           { [join(agentsDir, 'x.md')]: 'body' },
         );
-        const resolver = new AgentRoleResolver(fs.provider);
+        const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
         const error = await expectRoleError(
           resolver.resolve(workspaceRoot, name),
@@ -371,7 +514,7 @@ describe('AgentRoleResolver', () => {
         { [agentsDir]: [file(`${name}.md`)] },
         { [join(agentsDir, `${name}.md`)]: 'body' },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       await expect(
         resolver.resolve(workspaceRoot, name),
@@ -385,14 +528,16 @@ describe('AgentRoleResolver', () => {
         { [agentsDir]: [file('senior-tester.md')] },
         { [join(agentsDir, 'senior-tester.md')]: 'body' },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const error = await expectRoleError(
         resolver.resolve(workspaceRoot, 'Backend-Developer'),
         'unknown_role',
       );
       expect(error.availableRoles).toEqual(['senior-tester']);
-      expect(fs.readFile).not.toHaveBeenCalled();
+      expect(
+        fs.readFile.mock.calls.filter((call) => call[0] !== originStorePath()),
+      ).toEqual([]);
     });
 
     it('reads the path joined from the matched listing entry and returns the definition', async () => {
@@ -404,11 +549,13 @@ describe('AgentRoleResolver', () => {
             '---\nname: senior-tester\ndescription: "Writes backend code: services"\n---\n# Backend\n\nDo the work.\n',
         },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const definition = await resolver.resolve(workspaceRoot, 'senior-tester');
 
-      expect(fs.readFile).toHaveBeenCalledTimes(1);
+      expect(
+        fs.readFile.mock.calls.filter((call) => call[0] === sourcePath),
+      ).toHaveLength(1);
       expect(fs.readFile).toHaveBeenCalledWith(sourcePath);
       expect(definition).toEqual({
         name: 'senior-tester',
@@ -425,7 +572,7 @@ describe('AgentRoleResolver', () => {
         { [agentsDir]: [file('plain.md')] },
         { [sourcePath]: 'No frontmatter here.' },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const definition = await resolver.resolve(workspaceRoot, 'plain');
 
@@ -441,7 +588,7 @@ describe('AgentRoleResolver', () => {
             '---\nname: hollow\ndescription: x\n---\n  \n\t\n',
         },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const error = await expectRoleError(
         resolver.resolve(workspaceRoot, 'hollow'),
@@ -456,7 +603,7 @@ describe('AgentRoleResolver', () => {
         { [agentsDir]: [file('big.md')] },
         { [join(agentsDir, 'big.md')]: `---\nname: big\n---\n${body}` },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const definition = await resolver.resolve(workspaceRoot, 'big');
 
@@ -471,7 +618,7 @@ describe('AgentRoleResolver', () => {
         { [agentsDir]: [file('big.md')] },
         { [join(agentsDir, 'big.md')]: `---\nname: big\n---\n${body}` },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const error = await expectRoleError(
         resolver.resolve(workspaceRoot, 'big'),
@@ -487,7 +634,7 @@ describe('AgentRoleResolver', () => {
         { [agentsDir]: [file('wide.md')] },
         { [join(agentsDir, 'wide.md')]: body },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       expect(body.length).toBeLessThan(MAX_ROLE_BYTES);
       await expectRoleError(
@@ -504,7 +651,7 @@ describe('AgentRoleResolver', () => {
             '---\r\nname: windows\r\ndescription: CRLF role\r\n---\r\nLine one\r\nLine two\r\n',
         },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const definition = await resolver.resolve(workspaceRoot, 'windows');
 
@@ -520,7 +667,7 @@ describe('AgentRoleResolver', () => {
       fs.readFile.mockRejectedValue(
         new Error('EBUSY: resource busy or locked'),
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const error = await expectRoleError(
         resolver.resolve(workspaceRoot, 'gone'),
@@ -533,7 +680,7 @@ describe('AgentRoleResolver', () => {
     it('raises role_read_failed for a non-Error rejection', async () => {
       const fs = createFakeFileSystem({ [agentsDir]: [file('odd.md')] }, {});
       fs.readFile.mockRejectedValue('raw failure');
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const error = await expectRoleError(
         resolver.resolve(workspaceRoot, 'odd'),
@@ -550,7 +697,7 @@ describe('AgentRoleResolver', () => {
         { [agentsDir]: [file('team-leader.md')] },
         { [sourcePath]: '---\nname: team-leader\n---\nLead.\n' },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       await expect(resolver.listRoles(subPackage)).resolves.toEqual([
         'team-leader',
@@ -571,7 +718,7 @@ describe('AgentRoleResolver', () => {
             '---\nname: fenced\ndescription: outer\n---\n---\ninner: block\n---\nBody text.\n',
         },
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       const definition = await resolver.resolve(workspaceRoot, 'fenced');
 
@@ -586,7 +733,7 @@ describe('AgentRoleResolver', () => {
         { [agentsDir]: [file('live.md')] },
         files,
       );
-      const resolver = new AgentRoleResolver(fs.provider);
+      const resolver = new AgentRoleResolver(fs.provider, fs.logger);
 
       await expect(
         resolver.resolve(workspaceRoot, 'live'),

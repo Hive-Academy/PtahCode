@@ -45,6 +45,10 @@ interface Setup {
   descriptors?: Record<string, { sourceRef: string; label: string }>;
   active?: string[];
   wizardAgents?: Record<string, string>;
+  /** Absolute agent file path → the hash `hashWrittenFile` returns for it. */
+  fileHashes?: Record<string, string>;
+  /** Error code `hashWrittenFile` throws when a file has no hash (default ENOENT). */
+  hashErrorCode?: string;
   loaderThrows?: boolean;
   withLoader?: boolean;
 }
@@ -64,7 +68,17 @@ function build(setup: Setup = {}) {
       { hash, writtenAt: 1 },
     ]),
   );
-  const originStore = { read: jest.fn(async () => origins) };
+  const originStore = {
+    read: jest.fn(async () => origins),
+    hashWrittenFile: jest.fn(async (filePath: string) => {
+      const hash = setup.fileHashes?.[filePath];
+      if (hash === undefined) {
+        const code = setup.hashErrorCode ?? 'ENOENT';
+        throw Object.assign(new Error(`${code}: ${filePath}`), { code });
+      }
+      return hash;
+    }),
+  };
 
   const child = container.createChildContainer();
   child.registerInstance(TOKENS.LOGGER, logger);
@@ -120,6 +134,56 @@ describe('CloneProvenanceResolver — plugin-less clones', () => {
     );
     expect(origin?.provenance).toEqual({ kind: 'setup-wizard' });
     expect(origin?.divergedReason).toEqual({ kind: 'source-changed' });
+  });
+
+  describe('wizardOriginUnchanged', () => {
+    const FILE = join(SCOPE, '.claude', 'agents', 'backend-developer.md');
+    const wizardAgents = { 'backend-developer': WIZARD_HASH };
+
+    it('is true when the file hash equals the recorded hash', async () => {
+      const origin = await resolveOne(
+        { wizardAgents, fileHashes: { [FILE]: WIZARD_HASH } },
+        facts({}),
+      );
+      expect(origin?.wizardOriginUnchanged).toBe(true);
+    });
+
+    it('is false after a hand edit (provenance stays setup-wizard)', async () => {
+      const origin = await resolveOne(
+        { wizardAgents, fileHashes: { [FILE]: `sha256:${'c'.repeat(64)}` } },
+        facts({}),
+      );
+      expect(origin?.provenance).toEqual({ kind: 'setup-wizard' });
+      expect(origin?.wizardOriginUnchanged).toBe(false);
+    });
+
+    it('is false with no error log when the file is missing', async () => {
+      const { resolver, logger } = build({ wizardAgents });
+      const [origin] = (await resolver.resolveAll(SCOPE, [facts({})])) ?? [];
+      expect(origin.wizardOriginUnchanged).toBe(false);
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it('is omitted and logged at warn level on an unexpected hash error', async () => {
+      const { resolver, logger } = build({
+        wizardAgents,
+        hashErrorCode: 'EACCES',
+      });
+      const [origin] = (await resolver.resolveAll(SCOPE, [facts({})])) ?? [];
+      expect(origin.provenance).toEqual({ kind: 'setup-wizard' });
+      expect(origin.wizardOriginUnchanged).toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('hash failed'),
+        expect.any(Error),
+        { slug: 'backend-developer' },
+      );
+    });
+
+    it('is absent for a workspace file', async () => {
+      const origin = await resolveOne({}, facts({}));
+      expect(origin?.wizardOriginUnchanged).toBeUndefined();
+    });
   });
 
   it('a file a community pack replaced (origin forgotten) is a workspace file', async () => {

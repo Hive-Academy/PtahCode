@@ -67,6 +67,7 @@ import {
   CloneActionModel,
   KEEP_MINE_EXPLANATION,
   REBASE_EXPLANATION,
+  RETIRED_ROLE_REASON,
   cloneActionModel,
   cloneStatusLabel,
   formatHistoryTimestamp,
@@ -255,101 +256,114 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
             </p>
           }
 
-          <section class="space-y-2">
-            <h3 class="text-xs font-medium text-base-content-muted">Actions</h3>
-            <div class="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                ptahButton
-                variant="primary"
-                size="xs"
-                data-testid="drawer-enhance-btn"
-                [disabled]="
-                  !m.actions.enhance.enabled ||
-                  busy() ||
-                  enhanceBlockedReason() !== null
-                "
-                [title]="
-                  enhanceBlockedReason() ??
-                  m.actions.enhance.reason ??
-                  enhanceTitle
-                "
-                (click)="enhance.emit(m.clone)"
-              >
-                Enhance now
-              </button>
-              @if (
-                enhanceBlockedReason() ?? m.actions.enhance.reason;
-                as reason
-              ) {
-                <span
-                  class="text-[11px] text-base-content-muted"
-                  data-testid="drawer-enhance-reason"
-                  >{{ reason }}</span
+          @if (m.actions.retired) {
+            <p
+              class="text-xs text-base-content-muted"
+              data-testid="drawer-retired-note"
+            >
+              {{ retiredReason }}
+            </p>
+          } @else {
+            <section class="space-y-2">
+              <h3 class="text-xs font-medium text-base-content-muted">
+                Actions
+              </h3>
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  ptahButton
+                  variant="primary"
+                  size="xs"
+                  data-testid="drawer-enhance-btn"
+                  [disabled]="
+                    !m.actions.enhance.enabled ||
+                    busy() ||
+                    enhanceBlockedReason() !== null
+                  "
+                  [title]="
+                    enhanceBlockedReason() ??
+                    m.actions.enhance.reason ??
+                    enhanceTitle
+                  "
+                  (click)="enhance.emit(m.clone)"
                 >
-              }
-            </div>
+                  Enhance now
+                </button>
+                @if (
+                  enhanceBlockedReason() ?? m.actions.enhance.reason;
+                  as reason
+                ) {
+                  <span
+                    class="text-[11px] text-base-content-muted"
+                    data-testid="drawer-enhance-reason"
+                    >{{ reason }}</span
+                  >
+                }
+              </div>
 
-            @if (m.clone.diverged) {
-              <div
-                class="space-y-3 rounded-lg border border-warning/40 bg-warning/5 p-3"
-                data-testid="drawer-divergence"
-              >
-                <p class="text-xs font-medium text-warning">
-                  Upstream changed since this copy was made.
-                </p>
-
-                <dl
-                  class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs"
-                  data-testid="drawer-divergence-facts"
+              @if (m.clone.diverged) {
+                <div
+                  class="space-y-3 rounded-lg border border-warning/40 bg-warning/5 p-3"
+                  data-testid="drawer-divergence"
                 >
-                  <dt class="text-base-content-muted">Origin</dt>
-                  <dd data-testid="drawer-origin">{{ m.provenanceLabel }}</dd>
-                  @if (m.hasDivergedReason) {
-                    <dt class="text-base-content-muted">Reason</dt>
-                    <dd data-testid="drawer-reason">
-                      <ptah-diverged-reason [reason]="m.clone.divergedReason" />
-                    </dd>
+                  <p class="text-xs font-medium text-warning">
+                    Upstream changed since this copy was made.
+                  </p>
+
+                  <dl
+                    class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs"
+                    data-testid="drawer-divergence-facts"
+                  >
+                    <dt class="text-base-content-muted">Origin</dt>
+                    <dd data-testid="drawer-origin">{{ m.provenanceLabel }}</dd>
+                    @if (m.hasDivergedReason) {
+                      <dt class="text-base-content-muted">Reason</dt>
+                      <dd data-testid="drawer-reason">
+                        <ptah-diverged-reason
+                          [reason]="m.clone.divergedReason"
+                        />
+                      </dd>
+                    }
+                  </dl>
+
+                  @if (m.actions.rebase) {
+                    <div class="space-y-1">
+                      <button
+                        type="button"
+                        class="btn btn-outline btn-warning btn-xs"
+                        data-testid="drawer-rebase-btn"
+                        [disabled]="busy()"
+                        (click)="rebase.emit(m.clone)"
+                      >
+                        Rebase to upstream
+                      </button>
+                      <p class="text-[11px] text-base-content-muted">
+                        {{ rebaseExplanation }}
+                      </p>
+                    </div>
                   }
-                </dl>
 
-                @if (m.actions.rebase) {
                   <div class="space-y-1">
                     <button
                       type="button"
                       class="btn btn-outline btn-warning btn-xs"
-                      data-testid="drawer-rebase-btn"
+                      data-testid="drawer-keep-btn"
                       [disabled]="busy()"
-                      (click)="rebase.emit(m.clone)"
+                      (click)="keep.emit(m.clone)"
                     >
-                      Rebase to upstream
+                      Keep mine
                     </button>
-                    <p class="text-[11px] text-base-content-muted">
-                      {{ rebaseExplanation }}
+                    <p
+                      class="text-[11px] text-base-content-muted"
+                      data-testid="drawer-keep-explanation"
+                    >
+                      {{ keepMineExplanation }}
                     </p>
                   </div>
-                }
-
-                <div class="space-y-1">
-                  <button
-                    type="button"
-                    class="btn btn-outline btn-warning btn-xs"
-                    data-testid="drawer-keep-btn"
-                    [disabled]="busy()"
-                    (click)="keep.emit(m.clone)"
-                  >
-                    Keep mine
-                  </button>
-                  <p
-                    class="text-[11px] text-base-content-muted"
-                    data-testid="drawer-keep-explanation"
-                  >
-                    {{ keepMineExplanation }}
-                  </p>
                 </div>
-              </div>
-            }
-          </section>
+              }
+            </section>
+          }
 
           @if (m.clone.kind === 'agent') {
             <section class="space-y-2" data-testid="drawer-scorecard">
@@ -434,13 +448,19 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
                 m.actions.enhance.enabled && enhanceBlockedReason() === null
               "
               [enhanceTitle]="
-                enhanceBlockedReason() ?? m.actions.enhance.reason ?? enhanceTitle
+                enhanceBlockedReason() ??
+                m.actions.enhance.reason ??
+                enhanceTitle
               "
               [revertEnabled]="m.actions.revert.enabled"
               [revertTitle]="m.actions.revert.reason ?? ''"
               (enhance)="phaseEnhance.emit({ clone: m.clone, file: $event })"
               (revert)="
-                phaseRevert.emit({ clone: m.clone, ts: $event.ts, file: $event.file })
+                phaseRevert.emit({
+                  clone: m.clone,
+                  ts: $event.ts,
+                  file: $event.file,
+                })
               "
             />
           }
@@ -506,7 +526,10 @@ const STATUS_DOT: Record<SkillCloneStatus, string> = {
                         variant="ghost"
                         size="xs"
                         data-testid="clones-history-revert-btn"
-                        [disabled]="!h.hasBody || busy()"
+                        [disabled]="
+                          !m.actions.revert.enabled || !h.hasBody || busy()
+                        "
+                        [title]="m.actions.revert.reason ?? ''"
                         (click)="revertTo.emit({ clone: m.clone, ts: h.ts })"
                       >
                         Revert to this
@@ -641,6 +664,7 @@ export class CloneDetailDrawerComponent {
 
   protected readonly keepMineExplanation = KEEP_MINE_EXPLANATION;
   protected readonly rebaseExplanation = REBASE_EXPLANATION;
+  protected readonly retiredReason = RETIRED_ROLE_REASON;
   protected readonly enhanceTitle =
     'Propose an improvement from recorded usage. You review the diff before anything is written.';
 

@@ -101,6 +101,13 @@ export interface CloneSummary {
    * the producer did not resolve it; consumers render "Workspace file".
    */
   provenance?: LibraryProvenance;
+  /**
+   * Set only for a `setup-wizard` agent: `true` while the file still matches the
+   * hash the wizard recorded, `false` after a hand edit. Absent from an older
+   * host; consumers must use `=== true`. A retired role is read-only history
+   * only when this is `true` (the same rule as `AgentRoleResolver`).
+   */
+  wizardOriginUnchanged?: boolean;
   /** Why a `diverged` clone diverged. Absent when not diverged or unknown. */
   divergedReason?: DivergedReason;
   /** Slug of the source this clone collides with, from the sidecar. */

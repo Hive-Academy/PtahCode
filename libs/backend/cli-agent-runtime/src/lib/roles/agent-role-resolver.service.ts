@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { isAbsolute, join } from 'path';
 import { inject, injectable } from 'tsyringe';
 import {
@@ -6,15 +7,37 @@ import {
   type IFileSystemProvider,
 } from '@ptah-extension/platform-core';
 import {
+  AGENT_ORIGINS_FILE,
+  AgentOriginsFileSchema,
+  WIZARD_STATE_DIR,
   extractFrontmatterDescription,
-  isRetiredPtahAgent,
   resolveHarnessWorkspaceRoot,
   stripFrontmatter,
+  type AgentOrigins,
 } from '@ptah-extension/harness-sync';
+import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import {
+  isRetiredRole,
   phaseKindForRole,
   type AgentRoleDefinition,
 } from '@ptah-extension/shared';
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function isNotFound(error: unknown): boolean {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    return (error as { code?: unknown }).code === 'ENOENT';
+  }
+  return error instanceof Error && error.message.includes('ENOENT');
+}
+
+type RoleFileSystem = Pick<
+  IFileSystemProvider,
+  'exists' | 'readDirectory' | 'readFile'
+>;
+type RoleLogger = Pick<Logger, 'warn' | 'error'>;
 
 export const MAX_ROLE_BYTES = 64 * 1024;
 
@@ -48,15 +71,22 @@ export class AgentRoleError extends Error {
 export class AgentRoleResolver {
   constructor(
     @inject(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER)
-    private readonly fileSystem: IFileSystemProvider,
+    private readonly fileSystem: RoleFileSystem,
+    @inject(TOKENS.LOGGER) private readonly logger: RoleLogger,
   ) {}
 
+  /**
+   * The roles a caller may name: every file in the agents directory, except
+   * a retired built-in role that the setup wizard wrote and nobody changed.
+   */
   async listRoles(workspaceRoot: string): Promise<string[]> {
     this.assertWorkspaceRoot(workspaceRoot);
     const harnessRoot = resolveHarnessWorkspaceRoot(workspaceRoot);
     const agentsDir = this.agentsDirFor(harnessRoot);
-    return (await this.listRoleFiles(agentsDir))
-      .filter((file) => !this.isRetiredAgent(harnessRoot, agentsDir, file))
+    const files = await this.listRoleFiles(agentsDir);
+    const hidden = await this.hiddenRetiredRoles(harnessRoot, agentsDir, files);
+    return files
+      .filter((file) => !hidden.has(file.role))
       .map((file) => file.role);
   }
 
@@ -75,17 +105,15 @@ export class AgentRoleResolver {
     const harnessRoot = resolveHarnessWorkspaceRoot(workspaceRoot);
     const agentsDir = this.agentsDirFor(harnessRoot);
     const roleFiles = await this.listRoleFiles(agentsDir);
-    const availableRoles = roleFiles
-      .filter((file) => !this.isRetiredAgent(harnessRoot, agentsDir, file))
-      .map((file) => file.role);
+    const hidden = await this.hiddenRetiredRoles(
+      harnessRoot,
+      agentsDir,
+      roleFiles,
+    );
+    const userFiles = roleFiles.filter((file) => !hidden.has(file.role));
+    const availableRoles = userFiles.map((file) => file.role);
 
-    if (
-      roleFiles.some(
-        (file) =>
-          file.role === role &&
-          this.isRetiredAgent(harnessRoot, agentsDir, file),
-      )
-    ) {
+    if (hidden.has(role)) {
       throw new AgentRoleError(
         'unknown_role',
         `Role "${role}" is retired. Use the "${phaseKindForRole(role)}" phase instead.`,
@@ -93,14 +121,14 @@ export class AgentRoleResolver {
       );
     }
 
-    if (roleFiles.length === 0) {
+    if (userFiles.length === 0) {
       throw new AgentRoleError(
         'no_roles',
-        `No roles are defined for workspace ${harnessRoot}: ${agentsDir} has no role files. The setup wizard generates roles into that directory. Spawning without "role" is valid.`,
+        `No roles are defined for workspace ${harnessRoot}: ${agentsDir} has no role files. Create an agent file in .claude/agents/. Spawning without "role" is valid.`,
       );
     }
 
-    const match = roleFiles.find((file) => file.role === role);
+    const match = userFiles.find((file) => file.role === role);
     if (!match) {
       throw new AgentRoleError(
         'unknown_role',
@@ -163,16 +191,72 @@ export class AgentRoleResolver {
     return join(harnessRoot, '.claude', 'agents');
   }
 
-  private isRetiredAgent(
+  /**
+   * Retired built-in slugs whose file the setup wizard wrote and nobody
+   * changed. Only a retired slug with an origin entry is hashed. A file
+   * without origin evidence is user-written and stays visible.
+   */
+  private async hiddenRetiredRoles(
     harnessRoot: string,
     agentsDir: string,
-    file: { role: string; fileName: string },
-  ): boolean {
-    return isRetiredPtahAgent(
-      harnessRoot,
-      file.role,
-      join(agentsDir, file.fileName),
-    );
+    files: Array<{ role: string; fileName: string }>,
+  ): Promise<Set<string>> {
+    const hidden = new Set<string>();
+    const candidates = files.filter((file) => isRetiredRole(file.role));
+    if (candidates.length === 0) {
+      return hidden;
+    }
+    const origins = await this.readOrigins(harnessRoot);
+    for (const file of candidates) {
+      const origin = origins[file.role];
+      if (!origin) {
+        continue;
+      }
+      const hash = await this.hashRoleFile(join(agentsDir, file.fileName));
+      if (hash !== null && hash === origin.hash) {
+        hidden.add(file.role);
+      }
+    }
+    return hidden;
+  }
+
+  private async hashRoleFile(sourcePath: string): Promise<string | null> {
+    try {
+      const raw = await this.fileSystem.readFile(sourcePath);
+      const content = raw.replace(/\r\n/g, '\n');
+      return `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}`;
+    } catch (error: unknown) {
+      if (!isNotFound(error)) {
+        this.logger.error(
+          `[AgentRoleResolver] Failed to read ${sourcePath} for origin check`,
+          toError(error),
+        );
+      }
+      return null;
+    }
+  }
+
+  private async readOrigins(harnessRoot: string): Promise<AgentOrigins> {
+    const storePath = join(harnessRoot, WIZARD_STATE_DIR, AGENT_ORIGINS_FILE);
+    try {
+      const raw = await this.fileSystem.readFile(storePath);
+      const parsed = AgentOriginsFileSchema.safeParse(JSON.parse(raw));
+      if (!parsed.success) {
+        this.logger.warn(
+          `[AgentRoleResolver] Ignored invalid origin store ${storePath}: ${parsed.error.message}`,
+        );
+        return {};
+      }
+      return parsed.data.agents;
+    } catch (error: unknown) {
+      if (!isNotFound(error)) {
+        this.logger.error(
+          `[AgentRoleResolver] Failed to read origin store ${storePath}`,
+          toError(error),
+        );
+      }
+      return {};
+    }
   }
 
   private async listRoleFiles(

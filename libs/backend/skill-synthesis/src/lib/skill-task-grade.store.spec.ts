@@ -335,6 +335,46 @@ maybe('SkillTaskGradeStore', () => {
     } finally { db.close(); }
   });
 
+  it('reads a pre-Phase-5 subagent outcome under its historical role key', () => {
+    const { db, store } = setup();
+    try {
+      setupAttributionTables(db);
+      db.prepare('INSERT INTO skill_registry (slug, kind) VALUES (?, ?)').run(TESTS_ROLE, 'agent');
+      // Fixture: a lane row written before Phase 5, with a role and no phase kind.
+      insertLane(db, { runId: 'pre5', role: TESTS_ROLE, executorKind: 'subagent', phaseKind: null, root: '/workspace' });
+      const found = store.findAttributions('TASK_2026_001', '/workspace');
+      expect(found).toEqual([
+        expect.objectContaining({ kind: 'agent', slug: TESTS_ROLE, attributionKey: 'run:pre5', phaseKind: null, executorKind: 'subagent' }),
+      ]);
+      const [row] = found;
+      // Seed the grade with the pre-Phase-5 row shape: no phase or executor column value.
+      db.prepare(`INSERT INTO skill_task_grades
+        (task_id, subject_kind, subject_slug, attribution_key, run_id, verdict,
+         source_file, source_digest, evidence_source, workspace_root, graded_at, findings_ref)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        'TASK_2026_001', row.kind, row.slug, row.attributionKey, 'pre5', 'pass',
+        'review.md', 'digest-a', 'task-review', normalizeWorkspaceRoot('/workspace'), 1, null,
+      );
+      const snapshot = () => ({
+        grades: db.prepare('SELECT * FROM skill_task_grades ORDER BY attribution_key').all(),
+        outcomes: db.prepare('SELECT * FROM lane_outcome_records ORDER BY run_id').all(),
+      });
+      const before = snapshot();
+      expect(before.grades).toEqual([
+        expect.objectContaining({ subject_slug: TESTS_ROLE, phase_kind: null, executor_kind: null }),
+      ]);
+      expect(before.outcomes).toHaveLength(1);
+      expect(store.getAggregates('agent', [TESTS_ROLE], '/workspace').get(TESTS_ROLE))
+        .toEqual({ graded: 1, passed: 1, successRate: 1 });
+      expect(store.listRecent('agent', TESTS_ROLE, 5, '/workspace'))
+        .toMatchObject([{ subjectKind: 'agent', subjectSlug: TESTS_ROLE, phaseKind: null, executorKind: null }]);
+      expect(store.getPhaseAggregates('/workspace').filter((r) => r.phaseKind === 'tests' && r.legacy))
+        .toEqual([{ phaseKind: 'tests', legacy: true, aliasedRoles: [TESTS_ROLE], graded: 1, passed: 1, successRate: 1 }]);
+      // Reading does not rewrite the stored grade or the outcome row.
+      expect(snapshot()).toEqual(before);
+    } finally { db.close(); }
+  });
+
   it('counts a run under its real phase when the role alias names another phase', () => {
     const { db, store } = setup();
     try {
