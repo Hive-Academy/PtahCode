@@ -107,6 +107,12 @@ import {
   LaneModelBlockedError,
   type AgentRoleStamp,
 } from './agent-process-manager.service';
+import type { DependencyContainer } from 'tsyringe';
+import { SessionMetadataStore, SDK_TOKENS, flushSessionMetadataStores } from '@ptah-extension/agent-sdk';
+import { createMockStateStorage } from '@ptah-extension/platform-core/testing';
+import { AgentId } from '@ptah-extension/shared';
+import { persistCliSessionReference } from '../wiring/agent-events';
+import { SystemCliLaneResumer } from './messaging/lane-resumers/system-cli-lane-resumer';
 import { PTAH_CLI_ROLE_DELIVERY } from '../ptah-cli/helpers/ptah-cli-registry.utils';
 import {
   BUFFER_LOW_WATER_SIZE,
@@ -147,6 +153,7 @@ import type {
   CliDetectionResult,
   CliOutputSegment,
   CliSessionReference,
+  EffectiveLanePolicy,
   PhaseDispatchV1,
   QuotaOwnerRef,
 } from '@ptah-extension/shared';
@@ -465,6 +472,7 @@ function createManager(deps: {
       delivered: false,
       reason: 'chat-runtime-unavailable',
     })),
+    replayOutbox: jest.fn(async () => undefined),
   };
   const resumeGate = {
     evaluate: jest.fn(async () => ({
@@ -958,7 +966,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       ).toContain('(config-write-failed)');
     });
 
-    it('clears a handle timeout warning when attachment arrives later', async () => {
+    it('late attachment clears timeout and rejected handshake reports rejected:forbidden', async () => {
       getMcpPort.mockReturnValue(51821);
       let notifyTimeout: (() => void) | undefined;
       // A holder: probe.get() reads it before the attachment arrives.
@@ -970,8 +978,15 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       ) => void = () => undefined;
       const probe: import('./mcp-attachment-probe.port').IMcpAttachmentProbe = {
         get: () => attachmentRef.current,
+        getAttempt: () => ({
+          agentId: 'agent-under-test',
+          port: 4888,
+          reason: 'forbidden',
+          method: 'POST',
+          time: Date.now(),
+        }),
         waitFor: () =>
-          new Promise((resolve) => {
+          new Promise<import('./mcp-attachment-probe.port').McpAttachment | undefined>((resolve) => {
             resolveAttachment = resolve;
           }),
       };
@@ -1004,7 +1019,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       );
       notifyTimeout?.();
       expect(harness.manager.getStatus(result.agentId)).toMatchObject({
-        mcpAttachmentWarning: expect.stringContaining('(handshake-timeout)'),
+        mcpAttachmentWarning: expect.stringContaining('rejected:forbidden'),
       });
       await jest.advanceTimersByTimeAsync(5_000);
       attachmentRef.current = {
@@ -1024,6 +1039,39 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(
         harness.laneCompletion.signal.mock.calls[0][0].mcpAttachmentWarning,
       ).toBeUndefined();
+    });
+
+    it('valid authenticated handshake prevents warning', async () => {
+      getMcpPort.mockReturnValue(51821);
+      let agentId = '';
+      const probe: import('./mcp-attachment-probe.port').IMcpAttachmentProbe = {
+        get: (id, port) => id === agentId && port === 51821
+          ? { agentId: id, port, method: 'initialize', time: Date.now() }
+          : undefined,
+        waitFor: async (id, port) => id === agentId && port === 51821
+          ? { agentId: id, port, method: 'initialize', time: Date.now() }
+          : undefined,
+      };
+      let notifyTimeout: (() => void) | undefined;
+      const controls = createMockSdkHandle();
+      (sdkAdapter.runSdk as jest.Mock).mockResolvedValue({
+        ...controls.handle,
+        onMcpAttachmentTimeout: (callback: () => void) => { notifyTimeout = callback; },
+      });
+      const harness = createManager({
+        logger, cliDetection,
+        workspaceProvider: createMockWorkspaceProvider(),
+        reasoningSettings: { effort: { get: reasoningEffortGet } },
+        harnessPreflight: null,
+        mcpServerStatus: { getPort: getMcpPort },
+        hostAttention, attachmentProbe: probe,
+      });
+      const result = await harness.manager.spawn({ task: 'Use tools', cli: 'codex', workingDirectory: '/workspace/root' });
+      agentId = result.agentId;
+      notifyTimeout?.();
+      expect(harness.manager.getStatus(agentId)).not.toHaveProperty('mcpAttachmentWarning');
+      controls.resolve(0);
+      await controls.handle.done;
     });
 
     it('does not resolve an MCP port for adapters that opt out', async () => {
@@ -1479,8 +1527,237 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     });
   });
 
+  describe('permission routing (TASK_2026_1172, R1.1)', () => {
+    // Permission parts of the real adapter manifests
+    // (`claude-cli.adapter.ts`, `codex-app-server-lane.adapter.ts`).
+    const CLAUDE_POLICY_MANIFEST: Pick<
+      CliAdapterManifest,
+      'permissionModes' | 'networkModes'
+    > = {
+      permissionModes: {
+        plan: { state: 'supported', nativeMode: 'plan', networkModes: ['allow'] },
+        ask: { state: 'supported', nativeMode: 'default', networkModes: ['allow'] },
+        'auto-edit': { state: 'supported', nativeMode: 'acceptEdits', networkModes: ['allow'] },
+        yolo: { state: 'supported', nativeMode: 'bypassPermissions', networkModes: ['allow'] },
+      },
+      networkModes: {
+        allow: { state: 'supported' },
+        deny: { state: 'unsupported', reason: 'no network sandbox' },
+      },
+    };
+    const CODEX_POLICY_MANIFEST: Pick<
+      CliAdapterManifest,
+      'permissionModes' | 'networkModes'
+    > = {
+      permissionModes: {
+        plan: { state: 'supported', nativeMode: 'read-only', networkModes: ['deny'] },
+        ask: { state: 'unsupported', reason: 'no approval route', networkModes: [] },
+        'auto-edit': { state: 'supported', nativeMode: 'workspace-write', networkModes: ['allow', 'deny'] },
+        yolo: { state: 'supported', nativeMode: 'danger-full-access', networkModes: ['allow'] },
+      },
+      networkModes: {
+        allow: { state: 'supported' },
+        deny: { state: 'supported' },
+      },
+    };
+
+    function useAdapter(name: 'claude' | 'codex'): void {
+      const base = sdkAdapter.capabilities();
+      Object.assign(sdkAdapter, {
+        name,
+        capabilities: jest.fn().mockReturnValue({
+          ...base,
+          ...(name === 'claude' ? CLAUDE_POLICY_MANIFEST : CODEX_POLICY_MANIFEST),
+        }),
+      });
+    }
+
+    function lastRunSdkCall(): { permission?: string; network?: string; permissionSource?: string } {
+      const calls = (sdkAdapter.runSdk as jest.Mock).mock.calls;
+      return calls[calls.length - 1][0];
+    }
+
+    /** The stored record and the spawn result carry the same flat policy. */
+    function expectFlatPolicy(
+      result: { agentId: AgentProcessInfo['agentId']; effectivePolicy?: EffectiveLanePolicy },
+      expected: EffectiveLanePolicy,
+    ): void {
+      const stored = manager.getStatus(result.agentId) as AgentProcessInfo;
+      for (const policy of [result.effectivePolicy, stored.effectivePolicy]) {
+        expect(policy).toMatchObject(expected);
+        expect(policy).not.toHaveProperty('requested');
+      }
+    }
+
+    it.each([
+      ['claude', { permission: 'ask', permissionSource: 'spawn' }, { permission: 'ask' }, { permission: 'ask', permissionSource: 'spawn' }],
+      ['codex', { permission: 'auto-edit', network: 'deny', permissionSource: 'spawn', networkSource: 'spawn' }, { permission: 'auto-edit', network: 'deny' }, { permission: 'auto-edit', network: 'deny', permissionSource: 'spawn' }],
+      ['claude', { permission: 'ask', permissionSource: 'spawn' }, { permission: 'ask' }, { permission: 'plan', permissionSource: 'parent-plan' }],
+      ['codex', { permission: 'auto-edit', network: 'deny', permissionSource: 'spawn' }, { permission: 'auto-edit', network: 'deny' }, { permission: 'plan', network: 'deny', permissionSource: 'parent-plan' }],
+      ['claude', { permission: 'ask', unexpected: true }, { permission: 'ask' }, { permission: 'plan' }],
+      ['codex', { permission: 'auto-edit', unexpected: true }, { permission: 'auto-edit' }, { permission: 'plan', network: 'deny' }],
+    ] as const)('persists, restores, and resumes %s policy case %#', async (cli, effectivePolicy, requestedPolicy, expected) => {
+      useAdapter(cli);
+      const storage = createMockStateStorage();
+      const store = new SessionMetadataStore(storage, logger);
+      const parent = 'policy-parent';
+      await store.create(parent, '/workspace/root', 'Parent');
+      const child = Object.assign(Object.create(null) as DependencyContainer, {
+        isRegistered: (token: symbol) => token === SDK_TOKENS.SDK_SESSION_METADATA_STORE,
+        resolve: (token: symbol) => token === SDK_TOKENS.SDK_SESSION_METADATA_STORE ? store : undefined,
+      });
+      const agentId = AgentId.from('aaaaaaaa-bbbb-4ccc-8ddd-000000000999');
+      const info: AgentProcessInfo = {
+        agentId, cli, task: 'Original', workingDirectory: '/workspace/root',
+        status: 'completed', startedAt: '2026-11-07T00:00:00.000Z',
+        cliSessionId: `thread-${cli}`, parentSessionId: parent,
+        effectivePolicy: effectivePolicy as EffectiveLanePolicy,
+        requestedPolicy,
+      };
+      await persistCliSessionReference(child, logger, '[test]', info, undefined);
+      setupVscodeConfig({ cliLaneDefaults: { claude: { permission: 'yolo', network: 'allow' }, codex: { permission: 'yolo', network: 'allow' } } });
+      const [restored] = await store.getCliSessionsForRestore(parent);
+      manager.restoreAgents([restored], '/workspace/root', parent);
+      const restoredInfo = manager.getStatus(agentId);
+      if (!restoredInfo || Array.isArray(restoredInfo)) throw new Error('Expected restored lane');
+      expect(restoredInfo.effectivePolicy?.permission).toBe('unexpected' in effectivePolicy ? 'plan' : effectivePolicy.permission);
+      const capped = 'permissionSource' in expected && expected.permissionSource === 'parent-plan';
+      const resumer = new SystemCliLaneResumer(manager, capped ? () => 'plan' : undefined);
+      await resumer.resume(restoredInfo, 'Continue');
+      expect(lastRunSdkCall()).toMatchObject(expected);
+      if ('unexpected' in effectivePolicy) {
+        // Saved defaults (yolo, network allow) must not leak into the resume.
+        expect(lastRunSdkCall().network).toBe(cli === 'codex' ? 'deny' : undefined);
+        expect(lastRunSdkCall().permissionSource).toBeUndefined();
+      }
+      await flushSessionMetadataStores();
+    });
+
+    it.each([
+      ['claude', 'ask', undefined],
+      ['claude', 'plan', undefined],
+      ['claude', 'auto-edit', undefined],
+      ['codex', 'auto-edit', 'deny'],
+      ['codex', 'plan', 'deny'],
+    ] as const)(
+      'stores %s spawn %s as requested -> effective with the same flat value',
+      async (cli, permission, network) => {
+        useAdapter(cli);
+        const result = await manager.spawn({
+          task: 'Task',
+          cli,
+          workingDirectory: '/workspace/root',
+          permission,
+          ...(network ? { network } : {}),
+        });
+
+        expectFlatPolicy(result, { permission, permissionSource: 'spawn' });
+        expect(result.requestedPolicy).toEqual({ permission, network });
+        expect(
+          (manager.getStatus(result.agentId) as AgentProcessInfo).requestedPolicy,
+        ).toEqual({ permission, network });
+        expect(lastRunSdkCall()).toMatchObject({ permission, permissionSource: 'spawn' });
+      },
+    );
+
+    it.each([
+      ['claude', 'ask', undefined],
+      ['codex', 'auto-edit', 'deny'],
+    ] as const)(
+      'keeps %s %s when the stored snapshot is resumed',
+      async (cli, permission, network) => {
+        useAdapter(cli);
+        const first = await manager.spawn({
+          task: 'Initial task',
+          cli,
+          workingDirectory: '/workspace/root',
+          permission,
+          ...(network ? { network } : {}),
+        });
+        const snapshot = (manager.getStatus(first.agentId) as AgentProcessInfo)
+          .effectivePolicy;
+
+        const resumed = await manager.spawn({
+          task: 'Resume task',
+          cli,
+          workingDirectory: '/workspace/root',
+          resumeSessionId: `thread-${cli}`,
+          permission: snapshot?.permission,
+          network: snapshot?.network,
+          resumePolicy: snapshot,
+        });
+
+        expectFlatPolicy(resumed, { permission, permissionSource: 'spawn' });
+        expect(lastRunSdkCall()).toMatchObject({ permission, permissionSource: 'spawn' });
+      },
+    );
+
+    it('still caps a resumed Codex snapshot to plan under a parent plan', async () => {
+      useAdapter('codex');
+      const resumed = await manager.spawn({
+        task: 'Resume task',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+        resumeSessionId: 'thread-capped',
+        parentLevel: 'plan',
+        resumePolicy: {
+          permission: 'auto-edit',
+          network: 'allow',
+          permissionSource: 'spawn',
+          networkSource: 'spawn',
+        },
+      });
+
+      expectFlatPolicy(resumed, {
+        permission: 'plan',
+        network: 'deny',
+        permissionSource: 'parent-plan',
+        networkSource: 'parent-plan',
+      });
+      expect(lastRunSdkCall()).toMatchObject({ permission: 'plan', network: 'deny' });
+    });
+
+    it('lets an SDK-handle effectivePolicy replace the stored policy', async () => {
+      useAdapter('codex');
+      const handlePolicy: EffectiveLanePolicy = {
+        permission: 'plan',
+        network: 'deny',
+        permissionSource: 'spawn',
+        networkSource: 'spawn',
+      };
+      Object.assign(sdkControls.handle, { effectivePolicy: handlePolicy });
+
+      const result = await manager.spawn({
+        task: 'Task',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+        permission: 'auto-edit',
+        network: 'deny',
+      });
+
+      expect(result.effectivePolicy).toEqual(handlePolicy);
+      expect(
+        (manager.getStatus(result.agentId) as AgentProcessInfo).effectivePolicy,
+      ).toEqual(handlePolicy);
+    });
+  });
+
   describe('resume gate (TASK_2026_597, R9.1)', () => {
     const SESSION = 'thread-1';
+
+    it.each([
+      ['claude', { permission: 'ask' as const, permissionSource: 'spawn' as const }, { permission: 'ask' as const }],
+      ['codex', { permission: 'auto-edit' as const, network: 'deny' as const }, { permission: 'auto-edit' as const, network: 'deny' as const }],
+    ] as const)('restores %s lane policy snapshots', (cli, effectivePolicy, requestedPolicy) => {
+      const agentId = 'policy-previous' as CliSessionReference['agentId'];
+      manager.restoreAgents([{
+        cliSessionId: SESSION, cli, agentId, task: 'Continue',
+        startedAt: '2026-10-04T08:00:00.000Z', status: 'completed',
+        effectivePolicy, requestedPolicy,
+      }], '/workspace/root');
+
+      expect(manager.getStatus(agentId)).toMatchObject({ effectivePolicy, requestedPolicy });
+    });
 
     function restorePreviousLane(): void {
       const ref: CliSessionReference = {
@@ -2649,7 +2926,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         status: 'completed',
         exitCode: 0,
       });
-      expect(context).toEqual({ reportsDelivered: 0, authMatched: false });
+      expect(context).toEqual({ reportsDelivered: 0, reportAttempts: 0, reportsFailed: 0, authMatched: false });
     });
 
     it('signals a failure', async () => {
@@ -2740,6 +3017,8 @@ describe('AgentProcessManager - SDK Execution Path', () => {
 
       expect(laneCompletion.signal.mock.calls[0][1]).toEqual({
         reportsDelivered: 2,
+        reportAttempts: 0,
+        reportsFailed: 0,
         authMatched: false,
       });
     });

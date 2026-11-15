@@ -248,6 +248,8 @@ export interface AgentProcessInfo {
   readonly effectiveCapabilities?: EffectiveLaneCapabilities;
   /** Spawn policy requested for this lane; omitted fields use adapter defaults. */
   readonly effectivePolicy?: EffectiveLanePolicy;
+  /** Permission and network explicitly supplied on the spawn call. */
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   /** Workspace role name the agent was spawned as. */
   readonly role?: string;
   /** How the role was delivered (only set when `role` is set). */
@@ -496,6 +498,8 @@ export interface SpawnAgentResult {
   readonly cli: CliType;
   readonly status: AgentStatus;
   readonly startedAt: string;
+  readonly effectivePolicy?: EffectiveLanePolicy;
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   /** CLI-native session ID captured from init event. Null if not yet available. */
   readonly cliSessionId?: string;
   /** Display name of the Ptah CLI agent (only set when cli === 'ptah-cli') */
@@ -586,6 +590,8 @@ export interface CliOutputSegment {
   readonly turnTelemetry?: AgentTurnTelemetry;
   readonly usage?: {
     readonly model?: string;
+    readonly models?: { modelId: string; inputTokens: number; outputTokens: number;
+      cacheReadTokens: number; cacheWriteTokens: number }[];
     readonly inputTokens?: number;
     readonly outputTokens?: number;
     /** Prompt-cache tokens served from an existing cache entry. */
@@ -630,6 +636,10 @@ export interface AgentOutputDelta {
  * Stored in SessionMetadata.cliSessions[] for resume capability.
  */
 export interface CliSessionReference {
+  /** Validated effective permission and network snapshot for cold resume. */
+  readonly effectivePolicy?: EffectiveLanePolicy;
+  /** Original explicit permission and network request for this lane. */
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   /** Last observed turn number. Absent in older persisted references. */
   readonly turnSeq?: number;
   /** Immutable run snapshot. Malformed persisted values must refuse resume. */
@@ -780,6 +790,8 @@ export interface LaneCompletionSignal {
    * output buffer and whatever it wrote to disk.
    */
   readonly reportsDelivered: number;
+  readonly reportAttempts?: number;
+  readonly reportsFailed?: number;
   /** CLI-native session id, when the adapter reported one. Enables a resume. */
   readonly cliSessionId?: string;
   /** Why the host stopped the lane. Absent when it ended on its own or the caller stopped it. */

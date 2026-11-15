@@ -131,14 +131,14 @@ describe('PtahDescriptionListComponent (data API)', () => {
   imports: [PtahDescriptionListComponent, PtahDescriptionItemComponent, PtahButtonDirective],
   template: `
     <ptah-description-list ariaLabel="Details">
-      <ptah-description-item term="Status"><span class="badge">Active</span></ptah-description-item>
-      <ptah-description-item term="Email" [value]="email()" />
-      <ptah-description-item term="Nickname" />
-      <ptah-description-item term="Count" [value]="0" />
-      <ptah-description-item term="Key" value="sk-1" mono truncate>
+      <div ptahDescriptionItem term="Status"><span class="badge">Active</span></div>
+      <div ptahDescriptionItem term="Email" [value]="email()"></div>
+      <div ptahDescriptionItem term="Nickname"></div>
+      <div ptahDescriptionItem term="Count" [value]="0"></div>
+      <div ptahDescriptionItem term="Key" value="sk-1" mono truncate>
         <button ptahButton actions variant="ghost" size="xs" type="button">Copy</button>
-      </ptah-description-item>
-      <ptah-description-item term="Bound empty" value="  "><span>Hidden</span></ptah-description-item>
+      </div>
+      <div ptahDescriptionItem term="Bound empty" value="  "><span>Hidden</span></div>
     </ptah-description-list>
   `,
 })
@@ -156,16 +156,28 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
   }
 
   function dd(root: HTMLElement, index: number): HTMLElement {
-    return root.querySelectorAll<HTMLElement>('ptah-description-item dd')[index];
+    return root.querySelectorAll<HTMLElement>('[ptahDescriptionItem] dd:not([data-ptah-description-actions])')[index];
   }
 
-  it('renders one row per item with the item host as display contents', async () => {
+  it('uses the item host as the row: dl holds only div rows with dt and dd', async () => {
     const { root } = await render();
-    const items = root.querySelectorAll('ptah-description-item');
+    const items = root.querySelectorAll<HTMLElement>('[ptahDescriptionItem]');
     expect(items).toHaveLength(6);
+    expect(items[0].tagName).toBe('DIV');
     expect(items[0].getAttribute('data-ptah-pattern')).toBe('description-item');
-    expect(items[0].classList.contains('contents')).toBe(true);
-    expect(root.querySelectorAll('dl dt')).toHaveLength(6);
+    expect(items[0].hasAttribute('data-ptah-description-row')).toBe(true);
+    expect(items[0].classList.contains('grid')).toBe(true);
+    expect(items[0].classList.contains('contents')).toBe(false);
+    const dl = root.querySelector('dl') as HTMLElement;
+    const children = Array.from(dl.children);
+    expect(children.every((child) => child.tagName === 'DIV' && child.hasAttribute('data-ptah-description-row'))).toBe(true);
+    expect(children[0].firstElementChild?.tagName).toBe('DT');
+    expect(root.querySelectorAll('dl > div > dt')).toHaveLength(6);
+    expect(root.querySelectorAll('dl > div > dd:not([data-ptah-description-actions])')).toHaveLength(6);
+    // Each row holds only dt and dd elements. The action slot is a second dd.
+    const rowChildren = Array.from(root.querySelectorAll('dl > div > *'));
+    expect(rowChildren.every((child) => child.tagName === 'DT' || child.tagName === 'DD')).toBe(true);
+    expect(root.querySelectorAll('dl > div > dd[data-ptah-description-actions]')).toHaveLength(6);
   });
 
   it('shows projected rich content and no placeholder', async () => {
@@ -201,8 +213,14 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
     expect(value.classList.contains('font-[family-name:var(--ptah-font-mono)]')).toBe(true);
     expect(value.classList.contains('truncate')).toBe(true);
     expect(value.getAttribute('title')).toBe('sk-1');
-    const actions = root.querySelectorAll('[data-ptah-description-actions]')[4];
-    expect(actions.querySelector('button')?.textContent?.trim()).toBe('Copy');
+    const actions = root.querySelectorAll<HTMLElement>('[data-ptah-description-actions]')[4];
+    expect(actions.tagName).toBe('DD');
+    expect(actions.classList.contains('empty:hidden')).toBe(true);
+    const copy = actions.querySelector('button') as HTMLButtonElement;
+    expect(copy.textContent?.trim()).toBe('Copy');
+    expect(copy.disabled).toBe(false);
+    // A row with no action leaves its action dd with no child nodes, so `empty:hidden` removes it.
+    expect(root.querySelectorAll('[data-ptah-description-actions]')[0].childNodes).toHaveLength(0);
   });
 
   it('hides projected content behind the placeholder when the bound value is whitespace', async () => {
@@ -222,6 +240,7 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
     fixture.componentRef.setInput('term', 'Alone');
     fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
+    expect(host.hasAttribute('data-ptah-description-row')).toBe(true);
     expect(host.querySelector('[aria-hidden="true"]')?.textContent).toBe('Not set');
   });
 
@@ -231,11 +250,11 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
       imports: [PtahDescriptionListComponent, PtahDescriptionItemComponent],
       template: `
         <ptah-description-list>
-          <ptah-description-item term="Plan">
+          <div ptahDescriptionItem term="Plan">
             @if (plan(); as name) {
               <span class="badge">{{ name }}</span>
             }
-          </ptah-description-item>
+          </div>
         </ptah-description-list>
       `,
     })
@@ -250,7 +269,7 @@ describe('PtahDescriptionItemComponent (projection API)', () => {
     };
     await settle();
     const root = fixture.nativeElement as HTMLElement;
-    const value = (): HTMLElement => root.querySelector('ptah-description-item dd') as HTMLElement;
+    const value = (): HTMLElement => root.querySelector('[ptahDescriptionItem] dd') as HTMLElement;
     const slot = (): HTMLElement => value().querySelector('[data-ptah-description-slot]') as HTMLElement;
     expect(value().hasAttribute('data-ptah-description-empty')).toBe(true);
 

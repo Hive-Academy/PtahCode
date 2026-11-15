@@ -160,6 +160,8 @@ export class UiGalleryComponent {
     { id: 'patterns-form-section', label: 'Form section pattern' },
     { id: 'patterns-description-list', label: 'Description list pattern' },
     { id: 'patterns-form-actions', label: 'Form actions pattern' },
+    { id: 'patterns-editable-section', label: 'Editable section pattern' },
+    { id: 'patterns-settings-layout', label: 'Settings layout pattern' },
     { id: 'family-badge', label: 'Badge and status family' },
     { id: 'family-card', label: 'Card and surface family' },
     { id: 'timer-running', label: 'Timer: running' },

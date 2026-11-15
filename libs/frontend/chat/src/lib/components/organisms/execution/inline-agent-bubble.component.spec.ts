@@ -520,6 +520,63 @@ describe('InlineAgentBubbleComponent — Phase 3', () => {
   });
 
   describe('template click wiring', () => {
+    it('keeps v1 Codex send available without a native control reason', () => {
+      const fixture = TestBed.configureTestingModule({
+        providers: [
+          { provide: AgentMonitorStore, useValue: storeMock },
+          { provide: BackgroundAgentStore, useValue: bgStoreMock },
+        ],
+      }).createComponent(InlineAgentBubbleComponent);
+      fixture.componentRef.setInput('node', makeNode());
+      setRecord({
+        parentToolUseId: 'toolu_parent_abc', agentType: 'codex',
+        status: 'running', parentSessionId: 'sess-owner',
+      });
+      fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
+      expect(fixture.componentInstance.canSendMessage()).toBe(true);
+      expect(root.querySelector<HTMLButtonElement>('[data-testid="subagent-send-toggle"]')?.disabled).toBe(false);
+      expect(root.querySelector('[data-testid="subagent-stop-button"]')).toBeNull();
+      expect(root.querySelector('[data-testid="native-codex-control-reason"]')).toBeNull();
+      expect(root.textContent).not.toContain('Native Codex subagents do not support send or stop from Ptah yet.');
+    });
+
+    it('shows native path, status and disabled SDK controls without dispatching', () => {
+      const fixture = TestBed.configureTestingModule({
+        providers: [
+          { provide: AgentMonitorStore, useValue: storeMock },
+          { provide: BackgroundAgentStore, useValue: bgStoreMock },
+        ],
+      }).createComponent(InlineAgentBubbleComponent);
+      fixture.componentRef.setInput('node', makeNode());
+      setRecord({
+        parentToolUseId: 'toolu_parent_abc', agentType: 'codex',
+        description: 'native_vortex', status: 'running',
+        parentSessionId: 'sess-owner', nativeCycleId: 'thread-1:1', nativeCycleOrdinal: 1,
+      });
+      fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.textContent).toContain('native_vortex');
+      expect(root.querySelector('[data-status="running"]')).not.toBeNull();
+      const send = root.querySelector<HTMLButtonElement>('[data-testid="subagent-send-toggle"]');
+      const stop = root.querySelector<HTMLButtonElement>('[data-testid="subagent-stop-button"]');
+      expect(send?.disabled).toBe(true);
+      expect(stop?.disabled).toBe(true);
+      expect(root.textContent).toContain('Native Codex subagents do not support send or stop from Ptah yet.');
+      send?.click();
+      stop?.click();
+      expect(storeMock.sendMessageToAgent).not.toHaveBeenCalled();
+      expect(storeMock.stopAgent).not.toHaveBeenCalled();
+      setRecord({
+        parentToolUseId: 'toolu_parent_abc', agentType: 'codex',
+        description: 'native_vortex', status: 'failed',
+        errorMessage: 'child thread failed', parentSessionId: 'sess-owner',
+        nativeCycleId: 'thread-1:1', nativeCycleOrdinal: 1,
+      });
+      fixture.detectChanges();
+      expect(root.querySelector('[data-status="failed"]')).not.toBeNull();
+      expect(root.querySelector('[data-testid="native-agent-error"]')?.textContent).toContain('child thread failed');
+    });
     it('clicking the rendered stop button dispatches stopAgent', async () => {
       const fixture = TestBed.configureTestingModule({
         providers: [

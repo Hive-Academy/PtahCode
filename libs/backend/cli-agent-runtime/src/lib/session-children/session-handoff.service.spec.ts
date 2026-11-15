@@ -417,14 +417,12 @@ describe('SessionHandoffService', () => {
         worktreePath: root,
       };
       const spawner = {
-        succeed: jest
-          .fn()
-          .mockResolvedValue({
-            ok: true,
-            successor,
-            adoptedLanes: ['lane-1'],
-            tabOpened: true,
-          }),
+        succeed: jest.fn().mockResolvedValue({
+          ok: true,
+          successor,
+          adoptedLanes: ['lane-1'],
+          tabOpened: true,
+        }),
       };
       const request = h.request({ label: 'Next child' });
       await expect(h.build({ spawner }).handoff(request)).resolves.toEqual({
@@ -1331,6 +1329,25 @@ describe('SessionHandoffService', () => {
       });
       await tick();
       expect(fresh.chain.append).toHaveBeenCalledWith(
+        CALLER_SDK,
+        SUCCESSOR_SDK,
+        root,
+      );
+    });
+
+    it('ignores a Codex resolution for another tab while a successor waits', async () => {
+      const h = makeHarness();
+      const result = await h.service.handoff(h.request());
+      if (!result.ok) throw new Error('handoff should start');
+      h.notifyResolved({
+        tabId: 'other-codex-tab',
+        realSessionId: SUCCESSOR_SDK,
+      });
+      await tick();
+      expect(h.chain.append).not.toHaveBeenCalled();
+      h.notifyResolved({ tabId: result.tabId, realSessionId: SUCCESSOR_SDK });
+      await tick();
+      expect(h.chain.append).toHaveBeenCalledWith(
         CALLER_SDK,
         SUCCESSOR_SDK,
         root,

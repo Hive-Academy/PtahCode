@@ -153,12 +153,10 @@ export interface AgentProgressEvent extends FlatStreamEvent {
  * Carries a status patch for a running subagent. Used by the frontend
  * to update the subagent panel without waiting for completion.
  */
-export interface AgentStatusEvent extends FlatStreamEvent {
+interface AgentStatusEventBase extends FlatStreamEvent {
   readonly eventType: 'agent_status';
   /** Links to the parent Task tool_use */
   readonly parentToolUseId: string;
-  /** SDK task_id for the subagent */
-  readonly taskId: string;
   /** New lifecycle status from the SDK patch */
   readonly status:
     'pending' | 'running' | 'completed' | 'failed' | 'killed' | 'paused';
@@ -177,6 +175,31 @@ export interface AgentStatusEvent extends FlatStreamEvent {
   /** Human-legible workflow name, inherited from the workflow run root. */
   readonly workflowName?: string;
 }
+
+export interface SdkAgentStatusEvent extends AgentStatusEventBase {
+  /** SDK task_id for the subagent */
+  readonly taskId: string;
+  readonly native?: undefined;
+}
+
+export interface NativeCodexAgentStatus {
+  readonly provider: 'codex';
+  readonly agentThreadId: string;
+  readonly activityId: string;
+  readonly cycleId: string;
+  readonly cycleOrdinal: number;
+  readonly kind: 'started' | 'interacted' | 'interrupted' | 'completed';
+}
+
+export interface NativeCodexAgentStatusEvent extends AgentStatusEventBase {
+  readonly taskId?: undefined;
+  readonly agentId: string;
+  readonly native: NativeCodexAgentStatus;
+}
+
+export type AgentStatusEvent =
+  | SdkAgentStatusEvent
+  | NativeCodexAgentStatusEvent;
 
 /**
  * Agent completed event — emitted from SDK task_notification system messages.

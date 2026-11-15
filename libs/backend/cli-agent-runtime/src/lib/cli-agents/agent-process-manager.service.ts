@@ -58,6 +58,7 @@ import {
   issueLaneMcpToken,
   laneToolProfileAdapterResult,
 } from './cli-adapters/lane-mcp-credentials';
+import { withLanePlanModeInstruction } from './lane-reporting-contract';
 import {
   claudeModelFamily,
   SDK_TOKENS,
@@ -100,6 +101,7 @@ import { AgentSpawnEnvironment } from './agent-spawn-environment.service';
 import { LaneCompletionNotifier } from './lane-completion-notifier.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
 import { recordLaneUsageOutcome } from './lane-completion-outcome';
+import { LaneUsageNormalizer } from './lane-usage-normalizer';
 import { AgentOutputBuffer } from './agent-output-buffer.service';
 import {
   buildLaneHandoffTask,
@@ -218,6 +220,7 @@ export interface AgentRoleStamp {
 }
 
 interface SdkSpawnOptions {
+  readonly requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
   readonly effectivePolicy?: ReturnType<
     AgentSpawnEnvironment['resolveLanePolicy']
   >;
@@ -348,6 +351,7 @@ export class LaneModelBlockedError extends Error {
 }
 @injectable()
 export class AgentProcessManager {
+  private readonly laneUsageNormalizer = new LaneUsageNormalizer();
   private readonly agents = new Map<string, TrackedAgent>();
   /** Lanes a restore skipped because another live host run owns them. */
   private readonly foreignLiveAgentIds = new Set<string>();
@@ -455,6 +459,8 @@ export class AgentProcessManager {
     private readonly parentDeliveryDrainer?: ParentDeliveryDrainerService,
     @inject(CLI_AGENT_RUNTIME_TOKENS.AGENT_OUTPUT_JOURNAL, { isOptional: true })
     private readonly outputJournal?: AgentOutputJournal,
+    @inject(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { isOptional: true })
+    private readonly usageReconciliationTrigger?: import('@ptah-extension/platform-core').UsageReconciliationTrigger,
   ) {
     this.budgetTelemetry = new LaneBudgetTelemetry(this.logger,
       async (agentId) => {
@@ -611,6 +617,7 @@ export class AgentProcessManager {
       expectsMcp: request.attachMcp !== false && adapter.supportsMcp !== false,
       cliVersion: detection.version,
       effectivePolicy,
+      requestedPolicy: { permission: request.permission, network: request.network },
     });
   }
 
@@ -986,7 +993,10 @@ export class AgentProcessManager {
       taskKind: request.taskKind,
       routingSource: request.routingSource,
       potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
-      effectivePolicy: options.effectivePolicy,
+      // Flat policy, not the `translateLaneSpawnPolicy` wrapper: the
+      // formatter and `SystemCliLaneResumer` read `permission` directly.
+      effectivePolicy: options.effectivePolicy?.requested,
+      requestedPolicy: options.requestedPolicy,
       ...(request.phase ? { phaseKind: request.phase.kind } : previous?.phaseKind ? { phaseKind: previous.phaseKind } : {}),
     };
 
@@ -1078,7 +1088,10 @@ export class AgentProcessManager {
           admittedReference = snapshot;
           admittedSdkSessionId = sdkSessionId;
         },
-        task,
+        task: withLanePlanModeInstruction(
+          task,
+          options.effectivePolicy?.requested?.permission,
+        ),
         workingDirectory,
         files: request.files,
         taskFolder: request.taskFolder,
@@ -1215,6 +1228,7 @@ export class AgentProcessManager {
       accountReference?: LaneAccountReference;
       potentialCapabilities?: CliAdapterManifest;
       effectivePolicy?: EffectiveLanePolicy;
+      requestedPolicy?: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
       toolProfileApplied?: boolean;
       /** Phase handoff. A non-empty denial list is recorded on the spawn result. */
       phase?: SpawnAgentRequest['phase'];
@@ -1262,6 +1276,7 @@ export class AgentProcessManager {
         providerId: sdkHandle.providerId,
         potentialCapabilities: meta.potentialCapabilities,
         effectivePolicy: meta.effectivePolicy,
+        requestedPolicy: meta.requestedPolicy,
         taskKind: meta.taskKind,
         routingSource: meta.routingSource,
         resumedFromAgentId: meta.resumedFromAgentId ?? previous?.agentId,
@@ -1405,6 +1420,7 @@ export class AgentProcessManager {
       pendingMessages: [],
       reportsDelivered: 0,
       turnSegmentStart: 0,
+      turnStartedAt: info.startedAt,
     };
 
     const previousBudget = info.cliSessionId
@@ -1446,13 +1462,15 @@ export class AgentProcessManager {
         | 'handshake-timeout'
         | 'lane-exited-before-handshake'
         | 'config-write-failed',
+      detail?: string,
     ): void => {
       if (this.agents.get(agentId) !== tracked) return;
       if (tracked.info.mcpAttachmentWarning) return;
-      const warning = `Ptah MCP did not connect for this lane (${cause}); report in your final message.`;
+      const warning = `Ptah MCP did not connect for this lane (${cause})${detail ? `; detail: ${detail}` : ''}; report in your final message.`;
       tracked.info = { ...tracked.info, mcpAttachmentWarning: warning };
       this.logger.warn('[AgentProcessManager] MCP attachment warning', {
         cause,
+        detail,
         cli: tracked.info.cli,
         agentId,
         port: mcp?.mcpPort,
@@ -1475,6 +1493,11 @@ export class AgentProcessManager {
     if (mcp?.expectsMcp && mcp.mcpPort && this.attachmentProbe) {
       const port = mcp.mcpPort;
       const probe = this.attachmentProbe;
+      const timeoutDetail = (): string => {
+        const attempt = probe.getAttempt?.(agentId, port);
+        if (!attempt) return 'no-request-seen';
+        return attempt.reason === 'seen' ? 'seen-but-not-initialize' : `rejected:${attempt.reason}`;
+      };
       const clearWarning = (): void => {
         if (this.agents.get(agentId) !== tracked) return;
         if (!probe.get(agentId, port)) return;
@@ -1489,13 +1512,13 @@ export class AgentProcessManager {
       if (sdkHandle.onMcpAttachmentTimeout) {
         sdkHandle.onMcpAttachmentTimeout(() => {
           if (!probe.get(agentId, port) && !tracked.hasExited)
-            warnMcp('handshake-timeout');
+            warnMcp('handshake-timeout', timeoutDetail());
         });
       } else {
         void probe
           .waitFor(agentId, port, MCP_ATTACHMENT_TIMEOUT_MS)
           .then((entry) => {
-            if (!entry && !tracked.hasExited) warnMcp('handshake-timeout');
+            if (!entry && !tracked.hasExited) warnMcp('handshake-timeout', timeoutDetail());
           });
       }
       const onMcpLaneExit = (): void => {
@@ -1516,7 +1539,9 @@ export class AgentProcessManager {
         if (this.agents.get(agentId) !== tracked) return;
         if (captureSessionId) updateCliSessionId(captureSessionId());
         if (sdkHandle.outcomeUsageIsTurnTotal && segment.usage) {
-          tracked.outcomeUsage = segment.usage;
+          tracked.outcomeUsage = this.laneUsageNormalizer.accept(
+            String(agentId), sdkHandle.usageScope ?? 'turn', segment.usage,
+          );
         }
         if (segment.turnTelemetry) {
           const observed = observedModelFrom(info.cli, segment.turnTelemetry);
@@ -1583,6 +1608,8 @@ export class AgentProcessManager {
       cli: info.cli,
       status: 'running',
       startedAt: info.startedAt,
+      effectivePolicy: info.effectivePolicy,
+      requestedPolicy: info.requestedPolicy,
       cliSessionId: info.cliSessionId,
       ptahCliName: info.ptahCliName,
       ptahCliId: info.ptahCliId,
@@ -1831,6 +1858,8 @@ export class AgentProcessManager {
         task: ref.task,
         workingDirectory,
         startedAt: ref.startedAt,
+        ...(ref.effectivePolicy ? { effectivePolicy: ref.effectivePolicy } : {}),
+        ...(ref.requestedPolicy ? { requestedPolicy: ref.requestedPolicy } : {}),
         ...(ref.turnSeq !== undefined ? { turnSeq: ref.turnSeq } : {}),
         ...(ref.cliSessionId ? { cliSessionId: ref.cliSessionId } : {}),
         ...(ref.agentBudget ? { agentBudget: ref.agentBudget } : {}),
@@ -2217,6 +2246,13 @@ export class AgentProcessManager {
     if (!tracked) return;
     tracked.reportsDelivered++;
     if (claimsCompletion) this.completionClaims.add(agentId);
+  }
+
+  markReportAttempt(agentId: string, failed: boolean): void {
+    const tracked = this.agents.get(agentId);
+    if (!tracked) return;
+    tracked.reportAttempts = Math.min((tracked.reportAttempts ?? 0) + 1, 65535);
+    if (failed) tracked.reportsFailed = Math.min((tracked.reportsFailed ?? 0) + 1, 65535);
   }
 
   /**
@@ -2660,6 +2696,7 @@ export class AgentProcessManager {
     // This turn's rate-limit match reads only the segments it produces.
     tracked.turnSegmentStart = tracked.accumulatedSegments.length;
     tracked.outcomeUsage = undefined;
+    this.laneUsageNormalizer.settleTurn(String(agentId));
     tracked.rateLimitMatched = undefined;
     // A stop or timeout of this turn never re-reads auth wording, so an
     // earlier turn's match must not label it `auth`.
@@ -2673,6 +2710,7 @@ export class AgentProcessManager {
       tracked.exitEmitHandle = undefined;
     }
     const continuedAt = new Date().toISOString();
+    tracked.turnStartedAt = continuedAt;
     tracked.info = {
       ...tracked.info,
       turnSeq: (tracked.info.turnSeq ?? 1) + 1,
@@ -3668,7 +3706,7 @@ export class AgentProcessManager {
     const toolCalls =
       this.laneGuards.get(info.agentId)?.toolCallCount ??
       tracked.guardToolCalls;
-    if (tracked.outcomeUsage) {
+    {
       // Durable usage capture (TASK_2026_870 Phase 1): the same turn total
       // the outcome recorder reads, recorded before the signal so a lane
       // whose chat parent is gone still lands its usage. Keyed by the same
@@ -3680,11 +3718,16 @@ export class AgentProcessManager {
         info,
         info.completedAt ?? new Date().toISOString(),
         tracked.outcomeUsage,
+        tracked.sdkHandle?.getObservedNativeThreadId?.() ?? null,
+        this.usageReconciliationTrigger,
+        tracked.turnStartedAt,
       );
     }
     void Promise.resolve(
       this.laneCompletion.signal(info, {
         reportsDelivered,
+        reportAttempts: tracked.reportAttempts ?? 0,
+        reportsFailed: tracked.reportsFailed ?? 0,
         ...(tracked.heldBudgetWarning ? { heldBudgetWarning: true } : {}),
         ...(reportClaimsCompletion ? { reportClaimsCompletion: true } : {}),
         ...(tracked.outcomeUsage ? { usage: tracked.outcomeUsage } : {}),

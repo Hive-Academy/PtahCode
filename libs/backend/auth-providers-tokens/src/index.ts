@@ -1,5 +1,6 @@
 export { AUTH_PROVIDERS_TOKENS } from './lib/tokens';
 export type { AuthProvidersDIToken } from './lib/tokens';
+export type { ClaudeUsageProfileRoots } from './lib/usage-profile-roots.port';
 export type {
   ClaudeAccountActionCommand,
   ClaudeAccountActionTarget,

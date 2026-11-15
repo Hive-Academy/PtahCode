@@ -4,6 +4,7 @@ import {
 } from './codex-chat-turn-stream';
 import type { NativeChatAdapter } from './routing-agent-adapter';
 import type { SessionTurnStateRegistry } from '../helpers/session-turn-state.registry';
+import type { SessionIdResolvedCallbackRegistry } from '../helpers/session-id-resolved-callback-registry';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { randomUUID } from 'node:crypto';
 import type { DependencyContainer } from 'tsyringe';
@@ -232,6 +233,10 @@ export class CodexChatAdapter implements NativeChatAdapter {
     private readonly turnState: Pick<
       SessionTurnStateRegistry,
       'markGenerating' | 'settleTurn' | 'recordFailure' | 'forceIdle'
+    >,
+    private readonly sessionIdResolvedRegistry?: Pick<
+      SessionIdResolvedCallbackRegistry,
+      'notifyAll'
     >,
   ) {
     this.peerQueue = new CodexChatPeerQueue(this.ports.logger);
@@ -475,6 +480,12 @@ export class CodexChatAdapter implements NativeChatAdapter {
         this.deliverUserInputAnswerWithNotice(published, answer.text),
       );
       this.resolved?.(config.tabId, id);
+      this.sessionIdResolvedRegistry?.notifyAll({
+        tabId: config.tabId,
+        realSessionId: id,
+        ...(!resumeId ? { isNewSession: true as const } : {}),
+        timestamp: Date.now(),
+      });
       return this.turn(
         session,
         {

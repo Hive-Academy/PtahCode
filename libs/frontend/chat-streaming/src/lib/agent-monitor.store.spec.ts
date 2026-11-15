@@ -1463,6 +1463,29 @@ describe('AgentMonitorStore', () => {
       expect(store.activeTabPendingPermissions().length).toBe(1);
     });
 
+    it('shows a native lane permission for the thread-backed tab session', () => {
+      const threadId = 'codex-thread-1';
+      spawnAgent('native-lane', threadId);
+      const owner = store.agents().find((agent) => agent.agentId === 'native-lane');
+      expect(owner).toBeDefined();
+      store.onPermissionRequest({
+        requestId: 'native-permission',
+        agentId: 'native-lane',
+        parentSessionId: threadId,
+        laneGeneration: new Date(owner?.startedAt ?? 0).toISOString(),
+        kind: 'write',
+        toolName: 'edit',
+        toolArgs: '{}',
+        description: 'Allow file write',
+        timestamp: Date.now(),
+        timeoutAt: 0,
+      });
+      mockActiveTab.set({ claudeSessionId: 'codex-tab' });
+      expect(store.activeTabPendingPermissions()).toHaveLength(0);
+      mockActiveTab.set({ claudeSessionId: threadId });
+      expect(store.activeTabPendingPermissions()).toHaveLength(1);
+    });
+
     it('ignores expired and duplicate lane permission replay', () => {
       spawnAgent('agent-1', 'session-a');
       const owner = store.agents().find((agent) => agent.agentId === 'agent-1')!;

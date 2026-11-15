@@ -48,11 +48,7 @@ describe('McpServerBackoffService', () => {
   it('counts stderr and SDK init reports for the same attempt only once, even more than 10 seconds apart', () => {
     const { service, mcpStatus, sessionIdResolved } = makeHarness();
     const abortController = new AbortController();
-    service.trackStderrSession(
-      'tab-1',
-      'launch-1',
-      abortController.signal,
-    );
+    service.trackStderrSession('tab-1', 'launch-1', abortController.signal);
 
     service.checkStderrForFailure(FAILURE_LINE, Date.now(), 'launch-1');
     jest.advanceTimersByTime(15_000);
@@ -70,6 +66,29 @@ describe('McpServerBackoffService', () => {
     expect(service.getRecord('firecrawl')).toMatchObject({
       failureCount: 1,
       lastAttemptKey: 'launch-1',
+    });
+  });
+
+  it('does not attach a Claude attempt to a resolved Codex thread', () => {
+    const { service, sessionIdResolved } = makeHarness();
+    service.trackStderrSession(
+      'claude-tab',
+      'claude-launch',
+      new AbortController().signal,
+    );
+    service.trackStderrSession(
+      'codex-tab',
+      'codex-launch',
+      new AbortController().signal,
+    );
+    sessionIdResolved.notifyAll({
+      tabId: 'codex-tab',
+      realSessionId: 'codex-thread',
+      timestamp: Date.now(),
+    });
+    service.checkStderrForFailure(FAILURE_LINE, Date.now(), 'claude-launch');
+    expect(service.getRecord('firecrawl')).toMatchObject({
+      lastAttemptKey: 'claude-launch',
     });
   });
 
@@ -195,11 +214,7 @@ describe('McpServerBackoffService', () => {
       'launch-2',
       new AbortController().signal,
     );
-    service.checkStderrForFailure(
-      FAILURE_LINE,
-      secondFailureAt,
-      'launch-2',
-    );
+    service.checkStderrForFailure(FAILURE_LINE, secondFailureAt, 'launch-2');
 
     expect(service.getRecord('firecrawl')).toMatchObject({
       failureCount: 2,

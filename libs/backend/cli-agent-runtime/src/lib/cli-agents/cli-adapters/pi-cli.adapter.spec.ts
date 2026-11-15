@@ -200,6 +200,7 @@ describe('PiCliAdapter (RPC mode)', () => {
     expect(telemetry).toHaveLength(1);
     expect(telemetry[0].turnTelemetry).toMatchObject({ status: 'reported', usage: { inputTokens: 15, outputTokens: 6, modelId: 'provider/model' } });
     expect(telemetry[0].usage).toMatchObject({ inputTokens: 15, outputTokens: 6 });
+    expect(handle).toMatchObject({ outcomeUsageIsTurnTotal: true, usageScope: 'turn' });
   });
 
   it('uses turn_end as fallback and marks a turn with no usage event unavailable', async () => {
@@ -213,6 +214,19 @@ describe('PiCliAdapter (RPC mode)', () => {
     spawnedChildren[1].stdout.write('{"type":"agent_settled"}\n');
     await next?.done;
     expect(segments.filter((segment) => segment.turnTelemetry).map((segment) => segment.turnTelemetry?.status)).toEqual(['reported', 'unavailable']);
+  });
+
+  it('does not report a complete turn from a valid subset of assistant messages', async () => {
+    const handle = await adapter.runSdk({ task: 'Count', workingDirectory: '/proj', model: 'provider/model' });
+    const { segments } = collect(handle);
+    const write = (value: unknown) => currentChild?.stdout.write(`${JSON.stringify(value)}\n`);
+    write({ type: 'message_end', message: { role: 'assistant', usage: { input: 7, output: 3 } } });
+    write({ type: 'message_end', message: { role: 'assistant', usage: { output: 2 } } });
+    write({ type: 'agent_settled' });
+    await handle.done;
+    const terminal = segments.filter((segment) => segment.turnTelemetry)[0];
+    expect(terminal.usage).toBeUndefined();
+    expect(terminal.turnTelemetry).toMatchObject({ status: 'unavailable' });
   });
 
   describe('detect()', () => {

@@ -110,6 +110,20 @@ describe('UsageDashboardComponent', () => {
     ).not.toBeNull();
   });
 
+  it('shows repository totals, worktree paths and unknown coverage', async () => {
+    answerUsage(usageCall(0), {
+      ...usageSummary([]),
+      repositories: [{ repositoryId: 'repo-a', worktreePaths: ['/ws/a/tree'],
+        inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0,
+        knownCostMicroUsd: 250000, hasUnknownTokens: true }],
+    });
+    await settle();
+    expect(text('usage-repository')).toContain('Recorded tokens: 15');
+    expect(text('usage-repository')).toContain('Partial cost (known priced rows only): $0.25');
+    expect(text('usage-repository')).toContain('Token coverage incomplete');
+    expect(text('usage-repository')).toContain('/ws/a/tree');
+  });
+
   it('renders session counts and a compact priced and unpriced top sessions table', async () => {
     const base = usageSummary([factSonnetDay18]);
     answerUsage(usageCall(0), {

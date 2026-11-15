@@ -843,6 +843,8 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       onOutput: output.subscribe,
       onSegment: segments.subscribe,
       outcomeUsageIsTurnTotal: true,
+      usageScope: 'turn',
+      getObservedNativeThreadId: () => registeredThreadId,
       onLaneConfigRejected: configRejection.subscribe,
       supportsContinuation: () => !closed,
       steer: async (message: string): Promise<void> => {

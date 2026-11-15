@@ -38,13 +38,13 @@ import { PtahSectionLevel, PtahSectionSize, toSectionLevel } from './card.types'
       <div class="ptah-section-title-row">
         @switch (level()) {
           @case (2) {
-            <h2 class="ptah-section-title">{{ heading() }}</h2>
+            <h2 class="ptah-section-title" [attr.id]="headingId()">{{ heading() }}</h2>
           }
           @case (4) {
-            <h4 class="ptah-section-title">{{ heading() }}</h4>
+            <h4 class="ptah-section-title" [attr.id]="headingId()">{{ heading() }}</h4>
           }
           @default {
-            <h3 class="ptah-section-title">{{ heading() }}</h3>
+            <h3 class="ptah-section-title" [attr.id]="headingId()">{{ heading() }}</h3>
           }
         }
         <ng-content select="[status]" />
@@ -71,4 +71,6 @@ export class PtahSectionHeaderComponent {
   readonly eyebrow = input<string | null>(null);
   /** Muted hint text below the heading. */
   readonly description = input<string | null>(null);
+  /** The id of the heading element, so a parent can name it in `aria-labelledby`. */
+  readonly headingId = input<string | null>(null);
 }

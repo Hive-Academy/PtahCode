@@ -246,6 +246,7 @@ describe('CanvasDetailTranscriptComponent visibility', () => {
           provide: AgentMonitorStore,
           useValue: {
             agents: signal([]),
+            subagents: signal(new Map()),
             agentsForSession: () => [],
             agentsOwnedBySession: () => [],
             panelOpenRequest: signal({ seq: 0, tabId: null }),
