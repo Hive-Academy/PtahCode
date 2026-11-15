@@ -56,6 +56,28 @@
  * new usage in an already-baselined file cannot be absorbed silently; the
  * only escape is a hand-edited, review-visible baseline change.
  *
+ * Second rule — raw spacing utilities (TASK_2026_1177_9109 P5). Scope: only
+ * templates under `libs/frontend/chat/src/lib/settings/**` (`.html` and inline
+ * `template:` strings in `.ts`; spec/test files stay excluded). The settings
+ * pages take spacing from pattern components and `--ptah-*` tokens. After the
+ * same `!` and variant stripping, a token is blocked when its utility is
+ * `p|px|py|pt|pr|pb|pl|ps|pe|m|mx|my|mt|mr|mb|ml|ms|me|gap|gap-x|gap-y|
+ * space-x|space-y` (optionally negative, `-mt-2`) and its value is a numeric
+ * Tailwind scale step (`gap-2`, `mt-0.5`), `px` or `auto`, or an arbitrary
+ * value (`[...]` or `(...)`) that does not reference a `--ptah-` custom
+ * property. `gap-[var(--ptah-gap-group)]` passes; `gap-[7px]` is blocked.
+ * Theme aliases (`gap-ptah-field`) and other named values are not judged.
+ * The same surfaces are inspected ([class], [ngClass], [class.x], static
+ * class), but this rule never reports `<dynamic>`: the DaisyUI rule already
+ * counts every dynamic expression in this scope. Its baseline is
+ * `baseline-spacing.json`, with the same ratchet semantics as `baseline.json`.
+ * Files under `libs/frontend/chat/src/lib/settings/providers/accounts/**`
+ * are already converted: the initial seed never baselines them, so a raw
+ * spacing utility there always fails.
+ *
+ * The CLI runs both rules. Exit 1 when either rule has a count above its
+ * baseline, 2 on tool failure. `--update-baseline` updates both baselines.
+ *
  * Modeled on `tools/degradation-audit` (committed baseline, fail on
  * increase, allow decreases, never regenerate silently, exit 2 on tool
  * failure such as an unparseable source file).
@@ -130,6 +152,65 @@ export function isBlockedClassToken(rawToken: string): boolean {
   }
   return false;
 }
+
+// --- raw spacing rule (settings scope) ----------------------------------------
+
+/** Repo-relative prefix of the templates the raw spacing rule judges. */
+export const SPACING_SCOPE_PREFIX = 'libs/frontend/chat/src/lib/settings/';
+
+/** Already converted to tokens: never seeded into baseline-spacing.json. */
+export const SPACING_CONVERTED_PREFIXES = [
+  'libs/frontend/chat/src/lib/settings/providers/accounts/',
+];
+
+const SPACING_UTILITY_RE =
+  /^-?(?:p|px|py|pt|pr|pb|pl|ps|pe|m|mx|my|mt|mr|mb|ml|ms|me|gap|gap-x|gap-y|space-x|space-y)-(\d+(?:\.\d+)?|px|auto|\[[^\]]*\]|\([^)]*\))$/;
+
+/** The utility part of a class token: variants and `!` removed. */
+function utilityOf(rawToken: string): string {
+  // The last `:` outside brackets/parens ends the variants (arbitrary values
+  // and variants such as `[@container(min-width:640px)]:` hold colons).
+  let depth = 0;
+  let lastColon = -1;
+  for (let idx = 0; idx < rawToken.length; idx += 1) {
+    const char = rawToken[idx];
+    if (char === '[' || char === '(') depth += 1;
+    else if ((char === ']' || char === ')') && depth > 0) depth -= 1;
+    else if (char === ':' && depth === 0) lastColon = idx;
+  }
+  let token = rawToken.slice(lastColon + 1);
+  if (token.startsWith('!')) token = token.slice(1);
+  if (token.endsWith('!')) token = token.slice(0, -1); // Tailwind v4 suffix form
+  return token;
+}
+
+export function isRawSpacingToken(rawToken: string): boolean {
+  const match = SPACING_UTILITY_RE.exec(utilityOf(rawToken));
+  if (match === null) return false;
+  const value = match[1];
+  if (value.startsWith('[') || value.startsWith('(')) {
+    return !value.includes('--ptah-'); // token-backed arbitrary values pass
+  }
+  return true;
+}
+
+/** How one rule judges the class tokens of a template. */
+export interface ClassRule {
+  isBlocked: (token: string) => boolean;
+  /** Report `<dynamic>` for expressions that cannot be proven safe. */
+  reportDynamic: boolean;
+}
+
+export const DAISYUI_RULE: ClassRule = {
+  isBlocked: isBlockedClassToken,
+  reportDynamic: true,
+};
+
+/** Dynamic expressions in scope are already counted by DAISYUI_RULE. */
+export const SPACING_RULE: ClassRule = {
+  isBlocked: isRawSpacingToken,
+  reportDynamic: false,
+};
 
 function rootOfToken(token: string): string | undefined {
   for (const root of BLOCKED_ROOTS) {
@@ -329,6 +410,7 @@ function walkExpression(node: ts.Node, out: ExpressionAnalysis): void {
  */
 export function analyzeClassExpression(
   value: string,
+  isBlocked: (token: string) => boolean = isBlockedClassToken,
 ): { blockedTokens: string[]; dynamic: boolean } {
   const trimmed = value.trim();
   if (trimmed.length === 0) return { blockedTokens: [], dynamic: false };
@@ -336,24 +418,25 @@ export function analyzeClassExpression(
   if (!expression) return { blockedTokens: [], dynamic: true };
   const analysis: ExpressionAnalysis = { tokens: [], dynamic: false };
   walkExpression(expression, analysis);
-  const blockedTokens = analysis.tokens.filter((token) =>
-    isBlockedClassToken(token),
-  );
+  const blockedTokens = analysis.tokens.filter((token) => isBlocked(token));
   return { blockedTokens, dynamic: analysis.dynamic };
 }
 
 /** All blocked-class hits in one template string, offsets relative to it. */
-export function findTemplateHits(template: string): TemplateHit[] {
+export function findTemplateHits(
+  template: string,
+  rule: ClassRule = DAISYUI_RULE,
+): TemplateHit[] {
   const scanned = blankHtmlComments(template);
   const hits: TemplateHit[] = [];
   for (const attribute of iterateAttributes(scanned)) {
     if (attribute.name === 'class' || attribute.name === 'ngClass') {
       for (const token of classTokens(attribute.value)) {
-        if (isBlockedClassToken(token)) {
+        if (rule.isBlocked(token)) {
           hits.push({ offset: attribute.offset, token });
         }
       }
-      if (attribute.value.includes('{{')) {
+      if (rule.reportDynamic && attribute.value.includes('{{')) {
         // Interpolation can expand to anything; static tokens above still count.
         hits.push({ offset: attribute.offset, token: DYNAMIC_TOKEN });
       }
@@ -361,7 +444,7 @@ export function findTemplateHits(template: string): TemplateHit[] {
     }
     const boundToken = CLASS_TOKEN_BINDING_RE.exec(attribute.name);
     if (boundToken !== null) {
-      if (isBlockedClassToken(boundToken[1])) {
+      if (rule.isBlocked(boundToken[1])) {
         hits.push({ offset: attribute.offset, token: boundToken[1] });
       }
       continue;
@@ -374,11 +457,12 @@ export function findTemplateHits(template: string): TemplateHit[] {
     ) {
       const { blockedTokens, dynamic } = analyzeClassExpression(
         attribute.value,
+        rule.isBlocked,
       );
       for (const token of blockedTokens) {
         hits.push({ offset: attribute.offset, token });
       }
-      if (dynamic) {
+      if (dynamic && rule.reportDynamic) {
         hits.push({ offset: attribute.offset, token: DYNAMIC_TOKEN });
       }
     }
@@ -395,8 +479,12 @@ function lineOfOffset(content: string, offset: number): number {
 }
 
 /** Scan an external template file. */
-export function scanHtmlFile(content: string, relFile: string): ClassOccurrence[] {
-  return findTemplateHits(content).map((hit) => ({
+export function scanHtmlFile(
+  content: string,
+  relFile: string,
+  rule: ClassRule = DAISYUI_RULE,
+): ClassOccurrence[] {
+  return findTemplateHits(content, rule).map((hit) => ({
     file: relFile,
     line: lineOfOffset(content, hit.offset),
     token: hit.token,
@@ -407,7 +495,11 @@ export function scanHtmlFile(content: string, relFile: string): ClassOccurrence[
  * Scan a TypeScript source file for inline `template:` property values.
  * A file that fails to parse is a tool failure, never a skipped file.
  */
-export function scanTsFile(content: string, relFile: string): ClassOccurrence[] {
+export function scanTsFile(
+  content: string,
+  relFile: string,
+  rule: ClassRule = DAISYUI_RULE,
+): ClassOccurrence[] {
   const sourceFile = ts.createSourceFile(
     relFile,
     content,
@@ -436,7 +528,7 @@ export function scanTsFile(content: string, relFile: string): ClassOccurrence[] 
         ts.isNoSubstitutionTemplateLiteral(initializer)
       ) {
         const contentStart = initializer.getStart() + 1; // skip the opening quote
-        for (const hit of findTemplateHits(initializer.text)) {
+        for (const hit of findTemplateHits(initializer.text, rule)) {
           occurrences.push({
             file: relFile,
             line:
@@ -475,7 +567,7 @@ export function scanTsFile(content: string, relFile: string): ClassOccurrence[] 
               ).line + 1
             );
           };
-          for (const hit of findTemplateHits(staticText)) {
+          for (const hit of findTemplateHits(staticText, rule)) {
             occurrences.push({
               file: relFile,
               line: lineAt(hit.offset),
@@ -488,7 +580,7 @@ export function scanTsFile(content: string, relFile: string): ClassOccurrence[] 
           const classBinding =
             /(?<![\w.-])class\s*=\s*("[^"]*"|'[^']*')/g;
           for (const match of staticText.matchAll(classBinding)) {
-            if (match[1].includes(placeholder)) {
+            if (rule.reportDynamic && match[1].includes(placeholder)) {
               occurrences.push({
                 file: relFile,
                 line: lineAt(match.index ?? 0),
@@ -498,13 +590,15 @@ export function scanTsFile(content: string, relFile: string): ClassOccurrence[] 
           }
         }
         // `template: someExpression` — cannot be proven safe.
-        occurrences.push({
-          file: relFile,
-          line:
-            sourceFile.getLineAndCharacterOfPosition(initializer.getStart())
-              .line + 1,
-          token: DYNAMIC_TOKEN,
-        });
+        if (rule.reportDynamic) {
+          occurrences.push({
+            file: relFile,
+            line:
+              sourceFile.getLineAndCharacterOfPosition(initializer.getStart())
+                .line + 1,
+            token: DYNAMIC_TOKEN,
+          });
+        }
       }
     }
     ts.forEachChild(node, visit);
@@ -615,6 +709,7 @@ export function nextBaselineAfterUpdate(
   counts: Baseline,
   baseline: Baseline,
   initialSeed = false,
+  canSeed: (file: string) => boolean = () => true,
 ): Baseline {
   const next: Baseline = {};
   for (const file of Object.keys(counts).sort((a, b) =>
@@ -629,7 +724,7 @@ export function nextBaselineAfterUpdate(
       const count = fileCounts[token] ?? 0;
       if (!fileBaseline) {
         // A new file after the initial seed must remain over baseline.
-        if (initialSeed && count > 0) kept[token] = count;
+        if (initialSeed && canSeed(file) && count > 0) kept[token] = count;
         continue;
       }
       const allowed = fileBaseline[token] ?? 0;
@@ -663,13 +758,16 @@ export interface AuditOptions {
   repoRoot: string;
   scanGlobs: string[];
   ignoreGlobs: string[];
+  /** DaisyUI rule baseline (`baseline.json`). */
   baselinePath: string;
+  /** Raw spacing rule baseline (`baseline-spacing.json`). */
+  spacingBaselinePath: string;
   updateBaseline: boolean;
 }
 
-export interface AuditRunResult {
+/** The result of one rule against its own baseline. */
+export interface RuleRunResult {
   failed: boolean;
-  scannedFiles: number;
   occurrences: ClassOccurrence[];
   counts: Baseline;
   comparison: BaselineComparison;
@@ -678,58 +776,80 @@ export interface AuditRunResult {
   topFiles: Array<{ file: string; tokens: number }>;
 }
 
+/** Top-level fields hold the DaisyUI rule; `spacing` holds the second rule. */
+export interface AuditRunResult extends RuleRunResult {
+  /** True when either rule has a count above its baseline. */
+  failed: boolean;
+  scannedFiles: number;
+  spacing: RuleRunResult;
+}
+
 const UPDATE_HINT =
   'npx ts-node --transpile-only tools/ui-class-audit/check-ui-classes.ts --update-baseline';
 
-export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
-  const files = (
-    await fg(options.scanGlobs, {
-      cwd: options.repoRoot,
-      ignore: options.ignoreGlobs,
-      absolute: true,
-    })
-  ).sort((a, b) => a.localeCompare(b, 'en'));
+/** Remediation for the raw spacing rule. */
+const SPACING_HINT =
+  'use a pattern component or a --ptah-* token (e.g. gap-[var(--ptah-gap-group)])';
 
-  const occurrences: ClassOccurrence[] = [];
-  for (const filePath of files) {
-    const relFile = path.relative(options.repoRoot, filePath).replace(/\\/g, '/');
-    const content = fs.readFileSync(filePath, 'utf8');
-    if (filePath.endsWith('.html')) {
-      occurrences.push(...scanHtmlFile(content, relFile));
-    } else if (filePath.endsWith('.ts')) {
-      occurrences.push(...scanTsFile(content, relFile));
-    }
-  }
+interface RuleConfig {
+  /** Log prefix. */
+  label: string;
+  rule: ClassRule;
+  baselinePath: string;
+  inScope: (relFile: string) => boolean;
+  canSeed: (relFile: string) => boolean;
+  hint: (token: string) => string;
+  overBaselineHeading: string;
+  failureFooter: string[];
+}
+
+function sortOccurrences(occurrences: ClassOccurrence[]): void {
   occurrences.sort((a, b) => {
     if (a.file !== b.file) return a.file < b.file ? -1 : 1;
     if (a.line !== b.line) return a.line - b.line;
     return a.token.localeCompare(b.token, 'en');
   });
+}
+
+function scanFile(content: string, relFile: string, rule: ClassRule): ClassOccurrence[] {
+  if (relFile.endsWith('.html')) return scanHtmlFile(content, relFile, rule);
+  if (relFile.endsWith('.ts')) return scanTsFile(content, relFile, rule);
+  return [];
+}
+
+function runRule(
+  config: RuleConfig,
+  sources: Array<{ relFile: string; content: string }>,
+  updateBaseline: boolean,
+): RuleRunResult {
+  const { label } = config;
+  const baselineName = path.basename(config.baselinePath);
+  const occurrences: ClassOccurrence[] = [];
+  for (const source of sources) {
+    if (!config.inScope(source.relFile)) continue;
+    occurrences.push(...scanFile(source.content, source.relFile, config.rule));
+  }
+  sortOccurrences(occurrences);
 
   const counts = occurrenceCounts(occurrences);
-  const baseline = loadBaseline(options.baselinePath);
-  if (!fs.existsSync(options.baselinePath)) {
+  const baselineExists = fs.existsSync(config.baselinePath);
+  const baseline = loadBaseline(config.baselinePath);
+  if (!baselineExists) {
     console.log(
-      'ui-class-audit: baseline.json not found — every blocked token fails until it is seeded',
+      `${label}: ${baselineName} not found — every blocked token fails until it is seeded`,
     );
   }
   const comparison = compareWithBaseline(counts, baseline);
-
-  console.log(
-    `ui-class-audit: scanned ${files.length} file(s) ` +
-      '(apps/ptah-extension-webview/src, libs/frontend/**/src; ' +
-      'excluding libs/frontend/ui, *.spec.ts, generated output)',
-  );
 
   const failedSet = new Set(
     comparison.failures.map((failure) => `${failure.file}\u0000${failure.token}`),
   );
   if (comparison.failures.length > 0) {
-    console.log('\nui-class-audit: blocked class occurrences over baseline');
+    console.log(`\n${label}: ${config.overBaselineHeading}`);
     for (const occurrence of occurrences) {
       if (!failedSet.has(`${occurrence.file}\u0000${occurrence.token}`)) continue;
       console.log(
-        `  ${occurrence.file}:${occurrence.line}: ${occurrence.token} — ${replacementHint(occurrence.token)}`,
+        `  ${occurrence.file}:${occurrence.line}: ${occurrence.token} — ${config.hint(occurrence.token)}`,
       );
     }
   }
@@ -738,7 +858,7 @@ export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
     new Set([...Object.keys(counts), ...Object.keys(baseline)]),
   ).sort((a, b) => a.localeCompare(b, 'en'));
   if (allFiles.length > 0) {
-    console.log('\nui-class-audit: per-file totals');
+    console.log(`\n${label}: per-file totals`);
     for (const file of allFiles) {
       const fileCounts = counts[file];
       if (!fileCounts) {
@@ -770,27 +890,20 @@ export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
 
   if (comparison.decreases.length > 0) {
     console.log(
-      `\nui-class-audit: ${comparison.decreases.length} token count(s) decreased since baseline`,
+      `\n${label}: ${comparison.decreases.length} token count(s) decreased since baseline`,
     );
     for (const decrease of comparison.decreases) {
       console.log(
         `  ${decrease.file}: ${decrease.token} ${decrease.baseline} -> ${decrease.count}`,
       );
     }
-    if (!options.updateBaseline) {
+    if (!updateBaseline) {
       console.log(`  run \`${UPDATE_HINT}\` to record the decrease`);
     }
   }
 
   if (comparison.failures.length > 0) {
-    console.log(
-      '\nRaw DaisyUI component classes are blocked outside libs/frontend/ui. ' +
-        'Move this markup into an extracted component in @ptah-extension/ui.',
-    );
-    console.log(
-      '  Extract the matching polished-page component (chat, canvas, voice, setup) ' +
-        'into @ptah-extension/ui and import it here; do not substitute a generic primitive.',
-    );
+    for (const line of config.failureFooter) console.log(line);
     console.log(
       `After a real removal, record it with \`${UPDATE_HINT}\` ` +
         '(the flag never raises a count).',
@@ -798,21 +911,22 @@ export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
   }
 
   let baselineWritten = false;
-  if (options.updateBaseline) {
+  if (updateBaseline) {
     const next = nextBaselineAfterUpdate(
       counts,
       baseline,
-      !fs.existsSync(options.baselinePath),
+      !baselineExists,
+      config.canSeed,
     );
     if (JSON.stringify(next) !== JSON.stringify(baseline)) {
-      writeBaseline(options.baselinePath, next);
+      writeBaseline(config.baselinePath, next);
       baselineWritten = true;
       console.log(
-        'ui-class-audit: baseline.json updated ' +
+        `${label}: ${baselineName} updated ` +
           '(initial seed or decreases; prunes stale files; never raises an established count)',
       );
     } else {
-      console.log('ui-class-audit: baseline.json unchanged');
+      console.log(`${label}: ${baselineName} unchanged`);
     }
   }
 
@@ -826,13 +940,12 @@ export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
     .sort((a, b) => b.tokens - a.tokens || a.file.localeCompare(b.file, 'en'));
 
   console.log(
-    `\nui-class-audit: TOTAL ${totalTokens} blocked token(s) across ${filesWithUsage} file(s); ` +
+    `\n${label}: TOTAL ${totalTokens} blocked token(s) across ${filesWithUsage} file(s); ` +
       `${comparison.failures.length} token count(s) over baseline`,
   );
 
   return {
     failed: comparison.failures.length > 0,
-    scannedFiles: files.length,
     occurrences,
     counts,
     comparison,
@@ -842,10 +955,78 @@ export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
   };
 }
 
+export async function runAudit(options: AuditOptions): Promise<AuditRunResult> {
+  const files = (
+    await fg(options.scanGlobs, {
+      cwd: options.repoRoot,
+      ignore: options.ignoreGlobs,
+      absolute: true,
+    })
+  ).sort((a, b) => a.localeCompare(b, 'en'));
+  const sources = files.map((filePath) => ({
+    relFile: path.relative(options.repoRoot, filePath).replace(/\\/g, '/'),
+    content: fs.readFileSync(filePath, 'utf8'),
+  }));
+
+  console.log(
+    `ui-class-audit: scanned ${files.length} file(s) ` +
+      '(apps/ptah-extension-webview/src, libs/frontend/**/src; ' +
+      'excluding libs/frontend/ui, *.spec.ts, generated output)',
+  );
+
+  const daisy = runRule(
+    {
+      label: 'ui-class-audit',
+      rule: DAISYUI_RULE,
+      baselinePath: options.baselinePath,
+      inScope: () => true,
+      canSeed: () => true,
+      hint: replacementHint,
+      overBaselineHeading: 'blocked class occurrences over baseline',
+      failureFooter: [
+        '\nRaw DaisyUI component classes are blocked outside libs/frontend/ui. ' +
+          'Move this markup into an extracted component in @ptah-extension/ui.',
+        '  Extract the matching polished-page component (chat, canvas, voice, setup) ' +
+          'into @ptah-extension/ui and import it here; do not substitute a generic primitive.',
+      ],
+    },
+    sources,
+    options.updateBaseline,
+  );
+
+  console.log('');
+  const spacing = runRule(
+    {
+      label: 'ui-class-audit [raw-spacing]',
+      rule: SPACING_RULE,
+      baselinePath: options.spacingBaselinePath,
+      inScope: (relFile) => relFile.startsWith(SPACING_SCOPE_PREFIX),
+      canSeed: (relFile) =>
+        !SPACING_CONVERTED_PREFIXES.some((prefix) => relFile.startsWith(prefix)),
+      hint: (token) => `raw spacing utility \`${token}\`; ${SPACING_HINT}`,
+      overBaselineHeading: `raw spacing utility occurrences over baseline (${SPACING_SCOPE_PREFIX}**)`,
+      failureFooter: [
+        `\nRaw spacing utilities are blocked in ${SPACING_SCOPE_PREFIX}** templates: ` +
+          'use a pattern component or a --ptah-* token for spacing.',
+      ],
+    },
+    sources,
+    options.updateBaseline,
+  );
+
+  return {
+    ...daisy,
+    failed: daisy.failed || spacing.failed,
+    scannedFiles: files.length,
+    spacing,
+  };
+}
+
 // --- CLI ------------------------------------------------------------------------
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const BASELINE_PATH = path.join(__dirname, 'baseline.json');
+const SPACING_BASELINE_PATH = path.join(__dirname, 'baseline-spacing.json');
 
 async function main(): Promise<number> {
   const updateBaseline = process.argv.includes('--update-baseline');
@@ -854,8 +1035,16 @@ async function main(): Promise<number> {
     scanGlobs: DEFAULT_SCAN_GLOBS,
     ignoreGlobs: DEFAULT_IGNORE_GLOBS,
     baselinePath: BASELINE_PATH,
+    spacingBaselinePath: SPACING_BASELINE_PATH,
     updateBaseline,
   });
+  if (result.failed) {
+    const failedRules = [
+      result.comparison.failures.length > 0 ? 'daisyui-class' : undefined,
+      result.spacing.failed ? 'raw-spacing' : undefined,
+    ].filter((rule): rule is string => rule !== undefined);
+    console.log(`\nui-class-audit: FAILED rule(s): ${failedRules.join(', ')}`);
+  }
   return result.failed ? 1 : 0;
 }
 

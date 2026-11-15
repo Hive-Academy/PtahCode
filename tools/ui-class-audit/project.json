@@ -12,6 +12,7 @@
       "inputs": [
         "{projectRoot}/check-ui-classes.ts",
         "{projectRoot}/baseline.json",
+        "{projectRoot}/baseline-spacing.json",
         "{workspaceRoot}/apps/ptah-extension-webview/src/**/*.html",
         "{workspaceRoot}/apps/ptah-extension-webview/src/**/*.ts",
         "{workspaceRoot}/libs/frontend/**/src/**/*.html",
