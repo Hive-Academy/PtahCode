@@ -1402,7 +1402,8 @@ for (const host of ['vscode', 'electron'] as const) {
         page.locator('[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]'),
       ).toBeVisible();
       await assertOrderStripWhole(page, host, theme, 6);
-      // 52.1: one normalised version beside each name, on the name's line.
+      // 52.1: one normalised version per card. PR #1309: the version is a fact in the card's description list
+      // (term "Version"), not a second label on the name's line, so the header shows only the name and one status.
       const expected: Readonly<Record<string, string>> = {
         codex: 'v0.155.1',
         copilot: 'v1.0.83',
@@ -1415,19 +1416,18 @@ for (const host of ['vscode', 'electron'] as const) {
         );
         await expect(version).toHaveText(label);
         await expect(version).toHaveAttribute('title', LIVE_VERSIONS[cli]);
-        const line = await version.evaluate((element) => {
-          const name =
-            element.parentElement?.querySelector('h3')?.getBoundingClientRect();
-          const own = element.getBoundingClientRect();
-          return {
-            nameTop: name?.top ?? 0,
-            nameBottom: name?.bottom ?? 0,
-            top: own.top,
-            bottom: own.bottom,
-          };
-        });
-        expect(line.top).toBeLessThan(line.nameBottom);
-        expect(line.bottom).toBeGreaterThan(line.nameTop);
+        const fact = await version.evaluate((element) => ({
+          term:
+            element
+              .closest('[data-ptah-description-row]')
+              ?.querySelector('dt')
+              ?.textContent?.trim() ?? null,
+          inHeader: element.closest('header') !== null,
+          clipped: element.scrollWidth > element.clientWidth + 1,
+        }));
+        expect(fact.term).toBe('Version');
+        expect(fact.inHeader).toBe(false);
+        expect(fact.clipped).toBe(false);
       }
       // 52.2: the Antigravity model cell shows the id once, on at most two lines, with the name in its title.
       const model = page.locator(
