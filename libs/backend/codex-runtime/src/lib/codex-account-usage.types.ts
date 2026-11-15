@@ -35,11 +35,14 @@ export interface CodexRateLimitBucket {
     readonly hasCredits: boolean;
     readonly unlimited: boolean;
   };
+  /** A present credits value could not be parsed; eligibility is unknown. */
+  readonly creditsUnparsed?: true;
 }
 
 export interface CodexAccountUsageResult {
   readonly status: CodexAccountUsageStatus;
   readonly providerId: string;
+  readonly ordinaryUsageAllowed?: boolean;
   readonly fetchedAt?: number;
   readonly staleSince?: number;
   readonly account?: { readonly planType: string };

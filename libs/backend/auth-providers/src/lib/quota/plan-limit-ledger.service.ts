@@ -241,6 +241,15 @@ export class PlanLimitLedgerService {
     this.changed(owner.key);
   }
 
+  /** Release older provider API owner evidence when a fresh reading no longer supports it. */
+  clearProviderOwnerEvidence(owner: QuotaOwnerRef, observedAt: number): void {
+    if (!Number.isFinite(observedAt)) return;
+    const evidence = this.owners.get(owner.key)?.ownerEvidence.get(ALL_MODELS);
+    if (evidence?.source !== 'provider-api' || evidence.observedAt >= observedAt) return;
+    this.owners.get(owner.key)?.ownerEvidence.delete(ALL_MODELS);
+    this.changed(owner.key);
+  }
+
   /** Record a provider-imposed wait. The later deadline wins. */
   recordCooldown(owner: QuotaOwnerRef, cooldown: PlanLimitCooldown): void {
     const end = cooldownEnd(cooldown);

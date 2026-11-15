@@ -121,7 +121,7 @@ const ELIGIBILITY_STATUSES: ReadonlySet<ProviderAccountUsageStatus> = new Set([
 /** The ledger surface the service reads and feeds. */
 export type PlanUsageLedger = Pick<
   PlanLimitLedgerService,
-  'snapshotFor' | 'recordWindowEvidence'
+  'snapshotFor' | 'recordWindowEvidence' | 'recordOwnerEvidence' | 'clearProviderOwnerEvidence'
 >;
 /** The credential surface the service reads secrets through. */
 export type PlanUsageCredentials = Pick<PlanCredentialSource, 'resolve'>;
@@ -448,6 +448,12 @@ export class PlanUsageService {
       this.evictCache();
     }
     if (reading.status === 'available') {
+      if (reading.providerOwnerClear && reading.source === 'provider-api') {
+        this.ledger.clearProviderOwnerEvidence(owner, reading.fetchedAt ?? this.now());
+      }
+      if (reading.providerOwnerEvidence) {
+        this.ledger.recordOwnerEvidence(owner, reading.providerOwnerEvidence);
+      }
       for (const window of reading.windows) {
         this.ledger.recordWindowEvidence(owner, window);
       }

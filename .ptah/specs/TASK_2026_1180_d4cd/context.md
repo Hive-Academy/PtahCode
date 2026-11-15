@@ -77,10 +77,10 @@ as a limit).
 | Batch | Scope | PR | State |
 | --- | --- | --- | --- |
 | research | usage-sources.md | - | done |
-| a1 | codex false AT LIMIT, 100% reads limit-reached (codex lane 8e067b33) | #1298 | in_review |
-| a2 | spawn bounded lookup wait, grok deadline (antigravity lane aa2f8cb4) | #1298 | in_review |
-| a3 | review fixes 1, 3, 4 (codex lane 370c5eef); review: review-batch-a.md | #1298 | in_review |
-| b | antigravity reader (agy JSON, branch fix/antigravity-usage-reader) | #1301 | in_review |
+| a1 | codex false AT LIMIT, 100% reads limit-reached (codex lane 8e067b33) | #1298 | merged |
+| a2 | spawn bounded lookup wait, grok deadline (antigravity lane aa2f8cb4) | #1298 | merged |
+| a3 | review fixes 1, 3, 4 (codex lane 370c5eef); review: review-batch-a.md | #1298 | merged |
+| b | antigravity reader (agy JSON, branch fix/antigravity-usage-reader) | #1301 | merged |
 | c1 | codex `ordinaryUsageAllowed` gate (branch fix/lane-usage-sources); review: review-batch-c1-r3.md | #1308 | in_review |
 | c | fallback reader port coverage: claude OAuth usage, grok, copilot | - | pending |
 | d | per-model limit state | - | pending |
