@@ -315,6 +315,46 @@ describe('PlanLimitLedgerService — removeProviderWindowEvidence', () => {
 
     expect(windowOf(ledger, OWNER_A, KEY)).toBeDefined();
   });
+
+  it('rejects an older provider reading that arrives after removal', () => {
+    const { ledger } = harness();
+    const exhausted = readWindow(KEY, T0, 100, {
+      exhaustion: { observedAt: T0, source: 'provider-api' },
+    });
+    ledger.recordWindowEvidence(OWNER_A, exhausted);
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0 + MINUTE);
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0);
+    ledger.recordWindowEvidence(OWNER_A, exhausted);
+
+    expect(windowOf(ledger, OWNER_A, KEY)).toBeUndefined();
+  });
+
+  it('accepts a provider reading newer than the removal', () => {
+    const { ledger } = harness();
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0);
+    ledger.recordWindowEvidence(OWNER_A, readWindow(KEY, T0 + MINUTE, 30));
+
+    expect(windowOf(ledger, OWNER_A, KEY)?.used).toEqual({
+      kind: 'percent',
+      percent: 30,
+    });
+  });
+
+  it('does not apply the provider cutoff to lane-error evidence', () => {
+    const { ledger } = harness();
+    ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0 + MINUTE);
+    ledger.recordWindowEvidence(
+      OWNER_A,
+      readWindow(KEY, T0, 100, {
+        usedSource: 'error-derived',
+        exhaustion: { observedAt: T0, source: 'error-derived' },
+      }),
+    );
+
+    expect(windowOf(ledger, OWNER_A, KEY)?.exhaustion?.source).toBe(
+      'error-derived',
+    );
+  });
 });
 
 describe('PlanLimitLedgerService — precedence (F21, ledger side)', () => {

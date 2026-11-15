@@ -166,6 +166,10 @@ interface SessionState {
 @injectable()
 export class PlanLimitLedgerService {
   private readonly owners = new Map<string, OwnerState>();
+  private readonly providerWindowRemovalCutoffs = new Map<
+    string,
+    Map<PlanLimitWindow['key'], number>
+  >();
   private readonly sessions = new Map<string, SessionState>();
   private readonly listeners = new Set<PlanLimitLedgerListener>();
   private readonly disposers: Array<() => void>;
@@ -206,10 +210,20 @@ export class PlanLimitLedgerService {
     window: PlanLimitWindow,
     options: PlanLimitWindowRecordOptions = {},
   ): void {
+    const next: WindowEntry = { window, stale: options.stale === true };
+    const cutoff = this.providerWindowRemovalCutoffs
+      .get(owner.key)
+      ?.get(window.key);
+    if (
+      windowStamp(next).source === 'provider-api' &&
+      cutoff !== undefined &&
+      window.observedAt <= cutoff
+    ) {
+      return;
+    }
     const now = this.now();
     const id = allowanceId(window);
     const prev = this.owners.get(owner.key)?.windows.get(id);
-    const next: WindowEntry = { window, stale: options.stale === true };
     if (
       prev &&
       !supersedes(
@@ -233,6 +247,15 @@ export class PlanLimitLedgerService {
     key: PlanLimitWindow['key'],
     observedAt: number,
   ): void {
+    let cutoffs = this.providerWindowRemovalCutoffs.get(owner.key);
+    if (!cutoffs) {
+      cutoffs = new Map();
+      this.providerWindowRemovalCutoffs.set(owner.key, cutoffs);
+    }
+    cutoffs.set(
+      key,
+      Math.max(cutoffs.get(key) ?? Number.NEGATIVE_INFINITY, observedAt),
+    );
     const state = this.owners.get(owner.key);
     if (!state) return;
     let removed = false;
