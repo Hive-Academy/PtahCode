@@ -10,16 +10,22 @@ import {
 
 export const HANDOFF_ACK_STORAGE_KEY = 'ptah.handoffAcknowledgements';
 
-const RecordSchema = z.object({
-  predecessorTabId: z.string().min(1),
-  predecessorSdkId: z.string().min(1).nullable(),
-  successorTabId: z.string().min(1),
-  successorSdkId: z.string().min(1).nullable(),
-  workspaceRoot: z.string().min(1),
-  handoffPath: z.string().min(1),
-  state: z.enum(['recorded', 'closePending', 'closeCompleted']),
-}).strict();
-const DocumentSchema = z.object({ schemaVersion: z.literal(1), records: z.array(z.unknown()) }).strict();
+const RecordSchema = z
+  .object({
+    predecessorTabId: z.string().min(1),
+    predecessorSdkId: z.string().min(1).nullable(),
+    successorTabId: z.string().min(1),
+    successorSdkId: z.string().min(1).nullable(),
+    workspaceRoot: z.string().min(1),
+    handoffPath: z.string().min(1),
+    state: z.enum(['recorded', 'closePending', 'closeCompleted']),
+    /** Set when the predecessor holds results the successor never adopted: an ack must not close it. */
+    keepPredecessor: z.boolean().optional(),
+  })
+  .strict();
+const DocumentSchema = z
+  .object({ schemaVersion: z.literal(1), records: z.array(z.unknown()) })
+  .strict();
 export type HandoffAckRecord = z.infer<typeof RecordSchema>;
 
 /** Invalid documents are appended here (newest last) before they are replaced. */
@@ -46,7 +52,8 @@ export class SessionHandoffAckStore {
   ) {}
 
   private async readState(): Promise<AckDocumentState> {
-    if (!this.storage) throw new Error('handoff acknowledgement storage unavailable');
+    if (!this.storage)
+      throw new Error('handoff acknowledgement storage unavailable');
     if (hasStateStorageReadiness(this.storage)) await this.storage.whenReady();
     const raw: unknown = isAsyncStateStorage(this.storage)
       ? await this.storage.getAsync(HANDOFF_ACK_STORAGE_KEY)
@@ -54,7 +61,10 @@ export class SessionHandoffAckStore {
     if (raw === undefined) return { records: [], invalid: [] };
     const parsed = DocumentSchema.safeParse(raw);
     if (!parsed.success) {
-      this.logger?.error('Invalid handoff acknowledgement document', new Error('Invalid persisted handoff acknowledgement schema'));
+      this.logger?.error(
+        'Invalid handoff acknowledgement document',
+        new Error('Invalid persisted handoff acknowledgement schema'),
+      );
       return { records: [], invalid: [], quarantine: raw };
     }
     const state: AckDocumentState = { records: [], invalid: [] };
@@ -64,7 +74,12 @@ export class SessionHandoffAckStore {
       else state.invalid.push(entry);
     }
     if (state.invalid.length > 0) {
-      this.logger?.error('Invalid handoff acknowledgement records kept unchanged', new Error(`${state.invalid.length} invalid handoff acknowledgement record(s)`));
+      this.logger?.error(
+        'Invalid handoff acknowledgement records kept unchanged',
+        new Error(
+          `${state.invalid.length} invalid handoff acknowledgement record(s)`,
+        ),
+      );
     }
     return state;
   }
@@ -79,7 +94,11 @@ export class SessionHandoffAckStore {
       const previous: unknown = isAsyncStateStorage(this.storage!)
         ? await this.storage!.getAsync(HANDOFF_ACK_QUARANTINE_KEY)
         : this.storage!.get(HANDOFF_ACK_QUARANTINE_KEY);
-      const kept = Array.isArray(previous) ? previous : previous === undefined ? [] : [previous];
+      const kept = Array.isArray(previous)
+        ? previous
+        : previous === undefined
+          ? []
+          : [previous];
       await this.storage!.update(
         HANDOFF_ACK_QUARANTINE_KEY,
         [...kept, state.quarantine].slice(-MAX_QUARANTINED),
@@ -98,24 +117,35 @@ export class SessionHandoffAckStore {
   }
 
   async findByPredecessor(id: string): Promise<HandoffAckRecord | undefined> {
-    return this.serialized(async () => (await this.read()).find(
-      (record) => record.predecessorTabId === id || record.predecessorSdkId === id,
-    ));
+    return this.serialized(async () =>
+      (await this.read()).find(
+        (record) =>
+          record.predecessorTabId === id || record.predecessorSdkId === id,
+      ),
+    );
   }
 
   async findBySuccessor(id: string): Promise<HandoffAckRecord | undefined> {
-    return this.serialized(async () => (await this.read()).find(
-      (record) => record.successorTabId === id || record.successorSdkId === id,
-    ));
+    return this.serialized(async () =>
+      (await this.read()).find(
+        (record) =>
+          record.successorTabId === id || record.successorSdkId === id,
+      ),
+    );
   }
 
   async record(value: HandoffAckRecord): Promise<void> {
     await this.serialized(async () => {
       const state = await this.readState();
-      const index = state.records.findIndex((entry) => entry.predecessorTabId === value.predecessorTabId);
+      const index = state.records.findIndex(
+        (entry) => entry.predecessorTabId === value.predecessorTabId,
+      );
       if (index >= 0) {
         const existing = state.records[index];
-        if (existing.state !== 'recorded' || existing.successorTabId === value.successorTabId) {
+        if (
+          existing.state !== 'recorded' ||
+          existing.successorTabId === value.successorTabId
+        ) {
           throw new Error('handoff predecessor already recorded');
         }
         state.records[index] = RecordSchema.parse(value);
@@ -134,7 +164,9 @@ export class SessionHandoffAckStore {
     return this.serialized(async () => {
       const state = await this.readState();
       const { records } = state;
-      const index = records.findIndex((entry) => entry.predecessorTabId === predecessorTabId);
+      const index = records.findIndex(
+        (entry) => entry.predecessorTabId === predecessorTabId,
+      );
       if (index < 0 || records[index].state !== expected) return false;
       records[index] = RecordSchema.parse({ ...records[index], ...patch });
       await this.write(state);
@@ -143,7 +175,11 @@ export class SessionHandoffAckStore {
   }
 
   private prune(records: HandoffAckRecord[]): HandoffAckRecord[] {
-    let completed = records.filter((record) => record.state === 'closeCompleted').length;
-    return records.filter((record) => record.state !== 'closeCompleted' || --completed < 200);
+    let completed = records.filter(
+      (record) => record.state === 'closeCompleted',
+    ).length;
+    return records.filter(
+      (record) => record.state !== 'closeCompleted' || --completed < 200,
+    );
   }
 }

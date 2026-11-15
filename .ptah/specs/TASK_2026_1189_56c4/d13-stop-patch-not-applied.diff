@@ -1,0 +1,122 @@
+diff --git a/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.port.ts b/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.port.ts
+index 521755cf1..c8ee68f61 100644
+--- a/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.port.ts
++++ b/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.port.ts
+@@ -317,7 +317,8 @@ export type SessionChildStopResult =
+     }
+   | SessionChildLookupRefusal
+   | SessionChildStopHandedOffRefusal
+-  | SessionChildStopStartingRefusal;
++  | SessionChildStopStartingRefusal
++  | { readonly ok: false; readonly reason: 'interrupt-failed'; readonly detail: string };
+ 
+ /** `stop` on a start that is still in progress: nothing was stopped. */
+ export interface SessionChildStopStartingRefusal {
+diff --git a/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.spec.ts b/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.spec.ts
+index 710615179..f283be83d 100644
+--- a/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.spec.ts
++++ b/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.spec.ts
+@@ -135,6 +135,7 @@ export function makeHarness(
+     claimHeldPeerMessages: jest.fn().mockReturnValue([]),
+     interruptCurrentTurn: jest.fn().mockResolvedValue(true),
+     interruptSession: jest.fn().mockResolvedValue(undefined),
++    endSession: jest.fn((id: string) => { active.delete(id); }),
+   };
+   const host = {
+     listChildModels: jest.fn(async () => ['claude-haiku-4', 'claude-opus-4']),
+@@ -206,6 +207,7 @@ export function makeHarness(
+   /** The parent record's live level; what the autopilot toggle rewrites. */
+   const parentLevel: { value: PermissionLevel } = { value: 'yolo' };
+   const lifecycle = {
++    endSession: jest.fn(async (id: string) => { active.delete(id); }),
+     find: jest.fn((id: string) =>
+       lifecycleIds.has(id)
+         ? {
+@@ -377,6 +379,7 @@ export function makeHarness(
+     environment,
+     lanes,
+     agents,
++    lifecycle,
+     lifecycleIds,
+     parentLevel,
+     phases,
+@@ -2001,6 +2004,21 @@ describe('SessionSpawnerService.stop', () => {
+     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+   });
+ 
++  it('ends the live SDK session before reporting a child stopped', async () => {
++    const h = makeHarness();
++    const child = await h.startChild();
++    h.idResolved.notifyAll({ tabId: child.childSessionId, realSessionId: CHILD_SDK, timestamp: 2 });
++    h.active.add(CHILD_SDK);
++    h.active.delete(child.childSessionId);
++
++    const result = await h.spawner.stop({ callerSessionId: PARENT, childSessionId: child.childSessionId });
++
++    expect(h.adapter.endSession).toHaveBeenCalledWith(CHILD_SDK, 'parent-stop');
++    expect(h.lifecycle.endSession).toHaveBeenCalledWith(child.childSessionId, 'parent-stop');
++    expect(h.active.has(CHILD_SDK)).toBe(false);
++    expect(result).toMatchObject({ ok: true, child: { status: 'stopped' } });
++  });
++
+   it('F.1 M7: releases the child budget under its tab and SDK ids, after the interrupt', async () => {
+     const h = makeHarness();
+     const child = await h.startChild();
+@@ -2043,6 +2061,20 @@ describe('SessionSpawnerService.stop', () => {
+     expect(h.sessionBudget.release).not.toHaveBeenCalled();
+   });
+ 
++  it('ends the child lifecycle by tab even when the SDK id is bound', async () => {
++    const h = makeHarness();
++    const child = await h.startChild();
++    h.idResolved.notifyAll({ tabId: child.childSessionId, realSessionId: CHILD_SDK, timestamp: 2 });
++    h.lifecycle.endSession.mockImplementationOnce(async (id: string) => {
++      if (id === child.childSessionId) h.active.delete(child.childSessionId);
++    });
++    const result = await h.spawner.stop({ callerSessionId: PARENT, childSessionId: CHILD_SDK });
++    expect(h.adapter.endSession).toHaveBeenCalledWith(child.childSessionId, 'parent-stop');
++    expect(h.lifecycle.endSession).toHaveBeenCalledWith(child.childSessionId, 'parent-stop');
++    expect(h.adapter.isSessionActive(child.childSessionId)).toBe(false);
++    expect(result).toMatchObject({ ok: true, child: { status: 'stopped' } });
++  });
++
+   it('records an interrupt failure in the end reason and still stops', async () => {
+     const h = makeHarness();
+     const child = await h.startChild();
+diff --git a/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.ts b/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.ts
+index 52bca6cf7..f0986fd4e 100644
+--- a/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.ts
++++ b/libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.ts
+@@ -1207,7 +1207,7 @@ export class SessionSpawnerService implements ISessionSpawner {
+     if (runtime) runtime.stopping = true;
+ 
+     let reason = 'stopped-by-parent';
+-    const tabId = SessionId.safeParse(id);
++    const tabId = this.activeIdOf(target) ?? SessionId.safeParse(id);
+     if (this.adapter && tabId) {
+       try {
+         await this.adapter.interruptSession(tabId, 'parent-stop');
+@@ -1217,6 +1217,23 @@ export class SessionSpawnerService implements ISessionSpawner {
+         reason = `stopped-by-parent (interrupt failed: ${errorMessage(error)})`;
+       }
+     }
++    // Interrupt only ends the current turn. Close the registered SDK session
++    // before recording a terminal child, including when interruption failed.
++    const liveId = SessionId.safeParse(id);
++    if (liveId) {
++      try {
++        if (this.adapter && tabId) this.adapter.endSession(tabId, 'parent-stop');
++        await this.lifecycle.endSession(liveId, 'parent-stop');
++      } catch (error: unknown) {
++        this.log(`child session close faulted: ${errorMessage(error)}`);
++        if (runtime) runtime.stopping = false;
++        return {
++          ok: false,
++          reason: 'interrupt-failed',
++          detail: `session ${id} could not be closed; it remains live`,
++        };
++      }
++    }
+     this.registry.markEnded(id, 'stopped', reason, undefined, 'parent-stop');
+     this.releaseResources(id);
+     // After the awaited interrupt: the run is over, so no late result can
