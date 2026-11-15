@@ -462,14 +462,6 @@
     "ml-5": 1,
     "mt-0.5": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-lane-default-cell.component.ts": {
-    "gap-0.5": 2,
-    "gap-1": 1,
-    "gap-2": 1,
-    "gap-3": 1,
-    "mt-3": 1,
-    "p-2": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-model-effort-popover.component.ts": {
     "gap-1": 2,
     "gap-1.5": 1,
@@ -477,12 +469,6 @@
     "p-3": 1,
     "pb-1.5": 1,
     "space-y-2": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-orchestration-matrix.component.ts": {
-    "gap-1.5": 1,
-    "gap-4": 2,
-    "gap-x-2": 1,
-    "gap-y-1": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-provider-card-popovers.component.ts": {
     "gap-2": 1,

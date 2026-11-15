@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, input, output
 import {
   NativePopoverComponent,
   PtahButtonDirective,
+  PtahFieldComponent,
   PtahSelectDirective,
 } from '@ptah-extension/ui';
 import type { CliAdapterManifest, CliLaneDefaults, CliType, LaneNetworkMode, LanePermissionMode } from '@ptah-extension/shared';
@@ -17,31 +18,42 @@ let nextTitleId = 0;
 @Component({
   selector: 'ptah-cli-lane-default-cell',
   standalone: true,
-  imports: [NativePopoverComponent, PtahButtonDirective, PtahSelectDirective],
-  styles: `:host { display: block; } dialog.modal:not([open]) { display: none; } .compact { width: 4.75rem; } .wide, .card-layout { width: 100%; } .wide select { max-width: 20rem; min-width: 9rem; } @container (max-width: 479px) { .wide > .grid { grid-template-columns: minmax(0, 1fr); } }`,
+  imports: [NativePopoverComponent, PtahButtonDirective, PtahFieldComponent, PtahSelectDirective],
+  // Layout comes from the host data-layout attribute, not class bindings (ui-class-audit). Spacing uses --ptah-* tokens.
+  host: { '[attr.data-layout]': 'layout()' },
+  styles: `:host { display: block; min-width: 0; max-width: 100%; }
+    :host([data-layout='wide']), :host([data-layout='card']) { width: 100%; }
+    :host([data-layout='compact']) { width: max-content; }
+    dialog.modal:not([open]) { display: none; }
+    .fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ptah-gap-controls); min-width: 0; }
+    :host([data-layout='card']) .fields, :host([data-layout='wide']) .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    :host([data-layout='wide']) .fields { gap: var(--ptah-gap-field); }
+    :host([data-layout='wide']) ptah-field { max-width: 20rem; min-width: 9rem; }
+    @container (max-width: 479px) { :host([data-layout='wide']) .fields { grid-template-columns: minmax(0, 1fr); } }`,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex min-w-0 max-w-full flex-col gap-1 text-xs text-base-content [overflow-wrap:anywhere]" [class.compact]="layout() === 'compact'" [class.wide]="layout() === 'wide'" [class.card-layout]="layout() === 'card'">
+    <div class="flex min-w-0 max-w-full flex-col gap-[var(--ptah-gap-controls)] text-xs text-base-content [overflow-wrap:anywhere]">
       @if (cli() === 'ptah-cli') { <span>Shared by all Ptah CLI providers</span> }
       @if (cli() === 'codex') { <span>Same setting as Codex sandbox in Providers › OpenAI Codex › Credentials.</span> }
       @if (showCaption()) { <span>{{ saved() ? 'Saved default' : 'Auto (default) · built-in' }}</span> }
       @if (saved()) {
         <ptah-native-popover [isOpen]="resetOpen()" placement="bottom-start" [hasBackdrop]="true" backdropClass="transparent" (closed)="resetOpen.set(false)">
           <button trigger type="button" ptahButton variant="ghost" size="xs" [attr.aria-expanded]="resetOpen()" (click)="resetOpen.set(!resetOpen())">More default actions</button>
-          @if (resetOpen()) { <div content class="p-2"><button type="button" ptahButton variant="ghost" [disabled]="disabled() || pending() !== null" (click)="requestReset()">Reset to default ({{ resetDescription() }})</button></div> }
+          @if (resetOpen()) { <div content class="p-[var(--ptah-gap-controls)]"><button type="button" ptahButton variant="ghost" [disabled]="disabled() || pending() !== null" (click)="requestReset()">Reset to default ({{ resetDescription() }})</button></div> }
         </ptah-native-popover>
       }
       @if (unsupportedCombination(); as reason) { <span role="status">Unsupported combination: {{ reason }}</span> }
-      <div class="grid min-w-0 grid-cols-1" [class.gap-3]="layout() !== 'card'" [class.gap-2]="layout() === 'card'" [class.grid-cols-2]="layout() !== 'compact'">
+      <div class="fields">
       @if (permissions().length) {
-        <label class="flex flex-col gap-0.5">Permission
-          <select ptahSelect [size]="layout() === 'wide' ? 'sm' : 'xs'" class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission()"
+        <!-- Visible label from ptah-field; the aria-label keeps the provider name in the accessible name. -->
+        <ptah-field label="Permission" appearance="stacked" class="min-w-0">
+          <select ptahSelect class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' permission default'" [title]="effectivePermission() ?? ''"
             [disabled]="disabled() || pending() !== null" (change)="choosePermission($event)">
             <!-- Per-option [selected]: a select [value] bound before its options render falls back to the first option ("plan"). -->
             @if (effectivePermission() === undefined && permissions().length > 0) { <option value="" disabled [selected]="true">Choose a permission</option> }
             @for (mode of permissions(); track mode) { <option [value]="mode" [selected]="mode === effectivePermission()">{{ mode }}</option> }
           </select>
-        </label>
+        </ptah-field>
         @if (cli() === 'cursor') {
           @for (mode of unavailablePermissions(); track mode.mode) {
             <span class="text-base-content" tabindex="0">{{ mode.mode }} unavailable: {{ mode.reason }}</span>
@@ -49,18 +61,18 @@ let nextTitleId = 0;
         }
       } @else { <span tabindex="0" [title]="reason()">Permission: Unavailable — {{ reason() }}</span> }
       @if (networks().length) {
-        <label class="flex flex-col gap-0.5">Network
-          <select ptahSelect [size]="layout() === 'wide' ? 'sm' : 'xs'" class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork()"
+        <ptah-field label="Network" appearance="stacked" class="min-w-0">
+          <select ptahSelect class="w-full min-w-0 max-w-full text-base-content" [attr.aria-label]="name() + ' network default'" [title]="effectiveNetwork() ?? ''"
             [disabled]="disabled() || pending() !== null" (change)="chooseNetwork($event)">
             @for (mode of networks(); track mode) { <option [value]="mode" [selected]="mode === effectiveNetwork()">{{ mode }}</option> }
           </select>
-        </label>
+        </ptah-field>
       } @else { <span tabindex="0" [title]="reason()">Network: Unavailable — {{ reason() }}</span> }
       </div>
       <dialog #confirmation class="modal" (cancel)="cancel($event)" (close)="cancel()" [attr.aria-labelledby]="titleId">
         <div class="modal-box border border-base-content/60 bg-base-100 text-base-content">
           <h3 [id]="titleId" tabindex="-1" class="text-base font-semibold">Confirm full access</h3>
-          <p class="mt-3 text-sm">{{ cli() === 'codex' ? warning : 'Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.' }}</p>
+          <p class="mt-[var(--ptah-gap-heading)] text-sm">{{ cli() === 'codex' ? warning : 'Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.' }}</p>
           <div class="modal-action"><button type="button" ptahButton variant="ghost" (click)="cancel()">Cancel</button><button type="button" class="btn btn-warning btn-sm" (click)="confirm()">Confirm</button></div>
         </div>
       </dialog>
@@ -73,7 +85,7 @@ export class CliLaneDefaultCellComponent {
   readonly manifest = input<CliAdapterManifest>();
   readonly saved = input<Choice>();
   readonly disabled = input(false);
-  /** `compact`: narrow column. `wide`: settings row. `card`: full card width, Permission and Network side by side. */
+  /** `compact`: one column at its content width. `wide`: settings row. `card`: full card width, Permission and Network side by side. */
   readonly layout = input<'compact' | 'wide' | 'card'>('compact');
   readonly showCaption = input(true);
   readonly selected = output<Choice>();
