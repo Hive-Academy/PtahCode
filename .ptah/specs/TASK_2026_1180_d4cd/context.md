@@ -82,7 +82,7 @@ as a limit).
 | a3 | review fixes 1, 3, 4 (codex lane 370c5eef); review: review-batch-a.md | #1298 | merged |
 | b | antigravity reader (agy JSON, branch fix/antigravity-usage-reader) | #1301 | merged |
 | c1 | codex `ordinaryUsageAllowed` gate (branch fix/lane-usage-sources); review: review-batch-c1-r3.md | #1308 | in_review |
-| c2 | grok `prepaidBalance`, 402 classification, credits in snapshot (branch fix/lane-usage-readers-c2); review: review-batch-c2-r2.md | pending PR | in_review |
+| c2 | grok `prepaidBalance`, 402 classification, credits in snapshot (branch fix/lane-usage-readers-c2); review: review-batch-c2-r2.md | #1316 | in_review |
 | c3 | claude OAuth usage, copilot quota sources | - | pending |
 | d | per-model limit state | - | pending |
 
