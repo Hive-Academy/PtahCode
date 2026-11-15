@@ -7,7 +7,8 @@ import {
   viewChild,
 } from '@angular/core';
 import { Bell, Check, CircleAlert, MessageCircleQuestion, ShieldQuestion, Trash2, TriangleAlert, Volume2, VolumeX, X, LucideAngularModule } from 'lucide-angular';
-import { AttentionPermissionActionsComponent, type AttentionItem } from '@ptah-extension/core';
+import { type AttentionItem } from '@ptah-extension/core';
+import { AttentionPermissionActionsComponent } from './components/attention-permission-actions.component';
 import { NotificationCenterStore } from './notification-center.store';
 import { NotificationSoundService } from './notification-sound.service';
 import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';

@@ -5,7 +5,8 @@ import {
   input,
   output,
 } from '@angular/core';
-import { AttentionPermissionActionsComponent, type AttentionItem } from '@ptah-extension/core';
+import { type AttentionItem } from '@ptah-extension/core';
+import { AttentionPermissionActionsComponent } from '@ptah-extension/notification-center';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 import type {
   CompactCallout,

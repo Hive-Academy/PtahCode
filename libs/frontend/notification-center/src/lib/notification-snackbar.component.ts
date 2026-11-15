@@ -3,8 +3,9 @@ import {
   input, output, signal,
 } from '@angular/core';
 import {
-  ATTENTION_ACTION_DISPATCHER, NOTIFICATION_FOCUS_ROUTER, NotificationService, AttentionPermissionActionsComponent, type AttentionItem,
+  ATTENTION_ACTION_DISPATCHER, NOTIFICATION_FOCUS_ROUTER, NotificationService, type AttentionItem,
 } from '@ptah-extension/core';
+import { AttentionPermissionActionsComponent } from './components/attention-permission-actions.component';
 import {
   CircleAlert, MessageCircleQuestion, ShieldQuestion, TriangleAlert,
   X, LucideAngularModule,
