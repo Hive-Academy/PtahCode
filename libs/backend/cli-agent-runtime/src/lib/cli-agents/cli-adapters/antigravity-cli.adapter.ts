@@ -72,7 +72,10 @@ import type {
   SdkHandle,
 } from './cli-adapter.interface';
 import { bestMessagingCapability } from './cli-adapter.interface';
-import { applyLaneArgvPolicy, translateLaneSpawnPolicy } from '../lane-spawn-policy';
+import {
+  applyLaneArgvPolicy,
+  translateLaneSpawnPolicy,
+} from '../lane-spawn-policy';
 import {
   assertCommandLineWithinLimit,
   stripAnsiCodes,
@@ -438,23 +441,53 @@ export class AntigravityCliAdapter implements CliAdapter {
   capabilities(): CliAdapterManifest {
     return {
       messaging: {
-        steer: { state: 'unsupported', reason: 'Stream input has no verified mid-turn steer.' },
-        interrupt: { state: 'unsupported', reason: 'No run-scoped interrupt is exposed.' },
-        continuation: this.streamJsonInputSupported === true
-          ? { state: 'supported' }
-          : { state: 'unsupported', reason: 'Stream JSON input has not been verified for this binary.' },
+        steer: {
+          state: 'unsupported',
+          reason: 'Stream input has no verified mid-turn steer.',
+        },
+        interrupt: {
+          state: 'unsupported',
+          reason: 'No run-scoped interrupt is exposed.',
+        },
+        continuation:
+          this.streamJsonInputSupported === true
+            ? { state: 'supported' }
+            : {
+                state: 'unsupported',
+                reason:
+                  'Stream JSON input has not been verified for this binary.',
+              },
         resume: { state: 'supported' },
       },
       roleChannel: this.roleChannel,
       permissionModes: {
-        plan: { state: 'supported', nativeMode: '--mode plan', networkModes: ['allow'] },
-        ask: { state: 'unsupported', reason: 'No noninteractive approval route exists.', networkModes: [] },
-        'auto-edit': { state: 'supported', nativeMode: '--mode accept-edits', networkModes: ['allow'] },
-        yolo: { state: 'supported', nativeMode: '--dangerously-skip-permissions', networkModes: ['allow'] },
+        plan: {
+          state: 'supported',
+          nativeMode: '--mode plan',
+          networkModes: ['allow'],
+        },
+        ask: {
+          state: 'unsupported',
+          reason: 'No noninteractive approval route exists.',
+          networkModes: [],
+        },
+        'auto-edit': {
+          state: 'supported',
+          nativeMode: '--mode accept-edits',
+          networkModes: ['allow'],
+        },
+        yolo: {
+          state: 'supported',
+          nativeMode: '--dangerously-skip-permissions',
+          networkModes: ['allow'],
+        },
       },
       networkModes: {
         allow: { state: 'supported' },
-        deny: { state: 'unsupported', reason: 'No verified general network sandbox exists.' },
+        deny: {
+          state: 'unsupported',
+          reason: 'No verified general network sandbox exists.',
+        },
       },
       limitReader: { state: 'available', source: 'antigravity' },
       mcp: { state: 'supported' },
@@ -731,7 +764,11 @@ export class AntigravityCliAdapter implements CliAdapter {
    * `init` event. stderr and non-zero exit surface as `error` segments.
    */
   async runSdk(options: CliCommandOptions): Promise<SdkHandle> {
-    const policy = translateLaneSpawnPolicy(this.name, this.capabilities(), options);
+    const policy = translateLaneSpawnPolicy(
+      this.name,
+      this.capabilities(),
+      options,
+    );
     if (options.workingDirectory) {
       await this.ensureFolderTrusted(options.workingDirectory);
     }
@@ -749,10 +786,14 @@ export class AntigravityCliAdapter implements CliAdapter {
     const binary = options.binaryPath ?? 'agy';
     const useStreamInput = await this.probeStreamJsonInput(binary);
 
-    const prompt = useStreamInput ? taskPrompt : buildArgvTaskPrompt(options, this.name);
+    const prompt = useStreamInput
+      ? taskPrompt
+      : buildArgvTaskPrompt(options, this.name);
     const args = applyLaneArgvPolicy(
       buildAntigravityArgs(options, prompt, useStreamInput),
-      policy.cli === 'antigravity' ? policy.argv : { addArgs: [], removeArgs: [] },
+      policy.cli === 'antigravity'
+        ? policy.argv
+        : { addArgs: [], removeArgs: [] },
     );
 
     // `agy` ships as a real `.exe` under %LOCALAPPDATA%\agy\bin, which
@@ -832,37 +873,71 @@ export class AntigravityCliAdapter implements CliAdapter {
       const validTokens = (value: number | undefined): value is number =>
         value !== undefined && Number.isSafeInteger(value) && value >= 0;
       const complete = (usage: AgyResult['usage']): boolean =>
-        !!usage && validTokens(usage.input_tokens) && validTokens(usage.output_tokens);
+        !!usage &&
+        validTokens(usage.input_tokens) &&
+        validTokens(usage.output_tokens);
       const emitTelemetry = (usage?: AgyResult['usage']): void => {
         segment.emit({
-          type: 'info', content: 'Antigravity turn telemetry',
-          ...(usage && complete(usage) ? { usage: {
-            inputTokens: usage.input_tokens,
-            outputTokens: usage.output_tokens,
-            cacheReadTokens: usage.cache_read_tokens,
-          } } : {}),
+          type: 'info',
+          content: 'Antigravity turn telemetry',
+          ...(usage && complete(usage)
+            ? {
+                usage: {
+                  inputTokens: usage.input_tokens,
+                  outputTokens: usage.output_tokens,
+                  cacheReadTokens: usage.cache_read_tokens,
+                },
+              }
+            : {}),
           turnTelemetry: completedTurnTelemetry({
-            ...turnIdentity({ provider: 'antigravity', turnId: currentTurnId,
-              sessionId: capturedSessionId ?? options.agentId ?? `agy:${child.pid ?? 'unknown'}`,
-              runId: options.agentId, sequence: turnSequence, modelId: observedModelId, source: 'stream' }),
-            usage: usage ? {
-              inputTokens: usage.input_tokens,
-              outputTokens: usage.output_tokens,
-              cacheReadTokens: usage.cache_read_tokens,
-            } : undefined,
+            ...turnIdentity({
+              provider: 'antigravity',
+              turnId: currentTurnId,
+              sessionId:
+                capturedSessionId ??
+                options.agentId ??
+                `agy:${child.pid ?? 'unknown'}`,
+              runId: options.agentId,
+              sequence: turnSequence,
+              modelId: observedModelId,
+              source: 'stream',
+            }),
+            usage: usage
+              ? {
+                  inputTokens: usage.input_tokens,
+                  outputTokens: usage.output_tokens,
+                  cacheReadTokens: usage.cache_read_tokens,
+                }
+              : undefined,
           }),
         });
       };
       const onStep = (step: AgyStepUpdate): void => {
-        if (step.step_type === 'agent_response' && step.state === 'DONE' && complete(step.usage)
-          && (step.step_index === undefined || !seenUsageSteps.has(step.step_index))) {
-          if (step.step_index !== undefined) seenUsageSteps.add(step.step_index);
-          stepUsage = stepUsage ? {
-            input_tokens: (stepUsage.input_tokens ?? 0) + (step.usage?.input_tokens ?? 0),
-            output_tokens: (stepUsage.output_tokens ?? 0) + (step.usage?.output_tokens ?? 0),
-            cache_read_tokens: validTokens(stepUsage.cache_read_tokens) && validTokens(step.usage?.cache_read_tokens)
-              ? stepUsage.cache_read_tokens + step.usage!.cache_read_tokens! : undefined,
-          } : step.usage;
+        if (
+          step.step_type === 'agent_response' &&
+          step.state === 'DONE' &&
+          complete(step.usage) &&
+          (step.step_index === undefined ||
+            !seenUsageSteps.has(step.step_index))
+        ) {
+          if (step.step_index !== undefined)
+            seenUsageSteps.add(step.step_index);
+          stepUsage = stepUsage
+            ? {
+                input_tokens:
+                  (stepUsage.input_tokens ?? 0) +
+                  (step.usage?.input_tokens ?? 0),
+                output_tokens:
+                  (stepUsage.output_tokens ?? 0) +
+                  (step.usage?.output_tokens ?? 0),
+                cache_read_tokens:
+                  validTokens(stepUsage.cache_read_tokens) &&
+                  validTokens(step.usage?.cache_read_tokens)
+                    ? stepUsage.cache_read_tokens +
+                      step.usage!.cache_read_tokens!
+                    : undefined,
+              }
+            : step.usage;
         }
         if (step.state === 'ERROR' || step['status'] === 'ERROR') {
           errorSteps.push(step);
@@ -870,10 +945,17 @@ export class AntigravityCliAdapter implements CliAdapter {
         }
       };
       const onResult = (event: z.infer<typeof AgyResultEventSchema>): void => {
-        const nativeTurnId = event.result.conversation_id && event.result.num_turns !== undefined
-          ? `${event.result.conversation_id}:${event.result.num_turns}` : undefined;
-        currentTurnId = nativeTurnId ?? `${event.result.conversation_id}:${turnSequence}`;
-        if (seenResultIds.has(currentTurnId) && (!failedResult || event.result.status !== 'SUCCESS')) return;
+        const nativeTurnId =
+          event.result.conversation_id && event.result.num_turns !== undefined
+            ? `${event.result.conversation_id}:${event.result.num_turns}`
+            : undefined;
+        currentTurnId =
+          nativeTurnId ?? `${event.result.conversation_id}:${turnSequence}`;
+        if (
+          seenResultIds.has(currentTurnId) &&
+          (!failedResult || event.result.status !== 'SUCCESS')
+        )
+          return;
         seenResultIds.add(currentTurnId);
         observedModelId = event.result.model ?? observedModelId;
         sawResult = true;
@@ -884,23 +966,41 @@ export class AntigravityCliAdapter implements CliAdapter {
           let delta: AgyResult['usage'];
           if (complete(cumulative)) {
             if (!previousResultUsage) delta = cumulative;
-            else if (complete(previousResultUsage) &&
+            else if (
+              complete(previousResultUsage) &&
               cumulative!.input_tokens! >= previousResultUsage.input_tokens! &&
-              cumulative!.output_tokens! >= previousResultUsage.output_tokens!) {
+              cumulative!.output_tokens! >= previousResultUsage.output_tokens!
+            ) {
               delta = {
-                input_tokens: cumulative!.input_tokens! - previousResultUsage.input_tokens!,
-                output_tokens: cumulative!.output_tokens! - previousResultUsage.output_tokens!,
-                cache_read_tokens: validTokens(cumulative?.cache_read_tokens) && validTokens(previousResultUsage.cache_read_tokens)
-                  && cumulative.cache_read_tokens >= previousResultUsage.cache_read_tokens
-                  ? cumulative.cache_read_tokens - previousResultUsage.cache_read_tokens : undefined,
+                input_tokens:
+                  cumulative!.input_tokens! - previousResultUsage.input_tokens!,
+                output_tokens:
+                  cumulative!.output_tokens! -
+                  previousResultUsage.output_tokens!,
+                cache_read_tokens:
+                  validTokens(cumulative?.cache_read_tokens) &&
+                  validTokens(previousResultUsage.cache_read_tokens) &&
+                  cumulative.cache_read_tokens >=
+                    previousResultUsage.cache_read_tokens
+                    ? cumulative.cache_read_tokens -
+                      previousResultUsage.cache_read_tokens
+                    : undefined,
               };
             }
             previousResultUsage = cumulative;
           }
-          const usage = complete(delta) && (!complete(stepUsage) ||
-            (delta!.input_tokens! >= stepUsage!.input_tokens! && delta!.output_tokens! >= stepUsage!.output_tokens!))
-            ? { ...delta, cache_read_tokens: validTokens(delta?.cache_read_tokens) ? delta!.cache_read_tokens : stepUsage?.cache_read_tokens }
-            : stepUsage;
+          const usage =
+            complete(delta) &&
+            (!complete(stepUsage) ||
+              (delta!.input_tokens! >= stepUsage!.input_tokens! &&
+                delta!.output_tokens! >= stepUsage!.output_tokens!))
+              ? {
+                  ...delta,
+                  cache_read_tokens: validTokens(delta?.cache_read_tokens)
+                    ? delta!.cache_read_tokens
+                    : stepUsage?.cache_read_tokens,
+                }
+              : stepUsage;
           emitTelemetry(usage);
         }
         stepUsage = undefined;
@@ -1089,7 +1189,8 @@ export class AntigravityCliAdapter implements CliAdapter {
             lineBuf = '';
           }
           const exitCode = code ?? (signal ? 1 : 0);
-          if (!sawResult && exitCode === 0 && !abortController.signal.aborted) emitTelemetry(stepUsage);
+          if (!sawResult && exitCode === 0 && !abortController.signal.aborted)
+            emitTelemetry(stepUsage);
           const trailingStderr = stderrLineBuf.trim();
           emitStderrLine(trailingStderr);
           if (trailingStderr.startsWith('AGY_ERROR')) {
@@ -1150,11 +1251,13 @@ export class AntigravityCliAdapter implements CliAdapter {
           options.agentId &&
           options.mcpPort
             ? Promise.race([
-                options.attachmentProbe.waitFor(
-                  options.agentId,
-                  options.mcpPort,
-                  MCP_ATTACHMENT_TIMEOUT_MS,
-                ).then((entry) => ({ exited: false as const, entry })),
+                options.attachmentProbe
+                  .waitFor(
+                    options.agentId,
+                    options.mcpPort,
+                    MCP_ATTACHMENT_TIMEOUT_MS,
+                  )
+                  .then((entry) => ({ exited: false as const, entry })),
                 done.then(() => ({ exited: true as const, entry: undefined })),
               ])
             : mcpRestoreNeeded
@@ -1162,7 +1265,10 @@ export class AntigravityCliAdapter implements CliAdapter {
                 // startup lock for the same window (or until the lane ends).
                 // Releasing at once would race agy's config read.
                 Promise.race([
-                  done.then(() => ({ exited: true as const, entry: undefined })),
+                  done.then(() => ({
+                    exited: true as const,
+                    entry: undefined,
+                  })),
                   new Promise<{ exited: true; entry: undefined }>((resolve) => {
                     startupGrace = setTimeout(
                       () => resolve({ exited: true, entry: undefined }),
@@ -1174,6 +1280,7 @@ export class AntigravityCliAdapter implements CliAdapter {
         void startup
           .then(async (result) => {
             if (
+              !processClosed &&
               mcpConfigured &&
               !result.exited &&
               !result.entry &&
@@ -1209,7 +1316,7 @@ export class AntigravityCliAdapter implements CliAdapter {
         onSegment: segment.subscribe,
         onMcpAttachmentTimeout: (callback) => {
           onMcpTimeout = callback;
-          if (mcpTimedOut) callback();
+          if (mcpTimedOut && !processClosed) callback();
         },
         mcpConfigWriteFailed: !!options.mcpPort && !mcpConfigured,
         getSessionId: () => capturedSessionId,
@@ -1449,7 +1556,15 @@ export class AntigravityCliAdapter implements CliAdapter {
       step.usage
     ) {
       const usageStr = formatUsage(step.usage);
-      if (usageStr && Number.isSafeInteger(step.usage.input_tokens) && Number.isSafeInteger(step.usage.output_tokens) && step.usage.input_tokens !== undefined && step.usage.output_tokens !== undefined && step.usage.input_tokens >= 0 && step.usage.output_tokens >= 0) {
+      if (
+        usageStr &&
+        Number.isSafeInteger(step.usage.input_tokens) &&
+        Number.isSafeInteger(step.usage.output_tokens) &&
+        step.usage.input_tokens !== undefined &&
+        step.usage.output_tokens !== undefined &&
+        step.usage.input_tokens >= 0 &&
+        step.usage.output_tokens >= 0
+      ) {
         emitOutput(`\n[${usageStr}]\n`);
         emitSegment({
           type: 'info',
@@ -1462,7 +1577,11 @@ export class AntigravityCliAdapter implements CliAdapter {
           },
         });
       } else {
-        emitSegment({ type: 'info', content: 'Antigravity turn telemetry unavailable: complete input/output totals missing.' });
+        emitSegment({
+          type: 'info',
+          content:
+            'Antigravity turn telemetry unavailable: complete input/output totals missing.',
+        });
       }
     }
   }

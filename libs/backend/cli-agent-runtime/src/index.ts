@@ -73,7 +73,7 @@ export type {
 } from './lib/cli-agents/cli-adapters/codex/codex-app-server-lane-auth';
 export type { CodexLaneProfileInput } from './lib/cli-agents/cli-adapters/codex/codex-lane-profile';
 export { MCP_ATTACHMENT_TIMEOUT_MS } from './lib/cli-agents/mcp-attachment-probe.port';
-export type { IMcpAttachmentProbe, McpAttachment } from './lib/cli-agents/mcp-attachment-probe.port';
+export type { IMcpAttachmentProbe, McpAttachment, McpAttachmentAttempt } from './lib/cli-agents/mcp-attachment-probe.port';
 export type { CliAgentRuntimeDIToken } from './lib/di/tokens';
 // Certified lane persistence (TASK_2026_719 B17): bound only by a certifying host.
 export { CLAUDE_LANE_ACCOUNT_PERSISTENCE } from './lib/di/tokens';

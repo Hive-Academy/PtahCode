@@ -1,10 +1,21 @@
 import type {
   IMcpAttachmentProbe,
   McpAttachment,
-  McpAttachmentAttempt,
 } from '@ptah-extension/cli-agent-runtime';
 
-export type { McpAttachmentAttempt } from '@ptah-extension/cli-agent-runtime';
+export interface McpAttachmentAttempt {
+  readonly agentId: string;
+  readonly port: number;
+  readonly reason:
+    | 'auth-required'
+    | 'invalid-credential'
+    | 'forbidden'
+    | 'auth-error'
+    | 'invalid-url'
+    | 'seen';
+  readonly method: string;
+  readonly time: number;
+}
 
 const RETENTION_MS = 60 * 60 * 1000;
 
@@ -52,15 +63,16 @@ class McpAttachmentObserver implements IMcpAttachmentProbe {
   recordRejectedAttempt(attempt: McpAttachmentAttempt): void {
     const key = this.key(attempt.agentId, attempt.port);
     if (this.rejectedAttempts.size >= 512 && !this.rejectedAttempts.has(key))
-      this.rejectedAttempts.delete(this.rejectedAttempts.keys().next().value ?? '');
+      this.rejectedAttempts.delete(
+        this.rejectedAttempts.keys().next().value ?? '',
+      );
     this.rejectedAttempts.set(key, attempt);
   }
 
-  record(entry: McpAttachment, tools?: unknown): void {
-    // A successful JSON-RPC response can still contain an empty tools/list
-    // during startup. Keep waiting for a usable response or initialize.
-    if (entry.method === 'tools/list' &&
-        (!Array.isArray(tools) || tools.length === 0)) return;
+  record(entry: McpAttachment): void {
+    // Only initialize confirms the MCP handshake. A tool list can be returned
+    // while the catalog is still settling and must not release waiters.
+    if (entry.method !== 'initialize') return;
     const key = this.key(entry.agentId, entry.port);
     if (this.get(entry.agentId, entry.port)) return;
     for (const [storedKey, stored] of this.entries) {
