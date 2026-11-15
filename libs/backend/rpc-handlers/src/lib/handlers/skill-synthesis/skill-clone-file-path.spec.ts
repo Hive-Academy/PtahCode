@@ -87,6 +87,11 @@ describe('skill clone `file` argument (U-D13 (1))', () => {
       expect(resolveSkillCloneFilePath(cloneDir, 'SKILL.md')).toBe(join(cloneDir, 'SKILL.md'));
     });
 
+    it('resolves a phase target when its phases folder is missing', () => {
+      fs.rmSync(join(cloneDir, 'phases'), { recursive: true });
+      expect(resolveSkillCloneFilePath(cloneDir, 'phases/plan.md')).toBe(join(cloneDir, 'phases', 'plan.md'));
+    });
+
     it('refuses a phase file whose real path leaves the clone folder', () => {
       const outside = join(root, 'outside.md');
       fs.writeFileSync(outside, 'secret');
@@ -97,6 +102,19 @@ describe('skill clone `file` argument (U-D13 (1))', () => {
         // A host without symbolic-link rights (Windows without developer
         // mode) cannot build this case; the joined-path gate still applies.
         return;
+      }
+      expect(resolveSkillCloneFilePath(cloneDir, 'phases/plan.md')).toBeNull();
+      expect(listSkillClonePhaseFiles(cloneDir)).toEqual([]);
+    });
+
+    it('refuses a missing phase target under a symlinked parent', () => {
+      fs.rmSync(join(cloneDir, 'phases'), { recursive: true });
+      const outside = join(root, 'outside');
+      fs.mkdirSync(outside);
+      try { fs.symlinkSync(outside, join(cloneDir, 'phases'), 'dir'); }
+      catch (error: unknown) {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'EPERM') return; // Windows without symlink privilege.
+        throw error;
       }
       expect(resolveSkillCloneFilePath(cloneDir, 'phases/plan.md')).toBeNull();
       expect(listSkillClonePhaseFiles(cloneDir)).toEqual([]);

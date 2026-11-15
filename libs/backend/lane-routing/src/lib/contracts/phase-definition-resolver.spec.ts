@@ -113,6 +113,25 @@ it('reads version 1 as no machine requirements and version 2 with browser', () =
     .toThrow(new PhaseDefinitionError('INVALID_SCHEMA', 'batch'));
 });
 
+it('parses version 1 design without machine capabilities as an empty list', () => {
+  const design = metadata.replace('kind: batch', 'kind: design');
+  expect(resolvePhaseDefinition('design', () => design + body).definition.machineCapabilities).toEqual([]);
+  const dispatch = resolvePhaseDispatch('design', () => design + body);
+  const { machineCapabilities, ...oldDefinition } = dispatch.definition;
+  expect(machineCapabilities).toEqual([]);
+  expect(parsePhaseDispatch({ ...dispatch, version: 1, definition: oldDefinition }).definition.machineCapabilities).toEqual([]);
+});
+
+it('rejects version 2 without machine capabilities', () => {
+  const current = metadata.replace('version: 1', 'version: 2');
+  expect(() => resolvePhaseDefinition('batch', () => current + body))
+    .toThrow(new PhaseDefinitionError('INVALID_SCHEMA', 'batch'));
+  const legacy = resolvePhaseDispatch('batch', () => metadata + body);
+  const { machineCapabilities: _machineCapabilities, ...withoutMachine } = legacy.definition;
+  expect(() => parsePhaseDispatch({ ...legacy, version: 2, definition: { ...withoutMachine, version: 2 } }))
+    .toThrow(new PhaseDefinitionError('INVALID_SCHEMA', 'batch'));
+});
+
 it('keeps legacy phase resolution without a skill field', () => {
   const legacy = resolvePhaseDefinition('batch', () => metadata + body);
   expect(legacy).toEqual({ text: legacy.text, definition: legacy.definition, toolProfile: legacy.toolProfile });

@@ -253,6 +253,7 @@ function validatePhase(file: string, roles: readonly string[]): ValidationError[
   const topKeys = ['version', 'kind', 'input', 'deliverable', 'verdict', 'acceptanceStep', 'requiredCapabilities', 'machineCapabilities', 'toolProfile'];
   for (const key of Object.keys(data ?? {})) if (!topKeys.includes(key)) errors.push(error(relative, `Unknown phase field: ${key}`));
   if (data?.version !== 1 && data?.version !== PHASE_CONTRACT_VERSION) errors.push(error(relative, `Invalid phase field: version must be 1 or ${PHASE_CONTRACT_VERSION}`));
+  if (data?.version === PHASE_CONTRACT_VERSION && data.machineCapabilities === undefined) errors.push(error(relative, 'Invalid phase field: version 2 requires machineCapabilities'));
   if (data?.machineCapabilities !== undefined && (!Array.isArray(data.machineCapabilities) || !data.machineCapabilities.every(value => MACHINE_CAPABILITIES.includes(value as typeof MACHINE_CAPABILITIES[number])))) errors.push(error(relative, 'Invalid phase field: machineCapabilities contains an unknown token'));
   const kind = path.basename(file, '.md');
   if (!PHASE_KINDS.includes(kind as typeof PHASE_KINDS[number]) || data?.kind !== kind) errors.push(error(relative, `Invalid phase field: kind must equal filename ${kind}`));

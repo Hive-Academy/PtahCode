@@ -679,8 +679,22 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
   });
 
   describe('phase files and provider re-sync (U-D13 (1))', () => {
+    let phaseRoot: string;
+    beforeEach(() => {
+      phaseRoot = fs.mkdtempSync(join(tmpdir(), 'ptah-phase-rpc-'));
+      fs.mkdirSync(join(phaseRoot, 'deep-research'));
+    });
+    afterEach(() => fs.rmSync(phaseRoot, { recursive: true, force: true }));
+
+    function usePhaseRoot(mirror: ReturnType<typeof makeMirror>): void {
+      mirror.getUserLayerRoots.mockReturnValue({
+        skills: phaseRoot, agents: join(phaseRoot, 'agents'), commands: join(phaseRoot, 'commands'),
+      });
+    }
+
     it('revertEnhancement restores one phase file when the host can write it', async () => {
-      const { rpcHandler, enhancer } = buildHandlers();
+      const { rpcHandler, enhancer, mirror } = buildHandlers();
+      usePhaseRoot(mirror);
       enhancer.supportsPhaseFileWrites.mockReturnValue(true);
       enhancer.revert.mockResolvedValue({
         reverted: true,
@@ -706,7 +720,8 @@ describe('SkillsSynthesisRpcHandlers — clone/enhance RPC (P3-3)', () => {
     });
 
     it('revertEnhancement refuses a phase file without the write port', async () => {
-      const { rpcHandler, enhancer } = buildHandlers();
+      const { rpcHandler, enhancer, mirror } = buildHandlers();
+      usePhaseRoot(mirror);
       await expect(
         rpcHandler.call('skillSynthesis:revertEnhancement', {
           kind: 'skill',
@@ -2199,6 +2214,15 @@ describe('SkillsSynthesisRpcHandlers — getHistoryBody', () => {
       ts: TS,
     });
 
+    expect(result).toEqual({ body: null, ts: TS });
+  });
+
+  it('returns null for a phase absent from a snapshot without phases folder', async () => {
+    const { rpcHandler, mirror } = withRealRoots();
+    mirror.listHistory.mockResolvedValue([{ ts: TS, path: snapshotDir, hasSkillMd: true }]);
+    const result = await rpcHandler.call('skillSynthesis:getHistoryBody', {
+      kind: 'skill', slug: 'deep-research', ts: TS, file: 'phases/plan.md',
+    });
     expect(result).toEqual({ body: null, ts: TS });
   });
 

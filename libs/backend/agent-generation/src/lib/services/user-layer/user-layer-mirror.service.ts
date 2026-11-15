@@ -1145,7 +1145,7 @@ export class UserLayerMirrorService {
     });
   }
 
-  async writeEnhancedSkillFile(args: SkillPhaseWriteArgs): Promise<{ slug: string; historyTs: string | null; currentContentHash: string }> {
+  async writeEnhancedSkillFile(args: SkillPhaseWriteArgs): ReturnType<typeof writeSkillPhaseFile> {
     return writeSkillPhaseFile(this.skillPhaseFileOps(), args);
   }
 

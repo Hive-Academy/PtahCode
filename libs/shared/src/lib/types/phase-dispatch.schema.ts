@@ -22,10 +22,17 @@ const definition = z.object({
   verdict: z.array(nonempty).min(1),
   acceptanceStep: z.array(nonempty).min(1),
   requiredCapabilities: z.array(nonempty).min(1),
-  machineCapabilities: z.array(z.enum(MACHINE_CAPABILITIES)).default([]),
+  machineCapabilities: z.array(z.enum(MACHINE_CAPABILITIES)).optional(),
   toolProfile,
   discipline,
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.version === PHASE_CONTRACT_VERSION && value.machineCapabilities === undefined) {
+    ctx.addIssue({ code: 'custom', message: 'version 2 requires machineCapabilities' });
+  }
+}).transform(value => ({
+  ...value,
+  machineCapabilities: value.machineCapabilities ?? [],
+}));
 const skill = z.object({
   name: nonempty,
   path: nonempty.optional(),

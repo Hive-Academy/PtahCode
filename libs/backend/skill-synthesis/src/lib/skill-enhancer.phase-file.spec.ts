@@ -173,7 +173,7 @@ describe('SkillEnhancerService — phase files (U-D13 (1))', () => {
 
   function acceptContract(): void {
     // The spec checks only that no error is thrown; the value is not read.
-    resolveMock.mockReturnValue({} as never);
+    resolveMock.mockReturnValue({ definition: { version: 2, machineCapabilities: [] } } as never);
   }
 
   it('reads the body of the phase file, not SKILL.md', async () => {
@@ -196,6 +196,30 @@ describe('SkillEnhancerService — phase files (U-D13 (1))', () => {
     expect(result.proposed).toBe(false);
     expect(result.skipReason).toBe('invalid-candidate');
     expect(resolveMock).toHaveBeenCalledWith('plan', expect.any(Function));
+  });
+
+  it('refuses a v2 design candidate that drops the v1 browser gate', async () => {
+    const h = makeHarness(true);
+    resolveMock.mockImplementation((kind, source) => ({ definition: {
+      kind, version: source(kind).includes('Old phase body') ? 1 : 2, machineCapabilities: [],
+    } } as never));
+    const result = await h.svc.generateProposal('deep-research', settings(), {
+      manual: true, file: 'phases/design.md',
+    });
+    expect(result.skipReason).toBe('invalid-candidate');
+  });
+
+  it('allows a repair when the current phase is invalid and the browser gate is retained', async () => {
+    const h = makeHarness(true);
+    resolveMock.mockImplementation((kind, source) => {
+      if (source(kind).includes('Old phase body')) throw new PhaseDefinitionError('INVALID_SCHEMA', kind);
+      return { definition: { kind, version: 2, machineCapabilities: ['browser'] } } as never;
+    });
+    const result = await h.svc.generateProposal('deep-research', settings(), {
+      manual: true, file: 'phases/design.md',
+    });
+    expect(result.proposed).toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('current phase definition invalid'), expect.any(Object));
   });
 
   it('refuses a file argument on kind agent', async () => {
@@ -253,8 +277,29 @@ describe('SkillEnhancerService — phase files (U-D13 (1))', () => {
       slug: 'deep-research',
       file: PHASE_FILE,
       newBody: NEW_PHASE_TEXT,
+      expectedBodyHash: expect.stringMatching(/^sha256:/),
     });
     expect(h.mirror.writeEnhancedSkill).not.toHaveBeenCalled();
+  });
+
+  it('reports a stale proposal without marking an enhancement', async () => {
+    const h = makeHarness(true);
+    acceptContract();
+    const preview = await h.svc.generateProposal('deep-research', settings(), { manual: true, file: PHASE_FILE });
+    h.writer?.writeEnhancedSkillFile.mockResolvedValueOnce({ stale: true, slug: 'deep-research', historyTs: null, currentContentHash: '' });
+    const applied = await h.svc.applyProposal('skill', 'deep-research', preview.proposalId ?? '');
+    expect(applied.skipReason).toBe('stale-proposal');
+    expect(applied.applied).toBe(false);
+    expect(h.mirror.writeEnhancedSkill).not.toHaveBeenCalled();
+  });
+
+  it('refuses a candidate that lowers the phase version or removes a capability', async () => {
+    const h = makeHarness(true);
+    resolveMock.mockImplementation((_kind, read) => ({ definition: read('plan').includes('New phase')
+      ? { version: 1, machineCapabilities: [] }
+      : { version: 2, machineCapabilities: ['browser'] } } as never));
+    const preview = await h.svc.generateProposal('deep-research', settings(), { manual: true, file: PHASE_FILE });
+    expect(preview.skipReason).toBe('invalid-candidate');
   });
 
   it('reverts one phase file through the writer port, not the whole folder', async () => {

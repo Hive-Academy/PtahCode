@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { inject, injectable } from 'tsyringe';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import { effectiveMachineCapabilities, PhaseDefinitionError, resolvePhaseDefinition } from '@ptah-extension/lane-routing';
 import {
   ENHANCE_TIMEOUT_DEFAULT_MS,
   ENHANCE_TIMEOUT_MAX_MS,
@@ -16,7 +17,6 @@ import {
 } from '@ptah-extension/platform-core';
 import type {
   UserLayerMirrorService,
-  WriteEnhancedResult,
 } from '@ptah-extension/agent-generation';
 import {
   classifyThrownNetworkFailure,
@@ -72,10 +72,6 @@ import {
   type SkillCloneFile,
   type SkillClonePhaseFile,
 } from '@ptah-extension/shared';
-import {
-  PhaseDefinitionError,
-  resolvePhaseDefinition,
-} from '@ptah-extension/lane-routing';
 import {
   SKILL_FILE_WRITER_TOKEN,
   type SkillFileWriterPort,
@@ -141,6 +137,7 @@ export type EnhanceSkipReason =
   | 'invalid-file'
   /** This host has no write port for a phase file (`SKILL_FILE_WRITER_TOKEN`). */
   | 'phase-write-unavailable'
+  | 'stale-proposal'
   | 'error';
 
 export interface EnhanceResult {
@@ -485,7 +482,7 @@ export class SkillEnhancerService {
       }
 
       if (phaseKind !== null) {
-        if (!this.isValidPhaseDefinition(slug, file, candidateBody)) {
+        if (!this.isValidPhaseDefinition(slug, file, candidateBody, currentBody)) {
           return { ...judged, skipReason: 'invalid-candidate' };
         }
       } else if (
@@ -571,6 +568,7 @@ export class SkillEnhancerService {
           proposal.slug,
           phaseFile,
           proposal.proposedBody,
+          proposal.currentBody,
         )
       ) {
         return this.refusedApply(proposal, 'invalid-candidate');
@@ -581,12 +579,13 @@ export class SkillEnhancerService {
     }
     this.takeProposal(kind, slug, proposalId);
 
-    const written: Pick<WriteEnhancedResult, 'historyTs' | 'currentContentHash'> =
+    const written =
       phaseFile !== null && this.skillFileWriter
         ? await this.skillFileWriter.writeEnhancedSkillFile({
             slug: proposal.slug,
             file: phaseFile,
             newBody: proposal.proposedBody,
+            expectedBodyHash: formatSourceHash(proposal.currentBody),
           })
         : proposal.kind === 'skill'
         ? await this.mirror.writeEnhancedSkill({
@@ -599,6 +598,10 @@ export class SkillEnhancerService {
             newBody: proposal.proposedBody,
             workspaceRoot: this.resolveAgentScope(),
           });
+
+    if ('stale' in written && written.stale === true) {
+      return this.refusedApply(proposal, 'stale-proposal');
+    }
 
     this.registry.markEnhanced(
       proposal.kind,
@@ -943,11 +946,25 @@ export class SkillEnhancerService {
     slug: string,
     file: SkillCloneFile,
     body: string,
+    currentBody?: string,
   ): boolean {
     const phaseKind = phaseKindOfSkillCloneFile(file);
     if (phaseKind === null) return true;
     try {
-      resolvePhaseDefinition(phaseKind, () => body);
+      const candidate = resolvePhaseDefinition(phaseKind, () => body).definition;
+      if (currentBody !== undefined) {
+        let baseline = effectiveMachineCapabilities({ kind: phaseKind, version: 1, machineCapabilities: [] });
+        try {
+          const current = resolvePhaseDefinition(phaseKind, () => currentBody).definition;
+          if (candidate.version < current.version) return false;
+          baseline = effectiveMachineCapabilities(current);
+        } catch (error: unknown) {
+          if (!(error instanceof PhaseDefinitionError)) throw error;
+          this.logger.warn('[skill-enhancer] current phase definition invalid; using legacy machine capabilities for repair', { slug, file, code: error.code });
+        }
+        const candidateCapabilities = effectiveMachineCapabilities(candidate);
+        if (baseline.some((capability) => !candidateCapabilities.includes(capability))) return false;
+      }
       return true;
     } catch (error: unknown) {
       if (!(error instanceof PhaseDefinitionError)) throw error;

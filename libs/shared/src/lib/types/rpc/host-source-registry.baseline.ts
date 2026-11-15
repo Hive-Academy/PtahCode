@@ -356,6 +356,7 @@ export const BASELINE_RPC_METHOD_NAMES: readonly string[] = [
   'update:check-now',
   'update:get-state',
   'update:mark-downloaded',
+  'usage:getDimensionTotals',
   'voice:downloadModel',
   'voice:downloadTtsModel',
   'voice:getConfig',

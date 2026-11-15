@@ -28,7 +28,7 @@ import type { LaneRoutingLogger } from './lane-routing-logger';
 import type { PhaseDefinitionReader } from './phase-definition-reader.port';
 import { PhaseDefinitionFileReader } from './phase-definition-file.reader';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { FAMILY_PROFILE_MODEL } from './matrix/matrix.types';
 import { EMPTY_OUTCOME_FIGURES } from './matrix/outcome-figures';
 import type { RouteMatrix } from './pipeline/gather';
@@ -330,11 +330,21 @@ describe('gate phase policy roster', () => {
     expect(run.tools).toHaveBeenCalled();
   });
 
+  it.each([false, true])('keeps browser gating for a version 1 design phase (explicit empty: %s)', async (explicitEmpty) => {
+    const text = `---\nversion: 1\nkind: design\ninput: [brief]\ndeliverable: [design]\nverdict: [ready]\nacceptanceStep: [review]\nrequiredCapabilities: [design]\ntoolProfile:\n  disallowedTools: []\n  permission: prompt\n---\n## Method\nDesign.\n## Output contract\nDocument.\n## Return value\nReturn.\n## Refusals\nRefuse.\n## Escalation protocol\nEscalate.\n`;
+    const logger = testLogger();
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [], logger, phaseDefinitionReader: { read: async () => explicitEmpty ? text.replace('requiredCapabilities: [design]', 'requiredCapabilities: [design]\nmachineCapabilities: []') : text } });
+    const result = await run.service.decide({ ...implement(), phases: [{ id: 'draw', kind: 'design' }] }, run.source);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0]).toMatchObject({ status: 'unavailable', exclusionReason: 'missing-capability' });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('version 1 phase definition'), { kind: 'design' });
+  });
+
   it('reads browser from the shipped visual-review phase during gate-0.1', async () => {
     const reader = new PhaseDefinitionFileReader(
       { exists: async () => false, readFile: (path) => readFile(path, 'utf8') },
-      join(process.cwd(), '.ptah', 'missing-user-skills'),
-      join(process.cwd(), 'plugins'),
+      join(resolve(__dirname, '../../../../..'), '.ptah', 'missing-user-skills'),
+      join(resolve(__dirname, '../../../../..'), 'plugins'),
     );
     const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' }, tools: async () => [], phaseDefinitionReader: reader });
     const result = await run.service.decide({ ...implement(), phases: [{ id: 'look', kind: 'visual-review' }] }, run.source);

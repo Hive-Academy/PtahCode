@@ -14,14 +14,25 @@ export interface WriteSkillFileArgs {
   readonly slug: string;
   readonly file: SkillClonePhaseFile;
   readonly newBody: string;
+  /** SHA256 of the phase body observed when the proposal was generated. */
+  readonly expectedBodyHash?: string;
 }
 
 export interface WriteSkillFileResult {
+  readonly stale?: false;
   readonly slug: string;
   /** Stamp of the folder-wide snapshot taken before the write. */
   readonly historyTs: string | null;
   /** Content hash of the whole clone folder after the write. */
   readonly currentContentHash: string;
+}
+
+export interface StaleSkillFileResult {
+  readonly stale: true;
+  readonly slug: string;
+  readonly historyTs: null;
+  /** Hash of the live phase body; empty when the phase file is absent. */
+  readonly liveBodyHash: string;
 }
 
 export interface RevertSkillFileArgs {
@@ -40,7 +51,7 @@ export interface RevertSkillFileResult {
 
 export interface SkillFileWriterPort {
   /** Snapshot the whole folder, then write only `file`. */
-  writeEnhancedSkillFile(args: WriteSkillFileArgs): Promise<WriteSkillFileResult>;
+  writeEnhancedSkillFile(args: WriteSkillFileArgs): Promise<WriteSkillFileResult | StaleSkillFileResult>;
   /** Snapshot the whole folder, then restore only `file` from `historyTs`. */
   revertSkillFile(args: RevertSkillFileArgs): Promise<RevertSkillFileResult>;
 }

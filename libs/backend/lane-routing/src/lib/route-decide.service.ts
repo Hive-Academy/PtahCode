@@ -30,7 +30,7 @@ import type { LaneRoutingLogger } from './lane-routing-logger';
 import type { OutcomeFigureLookup } from './matrix/outcome-figures';
 import type { RouteCandidateSource } from './route-candidate-source.port';
 import type { PhaseDefinitionReader } from './phase-definition-reader.port';
-import { resolvePhaseDefinition } from './contracts/phase-definition-resolver';
+import { effectiveMachineCapabilities, PhaseDefinitionError, resolvePhaseDefinition } from './contracts/phase-definition-resolver';
 import type { RotationPick } from './ranking/rotation.store';
 import { assembleGateResult } from './pipeline/assemble-gate';
 import {
@@ -118,6 +118,7 @@ export interface RotationStateReader {
 }
 
 export class RouteDecideService implements RotationStateReader {
+  private readerUnavailableLogged = false;
   private readonly decisionCaller: DecisionCaller;
 
   constructor(private readonly deps: RouteDecideDependencies) {
@@ -328,18 +329,28 @@ export class RouteDecideService implements RotationStateReader {
         if (reader !== undefined) {
           try {
             const text = await reader.read(phase.kind);
-            requiredCapabilities = [...resolvePhaseDefinition(phase.kind, () => text).definition.machineCapabilities];
+            const definition = resolvePhaseDefinition(phase.kind, () => text).definition;
+            if (definition.version === 1) {
+              this.deps.logger.warn('[lane-routing] version 1 phase definition; using legacy machine capabilities', {
+                kind: phase.kind,
+              });
+            }
+            requiredCapabilities = [...effectiveMachineCapabilities(definition)];
           } catch (error: unknown) {
             // degradation-audit: optional-capability - retain the legacy browser gate when a phase definition cannot be read.
             this.deps.logger.warn('[lane-routing] phase definition unavailable; using legacy machine capabilities', {
               kind: phase.kind,
               errorName: error instanceof Error ? error.name : 'unknown',
+              code: error instanceof PhaseDefinitionError ? error.code : undefined,
             });
           }
         } else {
-          this.deps.logger.warn('[lane-routing] phase definition reader unavailable; using legacy machine capabilities', {
-            kind: phase.kind,
-          });
+          if (!this.readerUnavailableLogged) {
+            this.readerUnavailableLogged = true;
+            this.deps.logger.warn('[lane-routing] phase definition reader unavailable; using legacy machine capabilities', {
+              kind: phase.kind,
+            });
+          }
         }
         requiredCapabilities ??= phase.kind === 'visual-review' || phase.kind === 'design' ? ['browser'] : [];
         resolved.set(phase.kind, requiredCapabilities);

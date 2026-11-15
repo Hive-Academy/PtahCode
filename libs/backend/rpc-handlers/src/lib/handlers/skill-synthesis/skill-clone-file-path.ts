@@ -6,7 +6,7 @@
  * path, and its real path when it exists, must stay inside the clone folder.
  */
 import * as fs from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   PHASE_KINDS,
   skillClonePhaseFile,
@@ -30,10 +30,20 @@ export function resolveSkillCloneFilePath(
 ): string | null {
   const target = join(cloneDir, ...file.split('/'));
   if (!isInsideRoot(target, cloneDir)) return null;
-  if (!fs.existsSync(target)) return target;
-  const realRoot = fs.realpathSync(cloneDir);
-  const realTarget = fs.realpathSync(target);
-  return isInsideRoot(realTarget, realRoot) ? target : null;
+  try {
+    if (fs.lstatSync(cloneDir).isSymbolicLink()) return null;
+    const realRoot = fs.realpathSync(cloneDir);
+    let ancestor = dirname(target);
+    while (!fs.existsSync(ancestor) && ancestor !== cloneDir) ancestor = dirname(ancestor);
+    if (fs.lstatSync(ancestor).isSymbolicLink()) return null;
+    if (!isInsideRoot(fs.realpathSync(ancestor), realRoot)) return null;
+    if (!fs.existsSync(target)) return target;
+    if (fs.lstatSync(target).isSymbolicLink()) return null;
+    return isInsideRoot(fs.realpathSync(target), realRoot) ? target : null;
+  } catch {
+    // degradation-audit: optional-capability - an unreadable or disappearing clone path is not a safe RPC file.
+    return null;
+  }
 }
 
 /**

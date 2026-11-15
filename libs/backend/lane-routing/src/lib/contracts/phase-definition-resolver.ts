@@ -13,7 +13,7 @@ const metadataSchema = z.object({
   verdict: list,
   acceptanceStep: list,
   requiredCapabilities: list,
-  machineCapabilities: z.array(z.enum(MACHINE_CAPABILITIES)).default([]),
+  machineCapabilities: z.array(z.enum(MACHINE_CAPABILITIES)).optional(),
   toolProfile: z.object({
     disallowedTools: z.array(z.string().trim().min(1)),
     permission: z.enum(['allow', 'deny', 'prompt']),
@@ -37,6 +37,16 @@ export class PhaseDefinitionError extends Error {
     super(`Phase ${kind}: ${code.toLowerCase().replaceAll('_', ' ')}`);
     this.name = 'PhaseDefinitionError';
   }
+}
+
+/** Machine requirements used by the runtime gate for each contract version. */
+export function effectiveMachineCapabilities(
+  definition: Pick<PhaseDefinitionV1, 'version' | 'kind' | 'machineCapabilities'>,
+): PhaseDefinitionV1['machineCapabilities'] {
+  if (definition.version === 1) {
+    return definition.kind === 'design' || definition.kind === 'visual-review' ? ['browser'] : [];
+  }
+  return definition.machineCapabilities;
 }
 
 function sectionsFor(kind: PhaseKind, body: string): PhaseDefinitionV1['discipline'] {
@@ -101,8 +111,15 @@ export function resolvePhaseDefinition(
   const metadata = metadataSchema.safeParse(parsed.data);
   if (!metadata.success) throw new PhaseDefinitionError('INVALID_SCHEMA', kind);
   if (metadata.data.kind !== kind) throw new PhaseDefinitionError('KIND_MISMATCH', kind);
+  if (metadata.data.version === PHASE_CONTRACT_VERSION && metadata.data.machineCapabilities === undefined) {
+    throw new PhaseDefinitionError('INVALID_SCHEMA', kind);
+  }
   const discipline = sectionsFor(kind, parsed.content);
-  const definition: PhaseDefinitionV1 = { ...metadata.data, discipline };
+  const definition: PhaseDefinitionV1 = {
+    ...metadata.data,
+    machineCapabilities: metadata.data.machineCapabilities ?? [],
+    discipline,
+  };
   const text = renderDiscipline(discipline);
   return { text, toolProfile: definition.toolProfile, definition };
 }

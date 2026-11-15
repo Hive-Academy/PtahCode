@@ -65,7 +65,7 @@ export {
   RouteDecideArgsSchema,
   type RouteDecideArgs,
 } from './lib/contracts/route-decide-args.schema';
-export { resolvePhaseDefinition, resolvePhaseDispatch, parsePhaseDispatch, PhaseDefinitionError, type PhaseDefinitionErrorCode } from './lib/contracts/phase-definition-resolver';
+export { resolvePhaseDefinition, resolvePhaseDispatch, parsePhaseDispatch, effectiveMachineCapabilities, PhaseDefinitionError, type PhaseDefinitionErrorCode } from './lib/contracts/phase-definition-resolver';
 export {
   EXCLUSION_RULES,
   FALLBACK_CAUSES,
