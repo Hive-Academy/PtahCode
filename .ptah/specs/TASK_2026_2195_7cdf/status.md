@@ -46,3 +46,8 @@ Features that the 100 sites need and the first version lacks:
 - Proof sites: usage-top-sessions and usage-breakdown-table (dashboard). No baseline change.
 - Checks: related tests, lint, typecheck, typecheck-templates pass. Review: 0 blockers, 0 majors, 5 minors accepted.
 - Queued: raw `<progress>` (13 sites), needs a parent decision.
+
+PR 3 update: head 30c6f660b. Numeric header cells use `ptahNumeric`. Test ids `usage-breakdown-model`, `usage-breakdown-day` and `usage-top-sessions` now sit on the `ptah-table` host. usage-dashboard.component.spec passes. No e2e selector in apps/ uses these ids or `table[data-testid]`.
+
+### Queued PR: ptah-table v2 (design from the settings prototype)
+Waits for the parent's order. The settings prototype defines the table look: header style, row height tokens, hover and selected row, sticky header, empty and loading slot, row actions. v1 only forwards the DaisyUI `table` classes.
