@@ -11,6 +11,7 @@ interface WaitingLane {
 export class AgentSpawnMemoryGate {
   private readonly queue: WaitingLane[] = [];
   private poll?: NodeJS.Timeout;
+  private released?: TrackedAgent;
 
   constructor(
     private readonly freeMemory: () => number,
@@ -24,10 +25,13 @@ export class AgentSpawnMemoryGate {
     if (tracked.info.status !== 'starting') {
       return Promise.reject(new Error('Lane stopped before memory admission'));
     }
-    if (force || (this.queue.length === 0 && this.canStart(tracked))) {
+    if (force || (this.queue.length === 0 &&
+        this.released?.info.status !== 'starting' && this.canStart(tracked))) {
       return Promise.resolve();
     }
     tracked.info.waitingForMemory = true;
+    clearTimeout(tracked.admissionTimer);
+    tracked.admissionTimer = undefined;
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         const index = this.queue.findIndex((entry) => entry.tracked === tracked);
@@ -46,22 +50,32 @@ export class AgentSpawnMemoryGate {
     });
   }
 
-  wake(): void {
-    while (this.queue.length > 0) {
-      const head = this.queue[0];
-      if (head.tracked.info.status !== 'starting') {
-        this.queue.shift();
-        clearTimeout(head.timeout);
-        head.tracked.info.waitingForMemory = false;
-        head.reject(new Error('Lane stopped while waiting for memory'));
-        continue;
-      }
-      if (!this.canStart(head.tracked)) break;
+  wake(fromPoll = false): void {
+    for (let index = this.queue.length - 1; index >= 0; index--) {
+      const entry = this.queue[index];
+      if (entry.tracked.info.status === 'starting') continue;
+      this.queue.splice(index, 1);
+      clearTimeout(entry.timeout);
+      entry.tracked.info.waitingForMemory = false;
+      entry.reject(new Error('Lane stopped while waiting for memory'));
+    }
+    if (this.released && (this.released.info.status === 'starting' || !fromPoll)) {
+      this.stopPollIfEmpty();
+      return;
+    }
+    this.released = undefined;
+    const head = this.queue[0];
+    if (head && this.canStart(head.tracked)) {
       this.queue.shift();
       clearTimeout(head.timeout);
       head.tracked.info.waitingForMemory = false;
+      this.released = head.tracked;
       head.resolve();
     }
+    this.stopPollIfEmpty();
+  }
+
+  private stopPollIfEmpty(): void {
     if (this.queue.length === 0 && this.poll) {
       clearInterval(this.poll);
       this.poll = undefined;
@@ -76,7 +90,7 @@ export class AgentSpawnMemoryGate {
 
   private ensurePoll(): void {
     if (this.poll) return;
-    this.poll = setInterval(() => this.wake(), 1000);
+    this.poll = setInterval(() => this.wake(true), 1000);
     this.poll.unref?.();
   }
 }

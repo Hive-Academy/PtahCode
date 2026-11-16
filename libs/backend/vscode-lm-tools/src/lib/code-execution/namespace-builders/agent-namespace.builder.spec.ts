@@ -180,6 +180,37 @@ function makeDeps(
 // ---------------------------------------------------------------------------
 
 describe('buildAgentNamespace — shape', () => {
+  it('forwards force through both real namespace entry points to memory admission', async () => {
+    jest.useFakeTimers();
+    try {
+      const { deps, mocks } = makeDeps();
+      const tracked = { info: {
+        agentId: 'force-test' as AgentProcessInfo['agentId'],
+        status: 'starting', startedAt: new Date().toISOString(),
+      } };
+      const memoryGate = { wait: jest.fn().mockResolvedValue(undefined) };
+      const result = { agentId: 'force-test' } as SpawnAgentResult;
+      mocks.processManager.spawn.mockImplementation(async (_request, force) => {
+        await memoryGate.wait(tracked, force);
+        return result;
+      });
+      const ticket = { agentId: tracked.info.agentId, startedAt: tracked.info.startedAt };
+      Object.assign(mocks.processManager, {
+        executeSpawn: jest.fn(async (_ticket, _request, force) => {
+          await memoryGate.wait(tracked, force);
+          return result;
+        }),
+      });
+      const namespace = buildAgentNamespace(deps);
+      await expect(namespace.spawn({ task: 'work', cli: 'codex' }, true)).resolves.toMatchObject(result);
+      await expect(namespace.executeSpawn(ticket, { task: 'work', cli: 'codex' }, true)).resolves.toMatchObject(result);
+      expect(memoryGate.wait).toHaveBeenNthCalledWith(1, tracked, true);
+      expect(memoryGate.wait).toHaveBeenNthCalledWith(2, tracked, true);
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
+  });
   it('exposes spawn/status/read/message/report/stop/list/waitFor', () => {
     const { deps } = makeDeps();
     const ns = buildAgentNamespace(deps);

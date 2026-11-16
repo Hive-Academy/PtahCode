@@ -368,6 +368,7 @@ export class LaneModelBlockedError extends Error {
 @injectable()
 export class AgentProcessManager {
   private readonly memoryGate: AgentSpawnMemoryGate;
+  private readonly spawnLaunchTimes = new WeakMap<TrackedAgent, string>();
   private readonly laneUsageNormalizer = new LaneUsageNormalizer();
   private readonly agents = new Map<string, TrackedAgent>();
   /** Lanes a restore skipped because another live host run owns them. */
@@ -580,6 +581,9 @@ export class AgentProcessManager {
     });
     tracked.provisionalCli = !request.cli && !request.ptahCliId;
     this.agents.set(agentId, tracked);
+    armSpawnAdmissionWatchdog(tracked, () => {
+      this.failSpawn({ agentId, startedAt }, new Error('Lane did not start within 120 s'));
+    });
     return { agentId, startedAt };
   }
 
@@ -606,6 +610,7 @@ export class AgentProcessManager {
       if (tracked.info.status !== 'starting') {
         throw new Error('Lane stopped before spawn');
       }
+      this.spawnLaunchTimes.set(tracked, new Date().toISOString());
       armSpawnAdmissionWatchdog(tracked, () => {
         this.failSpawn(ticket, new Error('Lane did not start within 120 s'));
       });
@@ -1670,7 +1675,7 @@ export class AgentProcessManager {
       : undefined;
     const budget = createLaneBudget(
       this.spawnEnvironment.resolveAgentBudgetSettings(),
-      info.startedAt,
+      this.spawnLaunchTimes.get(tracked) ?? info.startedAt,
       previousBudget,
     );
     tracked.budget = budget;

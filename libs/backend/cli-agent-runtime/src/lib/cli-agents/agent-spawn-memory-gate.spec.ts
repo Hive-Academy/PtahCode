@@ -35,7 +35,7 @@ describe('AgentSpawnMemoryGate', () => {
     expect(next.info.waitingForMemory).toBeUndefined();
   });
 
-  it('queues and releases in FIFO order when memory recovers', async () => {
+  it('releases one lane per poll after the previous lane leaves starting', async () => {
     const running = lane(); running.info.status = 'running'; active.push(running);
     const first = lane(); const second = lane();
     const order: string[] = [];
@@ -45,6 +45,15 @@ describe('AgentSpawnMemoryGate', () => {
     expect(second.info.waitingForMemory).toBe(true);
     freeGb = 4;
     gate.wake();
+    await one;
+    expect(order).toEqual(['first']);
+    expect(second.info.waitingForMemory).toBe(true);
+    jest.advanceTimersByTime(1000);
+    expect(order).toEqual(['first']);
+    first.info.status = 'running';
+    gate.wake();
+    expect(second.info.waitingForMemory).toBe(true);
+    jest.advanceTimersByTime(1000);
     await Promise.all([one, two]);
     expect(order).toEqual(['first', 'second']);
     expect(first.info.waitingForMemory).toBe(false);
@@ -74,5 +83,19 @@ describe('AgentSpawnMemoryGate', () => {
     await expect(pending).rejects.toThrow('stopped');
     expect(failed).not.toHaveBeenCalled();
     await expect(gate.wait(lane(), true)).resolves.toBeUndefined();
+  });
+
+  it('removes a stopped waiter behind the head before checking memory', async () => {
+    const running = lane(); running.info.status = 'running'; active.push(running);
+    const first = lane(); const stopped = lane();
+    const one = gate.wait(first);
+    const two = gate.wait(stopped);
+    stopped.info.status = 'stopped';
+    gate.wake();
+    await expect(two).rejects.toThrow('stopped');
+    expect(stopped.info.waitingForMemory).toBe(false);
+    freeGb = 4;
+    gate.wake();
+    await one;
   });
 });

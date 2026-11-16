@@ -692,7 +692,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(manager.getStatus(ticket.agentId)).toMatchObject({
         agentId: ticket.agentId, status: 'starting', startedAt: ticket.startedAt,
       });
-      expect(() => manager.beginSpawn({ ...request, force: true })).toThrow('Maximum concurrent agent limit reached');
+      expect(() => manager.beginSpawn(request)).toThrow('Maximum concurrent agent limit reached');
     });
     it('moves the admitted record to running after the SDK handle arrives', async () => {
       const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
@@ -703,6 +703,42 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(result.status).toBe('running');
       expect(manager.findAgentInfo(ticket.agentId)?.status).toBe('running');
       expect(laneCompletion.signal).not.toHaveBeenCalled();
+    });
+
+    it('pauses the admission watchdog in the memory queue and starts the budget at release', async () => {
+      setupVscodeConfig({ 'agentBudget.maxDurationMin': 10 });
+      const environment = Reflect.get(manager, 'spawnEnvironment') as {
+        freeMemory: () => number; minFreeMemoryGb: () => number;
+      };
+      jest.spyOn(environment, 'freeMemory').mockReturnValue(0);
+      jest.spyOn(environment, 'minFreeMemoryGb').mockReturnValue(3);
+      const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+      const blocker = manager.beginSpawn(request);
+      const ticket = manager.beginSpawn(request);
+      const tracked = (Reflect.get(manager, 'agents') as Map<string, {
+        admissionTimer?: NodeJS.Timeout; info: AgentProcessInfo;
+      }>).get(ticket.agentId);
+      const blockerTracked = (Reflect.get(manager, 'agents') as Map<string, {
+        admissionTimer?: NodeJS.Timeout;
+      }>).get(blocker.agentId);
+      clearTimeout(blockerTracked?.admissionTimer);
+      if (blockerTracked) blockerTracked.admissionTimer = undefined;
+      expect(tracked?.admissionTimer).toBeDefined();
+      sdkAdapter.runSdk.mockImplementationOnce(async () => {
+        expect(tracked?.admissionTimer).toBeDefined();
+        return sdkControls.handle;
+      });
+      const execution = manager.executeSpawn(ticket, request);
+      expect(tracked?.info.waitingForMemory).toBe(true);
+      expect(tracked?.admissionTimer).toBeUndefined();
+      jest.advanceTimersByTime(180_000);
+      expect(tracked?.info.status).toBe('starting');
+      await manager.stop(blocker.agentId);
+      const releasedAt = Date.now();
+      const spawned = await execution;
+      const budget = (manager.getStatus(spawned.agentId) as AgentProcessInfo).agentBudget;
+      expect(budget?.startedAtMs).toBe(releasedAt);
+      expect(budget?.startedAtMs).toBeGreaterThan(Date.parse(ticket.startedAt));
     });
 
     it('fails a late launch once and releases the admitted slot', async () => {

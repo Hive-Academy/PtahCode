@@ -8,7 +8,7 @@ export interface SpawnAdmission {
 
 export const SPAWN_ADMISSION_WATCHDOG_MS = 120_000;
 
-/** The admission watchdog begins after a lane leaves the memory queue. */
+/** Arm the admission watchdog before preparation and again after memory release. */
 export function armSpawnAdmissionWatchdog(
   tracked: TrackedAgent,
   fail: () => void,
