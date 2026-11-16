@@ -119,6 +119,21 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
       .ptah-table-message-cell {
         text-align: center;
       }
+      .ptah-table-group-row th {
+        text-align: start;
+        background: var(--ptah-card-bg-raised);
+      }
+      .ptah-table-group-title {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--ptah-gap-inline);
+      }
+      .ptah-table-bar-cell {
+        min-width: 8rem;
+      }
+      .ptah-table-cell-button {
+        cursor: pointer;
+      }
     `,
   ],
 })
@@ -166,3 +181,4 @@ export * from './table-cells';
 export * from './table-row-actions.component';
 export * from './table-detail';
 export * from './table-order';
+export * from './table-matrix';
