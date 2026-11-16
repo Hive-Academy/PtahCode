@@ -16,6 +16,7 @@ import {
   Layers,
   SlidersHorizontal,
   AudioLines,
+  Wrench,
 } from 'lucide-angular';
 import {
   MotionStageDirective,
@@ -27,7 +28,6 @@ import {
   PtahStatusComponent,
   PtahStatePanelComponent,
   PtahSkeletonComponent,
-  PtahFormSectionComponent,
 } from '@ptah-extension/ui';
 // Two declarations on purpose: each component import must hold only the `@defer`-only class, or
 // Angular keeps the whole tab (Providers with its named-accounts UI and agents routing, Context Management) in the eager chunk.
@@ -129,7 +129,6 @@ const isAgentsRoutingSection = (
   PtahStatusComponent,
   PtahStatePanelComponent,
   PtahSkeletonComponent,
-  PtahFormSectionComponent,
   ],
   // Page-scoped: the toast timer dies with the page; one models loader for every tab.
   providers: [
@@ -144,6 +143,10 @@ const isAgentsRoutingSection = (
     :host-context([data-glass='on']) .settings-page {
       background-color: transparent;
     }
+    /* The Setup section is a glass card like the Advanced sections above it (same inset as theirs). */
+    :host-context([data-glass='on']) [data-glass-surface='content'] {
+      padding: 1.25rem;
+    }
   `,
 })
 export class SettingsComponent implements OnInit {
@@ -153,6 +156,7 @@ export class SettingsComponent implements OnInit {
   readonly authState = inject(AuthStateService);
   private readonly document = inject(DOCUMENT);
   readonly ArrowLeftIcon = ArrowLeft;
+  readonly SetupIcon = Wrench;
   /** Card tabs, in order. Each label is the button's exact accessible name (live-app scripts use it). */
   readonly settingsTabs = [
     { id: 'claude-auth', label: 'Providers', icon: Plug },

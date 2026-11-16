@@ -34,8 +34,9 @@
         </div>
       </div>
     }
-    <div nav-footer class="flex flex-col gap-ptah-controls">
-      <div data-testid="settings-context" [attr.title]="workspacePath()">
+    <!-- px-ptah-control-x is the inline padding of the nav items, so the footer content starts on their edge. -->
+    <div nav-footer class="flex flex-col gap-ptah-controls px-ptah-control-x">
+      <div data-testid="settings-context" class="[--ptah-dl-compact-term-w:5.5rem]" [attr.title]="workspacePath()">
         <ptah-description-list density="compact" [items]="contextRows()" />
       </div>
       @if (authState.isCustomProviderSelected()) {
@@ -122,14 +123,28 @@
       } @placeholder {
         <div aria-busy="true"><ptah-skeleton shape="block" /></div>
       }
-      <ptah-form-section heading="Setup" aria-label="Setup">
-        <div class="flex flex-wrap">
+      <!-- Same shape as the Advanced sections above it (icon, uppercase heading, note, then the
+           controls under the heading), so Setup reads as one more section of the tab. -->
+      <section
+        class="flex flex-col gap-ptah-controls border-t border-base-content/10 pt-ptah-section"
+        aria-labelledby="settings-setup-heading"
+        data-testid="settings-setup"
+        data-glass-surface="content"
+      >
+        <div class="flex flex-col gap-ptah-label">
+          <div class="flex items-center gap-ptah-inline">
+            <lucide-angular [img]="SetupIcon" class="w-4 h-4 text-secondary shrink-0" aria-hidden="true" />
+            <h2 id="settings-setup-heading" class="text-xs font-bold uppercase tracking-wider text-base-content">Setup</h2>
+          </div>
+          <p class="text-xs text-base-content-muted">Run the first-run steps again.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-ptah-controls">
           <button type="button" ptahButton variant="secondary" data-testid="settings-run-onboarding-again" (click)="runOnboardingAgain()">Run onboarding again</button>
           @if (isElectron) {
             <button type="button" ptahButton variant="secondary" data-testid="settings-check-claude-code" (click)="checkClaudeCode()">Check Claude Code</button>
           }
         </div>
-      </ptah-form-section>
+      </section>
       </div>
     }
 

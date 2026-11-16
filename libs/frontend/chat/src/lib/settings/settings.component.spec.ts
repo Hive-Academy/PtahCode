@@ -990,11 +990,11 @@ describe('SettingsComponent deferred tabs', () => {
     expect(
       Array.from(
         element.querySelectorAll(
-          'ptah-advanced-settings, ptah-form-section[aria-label="Setup"]',
+          'ptah-advanced-settings, [data-testid="settings-setup"]',
         ),
         (node) => node.tagName,
       ),
-    ).toEqual(['PTAH-ADVANCED-SETTINGS', 'PTAH-FORM-SECTION']);
+    ).toEqual(['PTAH-ADVANCED-SETTINGS', 'SECTION']);
 
     // The (modelChanged) binding survives the deferral (#84).
     fixture.debugElement
