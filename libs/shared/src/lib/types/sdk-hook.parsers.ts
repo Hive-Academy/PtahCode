@@ -27,6 +27,7 @@ import type {
   SdkTerminalReason,
   SdkTurnEndedPayload,
   SdkTurnFailedPayload,
+  TurnStopCause,
 } from './sdk-hook.types';
 import {
   isNonEmptyWireString,
@@ -38,6 +39,15 @@ import {
   readOptional,
   wireLiteralUnion,
 } from './wire-guards.internal';
+
+/** The closed set of `TurnStopCause` values. */
+const isTurnStopCause = wireLiteralUnion([
+  'user-stop',
+  'parent-steer',
+  'runtime-cap',
+  'host-stop',
+  'internal-abort',
+] as const satisfies readonly TurnStopCause[]);
 
 /** Mirrors `SdkTerminalReasonSchema`. */
 const isTerminalReason = wireLiteralUnion([
@@ -194,11 +204,12 @@ export function parseSdkTurnFailedPayload(
   if (!isNullableWireString(payload['errorDetails'])) return null;
   if (!isNullableTerminalReason(payload['terminalReason'])) return null;
   if (!isWireTimestamp(payload['timestamp'])) return null;
-  const stopCause = payload['stopCause'];
-  if (stopCause !== undefined &&
-      stopCause !== 'user-stop' && stopCause !== 'parent-steer' &&
-      stopCause !== 'runtime-cap' && stopCause !== 'host-stop' &&
-      stopCause !== 'internal-abort') return null;
+  const rawStopCause = payload['stopCause'];
+  let stopCause: TurnStopCause | undefined;
+  if (rawStopCause !== undefined) {
+    if (!isTurnStopCause(rawStopCause)) return null;
+    stopCause = rawStopCause;
+  }
   return {
     sessionId: payload['sessionId'],
     cwd: payload['cwd'],
