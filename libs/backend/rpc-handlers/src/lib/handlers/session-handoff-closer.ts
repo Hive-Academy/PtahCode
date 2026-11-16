@@ -12,7 +12,7 @@ interface BroadcastHost {
 /** Broadcast assumes one renderer owns the predecessor. Other replies wait
  * until the timeout so the owning renderer can still report closure. */
 export class SessionHandoffCloser implements HandoffPredecessorCloser {
-  private readonly pending = new Map<string, { finish: (result: HandoffCloseResult) => void; absent: boolean }>();
+  private readonly pending = new Map<string, { finish: (result: HandoffCloseResult) => void }>();
   timeoutMs = 30_000;
 
   constructor(
@@ -23,9 +23,11 @@ export class SessionHandoffCloser implements HandoffPredecessorCloser {
   async close(predecessorTabId: string, predecessorSdkId: string | null): Promise<HandoffCloseResult> {
     const requestId = randomUUID();
     return new Promise<HandoffCloseResult>((resolve) => {
-      const timer = setTimeout(() => this.finish(requestId, { kind: this.pending.get(requestId)?.absent ? 'absent' : 'timeout' }), this.timeoutMs);
+      // An absent reply only proves that one renderer lacks the tab. If no
+      // renderer confirms closure before the deadline, the result is retryable.
+      const timer = setTimeout(() => this.finish(requestId, { kind: 'timeout' }), this.timeoutMs);
       timer.unref?.();
-      this.pending.set(requestId, { absent: false, finish: (result) => {
+      this.pending.set(requestId, { finish: (result) => {
         clearTimeout(timer);
         resolve(result);
       } });
@@ -46,7 +48,6 @@ export class SessionHandoffCloser implements HandoffPredecessorCloser {
   complete(requestId: string, outcome: 'closed' | 'absent' | 'blocked', blockerCode?: HandoffCloseBlockerCode): boolean {
     const pending = this.pending.get(requestId);
     if (outcome === 'absent') {
-      if (pending) pending.absent = true;
       return pending !== undefined;
     }
     return this.finish(requestId, outcome === 'closed' ? { kind: 'closed' } : { kind: 'blocked', code: blockerCode ?? 'unknown' });
