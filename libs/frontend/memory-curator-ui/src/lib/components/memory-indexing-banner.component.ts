@@ -10,13 +10,13 @@ import type {
   IndexingActionMessage,
   IndexingUiState,
 } from '@ptah-extension/workspace-indexing';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahMeterComponent } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-memory-indexing-banner',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, CommonModule],
+  imports: [PtahButtonDirective, PtahMeterComponent, CommonModule],
   template: `
     @let message = actionMessage();
     @if (message) {
@@ -94,15 +94,30 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
               Indexing workspace… {{ banner.percent }}%
             </span>
             @if (banner.totalKnown) {
-              <progress
-                class="progress progress-primary h-1.5 w-full"
+              <ptah-meter
+                class="block w-full"
                 [value]="banner.percent"
-                max="100"
-              ></progress>
+                [max]="100"
+                label="Workspace indexing progress"
+                size="sm"
+                tone="primary"
+                barRole="progressbar"
+                [hideLabel]="true"
+                [showValue]="false"
+              />
             } @else {
-              <progress
-                class="progress progress-primary h-1.5 w-full"
-              ></progress>
+              <ptah-meter
+                class="block w-full"
+                [value]="0"
+                [max]="100"
+                label="Workspace indexing progress"
+                size="sm"
+                tone="primary"
+                barRole="progressbar"
+                [indeterminate]="true"
+                [hideLabel]="true"
+                [showValue]="false"
+              />
             }
           </div>
           <button

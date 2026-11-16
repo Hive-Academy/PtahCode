@@ -16,6 +16,7 @@ import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahMeterComponent,
 } from '@ptah-extension/ui';
 
 import { VecEmbedderRecoveryService } from '../../services/vec-embedder-recovery.service';
@@ -42,7 +43,13 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
   selector: 'ptah-db-health-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, NativeCardComponent],
+  imports: [
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    PtahMeterComponent,
+    NativeCardComponent,
+  ],
   template: `
     <div class="flex flex-col gap-4">
       <section class="flex flex-col gap-2" aria-label="Database health">
@@ -237,13 +244,15 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
             Embedder
           </span>
           <span
-            ptahBadge size="sm"
+            ptahBadge
+            size="sm"
             [tone]="
               embedderReady()
                 ? 'ok'
                 : embedderDownloading()
                   ? 'warn'
-                  : $safeNavigationMigration(embedderStatus()?.error) !== undefined
+                  : $safeNavigationMigration(embedderStatus()?.error) !==
+                      undefined
                     ? 'err'
                     : 'neutral'
             "
@@ -255,14 +264,25 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
         <div class="text-xs">
           @if (embedderDownloading()) {
             <div class="flex items-center gap-2">
-              <progress
-                class="progress progress-warning h-2 flex-1"
+              <ptah-meter
+                class="block min-w-0 flex-1"
                 [value]="embedderProgressPercent()"
-                max="100"
+                [max]="100"
+                label="ONNX model download"
+                size="md"
+                tone="warn"
+                barRole="progressbar"
+                [indeterminate]="typeof embedderStatus()?.progress !== 'number'"
+                [hideLabel]="true"
+                [showValue]="false"
                 data-testid="embedder-progress"
-              ></progress>
+              />
               <span class="tabular-nums">
-                {{ embedderProgressPercent() }}%
+                @if (typeof embedderStatus()?.progress === 'number') {
+                  {{ embedderProgressPercent() }}%
+                } @else {
+                  In progress
+                }
               </span>
             </div>
             <p class="mt-1 text-base-content-muted">
