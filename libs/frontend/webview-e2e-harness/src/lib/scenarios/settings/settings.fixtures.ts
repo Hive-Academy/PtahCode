@@ -803,6 +803,9 @@ function statefulSettingsFixtures(
     },
     'agent:detectClis': () => ({ clis: state.agentConfig.detectedClis }),
     'agent:listCliModels': CLI_MODELS_FIXTURE,
+    // Electron mounts the capability matrix. Without an answer it stays in its `aria-busy` loading state for the
+    // 5 s RPC timeout, and `waitForSettled` fails. No ratings is the fresh-profile state ("empty").
+    'agent:getCapabilityMatrix': { profiles: [] },
     'auth:saveSettings': (params: unknown) => {
       record(state, 'auth:saveSettings', params);
       Object.assign(state.authStatus, params as Partial<MutableAuthStatus>);
