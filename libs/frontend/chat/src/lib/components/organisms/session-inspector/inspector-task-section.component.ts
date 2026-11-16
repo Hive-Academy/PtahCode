@@ -16,9 +16,7 @@ import {
   TASK_DESCRIPTION_FILE,
   type TaskStatus,
 } from '@ptah-extension/shared';
-import {
-  TASK_STATUS_LABELS,
-} from '@ptah-extension/tasks-ui/presentation';
+import { TASK_STATUS_LABELS } from '@ptah-extension/tasks-ui/presentation';
 import {
   Ban,
   Circle,
@@ -33,7 +31,12 @@ import {
 } from 'lucide-angular';
 import { SessionTaskReader } from './session-task-reader';
 
-import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahIconButtonDirective,
+  PtahMeterComponent,
+} from '@ptah-extension/ui';
 /** Shape cue per status, so status is never carried by colour alone (17.2). */
 const STATUS_ICON: Readonly<Record<TaskStatus, LucideIconData>> = {
   backlog: Circle,
@@ -44,16 +47,31 @@ const STATUS_ICON: Readonly<Record<TaskStatus, LucideIconData>> = {
   cancelled: CircleX,
 };
 
-const PRIMARY_DOCUMENTS = [CARRIER_FILE, TASK_DESCRIPTION_FILE, IMPLEMENTATION_PLAN_FILE] as const;
+const PRIMARY_DOCUMENTS = [
+  CARRIER_FILE,
+  TASK_DESCRIPTION_FILE,
+  IMPLEMENTATION_PLAN_FILE,
+] as const;
 
-function basename(file: string): string { return file.split(/[\\/]/).pop()?.toLowerCase() ?? ''; }
+function basename(file: string): string {
+  return file.split(/[\\/]/).pop()?.toLowerCase() ?? '';
+}
 
-export function groupTaskDocuments(documents: readonly string[]): { primary: string[]; other: string[] } {
-  const primary = PRIMARY_DOCUMENTS.flatMap(name => documents.filter(file => basename(file) === name));
-  const list = documents.find(file => basename(file) === BATCHES_FILE)
-    ?? documents.find(file => basename(file) === LEGACY_BATCHES_FILE);
+export function groupTaskDocuments(documents: readonly string[]): {
+  primary: string[];
+  other: string[];
+} {
+  const primary = PRIMARY_DOCUMENTS.flatMap((name) =>
+    documents.filter((file) => basename(file) === name),
+  );
+  const list =
+    documents.find((file) => basename(file) === BATCHES_FILE) ??
+    documents.find((file) => basename(file) === LEGACY_BATCHES_FILE);
   if (list) primary.push(list);
-  return { primary, other: documents.filter(file => !primary.includes(file)) };
+  return {
+    primary,
+    other: documents.filter((file) => !primary.includes(file)),
+  };
 }
 
 let nextTaskSectionId = 0;
@@ -69,7 +87,13 @@ let nextTaskSectionId = 0;
 @Component({
   selector: 'ptah-inspector-task-section',
   standalone: true,
-  imports: [LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [
+    LucideAngularModule,
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    PtahMeterComponent,
+  ],
   providers: [SessionTaskReader],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -89,7 +113,13 @@ let nextTaskSectionId = 0;
             TASK
           </h3>
           @if (state.data?.task; as headingTask) {
-            <span ptahBadge data-testid="task-id" class="min-w-0 max-w-[70%] font-mono" [attr.title]="headingTask.id"><span class="ptah-badge-text">{{ headingTask.id }}</span></span>
+            <span
+              ptahBadge
+              data-testid="task-id"
+              class="min-w-0 max-w-[70%] font-mono"
+              [attr.title]="headingTask.id"
+              ><span class="ptah-badge-text">{{ headingTask.id }}</span></span
+            >
           }
         </div>
 
@@ -112,7 +142,10 @@ let nextTaskSectionId = 0;
             <span class="min-w-0 flex-1">Could not load task</span>
             <button
               type="button"
-              ptahButton variant="ghost" size="xs" class="shrink-0"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              class="shrink-0"
               aria-label="Retry loading task"
               (click)="reader.retry()"
             >
@@ -146,9 +179,26 @@ let nextTaskSectionId = 0;
               }
             </div>
             @if (reader.progress(); as progress) {
-              <div class="mt-1.5 flex items-center gap-2 text-[11px] text-base-content-muted">
-                <progress class="progress h-1.5 min-w-0 flex-1" [value]="progress.done" [max]="progress.total" [attr.aria-label]="progress.done + ' of ' + progress.total + ' tasks complete'"></progress>
-                <span class="shrink-0 tabular-nums">{{ progress.done }}/{{ progress.total }} tasks</span>
+              <div
+                class="mt-1.5 flex items-center gap-2 text-[11px] text-base-content-muted"
+              >
+                <ptah-meter
+                  class="min-w-0 flex-1"
+                  [value]="progress.done"
+                  [max]="progress.total"
+                  label="Tasks complete"
+                  [valueText]="
+                    progress.done + ' of ' + progress.total + ' tasks complete'
+                  "
+                  size="sm"
+                  tone="neutral"
+                  [hideLabel]="true"
+                  [showValue]="false"
+                  barRole="progressbar"
+                />
+                <span class="shrink-0 tabular-nums"
+                  >{{ progress.done }}/{{ progress.total }} tasks</span
+                >
               </div>
             }
             @if (state.status === 'error') {
@@ -164,7 +214,10 @@ let nextTaskSectionId = 0;
                 <span class="min-w-0 flex-1">Could not load task</span>
                 <button
                   type="button"
-                  ptahButton variant="ghost" size="xs" class="shrink-0"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
+                  class="shrink-0"
                   aria-label="Retry loading task"
                   (click)="reader.retry()"
                 >
@@ -175,63 +228,167 @@ let nextTaskSectionId = 0;
 
             @if (relatedCount() > 0) {
               <div class="mt-1">
-                <button type="button" ptahButton variant="ghost" size="xs" [attr.aria-expanded]="relatedOpen()" [attr.aria-controls]="relatedId" [attr.aria-label]="relatedLabel()" (click)="relatedOpen.set(!relatedOpen())">+{{ relatedCount() }} more</button>
+                <button
+                  type="button"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
+                  [attr.aria-expanded]="relatedOpen()"
+                  [attr.aria-controls]="relatedId"
+                  [attr.aria-label]="relatedLabel()"
+                  (click)="relatedOpen.set(!relatedOpen())"
+                >
+                  +{{ relatedCount() }} more
+                </button>
               </div>
             }
 
             @if (data.documents.length === 0) {
-              <p class="mt-2 text-xs text-base-content-muted">No documents yet</p>
+              <p class="mt-2 text-xs text-base-content-muted">
+                No documents yet
+              </p>
             } @else {
-              <div [id]="documentsId" class="relative mt-2 flex flex-wrap items-center gap-1" aria-label="Task documents">
+              <div
+                [id]="documentsId"
+                class="relative mt-2 flex flex-wrap items-center gap-1"
+                aria-label="Task documents"
+              >
                 @for (doc of groupedDocuments().primary; track doc) {
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs min-w-0 max-w-40 flex-nowrap font-mono font-normal"
-                        [class.btn-active]="reader.preview()?.file === doc"
-                        [attr.title]="doc"
-                        [attr.aria-pressed]="reader.preview()?.file === doc"
-                        [attr.aria-controls]="previewId"
-                        (click)="toggleDocument(doc)"
-                      >
-                        <lucide-angular
-                          [img]="FileTextIcon"
-                          class="size-3 shrink-0 text-base-content-muted"
-                          aria-hidden="true"
-                        />
-                        <span class="min-w-0 truncate">{{ doc }}</span>
-                      </button>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs min-w-0 max-w-40 flex-nowrap font-mono font-normal"
+                    [class.btn-active]="reader.preview()?.file === doc"
+                    [attr.title]="doc"
+                    [attr.aria-pressed]="reader.preview()?.file === doc"
+                    [attr.aria-controls]="previewId"
+                    (click)="toggleDocument(doc)"
+                  >
+                    <lucide-angular
+                      [img]="FileTextIcon"
+                      class="size-3 shrink-0 text-base-content-muted"
+                      aria-hidden="true"
+                    />
+                    <span class="min-w-0 truncate">{{ doc }}</span>
+                  </button>
                 }
-              @if (groupedDocuments().other.length) {
-                <div #dropdownRoot class="dropdown static" [class.dropdown-open]="documentsOpen()">
-                  <button #documentsToggle type="button" ptahButton variant="ghost" size="xs" [attr.aria-expanded]="documentsOpen()" [attr.aria-controls]="documentsMenuId" (click)="documentsOpen.set(!documentsOpen())">+{{ groupedDocuments().other.length }} files</button>
-                  @if (documentsOpen()) {
-                    <ul [id]="documentsMenuId" class="dropdown-content menu menu-xs left-0 top-full z-20 mt-1 max-h-56 w-full flex-nowrap overflow-y-auto rounded-lg border border-surface-border bg-surface-1 p-1 shadow-lg" aria-label="Other task documents">
-                      @for (doc of groupedDocuments().other; track doc) {
-                        <li><button type="button" class="min-w-0 font-mono" [title]="doc" [attr.aria-controls]="previewId" [attr.aria-pressed]="reader.preview()?.file === doc" (click)="selectOtherDocument(doc)"><span class="truncate">{{ doc }}</span></button></li>
-                      }
-                    </ul>
-                  }
-                </div>
-              }
+                @if (groupedDocuments().other.length) {
+                  <div
+                    #dropdownRoot
+                    class="dropdown static"
+                    [class.dropdown-open]="documentsOpen()"
+                  >
+                    <button
+                      #documentsToggle
+                      type="button"
+                      ptahButton
+                      variant="ghost"
+                      size="xs"
+                      [attr.aria-expanded]="documentsOpen()"
+                      [attr.aria-controls]="documentsMenuId"
+                      (click)="documentsOpen.set(!documentsOpen())"
+                    >
+                      +{{ groupedDocuments().other.length }} files
+                    </button>
+                    @if (documentsOpen()) {
+                      <ul
+                        [id]="documentsMenuId"
+                        class="dropdown-content menu menu-xs left-0 top-full z-20 mt-1 max-h-56 w-full flex-nowrap overflow-y-auto rounded-lg border border-surface-border bg-surface-1 p-1 shadow-lg"
+                        aria-label="Other task documents"
+                      >
+                        @for (doc of groupedDocuments().other; track doc) {
+                          <li>
+                            <button
+                              type="button"
+                              class="min-w-0 font-mono"
+                              [title]="doc"
+                              [attr.aria-controls]="previewId"
+                              [attr.aria-pressed]="
+                                reader.preview()?.file === doc
+                              "
+                              (click)="selectOtherDocument(doc)"
+                            >
+                              <span class="truncate">{{ doc }}</span>
+                            </button>
+                          </li>
+                        }
+                      </ul>
+                    }
+                  </div>
+                }
               </div>
               @if (reader.preview(); as preview) {
-                <div [id]="previewId" role="region" [attr.aria-label]="'Preview of ' + preview.file" class="mt-2 min-w-0 rounded-lg border border-surface-border bg-surface-1 p-3">
-                  <div class="flex items-baseline justify-between gap-2 text-xs">
-                    <span class="min-w-0 flex-1 truncate font-mono text-xs" [title]="preview.file">{{ preview.file }}</span>
+                <div
+                  [id]="previewId"
+                  role="region"
+                  [attr.aria-label]="'Preview of ' + preview.file"
+                  class="mt-2 min-w-0 rounded-lg border border-surface-border bg-surface-1 p-3"
+                >
+                  <div
+                    class="flex items-baseline justify-between gap-2 text-xs"
+                  >
+                    <span
+                      class="min-w-0 flex-1 truncate font-mono text-xs"
+                      [title]="preview.file"
+                      >{{ preview.file }}</span
+                    >
                     @if (reader.canOpen) {
-                      <button #openButton type="button" ptahButton variant="ghost" size="xs" [attr.aria-describedby]="reader.openError()?.file === preview.file ? openErrorId : null" (click)="reader.openDocument(preview.file, openButton)">Open</button>
+                      <button
+                        #openButton
+                        type="button"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
+                        [attr.aria-describedby]="
+                          reader.openError()?.file === preview.file
+                            ? openErrorId
+                            : null
+                        "
+                        (click)="reader.openDocument(preview.file, openButton)"
+                      >
+                        Open
+                      </button>
                     }
-                    <button type="button" ptahIconButton size="xs" label="Close document preview" (click)="reader.closePreview()">×</button>
+                    <button
+                      type="button"
+                      ptahIconButton
+                      size="xs"
+                      label="Close document preview"
+                      (click)="reader.closePreview()"
+                    >
+                      ×
+                    </button>
                   </div>
                   @if (preview.status === 'loading') {
-                    <div class="skeleton h-12 w-full" aria-label="Loading document preview"></div>
+                    <div
+                      class="skeleton h-12 w-full"
+                      aria-label="Loading document preview"
+                    ></div>
                   } @else if (preview.status === 'error') {
-                    <p class="text-xs text-base-content-muted">Could not preview this document <button type="button" ptahButton variant="ghost" size="xs" (click)="reader.previewDocument(preview.file)">Retry</button></p>
+                    <p class="text-xs text-base-content-muted">
+                      Could not preview this document
+                      <button
+                        type="button"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
+                        (click)="reader.previewDocument(preview.file)"
+                      >
+                        Retry
+                      </button>
+                    </p>
                   } @else {
-                    <pre class="mt-1 max-h-[6lh] overflow-hidden whitespace-pre-wrap break-words font-mono text-xs leading-4 text-base-content-muted">{{ preview.content }}</pre>
+                    <pre
+                      class="mt-1 max-h-[6lh] overflow-hidden whitespace-pre-wrap break-words font-mono text-xs leading-4 text-base-content-muted"
+                      >{{ preview.content }}</pre>
                   }
                   @if (reader.openError()?.file === preview.file) {
-                    <p [id]="openErrorId" role="alert" class="text-[11px] text-state-err">Could not open {{ preview.file }}</p>
+                    <p
+                      [id]="openErrorId"
+                      role="alert"
+                      class="text-[11px] text-state-err"
+                    >
+                      Could not open {{ preview.file }}
+                    </p>
                   }
                 </div>
               }
@@ -240,7 +397,9 @@ let nextTaskSectionId = 0;
             <span ptahBadge class="font-mono">
               {{ data.lead.taskId }}
             </span>
-            <p class="mt-2 flex items-center gap-1.5 text-xs text-base-content-muted">
+            <p
+              class="mt-2 flex items-center gap-1.5 text-xs text-base-content-muted"
+            >
               <lucide-angular
                 [img]="TriangleAlertIcon"
                 class="size-3.5 shrink-0"
@@ -261,8 +420,11 @@ let nextTaskSectionId = 0;
                   class="min-w-0"
                   [attr.title]="related.title ?? related.taskId"
                 >
-                  <span class="min-w-0 truncate font-mono text-[11px] text-base-content-muted">
-                    {{ related.taskId }}@if (related.title) {
+                  <span
+                    class="min-w-0 truncate font-mono text-[11px] text-base-content-muted"
+                  >
+                    {{ related.taskId }}
+                    @if (related.title) {
                       · {{ related.title }}
                     }
                   </span>
@@ -288,8 +450,10 @@ export class InspectorTaskSectionComponent {
   protected readonly documentsId = `ptah-task-documents-${this.sectionId}`;
   protected readonly documentsMenuId = `ptah-task-documents-menu-${this.sectionId}`;
   protected readonly openErrorId = `ptah-task-open-err-${this.sectionId}`;
-  protected readonly dropdownRoot = viewChild<ElementRef<HTMLElement>>('dropdownRoot');
-  protected readonly documentsToggle = viewChild<ElementRef<HTMLButtonElement>>('documentsToggle');
+  protected readonly dropdownRoot =
+    viewChild<ElementRef<HTMLElement>>('dropdownRoot');
+  protected readonly documentsToggle =
+    viewChild<ElementRef<HTMLButtonElement>>('documentsToggle');
 
   protected readonly relatedOpen = signal(false);
   protected readonly documentsOpen = signal(false);
@@ -304,7 +468,9 @@ export class InspectorTaskSectionComponent {
     return `${this.relatedOpen() ? 'Hide' : 'Show'} ${count} more ${noun}`;
   });
 
-  protected readonly groupedDocuments = computed(() => groupTaskDocuments(this.reader.state()?.data?.documents ?? []));
+  protected readonly groupedDocuments = computed(() =>
+    groupTaskDocuments(this.reader.state()?.data?.documents ?? []),
+  );
 
   protected readonly previewId = `ptah-task-preview-${this.sectionId}`;
 
@@ -328,8 +494,14 @@ export class InspectorTaskSectionComponent {
   protected closeOnOutsideClick(event: MouseEvent): void {
     const target = event.target;
     const root = this.dropdownRoot()?.nativeElement;
-    if (this.documentsOpen() && target instanceof Node && root && !root.contains(target)) {
-      if (root.contains(document.activeElement)) this.documentsToggle()?.nativeElement.focus();
+    if (
+      this.documentsOpen() &&
+      target instanceof Node &&
+      root &&
+      !root.contains(target)
+    ) {
+      if (root.contains(document.activeElement))
+        this.documentsToggle()?.nativeElement.focus();
       this.documentsOpen.set(false);
     }
   }
@@ -342,13 +514,20 @@ export class InspectorTaskSectionComponent {
     return STATUS_ICON[status];
   }
 
-  protected statusTone(status: TaskStatus): 'neutral' | 'info' | 'ok' | 'warn' | 'err' {
+  protected statusTone(
+    status: TaskStatus,
+  ): 'neutral' | 'info' | 'ok' | 'warn' | 'err' {
     switch (status) {
-      case 'in_progress': return 'info';
-      case 'in_review': return 'warn';
-      case 'blocked': return 'err';
-      case 'done': return 'ok';
-      default: return 'neutral';
+      case 'in_progress':
+        return 'info';
+      case 'in_review':
+        return 'warn';
+      case 'blocked':
+        return 'err';
+      case 'done':
+        return 'ok';
+      default:
+        return 'neutral';
     }
   }
 

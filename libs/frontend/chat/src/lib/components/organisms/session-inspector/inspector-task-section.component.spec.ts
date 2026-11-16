@@ -5,8 +5,15 @@ import type {
   SectionState,
   TaskSectionData,
 } from '../../../services/session-inspector';
-import { groupTaskDocuments, InspectorTaskSectionComponent } from './inspector-task-section.component';
-import { documentExcerpt, documentProgress, SessionTaskReader } from './session-task-reader';
+import {
+  groupTaskDocuments,
+  InspectorTaskSectionComponent,
+} from './inspector-task-section.component';
+import {
+  documentExcerpt,
+  documentProgress,
+  SessionTaskReader,
+} from './session-task-reader';
 
 const DOCUMENTS = [
   'task.md',
@@ -43,7 +50,11 @@ function readyState(
 describe('InspectorTaskSectionComponent', () => {
   const state = signal<SectionState<TaskSectionData> | null>(null);
   const openError = signal<{ readonly file: string } | null>(null);
-  const preview = signal<{ file: string; status: 'loading' | 'ready' | 'error'; content: string } | null>(null);
+  const preview = signal<{
+    file: string;
+    status: 'loading' | 'ready' | 'error';
+    content: string;
+  } | null>(null);
   const progress = signal<{ done: number; total: number } | null>(null);
   const reader = {
     state,
@@ -51,8 +62,12 @@ describe('InspectorTaskSectionComponent', () => {
     openError,
     preview,
     progress,
-    previewDocument: jest.fn((file: string) => { preview.set({ file, status: 'ready', content: 'Preview text' }); }),
-    closePreview: jest.fn(() => { preview.set(null); }),
+    previewDocument: jest.fn((file: string) => {
+      preview.set({ file, status: 'ready', content: 'Preview text' });
+    }),
+    closePreview: jest.fn(() => {
+      preview.set(null);
+    }),
     bind: jest.fn(),
     retry: jest.fn(),
     openDocument: jest.fn(),
@@ -92,21 +107,34 @@ describe('InspectorTaskSectionComponent', () => {
   it('opens a document disclosure with keyboard access and returns focus on selection, Escape and outside click', () => {
     const fixture = mount();
     const root = fixture.nativeElement as HTMLElement;
-    const list = root.querySelector<HTMLElement>('[aria-label="Task documents"]');
-    const toggle = [...root.querySelectorAll<HTMLButtonElement>('button[aria-expanded][aria-controls]')]
-      .find(button => button.textContent?.includes('+3 files'));
+    const list = root.querySelector<HTMLElement>(
+      '[aria-label="Task documents"]',
+    );
+    const toggle = [
+      ...root.querySelectorAll<HTMLButtonElement>(
+        'button[aria-expanded][aria-controls]',
+      ),
+    ].find((button) => button.textContent?.includes('+3 files'));
 
     expect(list).not.toBeNull();
     expect(toggle).not.toBeNull();
-    expect([...list!.querySelectorAll('button[aria-pressed]')].map(button => button.textContent?.trim())).toEqual(['task.md', 'implementation-plan.md', 'batches.md']);
+    expect(
+      [...list!.querySelectorAll('button[aria-pressed]')].map((button) =>
+        button.textContent?.trim(),
+      ),
+    ).toEqual(['task.md', 'implementation-plan.md', 'batches.md']);
     expect(toggle?.textContent?.trim()).toBe('+3 files');
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
 
     toggle?.focus();
-    toggle?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    toggle?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    );
     toggle?.click();
     fixture.detectChanges();
-    const menu = root.querySelector(`#${toggle?.getAttribute('aria-controls')}`);
+    const menu = root.querySelector(
+      `#${toggle?.getAttribute('aria-controls')}`,
+    );
     expect(menu?.querySelectorAll('li button')).toHaveLength(3);
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(toggle?.getAttribute('aria-controls')).toBe(menu?.id);
@@ -121,9 +149,13 @@ describe('InspectorTaskSectionComponent', () => {
     toggle?.click();
     fixture.detectChanges();
     root.querySelector<HTMLButtonElement>('li button')?.focus();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
     fixture.detectChanges();
-    expect(root.querySelector(`#${toggle?.getAttribute('aria-controls')}`)).toBeNull();
+    expect(
+      root.querySelector(`#${toggle?.getAttribute('aria-controls')}`),
+    ).toBeNull();
     expect(document.activeElement).toBe(toggle);
     toggle?.click();
     fixture.detectChanges();
@@ -135,7 +167,9 @@ describe('InspectorTaskSectionComponent', () => {
 
   it('shows the status as a tinted badge with an icon and a muted stage', () => {
     const root = mount().nativeElement as HTMLElement;
-    const status = root.querySelector<HTMLElement>('[data-testid="task-status"]');
+    const status = root.querySelector<HTMLElement>(
+      '[data-testid="task-status"]',
+    );
 
     expect(status?.textContent?.trim()).toBe('Backlog');
     expect(status?.hasAttribute('data-ptah-badge')).toBe(true);
@@ -148,23 +182,55 @@ describe('InspectorTaskSectionComponent', () => {
   it('shows progress only when counts exist', () => {
     const fixture = mount();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('progress')).toBeNull();
+    expect(root.querySelector('ptah-meter')).toBeNull();
     progress.set({ done: 3, total: 7 });
     fixture.detectChanges();
-    expect(root.querySelector('progress')?.getAttribute('value')).toBe('3');
+    expect(
+      root
+        .querySelector('ptah-meter [role="progressbar"]')
+        ?.getAttribute('aria-valuenow'),
+    ).toBe('3');
+    expect(
+      root
+        .querySelector('ptah-meter [role="progressbar"]')
+        ?.getAttribute('aria-valuetext'),
+    ).toBe('3 of 7 tasks complete');
     expect(root.textContent).toContain('3/7 tasks');
   });
 
   it('groups names case insensitively by basename and prefers batches', () => {
-    expect(groupTaskDocuments(['docs/TASK.MD', 'tasks.md', 'BATCHES.md', 'x/Task-Description.md', 'IMPLEMENTATION-PLAN.md', 'note.md']))
-      .toEqual({ primary: ['docs/TASK.MD', 'x/Task-Description.md', 'IMPLEMENTATION-PLAN.md', 'BATCHES.md'], other: ['tasks.md', 'note.md'] });
+    expect(
+      groupTaskDocuments([
+        'docs/TASK.MD',
+        'tasks.md',
+        'BATCHES.md',
+        'x/Task-Description.md',
+        'IMPLEMENTATION-PLAN.md',
+        'note.md',
+      ]),
+    ).toEqual({
+      primary: [
+        'docs/TASK.MD',
+        'x/Task-Description.md',
+        'IMPLEMENTATION-PLAN.md',
+        'BATCHES.md',
+      ],
+      other: ['tasks.md', 'note.md'],
+    });
   });
 
   it('strips front matter before excerpt and parses checkbox progress', () => {
-    expect(documentExcerpt('---\ntitle: Example\n---\nFirst line\nSecond line')).toBe('First line\nSecond line');
+    expect(
+      documentExcerpt('---\ntitle: Example\n---\nFirst line\nSecond line'),
+    ).toBe('First line\nSecond line');
     expect(documentExcerpt('---\ntitle: Example\n---\n')).toBe('No content');
-    expect(documentExcerpt('one\ntwo\nthree\nfour\nfive\nsix\nseven')).toBe('one\ntwo\nthree\nfour\nfive\nsix…');
-    expect(documentProgress('- [x] One\n- [ ] Two')).toEqual({ done: 1, total: 2 });
+    expect(documentExcerpt('one\ntwo\nthree\nfour\nfive\nsix\nseven')).toBe(
+      'one\ntwo\nthree\nfour\nfive\nsix…',
+    );
+    expect(documentProgress('- [x] One\n- [ ] Two')).toEqual({
+      done: 1,
+      total: 2,
+    });
   });
 
   it('shows the task ID in a small ghost mono badge', () => {
@@ -213,10 +279,20 @@ describe('InspectorTaskSectionComponent', () => {
     fixture.detectChanges();
     expect(reader.previewDocument).toHaveBeenCalledWith(DOCUMENTS[0]);
     expect(button?.getAttribute('aria-pressed')).toBe('true');
-    expect(root.querySelector('[role="region"]')?.textContent).toContain('Preview text');
+    expect(root.querySelector('[role="region"]')?.textContent).toContain(
+      'Preview text',
+    );
     const card = root.querySelector<HTMLElement>('[role="region"]');
-    for (const className of ['rounded-lg', 'border-surface-border', 'bg-surface-1', 'p-3']) expect(card?.classList.contains(className)).toBe(true);
-    const open = root.querySelector<HTMLButtonElement>('[role="region"] button');
+    for (const className of [
+      'rounded-lg',
+      'border-surface-border',
+      'bg-surface-1',
+      'p-3',
+    ])
+      expect(card?.classList.contains(className)).toBe(true);
+    const open = root.querySelector<HTMLButtonElement>(
+      '[role="region"] button',
+    );
     open?.click();
     expect(reader.openDocument).toHaveBeenCalledWith(DOCUMENTS[0], open);
 
@@ -230,14 +306,18 @@ describe('InspectorTaskSectionComponent', () => {
   it('toggles the preview and closes it with Escape', () => {
     const fixture = mount();
     const root = fixture.nativeElement as HTMLElement;
-    const chip = root.querySelector<HTMLButtonElement>('[aria-label="Task documents"] button');
+    const chip = root.querySelector<HTMLButtonElement>(
+      '[aria-label="Task documents"] button',
+    );
     chip?.click();
     fixture.detectChanges();
     const card = root.querySelector<HTMLElement>('[role="region"]');
     expect(card?.id).toBe(chip?.getAttribute('aria-controls'));
     expect(card?.textContent).toContain(DOCUMENTS[0]);
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
     fixture.detectChanges();
     expect(root.querySelector('[role="region"]')).toBeNull();
     expect(chip?.getAttribute('aria-pressed')).toBe('false');
@@ -252,18 +332,23 @@ describe('InspectorTaskSectionComponent', () => {
   it('shows loading and preview error states with Retry', () => {
     const fixture = mount({ status: 'loading', data: readyState().data });
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('section')?.getAttribute('aria-busy')).toBe('true');
+    expect(root.querySelector('section')?.getAttribute('aria-busy')).toBe(
+      'true',
+    );
     expect(root.querySelector('.skeleton')).not.toBeNull();
 
     state.set(readyState());
     preview.set({ file: DOCUMENTS[0], status: 'loading', content: '' });
     fixture.detectChanges();
-    expect(root.querySelector('[aria-label="Loading document preview"]')).not.toBeNull();
+    expect(
+      root.querySelector('[aria-label="Loading document preview"]'),
+    ).not.toBeNull();
 
     preview.set({ file: DOCUMENTS[0], status: 'error', content: '' });
     fixture.detectChanges();
-    const retry = [...root.querySelectorAll<HTMLButtonElement>('[role="region"] button')]
-      .find(button => button.textContent?.trim() === 'Retry');
+    const retry = [
+      ...root.querySelectorAll<HTMLButtonElement>('[role="region"] button'),
+    ].find((button) => button.textContent?.trim() === 'Retry');
     retry?.click();
     expect(reader.previewDocument).toHaveBeenCalledWith(DOCUMENTS[0]);
   });

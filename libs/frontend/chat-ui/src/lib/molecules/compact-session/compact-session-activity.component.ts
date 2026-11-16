@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import { LucideAngularModule, CheckCircle, XCircle } from 'lucide-angular';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahMeterComponent } from '@ptah-extension/ui';
 import { CompactSessionStatsComponent } from './compact-session-stats.component';
 import {
   CompactSessionLanesComponent,
@@ -92,7 +92,6 @@ const FALLBACK_RECAP_HEIGHT = 180;
  *
  * Uses size container queries on the body host to adapt progressively across tile sizes.
  */
-// Left raw: this compact todo bar uses native progress with the daisyUI success track at a fixed width.
 @Component({
   selector: 'ptah-compact-session-activity',
   standalone: true,
@@ -105,6 +104,7 @@ const FALLBACK_RECAP_HEIGHT = 180;
     ToolIconComponent,
     CompactSessionCalloutComponent,
     PtahButtonDirective,
+    PtahMeterComponent,
   ],
   host: {
     class: 'block h-full min-h-0 overflow-hidden',
@@ -829,14 +829,33 @@ const FALLBACK_RECAP_HEIGHT = 180;
           >
             @if (todo?.kind === 'known') {
               <span>☑ {{ todo.done }}/{{ todo.total }}</span>
-              <progress
-                class="progress progress-success w-8"
+              <ptah-meter
+                class="w-8"
                 [value]="todo.done"
                 [max]="todo.total"
-                aria-label="Todos"
-              ></progress>
+                label="Todos completed"
+                size="xs"
+                tone="ok"
+                [hideLabel]="true"
+                [showValue]="false"
+                barRole="progressbar"
+              />
             } @else {
               <span>—</span>
+              @if (todo?.kind !== 'none') {
+                <ptah-meter
+                  class="w-8"
+                  [value]="0"
+                  [max]="1"
+                  label="Todos completed"
+                  size="xs"
+                  tone="ok"
+                  [hideLabel]="true"
+                  [showValue]="false"
+                  [indeterminate]="true"
+                  barRole="progressbar"
+                />
+              }
             }
           </span>
           <span
