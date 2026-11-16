@@ -240,6 +240,28 @@ describe('CanvasLaneTabsComponent', () => {
     fixture.destroy();
   });
 
+  it('keeps a starting lane beside a running lane in the rail', () => {
+    agents.set([
+      cli({
+        agentId: 'starting', parentSessionId: 'owner',
+        cli: 'Starting', status: 'starting',
+      }),
+      cli({
+        agentId: 'running', parentSessionId: 'owner',
+        cli: 'Running', status: 'running',
+      }),
+    ]);
+    const fixture = TestBed.createComponent(CanvasLaneTabsComponent);
+    fixture.componentRef.setInput('tabId', TAB_ID);
+    fixture.componentRef.setInput('rail', true);
+    fixture.detectChanges();
+    expect(tabLabels(fixture.nativeElement)).toEqual([
+      expect.stringContaining('Starting'),
+      expect.stringContaining('Running'),
+    ]);
+    fixture.destroy();
+  });
+
   it('rail arrow keys move focus only, keep one tab stop, and leave selection to Enter or a click', async () => {
     agents.set(cliRoster(7));
     const fixture = TestBed.createComponent(CanvasLaneTabsComponent);

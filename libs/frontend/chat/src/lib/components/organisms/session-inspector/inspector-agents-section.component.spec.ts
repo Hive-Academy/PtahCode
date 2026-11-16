@@ -261,6 +261,16 @@ describe('InspectorAgentsSectionComponent (B+ agents list)', () => {
     expect(el.textContent).not.toContain('Usage: 2284653');
   });
 
+  it('keeps a starting lane active and labels it distinctly', () => {
+    const el: HTMLElement = mount([
+      agent({ key: 'cli:starting', status: 'starting', endedAt: null }),
+      agent({ key: 'cli:done', status: 'done' }),
+    ]).nativeElement;
+    expect(keys(el)[0]).toBe('cli:starting');
+    expect(el.querySelector('[data-testid="agents-count"]')?.textContent).toContain('1 running');
+    expect(el.querySelector('[data-agent-key="cli:starting"]')?.getAttribute('aria-label')).toContain('starting');
+  });
+
   it('shows provider avatar, type line, status ink and compact tokens and cost', () => {
     const el: HTMLElement = mount([
       agent(

@@ -36,6 +36,8 @@ describe('PTAH_CORE_SYSTEM_PROMPT', () => {
 
   it('teaches the push signal instead of a polling loop', () => {
     expect(PTAH_CORE_SYSTEM_PROMPT).toContain('<agent-lane-completed>');
+    expect(PTAH_CORE_SYSTEM_PROMPT).toContain('status is `starting`');
+    expect(PTAH_CORE_SYSTEM_PROMPT).toContain('`idempotencyKey` replays that lane');
     expect(PTAH_CORE_SYSTEM_PROMPT).not.toContain('poll until complete');
     expect(PTAH_CORE_SYSTEM_PROMPT).toContain('at most 5 status checks');
     expect(PTAH_CORE_SYSTEM_PROMPT).toContain('pending until parent activity');
