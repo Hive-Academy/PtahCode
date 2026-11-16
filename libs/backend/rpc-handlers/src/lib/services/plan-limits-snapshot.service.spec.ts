@@ -112,9 +112,43 @@ describe('PlanLimitsSnapshotService', () => {  it('shares normalized scopes in f
     const second = s.service.snapshot({ sessionIds: ['a', 'b'], ownerKeys: ['x'] });
     expect(s.discoverTargets).toHaveBeenCalledTimes(1);
     release([]);
-    expect(await first).toEqual(await second);
+    const firstResult = await first;
+    expect(firstResult).toBe(await second);
+    expect(firstResult).toEqual({ generatedAt: expect.any(Number), owners: [], discoveryIncomplete: false, sessionOwners: {
+      a: { ownerKey: null, modelScope: null }, b: { ownerKey: null, modelScope: null },
+    } });
+    const served = s.logger.debug.mock.calls.filter(([message]) => message === '[PlanLimitsSnapshot] snapshot served');
+    expect(served).toHaveLength(2);
+    expect(served.map(([, payload]) => payload)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'pull', path: 'assembled', scopeId: expect.stringMatching(/^[a-f0-9]{8}$/), sessionCount: 2, ownerKeyCount: 1, discoveryMs: expect.any(Number), readsMs: expect.any(Number) }),
+      expect.objectContaining({ source: 'pull', path: 'joined', durationMs: expect.any(Number) }),
+    ]));
+    expect(JSON.stringify(served)).not.toMatch(/"[abx]"/);
     await s.service.snapshot({ sessionIds: ['b', 'a'], ownerKeys: ['x'], refresh: true });
     expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+  });
+  it('rejects every joined caller with the shared assemble error and logs no served line', async () => {
+    const s = build();
+    s.discoverTargets.mockRejectedValueOnce(new Error('discovery down'));
+    const first = s.service.snapshot({ sessionIds: ['a'] });
+    const second = s.service.snapshot({ sessionIds: ['a'] });
+    await expect(first).rejects.toThrow('discovery down');
+    await expect(second).rejects.toThrow('discovery down');
+    expect(s.discoverTargets).toHaveBeenCalledTimes(1);
+    const served = s.logger.debug.mock.calls.filter(([message]) => message === '[PlanLimitsSnapshot] snapshot served');
+    expect(served).toHaveLength(0);
+  });
+  it('logs a push with the last scope and no raw owner key', async () => {
+    const s = build();
+    await s.service.snapshot({ providerId: 'openai-codex', sessionIds: ['private-session'], ownerKeys: ['private-owner'] });
+    const result = await s.service.currentSnapshot();
+    expect(result).toEqual({ generatedAt: expect.any(Number), owners: [], discoveryIncomplete: false, sessionOwners: {
+      'private-session': { ownerKey: null, modelScope: null },
+    } });
+    const served = s.logger.debug.mock.calls.filter(([message]) => message === '[PlanLimitsSnapshot] snapshot served');
+    expect(served).toHaveLength(2);
+    expect(served[1][1]).toEqual(expect.objectContaining({ source: 'push', path: 'assembled', refresh: false, hasProvider: true, sessionCount: 1, ownerKeyCount: 1, pushes: 1 }));
+    expect(JSON.stringify(served)).not.toMatch(/private-session|private-owner/);
   });
   it('links an ambient-only native home to its unknown owner and isolates other homes', async () => {
     const nativeId = SessionId.from('12345678-1234-4234-8234-123456789abc');

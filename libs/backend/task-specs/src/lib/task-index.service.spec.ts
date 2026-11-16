@@ -975,6 +975,8 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
     const timing = calls.find(([message]) => message === '[task-specs] index rebuild timing');
     expect(timing?.[1]).toEqual(expect.objectContaining({
       trigger: 'activation', carriers: 3, rows: 2,
+      rootId: expect.stringMatching(/^[a-f0-9]{8}$/), activeRoots: 1,
+      scanMs: expect.any(Number), rootRebuilds: 1, triggerRebuilds: 1,
       enumerateMs: expect.any(Number),
       readMs: expect.any(Number),
       parseValidateMs: expect.any(Number),
@@ -985,6 +987,15 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
     }));
     expect(JSON.stringify(timing)).not.toContain(ROOT);
     expect(JSON.stringify(timing)).not.toContain('body of');
+    await service.reindex(ROOT);
+    const rebuildLogs = [
+      ...jest.mocked(logger.debug).mock.calls,
+      ...jest.mocked(logger.info).mock.calls,
+    ].filter(([message]) => message === '[task-specs] index rebuild timing');
+    expect(rebuildLogs.map(([, metrics]) => metrics)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rootRebuilds: 1, triggerRebuilds: 1 }),
+      expect.objectContaining({ rootRebuilds: 2, triggerRebuilds: 1 }),
+    ]));
     service.dispose();
   });
 
