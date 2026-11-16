@@ -84,7 +84,7 @@ export function buildAgentWaitTool(
       `timeoutSec (0-${MAX_WAIT_TIMEOUT_SEC}, default ${DEFAULT_AGENT_WAIT_TIMEOUT_SEC}) bounds the wait; ` +
       'on timeout the reply is a PARTIAL result (not an error) and the call is safe to repeat. ' +
       httpCap +
-      'Per lane it reports status, exit code, duration, why it stopped, the declared deliverables ' +
+      'Per lane: status (or starting), exit code, duration, why it stopped, the declared deliverables ' +
       `checked on disk and last output, in at most ${WAIT_SUMMARY_MAX_CHARS} chars. ` +
       'Read the full output with ptah_agent_read.',
     inputSchema: {
@@ -264,10 +264,11 @@ async function describeEntry(
     };
   }
   const { info } = entry;
-  const exit = info.exitCode === undefined ? '' : `, exit ${info.exitCode}`;
+  const exit = info.status === 'starting' || info.exitCode === undefined ? '' : `, exit ${info.exitCode}`;
+  const duration = info.status === 'starting' ? '' : `, ${formatDuration(durationOf(info, now))}`;
   const head =
-    `[${entry.agentId}] ${info.displayName ?? info.cli}: ${info.status}${exit}, ` +
-    `${formatDuration(durationOf(info, now))}, ${stopReasonOf(info)}`;
+    `[${entry.agentId}] ${info.displayName ?? info.cli}: ${info.status}${exit}${duration}, ` +
+    stopReasonOf(info);
   const [details, lastLines] = await Promise.all([
     deliverableLines(info, statFile),
     entry.state === 'exited' && info.status !== 'starting'

@@ -7,7 +7,12 @@ import { formatAgentDuration } from './agent-duration';
  * `waiting`.
  */
 export type AgentStatusWord =
-  'running' | 'waiting' | 'done' | 'failed' | 'stopped' | 'queued';
+  'starting' | 'running' | 'waiting' | 'done' | 'failed' | 'stopped' | 'queued';
+
+/** Words whose duration advances while the lane is in flight. */
+export function isRunningAgentWord(word: AgentStatusWord | null): boolean {
+  return word === 'running' || word === 'starting';
+}
 
 /** The four agent kinds a session can hold; there is no other lane kind. */
 export type AgentKind = 'orchestrator' | 'subagent' | 'cli' | 'background';
