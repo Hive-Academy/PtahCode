@@ -40,7 +40,7 @@ describe('parseLaneCompletion', () => {
     expect(result.reportsFailed).toBe(1);
     expect(result.extra).toEqual(['Report delivery: 0 sent; 1 failed.', 'Next: 1 report attempts failed; inspect the lane output and deliverable.']);
     const stats = deriveLaneEventPresentation(row({ events: [{ kind: 'completed', status: 'completed', verdict: 'delivered', body, timestamp: 1, messageId: 'm' }] })).stats;
-    expect(stats).toContainEqual({ label: 'Failed reports', value: '1', compact: '1 failed report' });
+    expect(stats[0]).toEqual({ label: 'Failed reports', value: '1', compact: '1 failed report' });
   });
 
   it('adds no failed-report stat when every report was delivered', () => {

@@ -135,14 +135,15 @@ export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEven
       : { label: 'Report', tone: 'neutral', icon: FileText };
 
   const stats: LaneEventStat[] = [];
+  // First, because the collapsed card truncates the end of the stat line.
+  if (completion?.reportsFailed) {
+    const failedReports = completion.reportsFailed;
+    stats.push({ label: 'Failed reports', value: String(failedReports), compact: `${failedReports} failed ${failedReports === 1 ? 'report' : 'reports'}` });
+  }
   if (completion?.duration) stats.push({ label: 'Duration', value: completion.duration, compact: completion.duration });
   const reportCount = completion?.reports ?? row.events.filter(event => event.kind === 'report').length;
   if (completion?.reports !== undefined || reportCount > 0) {
     stats.push({ label: 'Reports', value: String(reportCount), compact: `${reportCount} ${reportCount === 1 ? 'report' : 'reports'}` });
-  }
-  if (completion?.reportsFailed) {
-    const failedReports = completion.reportsFailed;
-    stats.push({ label: 'Failed reports', value: String(failedReports), compact: `${failedReports} failed ${failedReports === 1 ? 'report' : 'reports'}` });
   }
   if (completion?.exitCode !== undefined && completion.exitCode !== 0) {
     stats.push({ label: 'Exit', value: String(completion.exitCode), compact: `exit ${completion.exitCode}` });
