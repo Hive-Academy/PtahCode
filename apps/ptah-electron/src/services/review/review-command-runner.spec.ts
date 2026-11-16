@@ -71,8 +71,10 @@ describe('ReviewCommandRunner', () => {
         await expect(result).resolves.toMatchObject({
           exitCode: 0, timedOut: true,
         });
-        expect(killTree).toHaveBeenCalledTimes(reason === 'exited' ? 0 : 1);
-        if (reason !== 'exited') expect(killTree).toHaveBeenCalledWith(43210, 'SIGTERM', expect.any(Function));
+        expect(killTree).toHaveBeenCalledTimes(reason === 'exited' && process.platform === 'win32' ? 0 : 1);
+        if (reason !== 'exited' || process.platform !== 'win32')
+          expect(killTree).toHaveBeenCalledWith(43210, 'SIGTERM', expect.any(Function),
+            { groupOnly: reason === 'exited' });
         expect(directKill).not.toHaveBeenCalled();
       } finally {
         jest.useRealTimers();
@@ -80,6 +82,41 @@ describe('ReviewCommandRunner', () => {
       }
     },
   );
+  it('keeps the deadline after leader exit while a descendant holds the pipes', async () => {
+    jest.useFakeTimers();
+    const root = await mkdtemp(join(tmpdir(), 'ptah-review-inherited-pipe-'));
+    const checkout = join(root, 'repo');
+    const source = join(root, 'attempts', 'claim', 'src');
+    await mkdir(checkout);
+    await mkdir(source, { recursive: true });
+    const child = Object.assign(new childProcess.ChildProcess(), {
+      stdout: new PassThrough(), stderr: new PassThrough(),
+    });
+    Object.defineProperty(child, 'pid', { value: 43211, configurable: true });
+    let spawned: () => void = () => undefined;
+    const spawnReady = new Promise<void>((resolve) => { spawned = resolve; });
+    jest.mocked(childProcess.spawn).mockImplementationOnce(() => { spawned(); return child; });
+    const killTree = jest.fn(async () => undefined);
+    try {
+      const runner = new ReviewCommandRunner(
+        async () => ({ repoRoot: checkout, attemptsRoot: join(root, 'attempts') }), logger, killTree);
+      const result = runner.run(repoA, 'node', ['--version'], source, 100);
+      await spawnReady;
+      child.emit('exit', 0, null);
+      await jest.advanceTimersByTimeAsync(100);
+      if (process.platform === 'win32') {
+        expect(child.stdout.destroyed).toBe(true);
+        expect(child.stderr.destroyed).toBe(true);
+      } else {
+        expect(killTree).toHaveBeenCalledWith(43211, 'SIGTERM', expect.any(Function), { groupOnly: true });
+      }
+      child.emit('close', 0, null);
+      await expect(result).resolves.toMatchObject({ timedOut: true, exitCode: 0 });
+    } finally {
+      jest.useRealTimers();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it('preserves a UTF-8 filename split between stdout chunks', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ptah-review-utf8-'));
     const checkout = join(root, 'repo');

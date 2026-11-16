@@ -512,16 +512,17 @@ export class AntigravityCliAdapter implements CliAdapter {
     this.streamJsonInputSupported = await new Promise<boolean>((resolve) => {
       let help = '';
       let settled = false;
+      let childClosed = false;
       const finish = (supported: boolean): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         resolve(supported);
       };
-      const child = spawnCli(binary, ['--help'], { spawner: this.spawner });
+      const child = spawnCli(binary, ['--help'], { spawner: this.spawner, detached: true });
       const timer = setTimeout(() => {
         void child.whenSpawned.then((pid) => {
-          if (pid && !child.killed) void killProcessTree(pid);
+          if (pid && !childClosed && !child.killed) void killProcessTree(pid);
         });
         finish(false);
       }, 8000);
@@ -532,7 +533,7 @@ export class AntigravityCliAdapter implements CliAdapter {
       child.stderr?.setEncoding('utf8');
       child.stdout?.on('data', capture);
       child.stderr?.on('data', capture);
-      child.on('close', () => finish(/--input-format\b/.test(help)));
+      child.on('close', () => { childClosed = true; finish(/--input-format\b/.test(help)); });
       child.on('error', () => finish(false));
     });
     this.streamJsonInputSupportByBinary.set(
@@ -583,10 +584,11 @@ export class AntigravityCliAdapter implements CliAdapter {
   ): Promise<string | undefined> {
     return new Promise((resolve) => {
       let stdout = '';
-      const child = spawnCli(binary, ['models'], { spawner: this.spawner });
+      let childClosed = false;
+      const child = spawnCli(binary, ['models'], { spawner: this.spawner, detached: true });
       const timer = setTimeout(() => {
         void child.whenSpawned.then((pid) => {
-          if (pid && !child.killed) void killProcessTree(pid);
+          if (pid && !childClosed && !child.killed) void killProcessTree(pid);
         });
         resolve(undefined);
       }, timeoutMs);
@@ -596,6 +598,7 @@ export class AntigravityCliAdapter implements CliAdapter {
         stdout += data;
       });
       child.on('close', () => {
+        childClosed = true;
         clearTimeout(timer);
         resolve(stdout.trim() || undefined);
       });

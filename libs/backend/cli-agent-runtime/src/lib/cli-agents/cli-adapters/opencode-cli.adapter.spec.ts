@@ -218,6 +218,8 @@ describe('OpencodeCliAdapter', () => {
         expect(await models).toEqual([]);
         expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
         expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+        expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/opencode', ['models'],
+          expect.objectContaining({ detached: true }));
         expect(currentChild?.kill).not.toHaveBeenCalled();
       } finally { jest.useRealTimers(); }
     });
@@ -640,6 +642,7 @@ describe('OpencodeCliAdapter', () => {
         ['run', '--help'],
         {
           spawner: undefined,
+          detached: true,
         },
       );
       expect(args).toContain('--standalone');
@@ -891,6 +894,7 @@ describe('OpencodeCliAdapter', () => {
       currentChild?.stdout.write(JSON.stringify({
         type: 'text', sessionID: 'ses_foreign', part: { id: 'part_1', text: 'foreign' },
       }) + '\n');
+      await Promise.resolve();
       currentChild?.emitClose(0);
       expect(await handle.done).toBe(1);
       await Promise.resolve();
@@ -899,6 +903,15 @@ describe('OpencodeCliAdapter', () => {
       expect(currentChild?.kill).not.toHaveBeenCalled();
       expect(segments.some((s) => s.type === 'error' && s.content.includes('session-mismatch'))).toBe(true);
       expect(segments.some((s) => s.type === 'text')).toBe(false);
+    });
+
+    it('does not terminate a closed child for a trailing session mismatch', async () => {
+      const handle = await adapter.runSdk({ ...baseOptions, resumeSessionId: 'ses_expected' });
+      currentChild?.stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_foreign' }));
+      currentChild?.emitClose(0);
+      expect(await handle.done).toBe(1);
+      await Promise.resolve();
+      expect(mockKillProcessTree).not.toHaveBeenCalled();
     });
 
     it('emits only the appended delta for repeated text on the same part id', async () => {

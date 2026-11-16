@@ -429,7 +429,8 @@ export class OpencodeCliAdapter implements CliAdapter {
     return new Promise((resolve) => {
       let stdout = '';
       let settled = false;
-      const child = spawnCli(binary, args, { spawner: this.spawner });
+      let childClosed = false;
+      const child = spawnCli(binary, args, { spawner: this.spawner, detached: true });
 
       const finish = (outcome: {
         stdout: string;
@@ -445,7 +446,7 @@ export class OpencodeCliAdapter implements CliAdapter {
 
       const timer = setTimeout(() => {
         void child.whenSpawned.then((pid) => {
-          if (pid && !child.killed) void killProcessTree(pid);
+          if (pid && !childClosed && !child.killed) void killProcessTree(pid);
         });
         finish({ stdout: '', exitCode: null, timedOut: true, errored: false });
       }, timeoutMs);
@@ -455,6 +456,7 @@ export class OpencodeCliAdapter implements CliAdapter {
         stdout += data;
       });
       child.on('close', (code) => {
+        childClosed = true;
         finish({
           stdout: stdout.trim(),
           exitCode: code,
@@ -889,6 +891,7 @@ export class OpencodeCliAdapter implements CliAdapter {
     let boundSessionId = launch.expectedSessionId;
     let firstSessionEvent = true;
     let sessionMismatch = false;
+    let childClosed = false;
     const parseLine = (line: string): void =>
       this.handleLine(line, emitOutput, emitSegment, state, (event) => {
         if (event.type === 'error') {
@@ -910,7 +913,7 @@ export class OpencodeCliAdapter implements CliAdapter {
             sessionMismatch = true;
             emitSegment({ type: 'error', content: 'session-mismatch: OpenCode resumed a different session' });
             void child.whenSpawned.then((pid) => {
-              if (pid && !child.killed) void killProcessTree(pid);
+              if (pid && !childClosed && !child.killed) void killProcessTree(pid);
             });
             return false;
           }
@@ -955,6 +958,7 @@ export class OpencodeCliAdapter implements CliAdapter {
 
     return new Promise<number>((resolve) => {
       child.on('close', (code, exitSignal) => {
+        childClosed = true;
         signal.removeEventListener('abort', onAbort);
         launch.onExited(child);
         if (lineBuf.trim()) {

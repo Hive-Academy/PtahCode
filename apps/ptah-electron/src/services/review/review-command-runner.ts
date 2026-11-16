@@ -122,22 +122,27 @@ export class ReviewCommandRunner implements IReviewCommandRunner {
       let exited = false;
       let stopRequested = false;
       const stop = (): void => {
-        if (stopRequested || exited || child.exitCode !== null || child.signalCode !== null || !child.pid) return;
+        if (finished || !child.pid) return;
+        if (exited && process.platform === 'win32') {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          return;
+        }
+        if (stopRequested) return;
         stopRequested = true;
         void this.killTree(child.pid, 'SIGTERM', (error: unknown) => {
           this.logger.error('Review command tree termination failed',
             error instanceof Error ? error : new Error(String(error)));
-        });
+        }, { groupOnly: exited });
       };
       const abort = (): void => { timedOut = true; stop(); };
       signal?.addEventListener('abort', abort, { once: true });
       if (signal?.aborted) abort();
       const timer = setTimeout(() => {
-        if (child.exitCode !== null) return;
         timedOut = true;
         stop();
       }, input.timeoutMs);
-      child.once('exit', () => { exited = true; clearTimeout(timer); });
+      child.once('exit', () => { exited = true; });
       const append = (target: 'stdout' | 'stderr', chunk: Buffer): void => {
         const value = (target === 'stdout' ? stdoutDecoder : stderrDecoder).write(chunk);
         if (target === 'stdout') stdout = (stdout + value).slice(0, maxOutputBytes);

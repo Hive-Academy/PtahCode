@@ -88,6 +88,20 @@ describe('killProcessTree', () => {
     expect(kill).toHaveBeenCalledWith(-8080, 'SIGKILL');
   });
 
+  it('never signals a reused bare PID in group-only mode', async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const kill = jest.spyOn(process, 'kill').mockImplementation((pid) => {
+      if (pid < 0) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+      return true;
+    });
+    const reaped = killProcessTree(8084, 'SIGTERM', undefined, { groupOnly: true });
+    await jest.advanceTimersByTimeAsync(100);
+    await reaped;
+    expect(kill).not.toHaveBeenCalledWith(8084, 'SIGTERM');
+    expect(kill).not.toHaveBeenCalledWith(8084, 'SIGKILL');
+  });
+
   it('does not escalate when the POSIX process exits on SIGTERM', async () => {
     jest.useFakeTimers();
     Object.defineProperty(process, 'platform', {

@@ -55,8 +55,10 @@ export async function killProcessTree(
   pid: number,
   signal: NodeJS.Signals = 'SIGTERM',
   onError?: (error: unknown) => void,
+  options?: { groupOnly?: boolean },
 ): Promise<void> {
   if (process.platform === 'win32') {
+    if (options?.groupOnly) return;
     try {
       const { execFile } = await import('node:child_process');
       await new Promise<void>((resolve, reject) => {
@@ -76,13 +78,19 @@ export async function killProcessTree(
   const killGroup = (nextSignal: NodeJS.Signals): void => {
     try {
       process.kill(-pid, nextSignal);
-    } catch {
-      try {
-        process.kill(pid, nextSignal);
-      } catch (error: unknown) {
-        // ESRCH: the process already exited, which is the goal. Anything else
-        // (EPERM) left it alive; the caller is told, as on win32.
-        if (!isEsrch(error)) onError?.(error);
+    } catch (groupError: unknown) {
+      if (options?.groupOnly) {
+        // Never fall back to the bare PID: after the leader exited, that PID
+        // can belong to an unrelated process.
+        if (!isEsrch(groupError)) onError?.(groupError);
+      } else {
+        try {
+          process.kill(pid, nextSignal);
+        } catch (error: unknown) {
+          // ESRCH: the process already exited, which is the goal. Anything else
+          // (EPERM) left it alive; the caller is told, as on win32.
+          if (!isEsrch(error)) onError?.(error);
+        }
       }
     }
   };
