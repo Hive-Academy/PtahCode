@@ -641,8 +641,8 @@ export function buildAgentSpawnTool({
       'agents, which are user-configured Anthropic-compatible providers. ' +
       'WHICH of either family exists on this machine is a runtime fact — call ' +
       'ptah_agent_list; do not assume a provider from any list you have read. ' +
-      'The agent runs while you continue working. ' +
-      'You do NOT need to poll: when the agent reaches a terminal status, a ' +
+      'It may reply "starting" and runs while you work. ' +
+      'Do NOT poll: when the agent reaches a terminal status, a ' +
       '<agent-lane-completed> turn is pushed into this session carrying its ' +
       'status, exit code, duration and — when you declared "deliverables" — ' +
       'whether each declared file was actually written. A verdict of ' +
@@ -855,8 +855,8 @@ export function buildAgentStatusTool(): MCPToolDefinition {
     name: 'ptah_agent_status',
     description:
       'Check the status of a specific agent or all agents. ' +
-      'Returns agentId, status (running/completed/failed/timeout/stopped), ' +
-      'cli, task, startedAt, duration, exitCode, and — when the adapter reports ' +
+      'Returns agentId, status (starting/running/completed/failed/timeout/stopped), ' +
+      'cli, task, startedAt, and when available duration, exitCode, and — when the adapter reports ' +
       'one — the CLI Session ID. That session id is what ptah_agent_spawn takes ' +
       'as resume_session_id, so its presence here is the signal to resume a ' +
       'timed-out agent rather than respawn it and lose its context.',
@@ -882,7 +882,7 @@ export function buildAgentReadTool(): MCPToolDefinition {
     name: 'ptah_agent_read',
     description:
       'Read the stdout/stderr output from an agent. ' +
-      'For running agents, returns output captured so far. ' +
+      'For starting or running agents, returns output captured so far, or no output yet. ' +
       'By default returns the last 200 lines of each stream, fewer when they ' +
       'would exceed the result size limit (the newest lines are kept; a line ' +
       'too long to fit is shown in part, and the full window is then saved to ' +

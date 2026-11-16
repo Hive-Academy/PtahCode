@@ -14,6 +14,7 @@ import {
   AgentSteerInputComponent,
   LaneComposerComponent,
   agentRunDurationMs,
+  isRunningAgentWord,
   type InspectorLaneRunDetail,
 } from '@ptah-extension/chat-ui';
 import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
@@ -306,8 +307,8 @@ export class InspectorAgentsSectionComponent {
   );
   private readonly hasRunning = computed(
     () =>
-      this.orchestratorAgent()?.status === 'running' ||
-      this.rows().some((row) => row.agent.status === 'running'),
+      isRunningAgentWord(this.orchestratorAgent()?.status ?? null) ||
+      this.rows().some((row) => isRunningAgentWord(row.agent.status)),
   );
   private readonly now = injectWallClock('second', () => this.hasRunning());
 
@@ -322,7 +323,9 @@ export class InspectorAgentsSectionComponent {
   protected readonly total = computed(() => agentListTotal(this.list()));
 
   protected readonly runningCount = computed(
-    () => this.list().filter((row) => row.agent.status === 'running').length,
+    () =>
+      this.list().filter((row) => isRunningAgentWord(row.agent.status))
+        .length,
   );
 
   protected readonly selectedKey = computed(() => {
@@ -506,7 +509,7 @@ export class InspectorAgentsSectionComponent {
       usage,
       durationMs: agentRunDurationMs(
         {
-          running: agent.status === 'running',
+          running: isRunningAgentWord(agent.status),
           startedAt: agent.startedAt,
           endedAt: agent.endedAt,
           reportedMs: tray?.entry.durationMs,
