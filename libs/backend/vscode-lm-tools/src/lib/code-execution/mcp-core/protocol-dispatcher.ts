@@ -1274,6 +1274,7 @@ async function handleIndividualTool(
                   permission: spawnArgs.permission,
                   network: spawnArgs.network,
                 };
+                const force = spawnArgs.force;
                 const admitted = typeof ptahAPI.agent.beginSpawn === 'function';
                 const ticket = admitted ? ptahAPI.agent.beginSpawn(spawnRequest) : undefined;
                 const pipeline = async () => {
@@ -1302,8 +1303,8 @@ async function handleIndividualTool(
                   try {
                     return await agentSpawnTiming.run(namespaceTiming, () =>
                       ticket
-                        ? ptahAPI.agent.executeSpawn(ticket, spawnRequest)
-                        : ptahAPI.agent.spawn(spawnRequest),
+                        ? ptahAPI.agent.executeSpawn(ticket, spawnRequest, force)
+                        : ptahAPI.agent.spawn(spawnRequest, force),
                     );
                   } finally {
                     spawnedAt = performance.now();

@@ -320,11 +320,12 @@ export interface AgentNamespace {
   /**
    * Spawn a CLI agent with a task
    * @param request - Spawn configuration (task, cli, timeout, files, taskFolder)
+   * @param force - Skip memory gate condition (the fixed concurrent cap still applies)
    * @returns Spawn result with agentId
    */
-  spawn: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
+  spawn: (request: SpawnAgentRequest, force?: boolean) => Promise<SpawnAgentResult>;
   beginSpawn: (request: SpawnAgentRequest) => SpawnAdmission;
-  executeSpawn: (ticket: SpawnAdmission, request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
+  executeSpawn: (ticket: SpawnAdmission, request: SpawnAgentRequest, force?: boolean) => Promise<SpawnAgentResult>;
   markSpawnReplied: (ticket: SpawnAdmission) => boolean;
   failSpawn: (ticket: SpawnAdmission, error: unknown) => void;
 

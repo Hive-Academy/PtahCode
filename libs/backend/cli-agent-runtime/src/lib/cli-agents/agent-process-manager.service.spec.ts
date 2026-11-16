@@ -601,6 +601,43 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   });
 
   describe('spawn() with SDK adapter', () => {
+    it('queues a replied lane and releases it when memory becomes available', async () => {
+      setupVscodeConfig({ maxConcurrentAgents: 3 });
+      process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '10';
+      try {
+        const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+        await manager.spawn(request);
+        process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '1';
+        const ticket = manager.beginSpawn(request);
+        manager.markSpawnReplied(ticket);
+        const pending = manager.executeSpawn(ticket, request);
+        await Promise.resolve();
+        expect(manager.findAgentInfo(ticket.agentId)).toMatchObject({ status: 'starting', waitingForMemory: true });
+        process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '10';
+        await jest.advanceTimersByTimeAsync(1000);
+        await expect(pending).resolves.toMatchObject({ status: 'running' });
+      } finally {
+        delete process.env['PTAH_VERIFY_FAKE_FREE_GB'];
+      }
+    });
+
+    it('stops a queued replied lane with one completion signal', async () => {
+      setupVscodeConfig({ maxConcurrentAgents: 3 });
+      process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '10';
+      try {
+        const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+        await manager.spawn(request);
+        process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '1';
+        const ticket = manager.beginSpawn(request);
+        manager.markSpawnReplied(ticket);
+        const pending = manager.executeSpawn(ticket, request);
+        await manager.stop(ticket.agentId);
+        await expect(pending).rejects.toThrow('stopped');
+        expect(laneCompletion.signal).toHaveBeenCalledTimes(1);
+      } finally {
+        delete process.env['PTAH_VERIFY_FAKE_FREE_GB'];
+      }
+    });
     it('discards a pre-reply refusal without an exit event', () => {
       const ticket = manager.beginSpawn({ task: 'blocked', cli: 'codex' });
       const exited = jest.fn();
@@ -617,6 +654,9 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       if (replied) manager.markSpawnReplied(ticket);
       const exited = jest.fn();
       manager.events.on('agent:exited', exited);
+      sdkAdapter.runSdk.mockImplementationOnce(() => new Promise<SdkHandle>(() => undefined));
+      void manager.executeSpawn(ticket, request).catch(() => undefined);
+      await jest.advanceTimersByTimeAsync(1);
       await jest.advanceTimersByTimeAsync(120_000);
       expect(manager.findAgentInfo(ticket.agentId)?.status).toBe(replied ? 'failed' : undefined);
       expect(exited).toHaveBeenCalledTimes(replied ? 1 : 0);
@@ -652,7 +692,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(manager.getStatus(ticket.agentId)).toMatchObject({
         agentId: ticket.agentId, status: 'starting', startedAt: ticket.startedAt,
       });
-      expect(() => manager.beginSpawn(request)).toThrow('Maximum concurrent agent limit reached');
+      expect(() => manager.beginSpawn({ ...request, force: true })).toThrow('Maximum concurrent agent limit reached');
     });
     it('moves the admitted record to running after the SDK handle arrives', async () => {
       const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
