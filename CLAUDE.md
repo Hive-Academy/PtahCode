@@ -6,6 +6,8 @@ Wide test runs exhaust the developer machine's RAM. These rules are mandatory fo
 agent, every subagent and every CLI lane. Repeat them in any task prompt you hand to a lane.
 
 - Verify with `npm run verify` (CLI lanes: see "Two-level check"). It runs `nx affected -t lint test typecheck --base=main`.
+  - In a worktree, `npm run verify` uses `NX_DAEMON=false` so no daemon stays alive there;
+    set `NX_DAEMON=true` to override.
   - Only some projects or targets: `npm run verify -- -p A,B` / `npm run verify -- -t test -p A`.
   - Extra Nx or Jest flags go after a second `--`: `npm run verify -- -p A -- --testPathPatterns=foo`.
   - `typecheck` does not compile Angular templates. After a template change run
