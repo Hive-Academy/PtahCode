@@ -307,7 +307,7 @@ export class InspectorAgentsSectionComponent {
   );
   private readonly hasRunning = computed(
     () =>
-      this.orchestratorAgent()?.status === 'running' ||
+      isRunningAgentWord(this.orchestratorAgent()?.status ?? null) ||
       this.rows().some((row) => isRunningAgentWord(row.agent.status)),
   );
   private readonly now = injectWallClock('second', () => this.hasRunning());
