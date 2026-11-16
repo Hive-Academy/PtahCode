@@ -348,6 +348,18 @@ describe('PtahSettingsLayoutComponent', () => {
     expect(host.emitted).toEqual(['accounts']);
   });
 
+  it('does not cancel Tab, Enter, Space or arrow keys on navigation buttons', () => {
+    host.navMode.set('navigation');
+    fixture.detectChanges();
+    const buttons = Array.from(
+      (q('[data-testid="settings-layout-tablist"]') as HTMLElement).querySelectorAll('button'),
+    );
+    for (const k of ['Tab', 'Enter', ' ', 'ArrowDown', 'Home']) {
+      expect(key(buttons[1], k).defaultPrevented).toBe(false);
+    }
+    expect(host.emitted).toEqual([]);
+  });
+
   it('indents a child and marks its parent as in section', () => {
     host.navMode.set('navigation');
     host.tabs.set([

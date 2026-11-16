@@ -34,6 +34,7 @@ export interface LaneCompletionDetails {
   readonly duration?: string;
   readonly exitCode?: number;
   readonly reports?: number;
+  readonly reportsFailed?: number;
   readonly deliverables?: readonly LaneDeliverableDetail[] | null;
   readonly task?: string;
   readonly cliSessionId?: string;
@@ -50,6 +51,7 @@ export function parseLaneCompletion(body: string): LaneCompletionDetails {
   let duration: string | undefined;
   let exitCode: number | undefined;
   let reports: number | undefined;
+  let reportsFailed: number | undefined;
   let deliverables: LaneDeliverableDetail[] | null | undefined;
   let task: string | undefined;
   let cliSessionId: string | undefined;
@@ -87,12 +89,16 @@ export function parseLaneCompletion(body: string): LaneCompletionDetails {
     if (count) { reports = Number(count[1]); continue; }
     const session = /^CLI Session ID: (.+?)(?: — pass it as resume_session_id.*)?$/.exec(line);
     if (session) { cliSessionId = session[1]; continue; }
+    const delivery = /^Report delivery: \d+ sent; (\d+) failed\.$/.exec(line);
+    if (delivery) reportsFailed = Number(delivery[1]);
+    // The failed-report recovery step must stay visible; other Next lines are prompts for the parent.
+    if (/^Next: \d+ report attempts failed/.test(line)) { extra.push(line); continue; }
     if (line.startsWith('Next:') ||
       line.startsWith('Read the lane output before you trust this result') ||
       line.startsWith('declare "deliverables"')) continue;
     extra.push(line);
   }
-  return { status, duration, exitCode, reports, deliverables, task, cliSessionId, extra };
+  return { status, duration, exitCode, reports, reportsFailed, deliverables, task, cliSessionId, extra };
 }
 
 export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEventMetrics | null = null, laterCompleted = false, monitorStatus: string | null = null): {
@@ -129,6 +135,11 @@ export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEven
       : { label: 'Report', tone: 'neutral', icon: FileText };
 
   const stats: LaneEventStat[] = [];
+  // First, because the collapsed card truncates the end of the stat line.
+  if (completion?.reportsFailed) {
+    const failedReports = completion.reportsFailed;
+    stats.push({ label: 'Failed reports', value: String(failedReports), compact: `${failedReports} failed ${failedReports === 1 ? 'report' : 'reports'}` });
+  }
   if (completion?.duration) stats.push({ label: 'Duration', value: completion.duration, compact: completion.duration });
   const reportCount = completion?.reports ?? row.events.filter(event => event.kind === 'report').length;
   if (completion?.reports !== undefined || reportCount > 0) {
