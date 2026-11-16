@@ -261,18 +261,6 @@ describe('CliOrchestrationMatrixComponent', () => {
     }));
     fixture.detectChanges();
   }
-  /** Decision 1: the Uninstalled group starts collapsed; most cases look inside it. */
-  function expandUninstalled() {
-    q<HTMLButtonElement>(
-      '[data-testid="cli-matrix-uninstalled-toggle"]',
-    )?.click();
-    fixture.detectChanges();
-  }
-  /** V36-7: Edit and Delete live in the row's "More actions" popover. */
-  function _more(id: string) {
-    q<HTMLButtonElement>(`[data-testid="cli-matrix-more-${id}"]`)?.click();
-    fixture.detectChanges();
-  }
   function _clickNamed(root: Element | null, name: string): void {
     const button = Array.from(root?.querySelectorAll('button') ?? [])
       .find((candidate) => candidate.textContent?.trim() === name);
@@ -334,7 +322,6 @@ describe('CliOrchestrationMatrixComponent', () => {
     feedback = TestBed.inject(SettingsSaveFeedbackService);
     fixture = TestBed.createComponent(CliOrchestrationMatrixComponent);
     fixture.detectChanges();
-    expandUninstalled();
   });
   afterEach(() => {
     feedback.dismiss();

@@ -316,6 +316,10 @@ export type LaneTableRow = CliMatrixRow & {
                         />
                       }
                     </ptah-native-popover>
+                  } @else {
+                    <span aria-hidden="true">·</span>
+                    <!-- A generic span takes no aria-label: the hidden prefix names the value instead. -->
+                    <span class="text-base-content-muted" data-testid="lanes-effort-na"><span class="sr-only">Effort </span>n/a</span>
                   }
                 </span>
               </ng-template>
@@ -347,7 +351,7 @@ export type LaneTableRow = CliMatrixRow & {
                 <button
                   role="menuitem"
                   type="button"
-                  (click)="showDetail(row, row.kind === 'system' ? 'capabilities' : undefined); capabilities.emit(row)"
+                  (click)="showDetail(row, 'capabilities'); capabilities.emit(row)"
                 >
                   All capabilities
                 </button>
@@ -483,7 +487,7 @@ export type LaneTableRow = CliMatrixRow & {
                   <dd>
                     <ptah-table-row-actions [rowLabel]="row.name">
                       <button role="menuitem" type="button" [disabled]="rowBusy(row) || testingRows()[row.id] || (row.kind === 'system' && !row.installed)" (click)="test.emit(row)">Test</button>
-                      <button role="menuitem" type="button" (click)="capabilities.emit(row)">All capabilities</button>
+                      <button role="menuitem" type="button" (click)="showDetail(row, 'capabilities'); capabilities.emit(row)">All capabilities</button>
                       @if (row.kind === 'instance') {
                         <button role="menuitem" type="button" [disabled]="rowBusy(row) || !canWrite()" (click)="edit.emit(row)">Edit</button>
                         <button role="menuitem" type="button" [disabled]="rowBusy(row) || !canWrite()" (click)="requestDelete(row, $event)">Delete</button>

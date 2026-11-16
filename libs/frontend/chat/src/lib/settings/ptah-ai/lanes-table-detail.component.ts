@@ -24,6 +24,7 @@ import {
   type CliProviderInfoKind,
 } from './cli-provider-card-popovers.component';
 import { CliCapabilityCellsComponent } from './cli-capability-cells.component';
+import { cliCapabilityView } from './cli-capability-view';
 
 @Component({
   selector: 'ptah-lanes-table-detail',
@@ -224,8 +225,40 @@ import { CliCapabilityCellsComponent } from './cli-capability-cells.component';
       >
         Edit tiers
       </button>
+      <ptah-native-popover
+        [isOpen]="isOpen('capabilities')"
+        [keepInViewport]="true"
+        placement="bottom-start"
+        [hasBackdrop]="true"
+        backdropClass="transparent"
+        (closed)="popoverClosed.emit()"
+      >
+        <button
+          trigger
+          type="button"
+          ptahButton
+          variant="ghost"
+          size="xs"
+          data-popover-kind="capabilities"
+          [attr.aria-expanded]="isOpen('capabilities')"
+          [attr.aria-controls]="'instance-capabilities-' + instance.id"
+          (click)="kindToggled.emit('capabilities')"
+        >
+          Show capabilities
+        </button>
+        @if (isOpen('capabilities')) {
+          <div content [id]="'instance-capabilities-' + instance.id" class="max-h-72 w-72 overflow-auto text-xs" style="padding: var(--ptah-gap-field)">
+            @for (group of capabilityView(instance).groups; track group.heading) {
+              <h4 class="font-semibold" style="margin-top: var(--ptah-gap-field)">{{ group.heading }}</h4>
+              @for (line of group.lines; track line.label) {
+                <p style="margin-top: calc(var(--ptah-gap-field) / 2)" [title]="line.reason || ''">{{ line.label }}: {{ line.value }} @if (line.reason) { · {{ line.reason }} }</p>
+              }
+            }
+          </div>
+        }
+      </ptah-native-popover>
     }
-    <div data-testid="cli-matrix-test-result" aria-live="polite">
+    <div data-testid="cli-matrix-test-result">
       {{ testing() ? 'Running…' : testResult() || 'Not run yet' }}
     </div>
   `,
@@ -266,5 +299,8 @@ export class LanesTableDetailComponent {
   ];
   protected isOpen(kind: CliProviderInfoKind | 'credentials'): boolean {
     return this.openKind() === kind;
+  }
+  protected capabilityView(row: InstanceCliMatrixRow) {
+    return cliCapabilityView(row.manifest);
   }
 }

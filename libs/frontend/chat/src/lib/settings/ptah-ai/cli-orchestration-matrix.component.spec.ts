@@ -252,7 +252,6 @@ describe('CliOrchestrationMatrixComponent', () => {
     }));
     fixture.detectChanges();
   }
-  function _expandUninstalled() { q<HTMLButtonElement>('[data-testid="cli-matrix-uninstalled-toggle"]')?.click(); fixture.detectChanges(); }
   beforeAll(() => {
     HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.setAttribute('open', ''); };
     HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) { this.removeAttribute('open'); };

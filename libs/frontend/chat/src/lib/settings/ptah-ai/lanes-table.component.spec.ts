@@ -263,6 +263,9 @@ describe('LanesTableComponent', () => {
       ).disabled,
     ).toBe(true);
     expect(q(host, '[aria-label="Effort default for Copilot"]')).toBeNull();
+    // A row with no effort editor shows "n/a", with a hidden "Effort" prefix for screen readers.
+    const na = q(host, '[data-testid="cli-provider-card-copilot"] [data-testid="lanes-effort-na"]');
+    expect(na?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Effort n/a');
   });
 
   it('opens the instance Model and Effort editors', async () => {
@@ -608,15 +611,21 @@ describe('LanesTableComponent', () => {
       const version = q(host, '[data-testid="cli-matrix-version"]');
       expect(version?.textContent).toContain('v1.2.3');
       expect(version?.getAttribute('title')).toBe('v1.2.3');
+      // The cell holds the model and the effort; the model button holds the label only.
       const model = q(host, '[data-testid="cli-matrix-model"]');
-      expect(model?.textContent?.trim()).toBe('gpt-5');
+      expect(
+        model?.querySelector('[data-popover-kind="model"]')?.textContent?.trim(),
+      ).toBe('gpt-5');
       expect(model?.getAttribute('title')).toBe('gpt-5 (GPT 5)');
     });
 
     it('shows CLI default for an empty model', async () => {
       const { host } = await mount([system('codex')]);
       expect(
-        q(host, '[data-testid="cli-matrix-model"]')?.textContent?.trim(),
+        q(
+          host,
+          '[data-testid="cli-matrix-model"] [data-popover-kind="model"]',
+        )?.textContent?.trim(),
       ).toBe('CLI default');
     });
   });

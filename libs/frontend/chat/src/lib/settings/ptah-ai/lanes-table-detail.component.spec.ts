@@ -67,6 +67,21 @@ describe('LanesTableDetailComponent', () => {
     expect(emit).toHaveBeenCalledWith(instance);
   });
 
+  it('opens rich capabilities for an instance row', () => {
+    const instance = { ...row(), kind: 'instance' as const, providerId: 'local', keyStatus: null, tiers: [], selectedModel: null, lastTest: null, runtimeStatus: null };
+    const { fixture, host } = mount(instance);
+    const emit = jest.fn();
+    fixture.componentInstance.kindToggled.subscribe(emit);
+    host.querySelector<HTMLButtonElement>('[data-popover-kind="capabilities"]')?.click();
+    expect(emit).toHaveBeenCalledWith('capabilities');
+    fixture.componentRef.setInput('openKind', 'capabilities');
+    fixture.detectChanges();
+    const content = host.querySelector('#instance-capabilities-codex');
+    expect(content?.textContent).toContain('Messaging');
+    expect(content?.textContent).toContain('Permission');
+    expect(content?.textContent).toContain('Unverified');
+  });
+
   it('has only one open popover at a time', () => {
     const { fixture, host } = mount();
     fixture.componentRef.setInput('openKind', 'info');
