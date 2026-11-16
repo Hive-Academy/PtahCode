@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  contentChild,
+  Directive,
+  input,
+  output,
+  TemplateRef,
+} from '@angular/core';
 import {
   PtahAlertComponent,
   PtahButtonDirective,
@@ -8,10 +17,21 @@ import {
 
 export type SettingsSectionState = 'loading' | 'error' | 'ready' | 'empty';
 
+/**
+ * Marks the ready content of a `ptah-settings-section-state`:
+ * `<ng-template ptahSectionReady>...</ng-template>`.
+ * Angular creates this content only in the ready state. Plain projected content
+ * is created in every state, so its constructors, effects and RPC calls would run
+ * during loading, error and empty.
+ */
+@Directive({ selector: 'ng-template[ptahSectionReady]', standalone: true })
+export class SettingsSectionReadyDirective {}
+
 @Component({
   selector: 'ptah-settings-section-state',
   standalone: true,
   imports: [
+    NgTemplateOutlet,
     PtahAlertComponent,
     PtahButtonDirective,
     PtahSkeletonComponent,
@@ -43,12 +63,18 @@ export type SettingsSectionState = 'loading' | 'error' | 'ready' | 'empty';
         />
       }
       @case ('ready') {
-        <ng-content />
+        @if (readyTemplate(); as ready) {
+          <ng-container [ngTemplateOutlet]="ready" />
+        }
       }
     }
   `,
 })
 export class SettingsSectionStateComponent {
+  protected readonly readyTemplate = contentChild(SettingsSectionReadyDirective, {
+    read: TemplateRef,
+  });
+
   readonly state = input.required<SettingsSectionState>();
   readonly errorText = input('Could not load this section.');
   readonly retryLabel = input('Retry');

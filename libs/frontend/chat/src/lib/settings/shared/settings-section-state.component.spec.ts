@@ -1,10 +1,27 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { SettingsSectionStateComponent, type SettingsSectionState } from './settings-section-state.component';
+import {
+  SettingsSectionReadyDirective,
+  SettingsSectionStateComponent,
+  type SettingsSectionState,
+} from './settings-section-state.component';
+
+let probeInstances = 0;
+
+@Component({
+  selector: 'ptah-ready-probe',
+  standalone: true,
+  template: '<p data-testid="ready-content">Loaded providers</p>',
+})
+class ReadyProbeComponent {
+  constructor() {
+    probeInstances += 1;
+  }
+}
 
 @Component({
   standalone: true,
-  imports: [SettingsSectionStateComponent],
+  imports: [SettingsSectionStateComponent, SettingsSectionReadyDirective, ReadyProbeComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-settings-section-state
@@ -19,7 +36,7 @@ import { SettingsSectionStateComponent, type SettingsSectionState } from './sett
       (retry)="retry()"
       (emptyAction)="emptyAction()"
     >
-      <p data-testid="ready-content">Loaded providers</p>
+      <ng-template ptahSectionReady><ptah-ready-probe /></ng-template>
     </ptah-settings-section-state>
   `,
 })
@@ -30,7 +47,10 @@ class HostComponent {
 }
 
 describe('SettingsSectionStateComponent', () => {
-  beforeEach(() => TestBed.configureTestingModule({ imports: [HostComponent] }));
+  beforeEach(() => {
+    probeInstances = 0;
+    TestBed.configureTestingModule({ imports: [HostComponent] });
+  });
 
   function render(state: SettingsSectionState) {
     const fixture = TestBed.createComponent(HostComponent);
@@ -67,8 +87,17 @@ describe('SettingsSectionStateComponent', () => {
     expect(element.querySelector('[data-testid="ready-content"]')).toBeNull();
   });
 
-  it('projects content only in the ready state', () => {
+  it.each<SettingsSectionState>(['loading', 'error', 'empty'])(
+    'does not create the ready content in the %s state',
+    (state) => {
+      render(state);
+      expect(probeInstances).toBe(0);
+    },
+  );
+
+  it('creates the ready content only in the ready state', () => {
     const { fixture, host, element } = render('ready');
+    expect(probeInstances).toBe(1);
     expect(element.querySelector('[data-testid="ready-content"]')?.textContent).toContain('Loaded providers');
     host.state.set('loading');
     fixture.detectChanges();

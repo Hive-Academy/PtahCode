@@ -18,17 +18,20 @@ export type SettingsConnectionTestState = 'idle' | 'running' | 'ok' | 'fail';
         [attr.data-testid]="testId()"
         (click)="test.emit()"
       >{{ label() }}</button>
-      @switch (state()) {
-        @case ('running') {
-          <ptah-status status="running" [label]="message() || 'Testing connection'" />
+      <!-- The live region stays in the DOM in every state, so a screen reader announces each result. -->
+      <span role="status" aria-live="polite" data-ptah-connection-result>
+        @switch (state()) {
+          @case ('running') {
+            <ptah-status status="running" [label]="message() || 'Testing connection'" />
+          }
+          @case ('ok') {
+            <ptah-status status="online" [label]="message() || 'Connection works'" />
+          }
+          @case ('fail') {
+            <ptah-status status="failed" [label]="message() || 'Connection failed'" />
+          }
         }
-        @case ('ok') {
-          <ptah-status status="online" [label]="message() || 'Connection works'" />
-        }
-        @case ('fail') {
-          <ptah-status status="failed" [label]="message() || 'Connection failed'" />
-        }
-      }
+      </span>
     </div>
   `,
 })
