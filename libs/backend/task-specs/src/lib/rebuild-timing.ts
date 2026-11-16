@@ -2,6 +2,11 @@ import type { Logger } from '@ptah-extension/vscode-core';
 
 export interface RebuildTiming {
   trigger: string;
+  rootId: string;
+  activeRoots: number;
+  scanMs: number;
+  rootRebuilds: number;
+  triggerRebuilds: number;
   enumerateMs: number;
   readMs: number;
   parseValidateMs: number;
@@ -20,6 +25,11 @@ export function logRebuildTiming(logger: Pick<Logger, 'debug' | 'info' | 'warn'>
   const message = '[task-specs] index rebuild timing';
   const metrics = {
     trigger: timing.trigger,
+    rootId: timing.rootId,
+    activeRoots: timing.activeRoots,
+    scanMs: Math.round(timing.scanMs),
+    rootRebuilds: timing.rootRebuilds,
+    triggerRebuilds: timing.triggerRebuilds,
     enumerateMs: Math.round(timing.enumerateMs),
     readMs: Math.round(timing.readMs),
     parseValidateMs: Math.round(timing.parseValidateMs),

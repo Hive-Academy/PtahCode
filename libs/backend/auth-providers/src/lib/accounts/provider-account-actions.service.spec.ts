@@ -41,7 +41,8 @@ class ConsoleChild extends EventEmitter implements SpawnedProcessHandle {
 }
 
 const signedIn = (accountClass: 'P' | 'O' = 'P'): ClaudeStatusProbeResult => ({
-  status: { loggedIn: true, accountClass, identityReference: 'identity-ref-0001', configDirectoryMatches: true },
+  status: { loggedIn: true, accountClass, identityReference: 'identity-ref-0001',
+    emailOnlyReference: 'email-only-ref-0001', organizationPresent: true, configDirectoryMatches: true },
   terminated: true,
 });
 const signedOut: ClaudeStatusProbeResult = { status: { loggedIn: false } as ClaudeAccountStatus, terminated: true };
@@ -84,7 +85,7 @@ describe('ProviderAccountActionsService', () => {
   let actions: ProviderAccountActionsService;
   let id: string;
   let context: ClaudeAuthContext;
-  let commands: { status: jest.Mock; logout: jest.Mock };
+  let commands: { status: jest.Mock; logout: jest.Mock; revealEmail: jest.Mock };
   let certifier: { authContext: jest.Mock; checkCoverage: jest.Mock };
   let loginConsole: { launch: jest.Mock; fallbackScript: jest.Mock };
   let completeAuth: jest.SpyInstance;
@@ -121,7 +122,9 @@ describe('ProviderAccountActionsService', () => {
         fingerprint: { size: 1, mtimeMs: 1 } },
       policy: { coverage: 'win32@2.1.310' } as ClaudeAuthContext['policy'],
     });
-    commands = { status: jest.fn().mockResolvedValue(signedOut), logout: jest.fn().mockResolvedValue({ exitCode: 0, terminated: true }) };
+    commands = { status: jest.fn().mockResolvedValue(signedOut), logout: jest.fn().mockResolvedValue({ exitCode: 0, terminated: true }),
+      revealEmail: jest.fn().mockResolvedValue({ email: 'person@example.test', identityReference: 'identity-ref-0001',
+        emailOnlyReference: 'email-only-ref-0001', terminated: true }) };
     certifier = { authContext: jest.fn().mockResolvedValue({ ok: true, context }), checkCoverage: jest.fn().mockResolvedValue({ ok: true }) };
     loginConsole = {
       launch: jest.fn().mockResolvedValue({ kind: 'unavailable' }),
@@ -166,6 +169,16 @@ describe('ProviderAccountActionsService', () => {
   });
 
   describe('fallback mode', () => {
+    it('re-probes an early sign-in before persisting its identity', async () => {
+      await actions.startSignIn(command());
+      commands.status.mockResolvedValueOnce({ status: { ...signedIn().status,
+        identityReference: 'email-only-ref-0001', organizationPresent: false }, terminated: true })
+        .mockResolvedValueOnce(signedIn());
+      await advance(2_000);
+      expect(commands.status).toHaveBeenCalledTimes(2);
+      expect(store.identityRef(id)).toBe('identity-ref-0001');
+    });
+
     it('returns the generated script for the auth context and completes when every child closed', async () => {
       const started = await actions.startSignIn(command());
       expect(started).toEqual({ ...accountActionResult('ok'), fallback: { platform: 'win32', script: 'Set-Location fixture' } });
@@ -386,6 +399,45 @@ describe('ProviderAccountActionsService', () => {
   });
 
   describe('status and sign-out', () => {
+    it('reveals through the gated status route without storing or broadcasting email', async () => {
+      signIn('signed-in');
+      const before = store.get(id);
+      expect(await actions.revealEmail(id)).toEqual({ ok: true, email: 'person@example.test' });
+      expect(commands.revealEmail).toHaveBeenCalledTimes(1);
+      expect(store.get(id)).toMatchObject({ revision: before.revision, state: 'signed-in' });
+      expect(JSON.stringify(store.get(id))).not.toContain('person@example.test');
+    });
+
+    it('refuses unsigned and missing profiles before launching a reveal probe', async () => {
+      expect((await actions.revealEmail(id)).ok).toBe(false);
+      expect((await actions.revealEmail('missing-profile-0001')).ok).toBe(false);
+      expect(commands.revealEmail).not.toHaveBeenCalled();
+    });
+
+    it('refuses a different identity and never records the returned email', async () => {
+      signIn('signed-in');
+      commands.revealEmail.mockResolvedValueOnce({ email: 'other@example.test',
+        identityReference: 'other-identity-ref', emailOnlyReference: 'other-email-ref', terminated: true });
+      expect(await actions.revealEmail(id)).toEqual({ ok: false, code: 'identity-mismatch' });
+      expect(store.identityRef(id)).toBe('identity-ref-0001');
+      expect(JSON.stringify(store.get(id))).not.toContain('other@example.test');
+    });
+    it('re-probes an early email-only status and stores the full reference', async () => {
+      commands.status.mockResolvedValueOnce({ status: { ...signedIn().status, identityReference: 'email-only-ref-0001',
+        organizationPresent: false }, terminated: true }).mockResolvedValueOnce(signedIn());
+      expect((await actions.readStatus(target())).code).toBe('ok');
+      expect(commands.status).toHaveBeenCalledTimes(2);
+      expect(store.identityRef(id)).toBe('identity-ref-0001');
+    });
+
+    it('accepts a genuinely organization-free account after one bounded re-probe', async () => {
+      const early = { status: { ...signedIn().status, identityReference: 'email-only-ref-0001',
+        organizationPresent: false }, terminated: true };
+      commands.status.mockResolvedValue(early);
+      expect((await actions.readStatus(target())).code).toBe('ok');
+      expect(commands.status).toHaveBeenCalledTimes(2);
+      expect(store.identityRef(id)).toBe('email-only-ref-0001');
+    });
     it.each([
       [signedIn(), 'signed-in', 'identity-ref-0001', 'ok'],
       [signedOut, 'signed-out', null, 'ok'],

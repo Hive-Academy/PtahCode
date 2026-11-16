@@ -24,7 +24,7 @@ import { LucideAngularModule, Check, Star, Cpu } from 'lucide-angular';
 import { LlmProviderStateService } from '@ptah-extension/core';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective, PtahSelectDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSelectDirective, PtahBadgeDirective, PtahFieldComponent, PtahFormSectionComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
 
 export const COULD_NOT_SAVE_LM_MODEL = 'Could not save the VS Code language model.';
 export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provider.';
@@ -32,26 +32,27 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
 @Component({
   selector: 'ptah-vscode-lm-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahSelectDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahSelectDirective, PtahBadgeDirective, PtahFieldComponent, PtahFormSectionComponent, PtahSkeletonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     @if (vscodeLmProvider(); as provider) {
-      <section
-        class="border-b border-base-content/10 pb-7"
+      <ptah-form-section
+        heading="VS Code language model"
+        description="Uses models from VS Code's Language Model API. No API key required."
         aria-labelledby="vscode-lm-heading"
         data-glass-surface="content"
       >
         <!-- Provider header row -->
-        <div class="flex items-center justify-between gap-3 mb-2">
-          <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center justify-between gap-[var(--ptah-gap-field)] mb-[var(--ptah-gap-controls)]">
+          <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
             <lucide-angular [img]="CpuIcon" class="w-4 h-4 text-secondary shrink-0" aria-hidden="true" />
-            <h2 id="vscode-lm-heading" class="text-xs font-bold uppercase tracking-wider text-base-content">
+            <h2 id="vscode-lm-heading" class="sr-only">
               {{ provider.displayName }}
             </h2>
             @if (provider.provider === llmState.defaultProvider()) {
               <span
-                class="badge badge-outline badge-xs gap-1 text-base-content"
+                ptahBadge appearance="outline" size="xs" class="text-base-content"
                 aria-label="Default provider"
               >
                 <lucide-angular [img]="StarIcon" class="w-3 h-3 text-primary shrink-0" aria-hidden="true" />
@@ -59,7 +60,7 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
               </span>
             }
             <span
-              class="badge badge-outline badge-xs gap-1 text-base-content"
+              ptahBadge appearance="outline" size="xs" class="text-base-content"
               aria-label="Provider configured"
             >
               <lucide-angular [img]="CheckIcon" class="w-3 h-3 text-success shrink-0" aria-hidden="true" />
@@ -83,14 +84,9 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
         </div>
 
         <!-- Model selection dropdown (A34) -->
-        <div class="flex items-center gap-2 mt-1 min-w-0">
-          <label
-            class="text-xs font-medium text-base-content shrink-0"
-            for="vscode-lm-model"
-          >
-            Model:
-          </label>
+        <div class="flex items-center gap-[var(--ptah-gap-controls)] mt-[var(--ptah-gap-label)] min-w-0">
           @if (vsCodeModels().length > 0) {
+            <ptah-field label="Model" appearance="stacked">
             <select
               id="vscode-lm-model"
               ptahSelect size="xs" class="flex-1 min-w-0 max-w-[260px] text-xs truncate text-base-content"
@@ -109,14 +105,15 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
                 </option>
               }
             </select>
+            </ptah-field>
             @if (savingModel()) {
-              <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+              <ptah-skeleton shape="lines" [lines]="1" />
             }
           } @else if (llmState.loadingModels().has('vscode-lm')) {
             <span
-              class="text-xs text-base-content-muted flex items-center gap-1"
+              class="text-xs text-base-content-muted flex items-center gap-[var(--ptah-gap-label)]"
             >
-              <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+              <ptah-skeleton shape="lines" [lines]="1" />
               Loading models...
             </span>
           } @else {
@@ -128,10 +125,10 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
 
         <!-- Capabilities (A35) -->
         @if (provider.capabilities.length > 0) {
-          <div class="flex flex-wrap gap-1 mt-2">
+          <div class="flex flex-wrap gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-controls)]">
             @for (cap of provider.capabilities; track cap) {
               <span
-                class="badge badge-outline badge-xs text-base-content"
+                ptahBadge appearance="outline" size="xs" class="text-base-content"
               >
                 {{ formatCapability(cap) }}
               </span>
@@ -139,16 +136,7 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
           </div>
         }
 
-        <!-- Info note (A35) -->
-        <p class="text-xs text-base-content-muted mt-2">
-          Uses models from VS Code's Language Model API. No API key required.
-        </p>
-      </section>
-    }
-  `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
+      </ptah-form-section>
     }
   `,
 })

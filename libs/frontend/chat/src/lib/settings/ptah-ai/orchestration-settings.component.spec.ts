@@ -299,14 +299,11 @@ describe('OrchestrationSettingsComponent', () => {
       '[data-testid="capability-matrix-setting"]',
     );
     expect(rotation).not.toBeNull();
-    expect(matrix).not.toBeNull();
+    expect(matrix).toBeNull();
     expect(routing?.compareDocumentPosition(rotation as Node)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(rotation?.compareDocumentPosition(matrix as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(matrix?.compareDocumentPosition(firstGroup as Node)).toBe(
+    expect(rotation?.compareDocumentPosition(firstGroup as Node)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });

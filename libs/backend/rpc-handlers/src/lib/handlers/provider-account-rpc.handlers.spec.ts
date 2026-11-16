@@ -194,6 +194,11 @@ const OK: ProviderAccountActionResult = { code: 'ok', summary: 'Done.' };
 
 /** Actions port fake: records each command and answers with a queued result. */
 class FakeActions implements ProviderAccountRpcActions {
+  revealResult: Awaited<ReturnType<ProviderAccountRpcActions['revealEmail']>> = { ok: true, email: 'person@example.test' };
+  revealEmail(profileId: string): Promise<Awaited<ReturnType<ProviderAccountRpcActions['revealEmail']>>> {
+    this.commands.push({ method: 'revealEmail', command: profileId });
+    return Promise.resolve(this.revealResult);
+  }
   readonly commands: Array<{
     readonly method: string;
     readonly command: unknown;
@@ -346,7 +351,39 @@ const addParams = (n: number, label = 'Personal') => ({
 });
 
 describe('ProviderAccountRpcHandlers', () => {
-  it('registers exactly the eleven provider account methods', () => {
+  describe('email reveal', () => {
+    it('returns the email only on an explicit call for a signed-in account', async () => {
+      const { call, service, actions, sent } = setup();
+      seedProfile(service);
+      await expect(call('provider:revealAccountEmail', { profileId: PROFILE_A }))
+        .resolves.toEqual({ ok: true, email: 'person@example.test' });
+      expect(actions.commands).toEqual([{ method: 'revealEmail', command: PROFILE_A }]);
+      expect(sent).toEqual([]);
+    });
+
+    it('refuses unknown and unsigned profiles without probing', async () => {
+      const { call, service, actions } = setup();
+      await expect(call('provider:revealAccountEmail', { profileId: PROFILE_A }))
+        .resolves.toMatchObject({ ok: false, result: { code: 'missing-profile' } });
+      seedProfile(service);
+      const account = service.profiles.get(PROFILE_A);
+      if (!account) throw new Error('fixture account missing');
+      service.profiles.set(PROFILE_A, { ...account, state: 'signed-out' });
+      await expect(call('provider:revealAccountEmail', { profileId: PROFILE_A }))
+        .resolves.toMatchObject({ ok: false, result: { code: 'identity-unproved' } });
+      expect(actions.commands).toEqual([]);
+    });
+
+    it('maps a refused probe to fixed copy without exposing raw text', async () => {
+      const { call, service, actions } = setup();
+      seedProfile(service);
+      actions.revealResult = { ok: false, code: 'identity-unproved' };
+      const result = await call('provider:revealAccountEmail', { profileId: PROFILE_A });
+      expect(result).toMatchObject({ ok: false, result: { code: 'identity-unproved' } });
+      expect(JSON.stringify(result)).not.toContain('person@example.test');
+    });
+  });
+  it('registers exactly the provider account methods', () => {
     const { rpcHandler } = setup();
     const names = rpcHandler.registerMethod.mock.calls.map((args) => args[0]);
     expect(names).toHaveLength(PROVIDER_ACCOUNT_RPC_METHOD_NAMES.length);
@@ -396,6 +433,8 @@ describe('ProviderAccountRpcHandlers', () => {
         'provider:getAccountStatus',
         { provider: 'gemini', profileId: PROFILE_A },
       ],
+      ['provider:revealAccountEmail', { profileId: '../escape' }],
+      ['provider:revealAccountEmail', { profileId: PROFILE_A, email: 'injected@example.test' }],
       [
         'provider:startAccountSignIn',
         {

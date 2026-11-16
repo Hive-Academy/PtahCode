@@ -151,6 +151,9 @@ function harness(
     }),
     maxConcurrentAgents: () => cap, sdkIdleReleaseMs: () => 100,
     scopedWorkspaceRoot: () => undefined, isWithinScope: () => true,
+    minFreeMemoryGb: jest.fn().mockReturnValue(0),
+    spawnQueueTimeoutMs: jest.fn().mockReturnValue(300_000),
+    freeMemory: jest.fn().mockReturnValue(10 * 1024 ** 3),
   });
   const output = stub<Args[6]>({
     discard: jest.fn(), appendOutput: jest.fn(), markTurnBoundary: jest.fn(),

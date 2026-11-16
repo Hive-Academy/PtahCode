@@ -107,7 +107,7 @@ export const AgentSpawnArgsSchema = z
     // 'not-routed' default is recorded at write time, so the spawn never
     // takes it. Never forwarded to the CLI.
     routingSource: z.enum(['model', 'ranking', 'pin']).optional(),
-    // Overrides the pre-spawn limit gate; never forwarded to `agent.spawn`.
+    // Bypasses duplicate and memory gates; the fixed concurrent cap still applies.
     force: z.boolean().optional(),
     idempotencyKey: z.string().min(1).max(128).optional(),
     // Optional account route for a `claude` lane: ID or sentinel only, never

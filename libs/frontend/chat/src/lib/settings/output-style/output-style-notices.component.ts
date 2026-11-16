@@ -17,7 +17,7 @@ import { LucideAngularModule, AlertCircle, AlertTriangle, RotateCcw } from 'luci
 import type { OutputStyleEntry } from '@ptah-extension/shared';
 import type { OutputStyleFailedOperation } from './output-style.store';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 /** Moderate 4: the banner is the fixed sentence for the failed list read, never host text. */
 const LIST_READ_FAILED = 'Could not read the output styles.';
@@ -25,19 +25,19 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
 @Component({
   selector: 'ptah-output-style-notices',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahAlertComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- List read failure (a load state; write outcomes are toasts) -->
     @if (fixedErrorMessage(); as message) {
-      <div
-        class="flex items-start gap-2 rounded border border-error/40 bg-error/10 p-2 mb-3 text-xs text-base-content"
-        role="alert"
+      <ptah-alert
+        tone="error" live="assertive" [compact]="true"
+        class="block mb-[var(--ptah-gap-field)]"
         data-testid="output-style-error"
       >
         <lucide-angular
           [img]="AlertCircleIcon"
-          class="w-3.5 h-3.5 mt-0.5 shrink-0 text-error"
+          class="w-3.5 h-3.5 mt-[var(--ptah-gap-label)] shrink-0 text-error"
           aria-hidden="true"
         />
         <span class="flex-1">{{ message }}</span>
@@ -48,19 +48,19 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
         >
           Dismiss
         </button>
-      </div>
+      </ptah-alert>
     }
 
     <!-- Missing-active banner (E5/N1) -->
     @if (activeMissing()) {
-      <div
-        class="flex items-start gap-2 rounded border border-warning/40 bg-warning/10 p-2 mb-3 text-xs text-base-content"
-        role="status"
+      <ptah-alert
+        tone="warning" live="polite" [compact]="true"
+        class="block mb-[var(--ptah-gap-field)]"
         data-testid="output-style-missing-banner"
       >
         <lucide-angular
           [img]="AlertTriangleIcon"
-          class="w-3.5 h-3.5 mt-0.5 shrink-0 text-warning"
+          class="w-3.5 h-3.5 mt-[var(--ptah-gap-label)] shrink-0 text-warning"
           aria-hidden="true"
         />
         <div class="flex-1">
@@ -71,7 +71,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
           </p>
           <button
             type="button"
-            ptahButton variant="ghost" size="xs" class="mt-1"
+            ptahButton variant="ghost" size="xs" class="mt-[var(--ptah-gap-label)]"
             (click)="clearSelection.emit()"
             [busy]="saving()"
             data-testid="output-style-clear-selection"
@@ -84,14 +84,14 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
             Clear the selection
           </button>
         </div>
-      </div>
+      </ptah-alert>
     }
 
     <!-- Collision banner (E4) -->
     @if (hasCollision()) {
-      <div
-        class="rounded border border-warning/40 bg-warning/10 p-2 mb-3 text-xs text-base-content"
-        role="status"
+      <ptah-alert
+        tone="warning" live="polite" [compact]="true"
+        class="block mb-[var(--ptah-gap-field)]"
         data-testid="output-style-collision-banner"
       >
         <p class="text-xs">
@@ -101,14 +101,14 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
           file beats a built-in of the same name. Rename one of them to remove
           the ambiguity.
         </p>
-      </div>
+      </ptah-alert>
     }
 
     <!-- Fallback injection banner (Req 5.4) -->
     @if (usingFallback()) {
-      <div
-        class="rounded border border-info/40 bg-info/10 p-2 mb-3 text-xs text-base-content"
-        role="status"
+      <ptah-alert
+        tone="info" live="polite" [compact]="true"
+        class="block mb-[var(--ptah-gap-field)]"
         data-testid="output-style-fallback-banner"
       >
         <p class="text-xs">
@@ -122,7 +122,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
           <button
             #copyButton
             type="button"
-            ptahButton variant="ghost" size="xs" class="mt-1"
+            ptahButton variant="ghost" size="xs" class="mt-[var(--ptah-gap-label)]"
             (click)="requestCopy(name)"
             [busy]="saving()"
             data-testid="output-style-copy-to-project"
@@ -132,7 +132,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
           <!-- Item 16 / P8: replacing a project style of the same name is confirmed first; no Undo -->
           @if (confirmingCopy()) {
             <div
-              class="flex flex-wrap items-center gap-2 rounded border border-base-300 p-2 mt-1 text-xs text-base-content"
+              class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] rounded border border-base-300 p-[var(--ptah-gap-controls)] mt-[var(--ptah-gap-label)] text-xs text-base-content"
               role="alertdialog"
               aria-label="Confirm replacing the project style"
               data-testid="output-style-copy-confirm"
@@ -141,7 +141,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
               <span class="flex-1">This project already has a style with this name. Replace it with your copy?</span>
               <button
                 type="button"
-                class="btn btn-outline btn-xs border-error text-base-content"
+                ptahButton variant="outline" size="xs" class="border-error text-base-content"
                 [ptahBusyDisabled]="saving()"
                 (click)="confirmCopy(name)"
                 data-testid="output-style-confirm-copy"
@@ -154,7 +154,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
             </div>
           }
         }
-      </div>
+      </ptah-alert>
     }
 
   `,

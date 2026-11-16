@@ -121,7 +121,7 @@ export const LEGACY_HERMES_FIRST_RUN_DISMISSED_KEY =
   'ptah-hermes-first-run-dismissed';
 
 export type SettingsTabId =
-  'providers' | 'claude-auth' | 'orchestration' | 'pro-features' | 'tools';
+  'providers' | 'claude-auth' | 'orchestration' | 'matrix' | 'pro-features' | 'tools';
 
 export interface PendingSettingsTab {
   tab: SettingsTabId;
@@ -135,7 +135,10 @@ export interface PendingSettingsTab {
     | 'cli-agents'
     | 'more-providers'
     | 'memory-curator'
-    | 'enhancement';
+    | 'enhancement'
+    | 'capability-matrix'
+    | 'decision-matrix'
+    | 'matrix';
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   type IHarnessPreflight,
 } from '@ptah-extension/agent-sdk';
 import { promises as fsPromises } from 'fs';
+import { freemem } from 'os';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
 import type { SentryService } from '@ptah-extension/vscode-core';
 import {
@@ -451,6 +452,28 @@ export class AgentSpawnEnvironment {
       MIN_CONCURRENT_AGENTS,
       Math.min(MAX_CONCURRENT_AGENTS, configured),
     );
+  }
+
+  minFreeMemoryGb(): number {
+    const value = this.workspace.getConfiguration<number>('ptah', 'agentOrchestration.minFreeMemoryGb', 3);
+    return typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(0, Math.min(100, value)) : 3;
+  }
+
+  spawnQueueTimeoutMs(): number {
+    const value = this.workspace.getConfiguration<number>('ptah', 'agentOrchestration.spawnQueueTimeoutMs', 300_000);
+    return typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(60_000, Math.min(600_000, value)) : 300_000;
+  }
+
+  freeMemory(): number {
+    const fake = process.env['PTAH_VERIFY_FAKE_FREE_GB'];
+    if (fake !== undefined) {
+      const gb = Number(fake);
+      if (Number.isFinite(gb) && gb >= 0) return gb * 1024 ** 3;
+      this.logger.warn('[AgentSpawnEnvironment] Invalid PTAH_VERIFY_FAKE_FREE_GB');
+    }
+    return freemem();
   }
 
   async preferredCli(): Promise<CliType | null> {

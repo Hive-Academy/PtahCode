@@ -1,5 +1,13 @@
 import type { SessionAgent } from '@ptah-extension/chat';
-import { dockCapacity, dockGroup, dockMarkerCount, orderDockAgents, planDockOverflow } from './dock-overflow';
+import {
+  agentDurationMs,
+  agentStatusInk,
+  dockCapacity,
+  dockGroup,
+  dockMarkerCount,
+  orderDockAgents,
+  planDockOverflow,
+} from './dock-overflow';
 
 function agent(key: string, status: SessionAgent['status'] = 'running', kind: SessionAgent['kind'] = 'cli'): SessionAgent {
   return { key, kind, status, name: key, cliId: null, agentType: null,
@@ -9,6 +17,11 @@ function agent(key: string, status: SessionAgent['status'] = 'running', kind: Se
 const keys = (agents: readonly SessionAgent[]): string[] => agents.map(({ key }) => key);
 
 describe('dock overflow planner', () => {
+  it('uses info ink and a live duration for a starting lane', () => {
+    const starting = { ...agent('starting', 'starting'), startedAt: 1_000 };
+    expect(agentStatusInk('starting')).toBe('text-info');
+    expect(agentDurationMs(starting, 5_000)).toBe(4_000);
+  });
   it('reserves the width of every marker a frozen order draws', () => {
     const frozen = [agent('o', 'waiting', 'orchestrator'), agent('a'), agent('f', 'done'), agent('b')];
     expect(dockMarkerCount(frozen)).toBe(3);

@@ -264,8 +264,8 @@ describe('gitWindow methods', () => {
 describe('provider account methods (TASK_2026_712 Batch 35)', () => {
   const accountMethods: readonly string[] = PROVIDER_ACCOUNT_RPC_METHOD_NAMES;
 
-  it('has eleven distinct methods, all in the shared registry', () => {
-    expect(accountMethods).toHaveLength(11);
+  it('has twelve distinct methods, all in the shared registry', () => {
+    expect(accountMethods).toHaveLength(12);
     expect(new Set(accountMethods).size).toBe(accountMethods.length);
     for (const method of accountMethods) {
       expect(RPC_METHOD_NAMES).toContain(method);

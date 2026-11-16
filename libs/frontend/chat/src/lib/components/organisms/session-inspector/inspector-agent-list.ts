@@ -19,6 +19,7 @@ export const NOT_REPORTED_VALUE = '—';
 export const NOT_REPORTED_TITLE = 'not reported';
 
 const STATUS_INK: Readonly<Record<AgentStatusWord, string>> = {
+  starting: 'text-info',
   running: 'text-state-run',
   waiting: 'text-state-need',
   queued: 'text-base-content-muted',
@@ -224,6 +225,7 @@ function isLive(row: AgentListRow): boolean {
   const status = row.agent.status;
   return (
     row.requests.length > 0 ||
+    status === 'starting' ||
     status === 'running' ||
     status === 'waiting' ||
     status === 'queued'

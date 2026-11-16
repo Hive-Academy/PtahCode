@@ -449,7 +449,7 @@ describe('AdvancedSettingsGroupComponent', () => {
       const input = field('compaction.toolOutputBudgetTokens');
       expect(input.getAttribute('inputmode')).toBe('numeric');
       expect(
-        input.parentElement?.querySelector('[aria-hidden="true"]')?.textContent?.trim(),
+        input.closest('[data-ptah-field]')?.querySelector('[ptahFieldTrailing]')?.textContent?.trim(),
       ).toBe('tokens');
       expect(
         field('agentBudget.handoffContextTokens').getAttribute(

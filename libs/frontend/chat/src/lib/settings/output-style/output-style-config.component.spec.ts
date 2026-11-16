@@ -142,7 +142,7 @@ describe('OutputStyleConfigComponent', () => {
 
   it('marks the Output Style section as a glass reading plane', () => {
     expect(
-      (fixture.nativeElement as HTMLElement).querySelector('section')?.getAttribute('data-glass-surface'),
+      (fixture.nativeElement as HTMLElement).querySelector('ptah-form-section')?.getAttribute('data-glass-surface'),
     ).toBe('content');
   });
 

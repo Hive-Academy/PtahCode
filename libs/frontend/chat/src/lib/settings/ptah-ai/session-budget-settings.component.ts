@@ -6,10 +6,12 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { VSCodeService, rpcCall } from '@ptah-extension/core';
+import { LoggingService, VSCodeService, rpcCall } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
-  SettingsFieldComponent,
+  PtahFieldComponent,
+  PtahFormSectionComponent,
+  PtahSettingRowComponent,
   PtahButtonDirective,
   PtahToggleDirective,
   PtahSelectDirective,
@@ -35,9 +37,7 @@ type NumberKey =
   | 'handoffPercent'
   | 'handoffAfterCompactions'
   | 'tightenWindowTokens';
-type BooleanKey =
-  | 'enabled'
-  | 'autoHandoffAtLimit';
+type BooleanKey = 'enabled' | 'autoHandoffAtLimit';
 
 type Parsed =
   | { readonly ok: true; readonly value: number | null }
@@ -54,7 +54,8 @@ const RPC_TIMEOUT_PREFIX = 'RPC timeout';
 /** A read-back value that can be written back (Undo); anything else offers no Undo. */
 function isBudgetValue(
   value: unknown,
-): value is number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure {
+): value is
+  number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure {
   return (
     value === null ||
     typeof value === 'number' ||
@@ -70,7 +71,9 @@ const UNIT_LABELS: Readonly<Record<SessionBudgetUnit, string>> = {
   tokens: 'Tokens',
   cost: 'Cost (USD)',
 };
-const TOKEN_MEASURE_LABELS: Readonly<Record<SessionBudgetTokenMeasure, string>> = {
+const TOKEN_MEASURE_LABELS: Readonly<
+  Record<SessionBudgetTokenMeasure, string>
+> = {
   weighted: 'Weighted session tokens',
   raw: 'Raw session tokens',
 };
@@ -183,222 +186,295 @@ function storedNumberIsValid(
 @Component({
   selector: 'ptah-session-budget-settings',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent, PtahButtonDirective, PtahToggleDirective, PtahSelectDirective, PtahInputDirective],
+  imports: [
+    SettingsBusyDisabledDirective,
+    PtahFieldComponent,
+    PtahFormSectionComponent,
+    PtahSettingRowComponent,
+    PtahButtonDirective,
+    PtahToggleDirective,
+    PtahSelectDirective,
+    PtahInputDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section
-      data-glass-surface="content"
-      class="flex flex-col gap-3 text-sm text-base-content"
-      aria-labelledby="session-budget-heading"
-      data-testid="settings-section-session-budget"
-    >
-      <div section-header class="border-b border-base-content/10 pb-2">
-        <h3
-          id="session-budget-heading"
-          class="text-base font-semibold text-base-content"
-        >
-          Session budget
-        </h3>
-        <p class="mt-0.5 text-xs text-base-content-muted">
-          Set per-chat limits and when Ptah should intervene.
-        </p>
-      </div>
-
-      @switch (load()) {
-        @case ('loading') {
-          <p
-            role="status"
-            aria-live="polite"
-            data-testid="session-budget-loading"
-          >
-            Loading session budget…
-          </p>
-        }
-        @case ('error') {
-          <div role="alert" class="space-y-1.5">
-            <p data-testid="session-budget-load-error">
-              The session budget settings could not be read. Your saved settings
-              have not changed.
-            </p>
-            <button
-              type="button"
-              ptahButton
-              (click)="reload()"
-              data-testid="session-budget-retry"
+    <section>
+      <ptah-form-section
+        heading="Session budget"
+        description="Set per-chat limits and when Ptah should intervene."
+        data-glass-surface="content"
+        data-testid="settings-section-session-budget"
+      >
+        @switch (load()) {
+          @case ('loading') {
+            <p
+              role="status"
+              aria-live="polite"
+              data-testid="session-budget-loading"
             >
-              Retry session budget
-            </button>
-          </div>
-        }
-        @default {
-          <div class="grid gap-x-4 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
+              Loading session budget…
+            </p>
+          }
+          @case ('error') {
+            <div role="alert">
+              <p data-testid="session-budget-load-error">
+                The session budget settings could not be read. Your saved
+                settings have not changed.
+              </p>
+              <button
+                type="button"
+                ptahButton
+                (click)="reload()"
+                data-testid="session-budget-retry"
+              >
+                Retry session budget
+              </button>
+            </div>
+          }
+          @default {
             @for (key of booleanKeys; track key) {
-              <div class="flex min-w-0 flex-col gap-1">
-                <span class="text-sm font-medium text-base-content">{{
-                  labels[key]
-                }}</span>
-                <label
-                  class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2"
-                >
+              <ptah-setting-row
+                [label]="labels[key]"
+                [hint]="booleanHelp[key]"
+                [controlId]="'session-budget-' + key"
+              >
+                <div>
                   <input
                     type="checkbox"
-                    ptahToggle size="sm"
+                    ptahToggle
+                    size="sm"
+                    [id]="'session-budget-' + key"
                     [checked]="booleanValue(key)"
                     [ptahBusyDisabled]="busy()"
                     (change)="toggle(key, $event)"
-                    [attr.aria-label]="labels[key]"
-                    [attr.aria-describedby]="'session-budget-' + key + '-help'"
+                    [attr.aria-describedby]="'session-budget-' + key + '-hint'"
                     [attr.data-testid]="'session-budget-' + key"
                   />
-                  <span class="text-sm">Enabled</span>
-                </label>
-                <p
-                  [id]="'session-budget-' + key + '-help'"
-                  class="text-xs text-base-content-muted"
-                >
-                  {{ booleanHelp[key] }}
-                </p>
-              </div>
-            }
-
-            <div class="flex min-w-0 flex-col gap-1">
-              <label for="session-budget-unit" class="text-sm font-medium text-base-content">{{
-                labels.unit
-              }}</label>
-              <select
-                ptahSelect size="sm"
-                id="session-budget-unit"
-                class="w-full text-sm"
-                [value]="unitValue()"
-                [ptahBusyDisabled]="busy()"
-                aria-describedby="session-budget-unit-help"
-                (change)="selectUnit($event)"
-                data-testid="session-budget-unit"
-              >
-                @for (unit of units; track unit) {
-                  <option [value]="unit" [selected]="unit === unitValue()">
-                    {{ unitLabels[unit] }}
-                  </option>
-                }
-              </select>
-              <p
-                id="session-budget-unit-help"
-                class="text-xs text-base-content-muted"
-              >
-                Tokens use chat usage; Cost uses priced models.
-              </p>
-              @if (errors()['unit']; as message) {
-                <p data-testid="session-budget-unit-error">{{ message }}</p>
-              }
-            </div>
-
-            <div class="flex min-w-0 flex-col gap-[var(--ptah-space-1)]">
-              <label for="session-budget-token-measure" class="text-sm font-medium text-base-content">Token measure</label>
-              <select
-                ptahSelect size="sm"
-                id="session-budget-token-measure"
-                class="w-full text-sm"
-                [value]="tokenMeasureValue()"
-                [ptahBusyDisabled]="busy()"
-                aria-describedby="session-budget-token-measure-help session-budget-token-measure-resolved"
-                (change)="selectTokenMeasure($event)"
-                data-testid="session-budget-token-measure"
-              >
-                @for (measure of tokenMeasures; track measure) {
-                  <option [value]="measure" [selected]="measure === tokenMeasureValue()">
-                    {{ tokenMeasureLabels[measure] }}
-                  </option>
-                }
-              </select>
-              <p id="session-budget-token-measure-help" class="text-xs text-base-content-muted">
-                Weighted counts cached reads at 10% and output at 5x. Raw counts every token of every request, including cache reads.
-              </p>
-              <p id="session-budget-token-measure-resolved" class="text-xs text-base-content-muted" data-testid="session-budget-token-measure-resolved">
-                Current measure: {{ tokenMeasureLabels[tokenMeasureValue()] }}.
-              </p>
-              @if (tokenMeasureValue() === 'raw' && !recommendationDismissed()) {
-                <div class="rounded-md border border-info/30 bg-info/10 px-[var(--ptah-space-2)] py-[var(--ptah-space-1)] text-xs" data-testid="session-budget-token-measure-recommendation">
-                  <p>Weighted session tokens are recommended for a session budget. Switching keeps your saved token budget number unchanged.</p>
-                  <button type="button" ptahButton variant="ghost" size="xs" [ptahBusyDisabled]="busy()" (click)="selectWeighted()" data-testid="session-budget-token-measure-switch">Switch to weighted</button>
-                  <button type="button" ptahButton variant="ghost" size="xs" (click)="dismissRecommendation()">Dismiss</button>
+                  <span class="ms-[var(--ptah-gap-label)] text-sm"
+                    >Enabled</span
+                  >
                 </div>
-              }
-              @if (errors()['tokenMeasure']; as message) {
-                <p role="alert" class="text-xs text-error">{{ message }}</p>
-              }
-            </div>
+              </ptah-setting-row>
+            }
 
-            @for (field of numberFields; track field.key) {
-              <div ptahSettingsField class="flex min-w-0 flex-col gap-1"
-                [fieldId]="'session-budget-' + field.key"
-                [label]="field.label"
-                [hint]="field.help + ' Range: ' + range(field.key) + '.'"
-                [error]="errors()[field.key] ?? null"
-                [errorTestId]="'session-budget-' + field.key + '-error'">
-                <ng-container ngProjectAs="[settingsFieldControl]"><div class="join flex w-full">
-                  <input
-                    ptahInput size="sm"
-                    type="text"
-                    [id]="'session-budget-' + field.key"
-                    [attr.inputmode]="
-                      settings[field.key].integer ? 'numeric' : 'decimal'
-                    "
-                    class="join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
-                    [invalid]="!!errors()[field.key]"
-                    [value]="numberText(field.key)"
-                    [attr.placeholder]="
-                      settings[field.key].nullable ? 'Advisory only' : null
-                    "
-                    [attr.aria-describedby]="
-                      'session-budget-' +
-                      field.key +
-                      '-help' +
-                      (errors()[field.key]
-                        ? ' session-budget-' + field.key + '-error'
-                        : '') +
-                      (storedNotice(field.key)
-                        ? ' session-budget-' + field.key + '-stored'
-                        : '')
-                    "
+            <div class="session-budget-fields">
+              <div class="session-budget-fields-grid">
+                <div class="flex min-w-0 flex-col gap-1">
+                  <label
+                    for="session-budget-unit"
+                    class="text-sm font-medium text-base-content"
+                    >{{ labels.unit }}</label
+                  >
+                  <select
+                    ptahSelect
+                    size="sm"
+                    id="session-budget-unit"
+                    class="w-full text-sm"
+                    [value]="unitValue()"
                     [ptahBusyDisabled]="busy()"
-                    (input)="edit(field.key, $event)"
-                    (change)="commit(field.key)"
-                    (focus)="focusedKey = field.key"
-                    (blur)="blurred(field.key)"
-                    [attr.data-testid]="'session-budget-' + field.key"
-                  />
-                  <span
-                    class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted"
-                    aria-hidden="true"
-                    >{{ unitSuffix(field.key) }}</span
+                    aria-describedby="session-budget-unit-help"
+                    (change)="selectUnit($event)"
+                    data-testid="session-budget-unit"
                   >
-                </div></ng-container>
-                @if (humanReadable(field.key); as readable) {
-                  <ng-container ngProjectAs="[settingsFieldBeforeHint]"><span
-                    class="whitespace-nowrap text-xs text-base-content-muted"
-                    >{{ readable }}</span
-                  ></ng-container>
-                }
-                @if (storedNotice(field.key); as notice) {
-                  <ng-container ngProjectAs="[settingsFieldAfterError]"><p
-                    [id]="'session-budget-' + field.key + '-stored'"
-                    class="rounded-md border border-info/30 bg-info/10 px-2 py-1"
-                    [attr.data-testid]="
-                      'session-budget-' + field.key + '-stored'
-                    "
+                    @for (unit of units; track unit) {
+                      <option [value]="unit" [selected]="unit === unitValue()">
+                        {{ unitLabels[unit] }}
+                      </option>
+                    }
+                  </select>
+                  <p
+                    id="session-budget-unit-help"
+                    class="text-xs text-base-content-muted"
                   >
-                    {{ notice }}
-                  </p></ng-container>
+                    Tokens use chat usage; Cost uses priced models.
+                  </p>
+                  @if (errors()['unit']; as message) {
+                    <p data-testid="session-budget-unit-error">{{ message }}</p>
+                  }
+                </div>
+
+                <div class="flex min-w-0 flex-col gap-[var(--ptah-space-1)]">
+                  <label
+                    for="session-budget-token-measure"
+                    class="text-sm font-medium text-base-content"
+                    >Token measure</label
+                  >
+                  <select
+                    ptahSelect
+                    size="sm"
+                    id="session-budget-token-measure"
+                    class="w-full text-sm"
+                    [value]="tokenMeasureValue()"
+                    [ptahBusyDisabled]="busy()"
+                    aria-describedby="session-budget-token-measure-help session-budget-token-measure-resolved"
+                    (change)="selectTokenMeasure($event)"
+                    data-testid="session-budget-token-measure"
+                  >
+                    @for (measure of tokenMeasures; track measure) {
+                      <option
+                        [value]="measure"
+                        [selected]="measure === tokenMeasureValue()"
+                      >
+                        {{ tokenMeasureLabels[measure] }}
+                      </option>
+                    }
+                  </select>
+                  <p
+                    id="session-budget-token-measure-help"
+                    class="text-xs text-base-content-muted"
+                  >
+                    Weighted counts cached reads at 10% and output at 5x. Raw
+                    counts every token of every request, including cache reads.
+                  </p>
+                  <p
+                    id="session-budget-token-measure-resolved"
+                    class="text-xs text-base-content-muted"
+                    data-testid="session-budget-token-measure-resolved"
+                  >
+                    Current measure:
+                    {{ tokenMeasureLabels[tokenMeasureValue()] }}.
+                  </p>
+                  @if (
+                    tokenMeasureValue() === 'raw' && !recommendationDismissed()
+                  ) {
+                    <div
+                      class="rounded-md border border-info/30 bg-info/10 px-[var(--ptah-space-2)] py-[var(--ptah-space-1)] text-xs"
+                      data-testid="session-budget-token-measure-recommendation"
+                    >
+                      <p>
+                        Weighted session tokens are recommended for a session
+                        budget. Switching keeps your saved token budget number
+                        unchanged.
+                      </p>
+                      <button
+                        type="button"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
+                        [ptahBusyDisabled]="busy()"
+                        (click)="selectWeighted()"
+                        data-testid="session-budget-token-measure-switch"
+                      >
+                        Switch to weighted
+                      </button>
+                      <button
+                        type="button"
+                        ptahButton
+                        variant="ghost"
+                        size="xs"
+                        (click)="dismissRecommendation()"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  }
+                  @if (errors()['tokenMeasure']; as message) {
+                    <p role="alert" class="text-xs text-error">{{ message }}</p>
+                  }
+                </div>
+
+                @for (field of numberFields; track field.key) {
+                  <ptah-field
+                    appearance="stacked"
+                    class="session-budget-number-field"
+                    [label]="field.label"
+                    [hint]="field.help + ' Range: ' + range(field.key) + '.'"
+                    [error]="errors()[field.key] ?? null"
+                    [errorTestId]="'session-budget-' + field.key + '-error'"
+                  >
+                    <input
+                      ptahInput
+                      size="sm"
+                      type="text"
+                      [id]="'session-budget-' + field.key"
+                      [attr.inputmode]="
+                        settings[field.key].integer ? 'numeric' : 'decimal'
+                      "
+                      class="join-item min-w-0 flex-1 text-right tabular-nums"
+                      [invalid]="!!errors()[field.key]"
+                      [value]="numberText(field.key)"
+                      [attr.placeholder]="
+                        settings[field.key].nullable ? 'Advisory only' : null
+                      "
+                      [attr.aria-describedby]="
+                        storedNotice(field.key)
+                          ? 'session-budget-' + field.key + '-stored'
+                          : null
+                      "
+                      [ptahBusyDisabled]="busy()"
+                      (input)="edit(field.key, $event)"
+                      (change)="commit(field.key)"
+                      (focus)="focusedKey = field.key"
+                      (blur)="blurred(field.key)"
+                      [attr.data-testid]="'session-budget-' + field.key"
+                    />
+                    <span ptahFieldTrailing aria-hidden="true">{{
+                      unitSuffix(field.key)
+                    }}</span>
+                    @if (errors()[field.key]) {
+                      <span
+                        ptahFieldBeforeHint
+                        class="text-xs text-base-content-muted"
+                        >{{ field.help }} Range: {{ range(field.key) }}.</span
+                      >
+                    }
+                    @if (humanReadable(field.key); as readable) {
+                      <span
+                        ptahFieldBeforeHint
+                        class="whitespace-nowrap text-xs text-base-content-muted"
+                        >{{ readable }}</span
+                      >
+                    }
+                    @if (storedNotice(field.key); as notice) {
+                      <p
+                        ptahFieldAfterError
+                        [id]="'session-budget-' + field.key + '-stored'"
+                        class="rounded-md border border-info/30 bg-info/10 px-2 py-1"
+                        [attr.data-testid]="
+                          'session-budget-' + field.key + '-stored'
+                        "
+                      >
+                        {{ notice }}
+                      </p>
+                    }
+                  </ptah-field>
                 }
               </div>
-            }
-          </div>
+            </div>
+          }
         }
-      }
-
+      </ptah-form-section>
     </section>
   `,
   styles: `
+    :host {
+      display: block;
+    }
+    .session-budget-fields {
+      container-type: inline-size;
+      min-width: 0;
+    }
+    .session-budget-fields-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      column-gap: var(--ptah-space-4);
+      row-gap: calc(var(--ptah-gap-field) + var(--ptah-space-1));
+      align-items: start;
+    }
+    .session-budget-number-field {
+      min-width: 0;
+      max-inline-size: 22rem;
+    }
+    @container (min-width: 36rem) {
+      .session-budget-fields-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @container (min-width: 56rem) {
+      .session-budget-fields-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
@@ -406,6 +482,7 @@ function storedNumberIsValid(
 })
 export class SessionBudgetSettingsComponent implements OnInit {
   private readonly vscode = inject(VSCodeService);
+  private readonly logger = inject(LoggingService);
   private readonly tabManager = inject(TabManagerService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
@@ -419,7 +496,8 @@ export class SessionBudgetSettingsComponent implements OnInit {
   protected readonly booleanHelp = BOOLEAN_HELP;
   protected readonly units = SESSION_BUDGET_SETTINGS.unit.values;
   protected readonly unitLabels = UNIT_LABELS;
-  protected readonly tokenMeasures = SESSION_BUDGET_SETTINGS.tokenMeasure.values;
+  protected readonly tokenMeasures =
+    SESSION_BUDGET_SETTINGS.tokenMeasure.values;
   protected readonly tokenMeasureLabels = TOKEN_MEASURE_LABELS;
   private readonly recommendationDismissed = signal(false);
 
@@ -443,13 +521,15 @@ export class SessionBudgetSettingsComponent implements OnInit {
       this.units.find((unit) => unit === value) ?? this.settings.unit.default
     );
   });
-  protected readonly tokenMeasureValue = computed<SessionBudgetTokenMeasure>(() => {
-    const value = this.saved()['tokenMeasure'];
-    return (
-      this.tokenMeasures.find((measure) => measure === value) ??
-      this.settings.tokenMeasure.default
-    );
-  });
+  protected readonly tokenMeasureValue = computed<SessionBudgetTokenMeasure>(
+    () => {
+      const value = this.saved()['tokenMeasure'];
+      return (
+        this.tokenMeasures.find((measure) => measure === value) ??
+        this.settings.tokenMeasure.default
+      );
+    },
+  );
 
   ngOnInit(): void {
     void this.reload();
@@ -483,7 +563,7 @@ export class SessionBudgetSettingsComponent implements OnInit {
       this.errors.set({});
       this.load.set('ready');
     } catch (error: unknown) {
-      console.warn('[SessionBudgetSettings] settings:get failed', error);
+      this.logger.warn('SessionBudgetSettings', 'settings:get failed', error);
       this.load.set('error');
     }
   }
@@ -610,7 +690,8 @@ export class SessionBudgetSettingsComponent implements OnInit {
     const input = event.target as HTMLSelectElement;
     const next = this.tokenMeasures.find((measure) => measure === input.value);
     input.value = this.tokenMeasureValue();
-    if (this.busy() || next === undefined || next === this.tokenMeasureValue()) return;
+    if (this.busy() || next === undefined || next === this.tokenMeasureValue())
+      return;
     await this.write('tokenMeasure', next);
   }
 
@@ -665,7 +746,8 @@ export class SessionBudgetSettingsComponent implements OnInit {
    */
   private async write(
     key: BudgetKey,
-    value: number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure,
+    value:
+      number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure,
   ): Promise<boolean> {
     const previous = this.saved()[key];
     let confirmed = false;
@@ -676,7 +758,9 @@ export class SessionBudgetSettingsComponent implements OnInit {
         confirmed = result.ok;
         return result;
       },
-      undo: isBudgetValue(previous) ? () => this.writeOnce(key, previous) : null,
+      undo: isBudgetValue(previous)
+        ? () => this.writeOnce(key, previous)
+        : null,
     });
     return confirmed;
   }
@@ -684,7 +768,8 @@ export class SessionBudgetSettingsComponent implements OnInit {
   /** One `settings:set`; a failure leaves the saved value and returns the sentence the toast shows. */
   private async writeOnce(
     key: BudgetKey,
-    value: number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure,
+    value:
+      number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     const label = this.labels[key];
     this.savingKey.set(key);
@@ -704,7 +789,7 @@ export class SessionBudgetSettingsComponent implements OnInit {
         (result.error?.startsWith(RPC_TIMEOUT_PREFIX) ?? false);
     } catch (error: unknown) {
       // Reported in the toast below, like a refused write.
-      console.warn('[SessionBudgetSettings] settings:set failed', error);
+      this.logger.warn('SessionBudgetSettings', 'settings:set failed', error);
     } finally {
       this.savingKey.set(null);
     }

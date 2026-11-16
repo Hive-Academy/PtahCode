@@ -166,6 +166,9 @@ export class PlanUsageService {
   private nextReadSequence = 0;
   private readonly failingSince = new Map<string, number>();
   private readonly flights = new Map<string, Flight>();
+  private cacheHits = 0;
+  private flightJoins = 0;
+  private flightStarts = 0;
   private readonly claudeOauthFailures = new Map<string, { until: number; rateLimited: boolean }>();
 
   private recordClaudeOauthFailure(ownerKey: string, retryAfterMs?: number): void {
@@ -272,8 +275,28 @@ export class PlanUsageService {
       !(options.allowCliFallback && cached.reading.status !== 'available') &&
       this.now() - cached.readAt < PLAN_USAGE_CACHE_TTL_MS
     ) {
+      this.cacheHits += 1;
+      this.logger.debug('[PlanUsage] owner snapshot request', {
+        outcome: 'cache-hit', providerId: target.providerId,
+        // A cache hit is never a refresh: the condition above excludes it.
+        refresh: false,
+        hits: this.cacheHits, joins: this.flightJoins, starts: this.flightStarts,
+      });
       return Promise.resolve(this.assemble(target.ownerRef, cached.reading));
     }
+    const bypass = target.claudeRoute?.kind === 'named' ? 'named-route'
+      : options.refresh ? 'refresh'
+      : !cached ? 'empty'
+      : options.allowCliFallback && cached.reading.status !== 'available' ? 'cli-fallback'
+      : 'expired';
+    const joining = this.flights.has(flightKey(target) + (options.allowCliFallback ? ':cli' : ''));
+    if (joining) this.flightJoins += 1;
+    else this.flightStarts += 1;
+    this.logger.debug('[PlanUsage] owner snapshot request', {
+      outcome: joining ? 'flight-join' : 'flight-start', bypass,
+      providerId: target.providerId, refresh: options.refresh === true,
+      hits: this.cacheHits, joins: this.flightJoins, starts: this.flightStarts,
+    });
     const flight =
       this.flights.get(flightKey(target) + (options.allowCliFallback ? ':cli' : '')) ??
       this.startFlight(target, options.refresh === true, options.allowCliFallback === true);

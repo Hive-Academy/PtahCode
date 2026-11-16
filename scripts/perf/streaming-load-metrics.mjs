@@ -18,6 +18,12 @@
  *   node scripts/perf/streaming-load-metrics.mjs --log "<electron log>" --hang-log "<ptah-hang.log>" --from ... --to ...
  *   # Compare two JSON outputs:
  *   node scripts/perf/streaming-load-metrics.mjs --compare baseline.json current.json
+ *
+ * The taskIndex, planLimits and planUsageCache sections read DEBUG lines. Start
+ * the app with PTAH_LOG_LEVEL=debug (or use the dev profile) for the run you
+ * measure. At the production level (info) those two plan sections stay empty and
+ * taskIndex holds only rebuilds that ran for 250 ms or more. rootId and scopeId
+ * are 8-hex hash prefixes, so the roots and scopes counts are lower bounds.
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';

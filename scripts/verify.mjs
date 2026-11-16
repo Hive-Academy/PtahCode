@@ -23,7 +23,7 @@
 // finish lint/typecheck first, then tests, under the same lock slot.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -42,6 +42,7 @@ import {
   slotCount,
 } from './verify-lock.mjs';
 import { planPhases } from './verify-args.mjs';
+import { isLinkedWorktree, nxChildEnv } from './verify-nx-env.mjs';
 
 const require = createRequire(import.meta.url);
 const log = (message) =>
@@ -197,6 +198,17 @@ async function main() {
   const runs = Array.isArray(run) ? run : [run];
   const task = values.task ?? runs.map((phase) => phase.task).join(' then ');
   const worktree = process.cwd();
+  const { env: runEnv, daemonDisabled } = values.exec
+    ? { env: process.env, daemonDisabled: false }
+    : nxChildEnv(
+        process.env,
+        // Anchor on this script's checkout, not on cwd, so a run from a
+        // subdirectory still finds the root `.git` entry.
+        isLinkedWorktree(
+          path.resolve(import.meta.dirname, '..', '.git'),
+          (entry) => statSync(entry, { throwIfNoEntry: false }),
+        ),
+      );
 
   let child = null;
   let interrupted = null;
@@ -223,6 +235,8 @@ async function main() {
     const waited = Math.round((Date.now() - waitStart) / 1000);
     log(`lock slot ${lock.slot} acquired after ${waited}s: ${task}`);
   }
+  if (daemonDisabled)
+    log('linked worktree: running Nx with NX_DAEMON=false');
 
   const runStart = Date.now();
   // Every phase runs even when an earlier one failed, so one verify reports
@@ -232,7 +246,7 @@ async function main() {
     log(`starting ${phase.task}`);
     const phaseCode = await new Promise((resolve) => {
       child = spawnCommand(phase.command, phase.args, {
-        ...process.env,
+        ...runEnv,
         [TOKEN_ENV]: lock.entry.token,
       });
       if (!lock.reentrant && child.pid)

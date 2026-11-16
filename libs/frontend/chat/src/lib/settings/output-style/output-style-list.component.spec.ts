@@ -121,15 +121,11 @@ describe('OutputStyleListComponent — CLI parity control', () => {
     TestBed.resetTestingModule();
   });
 
-  it('renders a P4 matrix table with role="radiogroup"', () => {
-    const table = fixture.nativeElement.querySelector('table[role="radiogroup"]');
-    expect(table).not.toBeNull();
-    expect(table.classList).toContain('table-xs');
-    expect(text()).toContain('Active');
-    expect(text()).toContain('Name');
-    expect(text()).toContain('Tier');
-    expect(text()).toContain('Description');
-    expect(text()).toContain('Actions');
+  it('renders a responsive style grid with radiogroup semantics', () => {
+    const grid = fixture.nativeElement.querySelector('[role="radiogroup"]');
+    expect(grid).not.toBeNull();
+    expect(grid.classList).toContain('grid');
+    expect(grid.querySelectorAll('[role="radio"]')).toHaveLength(2);
   });
 
   it('starts unticked and emits no parity field at all (default OFF)', () => {
@@ -551,9 +547,9 @@ describe('OutputStyleListComponent — CLI parity control', () => {
       fixture.detectChanges();
 
       const confirm = fixture.nativeElement.querySelector('[data-testid="output-style-delete-confirm"]') as HTMLElement;
-      const cell = confirm.closest('td') as HTMLTableCellElement;
-      expect(cell.getAttribute('colspan')).toBe('5');
-      expect(cell.closest('tr')?.getAttribute('data-testid')).toBeNull();
+      const cell = confirm.parentElement as HTMLElement;
+      expect(cell.classList).toContain('col-span-full');
+      expect(cell.getAttribute('data-testid')).toBeNull();
       expect(confirm.className).not.toMatch(/bg-error|border-error/);
       const button = fixture.nativeElement.querySelector('[data-testid="output-style-confirm-delete"]') as HTMLElement;
       expect(button.classList).toContain('btn-outline');

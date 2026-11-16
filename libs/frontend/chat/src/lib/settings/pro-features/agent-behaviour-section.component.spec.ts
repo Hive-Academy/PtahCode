@@ -57,7 +57,9 @@ describe('AgentBehaviourSectionComponent', () => {
   }
 
   const checkbox = (label: string) =>
-    element.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`) as HTMLInputElement;
+    element.querySelector<HTMLInputElement>(
+      `input[aria-label="${label}"]`,
+    ) as HTMLInputElement;
 
   async function click(label: string): Promise<void> {
     checkbox(label).click();
@@ -66,12 +68,16 @@ describe('AgentBehaviourSectionComponent', () => {
 
   beforeEach(() => {
     handlers = {
-      'enhancedPrompts:getStatus': () => rpcSuccess({ enabled: false, hasGeneratedPrompt: true }),
+      'enhancedPrompts:getStatus': () =>
+        rpcSuccess({ enabled: false, hasGeneratedPrompt: true }),
       'enhancedPrompts:setEnabled': () => rpcSuccess({ success: true }),
       'agent:getConfig': () => rpcSuccess({ workflowsDisabled: false }),
       'agent:setConfig': () => rpcSuccess({ success: true }),
     };
-    call = jest.fn(async (method: string, params: unknown) => handlers[method]?.(params) ?? rpcSuccess(undefined));
+    call = jest.fn(
+      async (method: string, params: unknown) =>
+        handlers[method]?.(params) ?? rpcSuccess(undefined),
+    );
     effort = signal<EffortLevel | undefined>('medium');
     setEffort = jest.fn();
     effortWrites(true);
@@ -85,9 +91,18 @@ describe('AgentBehaviourSectionComponent', () => {
       imports: [AgentBehaviourSectionComponent],
       providers: [
         { provide: ClaudeRpcService, useValue: { call } },
-        { provide: EffortStateService, useValue: { currentEffort: effort, setEffort } },
-        { provide: UltracodeStateService, useValue: { enabled: ultracodeEnabled, toggle: ultracodeToggle } },
-        { provide: ProvidersSettingsStateService, useValue: { commit: signal({ status: 'idle' }) } },
+        {
+          provide: EffortStateService,
+          useValue: { currentEffort: effort, setEffort },
+        },
+        {
+          provide: UltracodeStateService,
+          useValue: { enabled: ultracodeEnabled, toggle: ultracodeToggle },
+        },
+        {
+          provide: ProvidersSettingsStateService,
+          useValue: { commit: signal({ status: 'idle' }) },
+        },
         { provide: VSCodeService, useValue: { isElectron: true } },
         SettingsSaveFeedbackService,
       ],
@@ -102,13 +117,17 @@ describe('AgentBehaviourSectionComponent', () => {
   });
 
   describe('card shape', () => {
-    it('renders one Agent behaviour table with the four rows in order', async () => {
+    it('renders one Agent behaviour form section with the four rows in order', async () => {
       await render();
       expect(
         element.querySelector('section')?.getAttribute('data-glass-surface'),
       ).toBe('content');
-      expect(element.querySelector('#agent-behaviour-heading')?.textContent?.trim()).toBe('Agent behaviour');
-      const rows = Array.from(element.querySelectorAll('tbody tr')).map((row) => row.getAttribute('data-testid'));
+      expect(
+        element.querySelector('#agent-behaviour-heading')?.textContent?.trim(),
+      ).toBe('Agent behaviour');
+      const rows = Array.from(element.querySelectorAll('ptah-setting-row')).map(
+        (row) => row.getAttribute('data-testid'),
+      );
       expect(rows).toEqual([
         'agent-behaviour-row-prompt',
         'agent-behaviour-row-effort',
@@ -126,55 +145,90 @@ describe('AgentBehaviourSectionComponent', () => {
 
     it('labels the effort cell as the Providers Main Agent effort (G9)', async () => {
       await render();
-      const row = element.querySelector('[data-testid="agent-behaviour-row-effort"]');
+      const row = element.querySelector(
+        '[data-testid="agent-behaviour-row-effort"]',
+      );
       expect(row?.textContent).toContain('Chat reasoning effort');
-      expect(row?.textContent).toContain('Same value as Providers > Main Agent effort');
+      expect(row?.textContent).toContain(
+        'Same value as Providers > Main Agent effort',
+      );
     });
 
     it('deviation 6: colour classes sit only on icons, never on text', async () => {
-      handlers['enhancedPrompts:getStatus'] = () => rpcError('status unavailable');
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcError('status unavailable');
       await render();
       const coloured = Array.from(
-        element.querySelectorAll('.text-primary, .text-secondary, .text-success, .text-error, .text-warning'),
+        element.querySelectorAll(
+          '.text-primary, .text-secondary, .text-success, .text-error, .text-warning',
+        ),
       );
       expect(coloured.length).toBeGreaterThan(0);
       // lucide-angular copies its host classes onto the inner <svg>.
-      expect(coloured.every((node) => node.closest('lucide-angular') !== null)).toBe(true);
+      expect(
+        coloured.every((node) => node.closest('lucide-angular') !== null),
+      ).toBe(true);
     });
   });
 
   describe('System prompt mode (A10/A11)', () => {
     it('keeps the harness aria-label and disables the toggle until a prompt exists', async () => {
-      handlers['enhancedPrompts:getStatus'] = () => rpcSuccess({ enabled: false, hasGeneratedPrompt: false });
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: false, hasGeneratedPrompt: false });
       await render();
-      expect(isDisabledControl(checkbox('Toggle Enhanced System Prompt'))).toBe(true);
-      expect(element.querySelector('#agent-behaviour-prompt-note')?.textContent).toContain('Run Setup');
+      expect(isDisabledControl(checkbox('Toggle Enhanced System Prompt'))).toBe(
+        true,
+      );
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent,
+      ).toContain('Run Setup');
     });
 
     it('saves on selection, re-reads the status and toasts with Undo', async () => {
       await render();
-      handlers['enhancedPrompts:getStatus'] = () => rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
       await click('Toggle Enhanced System Prompt');
-      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', { workspacePath: '.', enabled: true });
+      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', {
+        workspacePath: '.',
+        enabled: true,
+      });
       expect(checkbox('Toggle Enhanced System Prompt').checked).toBe(true);
-      expect(element.querySelector('[data-testid="agent-behaviour-prompt-status"]')?.textContent).toContain('Ptah Enhanced');
-      expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved system prompt mode.', canUndo: true });
+      expect(
+        element.querySelector('[data-testid="agent-behaviour-prompt-status"]')
+          ?.textContent,
+      ).toContain('Ptah Enhanced');
+      expect(feedback.toast()).toEqual({
+        tone: 'status',
+        message: 'Saved system prompt mode.',
+        canUndo: true,
+      });
 
-      handlers['enhancedPrompts:getStatus'] = () => rpcSuccess({ enabled: false, hasGeneratedPrompt: true });
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: false, hasGeneratedPrompt: true });
       await feedback.undo();
-      expect(call).toHaveBeenLastCalledWith('enhancedPrompts:getStatus', { workspacePath: '.' });
-      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', { workspacePath: '.', enabled: false });
+      expect(call).toHaveBeenLastCalledWith('enhancedPrompts:getStatus', {
+        workspacePath: '.',
+      });
+      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', {
+        workspacePath: '.',
+        enabled: false,
+      });
     });
 
     it('writes the mode for the active workspace root, not ".", when the host tracks one', async () => {
       await render();
       TestBed.inject(WorkspaceScopeService).switchTo('/ws/project-a');
       await click('Toggle Enhanced System Prompt');
-      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', { workspacePath: '/ws/project-a', enabled: true });
+      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', {
+        workspacePath: '/ws/project-a',
+        enabled: true,
+      });
     });
 
     it('D15: a failed write reverts the checkbox and raises an alert toast with fixed message', async () => {
-      handlers['enhancedPrompts:setEnabled'] = () => rpcError('host detail: disk full');
+      handlers['enhancedPrompts:setEnabled'] = () =>
+        rpcError('host detail: disk full');
       await render();
       await click('Toggle Enhanced System Prompt');
       expect(checkbox('Toggle Enhanced System Prompt').checked).toBe(false);
@@ -188,7 +242,10 @@ describe('AgentBehaviourSectionComponent', () => {
 
     it('D15: a host failure inside a successful RPC ({success:false}) uses fixed error message', async () => {
       handlers['enhancedPrompts:setEnabled'] = () =>
-        rpcSuccess({ success: false, error: 'host detail: Enhanced prompts could not be enabled.' });
+        rpcSuccess({
+          success: false,
+          error: 'host detail: Enhanced prompts could not be enabled.',
+        });
       await render();
       call.mockClear();
       await click('Toggle Enhanced System Prompt');
@@ -200,7 +257,9 @@ describe('AgentBehaviourSectionComponent', () => {
       });
       expect(feedback.toast()?.message).not.toContain('host detail');
       // No status re-read follows a failed write.
-      expect(call).not.toHaveBeenCalledWith('enhancedPrompts:getStatus', { workspacePath: '.' });
+      expect(call).not.toHaveBeenCalledWith('enhancedPrompts:getStatus', {
+        workspacePath: '.',
+      });
     });
 
     it('D15: a thrown error during write uses fixed error message', async () => {
@@ -219,11 +278,16 @@ describe('AgentBehaviourSectionComponent', () => {
     });
 
     it('shows a load failure as an inline alert with fixed copy and no host detail', async () => {
-      handlers['enhancedPrompts:getStatus'] = () => rpcError('host detail: status unavailable');
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcError('host detail: status unavailable');
       await render();
-      const alert = element.querySelector('[data-testid="agent-behaviour-load-error"]');
+      const alert = element.querySelector(
+        '[data-testid="agent-behaviour-load-error"]',
+      );
       expect(alert?.getAttribute('role')).toBe('alert');
-      expect(alert?.textContent).toContain('Could not load the system prompt status.');
+      expect(alert?.textContent).toContain(
+        'Could not load the system prompt status.',
+      );
       expect(alert?.textContent).not.toContain('host detail');
     });
 
@@ -232,53 +296,85 @@ describe('AgentBehaviourSectionComponent', () => {
         throw new Error('host detail: socket timeout');
       };
       await render();
-      const alert = element.querySelector('[data-testid="agent-behaviour-load-error"]');
+      const alert = element.querySelector(
+        '[data-testid="agent-behaviour-load-error"]',
+      );
       expect(alert?.getAttribute('role')).toBe('alert');
-      expect(alert?.textContent).toContain('Could not load the system prompt status.');
+      expect(alert?.textContent).toContain(
+        'Could not load the system prompt status.',
+      );
       expect(alert?.textContent).not.toContain('host detail');
     });
 
     it('lane Serious 1: a status with error inside a successful RPC is a load failure with Retry, not the wizard note', async () => {
       handlers['enhancedPrompts:getStatus'] = () =>
-        rpcSuccess({ enabled: false, hasGeneratedPrompt: false, generatedAt: null, error: 'host detail: EPERM' });
+        rpcSuccess({
+          enabled: false,
+          hasGeneratedPrompt: false,
+          generatedAt: null,
+          error: 'host detail: EPERM',
+        });
       await render();
 
-      const alert = element.querySelector('[data-testid="agent-behaviour-load-error"]');
-      expect(alert?.textContent).toContain('Could not load the system prompt status.');
+      const alert = element.querySelector(
+        '[data-testid="agent-behaviour-load-error"]',
+      );
+      expect(alert?.textContent).toContain(
+        'Could not load the system prompt status.',
+      );
       expect(alert?.textContent).not.toContain('EPERM');
-      const note = element.querySelector('#agent-behaviour-prompt-note')?.textContent ?? '';
+      const note =
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent ??
+        '';
       expect(note).not.toContain('Run Setup');
       expect(note).toContain('not loaded');
 
-      handlers['enhancedPrompts:getStatus'] = () => rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
-      element.querySelector<HTMLButtonElement>('[data-testid="agent-behaviour-load-retry"]')?.click();
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
+      element
+        .querySelector<HTMLButtonElement>(
+          '[data-testid="agent-behaviour-load-retry"]',
+        )
+        ?.click();
       await settle();
 
-      expect(element.querySelector('[data-testid="agent-behaviour-load-error"]')).toBeNull();
+      expect(
+        element.querySelector('[data-testid="agent-behaviour-load-error"]'),
+      ).toBeNull();
       expect(checkbox('Toggle Enhanced System Prompt').checked).toBe(true);
     });
 
     it('Moderate 8 / FM-3: a saved mode whose re-read fails keeps the written value and shows the load error', async () => {
       await render();
-      handlers['enhancedPrompts:getStatus'] = () => rpcError('host detail: read failed');
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcError('host detail: read failed');
       await click('Toggle Enhanced System Prompt');
 
-      expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved system prompt mode.', canUndo: true });
+      expect(feedback.toast()).toEqual({
+        tone: 'status',
+        message: 'Saved system prompt mode.',
+        canUndo: true,
+      });
       expect(checkbox('Toggle Enhanced System Prompt').checked).toBe(true);
-      expect(element.querySelector('[data-testid="agent-behaviour-prompt-status"]')?.textContent).toContain('Ptah Enhanced');
-      expect(element.querySelector('[data-testid="agent-behaviour-load-error"]')?.textContent).toContain(
-        'Could not load the system prompt status.',
-      );
+      expect(
+        element.querySelector('[data-testid="agent-behaviour-prompt-status"]')
+          ?.textContent,
+      ).toContain('Ptah Enhanced');
+      expect(
+        element.querySelector('[data-testid="agent-behaviour-load-error"]')
+          ?.textContent,
+      ).toContain('Could not load the system prompt status.');
     });
 
     it('D2: "Active for all sessions" uses the muted token without extra opacity', async () => {
-      handlers['enhancedPrompts:getStatus'] = () => rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
       await render();
-      const line = Array.from(element.querySelectorAll('[data-testid="agent-behaviour-prompt-status"] div')).find(
-        (node) => node.textContent?.trim() === 'Active for all sessions',
+      const status = element.querySelector(
+        '[data-testid="agent-behaviour-prompt-status"]',
       );
-      expect(line?.classList).toContain('text-base-content-muted');
-      expect(line?.className).not.toMatch(/opacity-/);
+      expect(status?.textContent).toContain('Active for all sessions');
+      expect(status?.closest('[class*="opacity-"]')).toBeNull();
     });
   });
 
@@ -286,31 +382,45 @@ describe('AgentBehaviourSectionComponent', () => {
     it('clamps every description to one line, with the full text as its title and for screen readers', async () => {
       await render();
       const notes = ['prompt', 'effort', 'workflows', 'ultracode'].map(
-        (row) => element.querySelector(`#agent-behaviour-${row}-note`) as HTMLElement,
+        (row) =>
+          element.querySelector(`#agent-behaviour-${row}-note`) as HTMLElement,
       );
       for (const note of notes) {
         expect(note.classList).toContain('truncate');
         expect(note.classList).toContain('text-xs');
         expect(note.getAttribute('title')).toBe(note.textContent?.trim());
-        expect(note.closest('td')?.classList).toContain('max-w-0');
+        expect(note.closest('ptah-setting-row')).not.toBeNull();
       }
-      expect(notes[3].textContent).toContain('Turning Ultracode off restores your previous reasoning effort.');
-      expect(checkbox('Toggle Ultracode mode').getAttribute('aria-describedby')).toBe('agent-behaviour-ultracode-note');
-      expect(checkbox('Toggle dynamic workflows').getAttribute('aria-describedby')).toBe('agent-behaviour-workflows-note');
+      expect(notes[3].textContent).toContain(
+        'Turning Ultracode off restores your previous reasoning effort.',
+      );
+      expect(
+        checkbox('Toggle Ultracode mode').getAttribute('aria-describedby'),
+      ).toBe('agent-behaviour-ultracode-note');
+      expect(
+        checkbox('Toggle dynamic workflows').getAttribute('aria-describedby'),
+      ).toBe('agent-behaviour-workflows-note');
     });
   });
 
   describe('Chat reasoning effort (A26, read-back)', () => {
     it('shows the shared effort value on the cell button', async () => {
       await render();
-      expect(element.querySelector('[data-testid="agent-behaviour-effort-value"]')?.textContent).toContain('Medium');
+      expect(
+        element.querySelector('[data-testid="agent-behaviour-effort-value"]')
+          ?.textContent,
+      ).toContain('Medium');
     });
 
     it('saves a new level and Undo writes the previous one back', async () => {
       await render();
       await component.selectEffort('high');
       expect(setEffort).toHaveBeenCalledWith('high');
-      expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved chat reasoning effort.', canUndo: true });
+      expect(feedback.toast()).toEqual({
+        tone: 'status',
+        message: 'Saved chat reasoning effort.',
+        canUndo: true,
+      });
 
       await feedback.undo();
       expect(setEffort).toHaveBeenLastCalledWith('medium');
@@ -346,35 +456,55 @@ describe('AgentBehaviourSectionComponent', () => {
     it('is pinned while Ultracode is on: the cell is disabled and says why', async () => {
       ultracodeEnabled.set(true);
       await render();
-      const trigger = element.querySelector<HTMLButtonElement>('[data-testid="agent-behaviour-effort-value"]');
+      const trigger = element.querySelector<HTMLButtonElement>(
+        '[data-testid="agent-behaviour-effort-value"]',
+      );
       expect(isDisabledControl(trigger)).toBe(true);
-      expect(element.querySelector('#agent-behaviour-effort-note')?.textContent).toContain('Pinned to X-High by Ultracode');
+      expect(
+        element.querySelector('#agent-behaviour-effort-note')?.textContent,
+      ).toContain('Pinned to X-High by Ultracode');
     });
   });
 
   describe('Dynamic workflows (A27)', () => {
     it('hydrates from agent:getConfig', async () => {
-      handlers['agent:getConfig'] = () => rpcSuccess({ workflowsDisabled: true });
+      handlers['agent:getConfig'] = () =>
+        rpcSuccess({ workflowsDisabled: true });
       await render();
       expect(checkbox('Toggle dynamic workflows').checked).toBe(false);
-      expect(element.querySelector('[data-testid="agent-behaviour-workflows-status"]')?.textContent?.trim()).toBe('Off');
+      expect(
+        element
+          .querySelector('[data-testid="agent-behaviour-workflows-status"]')
+          ?.textContent?.trim(),
+      ).toBe('Off');
     });
 
     it('persists the inverted flag and toasts with Undo', async () => {
       await render();
       await click('Toggle dynamic workflows');
-      expect(call).toHaveBeenCalledWith('agent:setConfig', { workflowsDisabled: true });
+      expect(call).toHaveBeenCalledWith('agent:setConfig', {
+        workflowsDisabled: true,
+      });
       expect(checkbox('Toggle dynamic workflows').checked).toBe(false);
-      expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved dynamic workflows.', canUndo: true });
+      expect(feedback.toast()).toEqual({
+        tone: 'status',
+        message: 'Saved dynamic workflows.',
+        canUndo: true,
+      });
 
       await feedback.undo();
-      expect(call).toHaveBeenLastCalledWith('agent:setConfig', { workflowsDisabled: false });
+      expect(call).toHaveBeenLastCalledWith('agent:setConfig', {
+        workflowsDisabled: false,
+      });
       expect(component.workflowsEnabled()).toBe(true);
     });
 
     it('D15: a structured failure reverts the checkbox and uses fixed message with no host detail', async () => {
       handlers['agent:setConfig'] = () =>
-        rpcSuccess({ success: false, error: 'host detail: Settings file is read-only.' });
+        rpcSuccess({
+          success: false,
+          error: 'host detail: Settings file is read-only.',
+        });
       await render();
       await click('Toggle dynamic workflows');
       expect(checkbox('Toggle dynamic workflows').checked).toBe(true);
@@ -404,16 +534,31 @@ describe('AgentBehaviourSectionComponent', () => {
     it('keeps the toggle disabled and reports the failure when the setting cannot load', async () => {
       handlers['agent:getConfig'] = () => rpcError('host detail: host offline');
       await render();
-      expect(isDisabledControl(checkbox('Toggle dynamic workflows'))).toBe(true);
-      const alert = element.querySelector('[data-testid="agent-behaviour-load-error"]');
-      expect(alert?.textContent).toContain('Could not load the dynamic workflows setting.');
+      expect(isDisabledControl(checkbox('Toggle dynamic workflows'))).toBe(
+        true,
+      );
+      const alert = element.querySelector(
+        '[data-testid="agent-behaviour-load-error"]',
+      );
+      expect(alert?.textContent).toContain(
+        'Could not load the dynamic workflows setting.',
+      );
       expect(alert?.textContent).not.toContain('host detail');
 
-      handlers['agent:getConfig'] = () => rpcSuccess({ workflowsDisabled: false });
-      alert?.querySelector<HTMLButtonElement>('[data-testid="agent-behaviour-load-retry"]')?.click();
+      handlers['agent:getConfig'] = () =>
+        rpcSuccess({ workflowsDisabled: false });
+      alert
+        ?.querySelector<HTMLButtonElement>(
+          '[data-testid="agent-behaviour-load-retry"]',
+        )
+        ?.click();
       await settle();
-      expect(isDisabledControl(checkbox('Toggle dynamic workflows'))).toBe(false);
-      expect(element.querySelector('[data-testid="agent-behaviour-load-error"]')).toBeNull();
+      expect(isDisabledControl(checkbox('Toggle dynamic workflows'))).toBe(
+        false,
+      );
+      expect(
+        element.querySelector('[data-testid="agent-behaviour-load-error"]'),
+      ).toBeNull();
     });
 
     it('keeps the toggle disabled and reports the failure when the setting load throws', async () => {
@@ -421,9 +566,15 @@ describe('AgentBehaviourSectionComponent', () => {
         throw new Error('host detail: connection refused');
       };
       await render();
-      expect(isDisabledControl(checkbox('Toggle dynamic workflows'))).toBe(true);
-      const alert = element.querySelector('[data-testid="agent-behaviour-load-error"]');
-      expect(alert?.textContent).toContain('Could not load the dynamic workflows setting.');
+      expect(isDisabledControl(checkbox('Toggle dynamic workflows'))).toBe(
+        true,
+      );
+      const alert = element.querySelector(
+        '[data-testid="agent-behaviour-load-error"]',
+      );
+      expect(alert?.textContent).toContain(
+        'Could not load the dynamic workflows setting.',
+      );
       expect(alert?.textContent).not.toContain('host detail');
     });
   });
@@ -433,7 +584,11 @@ describe('AgentBehaviourSectionComponent', () => {
       await render();
       await click('Toggle Ultracode mode');
       expect(ultracodeToggle).toHaveBeenCalledWith(true);
-      expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved Ultracode.', canUndo: true });
+      expect(feedback.toast()).toEqual({
+        tone: 'status',
+        message: 'Saved Ultracode.',
+        canUndo: true,
+      });
 
       await feedback.undo();
       expect(ultracodeToggle).toHaveBeenLastCalledWith(false);
@@ -448,7 +603,8 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(checkbox('Toggle Ultracode mode').checked).toBe(true);
       expect(feedback.toast()).toEqual({
         tone: 'alert',
-        message: 'Could not turn off Ultracode: your previous reasoning effort was not restored.',
+        message:
+          'Could not turn off Ultracode: your previous reasoning effort was not restored.',
         canUndo: false,
       });
     });
@@ -482,10 +638,12 @@ describe('AgentBehaviourSectionComponent', () => {
       call.mockClear();
 
       // Trigger the protected loadPromptStatus directly or simulate change
-      await (component as unknown as { loadPromptStatus: () => Promise<void> }).loadPromptStatus();
-      expect(call).toHaveBeenCalledWith('enhancedPrompts:getStatus', { workspacePath: '.' });
+      await (
+        component as unknown as { loadPromptStatus: () => Promise<void> }
+      ).loadPromptStatus();
+      expect(call).toHaveBeenCalledWith('enhancedPrompts:getStatus', {
+        workspacePath: '.',
+      });
     });
   });
 });
-
-

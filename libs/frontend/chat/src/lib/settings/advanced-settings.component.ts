@@ -4,7 +4,6 @@ import {
   ElementRef,
   Injector,
   afterNextRender,
-  effect,
   inject,
   output,
   signal,
@@ -12,7 +11,6 @@ import {
 } from '@angular/core';
 import {
   LucideAngularModule,
-  ChevronRight,
   Download,
   Upload,
 } from 'lucide-angular';
@@ -25,7 +23,7 @@ import { ClaudeBuiltinsConfigComponent } from './pro-features/claude-builtins-co
 import { AgentBehaviourSectionComponent } from './pro-features/agent-behaviour-section.component';
 import { OutputStyleConfigComponent } from './output-style/output-style-config.component';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahDisclosureComponent, PtahInlineConfirmComponent } from '@ptah-extension/ui';
 
 /**
  * A per-key import failure is reported as `<key>: <reason>`, the key being a `ptah.*` secret
@@ -34,9 +32,6 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
  * read; the host text itself is never shown (D15).
  */
 const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
-
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 
 /**
  * Advanced tab shell (TASK_2026_555 Advanced / Search & Voice, Batches 39-42).
@@ -71,64 +66,44 @@ const FOCUS =
     VscodeLmConfigComponent,
     AdvancedSettingsGroupComponent,
     PtahButtonDirective,
+    PtahInlineConfirmComponent,
+    PtahDisclosureComponent,
   ],
   template: `
-    <div class="space-y-8 py-3">
+    <div class="flex flex-col gap-[var(--ptah-gap-section)] py-[var(--ptah-gap-field)]">
       <ptah-license-status-card>
         <!--
           M5: the import confirm takes the place of Export / Import inside the header's action row, so the
           membership badges under the header do not move and the card height stays the same.
         -->
-        <div membership-actions class="flex flex-wrap items-center gap-1.5">
+        <div membership-actions class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
           @if (confirmingImport()) {
-            <div
-              role="group"
-              aria-label="Confirm import settings"
+            <ptah-inline-confirm
+              message="Replace your settings from a file?"
+              ariaLabel="Confirm import settings"
+              confirmLabel="Import settings"
+              tone="danger"
+              confirmTestId="import-confirm-button"
               aria-describedby="import-confirm-detail"
-              class="flex items-center gap-1.5 rounded border border-base-300 px-2 py-0.5"
+              [busy]="isImporting()"
+              (confirm)="importSettings()"
+              (cancelled)="cancelImport()"
               data-testid="import-confirm"
-              (keydown.escape)="cancelImport($event)"
-            >
-              <span class="text-xs text-base-content whitespace-nowrap"
-                >Replace your settings from a file?</span
-              >
-              <span id="import-confirm-detail" class="sr-only">
-                Import replaces your current settings, API keys and preferences
-                with the contents of a settings export file you choose next.
-              </span>
-              <button
-                type="button"
-                class="btn btn-outline btn-sm border-error text-base-content"
-                [disabled]="isImporting()"
-                (click)="importSettings()"
-                data-testid="import-confirm-button"
-              >
-                Import settings
-              </button>
-              <button
-                #importCancel
-                type="button"
-                ptahButton variant="ghost"
-                [disabled]="isImporting()"
-                (click)="cancelImport()"
-              >
-                Cancel
-              </button>
-            </div>
+            />
+            <span id="import-confirm-detail" class="sr-only">
+              Import replaces your current settings, API keys and preferences
+              with the contents of a settings export file you choose next.
+            </span>
           } @else {
             <button
               type="button"
               ptahButton
+              [busy]="isExporting()"
               [disabled]="isExporting()"
               (click)="exportSettings()"
               aria-label="Export settings"
             >
-              @if (isExporting()) {
-                <span
-                  class="loading loading-spinner loading-xs"
-                  aria-hidden="true"
-                ></span>
-              } @else {
+              @if (!isExporting()) {
                 <lucide-angular
                   [img]="UploadIcon"
                   class="w-3 h-3"
@@ -141,16 +116,12 @@ const FOCUS =
               #importButton
               type="button"
               ptahButton
+              [busy]="isImporting()"
               [disabled]="isImporting()"
               (click)="requestImport()"
               aria-label="Import settings"
             >
-              @if (isImporting()) {
-                <span
-                  class="loading loading-spinner loading-xs"
-                  aria-hidden="true"
-                ></span>
-              } @else {
+              @if (!isImporting()) {
                 <lucide-angular
                   [img]="DownloadIcon"
                   class="w-3 h-3"
@@ -170,39 +141,18 @@ const FOCUS =
       <ptah-vscode-lm-config (modelChanged)="modelChanged.emit()" />
 
       <!-- Fine-tuning (TASK_2026_658): closed by default; its groups load in their own chunk once opened and in view. -->
-      <section class="border-t border-base-content/10 pt-6" data-glass-surface="content">
-        <details class="group" data-testid="fine-tuning-details">
-          <summary
-            [class]="
-              'flex cursor-pointer list-none items-start gap-2 rounded-lg py-0 select-none [&::-webkit-details-marker]:hidden ' +
-              focusRing
-            "
-            data-testid="fine-tuning-summary"
-          >
-            <!-- Points right closed, down open; the turn sits on the wrapper (lucide copies host classes to the svg). -->
-            <span
-              class="mt-0.5 inline-flex shrink-0 transition-transform group-open:rotate-90"
-              aria-hidden="true"
-            >
-              <lucide-angular
-                [img]="ChevronIcon"
-                class="block h-3.5 w-3.5 text-info"
-                aria-hidden="true"
-              />
-            </span>
-            <span class="flex min-w-0 flex-col gap-0.5">
-              <span
-                class="text-xs font-bold uppercase tracking-wider text-base-content"
-                >Fine-tuning</span
-              >
-              <span class="text-xs text-base-content-muted"
-                >Upkeep and timing values for memory, scheduled jobs and
-                the workspace harness. The defaults suit most people.</span
-              >
-            </span>
-          </summary>
+      <section
+        class="border-t border-base-content/10 pt-[var(--ptah-gap-group)]"
+        data-glass-surface="content"
+      >
+        <ptah-disclosure
+          label="Fine-tuning"
+          description="Upkeep and timing values for memory, scheduled jobs and the workspace harness. The defaults suit most people."
+          data-testid="fine-tuning-details"
+        >
+          <span ptahDisclosureSummary data-testid="fine-tuning-summary" aria-hidden="true" class="sr-only">Fine-tuning</span>
           <div
-            class="mt-3 flex flex-col gap-4 border-t border-base-content/10 pt-3"
+            class="mt-[var(--ptah-gap-heading)] flex flex-col gap-[var(--ptah-gap-group)] border-t border-base-content/10 pt-[var(--ptah-gap-heading)]"
           >
             @defer (on viewport) {
               <ptah-advanced-settings-group groupId="memory-upkeep" [contentSurface]="false" />
@@ -215,7 +165,7 @@ const FOCUS =
               ></div>
             }
           </div>
-        </details>
+        </ptah-disclosure>
       </section>
     </div>
   `,
@@ -233,25 +183,16 @@ export class AdvancedSettingsComponent {
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly importButton =
     viewChild<ElementRef<HTMLButtonElement>>('importButton');
-  private readonly importCancel =
-    viewChild<ElementRef<HTMLButtonElement>>('importCancel');
 
   /** VS Code LM model changes can change which CLIs are usable (#84). */
   readonly modelChanged = output<void>();
 
   readonly DownloadIcon = Download;
   readonly UploadIcon = Upload;
-  protected readonly ChevronIcon = ChevronRight;
-  protected readonly focusRing = FOCUS;
   readonly isExporting = signal(false);
   readonly isImporting = signal(false);
   /** The inline import confirm is open (S-confirm, P8). */
   readonly confirmingImport = signal(false);
-
-  constructor() {
-    // P8: the opened import confirm takes focus on Cancel, so Esc reaches it.
-    effect(() => this.importCancel()?.nativeElement.focus());
-  }
 
   /**
    * Export settings to a JSON file.

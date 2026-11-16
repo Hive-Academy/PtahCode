@@ -144,7 +144,8 @@ import { findBlockedLaneModel } from './lane-spawn-policy';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from './mcp-attachment-probe.port';
 import type { TrackedAgent } from './tracked-agent';
-import { startingAgent, SPAWN_ADMISSION_WATCHDOG_MS, type SpawnAdmission } from './agent-spawn-admission';
+import { startingAgent, armSpawnAdmissionWatchdog, type SpawnAdmission } from './agent-spawn-admission';
+import { AgentSpawnMemoryGate } from './agent-spawn-memory-gate';
 import {
   observedModelFrom,
   requestedModelForLog,
@@ -367,6 +368,8 @@ export class LaneModelBlockedError extends Error {
 }
 @injectable()
 export class AgentProcessManager {
+  private readonly memoryGate: AgentSpawnMemoryGate;
+  private readonly spawnLaunchTimes = new WeakMap<TrackedAgent, string>();
   private readonly laneUsageNormalizer = new LaneUsageNormalizer();
   private readonly agents = new Map<string, TrackedAgent>();
   /** Lanes a restore skipped because another live host run owns them. */
@@ -483,6 +486,20 @@ export class AgentProcessManager {
     @inject(CLI_AGENT_RUNTIME_TOKENS.EXTERNAL_COMPLETION_RECORDER, { isOptional: true })
     private readonly externalCompletions?: ExternalCompletionRecorder,
   ) {
+    // Lane state and failure callbacks are adapted to the shared admission queue.
+    const hasOtherActiveLane = (waiting: TrackedAgent) =>
+      Array.from(this.agents.values()).some((agent) =>
+        agent !== waiting && !agent.info.waitingForMemory &&
+        (agent.info.status === 'running' || agent.info.status === 'starting'));
+    this.memoryGate = new AgentSpawnMemoryGate(
+      () => this.spawnEnvironment.freeMemory(),
+      () => this.spawnEnvironment.minFreeMemoryGb(),
+      () => this.spawnEnvironment.spawnQueueTimeoutMs(),
+      hasOtherActiveLane,
+      (waiting, error) => this.failSpawn(
+        { agentId: waiting.info.agentId, startedAt: waiting.info.startedAt }, error),
+    );
+    this.events.on('agent:exited', () => this.memoryGate.wake());
     this.budgetTelemetry = new LaneBudgetTelemetry(
       this.logger,
       async (agentId) => {
@@ -538,9 +555,9 @@ export class AgentProcessManager {
    * Synchronous admission installs the starting record before detection,
    * validation, preflight, and the SDK launch yield to asynchronous work.
    */
-  async spawn(request: SpawnAgentRequest): Promise<SpawnAgentResult> {
+  async spawn(request: SpawnAgentRequest, force?: boolean): Promise<SpawnAgentResult> {
     const ticket = this.beginSpawn(request);
-    return this.executeSpawn(ticket, request);
+    return this.executeSpawn(ticket, request, force);
   }
 
   beginSpawn(request: SpawnAgentRequest): SpawnAdmission {
@@ -570,10 +587,10 @@ export class AgentProcessManager {
     });
     tracked.provisionalCli = !request.cli && !request.ptahCliId;
     tracked.externalOwner = request.externalOwner;
-    tracked.admissionTimer = this.unrefTimer(setTimeout(() => {
-      this.failSpawn({ agentId, startedAt }, new Error('Lane did not start within 120 s'));
-    }, SPAWN_ADMISSION_WATCHDOG_MS));
     this.agents.set(agentId, tracked);
+    armSpawnAdmissionWatchdog(tracked, () => {
+      this.failSpawn({ agentId, startedAt }, new Error('Lane did not start within 120 s'));
+    });
     return { agentId, startedAt };
   }
 
@@ -589,12 +606,22 @@ export class AgentProcessManager {
   async executeSpawn(
     ticket: SpawnAdmission,
     request: SpawnAgentRequest,
+    force?: boolean,
   ): Promise<SpawnAgentResult> {
     const tracked = this.agents.get(ticket.agentId);
     if (!tracked || tracked.info.startedAt !== ticket.startedAt) {
       throw new Error(`Spawn admission not found: ${ticket.agentId}`);
     }
     try {
+      await this.memoryGate.wait(tracked, force);
+      ticket.waitingForMemory = (tracked as any)._enteredQueue ?? false;
+      if (tracked.info.status !== 'starting') {
+        throw new Error('Lane stopped before spawn');
+      }
+      this.spawnLaunchTimes.set(tracked, new Date().toISOString());
+      armSpawnAdmissionWatchdog(tracked, () => {
+        this.failSpawn(ticket, new Error('Lane did not start within 120 s'));
+      });
       return await this.doSpawn(request, ticket);
     } catch (error: unknown) {
       this.failSpawn(ticket, error);
@@ -607,8 +634,13 @@ export class AgentProcessManager {
     if (!tracked || tracked.info.status !== 'starting' ||
         tracked.info.startedAt !== ticket.startedAt) return;
     clearTimeout(tracked.admissionTimer);
+    tracked.info.waitingForMemory = false;
     this.mcpCredentials?.revokeSubject(ticket.agentId);
     if (!tracked.spawnReplied) {
+      const completedAt = new Date().toISOString();
+      tracked.info = { ...tracked.info, status: 'failed', completedAt, lastActivityAt: completedAt };
+      tracked.stderrBuffer = error instanceof Error ? error.message : String(error);
+      tracked.hasExited = true;
       this.agents.delete(ticket.agentId);
       return;
     }
@@ -621,13 +653,9 @@ export class AgentProcessManager {
     this.scheduleCleanup(ticket.agentId);
   }
 
-  /**
-   * Internal spawn implementation. Admission already installed a starting
-   * record, which reserves the slot for this pipeline.
-   *
+  /** The starting record reserves the slot for this unlocked pipeline.
    * Runs UNLOCKED and does NOT re-check the concurrent limit — the caller
    * already owns the reserved starting record from {@link beginSpawn}.
-   * Re-checking here would double-count that reservation.
    */
   private async doSpawn(request: SpawnAgentRequest, ticket: SpawnAdmission): Promise<SpawnAgentResult> {
     const timing = new SpawnStepTiming();
@@ -1659,7 +1687,7 @@ export class AgentProcessManager {
       : undefined;
     const budget = createLaneBudget(
       this.spawnEnvironment.resolveAgentBudgetSettings(),
-      info.startedAt,
+      this.spawnLaunchTimes.get(tracked) ?? info.startedAt,
       previousBudget,
     );
     tracked.budget = budget;
@@ -3130,6 +3158,7 @@ export class AgentProcessManager {
       this.mcpCredentials?.revokeSubject(agentId);
       const completedAt = new Date().toISOString();
       tracked.info = { ...tracked.info, status: 'stopped', completedAt, lastActivityAt: completedAt };
+      this.memoryGate.wake();
       tracked.hasExited = true;
       if (tracked.spawnReplied) {
         this.signalLaneCompletion(tracked);
@@ -3301,22 +3330,7 @@ export class AgentProcessManager {
     });
   }
 
-  /**
-   * The spawn mutex primitive: a promise chain that runs `fn` after every
-   * previously-queued `fn` has settled.
-   *
-   * **It protects the check-and-reserve in {@link reserveSpawnSlot} and nothing
-   * else. Never await I/O inside it.** This lock is global to the host, so
-   * anything awaited within it serializes EVERY session on the machine: until
-   * TASK_2026_323 B10 the whole spawn ran in here, which meant one session's
-   * CLI detection, working-directory `realpath`, 1500 ms harness preflight and
-   * SDK process launch blocked every other session's spawn from even starting.
-   * The critical section is now a few synchronous reads and one increment.
-   *
-   * Uses a Promise-chain pattern: each call chains onto the previous, ensuring
-   * sequential execution while remaining non-blocking. try/finally guarantees
-   * the lock is released even on exceptions.
-   */
+  /** Serializes synchronous slot reservation; never await I/O inside this lock. */
   private acquireSpawnLock<T>(fn: () => Promise<T>): Promise<T> {
     const release = this.spawnMutex;
     let resolve: () => void = () => {};
