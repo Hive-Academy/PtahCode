@@ -54,12 +54,13 @@ Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processe
 | B2.1: retry-safe `ptah_agent_spawn` | TASK_2026_2181_dbbb | #1329 | merged |
 | B2.2: bounded CLI detection on spawn | TASK_2026_2181_dbbb | #1343 | merged |
 | B2.3a: `starting` status in all readers | TASK_2026_2181_dbbb | #1354 | merged |
-| B2.3b: synchronous admission and reply deadline | TASK_2026_2181_dbbb | #1367 | merged |
-| B2.4 to B2.6: status, wait and read polish, renderer, agent text | TASK_2026_2181_dbbb | #1375 | in review |
+| B2.3b: synchronous admission and reply deadline | TASK_2026_2181_dbbb | #1367 | in review |
+| B2.4 to B2.6: status, wait and read polish, renderer, agent text | TASK_2026_2181_dbbb | none | not started |
 | B3: completion signals for external MCP clients | TASK_2026_2181_dbbb | none | not started |
 | P2: Nx daemon and worktree cost measurement | none | none | not started |
 | P3: process tree stop on Windows | none | none | not started |
-| P4: memory-based concurrency limit for lanes and sessions | none | none | plan owed to the user before code |
+| P4a: extract shared memory gate | TASK_2026_2181_dbbb | #1382 | in review |
+| P4b: session memory queue admission | TASK_2026_2181_dbbb | pending | not started (waits for P4a merge) |
 | P5: host load (task index rebuild storm, `provider:getPlanLimits`) | none | none | not started |
 
 P4 baseline (recommendation of the coordinator, 2026-11-16, the user can change it): queue a
