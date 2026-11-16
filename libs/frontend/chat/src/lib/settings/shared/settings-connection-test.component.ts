@@ -15,6 +15,7 @@ export type SettingsConnectionTestState = 'idle' | 'running' | 'ok' | 'fail';
         type="button"
         variant="secondary"
         [busy]="state() === 'running'"
+      [disabled]="disabled()"
         [attr.data-testid]="testId()"
         (click)="test.emit()"
       >{{ label() }}</button>
@@ -40,6 +41,7 @@ export class SettingsConnectionTestComponent {
   readonly state = input<SettingsConnectionTestState>('idle');
   readonly message = input<string | null>(null);
   readonly testId = input<string | null>(null);
+  readonly disabled = input(false);
 
   readonly test = output<void>();
 }

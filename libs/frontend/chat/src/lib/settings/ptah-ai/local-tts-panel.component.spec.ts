@@ -113,6 +113,8 @@ describe('LocalTtsPanelComponent', () => {
     mount(rpc, localConfig());
     await settle();
 
+    expect(byTestId('local-tts-source-curated').closest('ptah-setting-row')).not.toBeNull();
+
     expect(rpc.call).toHaveBeenCalledWith('voice:listVoices', {
       providerId: 'local',
     });

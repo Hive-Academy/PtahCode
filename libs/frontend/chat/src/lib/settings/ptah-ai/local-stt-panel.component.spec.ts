@@ -90,7 +90,8 @@ describe('LocalSttPanelComponent', () => {
     mount(localConfig({ whisperModel: 'small.en' }));
 
     expect(byTestId<HTMLSelectElement>('local-stt-model-select').value).toBe('small.en');
-    expect(element.querySelector('table.table.table-sm')).not.toBeNull();
+    expect(byTestId('local-stt-panel-table').tagName).toBe('PTAH-FORM-SECTION');
+    expect(byTestId('local-stt-source-curated').closest('ptah-setting-row')).not.toBeNull();
   });
 
   it('persists a curated model change and toasts it with Undo, with no Saved chip (V14/V20)', async () => {

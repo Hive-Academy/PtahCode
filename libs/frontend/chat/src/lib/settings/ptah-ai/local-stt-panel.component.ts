@@ -19,6 +19,10 @@ import {
   PtahButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
+  PtahFormSectionComponent,
+  PtahMeterComponent,
+  PtahFieldComponent,
+  PtahSettingRowComponent,
 } from '@ptah-extension/ui';
 
 interface WhisperModelOption {
@@ -74,6 +78,10 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
     PtahButtonDirective,
     PtahInputDirective,
     PtahSelectDirective,
+  PtahFormSectionComponent,
+  PtahMeterComponent,
+  PtahFieldComponent,
+  PtahSettingRowComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -84,15 +92,11 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
       on first use.
     </p>
 
-    <table class="table table-sm" data-testid="local-stt-panel-table">
-      <tbody>
+    <ptah-form-section heading="Local speech to text" level="3" data-testid="local-stt-panel-table">
+
         <!-- V13: source. Returning to Curated saves immediately; a custom source
              is committed by its Save button (V15). -->
-        <tr>
-          <th scope="row" class="w-24 align-top font-medium text-base-content">
-            Source
-          </th>
-          <td class="align-top">
+        <ptah-setting-row label="Source" hint="Choose where the speech model comes from.">
             <div
               class="flex items-center gap-1"
               role="radiogroup"
@@ -115,17 +119,17 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                 </button>
               }
             </div>
-          </td>
-        </tr>
+        </ptah-setting-row>
 
         <!-- V14 curated model select / V15 custom id or folder -->
-        <tr>
-          <th scope="row" class="w-24 align-top font-medium text-base-content">
+        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+          <div class="text-sm font-medium text-base-content">
             Whisper model
-          </th>
-          <td class="align-top">
+          </div>
+          <div class="min-w-0">
             @if (source() === 'curated') {
-              <select
+              <ptah-field label="Whisper model" appearance="stacked">
+<select
                 id="local-stt-model"
                 aria-label="Whisper model"
                 ptahSelect
@@ -157,6 +161,7 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                   }
                 </optgroup>
               </select>
+</ptah-field>
             } @else {
               <div class="flex items-center gap-1">
                 <input
@@ -208,26 +213,25 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                 </p>
               }
             }
-          </td>
-        </tr>
+          </div>
+        </div>
 
         <!-- V16: download + live progress -->
-        <tr>
-          <th scope="row" class="w-24 align-top font-medium text-base-content">
+        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+          <div class="text-sm font-medium text-base-content">
             Download
-          </th>
-          <td class="align-top">
+          </div>
+          <div class="min-w-0">
             @if (isDownloading()) {
               <div
                 class="flex items-center gap-2"
                 data-testid="local-stt-download-status"
               >
-                <progress
-                  class="progress progress-primary h-2 flex-1"
-                  [value]="downloadPercent() ?? 0"
-                  max="100"
-                  data-testid="local-stt-download-progress"
-                ></progress>
+                <ptah-meter class="flex-1" [value]="downloadPercent() ?? 0"
+                  [indeterminate]="downloadPercent() === null" [max]="100"
+                  label="Speech model download progress" [hideLabel]="true"
+                  [showValue]="false" barRole="progressbar"
+                  data-testid="local-stt-download-progress" />
                 <span
                   class="text-[10px] text-base-content-muted w-20 text-right"
                 >
@@ -282,10 +286,10 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                 </button>
               </div>
             }
-          </td>
-        </tr>
-      </tbody>
-    </table>
+          </div>
+        </div>
+
+    </ptah-form-section>
   `,
 })
 export class LocalSttPanelComponent {

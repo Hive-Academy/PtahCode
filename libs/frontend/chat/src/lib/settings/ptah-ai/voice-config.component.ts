@@ -10,18 +10,17 @@ import {
 } from '@angular/core';
 import {
   AlertCircle,
-  Check,
-  ChevronDown,
   ChevronRight,
   LucideAngularModule,
   Mic,
 } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import {
-  NativePopoverComponent,
   PtahBadgeDirective,
-  PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahFormSectionComponent,
+  PtahFieldComponent,
+  PtahSelectDirective,
 } from '@ptah-extension/ui';
 import type {
   VoiceProviderCapabilityDto,
@@ -33,7 +32,6 @@ import {
   VoiceDetailsDrawerComponent,
   type VoiceDirection,
 } from './voice-details-drawer.component';
-import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 
 type VoiceProviderId = 'local' | 'elevenlabs';
 type WriteResult = { ok: true } | { ok: false; message: string };
@@ -76,7 +74,7 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
 /**
  * Voice engines card on the Search & Voice tab (pattern map V9-V12, P2 + P4).
  *
- * A `table-xs` matrix with one row per direction: the provider cell opens a P5 popover listing every
+ * One row per direction: the provider select lists every
  * provider for that direction (an unavailable one stays disabled with its reason as visible text), the
  * Model / Voice cell shows the active choice, the Status cell summarises readiness from the provider
  * config, and Details opens drawer D-VOICE on that direction's tab. A provider change saves on
@@ -87,7 +85,7 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
 @Component({
   selector: 'ptah-voice-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, VoiceDetailsDrawerComponent, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective],
+  imports: [LucideAngularModule, VoiceDetailsDrawerComponent, PtahBadgeDirective, PtahIconButtonDirective, PtahFormSectionComponent, PtahFieldComponent, PtahSelectDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -96,18 +94,8 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
       aria-labelledby="voice-engines-heading"
       data-glass-surface="content"
     >
-      <div class="flex items-center gap-1.5 mb-2">
-        <lucide-angular [img]="MicIcon" class="w-4 h-4 text-secondary" aria-hidden="true" />
-        <h2 id="voice-engines-heading" class="text-xs font-bold uppercase tracking-wider text-base-content">
-          Voice engines
-        </h2>
-      </div>
-
-      <p class="text-xs text-base-content-muted mb-3">
-        Pick the speech-to-text and text-to-speech engines used by the chat
-        mic and messaging-gateway voice notes. Local engines run offline;
-        cloud engines require an API key.
-      </p>
+      <ptah-form-section id="voice-engines-heading" heading="Voice engines" level="2"
+        description="Pick the speech-to-text and text-to-speech engines used by the chat mic and messaging-gateway voice notes. Local engines run offline; cloud engines require an API key.">
 
       @if (errorMessage(); as message) {
         <div role="alert" data-testid="voice-config-error"
@@ -123,83 +111,59 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
         </p>
       } @else if (rows().length) {
         <div class="overflow-x-auto">
-          <table class="table table-xs" data-testid="voice-engines-matrix">
-            <thead>
-              <tr>
-                <th scope="col">Direction</th>
-                <th scope="col">Provider</th>
-                <th scope="col">Model / Voice</th>
-                <th scope="col">Status</th>
-                <th class="text-right" scope="col">Details</th>
-              </tr>
-            </thead>
-            <tbody>
+          <div class="flex flex-col" data-testid="voice-engines-matrix">
+
               @for (row of rows(); track row.direction) {
-                <tr [attr.data-testid]="'voice-engine-row-' + row.direction">
-                  <th scope="row" class="font-bold text-base-content">{{ row.name }}</th>
-                  <td>
-                    <ptah-native-popover [isOpen]="picker() === row.direction" placement="bottom-start"
-                      backdropClass="transparent" (closed)="picker.set(null)">
-                      <button type="button" trigger ptahButton variant="ghost" size="xs"
-                        [disabled]="saving()" (click)="picker.set(row.direction)"
+                <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] border-b border-base-300 py-[var(--ptah-gap-field)] last:border-b-0" [attr.data-testid]="'voice-engine-row-' + row.direction">
+                  <div class="font-bold text-base-content">{{ row.name }}</div>
+                  <div>
+                    <ptah-field [label]="row.name + ' provider'" appearance="stacked">
+                      <select ptahSelect size="sm" [value]="row.providerId" [disabled]="saving()"
                         [attr.aria-label]="row.name + ' provider: ' + row.providerLabel + '. Change provider'"
-                        aria-haspopup="dialog" [attr.aria-expanded]="picker() === row.direction"
+                        (change)="onProviderChange($event, row.direction)"
                         [attr.data-testid]="'voice-provider-btn-' + row.direction">
-                        {{ row.providerLabel }}
-                        <lucide-angular [img]="ChevronDownIcon" class="w-3 h-3 text-base-content-muted" aria-hidden="true" />
-                      </button>
-                      <div content class="w-72 p-3 text-xs" role="dialog" [attr.aria-label]="row.name + ' provider'">
-                        <p class="mb-2 font-bold text-base-content">{{ row.name }} provider</p>
-                        <div role="radiogroup" [attr.aria-label]="row.name + ' provider'" class="space-y-1">
-                          @for (option of row.options; track option.id) {
-                            <button type="button" role="radio" [attr.aria-checked]="option.id === row.providerId"
-                              class="flex w-full items-start gap-2 rounded border border-base-300 p-2 text-left text-base-content hover:bg-base-300 disabled:cursor-not-allowed disabled:opacity-60"
-                              [ptahBusyDisabled]="!option.available || saving()"
-                              [attr.aria-describedby]="option.available ? null : 'voice-reason-' + row.direction + '-' + option.id"
-                              (click)="chooseProvider(row.direction, option.id)"
-                              [attr.data-testid]="'voice-provider-option-' + row.direction + '-' + option.id">
-                              <lucide-angular [img]="CheckIcon" class="mt-0.5 w-3 h-3 shrink-0 text-primary"
-                                [class.invisible]="option.id !== row.providerId" aria-hidden="true" />
-                              <span class="min-w-0">
-                                <span class="block font-semibold">{{ option.label }}</span>
-                                @if (!option.available) {
-                                  <span class="block text-[10px] text-base-content-muted"
-                                    [id]="'voice-reason-' + row.direction + '-' + option.id"
-                                    [attr.data-testid]="'voice-provider-reason-' + row.direction + '-' + option.id">
-                                    Unavailable: {{ option.unavailableReason ?? 'not available on this machine' }}
-                                  </span>
-                                }
-                              </span>
-                            </button>
-                          }
-                        </div>
-                      </div>
-                    </ptah-native-popover>
-                  </td>
-                  <td>
+                        @for (option of row.options; track option.id) {
+                          <option [value]="option.id" [disabled]="!option.available"
+                            [attr.data-testid]="'voice-provider-option-' + row.direction + '-' + option.id">
+                            {{ option.label }}@if (!option.available) { — Unavailable: {{ option.unavailableReason ?? 'not available on this machine' }} }
+                          </option>
+                        }
+                      </select>
+                    </ptah-field>
+                    @for (option of row.options; track option.id) {
+                      @if (!option.available) {
+                        <span class="sr-only" [id]="'voice-reason-' + row.direction + '-' + option.id"
+                          [attr.data-testid]="'voice-provider-reason-' + row.direction + '-' + option.id">
+                          Unavailable: {{ option.unavailableReason ?? 'not available on this machine' }}
+                        </span>
+                      }
+                    }
+                  </div>
+                  <div>
                     <span class="font-mono text-base-content" [attr.title]="row.modelTitle"
                       [attr.data-testid]="'voice-engine-model-' + row.direction">{{ row.modelLabel }}</span>
-                  </td>
-                  <td>
+                  </div>
+                  <div>
                     <span ptahBadge appearance="outline" class="gap-1 whitespace-nowrap text-base-content"
                       [attr.data-testid]="'voice-engine-status-' + row.direction">
                       <span [class]="'w-1.5 h-1.5 rounded-full ' + row.status.dot" aria-hidden="true"></span>
                       {{ row.status.label }}
                     </span>
-                  </td>
-                  <td class="text-right">
+                  </div>
+                  <div class="flex-1 text-right">
                     <button type="button" ptahIconButton size="xs" (click)="openDetails(row.direction)"
                       [label]="row.name + ' details: ' + row.detail"
                       [attr.data-testid]="'voice-engine-details-' + row.direction">
                       <lucide-angular [img]="ChevronRightIcon" class="w-3.5 h-3.5 text-base-content" aria-hidden="true" />
                     </button>
-                  </td>
-                </tr>
+                  </div>
+                </div>
               }
-            </tbody>
-          </table>
+
+          </div>
         </div>
       }
+      </ptah-form-section>
     </section>
 
     <!-- Lazy: the drawer and the panels it hosts load the first time a Details button is used. -->
@@ -220,9 +184,7 @@ export class VoiceConfigComponent implements OnInit {
 
   readonly MicIcon = Mic;
   readonly AlertCircleIcon = AlertCircle;
-  readonly ChevronDownIcon = ChevronDown;
   readonly ChevronRightIcon = ChevronRight;
-  readonly CheckIcon = Check;
 
   /** Save triggers are disabled while any settings write is in flight (D3). */
   readonly saving = this.feedback.saving;
@@ -232,7 +194,6 @@ export class VoiceConfigComponent implements OnInit {
   readonly errorMessage = signal<string | null>(null);
   readonly isLoading = signal(true);
   /** Direction whose provider popover is open. */
-  readonly picker = signal<VoiceDirection | null>(null);
   /** Direction whose drawer tab is open; `null` closes drawer D-VOICE. */
   readonly drawerDirection = signal<VoiceDirection | null>(null);
 
@@ -349,13 +310,19 @@ export class VoiceConfigComponent implements OnInit {
   }
 
   openDetails(direction: VoiceDirection): void {
-    this.picker.set(null);
     this.drawerDirection.set(direction);
   }
 
-  /** Popover choice: closes the popover, then saves on selection with Undo (S-sel). */
+  async onProviderChange(event: Event, direction: VoiceDirection): Promise<void> {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    await this.chooseProvider(direction, target.value);
+    const cfg = this.config();
+    if (cfg) target.value = direction === 'stt' ? cfg.sttProvider : cfg.ttsProvider;
+  }
+
+  /** Saves on selection with Undo (S-sel). */
   async chooseProvider(direction: VoiceDirection, providerId: string): Promise<void> {
-    this.picker.set(null);
     const current = this.config();
     if (!current) return;
     const next = asProviderId(providerId);

@@ -133,19 +133,18 @@ const voice: readonly ReachabilityEntry[] = [
       state.voice.unavailable = { elevenlabs: 'API key not configured' };
       return () => { state.voice.unavailable = {}; };
     }, async () => {
-      await page.locator('[data-testid="voice-provider-btn-stt"]').click();
+      await page.locator('[data-testid="voice-provider-btn-stt"]').focus();
       await expect(page.locator('[data-testid="voice-provider-option-stt-elevenlabs"]')).toBeDisabled();
       await expect(page.locator('[data-testid="voice-provider-reason-stt-elevenlabs"]')).toHaveText('Unavailable: API key not configured');
-      await page.keyboard.press('Escape');
     })) },
   { id: 'SV-10', capability: 'Voice: speech-to-text provider choice (save on selection, Undo); ElevenLabs STT model in the drawer', status: 'restored',
     reach: (page) => electronOnly(page, async () => {
       const start = before(page);
       await chooseVoiceProvider(page, 'stt', 'elevenlabs');
       await expectWrite(page, start, 'voice:setProviderConfig', { sttProvider: 'elevenlabs' });
-      await expect(page.locator('[data-testid="voice-provider-btn-stt"]')).toContainText('ElevenLabs');
+      await expect(page.locator('[data-testid="voice-provider-btn-stt"]')).toHaveValue('elevenlabs');
       await expectSavedThenUndo(page, 'speech-to-text provider', 'voice:setProviderConfig', { sttProvider: 'local' });
-      await expect(page.locator('[data-testid="voice-provider-btn-stt"]')).toContainText('Local');
+      await expect(page.locator('[data-testid="voice-provider-btn-stt"]')).toHaveValue('local');
     }) },
   { id: 'SV-11', capability: 'Local STT: Whisper model (save on selection, Undo), download status', status: 'restored',
     reach: (page) => inVoiceDrawer(page, 'stt', async () => {
