@@ -234,12 +234,16 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                   data-testid="local-stt-download-progress" />
                 <span
                   class="text-[10px] text-base-content-muted w-20 text-right"
+                  role="status"
                 >
-                  @if (downloadPercent() !== null) {
-                    Downloading {{ downloadPercent() }}%
-                  } @else {
-                    Starting…
-                  }
+                  <span class="sr-only">Downloading speech model</span>
+                  <span aria-hidden="true">
+                    @if (downloadPercent() !== null) {
+                      Downloading {{ downloadPercent() }}%
+                    } @else {
+                      Starting…
+                    }
+                  </span>
                 </span>
               </div>
             } @else {

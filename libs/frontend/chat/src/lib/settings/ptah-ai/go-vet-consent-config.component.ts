@@ -212,23 +212,30 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
           }
 
           @if (confirmingRoot(); as root) {
-            <ptah-inline-confirm
-              id="go-vet-confirm-title"
+            <div
+              role="group"
+              aria-labelledby="go-vet-confirm-title"
+              aria-describedby="go-vet-confirm-root"
               data-testid="go-vet-consent-confirm"
-              message="Allow go vet to run in this folder?"
-              ariaLabel="Allow go vet to run in this folder?"
-              confirmLabel="Allow go vet"
-              confirmTestId="go-vet-consent-allow"
-              cancelTestId="go-vet-consent-cancel"
-              (confirm)="confirmEnable()"
-              (cancelled)="cancelEnable()"
-            />
-            <span
-              id="go-vet-confirm-root"
-              class="block text-xs text-base-content-muted"
-              data-testid="go-vet-consent-confirm-root"
-              >{{ root }}</span
+              (keydown.escape)="cancelEnable($event)"
             >
+              <ptah-inline-confirm
+                id="go-vet-confirm-title"
+                message="Allow go vet to run in this folder?"
+                ariaLabel="Allow go vet to run in this folder?"
+                confirmLabel="Allow go vet"
+                confirmTestId="go-vet-consent-allow"
+                cancelTestId="go-vet-consent-cancel"
+                (confirm)="confirmEnable()"
+                (cancelled)="cancelEnable()"
+              />
+              <span
+                id="go-vet-confirm-root"
+                class="block text-xs text-base-content-muted"
+                data-testid="go-vet-consent-confirm-root"
+                >{{ root }}</span
+              >
+            </div>
           }
         </ptah-form-section>
       </section>

@@ -128,6 +128,19 @@ describe('LocalTtsPanelComponent', () => {
     ).toBe(2);
   });
 
+  it('places download progress text in one polite status region', () => {
+    const rpc = createMockRpcService();
+    routeRpc(rpc, { 'voice:listVoices': VOICES });
+    const component = mount(rpc, localConfig());
+    component.isTtsDownloading.set(true);
+    fixture.detectChanges();
+
+    const statuses = byTestId('local-tts-download-status').querySelectorAll<HTMLElement>('[role="status"]');
+    expect(Array.from(statuses, (status) => status.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Downloading voice model Starting…',
+    ]);
+  });
+
   it('persists a voice change voice-only and toasts it with Undo, with no Saved chip (V17/V20)', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {

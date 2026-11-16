@@ -489,9 +489,13 @@ describe('GoVetConsentConfigComponent', () => {
     await settle(fixture);
 
     const error = q(fixture, 'go-vet-consent-error');
-    expect(error?.querySelector('[role="alert"]')).not.toBeNull();
-    expect(error?.textContent).toContain('Could not read the go vet setting for this workspace.');
-    expect(error?.querySelector('button')?.textContent?.trim()).toBe('Retry');
+    expect(error).not.toBeNull();
+    const errorElement = error as HTMLElement;
+    expect(errorElement.querySelector('[role="alert"]')).not.toBeNull();
+    expect(errorElement.textContent).toContain(
+      'Could not read the go vet setting for this workspace.',
+    );
+    expect(errorElement.querySelector('button')?.textContent?.trim()).toBe('Retry');
     expect(toggle(fixture).disabled).toBe(true);
   });
 
@@ -569,11 +573,23 @@ describe('GoVetConsentConfigComponent', () => {
     await settle(fixture);
 
     const confirm = q(fixture, 'go-vet-consent-confirm');
-    expect(confirm?.getAttribute('role')).toBe('group');
-    expect(confirm?.querySelector('[data-testid="inline-confirm"]')).not.toBeNull();
+    expect(confirm).not.toBeNull();
+    const confirmGroup = confirm as HTMLElement;
+    expect(confirmGroup.getAttribute('role')).toBe('group');
+    expect(confirmGroup.getAttribute('aria-describedby')?.split(' ')).toContain(
+      'go-vet-confirm-root',
+    );
+    expect(confirmGroup.querySelector('[data-testid="inline-confirm"]')).not.toBeNull();
+    const root = confirmGroup.querySelector('#go-vet-confirm-root');
+    expect(root).not.toBeNull();
+    expect(root?.textContent?.trim()).toBe(ROOT_A);
+    // One description only: the inner confirm group must not announce the root again.
+    const innerGroup = confirmGroup.querySelector('ptah-inline-confirm');
+    expect(innerGroup).not.toBeNull();
+    expect(innerGroup?.hasAttribute('aria-describedby')).toBe(false);
     expect(document.activeElement).toBe(q(fixture, 'go-vet-consent-cancel'));
 
-    confirm?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    confirmGroup.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await settle(fixture);
 
     expect(q(fixture, 'go-vet-consent-confirm')).toBeNull();

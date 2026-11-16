@@ -264,12 +264,15 @@ interface VoiceGroup {
                   label="Voice model download progress" [hideLabel]="true"
                   [showValue]="false" barRole="progressbar"
                   data-testid="local-tts-download-progress" />
-                <span class="text-[10px] text-base-content-muted w-20 text-right">
-                  @if (ttsDownloadPercent() !== null) {
-                    Downloading {{ ttsDownloadPercent() }}%
-                  } @else {
-                    Starting…
-                  }
+                <span class="text-[10px] text-base-content-muted w-20 text-right" role="status">
+                  <span class="sr-only">Downloading voice model</span>
+                  <span aria-hidden="true">
+                    @if (ttsDownloadPercent() !== null) {
+                      Downloading {{ ttsDownloadPercent() }}%
+                    } @else {
+                      Starting…
+                    }
+                  </span>
                 </span>
               </div>
             } @else {

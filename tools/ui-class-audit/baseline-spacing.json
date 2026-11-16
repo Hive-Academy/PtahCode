@@ -562,10 +562,12 @@
     "px-2": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-config.component.ts": {
-    "gap-2": 1,
     "mt-2": 1,
+    "pb-7": 1
+  },
+  "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-key-editor.component.ts": {
+    "gap-2": 1,
     "p-3": 1,
-    "pb-7": 1,
     "pr-9": 1,
     "space-y-2": 1
   }

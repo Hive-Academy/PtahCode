@@ -6,19 +6,11 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Eye, EyeOff, Globe, Key, LucideAngularModule } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import {
-  NativePopoverComponent,
   PtahBadgeDirective,
   PtahButtonDirective,
-  PtahIconButtonDirective,
-  PtahCheckboxDirective,
-  PtahInputDirective,
-  PtahFieldComponent,
   PtahFormSectionComponent,
-  PtahStatusComponent,
-  PtahInlineConfirmComponent,
   PtahSettingRowComponent,
   PtahAlertComponent,
 } from '@ptah-extension/ui';
@@ -29,25 +21,9 @@ import {
 } from '../shared/settings-section-state.component';
 import { SettingsConnectionTestComponent } from '../shared/settings-connection-test.component';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { ProviderId, ProviderOption, ProviderTestResult, WebSearchProviderRowsComponent } from './web-search-provider-rows.component';
 
-type ProviderId = 'tavily' | 'serper' | 'exa';
 type WriteResult = { ok: true } | { ok: false; message: string };
-
-interface ProviderOption {
-  value: ProviderId;
-  label: string;
-  /** What the provider is; shown in the row's tooltip and to screen readers, not as a visible line. */
-  summary: string;
-  /** The one visible line under the name (pattern map §3.2: a row stays within ~48 px). */
-  freeTier: string;
-  signupUrl: string;
-}
-
-interface ProviderTestResult {
-  provider: string;
-  success: boolean;
-  error?: string;
-}
 
 const PROVIDER_OPTIONS: readonly ProviderOption[] = [
   {
@@ -112,22 +88,15 @@ function providerLabel(provider: ProviderId): string {
   standalone: true,
   imports: [
     SettingsBusyDisabledDirective,
-    LucideAngularModule,
-    NativePopoverComponent,
-    PtahBadgeDirective,
+      PtahBadgeDirective,
     PtahButtonDirective,
-    PtahIconButtonDirective,
-    PtahCheckboxDirective,
-    PtahInputDirective,
-    PtahFieldComponent,
-    PtahFormSectionComponent,
-    PtahStatusComponent,
-    PtahInlineConfirmComponent,
-    PtahSettingRowComponent,
+            PtahFormSectionComponent,
+        PtahSettingRowComponent,
     PtahAlertComponent,
     SettingsConnectionTestComponent,
     SettingsSectionStateComponent,
     SettingsSectionReadyDirective,
+    WebSearchProviderRowsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -193,252 +162,26 @@ function providerLabel(provider: ProviderId): string {
           (retry)="loadConfig()"
         >
           <ng-template ptahSectionReady>
-            <div
-              class="flex flex-col gap-[var(--ptah-gap-field)]"
-              role="list"
-              aria-label="Web search providers"
-            >
-              @for (opt of providerOptions; track opt.value) {
-                <div
-                  role="listitem"
-                  class="border-b border-base-content/10 py-[var(--ptah-gap-field)]"
-                >
-                  <div
-                    class="flex flex-nowrap items-center gap-[var(--ptah-gap-controls)]"
-                  >
-                    <input
-                      type="checkbox"
-                      ptahCheckbox
-                      size="xs"
-                      [checked]="isSelected(opt.value)"
-                      [ptahBusyDisabled]="saving()"
-                      (change)="onProviderChange(opt.value, $event)"
-                      [attr.data-testid]="
-                        'settings-toggle-web-search-provider-' + opt.value
-                      "
-                      [attr.aria-label]="'Use ' + opt.label + ' for web search'"
-                    />
-                    <lucide-angular
-                      [img]="GlobeIcon"
-                      class="w-4 h-4 text-secondary"
-                      aria-hidden="true"
-                    />
-                    <div
-                      class="min-w-0 flex-1"
-                      [attr.title]="opt.summary + ' ' + opt.freeTier"
-                    >
-                      <div class="font-bold text-base-content">
-                        {{ opt.label
-                        }}<span class="sr-only">: {{ opt.summary }}</span>
-                      </div>
-                      <p class="text-xs text-base-content-muted">
-                        {{ opt.freeTier }}
-                        <a
-                          [href]="opt.signupUrl"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="link underline text-base-content"
-                          [attr.data-testid]="
-                            'settings-web-search-signup-' + opt.value
-                          "
-                          >Get API key</a
-                        >
-                      </p>
-                    </div>
-                    <span
-                      [attr.data-testid]="
-                        'settings-web-search-key-status-' + opt.value
-                      "
-                    >
-                      <ptah-status
-                        [status]="
-                          apiKeyConfigured()[opt.value] ? 'online' : 'offline'
-                        "
-                        [label]="
-                          apiKeyConfigured()[opt.value] ? 'Key set' : 'No key'
-                        "
-                      />
-                    </span>
-                    <span
-                      [attr.data-testid]="
-                        'settings-web-search-status-' + opt.value
-                      "
-                    >
-                      @if (resultFor(opt.value); as r) {
-                        <ptah-status
-                          [status]="r.success ? 'online' : 'failed'"
-                          [label]="r.success ? 'Works' : TEST_FAILED"
-                        />
-                      } @else {
-                        <span class="sr-only">Not tested</span>
-                      }
-                    </span>
-                    <div
-                      class="flex shrink-0 flex-nowrap items-center gap-[var(--ptah-gap-controls)]"
-                    >
-                      <ptah-native-popover
-                        [isOpen]="activeKeyProvider() === opt.value"
-                        (closed)="closeKeyEditor()"
-                      >
-                        <button
-                          type="button"
-                          trigger
-                          ptahButton
-                          size="xs"
-                          (click)="openKeyEditor(opt.value)"
-                          [attr.aria-label]="
-                            (apiKeyConfigured()[opt.value] ? 'Update' : 'Set') +
-                            ' API key for ' +
-                            opt.label
-                          "
-                          [attr.data-testid]="
-                            'settings-web-search-key-btn-' + opt.value
-                          "
-                        >
-                          <lucide-angular
-                            [img]="KeyIcon"
-                            class="w-3 h-3"
-                            aria-hidden="true"
-                          />
-                          {{
-                            apiKeyConfigured()[opt.value]
-                              ? 'Update key'
-                              : 'Set key'
-                          }}
-                        </button>
-                        <div content class="p-3 w-72 space-y-2 text-left">
-                          <ptah-field
-                            [label]="'API key for ' + opt.label"
-                            [appearance]="
-                              apiKeyConfigured()[opt.value]
-                                ? 'stacked'
-                                : 'floating'
-                            "
-                            size="sm"
-                            hint="Stored encrypted on this machine. Use Test connection after saving to check it."
-                          >
-                            <input
-                              [id]="'web-search-api-key-' + opt.value"
-                              [type]="keyVisible() ? 'text' : 'password'"
-                              ptahInput
-                              size="sm"
-                              tone="mono"
-                              class="w-full pr-9 text-xs"
-                              placeholder="Paste the API key"
-                              autocomplete="off"
-                              spellcheck="false"
-                              [value]="apiKeyInput()"
-                              (input)="onApiKeyInput($event)"
-                              (keydown.enter)="saveApiKey()"
-                              data-testid="settings-web-search-key-input"
-                            />
-                            <span ptahFieldTrailing>
-                              <button
-                                type="button"
-                                ptahIconButton
-                                size="xs"
-                                (click)="keyVisible.set(!keyVisible())"
-                                [label]="
-                                  keyVisible() ? 'Hide API key' : 'Show API key'
-                                "
-                                [attr.aria-pressed]="keyVisible()"
-                                data-testid="settings-web-search-key-visibility"
-                              >
-                                <lucide-angular
-                                  [img]="keyVisible() ? EyeOffIcon : EyeIcon"
-                                  class="h-3.5 w-3.5"
-                                  aria-hidden="true"
-                                />
-                              </button>
-                            </span>
-                          </ptah-field>
-                          <a
-                            [href]="opt.signupUrl"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="link block underline text-base-content text-xs"
-                            >Get a key</a
-                          >
-                          <div class="flex gap-2">
-                            <button
-                              type="button"
-                              ptahButton
-                              variant="primary"
-                              [busy]="saving()"
-                              [disabled]="!apiKeyInput().trim()"
-                              (click)="saveApiKey()"
-                              [attr.aria-label]="
-                                'Save API key for ' + opt.label
-                              "
-                              data-testid="settings-web-search-key-save"
-                            >
-                              Save key
-                            </button>
-                            <button
-                              type="button"
-                              ptahButton
-                              variant="ghost"
-                              (click)="closeKeyEditor()"
-                              data-testid="settings-web-search-key-cancel"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      </ptah-native-popover>
-                      @if (apiKeyConfigured()[opt.value]) {
-                        <button
-                          type="button"
-                          ptahButton
-                          size="xs"
-                          [disabled]="saving()"
-                          (click)="requestClear(opt.value)"
-                          [attr.aria-label]="'Clear API key for ' + opt.label"
-                          [attr.aria-expanded]="confirmingClear() === opt.value"
-                          [attr.data-testid]="
-                            'settings-web-search-clear-btn-' + opt.value
-                          "
-                        >
-                          Clear
-                        </button>
-                      }
-                    </div>
-                  </div>
-                  @if (
-                    apiKeyConfigured()[opt.value] &&
-                    confirmingClear() === opt.value
-                  ) {
-                    <ptah-inline-confirm
-                      [message]="
-                        'Clear the stored ' +
-                        opt.label +
-                        ' key from this machine?'
-                      "
-                      [detail]="
-                        'Searches through ' +
-                        opt.label +
-                        ' stop until a key is added.'
-                      "
-                      [ariaLabel]="'Confirm clear ' + opt.label + ' API key'"
-                      confirmLabel="Clear key"
-                      tone="danger"
-                      [busy]="saving()"
-                      [confirmTestId]="
-                        'settings-web-search-clear-confirm-' + opt.value
-                      "
-                      [cancelTestId]="
-                        'settings-web-search-clear-cancel-' + opt.value
-                      "
-                      [attr.data-testid]="
-                        'settings-web-search-clear-group-' + opt.value
-                      "
-                      (confirm)="deleteApiKey(opt.value)"
-                      (cancelled)="cancelClear(opt.value)"
-                    />
-                  }
-                </div>
-              }
-            </div>
+             <ptah-web-search-provider-rows
+               [options]="providerOptions"
+               [selectedProviders]="selectedProviders()"
+               [apiKeyConfigured]="apiKeyConfigured()"
+               [activeKeyProvider]="activeKeyProvider()"
+               [confirmingClear]="confirmingClear()"
+               [testResults]="testResult()?.results ?? []"
+               [saving]="saving()"
+               [apiKeyInput]="apiKeyInput()"
+               [keyVisible]="keyVisible()"
+               (providerChange)="onProviderChange($event.provider, $event.event)"
+               (openKeyEditor)="openKeyEditor($event)"
+               (closeKeyEditor)="closeKeyEditor()"
+               (apiKeyChanged)="onApiKeyInput($event)"
+               (keyVisibilityToggle)="keyVisible.set(!keyVisible())"
+               (saveApiKey)="saveApiKey()"
+               (requestClear)="requestClear($event)"
+               (deleteApiKey)="deleteApiKey($event)"
+               (cancelClear)="cancelClear($event)"
+             />
 
             <p class="text-xs text-base-content-muted mt-2">
               At least one provider must stay selected.
@@ -488,12 +231,8 @@ export class WebSearchConfigComponent implements OnInit {
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
-  readonly GlobeIcon = Globe;
   readonly TEST_FAILED = TEST_FAILED;
   readonly LOAD_CONFIG_FAILED = LOAD_CONFIG_FAILED;
-  readonly KeyIcon = Key;
-  readonly EyeIcon = Eye;
-  readonly EyeOffIcon = EyeOff;
   readonly providerOptions = PROVIDER_OPTIONS;
 
   /** Save triggers are disabled while any settings write is in flight (D3). */

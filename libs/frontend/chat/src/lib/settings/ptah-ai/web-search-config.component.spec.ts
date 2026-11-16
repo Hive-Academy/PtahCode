@@ -612,7 +612,13 @@ describe('WebSearchConfigComponent', () => {
   });
 
   it('uses no text size below 12 px anywhere in the component source (Batch 50b)', () => {
-    const source = readFileSync(join(__dirname, 'web-search-config.component.ts'), 'utf8');
-    expect(source.match(/text-\[(?:\d|1[01])(?:\.\d+)?px\]/g)).toBeNull();
+    for (const file of [
+      'web-search-config.component.ts',
+      'web-search-provider-rows.component.ts',
+      'web-search-key-editor.component.ts',
+    ]) {
+      const source = readFileSync(join(__dirname, file), 'utf8');
+      expect(source.match(/text-\[(?:\d|1[01])(?:\.\d+)?px\]/g)).toBeNull();
+    }
   });
 });
