@@ -11,6 +11,14 @@ if [ "${PTAH_SKIP_VERIFY_LOCK:-0}" != "1" ] && ! node scripts/verify.mjs --check
   exec node scripts/verify.mjs --exec --task "pre-push $(git rev-parse --abbrev-ref HEAD)" -- sh -e "$0" "$@"
 fi
 
+# A linked worktree has a `.git` file, not a directory. Each worktree that
+# runs Nx starts its own daemon (170 to 270 MiB, alive for 3 hours), and a
+# hook that runs one time gets no gain from it. Same rule as
+# scripts/verify-nx-env.mjs: a caller that sets NX_DAEMON keeps its value.
+if [ -f "$(git rev-parse --show-toplevel)/.git" ] && [ -z "${NX_DAEMON+x}" ]; then
+  export NX_DAEMON=false
+fi
+
 echo "🚀 Running pre-push checks..."
 
 # DI invariant check — runs on every push regardless of branch (fast, ~2s).

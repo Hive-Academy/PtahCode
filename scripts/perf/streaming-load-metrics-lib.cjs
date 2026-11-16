@@ -56,6 +56,19 @@ function parseElectronLogLine(line) {
   const message = m[3];
   const base = { ts, level, message };
 
+  const diagnostics = [
+    ['[task-specs] index rebuild timing', 'taskIndex'],
+    ['[PlanLimitsSnapshot] snapshot served', 'planLimits'],
+    ['[PlanUsage] owner snapshot request', 'planUsageCache'],
+  ];
+  for (const [prefix, kind] of diagnostics) {
+    if (message.startsWith(`${prefix}: `)) {
+      const metrics = trailingJson(message);
+      if (metrics && typeof metrics === 'object' && !Array.isArray(metrics))
+        return { ...base, kind, metrics };
+    }
+  }
+
   if (message.startsWith('[event-loop] lag:')) {
     const j = trailingJson(message);
     if (j && typeof j.maxMs === 'number') {
@@ -280,6 +293,44 @@ function summarize(collector, window = {}, options = {}) {
   const stormLinesPerMin = options.stormLinesPerMin ?? 500;
   const inWin = collector.events.filter((e) => e.ts >= fromMs && e.ts <= toMs);
   const of = (kind) => inWin.filter((e) => e.kind === kind);
+  const diagnostics = (kind) => of(kind).map((e) => e.metrics);
+  const countBy = (items, field) => Object.fromEntries(
+    [...groupBy(items, (item) => item[field]).entries()].map(([key, values]) => [key, values.length]),
+  );
+  const finiteField = (items, field) => items.map((item) => item[field]).filter((value) => typeof value === 'number' && Number.isFinite(value));
+  const maxField = (items, field) => {
+    const values = finiteField(items, field);
+    return values.length ? values.reduce((max, value) => Math.max(max, value), -Infinity) : null;
+  };
+  const p50Field = (items, field) => {
+    const values = finiteField(items, field);
+    return values.length ? percentile(values.sort((a, b) => a - b), 50) : null;
+  };
+  const rebuilds = diagnostics('taskIndex');
+  const snapshots = diagnostics('planLimits');
+  const cacheRequests = diagnostics('planUsageCache');
+  const taskIndex = {
+    byTrigger: countBy(rebuilds, 'trigger'),
+    totalMs: { p50: p50Field(rebuilds, 'totalMs'), max: maxField(rebuilds, 'totalMs') },
+    scanMs: { p50: p50Field(rebuilds, 'scanMs'), max: maxField(rebuilds, 'scanMs') },
+    coalesced: rebuilds.reduce((sum, item) => sum + (item.coalesced ?? 0), 0),
+    maxWaitedMs: maxField(rebuilds, 'waitedMs'),
+    maxCarriers: maxField(rebuilds, 'carriers'), maxRows: maxField(rebuilds, 'rows'),
+    roots: new Set(rebuilds.map((item) => item.rootId).filter((id) => typeof id === 'string' && id.trim().length > 0)).size,
+    maxActiveRoots: maxField(rebuilds, 'activeRoots'),
+  };
+  const planLimits = {
+    bySource: countBy(snapshots, 'source'), byPath: countBy(snapshots, 'path'),
+    durationMs: { p50: p50Field(snapshots, 'durationMs'), max: maxField(snapshots, 'durationMs') },
+    maxDiscoveryMs: maxField(snapshots, 'discoveryMs'), maxReadsMs: maxField(snapshots, 'readsMs'),
+    discoveryIncomplete: snapshots.filter((item) => item.discoveryIncomplete).length,
+    scopes: new Set(snapshots.map((item) => item.scopeId).filter((id) => typeof id === 'string' && id.trim().length > 0)).size,
+  };
+  const planUsageCache = {
+    byOutcome: countBy(cacheRequests, 'outcome'),
+    byBypass: countBy(cacheRequests.filter((item) => item.bypass), 'bypass'),
+    byProviderId: countBy(cacheRequests, 'providerId'),
+  };
 
   const lag = of('eventLoopLag');
   const lagMax = lag.map((e) => e.maxMs);
@@ -474,6 +525,9 @@ function summarize(collector, window = {}, options = {}) {
     backgroundWork,
     warnErr,
     logVolume,
+    taskIndex,
+    planLimits,
+    planUsageCache,
   };
 }
 
@@ -572,8 +626,23 @@ function fmt(n) {
 
 function toMarkdown(summary, thresholdResults, title) {
   const s = summary;
+  const metric = (value) => value === null ? 'n/a' : value;
   const rows = [];
   rows.push(`## ${title ?? 'Streaming load metrics'}`);
+  rows.push('');
+  rows.push('### Task index rebuilds');
+  rows.push('');
+  rows.push(`Triggers: ${JSON.stringify(s.taskIndex.byTrigger)}; total ms p50/max: ${metric(s.taskIndex.totalMs.p50)}/${metric(s.taskIndex.totalMs.max)}; scan ms p50/max: ${metric(s.taskIndex.scanMs.p50)}/${metric(s.taskIndex.scanMs.max)}`);
+  rows.push(`Coalesced: ${s.taskIndex.coalesced}; max wait ms: ${metric(s.taskIndex.maxWaitedMs)}; max carriers/rows: ${metric(s.taskIndex.maxCarriers)}/${metric(s.taskIndex.maxRows)}; roots: ${s.taskIndex.roots}; max active roots: ${metric(s.taskIndex.maxActiveRoots)}`);
+  rows.push('');
+  rows.push('### Plan limits snapshots');
+  rows.push('');
+  rows.push(`Sources: ${JSON.stringify(s.planLimits.bySource)}; paths: ${JSON.stringify(s.planLimits.byPath)}; duration ms p50/max: ${metric(s.planLimits.durationMs.p50)}/${metric(s.planLimits.durationMs.max)}`);
+  rows.push(`Max discovery/reads ms: ${metric(s.planLimits.maxDiscoveryMs)}/${metric(s.planLimits.maxReadsMs)}; incomplete: ${s.planLimits.discoveryIncomplete}; scopes: ${s.planLimits.scopes}`);
+  rows.push('');
+  rows.push('### Plan usage owner cache');
+  rows.push('');
+  rows.push(`Outcomes: ${JSON.stringify(s.planUsageCache.byOutcome)}; bypasses: ${JSON.stringify(s.planUsageCache.byBypass)}; providers: ${JSON.stringify(s.planUsageCache.byProviderId)}`);
   rows.push('');
   rows.push(
     `Window: ${s.window.from ?? 'start'} .. ${s.window.to ?? 'end'} (first event ${s.window.firstEvent ?? '-'}, last ${s.window.lastEvent ?? '-'})`,

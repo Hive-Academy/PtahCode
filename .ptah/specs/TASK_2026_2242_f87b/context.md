@@ -36,3 +36,9 @@ daemon for a check that runs one time.
 - `.husky/pre-push` calls `npx nx` directly inside `verify.mjs --exec`. A push from a
   worktree can still start a daemon.
 - A dry-run cleanup command for stale daemons and stale `.nx/workspace-data`.
+
+## Pull request 2: pre-push hook
+
+- `.husky/pre-push` sets `NX_DAEMON=false` in a linked worktree, unless the caller set
+  `NX_DAEMON`. The test is `[ -f <toplevel>/.git ]`, the same rule as `isLinkedWorktree`.
+- Still open: a dry-run cleanup command for stale daemons and stale `.nx/workspace-data`.
