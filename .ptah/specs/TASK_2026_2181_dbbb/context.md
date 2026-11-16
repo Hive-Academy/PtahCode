@@ -57,7 +57,7 @@ Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processe
 | B2.3b: synchronous admission and reply deadline | TASK_2026_2181_dbbb | #1367 | merged |
 | B2.4 to B2.6: status, wait and read polish, renderer, agent text | TASK_2026_2181_dbbb | #1375 | in review |
 | B3: completion signals for external MCP clients | TASK_2026_2181_dbbb | none | not started |
-| P2: Nx daemon and worktree cost (PR 1: verify without the daemon in worktrees) | TASK_2026_2242_f87b | see branch `perf/verify-nx-daemon-off` | in review |
+| P2: Nx daemon and worktree cost (PR 1: verify without the daemon in worktrees) | TASK_2026_2242_f87b | #1379 | in review |
 | P3: process tree stop on Windows | none | none | not started |
 | P4: memory-based concurrency limit for lanes and sessions | none | none | plan owed to the user before code |
 | P5: host load (task index rebuild storm, `provider:getPlanLimits`) | none | none | not started |
