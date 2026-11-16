@@ -14,8 +14,8 @@ interface ParsedEvent {
 }
 
 interface Summary {
-  readonly taskIndex: { byTrigger: Record<string, number>; totalMs: { p50: number; max: number }; scanMs: { p50: number; max: number }; coalesced: number; roots: number };
-  readonly planLimits: { bySource: Record<string, number>; byPath: Record<string, number>; durationMs: { p50: number; max: number }; scopes: number };
+  readonly taskIndex: { byTrigger: Record<string, number>; totalMs: { p50: number | null; max: number | null }; scanMs: { p50: number | null; max: number | null }; coalesced: number; roots: number; maxActiveRoots: number | null };
+  readonly planLimits: { bySource: Record<string, number>; byPath: Record<string, number>; durationMs: { p50: number | null; max: number | null }; scopes: number };
   readonly planUsageCache: { byOutcome: Record<string, number>; byBypass: Record<string, number>; byProviderId: Record<string, number> };
   readonly eventLoop: {
     warnings: number;
@@ -86,7 +86,9 @@ const lib = require('./streaming-load-metrics-lib.cjs') as MetricsLib;
 // Electron daily-log format: timestamp, padded level, timestamp, message: JSON.
 const NEW_TIME = '[2026-11-16T10:00:00.000Z] [DEBUG] 2026-11-16T10:00:00.000Z - ';
 const REBUILD = `${NEW_TIME}[task-specs] index rebuild timing: {"trigger":"writer","rootId":"a1b2c3d4","activeRoots":2,"scanMs":12,"totalMs":20,"coalesced":3,"waitedMs":4,"carriers":5,"rows":4}`;
+const OLD_REBUILD = `${NEW_TIME}[task-specs] index rebuild timing: {"trigger":"writer","totalMs":20,"coalesced":0,"waitedMs":0,"carriers":5,"rows":4}`;
 const SNAPSHOT = `${NEW_TIME}[PlanLimitsSnapshot] snapshot served: {"source":"pull","path":"assembled","scopeId":"b1c2d3e4","durationMs":30,"discoveryMs":10,"readsMs":20,"discoveryIncomplete":false}`;
+const OLD_SNAPSHOT = `${NEW_TIME}[PlanLimitsSnapshot] snapshot served: {"source":"pull","path":"assembled","durationMs":30,"discoveryMs":10,"readsMs":20,"discoveryIncomplete":false}`;
 const CACHE = `${NEW_TIME}[PlanUsage] owner snapshot request: {"outcome":"flight-start","bypass":"empty","providerId":"codex","refresh":false,"hits":0,"joins":0,"starts":1}`;
 
 describe('new diagnostic lines', () => {
@@ -100,6 +102,30 @@ describe('new diagnostic lines', () => {
     expect(lib.toMarkdown(summary, null)).toContain('### Task index rebuilds');
     expect(lib.toMarkdown(summary, null)).toContain('### Plan limits snapshots');
     expect(lib.toMarkdown(summary, null)).toContain('### Plan usage owner cache');
+  });
+
+  it('marks unavailable rebuild fields in old-format logs', () => {
+    const summary = lib.summarize(collect([OLD_REBUILD]));
+    expect(summary.taskIndex).toMatchObject({
+      roots: 0,
+      scanMs: { p50: null, max: null },
+      maxActiveRoots: null,
+      totalMs: { p50: 20, max: 20 },
+    });
+    const markdown = lib.toMarkdown(summary, null);
+    expect(markdown).toContain('scan ms p50/max: n/a/n/a');
+    expect(markdown).toContain('max active roots: n/a');
+    expect(markdown).not.toContain('null');
+  });
+
+  it('excludes old-format rebuilds from scan duration samples', () => {
+    const summary = lib.summarize(collect([OLD_REBUILD, REBUILD]));
+    expect(summary.taskIndex).toMatchObject({ roots: 1, scanMs: { p50: 12, max: 12 } });
+  });
+
+  it('does not count plan limits snapshots without a scope id', () => {
+    const summary = lib.summarize(collect([OLD_SNAPSHOT]));
+    expect(summary.planLimits.scopes).toBe(0);
   });
 });
 
