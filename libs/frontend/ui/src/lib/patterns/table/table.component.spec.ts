@@ -3,6 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import {
   PtahNumericCellDirective,
   PtahTableComponent,
+  PtahTableRowDirective,
 } from './table.component';
 
 @Component({
@@ -10,7 +11,7 @@ import {
   imports: [PtahTableComponent, PtahNumericCellDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ptah-table label="Usage by day" [size]="size()">
+    <ptah-table label="Usage by day" [size]="size()" [density]="density()">
       <thead>
         <tr>
           <th>Day</th>
@@ -28,6 +29,7 @@ import {
 })
 class HostComponent {
   readonly size = signal<'xs' | 'sm'>('xs');
+  readonly density = signal<'default' | 'compact' | undefined>(undefined);
 }
 
 @Component({
@@ -94,5 +96,19 @@ describe('PtahTableComponent', () => {
       expect(cell.classList.contains('text-right')).toBe(true);
       expect(cell.classList.contains('tabular-nums')).toBe(true);
     }
+  });
+
+  it('sets no density by default and accepts default and compact density', () => {
+    const table = fixture.nativeElement.querySelector(
+      'ptah-table',
+    ) as HTMLElement;
+    expect(table.hasAttribute('data-density')).toBe(false);
+    fixture.componentInstance.density.set('default');
+    fixture.detectChanges();
+    expect(table.getAttribute('data-density')).toBe('default');
+    fixture.componentInstance.density.set('compact');
+    fixture.detectChanges();
+    expect(table.getAttribute('data-density')).toBe('compact');
+    expect(PtahTableRowDirective).toBeDefined();
   });
 });
