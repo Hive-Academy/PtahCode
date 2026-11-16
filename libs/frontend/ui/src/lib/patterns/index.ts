@@ -3,3 +3,4 @@ export * from './form-actions/form-actions.component';
 export * from './description-list/description-list.component';
 export * from './editable-section/editable-section.component';
 export * from './settings-layout/settings-layout.component';
+export * from './table/table.component';
