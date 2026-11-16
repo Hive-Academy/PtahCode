@@ -16,6 +16,8 @@ import { ArrowLeft, LucideAngularModule, MoreHorizontal } from 'lucide-angular';
 import {
   PtahBadgeDirective,
   PtahButtonDirective,
+  PtahDisclosureComponent,
+  PtahDisclosureLazyDirective,
   PtahIconButtonDirective,
 } from '@ptah-extension/ui';
 import type { RemoteMachine } from '../../services/machines-store';
@@ -54,6 +56,8 @@ export interface MachinesActionError {
   imports: [
     PtahBadgeDirective,
     PtahButtonDirective,
+    PtahDisclosureComponent,
+    PtahDisclosureLazyDirective,
     PtahIconButtonDirective,
     LucideAngularModule,
     DisplayTextPipe,
@@ -242,39 +246,38 @@ export interface MachinesActionError {
       </div>
     }
 
-    <details
+    <ptah-disclosure
       class="surface-2 rounded-box p-4"
       data-testid="machine-readiness-tile"
-      (toggle)="onReadinessToggle($event)"
+      label="Readiness"
+      [keepAlive]="false"
     >
-      <summary
-        class="cursor-pointer text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-      >
-        Readiness
-        @if (readinessCounts(); as counts) {
-          <span
-            class="ml-1 text-xs font-normal"
-            [class.text-base-content-muted]="counts.failed === 0"
-            [class.text-state-need]="counts.failed > 0"
-            data-testid="machine-readiness-result"
-            >{{ counts.passed }} of {{ counts.total }} passed{{
-              counts.failed > 0 ? ' · ' + counts.failed + ' failed' : ''
-            }}</span
-          >
-        } @else {
-          <span class="ml-1 text-xs font-normal text-base-content-muted"
-            >Checks this machine before sessions run</span
-          >
-        }
-      </summary>
-      @if (readinessOpen()) {
+      @if (readinessCounts(); as counts) {
+        <span
+          ptahDisclosureSummary
+          class="text-xs font-normal"
+          [class.text-base-content-muted]="counts.failed === 0"
+          [class.text-state-need]="counts.failed > 0"
+          data-testid="machine-readiness-result"
+          >{{ counts.passed }} of {{ counts.total }} passed{{
+            counts.failed > 0 ? ' · ' + counts.failed + ' failed' : ''
+          }}</span
+        >
+      } @else {
+        <span
+          ptahDisclosureSummary
+          class="text-xs font-normal text-base-content-muted"
+          >Checks this machine before sessions run</span
+        >
+      }
+      <ng-template ptahDisclosureLazy>
         <ptah-readiness-panel
           [machine]="machine()"
           class="mt-3"
           (counted)="onReadinessCounted($event)"
         />
-      }
-    </details>
+      </ng-template>
+    </ptah-disclosure>
 
     <ptah-remote-session-list
       [machine]="machine()"
@@ -300,9 +303,6 @@ export class MachineOverviewComponent {
 
   protected readonly ArrowLeftIcon = ArrowLeft;
   protected readonly MoreIcon = MoreHorizontal;
-
-  /** The readiness tile mounts the panel only once it was expanded. */
-  protected readonly readinessOpen = signal(false);
 
   /** The last check result, kept for the machine that it belongs to. */
   private readonly lastCounts = signal<{
@@ -337,12 +337,5 @@ export class MachineOverviewComponent {
 
   protected onReadinessCounted(counts: ReadinessCounts): void {
     this.lastCounts.set({ machineId: this.machine().machineId, counts });
-  }
-
-  protected onReadinessToggle(event: Event): void {
-    const target = event.target;
-    if (target instanceof HTMLDetailsElement) {
-      this.readinessOpen.set(target.open);
-    }
   }
 }
