@@ -1,18 +1,19 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input, linkedSignal } from '@angular/core';
 import { ClaudeRpcService } from '@ptah-extension/core';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import { Eye, EyeOff, LucideAngularModule } from 'lucide-angular';
 
 /** Email exists only in this component while explicitly revealed. */
 @Component({
   selector: 'ptah-account-email-reveal',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex flex-wrap items-center gap-2 text-sm" data-testid="account-email">
+    <div class="flex flex-wrap items-center gap-[var(--ptah-gap-inline)] text-sm" data-testid="account-email">
       <span class="text-base-content-muted">Email</span>
       <span class="break-all" data-testid="account-email-value">{{ email() ?? '••••••••' }}</span>
-      <button type="button" class="btn btn-ghost btn-xs" [disabled]="loading()"
+      <button type="button" ptahButton variant="ghost" size="xs" [disabled]="loading()"
         [attr.aria-label]="email() ? 'Hide email' : 'Show email'"
         [attr.aria-pressed]="email() !== null"
         (click)="toggle()" data-testid="account-email-toggle">

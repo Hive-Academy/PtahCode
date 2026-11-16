@@ -156,7 +156,7 @@ describe('parseClaudeAccountStatus', () => {
         accountClass: 'O',
         identityReference: null,
         emailOnlyReference: null,
-        organizationPresent: false,
+        organizationPresent: true,
         configDirectoryMatches: true,
       });
     });
