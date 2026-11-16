@@ -18,7 +18,6 @@ import {
   CLI_TEST_NOT_STARTED,
   cliMatrixRows,
   cliTestFailedText,
-  type CliMatrixCellField,
   type CliMatrixRow,
   type InstanceCliMatrixRow,
   type SystemCliMatrixRow,
@@ -36,28 +35,12 @@ import { PtahCliInstancesComponent } from './ptah-cli-instances.component';
 import { CliLaneDefaultsStore } from './cli-lane-defaults.store';
 import { CliProviderGridComponent } from './cli-provider-grid.component';
 import type { LaneTableRow } from './lanes-table.component';
-import type { CliProviderOpenKind } from './cli-provider-card-popovers.component';
 import { CliSharedDefaultsComponent } from './cli-shared-defaults.component';
+import { savePreferredAgentOrder } from './preferred-agent-order-save';
 import {
   PtahButtonDirective,
 } from '@ptah-extension/ui';
 
-/** Which popover of which row is open; one at a time. */
-type CliProviderOpenCell = { readonly rowId: string; readonly kind: CliProviderOpenKind };
-type OpenCell = {
-  readonly rowId: string;
-  readonly kind: CliMatrixCellField | CliProviderOpenKind | 'more';
-};
-const PROVIDER_OPEN_KINDS: ReadonlySet<OpenCell['kind']> = new Set<CliProviderOpenKind>([
-  'info', 'capabilities', 'model', 'effort', 'permission', 'credentials', 'install',
-]);
-function isProviderOpenCell(cell: OpenCell): cell is CliProviderOpenCell {
-  return PROVIDER_OPEN_KINDS.has(cell.kind);
-}
-interface MatrixGroup {
-  readonly id: 'installed' | 'uninstalled';
-  readonly rows: readonly SystemCliMatrixRow[];
-}
 
 /**
  * #77: install copy per system CLI. Codex and Copilot keep the old "No CLI agents found" commands; the other four are
@@ -202,7 +185,7 @@ const SAVE_SCOPE = 'global';
           <p data-testid="cli-matrix-empty">No CLI agent is installed. Install one from the list below, then Re-detect.</p>
         }
         @if (loading()) {
-          <p data-testid="cli-matrix-empty">Loading CLI agents?</p>
+          <p data-testid="cli-matrix-empty">Loading CLI agents…</p>
         }
       </div>
 
@@ -223,20 +206,7 @@ const SAVE_SCOPE = 'global';
         [canWrite]="canWrite()"
         [testing]="testing()"
         [testingId]="testingId()"
-        [confirmDeleteId]="confirmDelete()"
-        [openCell]="openCell()"
         (addRequested)="openAdd($event)"
-        (toggled)="toggle($event.row, $event.event)"
-        (cellToggled)="toggleCell($event.rowId, $event.kind)"
-        (cellOpened)="focusOpened()"
-        (moreOpened)="focusFirstIn('cli-matrix-more-menu')"
-        (closed)="close()"
-        (tiersRequested)="openTiers($event)"
-        (testRequested)="test($event)"
-        (editRequested)="openEdit($event)"
-        (deleteAsked)="askDelete($event)"
-        (deleteCancelled)="cancelDelete($event)"
-        (deleteConfirmed)="remove($event)"
       />
     </div>
 
@@ -319,19 +289,13 @@ export class CliOrchestrationMatrixComponent {
     return result;
   });
   protected async moveLane(row: LaneTableRow, direction: -1 | 1): Promise<void> {
-    const context = this.state.reviewContext();
-    if (!context || this.busy()) return;
+    if (!this.state.reviewContext() || this.busy()) return;
     const installed = this.rows().installed.map(item => item.id);
     const index = installed.indexOf(row.id);
     const next = index + direction;
     if (index < 0 || next < 0 || next >= installed.length) return;
-    const previous = [...(this.state.orchestration().data?.preferredAgentOrder ?? [])];
     [installed[index], installed[next]] = [installed[next], installed[index]];
-    await this.feedback.save({
-      label: 'preferred agent order', scope: SAVE_SCOPE,
-      write: () => this.state.saveSettings({ orchestration: { preferredAgentOrder: installed } }, context),
-      undo: () => this.state.saveSettings({ orchestration: { preferredAgentOrder: previous } }, context),
-    });
+    await savePreferredAgentOrder(this.state, this.feedback, installed);
   }
   protected editLane(row: LaneTableRow): void {
     if (row.kind === 'instance') this.openEdit(row);
@@ -341,7 +305,7 @@ export class CliOrchestrationMatrixComponent {
     if (row.kind === 'instance') await this.remove(row);
   }
   protected showCapabilities(row: LaneTableRow): void {
-    this.focusAfterRender(`#lane-detail-${row.id}`);
+    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="capabilities"]`);
   }
   protected showInstallGuide(row: LaneTableRow): void {
     this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="install"]`);
@@ -363,17 +327,6 @@ export class CliOrchestrationMatrixComponent {
   protected readonly ptahManifest = computed(() =>
     this.state.orchestration().data?.detectedClis.find(cli => cli.ptahCliId)?.manifest,
   );
-  /** The installed system CLIs (always, for its empty state), then the Uninstalled group when it has rows (#71). */
-  protected readonly groups = computed((): readonly MatrixGroup[] => {
-    const { installed, uninstalled } = this.rows();
-    const system = installed.filter(
-      (row): row is SystemCliMatrixRow => row.kind === 'system',
-    );
-    const groups: MatrixGroup[] = [{ id: 'installed', rows: system }];
-    if (uninstalled.length)
-      groups.push({ id: 'uninstalled', rows: uninstalled });
-    return groups;
-  });
   /** Neither source has data yet (the container shows each section's own loading or error line). */
   protected readonly loading = computed(
     () => !this.state.orchestration().data && !this.state.cliAgents().data,
@@ -386,50 +339,21 @@ export class CliOrchestrationMatrixComponent {
       this.state.reviewContext() !== null,
   );
 
-  private readonly openState = signal<OpenCell | null>(null);
-  protected readonly providerOpenCell = computed((): CliProviderOpenCell | null => {
-    const open = this.openState();
-    return open && isProviderOpenCell(open) ? open : null;
-  });
-  /** The open popover, for the instance cards. */
-  protected readonly openCell = this.openState.asReadonly();
-  /** Decision 1: the Uninstalled group starts collapsed. */
-  private readonly uninstalledOpen = signal(false);
-  /** Expanded by the user, or holding the open popover (a Cursor key removal moves its row into this group). */
-  protected readonly uninstalledShown = computed(() => {
-    const open = this.openState();
-    return (
-      this.uninstalledOpen() ||
-      (!!open && this.rows().uninstalled.some((row) => row.id === open.rowId))
-    );
-  });
-  protected readonly confirmDelete = signal<string | null>(null);
   protected readonly testingId = signal<string | null>(null);
   /** Batch 32 modals: the add/edit form (with the instance it edits, or `null` to create) and the tier mapping. */
   protected readonly addOpen = signal(false);
   protected readonly editTarget = signal<CliInstanceEditTarget | null>(null);
   protected readonly tierTarget = signal<CliTierMappingTarget | null>(null);
-  protected readonly noInstances = computed(
-    () =>
-      this.state.cliAgents().status === 'ready' &&
-      !this.state.cliAgents().data?.length,
-  );
   /** Which Add button opened the form: the empty-state one disappears once an instance exists (Minor 2). */
   private addOrigin: 'header' | 'empty' = 'header';
 
-  protected toggleUninstalled(): void {
-    this.uninstalledOpen.set(!this.uninstalledShown());
-  }
-
   protected openAdd(origin: 'header' | 'empty'): void {
-    this.close();
     this.addOrigin = origin;
     this.editTarget.set(null);
     this.addOpen.set(true);
   }
 
   protected openEdit(row: InstanceCliMatrixRow): void {
-    this.close();
     this.editTarget.set({
       id: row.id,
       name: row.name,
@@ -464,14 +388,13 @@ export class CliOrchestrationMatrixComponent {
     }
     if (this.addOrigin === 'empty')
       this.focusAfterRender(
+        `[data-testid="cli-matrix-row-${created.id}"] ptah-table-row-expander button`,
         `[data-testid="cli-matrix-tiers-${created.id}"]`,
-        `#lane-detail-${created.id} button`,
       );
     void this.test(created.id);
   }
 
   protected openTiers(row: InstanceCliMatrixRow): void {
-    this.close();
     this.tierTarget.set({
       id: row.id,
       name: row.name,
@@ -486,8 +409,8 @@ export class CliOrchestrationMatrixComponent {
     this.tierTarget.set(null);
     if (id)
       this.focusAfterRender(
+        `[data-testid="cli-matrix-row-${id}"] ptah-table-row-expander button`,
         `[data-testid="cli-matrix-tiers-${id}"]`,
-        `#lane-detail-${id} button`,
       );
   }
   /** The instance whose Test ran last, for a test that failed before it produced a result. */
@@ -496,34 +419,6 @@ export class CliOrchestrationMatrixComponent {
     () =>
       this.testingId() !== null || this.state.cliTest().status === 'loading',
   );
-
-  protected isOpen(rowId: string, kind: OpenCell['kind']): boolean {
-    const open = this.openState();
-    return open?.rowId === rowId && open.kind === kind;
-  }
-
-  protected toggleCell(rowId: string, kind: OpenCell['kind']): void {
-    this.openState.set(this.isOpen(rowId, kind) ? null : { rowId, kind });
-  }
-
-  protected close(): void {
-    this.openState.set(null);
-  }
-
-  protected toggleProviderPopover(cell: CliProviderOpenCell): void {
-    if (this.isOpen(cell.rowId, cell.kind)) this.closeProviderPopover();
-    else this.openState.set(cell);
-  }
-
-  protected closeProviderPopover(): void {
-    const open = this.providerOpenCell();
-    if (!open) return;
-    const movedIntoCollapsedGroup = !this.uninstalledOpen() && this.rows().uninstalled.some(row => row.id === open.rowId);
-    this.close();
-    this.focusAfterRender(movedIntoCollapsedGroup
-      ? '[data-testid="cli-matrix-uninstalled-toggle"]'
-      : `[data-testid="cli-provider-card-${open.rowId}"] [data-popover-kind="${open.kind}"]`);
-  }
 
   /**
    * The install guide's Re-detect: the same re-read as the policy bar's Re-detect CLIs. A CLI that is found
@@ -542,49 +437,7 @@ export class CliOrchestrationMatrixComponent {
       );
       return;
     }
-    this.close();
     this.focusAfterRender(`[data-testid="cli-provider-card-${rowId}"] input[type="checkbox"]`);
-  }
-
-  /**
-   * M3: a saved or removed Cursor key moves its row between groups, which re-creates the popover with focus on `body`;
-   * closing returns focus to the row's Credentials trigger wherever the row now is. A removed key moves the row into
-   * the Uninstalled group, which collapses again on close unless the user expanded it: focus then goes to that group's
-   * disclosure button, never `body` (re-check N-2).
-   */
-  /** The "More actions" Delete: the inline confirm replaces the actions, so focus moves to its Cancel. */
-  protected askDelete(rowId: string): void {
-    this.close();
-    this.confirmDelete.set(rowId);
-    this.focusAfterRender(
-      `[data-testid="cli-matrix-delete-confirm-${rowId}"] [data-cancel-delete]`,
-    );
-  }
-
-  protected cancelDelete(rowId: string): void {
-    this.confirmDelete.set(null);
-    this.focusAfterRender(`[data-testid="cli-matrix-more-${rowId}"]`);
-  }
-
-  /** The panel takes focus when positioned; then its first control does (the model search opens its list). */
-  protected focusOpened(): void {
-    this.element.nativeElement
-      .querySelector<HTMLElement>(
-        '[data-testid="cli-matrix-popover"] input:not([disabled]), [data-testid="cli-matrix-popover"] button[aria-pressed="true"]',
-      )
-      ?.focus();
-  }
-
-  protected focusFirstIn(testid: string): void {
-    const buttons = this.element.nativeElement.querySelectorAll<HTMLElement>(
-      `[data-testid="${testid}"] button:not([disabled])`,
-    );
-    for (const button of buttons) {
-      if (getComputedStyle(button).display !== 'none') {
-        button.focus();
-        return;
-      }
-    }
   }
 
   /**
@@ -701,7 +554,7 @@ export class CliOrchestrationMatrixComponent {
   protected async remove(row: InstanceCliMatrixRow): Promise<void> {
     const context = this.state.reviewContext();
     if (!context || this.busy()) return;
-    const result = await this.feedback.save({
+    await this.feedback.save({
       label: `removal of ${row.name}`,
       scope: SAVE_SCOPE,
       write: () =>
@@ -711,8 +564,6 @@ export class CliOrchestrationMatrixComponent {
         ),
       undo: null,
     });
-    // M2: this save's own result, never an earlier commit.
-    if (result === 'saved') this.confirmDelete.set(null);
   }
 
   /** Focuses the first selector present and shown after the next render; later ones are fallbacks. */
@@ -723,7 +574,9 @@ export class CliOrchestrationMatrixComponent {
         for (const selector of selectors) {
           const target = root.querySelector<HTMLElement>(selector);
           // The narrow layout hides inline Tiers and Test (they move into More).
-          if (target && getComputedStyle(target).display !== 'none') {
+          if (target && !target.closest('[hidden], [aria-hidden="true"]') &&
+              getComputedStyle(target).display !== 'none' &&
+              getComputedStyle(target).visibility !== 'hidden') {
             target.focus();
             return;
           }

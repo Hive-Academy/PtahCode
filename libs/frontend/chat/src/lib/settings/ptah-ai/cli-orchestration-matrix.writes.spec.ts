@@ -379,6 +379,49 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(state.saveSettings).toHaveBeenCalledTimes(2);
   });
 
+  it('writes a permission selection from the table control', async () => {
+    showSavedCodexDefault();
+    const select = row('codex')?.querySelector<HTMLSelectElement>('select[aria-label="Codex permission default"]');
+    expect(select).not.toBeNull();
+    if (!select) throw new Error('Missing Codex permission select');
+    select.value = 'auto-edit';
+    select.dispatchEvent(new Event('change'));
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { cliLaneDefaults: expect.objectContaining({ codex: { permission: 'auto-edit', network: 'deny' } }) } },
+      CONTEXT,
+    );
+  });
+
+  it('resets a saved default from the table control', async () => {
+    showSavedCodexDefault();
+    const cell = row('codex')?.querySelector('ptah-cli-lane-default-cell');
+    _clickNamed(cell ?? null, 'More default actions');
+    fixture.detectChanges();
+    const reset = Array.from(cell?.querySelectorAll('button') ?? []).find(button => button.textContent?.includes('Reset to default'));
+    expect(reset).toBeDefined();
+    reset?.click();
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { cliLaneDefaults: { codex: null } } },
+      CONTEXT,
+    );
+  });
+
+  it('writes a toggle and Test from the table controls', async () => {
+    check('codex', false);
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { disabledClis: ['copilot', 'codex'] } }, CONTEXT,
+    );
+    const actions = row('glm-1')?.querySelector<HTMLButtonElement>('ptah-table-row-actions button[aria-haspopup="menu"]');
+    actions?.click();
+    fixture.detectChanges();
+    _clickNamed(row('glm-1'), 'Test');
+    await flush();
+    expect(state.testCliConnection).toHaveBeenCalledWith('glm-1');
+  });
+
   it('routes order moves through preferredAgentOrder with undo', async () => {
     table().moved.emit({ row: lane('codex'), direction: 1 }); await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(

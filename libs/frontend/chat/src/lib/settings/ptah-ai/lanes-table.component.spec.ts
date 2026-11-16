@@ -469,6 +469,15 @@ describe('LanesTableComponent', () => {
   });
 
   describe('order', () => {
+    it('suppresses a focus tooltip during the order button focus return', async () => {
+      const { host } = await mount([instance('a'), instance('b')], true);
+      const button = q(host, '[data-testid="cli-matrix-row-a"] [data-order-down]') as HTMLButtonElement;
+      const focused = jest.fn();
+      button.addEventListener('focus', focused);
+      button.click();
+      button.dispatchEvent(new FocusEvent('focus', { bubbles: false }));
+      expect(focused).not.toHaveBeenCalled();
+    });
     it('blocks moves while busy or without write permission', async () => {
       const a = instance('a');
       const b = instance('b');
@@ -582,6 +591,13 @@ describe('LanesTableComponent', () => {
   });
 
   describe('system row', () => {
+    it('keeps one version hook and wide defaults when details are expanded', async () => {
+      const { fixture, host } = await mount([system('codex')]);
+      q(host, '[data-testid="cli-provider-card-codex"] ptah-table-row-expander button')?.click();
+      fixture.detectChanges();
+      expect(host.querySelectorAll('[data-testid="cli-matrix-version"]')).toHaveLength(1);
+      expect(q(host, '#lane-detail-codex > td > dl')).toBeNull();
+    });
     it('has card and version hooks and a clean model label', async () => {
       const { host } = await mount([
         system('codex', {

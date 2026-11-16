@@ -54,24 +54,10 @@ async function closeMatrixModal(
 /** The fixture's one Ptah CLI instance, "Glm" (BRIEF:66-67). */
 const GLM_ID = 'glm-instance-1';
 
-/** System CLIs the shared fixture reports as not installed: their rows sit in the Uninstalled group. */
-const UNINSTALLED_IN_FIXTURE: ReadonlySet<string> = new Set(['cursor', 'pi']);
-
-/**
- * Gate V 36 decision 1: the Uninstalled group is collapsed by default behind its disclosure button. Expands it when it
- * is collapsed (the tab keeps its state between entries); returns the toggle.
- */
-export async function expandUninstalled(page: Page): Promise<Locator> {
-  const row = page.locator('[data-testid="cli-provider-card-cursor"]');
-  await expect(row).toBeVisible();
-  return row;
-}
-
 /** Returns a provider card, or the existing Ptah CLI instance card. */
 async function matrixCard(page: Page, id: string): Promise<Locator> {
   await agentsRoutingTab(page);
   const card = page.locator(`[data-testid="${id === GLM_ID ? 'cli-matrix-row' : 'cli-provider-card'}-${id}"]`);
-  if (UNINSTALLED_IN_FIXTURE.has(id)) await expandUninstalled(page);
   await expect(card).toBeVisible();
   const details = card.locator('ptah-table-row-expander button');
   if ((await details.getAttribute('aria-expanded')) === 'false') {
@@ -902,9 +888,9 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     capability:
       'Per-CLI grouping of delegated settings, hidden when not installed',
     status: 'restored',
-    // Installed rows first; Cursor and Pi in the "Uninstalled" group, as plain text, with an install guide.
+    // Installed rows first; Cursor and Pi remain visible with Not installed status and an install guide.
     reach: async (page) => {
-      // Gate V 36 decision 1: the group is a disclosure ("Uninstalled CLI agents (2)"), collapsed by default.
+      // The table keeps uninstalled rows visible after installed rows.
       await agentsRoutingTab(page);
       const cursor = await matrixCard(page, 'cursor');
       const pi = await matrixCard(page, 'pi');
@@ -912,6 +898,13 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       await expect(pi).toBeVisible();
       await expect(providerField(pi, 'Model')).toBeDisabled();
       await expect(pi).toContainText('Not installed');
+      await expect(cursor).toContainText('Not installed');
+      const rows = page.locator('[data-testid^="cli-provider-card-"]');
+      expect(await rows.allTextContents()).toEqual(expect.arrayContaining([expect.stringContaining('Cursor'), expect.stringContaining('Pi')]));
+      expect(await cursor.evaluate((node) => {
+        const piRow = document.querySelector('[data-testid="cli-provider-card-pi"]');
+        return piRow !== null && Boolean(node.compareDocumentPosition(piRow) & Node.DOCUMENT_POSITION_FOLLOWING);
+      })).toBe(true);
       await pi.getByRole('button', { name: 'More actions for Pi' }).click();
       await expect(pi.getByRole('menuitem', { name: 'Test' })).toBeDisabled();
       await page.keyboard.press('Escape');

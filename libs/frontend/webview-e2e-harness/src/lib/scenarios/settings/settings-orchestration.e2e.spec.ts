@@ -11,16 +11,7 @@
  * starts from the BRIEF baseline and every RPC a scene asserts was sent by that scene's own clicks.
  */
 import type { Locator, Page } from '@playwright/test';
-async function expandMatrixDetail(page: Page, id: string): Promise<void> {
-  const row = page.locator(`[data-testid="${id.includes("instance") ? "cli-matrix-row" : "cli-provider-card"}-${id}"]`);
-  const expander = row.locator('ptah-table-row-expander button');
-  if ((await expander.getAttribute('aria-expanded')) === 'true') return;
-  if (await expander.isVisible()) await expander.click();
-  else {
-    await row.locator('ptah-table-row-actions button[aria-haspopup="menu"]').click();
-    await row.getByRole('menuitem', { name: 'Details' }).click();
-  }
-}
+import { expandMatrixDetail } from './settings-matrix-detail';
 
 import { test, expect } from '../../test-fixtures';
 import {
@@ -552,7 +543,7 @@ for (const host of HOSTS) {
         .locator('[data-testid="cursor-credential-remove-confirm-button"]')
         .click();
       await expect(toastMessage(page)).toHaveText('Stored key removed.');
-      // The row moved into the collapsed group; the open popover keeps it shown, with focus inside.
+      // The row now reports Not installed; the open popover keeps focus inside.
       await expect(
         uninstalled.locator('[data-testid="cursor-credential-popover"]'),
       ).toBeVisible();
@@ -561,11 +552,12 @@ for (const host of HOSTS) {
           popover.evaluate((node) => node.contains(document.activeElement)),
         )
         .toBe(true);
-      // Esc closes it: the group collapses again, the row leaves the DOM, and focus lands on the toggle, not body.
+      // Esc closes the popover and restores focus to the credentials trigger.
       await page.keyboard.press('Escape');
       await expect(popover).toHaveCount(0);
       await expect(toggle).toHaveAttribute('aria-expanded', 'true');
       await expect(page.locator('[data-testid="cli-provider-card-cursor"]')).toBeVisible();
+      await expect(uninstalled).toContainText('Not installed');
       await expect(installedTrigger).toBeFocused();
       // Esc on the toggle closes nothing else: the tab stays as it is.
       await page.keyboard.press('Escape');

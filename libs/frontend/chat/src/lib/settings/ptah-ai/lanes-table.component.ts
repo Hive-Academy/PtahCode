@@ -1,8 +1,11 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
+  ElementRef,
   computed,
   effect,
+  inject,
   input,
   output,
   signal,
@@ -15,7 +18,6 @@ import {
   PtahTableRowTitleComponent,
   PtahTableRowDirective,
   PtahCollapsibleCellDirective,
-  PtahDetailRowDirective,
   PtahDetailCellDirective,
   PtahRowExpanderComponent,
   PtahTableOrderButtonsComponent,
@@ -58,7 +60,6 @@ export type LaneTableRow = CliMatrixRow & {
     PtahTableRowTitleComponent,
     PtahTableRowDirective,
     PtahCollapsibleCellDirective,
-    PtahDetailRowDirective,
     PtahDetailCellDirective,
     PtahRowExpanderComponent,
     PtahTableOrderButtonsComponent,
@@ -422,6 +423,7 @@ export type LaneTableRow = CliMatrixRow & {
                   (kindToggled)="toggleInfo(row, $event)" (popoverClosed)="infoOpen.set(null)"
                   (redetect)="redetect.emit($event)" (codexSettings)="codexSettings.emit()"
                   (tiers)="tiers.emit($event)" />
+                @if (table.collapsed()) {
                 <dl>
                   <dt>Permission</dt>
                   <dd>
@@ -494,6 +496,7 @@ export type LaneTableRow = CliMatrixRow & {
                   <dt>Capabilities</dt>
                   <dd><ptah-cli-capability-cells [manifest]="row.manifest" [compact]="true" /></dd>
                 </dl>
+                }
               }
             </td>
           </tr>
@@ -526,7 +529,8 @@ export type LaneTableRow = CliMatrixRow & {
 export class LanesTableComponent {
   protected tierList(row: LaneTableRow): string {
     if (row.kind !== 'instance' || !row.tiers?.length) return 'No tier models';
-    return row.tiers.map(tier => `${tier.label}: ${tier.model}`).join(', '); }
+    return row.tiers.map(tier => `${tier.label}: ${tier.model}`).join(', ');
+  }
   readonly rows = input.required<readonly LaneTableRow[]>();
   /** Index among positioned rows; uninstalled system rows have no entry. */
   protected readonly positions = computed(() => {
@@ -559,6 +563,9 @@ export class LanesTableComponent {
   );
   private readonly table = viewChild(PtahTableComponent);
   protected readonly pendingDelete = signal<LaneTableRow | null>(null);
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly orderFocusReturning = signal(false);
   private readonly deleteFocus = new LanesTableDeleteFocus();
   private readonly openCell = signal<{
     row: LaneTableRow;
@@ -599,6 +606,16 @@ export class LanesTableComponent {
     this.infoOpen.set(this.infoIsOpen(row, kind) ? null : { rowId: row.id, kind });
   }
   constructor() {
+    // The UI order component restores focus after a move. Suppress its focus tooltip
+    // for that return, as the policy order editor does when its popover closes.
+    const onOrderFocus = (event: FocusEvent): void => {
+      if (this.orderFocusReturning() && event.target instanceof Element &&
+          event.target.matches('[data-order-up], [data-order-down]')) {
+        event.stopImmediatePropagation();
+      }
+    };
+    this.element.nativeElement.addEventListener('focus', onOrderFocus, true);
+    this.destroyRef.onDestroy(() => this.element.nativeElement.removeEventListener('focus', onOrderFocus, true));
     effect(() => {
       const announcement = this.testAnnouncement();
       if (announcement) this.table()?.announce(announcement);
@@ -622,6 +639,8 @@ export class LanesTableComponent {
   }
   protected moveRow(row: LaneTableRow, direction: -1 | 1): void {
     if (this.rowBusy(row) || !this.canWrite()) return;
+    this.orderFocusReturning.set(true);
+    setTimeout(() => this.orderFocusReturning.set(false));
     this.moved.emit({ row, direction });
   }
   protected toggleRow(row: LaneTableRow, event: Event): void {
