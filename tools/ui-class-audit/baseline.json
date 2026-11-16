@@ -508,9 +508,6 @@
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-model-effort-popover.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-provider-card.component.ts": {
-    "card-body": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/copilot-auto-approve-toggle.component.ts": {
     "<dynamic>": 1,
     "toggle": 1,

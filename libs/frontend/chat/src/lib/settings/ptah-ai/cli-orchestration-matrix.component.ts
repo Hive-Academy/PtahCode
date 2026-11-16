@@ -34,14 +34,16 @@ import {
 import { AgentOrchestrationConfigComponent } from './agent-orchestration-config.component';
 import { PtahCliInstancesComponent } from './ptah-cli-instances.component';
 import { CliLaneDefaultsStore } from './cli-lane-defaults.store';
-import { CliProviderGridComponent, type CliProviderOpenCell } from './cli-provider-grid.component';
-import type { CliProviderOpenKind } from './cli-provider-card.component';
+import { CliProviderGridComponent } from './cli-provider-grid.component';
+import type { LaneTableRow } from './lanes-table.component';
+import type { CliProviderOpenKind } from './cli-provider-card-popovers.component';
 import { CliSharedDefaultsComponent } from './cli-shared-defaults.component';
 import {
   PtahButtonDirective,
 } from '@ptah-extension/ui';
 
 /** Which popover of which row is open; one at a time. */
+type CliProviderOpenCell = { readonly rowId: string; readonly kind: CliProviderOpenKind };
 type OpenCell = {
   readonly rowId: string;
   readonly kind: CliMatrixCellField | CliProviderOpenKind | 'more';
@@ -171,44 +173,36 @@ const SAVE_SCOPE = 'global';
       <p class="text-xs text-base-content-muted">These are CLI capabilities. Permission and network defaults are editable. A running lane may offer fewer actions.</p>
 
       <ptah-agent-orchestration-config />
+      <button type="button" ptahButton variant="ghost" data-testid="lanes-order-edit"
+        [attr.aria-pressed]="orderMode()" (click)="orderMode.set(!orderMode())">
+        {{ orderMode() ? 'Done editing order' : 'Edit lane order' }}
+      </button>
 
       <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]" data-testid="cli-matrix" tabindex="-1" [attr.aria-busy]="loading()">
-        <ptah-cli-provider-grid [rows]="groups()[0].rows"
-          [sharedOpenCell]="providerOpenCell()"
-          [defaults]="state.orchestration().data?.cliLaneDefaults"
-          [busy]="busy()" [canWrite]="canWrite()" [testing]="testing()" [testingId]="testingId()"
-          [testTexts]="systemTestTexts()" [guides]="CLI_INSTALL_GUIDES"
+        <ptah-cli-provider-grid
+          [rows]="tableRows()" [defaults]="state.orchestration().data?.cliLaneDefaults"
+          [busy]="busy()" [canWrite]="canWrite()" [loading]="loading()"
+          [testingRows]="testingRows()" [testResults]="tableTestResults()"
+          [orderMode]="orderMode()" [guides]="CLI_INSTALL_GUIDES"
+          [error]="laneReadError()"
           (toggled)="toggle($event.row, $event.event)"
-          (defaultSelected)="saveLaneDefault($event.row, $event.choice)"
-          (defaultResetRequested)="resetLaneDefault($event)"
-          (testRequested)="test($event)" (redetectRequested)="redetectFromGuide($event)"
-          (popoverToggled)="toggleProviderPopover($event)" (popoverDismissed)="closeProviderPopover()"
-          (codexSettingsRequested)="codexSettingsRequested.emit()" />
-        @if (groups().length > 1) {
-          <button type="button" ptahButton variant="ghost" class="self-start before:inline-block before:w-3 before:transition-transform before:content-['›'] aria-expanded:before:rotate-90"
-            data-testid="cli-matrix-uninstalled-toggle" [attr.aria-expanded]="uninstalledShown()"
-            (click)="toggleUninstalled()">Uninstalled CLI agents ({{ groups()[1].rows.length }})</button>
-          @if (uninstalledShown()) {
-            <div data-testid="cli-matrix-uninstalled">
-              <ptah-cli-provider-grid [rows]="groups()[1].rows"
-                [sharedOpenCell]="providerOpenCell()"
-                [defaults]="state.orchestration().data?.cliLaneDefaults"
-                [busy]="busy()" [canWrite]="canWrite()" [testing]="testing()" [testingId]="testingId()"
-                [testTexts]="systemTestTexts()" [guides]="CLI_INSTALL_GUIDES"
-                (toggled)="toggle($event.row, $event.event)"
-                (defaultSelected)="saveLaneDefault($event.row, $event.choice)"
-                (defaultResetRequested)="resetLaneDefault($event)"
-                (testRequested)="test($event)" (redetectRequested)="redetectFromGuide($event)"
-                (popoverToggled)="toggleProviderPopover($event)" (popoverDismissed)="closeProviderPopover()"
-                (codexSettingsRequested)="codexSettingsRequested.emit()" />
-            </div>
-          }
-        }
-        @if (!loading() && groups()[0].rows.length === 0) {
+          (moved)="moveLane($event.row, $event.direction)"
+          (test)="test($event.id)"
+          (edit)="editLane($event)"
+          (delete)="deleteLane($event)"
+          (capabilities)="showCapabilities($event)"
+          (installGuide)="showInstallGuide($event)"
+          (signIn)="signInLane($event)"
+          (retry)="retryLanes()" (redetect)="redetectFromGuide($event)"
+          (codexSettings)="codexSettingsRequested.emit()"
+          (tiers)="editTiers($event)"
+          (defaultSelected)="selectTableDefault($event.row, $event.choice)"
+          (defaultResetRequested)="resetTableDefault($event)" />
+        @if (!loading() && tableRows().length === 0) {
           <p data-testid="cli-matrix-empty">No CLI agent is installed. Install one from the list below, then Re-detect.</p>
         }
         @if (loading()) {
-          <p data-testid="cli-matrix-empty">Loading CLI agents…</p>
+          <p data-testid="cli-matrix-empty">Loading CLI agents?</p>
         }
       </div>
 
@@ -223,8 +217,8 @@ const SAVE_SCOPE = 'global';
 
       <!-- The Ptah CLI instances: their own sub-section under a hairline, with Add and one card per instance. -->
       <ptah-cli-instances
-        [rows]="instances()"
-        [empty]="noInstances()"
+        [rows]="[]"
+        [empty]="!loading() && instances().length === 0"
         [busy]="busy()"
         [canWrite]="canWrite()"
         [testing]="testing()"
@@ -295,6 +289,77 @@ export class CliOrchestrationMatrixComponent {
       (row): row is InstanceCliMatrixRow => row.kind === 'instance',
     ),
   );
+  protected readonly tableRows = computed((): readonly LaneTableRow[] =>
+    [...this.rows().installed, ...this.rows().uninstalled].map((row, index) => ({
+      ...row,
+      order: row.kind === 'system' && !row.installed ? undefined : index + 1,
+    })),
+  );
+  protected readonly laneReadError = computed(() =>
+    this.state.orchestration().status === 'error' ||
+    this.state.cliAgents().status === 'error'
+      ? 'Could not load lanes.'
+      : null,
+  );
+  protected async retryLanes(): Promise<void> {
+    await Promise.all([this.state.refreshOrchestration(), this.state.refreshCliAgents()]);
+  }
+  protected readonly orderMode = signal(false);
+  protected readonly testingRows = computed((): Readonly<Record<string, boolean>> => {
+    const id = this.testingId();
+    return id ? { [id]: true } : {};
+  });
+  protected readonly tableTestResults = computed((): Readonly<Record<string, string>> => {
+    const result: Record<string, string> = { ...this.systemTestTexts() };
+    for (const row of this.instances()) {
+      if (row.lastTest) result[row.id] = row.lastTest.success
+        ? (row.lastTest.latencyMs === null ? 'Test passed.' : `Test passed in ${row.lastTest.latencyMs}ms.`)
+        : cliTestFailedText(row.lastTest.reason);
+    }
+    return result;
+  });
+  protected async moveLane(row: LaneTableRow, direction: -1 | 1): Promise<void> {
+    const context = this.state.reviewContext();
+    if (!context || this.busy()) return;
+    const installed = this.rows().installed.map(item => item.id);
+    const index = installed.indexOf(row.id);
+    const next = index + direction;
+    if (index < 0 || next < 0 || next >= installed.length) return;
+    const previous = [...(this.state.orchestration().data?.preferredAgentOrder ?? [])];
+    [installed[index], installed[next]] = [installed[next], installed[index]];
+    await this.feedback.save({
+      label: 'preferred agent order', scope: SAVE_SCOPE,
+      write: () => this.state.saveSettings({ orchestration: { preferredAgentOrder: installed } }, context),
+      undo: () => this.state.saveSettings({ orchestration: { preferredAgentOrder: previous } }, context),
+    });
+  }
+  protected editLane(row: LaneTableRow): void {
+    if (row.kind === 'instance') this.openEdit(row);
+    else if (row.cli === 'codex') this.codexSettingsRequested.emit();
+  }
+  protected async deleteLane(row: LaneTableRow): Promise<void> {
+    if (row.kind === 'instance') await this.remove(row);
+  }
+  protected showCapabilities(row: LaneTableRow): void {
+    this.focusAfterRender(`#lane-detail-${row.id}`);
+  }
+  protected showInstallGuide(row: LaneTableRow): void {
+    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="install"]`);
+  }
+  protected signInLane(row: LaneTableRow): void {
+    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="credentials"]`);
+  }
+  protected editTiers(row: LaneTableRow): void {
+    if (row.kind === 'instance') this.openTiers(row);
+  }
+  protected async selectTableDefault(
+    row: LaneTableRow, choice: NonNullable<CliLaneDefaults[SystemCliType]>,
+  ): Promise<void> {
+    if (row.kind === 'system') await this.saveLaneDefault(row, choice);
+  }
+  protected async resetTableDefault(row: LaneTableRow): Promise<void> {
+    if (row.kind === 'system') await this.resetLaneDefault(row);
+  }
   protected readonly ptahManifest = computed(() =>
     this.state.orchestration().data?.detectedClis.find(cli => cli.ptahCliId)?.manifest,
   );
@@ -400,7 +465,7 @@ export class CliOrchestrationMatrixComponent {
     if (this.addOrigin === 'empty')
       this.focusAfterRender(
         `[data-testid="cli-matrix-tiers-${created.id}"]`,
-        `[data-testid="cli-matrix-more-${created.id}"]`,
+        `#lane-detail-${created.id} button`,
       );
     void this.test(created.id);
   }
@@ -422,7 +487,7 @@ export class CliOrchestrationMatrixComponent {
     if (id)
       this.focusAfterRender(
         `[data-testid="cli-matrix-tiers-${id}"]`,
-        `[data-testid="cli-matrix-more-${id}"]`,
+        `#lane-detail-${id} button`,
       );
   }
   /** The instance whose Test ran last, for a test that failed before it produced a result. */

@@ -11,6 +11,17 @@
  * starts from the BRIEF baseline and every RPC a scene asserts was sent by that scene's own clicks.
  */
 import type { Locator, Page } from '@playwright/test';
+async function expandMatrixDetail(page: Page, id: string): Promise<void> {
+  const row = page.locator(`[data-testid="${id.includes("instance") ? "cli-matrix-row" : "cli-provider-card"}-${id}"]`);
+  const expander = row.locator('ptah-table-row-expander button');
+  if ((await expander.getAttribute('aria-expanded')) === 'true') return;
+  if (await expander.isVisible()) await expander.click();
+  else {
+    await row.locator('ptah-table-row-actions button[aria-haspopup="menu"]').click();
+    await row.getByRole('menuitem', { name: 'Details' }).click();
+  }
+}
+
 import { test, expect } from '../../test-fixtures';
 import {
   bootSettings,
@@ -67,14 +78,10 @@ const rolesDetails = (page: Page): Locator =>
 
 async function open(page: Page, modal: ModalCase): Promise<Locator> {
   const opener = modal.opener(page);
-  if (modal.testid !== 'cli-tier-mapping-modal' || (await opener.isVisible()))
-    await opener.click();
-  else {
-    await page.locator(`[data-testid="cli-matrix-more-${GLM_ID}"]`).click();
-    await page
-      .locator(`[data-testid="cli-matrix-more-tiers-${GLM_ID}"]`)
-      .click();
-  }
+  if (modal.testid === 'cli-tier-mapping-modal') {
+    await expandMatrixDetail(page, GLM_ID);
+    await page.locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`).click();
+  } else await opener.click();
   const dialog = dialogOf(page, modal.testid);
   await expect(dialog).toHaveAttribute('open', '');
   // showModal() moves focus into the dialog.
@@ -210,9 +217,10 @@ for (const host of HOSTS) {
       page,
     }) => {
       // V36-7: Edit sits in the row's "More actions" popover; focus returns to that trigger.
-      const more = page.locator(`[data-testid="cli-matrix-more-${GLM_ID}"]`);
+      await expandMatrixDetail(page, GLM_ID);
+      const more = page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`);
       await more.click();
-      await page.locator(`[data-testid="cli-matrix-edit-${GLM_ID}"]`).click();
+      await page.locator(`#lane-detail-${GLM_ID} [role="menuitem"]:text-is("Edit")`).click();
       const dialog = dialogOf(page, 'add-cli-instance-modal');
       await expect(dialog).toHaveAttribute('open', '');
       await expect(
@@ -368,8 +376,9 @@ for (const host of HOSTS) {
       page,
     }) => {
       await page.setViewportSize({ width: 1024, height: 768 });
-      await page.locator(`[data-testid="cli-matrix-more-${GLM_ID}"]`).click();
-      const menu = page.locator('[data-testid="cli-matrix-more-menu"]');
+      await expandMatrixDetail(page, GLM_ID);
+      await page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`).click();
+      const menu = page.locator(`#lane-detail-${GLM_ID} [role="menu"]`);
       await expect(menu).toBeVisible();
       const panel = await menu.boundingBox();
       if (!panel) throw new Error('No More actions panel box');
@@ -506,24 +515,24 @@ for (const host of HOSTS) {
         cursorKeyStoreOverrides(page),
       );
       const toggle = page.locator(
-        '[data-testid="cli-matrix-uninstalled-toggle"]',
+        '[data-testid="cli-provider-card-cursor"] button[aria-label="Details for Cursor"]',
       );
       const uninstalled = page.locator(
-        '[data-testid="cli-matrix-uninstalled"]',
+        '#lane-detail-cursor',
       );
       const popover = page.locator('[data-testid="cursor-credential-popover"]');
       const key = popover.locator('[data-testid="cursor-credential-key"]');
       // Save a key from the Uninstalled row: the row moves to the installed group.
-      await toggle.click();
+      await expandMatrixDetail(page, 'cursor');
       await uninstalled
-        .locator('[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]')
+        .locator('[data-popover-kind="credentials"]')
         .click();
       await expect(key).toBeFocused();
       await key.fill('crsr_e2e_secret_value');
       await popover.locator('[data-testid="cursor-credential-save"]').click();
       await expect(toastMessage(page)).toHaveText('Key stored, not verified.');
       const installedTrigger = page.locator(
-        '[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]',
+        '#lane-detail-cursor [data-popover-kind="credentials"]',
       );
       await expect(installedTrigger).toBeVisible();
       await expect(
@@ -533,8 +542,7 @@ for (const host of HOSTS) {
       await expect(popover).toHaveCount(0);
       await expect(installedTrigger).toBeFocused();
       // Collapse the Uninstalled group, then remove the key from the installed row.
-      await toggle.click();
-      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
       await installedTrigger.click();
       await popover.locator('[data-testid="cursor-credential-remove"]').click();
       await expect(
@@ -556,14 +564,12 @@ for (const host of HOSTS) {
       // Esc closes it: the group collapses again, the row leaves the DOM, and focus lands on the toggle, not body.
       await page.keyboard.press('Escape');
       await expect(popover).toHaveCount(0);
-      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-      await expect(
-        page.locator('[data-testid="cli-provider-card-cursor"]'),
-      ).toHaveCount(0);
-      await expect(toggle).toBeFocused();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.locator('[data-testid="cli-provider-card-cursor"]')).toBeVisible();
+      await expect(installedTrigger).toBeFocused();
       // Esc on the toggle closes nothing else: the tab stays as it is.
       await page.keyboard.press('Escape');
-      await expect(toggle).toBeFocused();
+      await expect(installedTrigger).toBeFocused();
       await expect(page.locator('[data-testid="cli-matrix"]')).toBeVisible();
     });
 
@@ -577,11 +583,9 @@ for (const host of HOSTS) {
         host,
         cursorKeyStoreOverrides(page, { failCursorSave: true }),
       );
-      await page
-        .locator('[data-testid="cli-matrix-uninstalled-toggle"]')
-        .click();
+      await expandMatrixDetail(page, 'cursor');
       const trigger = page.locator(
-        '[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]',
+        '#lane-detail-cursor [data-popover-kind="credentials"]',
       );
       await trigger.click();
       const popover = page.locator('[data-testid="cursor-credential-popover"]');

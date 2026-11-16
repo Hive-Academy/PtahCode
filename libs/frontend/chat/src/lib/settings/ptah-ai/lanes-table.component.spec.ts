@@ -796,7 +796,8 @@ describe('LanesTableComponent', () => {
           : '[data-testid="cli-matrix-row-a"]',
       );
       expect(
-        (row?.querySelector('[role="menuitem"]') as HTMLButtonElement).disabled,
+        (Array.from(row?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
+          .find(button => button.textContent?.trim() === 'Test') as HTMLButtonElement).disabled,
       ).toBe(true);
     }
     expect(host.textContent).toContain('Answered in 1.4 s');
