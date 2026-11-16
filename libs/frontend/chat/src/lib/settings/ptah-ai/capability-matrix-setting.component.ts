@@ -32,6 +32,7 @@ import {
   PtahTableComponent,
   PtahTableGroupTitleComponent,
   PtahTableScoreComponent,
+  PtahTableMessageCellDirective,
 } from '@ptah-extension/ui';
 import {
   SettingsSectionReadyDirective,
@@ -67,6 +68,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
     PtahTableComponent,
     PtahTableGroupTitleComponent,
     PtahTableScoreComponent,
+    PtahTableMessageCellDirective,
     SettingsSectionReadyDirective,
     SettingsSectionStateComponent,
   ],
@@ -142,6 +144,18 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                   }
                 </tr>
               </thead>
+              @if (visible().length === 0) {
+                <tbody>
+                  <tr>
+                    <td
+                      [ptahMessageCell]="matrix.collapsed() ? 3 : 7"
+                      data-testid="capability-matrix-filtered-empty"
+                    >
+                      No models match the filters.
+                    </td>
+                  </tr>
+                </tbody>
+              }
               @for (family of families(); track family) {
                 <tbody [id]="'family-' + family">
                   <tr ptahGroupRow>
@@ -420,6 +434,9 @@ export class CapabilityMatrixSettingComponent implements OnInit {
   readonly sortDescending = input(false);
   readonly headingLevel = input<2 | 3>(3);
   readonly resultChange = output<AgentGetCapabilityMatrixResult | null>();
+  readonly loadingChange = output<boolean>();
+  readonly visibleCountChange = output<number>();
+  private requestSequence = 0;
   protected readonly tasks = OUTCOME_TASK_KINDS;
   protected readonly labels = LABELS;
   protected readonly load = signal<'loading' | 'error' | 'ready' | 'empty'>(
@@ -436,6 +453,11 @@ export class CapabilityMatrixSettingComponent implements OnInit {
       const table = this.table();
       const message = this.announcement();
       if (table && this.load() === 'ready' && message) table.announce(message);
+    });
+    effect(() => {
+      this.visibleCountChange.emit(
+        this.visible().filter((profile) => profile.model !== '*').length,
+      );
     });
   }
   protected readonly expandedRows = signal<ReadonlySet<string>>(new Set());
@@ -508,18 +530,22 @@ export class CapabilityMatrixSettingComponent implements OnInit {
     void this.reload();
   }
   async reload(): Promise<void> {
+    const request = ++this.requestSequence;
     this.load.set('loading');
+    this.loadingChange.emit(true);
     try {
       const response = await this.rpc.call(
         'agent:getCapabilityMatrix',
         NO_PARAMS,
         { timeout: 5_000 },
       );
+      if (request !== this.requestSequence) return;
       if (!response.isSuccess()) {
         this.result.set(null);
         this.resultChange.emit(null);
         this.load.set('error');
         this.announcement.set('Ratings could not be loaded.');
+        this.loadingChange.emit(false);
         return;
       }
       this.result.set(response.data);
@@ -530,7 +556,9 @@ export class CapabilityMatrixSettingComponent implements OnInit {
           ? `${response.data.profiles.length} ratings loaded.`
           : 'No ratings yet.',
       );
+      this.loadingChange.emit(false);
     } catch (error: unknown) {
+      if (request !== this.requestSequence) return;
       // degradation-audit: reported - a failed read shows the error state with Retry.
       this.logger.warn(
         'CapabilityMatrixSetting',
@@ -544,6 +572,7 @@ export class CapabilityMatrixSettingComponent implements OnInit {
       this.resultChange.emit(null);
       this.load.set('error');
       this.announcement.set('Ratings could not be loaded.');
+      this.loadingChange.emit(false);
     }
   }
 }

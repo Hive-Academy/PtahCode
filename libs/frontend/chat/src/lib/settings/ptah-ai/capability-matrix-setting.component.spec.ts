@@ -90,7 +90,7 @@ describe('CapabilityMatrixSettingComponent', () => {
     expect(root().textContent).toContain('Recent picks are unavailable');
     expect(root().querySelectorAll('thead th')).toHaveLength(7);
     expect(root().querySelector('ptah-table-row-expander')).toBeNull();
-    expect(root().querySelector('tr[ptahDetailRow]')).toBeNull();
+    expect(root().querySelector('tr.ptah-table-detail-row')).toBeNull();
     expect(
       root()
         .querySelector('[data-testid="matrix-row-sample-*-implement"] button')
@@ -252,5 +252,31 @@ describe('CapabilityMatrixSettingComponent', () => {
       ),
     ).not.toBeNull();
     expect(root().querySelectorAll('button')).toHaveLength(0);
+  });
+  it('shows a filtered empty message when profiles exist but none match', async () => {
+    call.mockResolvedValue(rpcSuccess(result));
+    fixture = TestBed.createComponent(CapabilityMatrixSettingComponent);
+    fixture.componentRef.setInput('familyFilter', 'missing');
+    fixture.detectChanges();
+    await settle();
+    expect(root().querySelector('[data-testid="capability-matrix-empty"]')).toBeNull();
+    expect(root().querySelector('[data-testid="capability-matrix-table"]')).not.toBeNull();
+    expect(root().querySelector('[data-testid="capability-matrix-filtered-empty"]')?.textContent).toContain('No models match the filters.');
+  });
+  it('ignores an older request that resolves after a newer reload', async () => {
+    let resolveFirst!: (value: unknown) => void;
+    call.mockImplementationOnce(() => new Promise((done) => { resolveFirst = done; }))
+      .mockResolvedValueOnce(rpcSuccess(result));
+    fixture = TestBed.createComponent(CapabilityMatrixSettingComponent);
+    const emitted: (AgentGetCapabilityMatrixResult | null)[] = [];
+    fixture.componentInstance.resultChange.subscribe((value) => emitted.push(value));
+    fixture.detectChanges();
+    await fixture.componentInstance.reload();
+    await settle();
+    resolveFirst(rpcError('old failure'));
+    await settle();
+    expect(emitted).toEqual([result]);
+    expect(root().querySelector('[data-testid="capability-matrix-error"]')).toBeNull();
+    expect(root().querySelector('[data-testid="matrix-row-sample-*-implement"]')).not.toBeNull();
   });
 });

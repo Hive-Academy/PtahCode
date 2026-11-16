@@ -118,6 +118,8 @@ import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.co
       [sortKind]="sortKind()"
       [sortDescending]="descending()"
       (resultChange)="onResult($event)"
+      (loadingChange)="busy.set($event)"
+      (visibleCountChange)="visibleCount.set($event)"
     />
   `,
 })
@@ -145,15 +147,7 @@ export class DecisionMatrixPageComponent {
   protected readonly families = computed(() => [
     ...new Set((this.result()?.profiles ?? []).map((p) => p.family)),
   ]);
-  protected readonly visibleCount = computed(
-    () =>
-      (this.result()?.profiles ?? []).filter(
-        (p) =>
-          p.model !== '*' &&
-          (!this.family() || p.family === this.family()) &&
-          p.model.toLowerCase().includes(this.search().trim().toLowerCase()),
-      ).length,
-  );
+  protected readonly visibleCount = signal(0);
   protected readonly latest = computed(() => {
     let latest: string | null = null;
     for (const profile of this.result()?.profiles ?? [])
@@ -223,7 +217,6 @@ export class DecisionMatrixPageComponent {
   );
   protected onResult(result: AgentGetCapabilityMatrixResult | null): void {
     this.result.set(result);
-    this.busy.set(false);
   }
   protected refresh(): void {
     if (this.busy()) return;
