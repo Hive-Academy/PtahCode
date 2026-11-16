@@ -20,6 +20,30 @@ let nextSettingsLayoutId = 0;
 /** The `layout-split` break width (pattern-spec.md section 0.4). */
 const LAYOUT_SPLIT_PX = 768;
 
+/**
+ * The split width of the navigation mode: below it the nav is a horizontal strip.
+ * The approved nav column is 14.5rem. The token --ptah-settings-nav-w (13rem) is
+ * the tabs-mode width, so it does not apply here.
+ */
+const NAVIGATION_SPLIT_PX = 640;
+
+/**
+ * Navigation-mode classes for the NAVIGATION_SPLIT_PX split and the 14.5rem column.
+ * Tailwind reads only literal class names, so these classes repeat 640px literally.
+ * Keep each navigation-mode width class in this object and nowhere else.
+ */
+const NAVIGATION_CLASSES = {
+  frameGrid: '[@container(min-width:640px)]:grid-cols-[14.5rem_minmax(0,1fr)]',
+  frameGap: '[@container(min-width:640px)]:gap-x-[var(--ptah-gap-section)]',
+  nav: '[@container(min-width:640px)]:sticky [@container(min-width:640px)]:top-0 [@container(min-width:640px)]:self-start',
+  slot: 'hidden [@container(min-width:640px)]:[&:not(:empty)]:block',
+  list: 'flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [@container(min-width:640px)]:flex-col [@container(min-width:640px)]:overflow-visible',
+} as const;
+
+/** The connector of a child item in navigation mode. */
+const NAVIGATION_CHILD_CLASS =
+  'relative ml-[var(--ptah-gap-section)] before:pointer-events-none before:absolute before:left-0 before:top-0 before:h-1/2 before:w-[var(--ptah-gap-inline)] before:rounded-bl-[var(--ptah-radius-control)] before:border-b before:border-l before:border-[var(--ptah-border-color)]';
+
 /** One tab item of `ptah-settings-layout`. */
 export interface PtahSettingsTab<TId extends string = string> {
   readonly id: TId;
@@ -114,13 +138,18 @@ const NAV_CLASS = [
         >
           <div [class]="navSlotClass()"><ng-content select="[nav-header]" /></div>
           <div
-            [attr.role]="navMode() === 'tabs' ? 'tablist' : null"
+            [attr.role]="navMode() === 'tabs' ? 'tablist' : 'list'"
             [class]="navListClass()"
             [attr.aria-orientation]="navMode() === 'tabs' ? orientation() : null"
             data-testid="settings-layout-tablist"
           >
             @for (tab of tabs(); track tab.id; let i = $index) {
-              <div [class]="navMode() === 'navigation' && tab.parent ? 'relative ml-[var(--ptah-gap-section)] before:pointer-events-none before:absolute before:left-0 before:top-0 before:h-1/2 before:w-[var(--ptah-gap-inline)] before:rounded-bl-[var(--ptah-radius-control)] before:border-b before:border-l before:border-[var(--ptah-border-color)]' : ''">
+              <!-- Tabs mode: a presentation wrapper with display: contents, so each tab stays a direct flex item of the tablist. -->
+              <div
+                [class]="itemWrapperClass(tab)"
+                [attr.role]="navMode() === 'tabs' ? 'presentation' : 'listitem'"
+                data-testid="settings-layout-item"
+              >
               <button
                 #tabButton
                 type="button"
@@ -256,19 +285,24 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   protected readonly frameToggles = computed(() => ({
     '[@container(min-width:768px)]:grid-cols-[var(--ptah-settings-nav-w)_minmax(0,1fr)]': this.hasTabs() && this.navMode() === 'tabs',
     '[@container(min-width:768px)]:gap-x-[var(--ptah-gap-section)]': this.hasTabs() && this.navMode() === 'tabs',
-    '[@container(min-width:640px)]:grid-cols-[14.5rem_minmax(0,1fr)]': this.hasTabs() && this.navMode() === 'navigation',
-    '[@container(min-width:640px)]:gap-x-[var(--ptah-gap-section)]': this.hasTabs() && this.navMode() === 'navigation',
+    [NAVIGATION_CLASSES.frameGrid]: this.hasTabs() && this.navMode() === 'navigation',
+    [NAVIGATION_CLASSES.frameGap]: this.hasTabs() && this.navMode() === 'navigation',
   }));
 
   protected readonly navToggles = computed(() => this.navMode() === 'navigation'
-    ? '[@container(min-width:640px)]:sticky [@container(min-width:640px)]:top-0 [@container(min-width:640px)]:self-start'
+    ? NAVIGATION_CLASSES.nav
     : '[@container(min-width:768px)]:sticky [@container(min-width:768px)]:top-0 [@container(min-width:768px)]:self-start');
   protected readonly navSlotClass = computed(() => this.navMode() === 'navigation'
-    ? 'hidden [@container(min-width:640px)]:[&:not(:empty)]:block'
+    ? NAVIGATION_CLASSES.slot
     : 'hidden [@container(min-width:768px)]:[&:not(:empty)]:block');
   protected readonly navListClass = computed(() => this.navMode() === 'navigation'
-    ? 'flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [@container(min-width:640px)]:flex-col [@container(min-width:640px)]:overflow-visible'
+    ? NAVIGATION_CLASSES.list
     : 'flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] [@container(min-width:768px)]:flex-col [@container(min-width:768px)]:gap-[var(--ptah-gap-label)] [@container(min-width:768px)]:overflow-visible [@container(min-width:768px)]:[border-bottom:none]');
+
+  protected itemWrapperClass(tab: PtahSettingsTab<TId>): string {
+    if (this.navMode() === 'tabs') return 'contents';
+    return tab.parent ? NAVIGATION_CHILD_CLASS : '';
+  }
 
   protected inSection(id: TId): boolean {
     return this.tabs().some((tab) => tab.id === this.selected() && tab.parent === id);
@@ -291,7 +325,7 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   constructor() {
     if (typeof ResizeObserver !== 'undefined') {
       const observer = new ResizeObserver(([entry]) => {
-        if (entry) this.narrow.set(entry.contentRect.width < (this.navMode() === 'navigation' ? 640 : LAYOUT_SPLIT_PX));
+        if (entry) this.narrow.set(entry.contentRect.width < (this.navMode() === 'navigation' ? NAVIGATION_SPLIT_PX : LAYOUT_SPLIT_PX));
       });
       observer.observe(this.host.nativeElement);
       inject(DestroyRef).onDestroy(() => observer.disconnect());

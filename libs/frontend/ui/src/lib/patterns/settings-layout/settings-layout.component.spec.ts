@@ -314,6 +314,14 @@ describe('PtahSettingsLayoutComponent', () => {
     expect(tablist()).not.toBeNull();
     expect(tabs()[0].getAttribute('aria-selected')).toBe('true');
     expect(tabs()[0].hasAttribute('aria-current')).toBe(false);
+    // Each tab wrapper is presentational and uses display: contents, so each tab
+    // stays a direct flex item of the tablist.
+    for (const tab of tabs()) {
+      const wrapper = tab.parentElement as HTMLElement;
+      expect(wrapper.parentElement).toBe(tablist());
+      expect(wrapper.getAttribute('role')).toBe('presentation');
+      expect(wrapper.className).toBe('contents');
+    }
   });
 
   it('renders navigation buttons with active hooks and a projected band', () => {
@@ -324,6 +332,11 @@ describe('PtahSettingsLayoutComponent', () => {
     const buttons = Array.from(nav.querySelectorAll('button'));
     expect(nav.getAttribute('aria-label')).toBe('Settings sections');
     expect(tablist()).toBeNull();
+    const list = q('[data-testid="settings-layout-tablist"]') as HTMLElement;
+    expect(list.getAttribute('role')).toBe('list');
+    const items = Array.from(list.children);
+    expect(items).toHaveLength(buttons.length);
+    expect(items.every((item) => item.getAttribute('role') === 'listitem')).toBe(true);
     expect(buttons[0].hasAttribute('role')).toBe(false);
     expect(buttons[0].getAttribute('aria-current')).toBe('page');
     expect(buttons[0].getAttribute('data-active')).toBe('true');
