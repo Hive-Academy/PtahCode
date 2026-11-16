@@ -35,7 +35,7 @@ import {
   AlertTriangle,
   Palette,
 } from 'lucide-angular';
-import { NativeDrawerComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahFormActionsComponent } from '@ptah-extension/ui';
 import type {
   InvalidOutputStyle,
   OutputStyleDetail,
@@ -91,6 +91,7 @@ interface StaleConflict {
     PtahButtonDirective,
     PtahFieldComponent,
     PtahInputDirective,
+    PtahFormActionsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -101,7 +102,7 @@ interface StaleConflict {
       (closed)="requestClose()"
     >
       @if (isOpen()) {
-        <div drawer-header class="flex items-center gap-2" data-testid="output-style-drawer">
+        <div drawer-header class="flex items-center gap-[var(--ptah-gap-controls)]" data-testid="output-style-drawer">
           <lucide-angular
             [img]="PaletteIcon"
             class="w-4 h-4 text-secondary"
@@ -118,16 +119,16 @@ interface StaleConflict {
         </div>
       }
 
-      <div class="space-y-4 text-xs text-base-content">
+      <div class="space-y-[var(--ptah-gap-group)] text-xs text-base-content">
         @if (repair(); as broken) {
           <div
-            class="flex items-start gap-2 rounded border border-warning/40 bg-warning/10 p-2 mb-2 text-xs text-base-content"
+            class="flex items-start gap-[var(--ptah-gap-controls)] rounded border border-warning/40 bg-warning/10 p-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-controls)] text-xs text-base-content"
             role="status"
             data-testid="output-style-repair-notice"
           >
             <lucide-angular
               [img]="AlertTriangleIcon"
-              class="w-3.5 h-3.5 mt-0.5 shrink-0 text-warning"
+              class="w-3.5 h-3.5 mt-[var(--ptah-gap-label)] shrink-0 text-warning"
               aria-hidden="true"
             />
             <p class="text-xs leading-relaxed">
@@ -141,31 +142,31 @@ interface StaleConflict {
         }
 
         @if (confirmingDiscard()) {
-          <div class="rounded border border-base-300 p-2 text-xs text-base-content" role="alertdialog"
+          <div class="rounded border border-base-300 p-[var(--ptah-gap-controls)] text-xs text-base-content" role="alertdialog"
             aria-label="Discard unsaved changes" data-testid="output-style-discard-confirm"
             (keydown.escape)="keepEditing($event)">
             <p>Discard your changes to this style? Nothing has been saved.</p>
-            <div class="flex gap-1 mt-1">
-              <button type="button" class="btn btn-outline btn-xs border-error text-base-content" (click)="discard()"
+            <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+              <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" (click)="discard()"
                 data-testid="output-style-discard-button">Discard changes</button>
               <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
                 (click)="keepEditing()">Keep editing</button>
             </div>
           </div>
         } @else if (conflict(); as pending) {
-          <div class="rounded border border-base-300 p-2 text-xs text-base-content" role="alertdialog"
+          <div class="rounded border border-base-300 p-[var(--ptah-gap-controls)] text-xs text-base-content" role="alertdialog"
             aria-label="Confirm replacing an existing file" data-testid="output-style-conflict-dialog"
             (keydown.escape)="dismissConflict($event)">
             <p>{{ pending.message }}</p>
-            <div class="flex gap-1 mt-1">
-              <button type="button" class="btn btn-outline btn-xs border-error text-base-content" [ptahBusyDisabled]="saving()"
+            <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+              <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" [ptahBusyDisabled]="saving()"
                 (click)="confirmOverwrite()">Replace it</button>
               <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
                 (click)="dismissConflict()">Keep both — I'll rename</button>
             </div>
           </div>
         } @else if (stale(); as changed) {
-          <div class="rounded border border-base-300 p-2 text-xs text-base-content" role="alertdialog"
+          <div class="rounded border border-base-300 p-[var(--ptah-gap-controls)] text-xs text-base-content" role="alertdialog"
             aria-label="The style file changed on disk" data-testid="output-style-stale-dialog"
             (keydown.escape)="dismissConflict($event)">
             @if (changed.fresh === null) {
@@ -173,14 +174,14 @@ interface StaleConflict {
                 This style changed on disk after you opened it, and Ptah could not
                 read the current file. Nothing was written.
               </p>
-              <div class="flex gap-1 mt-1">
+              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
                 <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
                   (click)="dismissConflict()">Close</button>
               </div>
             } @else if (changed.confirmingReload) {
               <p>Discard your edits and load the current file?</p>
-              <div class="flex gap-1 mt-1">
-                <button type="button" class="btn btn-outline btn-xs border-error text-base-content"
+              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+                <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content"
                   (click)="reloadFile(changed.fresh)" data-testid="output-style-stale-discard-reload">
                   Discard and reload
                 </button>
@@ -193,8 +194,8 @@ interface StaleConflict {
                 Reload shows the current file instead of your edits; Overwrite
                 replaces the current file with your edits.
               </p>
-              <div class="flex gap-1 mt-1">
-                <button type="button" class="btn btn-outline btn-xs border-error text-base-content" [ptahBusyDisabled]="saving()"
+              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+                <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" [ptahBusyDisabled]="saving()"
                   (click)="overwriteStale(changed.fresh)" data-testid="output-style-stale-overwrite">Overwrite</button>
                 <button type="button" ptahButton size="xs"
                   (click)="stale.set({ fresh: changed.fresh, confirmingReload: true })"
@@ -206,7 +207,7 @@ interface StaleConflict {
           </div>
         }
 
-        <form class="space-y-3" id="output-style-editor-form" (submit)="submit($event)">
+        <form class="space-y-[var(--ptah-gap-field)]" id="output-style-editor-form" (submit)="submit($event)">
           <!-- Name -->
           <div>
             <ptah-field
@@ -228,8 +229,8 @@ interface StaleConflict {
             />
             </ptah-field>
             @if (showNameError()) {
-              <p id="output-style-name-error" class="flex items-start gap-1 text-xs text-base-content mt-1">
-                <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 mt-px shrink-0 text-error" aria-hidden="true" />
+              <p id="output-style-name-error" class="flex items-start gap-[var(--ptah-gap-label)] text-xs text-base-content mt-[var(--ptah-gap-label)]">
+                <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 mt-[var(--ptah-gap-label)] shrink-0 text-error" aria-hidden="true" />
                 <span>
                   Give the style a name. This is the value the agent is selected by,
                   so it cannot be blank.
@@ -256,8 +257,8 @@ interface StaleConflict {
             />
             </ptah-field>
             @if (showDescriptionError()) {
-              <p id="output-style-description-error" class="flex items-start gap-1 text-xs text-base-content mt-1">
-                <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 mt-px shrink-0 text-error" aria-hidden="true" />
+              <p id="output-style-description-error" class="flex items-start gap-[var(--ptah-gap-label)] text-xs text-base-content mt-[var(--ptah-gap-label)]">
+                <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 mt-[var(--ptah-gap-label)] shrink-0 text-error" aria-hidden="true" />
                 <span>
                   Add one line describing what this style does, so it is recognisable
                   in the list.
@@ -268,18 +269,18 @@ interface StaleConflict {
 
           <!-- Tier -->
           <fieldset [disabled]="tierLocked()">
-            <legend class="text-xs font-medium mb-1 text-base-content">
+            <legend class="text-xs font-medium mb-[var(--ptah-gap-label)] text-base-content">
               Where to save it
             </legend>
-            <div class="space-y-1">
+            <div class="space-y-[var(--ptah-gap-label)]">
               @for (choice of tierChoices; track choice.value) {
                 <label
-                  class="flex items-start gap-2 rounded px-1.5 py-1 hover:bg-base-200/50 transition-colors cursor-pointer text-base-content"
+                  class="flex items-start gap-[var(--ptah-gap-controls)] rounded px-[var(--ptah-gap-inline)] py-[var(--ptah-gap-label)] hover:bg-base-200/50 transition-colors cursor-pointer text-base-content"
                 >
                   <input
                     type="radio"
                     name="output-style-tier"
-                    class="radio radio-xs mt-0.5"
+                    class="radio radio-xs mt-[var(--ptah-gap-label)]"
                     [value]="choice.value"
                     [checked]="tier() === choice.value"
                     (change)="tier.set(choice.value)"
@@ -298,7 +299,7 @@ interface StaleConflict {
               }
             </div>
             @if (tierLocked()) {
-              <p class="text-xs text-base-content-muted mt-1">
+              <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-label)]">
                 An existing style stays where it already lives. Delete it and create
                 it again to move it.
               </p>
@@ -325,7 +326,7 @@ interface StaleConflict {
       </div>
 
       @if (isOpen()) {
-        <div drawer-footer class="flex items-center justify-between gap-2 border-t border-base-300 px-4 py-3">
+        <ptah-form-actions drawer-footer [saving]="saving()">
           <button
             type="submit"
             form="output-style-editor-form"
@@ -335,7 +336,6 @@ interface StaleConflict {
             data-testid="output-style-save-button"
           >
             @if (saving()) {
-              <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
               Saving…
             } @else {
               Save style
@@ -349,7 +349,7 @@ interface StaleConflict {
           >
             Cancel
           </button>
-        </div>
+        </ptah-form-actions>
       }
     </ptah-native-drawer>
   `,
