@@ -9,6 +9,7 @@ import {
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const FAILURE_RETRY_MS = 60_000;
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -41,6 +42,9 @@ interface Catalog {
 export class OpenRouterPricingService implements IPricingProvider {
   private cache: Catalog | null = null;
   private cacheTime = 0;
+  private failureTime: number | null = null;
+  /** clearCache() increments this, so an older fetch cannot write state after the clear. */
+  private generation = 0;
   private pending: Promise<Catalog> | null = null;
   private warmupPromise: Promise<OpenRouterModel[]> | null = null;
 
@@ -63,15 +67,25 @@ export class OpenRouterPricingService implements IPricingProvider {
   }
 
   warmup(): void {
-    if (this.warmupPromise) return;
-    this.warmupPromise = this.fetchAndRegister().catch((err) => {
-      this.logger.warn(
-        `[OpenRouterPricing] Warmup failed — costs will read as "unknown" until next refresh. ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      return [];
-    });
+    if (
+      this.warmupPromise &&
+      (this.failureTime === null ||
+        Date.now() - this.failureTime < FAILURE_RETRY_MS)
+    )
+      return;
+    this.warmupPromise = this.fetchAndRegister()
+      .then((models) => {
+        if (models.length === 0) this.warmupPromise = null;
+        return models;
+      })
+      .catch((err: unknown) => {
+        this.logger.warn(
+          `[OpenRouterPricing] Warmup failed — costs will read as "unknown" until next refresh. ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        return [];
+      });
   }
 
   /**
@@ -124,8 +138,10 @@ export class OpenRouterPricingService implements IPricingProvider {
   clearCache(): void {
     this.cache = null;
     this.cacheTime = 0;
+    this.failureTime = null;
     this.pending = null;
     this.warmupPromise = null;
+    this.generation++;
   }
 
   private async ensureCatalog(): Promise<Catalog> {
@@ -133,17 +149,30 @@ export class OpenRouterPricingService implements IPricingProvider {
       return this.cache;
     }
     if (this.pending) return this.pending;
-    this.pending = this.fetchCatalog()
+    if (
+      this.failureTime !== null &&
+      Date.now() - this.failureTime < FAILURE_RETRY_MS
+    )
+      return this.cache ?? emptyCatalog();
+    const generation = this.generation;
+    const pending = this.fetchCatalog()
       .then((catalog) => {
+        if (generation !== this.generation) return catalog;
         this.cache = catalog;
         this.cacheTime = Date.now();
+        this.failureTime = null;
         return catalog;
       })
-      .catch(() => emptyCatalog())
+      .catch(() => {
+        if (generation !== this.generation) return emptyCatalog();
+        this.failureTime = Date.now();
+        return this.cache ?? emptyCatalog();
+      })
       .finally(() => {
-        this.pending = null;
+        if (this.pending === pending) this.pending = null;
       });
-    return this.pending;
+    this.pending = pending;
+    return pending;
   }
 
   private async fetchCatalog(): Promise<Catalog> {
@@ -156,10 +185,7 @@ export class OpenRouterPricingService implements IPricingProvider {
       );
       const raw = Array.isArray(data?.data) ? data.data : null;
       if (!raw) {
-        this.logger.warn(
-          `[OpenRouterPricing] ${OPENROUTER_MODELS_URL} response missing "data" array.`,
-        );
-        return emptyCatalog();
+        throw new Error('Response missing "data" array');
       }
       const models: OpenRouterModel[] = [];
       const pricingByKey = new Map<string, ModelPricing>();
