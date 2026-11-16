@@ -108,6 +108,16 @@ import type { IHarnessAgentTransformer } from './transformers/agent-transformer.
  */
 const LEGACY_RIVAL_MANIFEST = '.ptah-managed.json';
 
+function hasGitMarker(workspaceRoot: string): boolean {
+  let current = workspaceRoot;
+  while (true) {
+    if (existsSync(join(current, '.git'))) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
+
 export interface WorkspaceHarnessTargetOptions {
   id: HarnessTargetId;
   facets: HarnessFacetMatrix;
@@ -314,6 +324,19 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
           result,
         });
         continue;
+      }
+      if (removal.kind === 'command') {
+        const tracking = await this.probeGitTracking(
+          workspaceRoot,
+          removal.relPath,
+        );
+        if (
+          tracking === 'tracked' ||
+          (tracking === 'unverifiable' && hasGitMarker(workspaceRoot))
+        ) {
+          (result.releasedTracked ??= []).push(removal.relPath);
+          continue;
+        }
       }
       await this.retireOwned(
         removal,
@@ -1073,7 +1096,12 @@ function lstatSyncOrNull(path: string): Stats | null {
 }
 
 function isMissingFile(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  );
 }
 
 /** Names recorded under `key` in a legacy `.ptah-managed.json`. */
