@@ -162,3 +162,4 @@ export class PtahNumericCellDirective {}
 export * from './table-cells';
 export * from './table-row-actions.component';
 export * from './table-detail';
+export * from './table-order';
