@@ -68,7 +68,7 @@ describe('ProviderConnectionCardComponent', () => {
       const fixture = createComponent({ ...KIMI_CODE, status: 'connected', positiveProbeEvidence: true });
       const emitted = jest.fn();
       fixture.componentInstance.detailsRequested.subscribe(emitted);
-      const frame = fixture.nativeElement.querySelector('ptah-native-card > div') as HTMLElement;
+      const frame = fixture.nativeElement.querySelector('ptah-surface-card > div') as HTMLElement;
       expect(frame.getAttribute('role')).toBeNull();
       expect(frame.getAttribute('tabindex')).toBeNull();
       expect(frame.contains(surface(fixture))).toBe(true);
@@ -183,10 +183,10 @@ describe('ProviderConnectionCardComponent', () => {
       expect(query(createComponent({ ...KIMI_CODE, usedByCount: null, usedByLabels: ['Main agent'] }), 'used-for')).toBeNull();
     });
 
-    it('keeps text at the 12 px floor; the card frame is the native card own frame (no second glass frame on the host)', () => {
+    it('keeps text at the 12 px floor; the card frame is the surface card own frame (no second glass frame on the host)', () => {
       const fixture = createComponent({ ...KIMI_CODE, status: 'needs-key', sourceLabel: 'Key stored on this machine', usedByCount: 1 });
       expect(fixture.nativeElement.innerHTML).not.toMatch(/text-\[(9|10|11)px\]/);
-      expect(fixture.nativeElement.querySelector('ptah-native-card')?.hasAttribute('data-glass-surface')).toBe(false);
+      expect(fixture.nativeElement.querySelector('ptah-surface-card')?.hasAttribute('data-glass-surface')).toBe(false);
     });
 
     it('gives a long provider name room and lets status wrap below it', () => {
@@ -227,7 +227,8 @@ describe('ProviderConnectionCardComponent', () => {
       expect(action.getAttribute('aria-label')).toBe(ariaLabel);
       expect(action.className).toContain('btn-sm');
       expect(action.className).not.toContain('btn-xs');
-      expect(action.className).toContain('focus-visible:outline-2');
+      expect(action.className).toContain('btn-ghost');
+      expect(action.hasAttribute('data-ptah-button')).toBe(true);
       action.click();
       expect(emitted).toHaveBeenCalledTimes(1);
     });
@@ -275,7 +276,7 @@ describe('ProviderConnectionCardComponent', () => {
     it('the active card has the primary spine (prototype; Gate V 28) and "Active for main agent"', () => {
       const fixture = createComponent({ ...KIMI_CODE, status: 'connected', positiveProbeEvidence: true, isActive: true });
       expect(query(fixture, 'status-copy')?.textContent?.trim()).toBe('Active for main agent');
-      expect(query(fixture, 'native-card-spine')).not.toBeNull();
+      expect(query(fixture, 'surface-card-spine')).not.toBeNull();
       expect(fixture.nativeElement.querySelector('[data-tone]')?.getAttribute('data-tone')).toBe('primary');
     });
 
@@ -327,7 +328,8 @@ describe('ProviderConnectionCardComponent', () => {
       expect(text?.className ?? '').not.toMatch(/text-(warning|error|success|info)/);
       const retry = query(fixture, 'card-key-unreadable-retry') as HTMLButtonElement;
       expect(retry.textContent?.trim()).toBe('Retry');
-      expect(retry.className).toContain('focus-visible:outline-base-content');
+      expect(retry.className).toContain('btn-ghost');
+      expect(retry.hasAttribute('data-ptah-button')).toBe(true);
       expect(retry.getAttribute('aria-label')).toBe('Retry reading the stored key for Kimi Code');
       expect(query(fixture, 'btn-add-key')).toBeNull();
       expect(query(fixture, 'status-copy')).toBeNull();

@@ -329,14 +329,6 @@
     "py-2": 2,
     "space-y-1.5": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/main-agent-scope-badges.component.ts": {
-    "gap-1.5": 1,
-    "p-2.5": 1,
-    "space-y-2": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/main-agent-section.component.ts": {
-    "mr-auto": 1
-  },
   "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
     "-mt-6": 1,
     "-mx-3": 1,
@@ -353,12 +345,6 @@
     "space-y-1": 1,
     "space-y-2": 3,
     "space-y-3": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/provider-connection-card.component.ts": {
-    "gap-1.5": 1,
-    "gap-2": 1,
-    "gap-3": 1,
-    "gap-x-1.5": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-consumer-assignments.component.ts": {
     "gap-1.5": 4,

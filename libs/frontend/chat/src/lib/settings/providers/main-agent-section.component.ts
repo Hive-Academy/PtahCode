@@ -5,7 +5,7 @@ import {
   ProvidersSettingsStateService, type ProvidersEffectiveRoute, type ProvidersSettingsSection,
 } from '@ptah-extension/core';
 import {
-  PtahBadgeDirective, PtahButtonDirective, PtahDescriptionItemComponent, PtahDescriptionListComponent,
+  PtahAlertComponent, PtahBadgeDirective, PtahButtonDirective, PtahDescriptionItemComponent, PtahDescriptionListComponent,
   PtahSkeletonComponent, type PtahBadgeTone,
 } from '@ptah-extension/ui';
 
@@ -37,24 +37,24 @@ const BADGE_TONE: Readonly<Record<MainAgentTone, PtahBadgeTone>> = {
   selector: 'ptah-main-agent-section',
   standalone: true,
   imports: [
-    NgTemplateOutlet, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective,
+    NgTemplateOutlet, LucideAngularModule, PtahAlertComponent, PtahBadgeDirective, PtahButtonDirective,
     PtahDescriptionListComponent, PtahDescriptionItemComponent, PtahSkeletonComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- The block only: the page puts it and Connections on one card. It lifts while it holds a popover (role="dialog"),
          like the card itself, so the Connections block under it never paints over the panel. -->
-    <section class="flex flex-col gap-[var(--ptah-gap-heading)] has-[[role=dialog]]:relative has-[[role=dialog]]:z-30"
+    <section class="flex flex-col gap-ptah-heading has-[[role=dialog]]:relative has-[[role=dialog]]:z-30"
       aria-labelledby="main-agent-heading" data-testid="main-agent-section">
       <!-- has-[[role=dialog]]:z-30: the block holding an open popover (a scope badge's, or the Main Agent one; both are
            role="dialog") stays above the blocks after it.
            The class must not contain "popover": the light theme styles every [class*='popover'] (styles.css). -->
-      <div class="relative flex flex-col gap-[var(--ptah-gap-controls)] has-[[role=dialog]]:z-30"
+      <div class="relative flex flex-col gap-ptah-controls has-[[role=dialog]]:z-30"
         data-testid="routing-node-main-agent" [attr.aria-busy]="main().state === 'loading'">
         <!-- Head: the title, then the status and the projected layer badges in the same wrapping row (a badge that does
              not fit moves, whole, to the next line), and the route status at the end. -->
-        <div class="flex flex-wrap items-center gap-x-[var(--ptah-gap-inline)] gap-y-[var(--ptah-gap-label)]">
-          <div class="mr-auto flex shrink-0 items-center gap-[var(--ptah-gap-inline)]">
+        <div class="flex flex-wrap items-center gap-x-ptah-inline gap-y-ptah-label">
+          <div class="flex shrink-0 items-center gap-ptah-inline">
             @switch (main().tone) {
               @case ('success') { <span class="h-2 w-2 shrink-0 rounded-full bg-success" aria-hidden="true"></span> }
               @case ('warning') { <span class="h-2 w-2 shrink-0 rounded-full bg-warning" aria-hidden="true"></span> }
@@ -68,6 +68,7 @@ const BADGE_TONE: Readonly<Record<MainAgentTone, PtahBadgeTone>> = {
             <span ptahBadge class="shrink-0 whitespace-nowrap" data-testid="routing-node-status">{{ main().status }}</span>
             <ng-content select="[main-agent-badges]" />
           </div>
+          <span class="grow" aria-hidden="true"></span>
           <span ptahBadge role="status" [tone]="statusTone()" class="shrink-0 whitespace-nowrap"
             data-testid="main-agent-route-status">{{ status().text }}</span>
         </div>
@@ -78,12 +79,11 @@ const BADGE_TONE: Readonly<Record<MainAgentTone, PtahBadgeTone>> = {
             <div><ng-container *ngTemplateOutlet="changeAction" /></div>
           }
           @case ('error') {
-            <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] text-xs text-base-content" role="alert"
-              data-testid="routing-node-error">
+            <ptah-alert tone="warning" [compact]="true" role="alert" data-testid="routing-node-error">
               <span>Main-agent route unavailable.</span>
-              <button type="button" ptahButton variant="ghost"
+              <button alertAction type="button" ptahButton variant="ghost"
                 (click)="state.refreshRoute()" data-testid="routing-node-retry">Retry</button>
-            </div>
+            </ptah-alert>
             <div><ng-container *ngTemplateOutlet="changeAction" /></div>
           }
           @default {
@@ -103,7 +103,7 @@ const BADGE_TONE: Readonly<Record<MainAgentTone, PtahBadgeTone>> = {
                 </div>
               </ptah-description-list>
             } @else {
-              <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
+              <div class="flex flex-wrap items-center gap-ptah-controls">
                 <p class="text-xs text-base-content">Choose a provider to start the main agent.</p>
                 <ng-container *ngTemplateOutlet="changeAction" />
               </div>
