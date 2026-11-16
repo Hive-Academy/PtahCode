@@ -91,6 +91,7 @@ describe('OpenRouterPricingService', () => {
       (globalThis as unknown as { fetch: typeof globalThis.fetch }).fetch =
         originalFetch;
     }
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
@@ -175,7 +176,6 @@ describe('OpenRouterPricingService', () => {
       mockFetchOnce(fetchMock, sampleCatalog());
       await service.getPricing('anthropic/claude-opus-4-7');
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      jest.useRealTimers();
     });
   });
 
@@ -214,14 +214,69 @@ describe('OpenRouterPricingService', () => {
   });
 
   describe('HTTP failure', () => {
-    it('returns null when the fetch throws, and retries on the next call', async () => {
+    it('bounds retries and warnings across 1,000 lookups, then retries after a minute', async () => {
+      jest.useFakeTimers();
       mockFetchFailureOnce(fetchMock, 'network down');
-      const first = await service.getPricing('anthropic/claude-opus-4-7');
-      expect(first).toBeNull();
+      for (let i = 0; i < 1_000; i++) {
+        expect(
+          await service.getPricing('anthropic/claude-opus-4-7'),
+        ).toBeNull();
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
       mockFetchOnce(fetchMock, sampleCatalog());
+      jest.setSystemTime(Date.now() + 60_000);
       const second = await service.getPricing('anthropic/claude-opus-4-7');
       expect(second).not.toBeNull();
       expect(second?.inputCostPerToken).toBeCloseTo(15e-6);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('serves the last good catalog when refresh fails after its TTL', async () => {
+      jest.useFakeTimers();
+      mockFetchOnce(fetchMock, sampleCatalog());
+      await service.getPricing('anthropic/claude-opus-4-7');
+      jest.setSystemTime(Date.now() + 5 * 60 * 1000);
+      mockFetchFailureOnce(fetchMock, 'network down');
+      expect(
+        (await service.getPricing('anthropic/claude-opus-4-7'))
+          ?.inputCostPerToken,
+      ).toBeCloseTo(15e-6);
+      expect(
+        (await service.getPricing('anthropic/claude-opus-4-7'))
+          ?.inputCostPerToken,
+      ).toBeCloseTo(15e-6);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears failure state after success and on explicit clearCache', async () => {
+      jest.useFakeTimers();
+      mockFetchFailureOnce(fetchMock, 'network down');
+      await service.getPricing('anthropic/claude-opus-4-7');
+      jest.setSystemTime(Date.now() + 60_000);
+      mockFetchOnce(fetchMock, sampleCatalog());
+      await service.getPricing('anthropic/claude-opus-4-7');
+      service.clearCache();
+      mockFetchFailureOnce(fetchMock, 'network down again');
+      expect(await service.getPricing('anthropic/claude-opus-4-7')).toBeNull();
+      service.clearCache();
+      mockFetchOnce(fetchMock, sampleCatalog());
+      expect(
+        await service.getPricing('anthropic/claude-opus-4-7'),
+      ).not.toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+
+    it('retries failed warmup through ensureHydrated after the failure window', async () => {
+      jest.useFakeTimers();
+      mockFetchFailureOnce(fetchMock, 'network down');
+      expect(await service.ensureHydrated()).toBe(false);
+      expect(await service.ensureHydrated()).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      jest.setSystemTime(Date.now() + 60_000);
+      mockFetchOnce(fetchMock, sampleCatalog());
+      expect(await service.ensureHydrated()).toBe(true);
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
