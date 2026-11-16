@@ -268,6 +268,25 @@ describe('OpenRouterPricingService', () => {
       expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
+    it('ignores a fetch that fails after clearCache', async () => {
+      let rejectFetch: (reason: Error) => void = () => undefined;
+      fetchMock.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFetch = reject;
+          }),
+      );
+      const stale = service.getPricing('anthropic/claude-opus-4-7');
+      service.clearCache();
+      rejectFetch(new Error('network down'));
+      expect(await stale).toBeNull();
+      mockFetchOnce(fetchMock, sampleCatalog());
+      expect(
+        await service.getPricing('anthropic/claude-opus-4-7'),
+      ).not.toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
     it('retries failed warmup through ensureHydrated after the failure window', async () => {
       jest.useFakeTimers();
       mockFetchFailureOnce(fetchMock, 'network down');

@@ -43,6 +43,8 @@ export class OpenRouterPricingService implements IPricingProvider {
   private cache: Catalog | null = null;
   private cacheTime = 0;
   private failureTime: number | null = null;
+  /** clearCache() increments this, so an older fetch cannot write state after the clear. */
+  private generation = 0;
   private pending: Promise<Catalog> | null = null;
   private warmupPromise: Promise<OpenRouterModel[]> | null = null;
 
@@ -139,6 +141,7 @@ export class OpenRouterPricingService implements IPricingProvider {
     this.failureTime = null;
     this.pending = null;
     this.warmupPromise = null;
+    this.generation++;
   }
 
   private async ensureCatalog(): Promise<Catalog> {
@@ -151,21 +154,25 @@ export class OpenRouterPricingService implements IPricingProvider {
       Date.now() - this.failureTime < FAILURE_RETRY_MS
     )
       return this.cache ?? emptyCatalog();
-    this.pending = this.fetchCatalog()
+    const generation = this.generation;
+    const pending = this.fetchCatalog()
       .then((catalog) => {
+        if (generation !== this.generation) return catalog;
         this.cache = catalog;
         this.cacheTime = Date.now();
         this.failureTime = null;
         return catalog;
       })
       .catch(() => {
+        if (generation !== this.generation) return emptyCatalog();
         this.failureTime = Date.now();
         return this.cache ?? emptyCatalog();
       })
       .finally(() => {
-        this.pending = null;
+        if (this.pending === pending) this.pending = null;
       });
-    return this.pending;
+    this.pending = pending;
+    return pending;
   }
 
   private async fetchCatalog(): Promise<Catalog> {
