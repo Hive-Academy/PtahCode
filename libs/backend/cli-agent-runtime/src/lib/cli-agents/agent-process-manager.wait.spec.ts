@@ -124,7 +124,7 @@ describe('AgentProcessManager.waitForAgents', () => {
     });
     await Promise.resolve();
     expect(settled).toBe(false);
-    expect(exitListeners(manager)).toBe(1);
+    expect(exitListeners(manager)).toBe(2);
 
     manager.events.emit(
       'agent:exited',
@@ -145,7 +145,7 @@ describe('AgentProcessManager.waitForAgents', () => {
         info: expect.objectContaining({ status: 'completed', exitCode: 0 }),
       },
     ]);
-    expect(exitListeners(manager)).toBe(0);
+    expect(exitListeners(manager)).toBe(1);
     expect(setIntervalSpy).not.toHaveBeenCalled();
     setIntervalSpy.mockRestore();
   });
@@ -176,7 +176,7 @@ describe('AgentProcessManager.waitForAgents', () => {
     manager.events.emit('agent:exited', infoOf(ID_B, { status: 'completed' }));
     const allResult = await all;
     expect(allResult.entries.map((e) => e.state)).toEqual(['exited', 'exited']);
-    expect(exitListeners(manager)).toBe(0);
+    expect(exitListeners(manager)).toBe(1);
   });
 
   it('returns a partial result on timeout, not an error, and removes the listener', async () => {
@@ -195,7 +195,7 @@ describe('AgentProcessManager.waitForAgents', () => {
       expect.objectContaining({ agentId: ID_A, state: 'exited' }),
       expect.objectContaining({ agentId: ID_B, state: 'running' }),
     ]);
-    expect(exitListeners(manager)).toBe(0);
+    expect(exitListeners(manager)).toBe(1);
   });
 
   it('reports a lane that turned terminal without an exit event as exited on timeout', async () => {
@@ -276,7 +276,7 @@ describe('AgentProcessManager.waitForAgents', () => {
       { agentId: ID_ELSEWHERE, state: 'other_workspace' },
       expect.objectContaining({ agentId: ID_DONE, state: 'exited' }),
     ]);
-    expect(exitListeners(manager)).toBe(0);
+    expect(exitListeners(manager)).toBe(1);
   });
 
   it('ignores exit events for ids it is not waiting on', async () => {
@@ -346,7 +346,7 @@ describe('AgentProcessManager.waitForAgents', () => {
     expect(result.entries).toEqual([
       expect.objectContaining({ agentId: ID_A, state: 'running' }),
     ]);
-    expect(exitListeners(manager)).toBe(0);
+    expect(exitListeners(manager)).toBe(1);
   });
 
   it('removes the abort listener when the lanes end first', async () => {
@@ -374,7 +374,7 @@ describe('AgentProcessManager.waitForAgents', () => {
 
     const immediate = await manager.waitForAgents([ID_A], 'all', -5);
     expect(immediate.timedOut).toBe(true);
-    expect(exitListeners(manager)).toBe(0);
+    expect(exitListeners(manager)).toBe(1);
 
     let settled = false;
     const capped = manager

@@ -173,7 +173,7 @@ const CODEX_EXHAUSTED = codexLane({
 type AgentStub = Pick<AgentNamespace, 'spawn' | 'list' | 'limits'>;
 
 interface Harness {
-  readonly spawn: jest.Mock<Promise<SpawnAgentResult>, [SpawnAgentRequest]>;
+  readonly spawn: jest.Mock<Promise<SpawnAgentResult>, [SpawnAgentRequest, boolean | undefined]>;
   readonly list: jest.Mock<Promise<CliDetectionResult[]>, []>;
   readonly limits: jest.Mock<
     Promise<readonly AgentLimit[] | undefined>,
@@ -183,7 +183,7 @@ interface Harness {
 }
 
 function harness(outcome: SpawnAgentResult | Error): Harness {
-  const spawn = jest.fn<Promise<SpawnAgentResult>, [SpawnAgentRequest]>(
+  const spawn = jest.fn<Promise<SpawnAgentResult>, [SpawnAgentRequest, boolean | undefined]>(
     async () => {
       if (outcome instanceof Error) throw outcome;
       return outcome;
@@ -428,6 +428,7 @@ describe.each([
       const owner = caller?.trim() || undefined;
       expect(h.spawn).toHaveBeenCalledWith(
         expect.objectContaining({ parentSessionId: owner }),
+        undefined,
       );
       const sentence =
         _name === 'protocol'

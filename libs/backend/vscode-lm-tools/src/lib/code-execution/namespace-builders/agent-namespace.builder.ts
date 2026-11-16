@@ -425,6 +425,7 @@ export function buildAgentNamespace(
   const executeNamespaceSpawn = async (
     request: UntypedSpawnRequest,
     admission?: SpawnAdmission,
+    force?: boolean,
   ) => {
       const timing = agentSpawnTiming.getStore();
       const resolutionStartedAt = performance.now();
@@ -735,8 +736,12 @@ export function buildAgentNamespace(
           );
         return {
           ...markParentless(await (admission
-            ? agentProcessManager.executeSpawn(admission, enrichedRequest)
-            : agentProcessManager.spawn(enrichedRequest))),
+            ? (force === undefined
+                ? agentProcessManager.executeSpawn(admission, enrichedRequest)
+                : agentProcessManager.executeSpawn(admission, enrichedRequest, force))
+            : (force === undefined
+                ? agentProcessManager.spawn(enrichedRequest)
+                : agentProcessManager.spawn(enrichedRequest, force)))),
           ...(resolvedSkills.length && { skillDelivery: 'inline' as const }),
         };
       } catch (error: unknown) {
@@ -753,7 +758,7 @@ export function buildAgentNamespace(
 
   return {
     resolveCallerParentId,
-    spawn: (request) => executeNamespaceSpawn(request),
+    spawn: (request, force?: boolean) => executeNamespaceSpawn(request, undefined, force),
     beginSpawn: (request) => {
       const { accountSelection: _accountSelection, ...safeRequest } = request;
       const rawSessionId = isMcpRequestInFlight()
@@ -766,7 +771,7 @@ export function buildAgentNamespace(
         parentSessionId: rawSessionId ? resolveCallerParentId(rawSessionId) : undefined,
       });
     },
-    executeSpawn: (ticket, request) => executeNamespaceSpawn(request, ticket),
+    executeSpawn: (ticket, request, force?: boolean) => executeNamespaceSpawn(request, ticket, force),
     markSpawnReplied: (ticket) => agentProcessManager.markSpawnReplied(ticket),
     failSpawn: (ticket, error) => agentProcessManager.failSpawn(ticket, error),
 
