@@ -58,4 +58,18 @@ describe('ptah-button.css owner input rules', () => {
     );
     toneRules.forEach((selector) => expect(selector).not.toContain('btn-outline'));
   });
+
+  it('limits the ghost hover tint to danger tones, so warning keeps its own ink', () => {
+    const ghostToneHover = rules.filter(
+      (selector) =>
+        selector.includes('.btn-ghost') &&
+        selector.includes('[data-tone') &&
+        selector.includes(':hover'),
+    );
+    expect(ghostToneHover.length).toBeGreaterThan(0);
+    ghostToneHover.forEach((selector) => {
+      expect(selector).toContain("[data-tone='danger']");
+      expect(selector).not.toContain("[data-tone='warning']");
+    });
+  });
 });

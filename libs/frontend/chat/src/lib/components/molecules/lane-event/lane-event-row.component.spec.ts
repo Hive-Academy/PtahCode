@@ -279,7 +279,7 @@ describe('LaneEventRowComponent', () => {
       const dialog = element.querySelector('[role="alertdialog"]')!;
       expect(dialog.textContent).toContain('Retrying can run it twice');
       rpc.call.mockResolvedValueOnce(rpcSuccess({ ...notSaved, parentSessionId: 'parent', attempts: 2, state: 'sending' }));
-      dialog.querySelector<HTMLButtonElement>('button.btn-warning')!.click();
+      dialog.querySelector<HTMLButtonElement>('button[data-tone="warning"]')!.click();
       await fixture.whenStable();
       expect(rpc.call).toHaveBeenCalledWith('agent:retryParentDelivery', { deliveryId, confirmDuplicateRisk: true });
     });

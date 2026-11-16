@@ -36,7 +36,7 @@ export class PtahButtonDirective {
   readonly noPadding = input(false, { transform: booleanAttribute });
   readonly align = input<PtahButtonAlign>('center');
   readonly shape = input<PtahButtonShape>('default');
-  /** Ghost variant ink only; other variants ignore tone. */
+  /** Ghost variant ink for danger tones; warning tone applies to primary and outline. */
   readonly tone = input<PtahButtonTone>('default');
   /**
    * Selected state. Undefined: not a toggle, the owner writes no aria-pressed or aria-current.
