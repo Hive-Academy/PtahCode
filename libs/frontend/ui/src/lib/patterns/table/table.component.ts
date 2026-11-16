@@ -131,6 +131,22 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
       .ptah-table-bar-cell {
         min-width: 8rem;
       }
+      .ptah-table-sticky-header {
+        position: sticky;
+        inset-inline-start: 0;
+        z-index: 1;
+        background: var(--ptah-table-sticky-bg, var(--surface-1));
+      }
+      .ptah-table-score {
+        display: flex;
+        flex-direction: column;
+        gap: var(--ptah-gap-inline);
+      }
+      .ptah-table-score-unrated,
+      .ptah-table-score-stale {
+        color: var(--ptah-section-description-color);
+        font-size: var(--ptah-text-hint-size);
+      }
       .ptah-table-cell-button {
         cursor: pointer;
       }

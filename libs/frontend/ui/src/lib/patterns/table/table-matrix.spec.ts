@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { PtahTableComponent } from './table.component';
 import {
   PtahTableCellButtonDirective,
   PtahTableGroupHeaderDirective,
@@ -27,7 +28,7 @@ import {
     <table>
       <tbody>
         <tr ptahGroupRow>
-          <th ptahGroupHeader [columns]="3">
+          <th ptahGroupHeader [columns]="4">
             <ptah-table-group-title name="Installed"
               ><span ptahGroupCount>3</span></ptah-table-group-title
             >
@@ -48,10 +49,10 @@ import {
           </td>
         </tr>
         <tr>
-          <td ptahStatusCell="error" [columns]="3">Failed</td>
+          <td ptahStatusCell="error" [columns]="4">Failed</td>
         </tr>
         <tr>
-          <td ptahStatusCell="loading" [columns]="3">Loading</td>
+          <td ptahStatusCell="loading" [columns]="4">Loading</td>
         </tr>
       </tbody>
     </table>
@@ -85,7 +86,7 @@ describe('table matrix helpers', () => {
 
   it('sets scope rowgroup and colspan on the group header', () => {
     const th = render().querySelector('th[scope="rowgroup"]');
-    expect(th?.getAttribute('colspan')).toBe('3');
+    expect(th?.getAttribute('colspan')).toBe('4');
   });
 
   it('shows the score number and a text stale mark', () => {
@@ -105,6 +106,46 @@ describe('table matrix helpers', () => {
     expect(scores[1].querySelector('.ptah-table-score-stale')).toBeNull();
   });
 
+  it('treats a score outside 0 to 100 as unrated', () => {
+    const f = TestBed.createComponent(PtahTableScoreComponent);
+    f.componentRef.setInput('label', 'Q');
+    for (const [v, rated] of [
+      [0, true],
+      [100, true],
+      [-5, false],
+      [120, false],
+    ] as const) {
+      f.componentRef.setInput('score', v);
+      f.detectChanges();
+      expect(
+        !!(f.nativeElement as HTMLElement).querySelector('[role="meter"]'),
+      ).toBe(rated);
+    }
+  });
+
+  it('puts the sticky class on the row header inside a table (CSS is checked in the visual review)', () => {
+    @Component({
+      standalone: true,
+      imports: [PtahTableComponent, PtahTableStickyHeaderDirective],
+      template: `<ptah-table label="T"
+        ><table>
+          <tbody>
+            <tr>
+              <th scope="row" ptahStickyHeader>A</th>
+            </tr>
+          </tbody>
+        </table></ptah-table
+      >`,
+    })
+    class StickyHost {}
+    const f = TestBed.createComponent(StickyHost);
+    f.detectChanges();
+    const th = (f.nativeElement as HTMLElement).querySelector(
+      'th',
+    ) as HTMLElement;
+    expect(th.classList.contains('ptah-table-sticky-header')).toBe(true);
+  });
+
   it('mirrors popover state on the cell button', () => {
     const b = render().querySelector('button') as HTMLButtonElement;
     expect(b.getAttribute('aria-haspopup')).toBe('dialog');
@@ -117,7 +158,7 @@ describe('table matrix helpers', () => {
       render().querySelectorAll<HTMLElement>('td[data-status]'),
     );
     expect(cells[0].getAttribute('role')).toBe('alert');
-    expect(cells[0].getAttribute('colspan')).toBe('3');
+    expect(cells[0].getAttribute('colspan')).toBe('4');
     expect(cells[1].getAttribute('role')).toBe('status');
     expect(cells[1].getAttribute('aria-busy')).toBe('true');
   });

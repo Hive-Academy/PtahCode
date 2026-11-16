@@ -67,7 +67,7 @@ export class PtahTableBarCellDirective {}
 
 /**
  * Score from 0 to 100 as a `ptah-meter` with the number visible.
- * No score (null or undefined) shows the unrated text and no bar.
+ * No score, or a score outside 0 to 100, shows the unrated text and no bar.
  * `stale` adds a visible text mark, so the state is not only a color.
  *
  * ```html
@@ -107,7 +107,7 @@ export class PtahTableScoreComponent {
   readonly staleText = input('Stale');
   readonly rated = computed(() => {
     const v = this.score();
-    return typeof v === 'number' && Number.isFinite(v);
+    return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100;
   });
 }
 
