@@ -51,6 +51,58 @@ describe('ExternalCompletionOutbox', () => {
     expect(box.pendingCount(other)).toBe(1);
   });
 
+  it('does not acknowledge a replacement after evicting a held entry', () => {
+    const box = new ExternalCompletionOutbox(logger, { maxTotal: 1, now: () => now });
+    const limits = { maxEntries: 1, maxBytes: 100 };
+    box.record(entry('a'));
+    const oldClaim = box.claim(owner, limits);
+    now++;
+    box.record(entry('b'));
+    now++;
+    box.record(entry('a'));
+    expect(box.acknowledge(owner, oldClaim.claimId)).toBe(0);
+    expect(box.claim(owner, limits).entries.map(item => item.agentId)).toEqual(['a']);
+  });
+
+  it('does not release a replacement held by a newer claim', () => {
+    const box = new ExternalCompletionOutbox(logger, { maxTotal: 1, now: () => now });
+    const limits = { maxEntries: 1, maxBytes: 100 };
+    box.record(entry('a'));
+    const oldClaim = box.claim(owner, limits);
+    now++;
+    box.record(entry('b'));
+    now++;
+    box.record(entry('a'));
+    const newClaim = box.claim(owner, limits);
+    box.release(owner, oldClaim.claimId);
+    expect(box.claim(owner, limits).entries).toHaveLength(0);
+    expect(box.acknowledge(owner, newClaim.claimId)).toBe(1);
+  });
+
+  it('does not acknowledge a replacement after a held entry ages out', () => {
+    const box = new ExternalCompletionOutbox(logger, { maxAgeMs: 2, now: () => now });
+    const limits = { maxEntries: 1, maxBytes: 100 };
+    box.record(entry('a'));
+    const oldClaim = box.claim(owner, limits);
+    now = 3;
+    box.record(entry('a'));
+    expect(box.acknowledge(owner, oldClaim.claimId)).toBe(0);
+    expect(box.claim(owner, limits).entries).toHaveLength(1);
+  });
+
+  it('rejects a late acknowledgement after a lease is claimed again', () => {
+    const box = new ExternalCompletionOutbox(logger, { leaseMs: 10, now: () => now });
+    const limits = { maxEntries: 1, maxBytes: 100 };
+    box.record(entry('a'));
+    const oldClaim = box.claim(owner, limits);
+    now = 11;
+    const newClaim = box.claim(owner, limits);
+    expect(newClaim.entries).toHaveLength(1);
+    expect(box.acknowledge(owner, oldClaim.claimId)).toBe(0);
+    expect(box.claim(owner, limits).entries).toHaveLength(0);
+    expect(box.acknowledge(owner, newClaim.claimId)).toBe(1);
+  });
+
   it('keeps explicit lane reads private, including forged transport', () => {
     const box = new ExternalCompletionOutbox(logger, { now: () => now });
     box.record(entry('a', { ...owner, exclusive: false }));

@@ -23,12 +23,12 @@ export interface ExternalOutboxOptions {
   readonly now?: () => number;
 }
 
-/** Optional limits for the outbox. No host registers it; tests construct the class directly. */
+/** Limits for the outbox. The host registers an empty object, so the defaults apply. */
 export const EXTERNAL_OUTBOX_OPTIONS = Symbol.for('ExternalCompletionOutboxOptions');
 
 interface HeldClaim {
   readonly owner: ExternalOwnerKey;
-  readonly ids: readonly string[];
+  readonly entries: readonly ExternalCompletionEntry[];
   readonly expiresAt: number;
 }
 
@@ -37,7 +37,7 @@ interface HeldClaim {
 export class ExternalCompletionOutbox {
   private readonly entries = new Map<string, ExternalCompletionEntry>();
   private readonly claims = new Map<string, HeldClaim>();
-  private readonly held = new Set<string>();
+  private readonly held = new Map<string, ExternalCompletionEntry>();
   private readonly maxPerOwner: number;
   private readonly maxTotal: number;
   private readonly maxAgeMs: number;
@@ -47,7 +47,7 @@ export class ExternalCompletionOutbox {
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
-    // Tests pass small limits; the container injects nothing and the defaults apply.
+    // Tests pass small limits. The container injects an empty object.
     @inject(EXTERNAL_OUTBOX_OPTIONS, { isOptional: true })
     options: ExternalOutboxOptions = {},
   ) {
@@ -64,16 +64,25 @@ export class ExternalCompletionOutbox {
     for (const [id, claim] of this.claims) {
       if (claim.expiresAt > now) continue;
       this.claims.delete(id);
-      for (const entryId of claim.ids) this.held.delete(entryId);
+      for (const entry of claim.entries) this.releaseEntry(entry);
     }
     let count = 0;
-    for (const [id, entry] of this.entries) {
+    for (const entry of this.entries.values()) {
       if (now - entry.recordedAt <= this.maxAgeMs) continue;
-      this.entries.delete(id);
-      this.held.delete(id);
+      this.removeEntry(entry);
       count++;
     }
     if (count) this.logger.info(`[ExternalCompletionOutbox] Evicted ${count} expired entries`);
+  }
+
+  private releaseEntry(entry: ExternalCompletionEntry): void {
+    if (this.held.get(entry.completionId) === entry) this.held.delete(entry.completionId);
+  }
+
+  private removeEntry(entry: ExternalCompletionEntry): boolean {
+    this.releaseEntry(entry);
+    if (this.entries.get(entry.completionId) !== entry) return false;
+    return this.entries.delete(entry.completionId);
   }
 
   private removeOldest(predicate: (entry: ExternalCompletionEntry) => boolean): boolean {
@@ -82,8 +91,7 @@ export class ExternalCompletionOutbox {
       if (predicate(entry) && (!oldest || entry.recordedAt < oldest.recordedAt)) oldest = entry;
     }
     if (!oldest) return false;
-    this.entries.delete(oldest.completionId);
-    this.held.delete(oldest.completionId);
+    this.removeEntry(oldest);
     return true;
   }
 
@@ -128,9 +136,9 @@ export class ExternalCompletionOutbox {
       if (entries.length > 0 && bytes + size > limits.maxBytes) break;
       entries.push(entry);
       bytes += size;
-      this.held.add(entry.completionId);
+      this.held.set(entry.completionId, entry);
     }
-    if (entries.length) this.claims.set(claimId, { owner, ids: entries.map(item => item.completionId), expiresAt: this.now() + this.leaseMs });
+    if (entries.length) this.claims.set(claimId, { owner, entries, expiresAt: this.now() + this.leaseMs });
     return { claimId, entries };
   }
 
@@ -141,9 +149,8 @@ export class ExternalCompletionOutbox {
     if (!claim || !ownerKeysEqual(owner, claim.owner)) return 0;
     this.claims.delete(claimId);
     let count = 0;
-    for (const id of claim.ids) {
-      this.held.delete(id);
-      if (this.entries.delete(id)) count++;
+    for (const entry of claim.entries) {
+      if (this.removeEntry(entry)) count++;
     }
     return count;
   }
@@ -153,7 +160,7 @@ export class ExternalCompletionOutbox {
     const claim = this.claims.get(claimId);
     if (!claim || !ownerKeysEqual(owner, claim.owner)) return;
     this.claims.delete(claimId);
-    for (const id of claim.ids) this.held.delete(id);
+    for (const entry of claim.entries) this.releaseEntry(entry);
   }
 
   findForLane(owner: ExternalOwnerKey, agentId: string): ExternalCompletionEntry | undefined {

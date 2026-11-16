@@ -39,7 +39,12 @@ import { LaneInstructionFileStore } from '../cli-agents/lane-instruction-file-st
 import { AgentSpawnEnvironment } from '../cli-agents/agent-spawn-environment.service';
 import { AgentOutputBuffer } from '../cli-agents/agent-output-buffer.service';
 import { LaneCompletionNotifier } from '../cli-agents/lane-completion-notifier.service';
-import { ExternalCompletionOutbox, ExternalCompletionRecorder } from '../cli-agents/external-delivery';
+import {
+  EXTERNAL_OUTBOX_OPTIONS,
+  ExternalCompletionOutbox,
+  ExternalCompletionRecorder,
+  type ExternalOutboxOptions,
+} from '../cli-agents/external-delivery';
 import { ParentEnvelopeStoreService } from '../cli-agents/parent-delivery/parent-envelope-store.service';
 import { ParentDeliveryDrainerService } from '../cli-agents/parent-delivery/parent-delivery-drainer.service';
 import { LaneResumeGate } from '../cli-agents/lane-resume-gate';
@@ -301,6 +306,8 @@ export function registerCliAgentRuntimeServices(
   );
   container.registerSingleton(AgentSpawnEnvironment);
   container.registerSingleton(AgentOutputBuffer);
+  // The default limits apply. Tests construct the outbox with small limits.
+  container.register<ExternalOutboxOptions>(EXTERNAL_OUTBOX_OPTIONS, { useValue: {} });
   container.registerSingleton(ExternalCompletionOutbox);
   container.registerSingleton(ExternalCompletionRecorder);
   container.register(CLI_AGENT_RUNTIME_TOKENS.EXTERNAL_COMPLETION_OUTBOX, { useToken: ExternalCompletionOutbox });

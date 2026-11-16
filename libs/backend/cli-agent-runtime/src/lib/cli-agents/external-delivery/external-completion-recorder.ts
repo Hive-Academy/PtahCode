@@ -1,6 +1,7 @@
 import { inject, injectable } from 'tsyringe';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import type { AgentProcessInfo, ExternalOwnerKey } from '@ptah-extension/shared';
+import { CLI_AGENT_RUNTIME_TOKENS } from '../../di/tokens';
 import type { LaneCompletionResult } from '../lane-completion-replay';
 import { ExternalCompletionOutbox } from './external-completion-outbox';
 import { externalOwnerKeySchema } from './external-owner-key';
@@ -9,6 +10,7 @@ import { externalOwnerKeySchema } from './external-owner-key';
 export class ExternalCompletionRecorder {
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
+    @inject(CLI_AGENT_RUNTIME_TOKENS.EXTERNAL_COMPLETION_OUTBOX)
     private readonly outbox: ExternalCompletionOutbox,
   ) {}
 
