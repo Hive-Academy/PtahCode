@@ -65,3 +65,5 @@ Excluded (settings child migrates them in its tab PRs; the parent relays this li
 - libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts:225 (STT download; same rule)
 - libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts:210 (indeterminate, label "Prompt generation progress")
 Left unchanged, needs a native-progress-track variant: libs/frontend/declarative-dashboard/src/lib/components/dashboard-progress.component.ts:29.
+
+Meter migration PRs (open): #1340 chat (078d75287), #1341 memory (36c27aab9), #1342 pages (6aff4fa4e). Review: review-meter.md (0 blockers, 1 major fixed; minors accepted). Baseline: no rows applied (these sites carry no audited classes).
