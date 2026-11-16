@@ -90,6 +90,15 @@ describe('SessionHandoffAckStore', () => {
       .rejects.toBe(failed);
   });
 
+  it('rejects a schema-degraded candidate during authoritative status lookup', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/a', [{ ...baseRecord, predecessorSdkId: 'sdk-before' }]);
+    fixture.documents.get('/b')?.set(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: [{ bad: true }] });
+    const store = new SessionHandoffAckStore(fixture.storage);
+    await expect(store.statusForPredecessor('before', 'sdk-before', '/a'))
+      .rejects.toThrow('invalid data');
+  });
+
   it('finds and transitions an unregistered-root write through a scoped proxy without default storage', async () => {
     const fixture = scopedFixture();
     const store = new SessionHandoffAckStore(fixture.storage);

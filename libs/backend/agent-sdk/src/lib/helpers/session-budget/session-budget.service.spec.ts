@@ -312,6 +312,13 @@ describe('SessionBudgetService.recordCompaction', () => {
     h.service.recordCompaction(SID);
     expect(h.service.observe(at(1, 1))?.stage).toBe('normal');
   });
+
+  it('uses a completion received before the first authoritative figure', () => {
+    const h = harness();
+    h.setConfig({ handoffAfterCompactions: 1 });
+    h.service.recordCompaction(SID, { postCompactionContextTokens: 120_000, effectiveAutoCompactWindowTokens: 200_000 });
+    expect(h.service.observe(at(1, 1))?.stage).toBe('handoff');
+  });
 });
 
 describe('SessionBudgetService — settings', () => {

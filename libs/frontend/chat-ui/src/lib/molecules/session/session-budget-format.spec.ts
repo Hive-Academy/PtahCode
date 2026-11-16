@@ -75,6 +75,11 @@ describe('session-budget-format', () => {
       expect(tokensTooltip(weighted, line, 'Breakdown')).toContain(line);
     });
 
+    it('uses weighted usage even when the TOKENS chip differs', () => {
+      const weighted = { ...TOKENS_BUDGET, measure: 'weighted-tokens' as const, used: 1_000_000, percent: 2 };
+      expect(budgetTooltip(weighted, { ...FIGURES, tokensLabel: '10.0M' })).toContain('2% used (1.0M of 50.0M)');
+    });
+
     it.each([null, COST_BUDGET, LOWER_BOUND_BUDGET, WEIGHTED_BUDGET])(
       'is null for any other budget: %#',
       (budget) => {

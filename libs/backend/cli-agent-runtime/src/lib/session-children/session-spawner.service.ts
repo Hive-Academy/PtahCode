@@ -2230,13 +2230,13 @@ export class SessionSpawnerService implements ISessionSpawner {
    * once the interrupt settles, so a result the run emits meanwhile cannot
    * bring the entry back.
    */
-  private interruptInBackground(childSessionId: string): Promise<boolean> {
+  private interruptInBackground(childSessionId: string, stopCause: 'host-stop' | 'runtime-cap' = 'host-stop'): Promise<boolean> {
     const id = SessionId.safeParse(childSessionId);
     if (!this.adapter || !id) {
       this.releaseBudget(childSessionId);
       return Promise.resolve(false);
     }
-    return this.verifyAndHardStop(childSessionId, this.registry.get(childSessionId)?.sdkSessionId)
+    return this.verifyAndHardStop(childSessionId, this.registry.get(childSessionId)?.sdkSessionId, stopCause)
       .then((result) => {
         if (!result.stopped) {
           this.log(
@@ -2412,7 +2412,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       'runtime-cap',
     );
     this.releaseResources(child.childSessionId);
-    this.interruptInBackground(child.childSessionId);
+    this.interruptInBackground(child.childSessionId, 'runtime-cap');
   }
 
   private async hostSucceed(

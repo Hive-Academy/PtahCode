@@ -185,6 +185,8 @@ export function reduceIdleSession(
         break;
       case 'turn-context': {
         if (state.compactBoundaryObserved && state.postBoundaryBaseline == null &&
+            state.lastTurn?.turnId === signal.turnId && !state.idlePeriodClosed &&
+            !state.activitySinceTurnEnd && !state.prefixChangedSinceTurnEnd &&
             signal.totalTokens !== null && Number.isFinite(signal.totalTokens) && signal.totalTokens >= 0) {
           next = { ...state, postBoundaryBaseline: signal.totalTokens };
           break;
@@ -410,7 +412,7 @@ export function reduceIdleSession(
         }
         break;
       case 'rekey':
-        next = { ...state, sessionId: signal.toId, compactBoundaryObserved: false, postBoundaryBaseline: null };
+        next = { ...state, sessionId: signal.toId, postBoundaryBaseline: null };
         break;
       case 'session-released':
         release();

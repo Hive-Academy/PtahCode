@@ -112,12 +112,12 @@ describe('MessageBubbleComponent — branch/rewind action buttons', () => {
     expect(root.querySelector('[data-testid="chat-turn-interrupted"]')?.textContent).toContain(label);
   });
 
-  it.each([undefined, 'internal-abort'] as const)('hides an unknown interruption label while retaining partial content (%s)', (stopCause) => {
+  it.each([undefined, 'internal-abort'] as const)('shows a neutral interruption label with partial content (%s)', (stopCause) => {
     setMessage(createExecutionChatMessage({
       id: 'empty-interrupted', role: 'assistant', rawContent: 'Partial reply', isInterrupted: true, stopCause,
     }));
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('[data-testid="chat-turn-interrupted"]')).toBeNull();
+    expect(root.querySelector('[data-testid="chat-turn-interrupted"]')?.textContent).toContain('Response interrupted');
     expect(root.textContent).toContain('Partial reply');
   });
 

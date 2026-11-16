@@ -91,6 +91,8 @@ export class SessionAutoHandoffCoordinatorService {
   private readonly retryRevision = signal(0);
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly reconcileTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Delivered turns still streaming when the bounded status poll expires. */
+  private readonly awaitingSettlement = new Map<string, string>();
   private readonly deferralTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Sessions with a probe or send in flight; guarded synchronously, so a re-run cannot double-fire. */
@@ -120,6 +122,15 @@ export class SessionAutoHandoffCoordinatorService {
       this.retryRevision();
       const candidates = this.candidates();
       const stale = this.staleQueued();
+      for (const [sessionId, tabId] of this.awaitingSettlement) {
+        const tab = this.budgetTabs().find((item) => item.id === tabId);
+        if (!tab || tab.claudeSessionId !== sessionId || this.autoHandoff.entry(sessionId)?.state !== 'delivered') {
+          this.awaitingSettlement.delete(sessionId);
+        } else if (tab.status !== 'streaming') {
+          this.awaitingSettlement.delete(sessionId);
+          this.scheduleReconcile(tabId, sessionId, 0);
+        }
+      }
       this.clearObsoleteTimers();
       if (candidates.length === 0 && stale.length === 0) return;
       untracked(() => {
@@ -330,6 +341,10 @@ export class SessionAutoHandoffCoordinatorService {
         this.scheduleReconcile(tabId, sessionId, 1);
         return;
       }
+      if (!this.stillQualifies(tabId, sessionId)) {
+        this.autoHandoff.release(sessionId);
+        return;
+      }
       if (this.autoHandoff.isManuallyWrappedUp(sessionId) || this.autoHandoff.entry(sessionId)?.state !== 'pending') return;
       if (this.compacting(tabId)) {
         this.autoHandoff.release(sessionId);
@@ -430,6 +445,11 @@ export class SessionAutoHandoffCoordinatorService {
       clearTimeout(timer);
       this.reconcileTimers.delete(sessionId);
     }
+    for (const [sessionId, tabId] of this.awaitingSettlement) {
+      if (!this.budgetTabs().some((tab) => tab.id === tabId && tab.claudeSessionId === sessionId)) {
+        this.awaitingSettlement.delete(sessionId);
+      }
+    }
   }
 
   private deferCompaction(candidate: HandoffCandidate): void {
@@ -490,6 +510,9 @@ export class SessionAutoHandoffCoordinatorService {
     if (tab?.claudeSessionId !== sessionId) return;
     try {
       const result = await this.rpc.call('session:handoffStatus', { tabId, sessionId });
+      const current = this.autoHandoff.entry(sessionId);
+      const currentTab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
+      if (!current || current.state === 'cancelled' || current.state === 'completed' || current.state === 'failed' || currentTab?.claudeSessionId !== sessionId) return;
       const status = result.success && result.data ? result.data : { state: 'unavailable' as const };
       if (status.state === 'recorded' || status.state === 'closePending') {
         this.autoHandoff.transition(sessionId, 'recorded');
@@ -501,13 +524,13 @@ export class SessionAutoHandoffCoordinatorService {
         return;
       }
       if (status.state === 'unavailable') {
-        this.autoHandoff.transition(sessionId, entry.state, true);
-      } else if (status.state === 'absent' && entry.state === 'pending' && entry.attempts === 0 && entry.queued === null) {
+        this.autoHandoff.transition(sessionId, current.state, true);
+      } else if (status.state === 'absent' && current.state === 'pending' && current.attempts === 0 && current.queued === null) {
         this.autoHandoff.release(sessionId);
         this.retryRevision.update((value) => value + 1);
         return;
-      } else if (status.state === 'absent' && entry.state === 'delivered' && tab.status !== 'streaming') {
-        if ((this.sentAttempts.get(sessionId) ?? entry.attempts) >= MAX_FAILED_ATTEMPTS) {
+      } else if (status.state === 'absent' && current.state === 'delivered' && currentTab.status !== 'streaming') {
+        if ((this.sentAttempts.get(sessionId) ?? current.attempts) >= MAX_FAILED_ATTEMPTS) {
           this.autoHandoff.transition(sessionId, 'failed');
           return;
         }
@@ -519,9 +542,16 @@ export class SessionAutoHandoffCoordinatorService {
       }
     } catch (error: unknown) {
       this.logger.warn(LOG_CONTEXT, 'handoff status lookup failed', { tabId, sessionId, error });
-      this.autoHandoff.transition(sessionId, entry.state, true);
+      const current = this.autoHandoff.entry(sessionId);
+      if (current && current.state !== 'cancelled' && current.state !== 'completed' && current.state !== 'failed') {
+        this.autoHandoff.transition(sessionId, current.state, true);
+      }
     }
     if (step < 12) this.scheduleReconcile(tabId, sessionId, step + 1);
+    else if (this.autoHandoff.entry(sessionId)?.state === 'delivered' &&
+      this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab?.status === 'streaming') {
+      this.awaitingSettlement.set(sessionId, tabId);
+    }
   }
 
   /**

@@ -146,8 +146,16 @@ describe('SessionBudgetSettingsComponent', () => {
     expect(host().textContent).toContain('50% or more of the auto-compact window');
   });
 
-  it('resolves a legacy stored budget to raw and switches measure without changing its number', async () => {
+  it('keeps weighted for a stored budget with no stored measure', async () => {
     delete stored['sessionBudget.tokenMeasure'];
+    stored['sessionBudget.tokens'] = 30_000_000;
+    await create();
+    expect(byTestId<HTMLSelectElement>('session-budget-token-measure')?.value).toBe('weighted');
+    expect(byTestId('session-budget-token-measure-recommendation')).toBeNull();
+  });
+
+  it('shows a migrated raw budget and switches measure without changing its number', async () => {
+    stored['sessionBudget.tokenMeasure'] = 'raw';
     stored['sessionBudget.tokens'] = 30_000_000;
     await create();
     expect(byTestId<HTMLSelectElement>('session-budget-token-measure')?.value).toBe('raw');

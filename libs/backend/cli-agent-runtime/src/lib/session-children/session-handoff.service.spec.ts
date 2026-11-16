@@ -408,6 +408,14 @@ describe('SessionHandoffService', () => {
       .resolves.toEqual({ state: 'absent', successorSessionId: null });
   });
 
+  it('does not report absence for a known in-flight handoff with no persisted record', async () => {
+    const h = makeHarness();
+    h.service['inFlight'].set(CALLER, CALLER_NEW_TAB);
+    h.service['inFlightSdkIds'].set(CALLER, CALLER_SDK);
+    await expect(h.service.status({ tabId: CALLER, sessionId: CALLER_SDK, workspaceRoot: root }))
+      .resolves.toEqual({ state: 'unavailable', successorSessionId: null });
+  });
+
   it('logs a storage read failure and returns unavailable', async () => {
     const failure = new Error('storage read failed');
     const storage: IStateStorage = {

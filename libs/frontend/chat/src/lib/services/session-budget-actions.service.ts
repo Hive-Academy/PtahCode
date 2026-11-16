@@ -166,7 +166,11 @@ export class SessionBudgetActionsService {
         void this.requestWrapUp();
       }
     });
-    this.destroyRef.onDestroy(() => this.clearDeferred());
+    this.destroyRef.onDestroy(() => {
+      const intent = this.deferred();
+      if (intent) this.setWrapUpSent(intent.sessionId, false);
+      this.clearDeferred();
+    });
   }
 
   retryHandoff(): Promise<void> {
@@ -272,7 +276,7 @@ export class SessionBudgetActionsService {
     }
     const autoEntry = this.autoHandoff.entry(sessionId);
     const recoverableClaim = autoEntry?.state === 'pending' && autoEntry.attempts === 0 && autoEntry.statusError;
-    if (autoEntry && !recoverableClaim && !this.autoHandoff.isManuallyWrappedUp(sessionId)) return;
+    if (autoEntry && autoEntry.state !== 'cancelled' && !recoverableClaim && !this.autoHandoff.isManuallyWrappedUp(sessionId)) return;
     this.setWrapUpSent(sessionId, true);
     if (recoverableClaim) this.autoHandoff.release(sessionId);
     try {

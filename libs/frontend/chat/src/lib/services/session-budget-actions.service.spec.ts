@@ -121,6 +121,16 @@ describe('SessionBudgetActionsService', () => {
     expect(sendOrQueueMessageMock).not.toHaveBeenCalled();
   });
 
+  it('releases an unsent manual mark on destroy during compaction', async () => {
+    const { service, compacting, autoHandoff, sendOrQueueMessageMock } = setup();
+    compacting.set(true);
+    await service.sendWrapUp();
+    expect(autoHandoff.isManuallyWrappedUp(SESSION)).toBe(true);
+    TestBed.resetTestingModule();
+    expect(autoHandoff.isManuallyWrappedUp(SESSION)).toBe(false);
+    expect(sendOrQueueMessageMock).not.toHaveBeenCalled();
+  });
+
   describe('display stage', () => {
     it('is the authoritative stage while idle', () => {
       const { service } = setup();
@@ -185,6 +195,18 @@ describe('SessionBudgetActionsService', () => {
       expect(withdrawMock).toHaveBeenCalledWith(queued, { restore: false });
       expect(autoHandoff.entry(SESSION)?.state).toBe('cancelled');
       expect(service.wrapUpSent()).toBe(false);
+    });
+
+    it('allows a manual wrap-up after cancelling the automatic queue', async () => {
+      const { service, followUpStore, autoHandoff, sendOrQueueMessageMock } = setup();
+      const queued = { clientMessageId: 'handoff-manual', tabId: 'tab-abc', sessionId: SESSION };
+      followUpStore.add({ ...queued, content: '/session-handoff', isCommand: true, phase: 'held' });
+      autoHandoff.claim(SESSION);
+      autoHandoff.recordQueued(SESSION, queued);
+      await service.cancelAutoHandoff();
+      await service.sendWrapUp();
+      expect(sendOrQueueMessageMock).toHaveBeenCalledTimes(1);
+      expect(autoHandoff.entry(SESSION)?.state).toBe('cancelled');
     });
 
     it('reverts cancellation when a turn already claimed the follow-up', async () => {

@@ -138,6 +138,72 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     expect(handoff.entry(SESSION)?.state).toBe('pending');
   });
 
+  it('does not send to a tab rebound while the pre-send status is pending', async () => {
+    let resolve!: (value: { success: true; data: { state: 'absent' } }) => void;
+    statusCall.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    start([makeTab(TAB)]);
+    TestBed.tick();
+    await settle();
+    patch(TAB, { claudeSessionId: OTHER_SESSION });
+    resolve({ success: true, data: { state: 'absent' } });
+    await run();
+    expect(send).not.toHaveBeenCalled();
+    expect(handoff.entry(SESSION)).toBeNull();
+  });
+
+  it('keeps a delivered entry when unavailable status finishes after delivery', async () => {
+    start([makeTab(TAB)]);
+    await run();
+    let resolve!: (value: { success: true; data: { state: 'unavailable' } }) => void;
+    statusCall.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const coordinator = TestBed.inject(SessionAutoHandoffCoordinatorService);
+    const pending = coordinator['reconcile'](TAB, SESSION, 1);
+    handoff.transition(SESSION, 'delivered');
+    resolve({ success: true, data: { state: 'unavailable' } });
+    await pending;
+    expect(handoff.entry(SESSION)?.state).toBe('delivered');
+  });
+
+  it('keeps a delivered entry when a stale status request rejects', async () => {
+    start([makeTab(TAB)]);
+    handoff.claim(SESSION);
+    handoff.recordQueued(SESSION, null);
+    let reject!: (error: Error) => void;
+    statusCall.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const pending = TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 1);
+    handoff.transition(SESSION, 'delivered');
+    reject(new Error('status unavailable'));
+    await pending;
+    expect(handoff.entry(SESSION)?.state).toBe('delivered');
+  });
+
+  it('does not release a delivered entry when streaming begins during status lookup', async () => {
+    start([makeTab(TAB)]);
+    handoff.claim(SESSION);
+    handoff.recordQueued(SESSION, null);
+    handoff.transition(SESSION, 'delivered');
+    let resolve!: (value: { success: true; data: { state: 'absent' } }) => void;
+    statusCall.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const pending = TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 1);
+    patch(TAB, { status: 'streaming' });
+    resolve({ success: true, data: { state: 'absent' } });
+    await pending;
+    expect(handoff.entry(SESSION)?.state).toBe('delivered');
+  });
+
+  it('reconciles a delivered turn after polling expires and the stream settles', async () => {
+    start([makeTab(TAB, { status: 'streaming' })]);
+    handoff.claim(SESSION);
+    handoff.recordQueued(SESSION, null);
+    handoff.transition(SESSION, 'delivered');
+    statusCall.mockResolvedValue({ success: true, data: { state: 'absent' } });
+    await TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 12);
+    const callsBeforeSettlement = statusCall.mock.calls.length;
+    patch(TAB, { status: 'loaded' });
+    await run();
+    expect(statusCall.mock.calls.length).toBeGreaterThan(callsBeforeSettlement);
+  });
+
   it('keeps a visible status error and does not send when status is unavailable', async () => {
     statusCall.mockResolvedValue({ success: true, data: { state: 'unavailable', successorSessionId: null } });
     start([makeTab(TAB)]);

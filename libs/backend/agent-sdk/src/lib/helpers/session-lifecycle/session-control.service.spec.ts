@@ -180,6 +180,37 @@ describe('SessionControl end causes', () => {
     expect(h.events.peekStopCause(KEY)).toBe('host-stop');
     expect(h.events.takeStopCause(KEY)).toBe('host-stop');
   });
+  it('keeps a parallel host stop when the turn interrupt times out', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = makeHarness();
+      const rec = h.registry.register(KEY, makeConfig(), new AbortController());
+      rec.turnInFlight = true;
+      rec.query = { interrupt: jest.fn(() => new Promise<void>(() => undefined)) } as never;
+      const ending = Promise.all([
+        h.control.interruptCurrentTurn(KEY_ID, 'host-stop'),
+        h.control.endSession(KEY_ID, 'parent-stop'),
+      ]);
+      await jest.advanceTimersByTimeAsync(5000);
+      await ending;
+      expect(h.events.takeStopCause(KEY)).toBe('host-stop');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it('does not clear a replacement record stop cause during old teardown', async () => {
+    const h = makeHarness();
+    const rec = h.registry.register(KEY, makeConfig(), new AbortController());
+    let finishInterrupt: (() => void) | undefined;
+    rec.query = { interrupt: jest.fn(() => new Promise<void>((resolve) => { finishInterrupt = resolve; })) } as never;
+    const ending = h.control.endSession(KEY_ID, 'unknown');
+    await Promise.resolve();
+    h.registry.register(KEY, makeConfig(), new AbortController());
+    h.events.recordStopCause([KEY], 'runtime-cap');
+    finishInterrupt?.();
+    await ending;
+    expect(h.events.takeStopCause(KEY)).toBe('runtime-cap');
+  });
   it.each([
     [undefined, 'unknown'],
     ['user-stop', 'user-stop'],

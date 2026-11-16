@@ -98,11 +98,17 @@ describe('reduceIdleSession', () => {
     expect(nextBoundary.postBoundaryBaseline).toBeNull();
     expect(step(nextBoundary, context('t', 80_000)).state.postBoundaryBaseline).toBe(80_000);
   });
-  it('clears baseline on rekey and release', () => {
+  it('keeps the boundary armed on rekey and clears it on release', () => {
     const baseline = step(initial, sig('post-compact')).state;
-    const withBaseline = step(baseline, context('t', 120_000)).state;
-    expect(step(withBaseline, { type: 'rekey', sessionId: 's', toId: 'next' }).state).toMatchObject({ compactBoundaryObserved: false, postBoundaryBaseline: null });
+    const withBaseline = step(step(baseline, turn()).state, context('t', 120_000)).state;
+    expect(step(withBaseline, { type: 'rekey', sessionId: 's', toId: 'next' }).state).toMatchObject({ compactBoundaryObserved: true, postBoundaryBaseline: null });
     expect(step(withBaseline, { type: 'session-released', sessionId: 's' }).state).toMatchObject({ compactBoundaryObserved: false, postBoundaryBaseline: null });
+  });
+  it('ignores stale and activity-tainted readings for the post-boundary baseline', () => {
+    const ready = step(step(initial, sig('post-compact')).state, turn()).state;
+    expect(step(ready, context('old', 120_000)).state.postBoundaryBaseline).toBeNull();
+    const active = step(ready, sig('input')).state;
+    expect(step(active, context('t', 120_000)).state.postBoundaryBaseline).toBeNull();
   });
   it('arms from the matching ended turn, deriving a due timer', () => {
     const state = armed();

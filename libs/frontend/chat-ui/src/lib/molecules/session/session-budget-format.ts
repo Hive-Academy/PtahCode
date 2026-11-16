@@ -72,7 +72,9 @@ export function budgetTooltip(
   let used: string;
   let limit: string;
   if (budget.measure === 'tokens' || budget.measure === 'weighted-tokens') {
-    used = figures.tokensLabel;
+    used = budget.measure === 'weighted-tokens'
+      ? formatOptionalTokens(budget.used ?? undefined)
+      : figures.tokensLabel;
     limit = formatTokens(budget.limit);
   } else if (budget.measure === 'weighted-fallback') {
     used = formatOptionalTokens(budget.used ?? undefined);

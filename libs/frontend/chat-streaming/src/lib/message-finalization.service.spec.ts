@@ -365,6 +365,17 @@ describe('MessageFinalizationService', () => {
       expect(finalized[1]).toMatchObject({ id: 'reply', isInterrupted: true, cost: 0.01, duration: 300 });
     });
 
+    it('preserves an existing stop cause during a stats-only interrupted update', () => {
+      const reply = { id: 'reply', role: 'assistant', isInterrupted: true, stopCause: 'user-stop' } as ExecutionChatMessage;
+      tabsSignal.set([makeTab({
+        messages: [reply],
+        streamingState: makeStreamingState({ pendingStats: { tokens: { input: 1, output: 2 }, cost: 0.01, duration: 100 } }),
+      })]);
+      activeTabIdSignal.set('tab-1');
+      service.finalizeCurrentMessage(undefined, true, true);
+      expect(tabManager.applyFinalizedTurn.mock.calls[0][1][0].stopCause).toBe('user-stop');
+    });
+
     it('does not add an interruption marker on normal completion', () => {
       treeBuilder.buildTree.mockReturnValue([makeNode({ id: 'root', content: 'Done' })]);
       tabsSignal.set([makeTab({ streamingState: makeStreamingState({ currentMessageId: 'msg-1' }) })]);

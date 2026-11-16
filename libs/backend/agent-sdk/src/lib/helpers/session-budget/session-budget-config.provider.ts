@@ -106,10 +106,7 @@ export class SessionBudgetConfigProvider {
   }
 
   private readConfig(read: SettingReader): SessionBudgetConfig {
-    const storedBudget =
-      read(SESSION_BUDGET_SETTINGS.tokens.key) !== undefined ||
-      read(SESSION_BUDGET_SETTINGS.unit.key) !== undefined;
-    const tokenMeasure = this.readTokenMeasure(read, storedBudget);
+    const tokenMeasure = this.readTokenMeasure(read);
     let tightenPercent = this.readNumber(
       read,
       SESSION_BUDGET_SETTINGS.tightenPercent,
@@ -179,17 +176,18 @@ export class SessionBudgetConfigProvider {
     return setting.default;
   }
 
-  private readTokenMeasure(
-    read: SettingReader,
-    storedBudget: boolean,
-  ): SessionBudgetTokenMeasure {
+  /**
+   * An unset measure is `weighted`. A budget stored before the measure existed
+   * gets an explicit `raw` from `migrateSessionBudgetMeasure` at host start,
+   * so this reader never infers the measure from other keys.
+   */
+  private readTokenMeasure(read: SettingReader): SessionBudgetTokenMeasure {
     const setting = SESSION_BUDGET_SETTINGS.tokenMeasure;
-    const fallback = storedBudget ? 'raw' : 'weighted';
     const raw = read(setting.key);
-    if (raw === undefined) return fallback;
+    if (raw === undefined) return setting.default;
     if (raw === 'weighted' || raw === 'raw') return raw;
     this.warnInvalid(setting.key, raw, "'weighted' or 'raw'");
-    return fallback;
+    return setting.default;
   }
 
   private readNumber(

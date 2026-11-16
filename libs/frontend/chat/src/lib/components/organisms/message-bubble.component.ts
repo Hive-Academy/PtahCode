@@ -158,7 +158,7 @@ export class MessageBubbleComponent {
       case 'parent-steer': return 'Stopped by parent session';
       case 'runtime-cap': return 'Runtime cap reached';
       case 'host-stop': return 'Stopped by host';
-      default: return null;
+      default: return this.message().isInterrupted ? 'Response interrupted' : null;
     }
   });
   /** Lane hosts route permissions to their owning session. Main chat keeps its store path. */

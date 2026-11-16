@@ -389,7 +389,7 @@ export class MessageFinalizationService {
     if (previous?.role === 'assistant' && previous.isInterrupted && !stats) return;
     const marker =
       previous?.role === 'assistant'
-        ? { ...previous, isInterrupted: true, stopCause, ...(stats ?? {}) }
+        ? { ...previous, isInterrupted: true, stopCause: stopCause ?? previous.stopCause, ...(stats ?? {}) }
         : createExecutionChatMessage({
             id: `interrupted-${tabId}-${previous?.id ?? 'empty'}`,
             role: 'assistant',

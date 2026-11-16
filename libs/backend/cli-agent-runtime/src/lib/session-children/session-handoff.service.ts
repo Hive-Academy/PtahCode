@@ -268,9 +268,13 @@ export class SessionHandoffService
         request.sessionId,
         request.workspaceRoot,
       );
-      return record
-        ? { state: record.state, successorSessionId: record.successorSdkId }
-        : { state: 'absent', successorSessionId: null };
+      if (record) return { state: record.state, successorSessionId: record.successorSdkId };
+      const known = this.recoverableRecords.get(request.tabId);
+      if ((known?.predecessorSdkId === request.sessionId && known.workspaceRoot === request.workspaceRoot) ||
+          (this.inFlight.has(request.tabId) && this.inFlightSdkIds.get(request.tabId) === request.sessionId) ||
+          this.findHandedOff(request.tabId, request.sessionId))
+        return { state: 'unavailable', successorSessionId: null };
+      return { state: 'absent', successorSessionId: null };
     } catch (error: unknown) {
       this.reportError('handoff status lookup failed', error);
       return { state: 'unavailable', successorSessionId: null };

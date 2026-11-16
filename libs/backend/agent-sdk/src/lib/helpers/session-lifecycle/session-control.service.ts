@@ -70,6 +70,7 @@ function authWorkspaceOf(rec: SessionRecord): string | undefined {
 }
 
 export class SessionControl {
+  private readonly endingRecords = new WeakSet<SessionRecord>();
   constructor(
     private readonly logger: Logger,
     private readonly registry: SessionRegistry,
@@ -143,7 +144,8 @@ export class SessionControl {
       // the pump's turn claim. Release it here or the session's next follow-up
       // is held forever (TASK_2026_294).
       if (timedOut) {
-        this.adapterEvents?.clearStopCause(rec.tabId);
+        if (this.registry.find(rec.tabId) === rec && !this.endingRecords.has(rec))
+          this.adapterEvents?.clearStopCause(rec.tabId);
         // No turn identifier exists on SDK hooks. Retire this query rather than
         // allowing late A hooks to acquire operation ownership during turn B.
         this.retireInterruptedRecord(rec);
@@ -186,7 +188,8 @@ export class SessionControl {
       // degradation-audit: optional-capability - false is this method's
       // reported "interrupt did not take", the same value the 3s timeout
       // returns, and the turn claim is released above so the session lives on.
-      this.adapterEvents?.clearStopCause(rec.tabId);
+      if (this.registry.find(rec.tabId) === rec && !this.endingRecords.has(rec))
+        this.adapterEvents?.clearStopCause(rec.tabId);
       this.retireInterruptedRecord(rec);
       this.logger.warn(
         `[SessionLifecycle] Turn interrupt failed for session ${sessionId}`,
@@ -323,6 +326,7 @@ export class SessionControl {
     sessionId: SessionId,
     cause: SessionEndCause = 'unknown',
   ): Promise<void> {
+    this.endingRecords.add(rec);
     this.logger.info(`[SessionLifecycle] Ending session: ${sessionId}`);
     const registrySessionId = rec.realSessionId ?? rec.tabId;
     const workspaceRoot = rec.config.projectPath ?? '';
@@ -356,7 +360,7 @@ export class SessionControl {
       const ownsTab = this.registry.find(rec.tabId) === rec;
       rec.abortController.abort();
       this.registry.remove(rec);
-      if (!preserveTurnStopCause || !ownsTab) {
+      if (!preserveTurnStopCause && ownsTab) {
         this.adapterEvents?.clearStopCause(rec.tabId);
       }
       if (cause === 'user-stop' && ownsTab) {

@@ -12,6 +12,7 @@
  * label is `null`; the rest of the chain is still returned.
  */
 import { injectable, inject } from 'tsyringe';
+import { resolve } from 'node:path';
 import { TOKENS, RpcUserError } from '@ptah-extension/vscode-core';
 import type { Logger, RpcHandler } from '@ptah-extension/vscode-core';
 import {
@@ -95,7 +96,8 @@ export class SessionHandoffChainRpcHandlers {
 
     const { sessionId, tabId } = parsed.data;
     const metadata = await this.loadMetadata(sessionId);
-    const workspaceRoot = metadata?.workspaceId;
+    const workspaceId = metadata?.workspaceId?.trim();
+    const workspaceRoot = workspaceId ? resolve(workspaceId) : undefined;
     if (!workspaceRoot || !this.handoff) return UNAVAILABLE;
 
     try {

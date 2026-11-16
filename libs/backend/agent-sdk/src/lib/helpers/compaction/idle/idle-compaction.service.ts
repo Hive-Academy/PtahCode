@@ -395,22 +395,22 @@ export class IdleCompactionService implements IdleCompactionSignals {
   ): Observable<never> {
     const current = state();
     const pending = getPending();
-    const config = this.config.getConfig();
-    const idleConfig = this.config.getIdleCompactionConfig();
-    const effectiveSdkWindow = resolveAutoCompactControl({
-      enabled: config.enabled, windowTokens: config.contextTokenThreshold,
-      envWindow: config.envWindow, modelClass: this.nativeAnthropicSessions.has(current.sessionId) ? 'claude' : 'proxied',
-    }).effectiveWindow;
-    const inactiveKey = effectiveSdkWindow !== null && idleConfig.minTokens >= effectiveSdkWindow
-      ? `${idleConfig.minTokens}:${effectiveSdkWindow}` : null;
-    if (inactiveKey !== this.lastInactiveConfig) {
-      this.lastInactiveConfig = inactiveKey;
-      if (inactiveKey !== null) this.safeInfo('[IdleCompactionService] idle gate inactive', {
-        reason: 'min-at-sdk-window', minTokens: idleConfig.minTokens, effectiveSdkWindow,
-      });
-    }
     let refusal: IdleSkipReason | null;
     try {
+      const config = this.config.getConfig();
+      const idleConfig = this.config.getIdleCompactionConfig();
+      const effectiveSdkWindow = resolveAutoCompactControl({
+        enabled: config.enabled, windowTokens: config.contextTokenThreshold,
+        envWindow: config.envWindow, modelClass: this.nativeAnthropicSessions.has(current.sessionId) ? 'claude' : 'proxied',
+      }).effectiveWindow;
+      const inactiveKey = effectiveSdkWindow !== null && idleConfig.minTokens >= effectiveSdkWindow
+        ? `${idleConfig.minTokens}:${effectiveSdkWindow}` : null;
+      if (inactiveKey !== this.lastInactiveConfig) {
+        this.lastInactiveConfig = inactiveKey;
+        if (inactiveKey !== null) this.safeInfo('[IdleCompactionService] idle gate inactive', {
+          reason: 'min-at-sdk-window', minTokens: idleConfig.minTokens, effectiveSdkWindow,
+        });
+      }
       refusal =
         !pending || pending.attemptId !== effect.attemptId
           ? 'compaction-state'

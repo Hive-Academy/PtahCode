@@ -148,12 +148,13 @@ export class SessionHandoffAckStore {
   private async locate(
     predicate: (record: HandoffAckRecord) => boolean,
     complete = false,
+    requireValid = false,
   ): Promise<AckMatch | undefined> {
     if (!this.storage)
       throw new Error('handoff acknowledgement storage unavailable');
     const rootStorage = this.storage;
     let best: AckMatch | undefined;
-    for (const { storage, state } of await this.readCandidates(complete)) {
+    for (const { storage, state } of await this.readCandidates(complete, requireValid)) {
       state.records.forEach((record, index) => {
         if (!predicate(record)) return;
         const match = {
@@ -176,6 +177,7 @@ export class SessionHandoffAckStore {
    */
   private async readCandidates(
     complete = false,
+    requireValid = false,
   ): Promise<{ storage: IStateStorage; state: AckDocumentState }[]> {
     if (!this.storage)
       throw new Error('handoff acknowledgement storage unavailable');
@@ -184,7 +186,10 @@ export class SessionHandoffAckStore {
     let failed = false;
     for (const storage of storageCandidates(this.storage)) {
       try {
-        available.push({ storage, state: await this.readState(storage) });
+        const state = await this.readState(storage);
+        if (requireValid && (state.quarantine !== undefined || state.invalid.length > 0))
+          throw new Error('handoff acknowledgement document contains invalid data');
+        available.push({ storage, state });
       } catch (error) {
         failed = true;
         lastError = error;
@@ -236,7 +241,7 @@ export class SessionHandoffAckStore {
   ): Promise<Pick<HandoffAckRecord, 'state' | 'successorSdkId'> | undefined> {
     return this.serialized(async () => {
       const record = (
-        await this.locate((entry) => entry.predecessorTabId === tabId, true)
+        await this.locate((entry) => entry.predecessorTabId === tabId, true, true)
       )?.record;
       if (
         !record ||

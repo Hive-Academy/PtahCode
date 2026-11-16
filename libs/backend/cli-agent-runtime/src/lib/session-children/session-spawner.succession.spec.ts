@@ -441,6 +441,7 @@ describe('SessionSpawnerService succession', () => {
     );
     expect(h.adapter.sendMessageToSession).not.toHaveBeenCalled();
     expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
+    expect(h.adapter.interruptCurrentTurn).toHaveBeenCalledWith(child.childSessionId, 'runtime-cap');
   });
 
   it('arms the handoff grace when a direct tab turn starts after a deferred cap', async () => {

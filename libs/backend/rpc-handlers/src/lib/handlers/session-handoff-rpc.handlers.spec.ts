@@ -2,6 +2,7 @@
  * SessionHandoffChainRpcHandlers specs (TASK_2026_876, plan component 5).
  */
 import 'reflect-metadata';
+import { resolve } from 'node:path';
 
 // The real package pulls an ESM-only wasm module (workspace-intelligence)
 // that Jest cannot load as CommonJS; the handler only needs the token.
@@ -267,8 +268,16 @@ describe('session:handoffStatus', () => {
     expect(fakes.handoff.status).toHaveBeenCalledWith({
       sessionId: SESSION_A,
       tabId: 'tab-a',
-      workspaceRoot: WORKSPACE,
+      workspaceRoot: resolve(WORKSPACE),
     });
+  });
+
+  it('normalizes a stored workspace before looking up handoff status', async () => {
+    const fakes = makeFakes();
+    fakes.metadataStore.get.mockResolvedValue({ ...metadata('Plan'), workspaceId: `  ${WORKSPACE}/  ` });
+    build(fakes);
+    await callStatus(fakes, { sessionId: SESSION_A, tabId: 'tab-a' });
+    expect(fakes.handoff.status).toHaveBeenCalledWith(expect.objectContaining({ workspaceRoot: resolve(WORKSPACE) }));
   });
 
   it.each([

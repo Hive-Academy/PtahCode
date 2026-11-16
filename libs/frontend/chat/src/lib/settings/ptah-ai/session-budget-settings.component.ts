@@ -444,12 +444,11 @@ export class SessionBudgetSettingsComponent implements OnInit {
     );
   });
   protected readonly tokenMeasureValue = computed<SessionBudgetTokenMeasure>(() => {
-    const saved = this.saved();
-    const value = saved['tokenMeasure'];
-    if (value === 'weighted' || value === 'raw') return value;
-    return saved['tokens'] !== undefined || saved['unit'] !== undefined
-      ? 'raw'
-      : 'weighted';
+    const value = this.saved()['tokenMeasure'];
+    return (
+      this.tokenMeasures.find((measure) => measure === value) ??
+      this.settings.tokenMeasure.default
+    );
   });
 
   ngOnInit(): void {
