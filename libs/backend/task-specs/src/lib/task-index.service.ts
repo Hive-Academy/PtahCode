@@ -149,6 +149,8 @@ const GENERATED_ROOT_FILES: readonly string[] = [
 @injectable()
 export class TaskIndexService implements ITaskIndexNotifier {
   private readonly states = new Map<string, WorkspaceState>();
+  private readonly rootRebuildCounts = new Map<string, number>();
+  private readonly triggerRebuildCounts = new Map<string, number>();
   private readonly _onDidChangeIndex: IEvent<TaskIndexChangeEvent>;
   private readonly fireChange: (e: TaskIndexChangeEvent) => void;
   private readonly now: () => number;
@@ -809,13 +811,15 @@ export class TaskIndexService implements ITaskIndexNotifier {
     let carriers = 0;
     let rows = 0;
     let failed = true;
+    let scanMs = 0;
     try {
     const state = this.states.get(root);
     if (state) {
       state.eventsDuringRebuild.clear();
       await this.captureFingerprints(root, state, folderNames);
     }
-    const scan = await this.scanner.scan(root);
+    const scanStarted = this.now();
+    const scan = await this.scanner.scan(root).finally(() => { scanMs = this.now() - scanStarted; });
     enumerateMs = scan.timing?.enumerateMs ?? 0;
     readMs = scan.timing?.readMs ?? 0;
     parseValidateMs = scan.timing?.parseValidateMs ?? 0;
@@ -891,8 +895,14 @@ export class TaskIndexService implements ITaskIndexNotifier {
     };
     } finally {
       if (failed) this.states.get(root)?.fingerprints.clear();
+      const trigger = reason === 'write' ? 'writer' : reason === 'reindex' && !emit ? 'activation' : reason;
+      const rootRebuilds = (this.rootRebuildCounts.get(root) ?? 0) + 1;
+      const triggerRebuilds = (this.triggerRebuildCounts.get(trigger) ?? 0) + 1;
+      this.rootRebuildCounts.set(root, rootRebuilds);
+      this.triggerRebuildCounts.set(trigger, triggerRebuilds);
       logRebuildTiming(this.logger, {
-        trigger: reason === 'write' ? 'writer' : reason === 'reindex' && !emit ? 'activation' : reason,
+        trigger, rootId: createHash('sha256').update(root).digest('hex').slice(0, 8),
+        activeRoots: this.states.size, scanMs, rootRebuilds, triggerRebuilds,
         enumerateMs, readMs, parseValidateMs, sqliteReplaceMs: replaceMs,
         listenerMs, waitedMs, totalMs: this.now() - started + waitedMs,
         carriers, rows, coalesced, failed,
