@@ -51,3 +51,9 @@ PR 3 update: head 30c6f660b. Numeric header cells use `ptahNumeric`. Test ids `u
 
 ### Queued PR: ptah-table v2 (design from the settings prototype)
 Waits for the parent's order. The settings prototype defines the table look: header style, row height tokens, hover and selected row, sticky header, empty and loading slot, row actions. v1 only forwards the DaisyUI `table` classes.
+
+## Raw progress versus ptah-meter (13 sites)
+Detail table: progress-vs-meter.md. Result: meter fits 12, meter needs a variant 1, meter must not own 0.
+- local-tts-panel:260, local-stt-panel:225, system-prompt-drawer:210, inspector-task-section:150, task-list:508, turn-summary-tests:58, compact-session-activity:832, messaging-gateway-tab:190, review-run-detail:43, memory-indexing-banner:97 and :103, db-health-panel:258: meter fits (use `barRole="progressbar"` for task progress, `indeterminate` for unknown total, hidden label row).
+- declarative-dashboard dashboard-progress:29: meter needs a variant (native progress track look). Keep native `<progress>` until then.
+Recommendation: no new progress component. Migrate sites to ptah-meter. Two download states show 0% when the total is unknown: use `indeterminate`.
