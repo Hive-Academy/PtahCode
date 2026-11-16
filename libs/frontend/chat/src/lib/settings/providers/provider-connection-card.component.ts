@@ -7,7 +7,7 @@ import {
   type OutputEmitterRef,
 } from '@angular/core';
 import { LucideAngularModule, AlertTriangle } from 'lucide-angular';
-import { NativeCardComponent, PtahBadgeDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, SurfaceCardComponent } from '@ptah-extension/ui';
 import type { ConnectionCheckRecord, SettingScope } from '@ptah-extension/shared';
 import {
   SettingScopeRowComponent,
@@ -40,7 +40,7 @@ interface InlineAction {
 }
 
 /**
- * Compact connection card (≤ 80 px; plan :627-636, design-spec §3.3, prototype `.conn-card`).
+ * Compact connection card on `ptah-surface-card` (≤ 80 px; plan :627-636, design-spec §3.3, prototype `.conn-card`).
  *
  * - A full-surface native button opens the connection drawer. Inline controls are siblings of that
  *   button so they remain independent keyboard and pointer targets.
@@ -61,17 +61,17 @@ interface InlineAction {
 @Component({
   selector: 'ptah-provider-connection-card',
   standalone: true,
-  imports: [LucideAngularModule, NativeCardComponent, PtahBadgeDirective, SettingScopeRowComponent],
+  imports: [LucideAngularModule, SurfaceCardComponent, PtahBadgeDirective, PtahButtonDirective, SettingScopeRowComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block self-start' },
   template: `
-    <ptah-native-card class="block [&>div]:hover:bg-base-200/70 [&>div]:hover:border-base-content/20"
+    <ptah-surface-card class="block [&>div]:hover:bg-base-200/70 [&>div]:hover:border-base-content/20"
       density="compact" [tone]="cardTone()" [spine]="cardSpine()"
       [attr.title]="keyUnreadable() ? keyUnreadableText : statusCopy()"
       [attr.data-state]="resolvedState()" data-testid="provider-connection-card">
       <button type="button" class="absolute inset-0 z-0 w-full cursor-pointer rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-base-content"
         [attr.aria-label]="cardAriaLabel()" [attr.title]="triggerTitle()" (click)="detailsRequested.emit()" data-testid="provider-card-details-trigger"></button>
-      <div class="pointer-events-none relative z-10 flex min-h-[40px] items-center gap-3">
+      <div class="pointer-events-none relative z-10 flex min-h-[40px] items-center gap-ptah-controls">
         <span [class]="avatarClass()" aria-hidden="true" data-testid="card-avatar">{{ initials() }}</span>
         <!-- The name keeps at least 7rem (a long status once squeezed it to one letter per line);
              the status shrinks instead and wraps its own chips, so the card keeps its height. -->
@@ -83,9 +83,9 @@ interface InlineAction {
                then the usage ("Used by N · Used for: …" as ONE segment), so the line is at most two lines and the card
                stays within its 80 px budget. Full segment text is also in the card trigger's title for pointer hover.
                Each "·" ends the segment before it, so a wrapped line never starts with a separator. -->
-          <div class="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs leading-snug text-base-content-muted">
+          <div class="flex min-w-0 flex-wrap items-center gap-x-ptah-inline text-xs leading-snug text-base-content-muted">
             @if (subtitle(); as text) {
-              <span class="flex min-w-0 max-w-full items-center gap-x-1.5">
+              <span class="flex min-w-0 max-w-full items-center gap-x-ptah-inline">
                 <span class="block min-w-0 truncate text-xs leading-snug text-base-content-muted" [attr.title]="text"
                   data-testid="card-subtitle">{{ text }}</span>
                 @if (usedByCount() !== null) {
@@ -104,8 +104,8 @@ interface InlineAction {
             }
           </div>
         </div>
-        <div class="flex min-w-0 flex-wrap items-center justify-end gap-2 text-xs">
-          <span class="flex items-center gap-1.5 font-medium text-base-content" data-testid="status-badge">
+        <div class="flex min-w-0 flex-wrap items-center justify-end gap-ptah-inline text-xs">
+          <span class="flex items-center gap-ptah-inline font-medium text-base-content" data-testid="status-badge">
             @if (isBlockedMain()) {
               <lucide-angular [img]="AlertTriangleIcon" class="h-3.5 w-3.5" aria-hidden="true" />
               <span data-testid="blocked-main-badge">Main agent · Needs attention ·</span>
@@ -122,10 +122,10 @@ interface InlineAction {
           </span>
           @if (keyUnreadable()) {
             <!-- M-6: the key's state is unknown, so the repair is a re-read, never "Add API key". -->
-            <button type="button" [class]="inlineActionClass" [attr.aria-label]="'Retry reading the stored key for ' + displayName()"
+            <button type="button" ptahButton variant="ghost" [class]="inlineActionClass" [attr.aria-label]="'Retry reading the stored key for ' + displayName()"
               (click)="keyRetryRequested.emit()" data-testid="card-key-unreadable-retry">Retry</button>
           } @else if (inlineAction(); as action) {
-            <button type="button" [class]="inlineActionClass"
+            <button type="button" ptahButton variant="ghost" [class]="inlineActionClass"
               [attr.aria-label]="action.ariaLabel" (click)="action.emit.emit()" [attr.data-testid]="action.testId">
               {{ action.label }}
             </button>
@@ -145,14 +145,14 @@ interface InlineAction {
           }
         </div>
       </div>
-    </ptah-native-card>
+    </ptah-surface-card>
   `,
 })
 export class ProviderConnectionCardComponent {
   protected readonly AlertTriangleIcon = AlertTriangle;
   protected readonly keyUnreadableText = KEY_UNREADABLE_TEXT;
   protected readonly inlineActionClass =
-    'pointer-events-auto relative z-20 btn btn-ghost btn-sm px-2 text-xs font-medium text-base-content underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
+    'pointer-events-auto relative z-20 underline underline-offset-2';
 
   /** Provider registry or connection identifier (e.g. 'anthropic', 'kimi-code', 'claude-cli'). */
   readonly providerId = input<string>('');
