@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2197_9781
-status: backlog
+status: in_review
 type: REFACTORING
 title: "Align session budget, compaction and handoff"
 depends_on: []
