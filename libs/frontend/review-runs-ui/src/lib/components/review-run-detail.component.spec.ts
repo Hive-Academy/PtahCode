@@ -93,7 +93,10 @@ describe('ReviewRunDetailComponent', () => {
     ] });
     fixture.detectChanges();
     expect(text('review-detail-lens-count')).toBe('1 of 2 lenses completed');
-    expect(host.querySelector('progress')?.getAttribute('max')).toBe('2');
+    const meter = host.querySelector('ptah-meter [role="progressbar"]');
+    expect(meter?.getAttribute('aria-label')).toBe('Completed lenses');
+    expect(meter?.getAttribute('aria-valuenow')).toBe('1');
+    expect(meter?.getAttribute('aria-valuemax')).toBe('2');
     const notes = Array.from(host.querySelectorAll('[data-testid="review-detail-coverage-notes"] li')).map(item => item.textContent?.trim());
     expect(notes).toEqual(['diff-complete', 'dependencies:passed', 'lint:passed']);
     expect(text('review-detail-coverage')).toContain('Coverage notes');
@@ -117,7 +120,7 @@ describe('ReviewRunDetailComponent', () => {
     fixture.componentRef.setInput('run', { ...run, coverage: ['diff-truncated', 'dependencies:failed'], stages: [] });
     fixture.detectChanges();
     expect(host.querySelector('[data-testid="review-detail-lens-count"]')).toBeNull();
-    expect(host.querySelector('progress')).toBeNull();
+    expect(host.querySelector('ptah-meter')).toBeNull();
     expect(host.querySelector('[data-testid="review-detail-lenses"]')).toBeNull();
     expect(host.textContent).toContain('Lens count unavailable');
     expect(host.textContent).toContain('Lens records unavailable.');

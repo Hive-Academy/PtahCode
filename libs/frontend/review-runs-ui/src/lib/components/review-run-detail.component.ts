@@ -4,13 +4,13 @@ import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component';
 import { ReviewFindingsPanelComponent } from '../findings/review-findings-panel.component';
 import { RUN_STATUS_INK, reviewStatusLabel } from './review-runs-list.component';
-import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahMeterComponent } from '@ptah-extension/ui';
 
 /** The run contract and the query return 16 stage records at most. */
 const STAGE_LIMIT = 16;
 
 @Component({
-  selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsPanelComponent, ReviewConfirmDialogComponent, PtahButtonDirective, PtahBadgeDirective],
+  selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsPanelComponent, ReviewConfirmDialogComponent, PtahButtonDirective, PtahBadgeDirective, PtahMeterComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
@@ -40,7 +40,7 @@ const STAGE_LIMIT = 16;
               @if (lensCount(); as count) { <span data-testid="review-detail-lens-count">{{ count.completed }} of {{ count.total }} lenses completed</span> }
               @else { <span class="text-base-content-muted" data-testid="review-detail-lens-count-unavailable">Lens count unavailable</span> }
             </div>
-            @if (lensCount(); as count) { <progress class="progress progress-primary mt-2 h-1 w-full" [value]="count.completed" [max]="count.total" aria-label="Completed lenses"></progress> }
+            @if (lensCount(); as count) { <ptah-meter class="mt-2 block w-full" [value]="count.completed" [max]="count.total" label="Completed lenses" size="xs" tone="primary" [hideLabel]="true" [showValue]="false" barRole="progressbar" aria-label="Completed lenses" /> }
             @if (run().status === 'partial') { <p class="mt-2 text-sm text-state-need">Coverage limited. Unchecked paths are not claimed clean.</p> }
             @if (run().coverage.length) { <h3 class="mt-3 text-xs font-semibold">Coverage notes</h3>
               <ul class="mt-1 flex flex-wrap gap-x-3 gap-y-1" data-testid="review-detail-coverage-notes">@for (note of run().coverage; track $index) { <li class="break-all font-mono text-xs text-base-content-muted">{{ note }}</li> }</ul> }

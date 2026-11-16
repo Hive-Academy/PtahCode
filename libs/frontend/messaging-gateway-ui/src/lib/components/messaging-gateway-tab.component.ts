@@ -26,6 +26,7 @@ import {
 import { GatewaySetupGuideComponent } from './gateway-setup-guide.component';
 import {
   PtahButtonDirective,
+  PtahMeterComponent,
   PtahStatComponent,
   PtahSurfaceDirective,
 } from '@ptah-extension/ui';
@@ -62,6 +63,7 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
     GatewayPlatformPaneComponent,
     GatewaySetupGuideComponent,
     PtahButtonDirective,
+    PtahMeterComponent,
     PtahStatComponent,
     PtahSurfaceDirective,
   ],
@@ -187,11 +189,17 @@ const PLATFORM_CARDS: readonly PlatformCardConfig[] = [
                   }
                 </span>
                 @if (!v.error && !v.done) {
-                  <progress
-                    class="progress progress-primary w-full"
+                  <ptah-meter
+                    class="block w-full"
                     [value]="v.percent"
-                    max="100"
-                  ></progress>
+                    [max]="100"
+                    label="Whisper model download"
+                    size="sm"
+                    tone="primary"
+                    [hideLabel]="true"
+                    [showValue]="false"
+                    barRole="progressbar"
+                  />
                 }
               </div>
               <button
