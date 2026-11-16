@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   LucideAngularModule,
 } from 'lucide-angular';
+import { PtahMeterComponent } from '@ptah-extension/ui';
 import type {
   TurnSummaryTestTone,
   TurnSummaryTestsCard,
@@ -35,11 +36,10 @@ const TONE_CLASS: Readonly<Record<TurnSummaryTestTone, string>> = {
  * five failure lines and a native `<details>` "Full command". Outcome is text,
  * never colour alone; colour rides along through the AA-measured overrides.
  */
-// Left raw: this pass share uses native progress with the daisyUI success track beside a separate percentage.
 @Component({
   selector: 'ptah-turn-summary-tests',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, PtahMeterComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -54,102 +54,115 @@ const TONE_CLASS: Readonly<Record<TurnSummaryTestTone, string>> = {
   ],
   template: `
     @let tests = card();
-      <div class="mb-2 flex min-w-0 items-center gap-2">
-        <progress
-          class="progress progress-success h-1.5 min-w-0 flex-1"
-          [value]="tests.summary.passed"
-          [max]="tests.summary.total"
-          [attr.aria-label]="passedShareLabel()"
-          data-testid="turn-summary-tests-progress"
-        ></progress>
-        <span class="shrink-0 tabular-nums text-base-content-muted"
-          >{{ passedPercent() }}%</span
+    <div class="mb-2 flex min-w-0 items-center gap-2">
+      <ptah-meter
+        class="min-w-0 flex-1"
+        [value]="tests.summary.passed"
+        [max]="tests.summary.total"
+        [label]="passedShareLabel()"
+        size="sm"
+        tone="ok"
+        [hideLabel]="true"
+        [showValue]="false"
+        barRole="progressbar"
+        data-testid="turn-summary-tests-progress"
+      />
+      <span class="shrink-0 tabular-nums text-base-content-muted"
+        >{{ passedPercent() }}%</span
+      >
+    </div>
+    <ul class="flex min-w-0 flex-col" role="list">
+      @for (run of tests.runs; track $index) {
+        <li
+          class="flex min-w-0 flex-col gap-1 border-b border-base-content/10 py-1.5 last:border-b-0"
+          data-testid="turn-summary-test-run"
         >
-      </div>
-      <ul class="flex min-w-0 flex-col" role="list">
-        @for (run of tests.runs; track $index) {
-          <li
-            class="flex min-w-0 flex-col gap-1 border-b border-base-content/10 py-1.5 last:border-b-0"
-            data-testid="turn-summary-test-run"
-          >
-            <div class="flex min-w-0 items-start gap-1.5">
-              @switch (run.outcome) {
-                @case ('passed') {
-                  <lucide-angular
-                    [img]="PassedIcon"
-                    [class]="'mt-0.5 h-3.5 w-3.5 shrink-0 ' + TONE_CLASS[run.tone]"
-                    role="img"
-                    [attr.aria-label]="run.outcomeName"
-                  />
-                }
-                @case ('failed') {
+          <div class="flex min-w-0 items-start gap-1.5">
+            @switch (run.outcome) {
+              @case ('passed') {
+                <lucide-angular
+                  [img]="PassedIcon"
+                  [class]="
+                    'mt-0.5 h-3.5 w-3.5 shrink-0 ' + TONE_CLASS[run.tone]
+                  "
+                  role="img"
+                  [attr.aria-label]="run.outcomeName"
+                />
+              }
+              @case ('failed') {
+                <lucide-angular
+                  [img]="FailedIcon"
+                  [class]="
+                    'mt-0.5 h-3.5 w-3.5 shrink-0 ' + TONE_CLASS[run.tone]
+                  "
+                  role="img"
+                  [attr.aria-label]="run.outcomeName"
+                />
+              }
+              @case ('running') {
+                <lucide-angular
+                  [img]="RunningIcon"
+                  [class]="
+                    'mt-0.5 h-3.5 w-3.5 shrink-0 ' + TONE_CLASS[run.tone]
+                  "
+                  role="img"
+                  [attr.aria-label]="run.outcomeName"
+                />
+              }
+              @default {
+                <lucide-angular
+                  [img]="UnknownIcon"
+                  [class]="
+                    'mt-0.5 h-3.5 w-3.5 shrink-0 ' + TONE_CLASS[run.tone]
+                  "
+                  role="img"
+                  [attr.aria-label]="run.outcomeName"
+                />
+              }
+            }
+            <span class="flex min-w-0 flex-1 flex-col">
+              <span
+                class="ts-wrap font-mono font-semibold"
+                [title]="run.command"
+                data-testid="turn-summary-test-label"
+                >{{ run.label }}</span
+              >
+              <span
+                [class]="'ts-wrap ' + TONE_CLASS[run.tone]"
+                data-testid="turn-summary-test-outcome"
+                >{{ outcomeEyebrow(run.outcomeName, run.project) }}</span
+              >
+            </span>
+          </div>
+          @if (run.failures.length > 0) {
+            <ul class="flex min-w-0 flex-col gap-0.5 pl-5" role="list">
+              @for (failure of run.failures; track $index) {
+                <li
+                  class="ts-wrap flex items-start gap-1 font-mono text-[11px] diff-del-text"
+                  data-testid="turn-summary-test-failure"
+                >
                   <lucide-angular
                     [img]="FailedIcon"
-                    [class]="'mt-0.5 h-3.5 w-3.5 shrink-0 ' + TONE_CLASS[run.tone]"
-                    role="img"
-                    [attr.aria-label]="run.outcomeName"
+                    class="mt-0.5 h-3 w-3 shrink-0"
+                    aria-hidden="true"
                   />
-                }
-                @case ('running') {
-                  <lucide-angular
-                    [img]="RunningIcon"
-                    [class]="'mt-0.5 h-3.5 w-3.5 shrink-0 ' + TONE_CLASS[run.tone]"
-                    role="img"
-                    [attr.aria-label]="run.outcomeName"
-                  />
-                }
-                @default {
-                  <lucide-angular
-                    [img]="UnknownIcon"
-                    [class]="'mt-0.5 h-3.5 w-3.5 shrink-0 ' + TONE_CLASS[run.tone]"
-                    role="img"
-                    [attr.aria-label]="run.outcomeName"
-                  />
-                }
+                  {{ failure }}
+                </li>
               }
-              <span class="flex min-w-0 flex-1 flex-col">
-                <span
-                  class="ts-wrap font-mono font-semibold"
-                  [title]="run.command"
-                  data-testid="turn-summary-test-label"
-                  >{{ run.label }}</span
-                >
-                <span
-                  [class]="'ts-wrap ' + TONE_CLASS[run.tone]"
-                  data-testid="turn-summary-test-outcome"
-                  >{{ outcomeEyebrow(run.outcomeName, run.project) }}</span
-                >
-              </span>
-            </div>
-            @if (run.failures.length > 0) {
-              <ul class="flex min-w-0 flex-col gap-0.5 pl-5" role="list">
-                @for (failure of run.failures; track $index) {
-                  <li
-                    class="ts-wrap flex items-start gap-1 font-mono text-[11px] diff-del-text"
-                    data-testid="turn-summary-test-failure"
-                  >
-                    <lucide-angular
-                      [img]="FailedIcon"
-                      class="mt-0.5 h-3 w-3 shrink-0"
-                      aria-hidden="true"
-                    />
-                    {{ failure }}
-                  </li>
-                }
-              </ul>
-            }
-            <details class="pl-5" data-testid="turn-summary-test-command">
-              <summary class="cursor-pointer text-base-content-muted">
-                Full command
-              </summary>
-              <code
-                class="ts-wrap mt-1 block whitespace-pre-wrap font-mono text-[11px]"
-                >{{ run.command }}</code
-              >
-            </details>
-          </li>
-        }
-      </ul>
+            </ul>
+          }
+          <details class="pl-5" data-testid="turn-summary-test-command">
+            <summary class="cursor-pointer text-base-content-muted">
+              Full command
+            </summary>
+            <code
+              class="ts-wrap mt-1 block whitespace-pre-wrap font-mono text-[11px]"
+              >{{ run.command }}</code
+            >
+          </details>
+        </li>
+      }
+    </ul>
   `,
 })
 export class TurnSummaryTestsComponent {

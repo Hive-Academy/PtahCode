@@ -1145,9 +1145,7 @@ describe(`${CompactSessionActivityComponent.name} board layout`, () => {
       metricsModel?: string | null;
       todos?: import('./compact-session-metrics').CompactTodoState | null;
       gitStats?: import('./compact-session-metrics').CompactGitState | null;
-      linkedTask?:
-        | import('./compact-session-metrics').CompactLinkedTask
-        | null;
+      linkedTask?: import('./compact-session-metrics').CompactLinkedTask | null;
     } = {},
   ) {
     const fixture = TestBed.createComponent(CompactSessionActivityComponent);
@@ -1271,6 +1269,7 @@ describe(`${CompactSessionActivityComponent.name} board layout`, () => {
     expect(
       metrics?.querySelector('[aria-label="Todos"]')?.getAttribute('title'),
     ).toBe('Todos not reported by this session');
+    expect(metrics?.querySelector('ptah-meter')).toBeNull();
     expect(
       metrics?.querySelector('[aria-label="Context usage"]')?.textContent,
     ).toContain('—');
@@ -1290,6 +1289,11 @@ describe(`${CompactSessionActivityComponent.name} board layout`, () => {
     ).toBe('Todos unknown');
     expect(
       metrics
+        ?.querySelector('ptah-meter [role="progressbar"]')
+        ?.hasAttribute('aria-valuenow'),
+    ).toBe(false);
+    expect(
+      metrics
         ?.querySelector('[data-testid="compact-session-git-cell"]')
         ?.getAttribute('title'),
     ).toBe('Could not read git status');
@@ -1304,7 +1308,11 @@ describe(`${CompactSessionActivityComponent.name} board layout`, () => {
     expect(
       metrics?.querySelector('[aria-label="Todos"]')?.textContent,
     ).toContain('2/3');
-    expect(metrics?.querySelector('progress')?.getAttribute('value')).toBe('2');
+    expect(
+      metrics
+        ?.querySelector('ptah-meter [role="progressbar"]')
+        ?.getAttribute('aria-valuenow'),
+    ).toBe('2');
     expect(
       metrics?.querySelector('[aria-label="Todos"]')?.getAttribute('title'),
     ).toBe('Writing tests');
@@ -1387,15 +1395,30 @@ describe(`${CompactSessionActivityComponent.name} board layout`, () => {
     buttonByText(root, 'Allow')?.click();
     buttonByText(root, 'Deny')?.click();
 
-    expect(decided).toHaveBeenCalledWith({ callout: permission, decision: 'allow', reason: undefined });
-    expect(decided).toHaveBeenCalledWith({ callout: permission, decision: 'deny', reason: undefined });
+    expect(decided).toHaveBeenCalledWith({
+      callout: permission,
+      decision: 'allow',
+      reason: undefined,
+    });
+    expect(decided).toHaveBeenCalledWith({
+      callout: permission,
+      decision: 'deny',
+      reason: undefined,
+    });
     // A lane accepts only allow and deny, so it has no further options.
     expect(buttonByText(root, 'More')).toBeUndefined();
   });
 
   it('offers a session permission every option, including a denial reason', () => {
-    const session: CompactPermissionCallout = { ...permission, source: 'session', agentId: undefined };
-    const fixture = renderBoard({ lanes: laneSummary([lane()], 2, { running: 3 }), callout: session });
+    const session: CompactPermissionCallout = {
+      ...permission,
+      source: 'session',
+      agentId: undefined,
+    };
+    const fixture = renderBoard({
+      lanes: laneSummary([lane()], 2, { running: 3 }),
+      callout: session,
+    });
     const root = fixture.nativeElement as HTMLElement;
     const decided = jest.fn();
     const opened = jest.fn();
@@ -1404,16 +1427,29 @@ describe(`${CompactSessionActivityComponent.name} board layout`, () => {
 
     buttonByText(root, 'Open')?.click();
     expect(opened).toHaveBeenCalledWith(session);
-    buttonByText(root, 'More')?.click(); fixture.detectChanges();
-    buttonByText(root, 'Always allow in session')?.click();
-    expect(decided).toHaveBeenLastCalledWith({ callout: session, decision: 'always_allow', reason: undefined });
+    buttonByText(root, 'More')?.click();
     fixture.detectChanges();
-    buttonByText(root, 'More')?.click(); fixture.detectChanges();
-    buttonByText(root, 'Deny with message')?.click(); fixture.detectChanges();
-    const reason = root.querySelector<HTMLInputElement>('[data-testid="cs-callout-permission"] input')!;
+    buttonByText(root, 'Always allow in session')?.click();
+    expect(decided).toHaveBeenLastCalledWith({
+      callout: session,
+      decision: 'always_allow',
+      reason: undefined,
+    });
+    fixture.detectChanges();
+    buttonByText(root, 'More')?.click();
+    fixture.detectChanges();
+    buttonByText(root, 'Deny with message')?.click();
+    fixture.detectChanges();
+    const reason = root.querySelector<HTMLInputElement>(
+      '[data-testid="cs-callout-permission"] input',
+    )!;
     reason.value = 'Run the unit suite only';
     buttonByText(root, 'Send denial')?.click();
-    expect(decided).toHaveBeenLastCalledWith({ callout: session, decision: 'deny_with_message', reason: 'Run the unit suite only' });
+    expect(decided).toHaveBeenLastCalledWith({
+      callout: session,
+      decision: 'deny_with_message',
+      reason: 'Run the unit suite only',
+    });
   });
 
   it('shows question text and remaining count and emits Answer', () => {
