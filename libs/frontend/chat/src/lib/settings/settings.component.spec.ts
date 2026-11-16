@@ -62,6 +62,12 @@ import {
   MotionStageDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahSettingsLayoutComponent,
+  PtahDescriptionListComponent,
+  PtahStatusComponent,
+  PtahStatePanelComponent,
+  PtahSkeletonComponent,
+  PtahFormSectionComponent,
 } from '@ptah-extension/ui';
 import { SettingsComponent } from './settings.component';
 import { OrchestrationSettingsComponent } from './ptah-ai/orchestration-settings.component';
@@ -375,7 +381,7 @@ describe('SettingsComponent agents-routing landing', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [
+        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, 
           AgentsRoutingSettingsComponent,
           MotionStageDirective,
           PtahButtonDirective,
@@ -439,7 +445,7 @@ describe('SettingsComponent agents-routing landing', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [
+        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, 
           AgentsRoutingSettingsComponent,
           MotionStageDirective,
           PtahButtonDirective,
@@ -512,7 +518,7 @@ describe('SettingsComponent agents-routing landing', () => {
       ],
     });
     TestBed.overrideComponent(SettingsComponent, {
-      set: { imports: [AgentsRoutingStub, MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+      set: { imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, AgentsRoutingStub, MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
     });
     const appState = TestBed.inject(AppStateManager);
     appState.requestSettingsTab({
@@ -570,7 +576,7 @@ describe('SettingsComponent agents-routing landing', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [OrchestrationSettingsComponent, MotionStageDirective],
+        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, OrchestrationSettingsComponent, MotionStageDirective],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
@@ -623,7 +629,7 @@ describe('SettingsComponent header', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
+        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
@@ -636,22 +642,15 @@ describe('SettingsComponent header', () => {
   it('shows the workspace name (full path in title) and the Desktop app label', () => {
     const element = render(true, 'C:\\work\\ptah-extension');
     const context = element.querySelector('[data-testid="settings-context"]');
-    expect(context?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      'Workspace: ptah-extension · App: Desktop',
-    );
-    expect(context?.querySelector('[title]')?.getAttribute('title')).toBe(
+    expect(Array.from(context?.querySelectorAll('dt, dd') ?? [], (node) => node.textContent?.trim())).toEqual(['Workspace', 'ptah-extension', 'App', 'Desktop']);
+    expect(context?.getAttribute('title')).toBe(
       'C:\\work\\ptah-extension',
     );
   });
 
   it('shows only the VS Code app label when no folder is open', () => {
     const element = render(false, null);
-    expect(
-      element
-        .querySelector('[data-testid="settings-context"]')
-        ?.textContent?.replace(/\s+/g, ' ')
-        .trim(),
-    ).toBe('App: VS Code');
+    expect(Array.from(element.querySelectorAll('[data-testid="settings-context"] dt, [data-testid="settings-context"] dd'), (node) => node.textContent?.trim())).toEqual(['App', 'VS Code']);
   });
 
   it('keeps Back and four enabled tab buttons with their names (D9)', () => {
@@ -663,7 +662,7 @@ describe('SettingsComponent header', () => {
     ).toBe('Back to Chat');
     const tabs = Array.from(
       element.querySelectorAll<HTMLButtonElement>(
-        'nav[aria-label="Settings sections"] button',
+        '[data-testid="settings-layout-tablist"] button',
       ),
     );
     expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
@@ -673,8 +672,25 @@ describe('SettingsComponent header', () => {
       'Search & Voice',
     ]);
     expect(tabs.every((tab) => !tab.disabled)).toBe(true);
+    expect(element.querySelector('[data-testid="settings-tabs"]')?.getAttribute('aria-label')).toBe('Settings sections');
+    expect(element.querySelector('[data-testid="settings-back"]')?.closest('[nav-header]')).not.toBeNull();
     expect(tabs[0].classList.contains('tab-active')).toBe(true);
+    expect(tabs[0].getAttribute('data-active')).toBe('true');
     expect(tabs[0].getAttribute('aria-current')).toBe('page');
+  });
+
+  it('keeps one settings-back test id and a narrow-only Back in the header actions', () => {
+    const element = render(false, null);
+    expect(element.querySelectorAll('[data-testid="settings-back"]')).toHaveLength(1);
+    const narrowBack = element.querySelector<HTMLButtonElement>('[data-narrow-back]');
+    expect(narrowBack?.getAttribute('aria-label')).toBe('Back to Chat');
+    expect(narrowBack?.hasAttribute('data-testid')).toBe(false);
+    // The wrapper owns the hide rule: ptahButton's display rule beats a utility on the button.
+    expect(narrowBack?.classList.contains('[@container(min-width:640px)]:hidden')).toBe(false);
+    expect(
+      narrowBack?.closest('[data-narrow-back-slot]')?.classList.contains('[@container(min-width:640px)]:hidden'),
+    ).toBe(true);
+    expect(narrowBack?.closest('[nav-header]')).toBeNull();
   });
 
   it.each([true, false])(
@@ -690,7 +706,7 @@ describe('SettingsComponent header', () => {
         .mockImplementation(() => undefined);
       Array.from(
         element.querySelectorAll<HTMLButtonElement>(
-          'nav[aria-label="Settings sections"] button',
+          '[data-testid="settings-layout-tablist"] button',
         ),
       )[2].click();
       renderedFixture.detectChanges();
@@ -755,7 +771,7 @@ describe('SettingsComponent security copy', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
+        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
@@ -783,14 +799,44 @@ describe('SettingsComponent security copy', () => {
     expect(builtIn.textContent.replace(/\s+/g, ' ')).toContain(
       'Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.',
     );
-    // D10 (Batch 28): one text-xs line (12 px floor), truncated rather than wrapped.
+    // D10 (Batch 28) kept text-xs (12 px floor). In the narrow nav footer the claim wraps:
+    // one truncated line hid most of it.
     expect(builtIn.className).toContain('text-xs');
-    expect(builtIn.querySelector('p')?.className).toContain('truncate');
+    expect(builtIn.querySelector('p')?.className).not.toContain('truncate');
+    // The text is visible in full, so no title repeats it (a title is not reachable by keyboard or touch).
+    expect(builtIn.hasAttribute('title')).toBe(false);
     expect(
       fixture.nativeElement.querySelector(
         '[data-testid="custom-provider-security-copy"]',
       ),
     ).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-narrow-endpoint-warning]'),
+    ).toBeNull();
+  });
+
+  it('keeps a narrow-only custom endpoint warning in the header band', () => {
+    isCustomProviderSelected.set(true);
+    selectedCustomHost.set('192.168.1.50:8000');
+    const fixture = render();
+
+    const warning = fixture.nativeElement.querySelector(
+      '[data-narrow-endpoint-warning]',
+    ) as HTMLElement | null;
+    expect(warning?.hasAttribute('header-band')).toBe(true);
+    expect(
+      warning?.classList.contains('[@container(min-width:640px)]:hidden'),
+    ).toBe(true);
+    expect(warning?.hasAttribute('data-testid')).toBe(false);
+    expect(warning?.querySelector('code')?.textContent?.trim()).toBe(
+      '192.168.1.50:8000',
+    );
+    expect(warning?.textContent).toContain('Custom endpoint');
+    expect(
+      fixture.nativeElement.querySelectorAll(
+        '[data-testid="custom-provider-security-copy"]',
+      ).length,
+    ).toBe(1);
   });
 
   it('swaps in a host-naming claim for a user-defined provider', () => {
@@ -805,6 +851,8 @@ describe('SettingsComponent security copy', () => {
     const text = custom.textContent.replace(/\s+/g, ' ');
     expect(text).toContain('192.168.1.50:8000');
     expect(text).toContain('Ptah does not operate, vet, or monitor it');
+    expect(custom.hasAttribute('title')).toBe(false);
+    expect(custom.querySelector('p')?.className).not.toContain('truncate');
     expect(
       fixture.nativeElement.querySelector(
         '[data-testid="builtin-provider-security-copy"]',
@@ -875,7 +923,7 @@ describe('SettingsComponent deferred tabs', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [
+        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, 
           MotionStageDirective,
           AdvancedStub,
           SearchVoiceStub,
@@ -942,7 +990,7 @@ describe('SettingsComponent deferred tabs', () => {
     expect(
       Array.from(
         element.querySelectorAll(
-          'ptah-advanced-settings, section[aria-label="Setup"]',
+          'ptah-advanced-settings, [data-testid="settings-setup"]',
         ),
         (node) => node.tagName,
       ),
@@ -968,8 +1016,14 @@ describe('SettingsComponent deferred tabs', () => {
     const error = element.querySelector(
       '[data-testid="providers-settings-load-error"]',
     );
-    expect(error?.getAttribute('role')).toBe('alert');
+    // Exactly one alert region (the panel's error section), so the error is announced one time.
+    expect(error?.hasAttribute('role')).toBe(false);
+    expect(error?.querySelectorAll('[role="alert"]').length).toBe(1);
+    expect(error?.querySelector('[role="alert"]')?.textContent).toContain('The Providers page could not load.');
+    expect(error?.querySelector('ptah-state-panel')?.getAttribute('state')).toBe('error');
     expect(error?.textContent).toContain('The Providers page could not load.');
+    // One Reload button only: the panel has no action of its own.
+    expect(Array.from(error?.querySelectorAll('button') ?? [], (button) => button.textContent?.trim())).toEqual(['Reload']);
 
     const reload = jest
       .spyOn(fixture.componentInstance, 'reloadWindow')
@@ -1105,7 +1159,7 @@ describe('SettingsComponent deep-linked provider request', () => {
       ],
     });
     TestBed.overrideComponent(SettingsComponent, {
-      set: { imports: [ProvidersPageStub, MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+      set: { imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, ProvidersPageStub, MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
     });
     const appState = TestBed.inject(AppStateManager);
     appState.requestSettingsTab({
