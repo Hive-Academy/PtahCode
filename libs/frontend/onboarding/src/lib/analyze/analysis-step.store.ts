@@ -52,6 +52,7 @@ export class AnalysisStepStore {
   );
   private readonly attachedValue = signal(false);
   private workspaceRevision = 0;
+  private selectionRevision = 0;
   readonly saved = this.savedValue.asReadonly();
   readonly hidden = this.hiddenValue.asReadonly();
   readonly selected = this.selectedValue.asReadonly();
@@ -131,13 +132,14 @@ export class AnalysisStepStore {
   }
   async selectAnalysis(
     filename: string,
-  ): Promise<'loaded' | 'not-found' | 'failed'> {
+  ): Promise<'loaded' | 'not-found' | 'failed' | 'superseded'> {
     if (!this.savedValue().some((item) => item.filename === filename))
       return 'not-found';
     const revision = this.workspaceRevision;
+    const selectionRevision = ++this.selectionRevision;
     try {
       const result = await this.rpc.loadAnalysis(filename);
-      if (revision !== this.workspaceRevision) return 'not-found';
+      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'superseded';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
       this.selectedValue.set(filename);
       this.loadedValue.set(result);
@@ -147,12 +149,13 @@ export class AnalysisStepStore {
       return 'failed';
     }
   }
-  async useAnalysis(slug: string): Promise<'loaded' | 'not-found' | 'failed'> {
+  async useAnalysis(slug: string): Promise<'loaded' | 'not-found' | 'failed' | 'superseded'> {
     if (!slug || slug.includes('/') || slug.includes('\\')) return 'not-found';
     const revision = this.workspaceRevision;
+    const selectionRevision = ++this.selectionRevision;
     try {
       const result = await this.rpc.loadAnalysis(slug);
-      if (revision !== this.workspaceRevision) return 'not-found';
+      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'superseded';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
       this.selectedValue.set(slug);
       this.loadedValue.set(result);
@@ -164,6 +167,7 @@ export class AnalysisStepStore {
   }
   resetForWorkspace(): void {
     this.workspaceRevision++;
+    this.selectionRevision++;
     this.savedValue.set([]);
     this.hiddenValue.set(new Set());
     this.selectedValue.set(null);
@@ -171,7 +175,10 @@ export class AnalysisStepStore {
     this.attachedValue.set(false);
   }
   clearSelection(): void {
+    this.selectionRevision++;
     this.selectedValue.set(null);
     this.loadedValue.set(null);
   }
 }
+
+

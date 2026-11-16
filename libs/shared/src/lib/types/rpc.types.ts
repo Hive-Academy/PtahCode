@@ -451,6 +451,8 @@ import type {
   WizardPreviewGenerationParams,
   WizardPreviewGenerationResponse,
   MultiPhaseAnalysisResponse,
+  WizardRecommendAnalysisSkillsParams,
+  WizardRecommendAnalysisSkillsResult,
   EnhancedPromptsGetStatusParams,
   EnhancedPromptsGetStatusResponse,
   EnhancedPromptsRunWizardParams,
@@ -1559,6 +1561,10 @@ export interface RpcMethodRegistry
   'wizard:recommend-skills': {
     params: WizardRecommendSkillsParams;
     result: WizardRecommendSkillsResponse;
+  };
+  'wizard:recommend-analysis-skills': {
+    params: WizardRecommendAnalysisSkillsParams;
+    result: WizardRecommendAnalysisSkillsResult;
   };
   'wizard:search-skills': {
     params: WizardSearchSkillsParams;
@@ -3815,6 +3821,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:get-resumable-run': true,
   'wizard:analysis-status': true,
   'wizard:recommend-skills': true,
+  'wizard:recommend-analysis-skills': true,
   'wizard:search-skills': true,
   'wizard:get-project-guidance': true,
   'wizard:preview-skills-for-consent': true,

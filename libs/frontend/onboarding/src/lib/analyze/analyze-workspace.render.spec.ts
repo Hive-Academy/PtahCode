@@ -151,10 +151,11 @@ describe('AnalyzeWorkspacePage rendered actions', () => {
     expect(text).not.toContain('Continue previous run');
     const continueButton = [
       ...(fixture.nativeElement as HTMLElement).querySelectorAll('button'),
-    ].find((button) => button.textContent?.trim() === 'Project guidance');
+    ].find((button) => button.textContent?.trim() === 'Review skills');
     continueButton?.click();
     expect(router.navigate).toHaveBeenCalledWith(
-      ['/onboarding', 'analyze', 'guidance'],
+      ['/onboarding', 'analyze', 'skills'],
+
       expect.objectContaining({ queryParams: { analysis: 'saved' } }),
     );
   });
@@ -512,3 +513,4 @@ describe('AnalyzeWorkspacePage rendered actions', () => {
     fixture.destroy();
   });
 });
+

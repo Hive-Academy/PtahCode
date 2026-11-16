@@ -14,13 +14,13 @@ import {
 } from '@ptah-extension/ui';
 
 @Component({
-  selector: 'ptah-team-builder-skill-consent',
+  selector: 'ptah-stack-skill-consent',
   standalone: true,
   imports: [NativeModalComponent, PtahButtonDirective, PtahCheckboxDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  templateUrl: './team-builder-skill-consent.component.html',
+  templateUrl: './stack-skill-consent.component.html',
 })
-export class TeamBuilderSkillConsentComponent {
+export class StackSkillConsentComponent {
   private readonly element = inject(ElementRef<HTMLElement>);
   readonly open = input.required<boolean>();
   readonly previews = input.required<WizardSkillConsentPreview[]>();
@@ -49,3 +49,4 @@ export class TeamBuilderSkillConsentComponent {
     );
   }
 }
+

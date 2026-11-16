@@ -98,7 +98,8 @@ describe('ProjectGuidancePage', () => {
     const panel = layout?.querySelector('ptah-run-panel');
     expect(log).not.toBeNull();
     expect(log?.hasAttribute('runlog')).toBe(true);
-    expect((log?.compareDocumentPosition(panel as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(log && panel && (log.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+
     expect(log?.querySelector('[role="log"]')).not.toBeNull();
     expect(log?.querySelector('summary')).toBeNull();
     const logInstance = fixture.debugElement.query((debug) => debug.componentInstance instanceof DetailsLogStubComponent)?.componentInstance as DetailsLogStubComponent;
@@ -248,3 +249,4 @@ describe('ProjectGuidancePage', () => {
     retry?.click(); expect(workflow.regenerateGuidance).toHaveBeenCalled();
   });
 });
+

@@ -216,6 +216,29 @@ export interface MultiPhaseManifestV4 {
   phases: Record<string, PhaseResultV4>;
 }
 
+export type StackItemKind = 'language' | 'framework' | 'library' | 'test-tool' | 'pattern';
+export interface StackSummaryItem {
+  kind: StackItemKind;
+  name: string;
+  evidence: string;
+  sourcePhase: string;
+}
+export interface StackSummary {
+  items: StackSummaryItem[];
+  source: 'structured' | 'legacy';
+}
+export interface WizardRecommendAnalysisSkillsParams {
+  runId: string;
+}
+export interface WizardRecommendAnalysisSkillsResult {
+  skills: import('../rpc.types').SkillRecommendation[];
+  detectedItems: StackSummaryItem[];
+  unmatchedItems: StackSummaryItem[];
+  searchFailures: { item: string; reason: string }[];
+  summarySource: 'structured' | 'legacy' | 'none';
+  warning?: string;
+}
+
 /**
  * Multi-phase analysis response from wizard:deep-analyze RPC method.
  *
@@ -249,6 +272,7 @@ export interface MultiPhaseAnalysisResponse {
     | MultiPhaseManifestV4;
   /** Phase file contents (markdown) keyed by phase ID */
   phaseContents: Record<string, string>;
+  stackSummary?: StackSummary;
   /** Analysis directory path for downstream consumers (generation, enhanced prompts) */
   analysisDir: string;
 }

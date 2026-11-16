@@ -47,6 +47,8 @@ import type {
   WizardAnalysisStatusResponse,
   WizardRecommendSkillsParams,
   WizardRecommendSkillsResponse,
+  WizardRecommendAnalysisSkillsParams,
+  WizardRecommendAnalysisSkillsResult,
   WizardSearchSkillsParams,
   WizardSearchSkillsResponse,
   WizardGetProjectGuidanceParams,
@@ -68,6 +70,7 @@ import {
   WizardListAnalysesParamsSchema,
   WizardLoadAnalysisParamsSchema,
   WizardRecommendSkillsParamsSchema,
+  WizardRecommendAnalysisSkillsParamsSchema,
   WizardSearchSkillsParamsSchema,
   WizardGetProjectGuidanceParamsSchema,
   WizardPreviewSkillsForConsentParamsSchema,
@@ -120,6 +123,7 @@ export class SetupRpcHandlers {
     'wizard:get-resumable-run',
     'wizard:analysis-status',
     'wizard:recommend-skills',
+    'wizard:recommend-analysis-skills',
     'wizard:search-skills',
     'wizard:get-project-guidance',
     'wizard:preview-skills-for-consent',
@@ -197,6 +201,7 @@ export class SetupRpcHandlers {
     this.registerGetResumableRun();
     this.registerAnalysisStatus();
     this.registerRecommendSkills();
+    this.registerRecommendAnalysisSkills();
     this.registerSearchSkills();
     this.registerGetProjectGuidance();
     this.registerPreviewSkillsForConsent();
@@ -626,6 +631,58 @@ export class SetupRpcHandlers {
           this.logger.warn(`Analysis CLAUDE.md link: ${linked.error}`);
       }
       return loaded;
+    });
+  }
+
+  private registerRecommendAnalysisSkills(): void {
+    this.rpcHandler.registerMethod<
+      WizardRecommendAnalysisSkillsParams,
+      WizardRecommendAnalysisSkillsResult
+    >('wizard:recommend-analysis-skills', async (rawParams) => {
+      const { runId } = this.parse(
+        WizardRecommendAnalysisSkillsParamsSchema,
+        rawParams,
+      );
+      const empty = (warning: string): WizardRecommendAnalysisSkillsResult => ({
+        skills: [],
+        detectedItems: [],
+        unmatchedItems: [],
+        searchFailures: [],
+        summarySource: 'none',
+        warning,
+      });
+      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+      if (!workspaceRoot)
+        return empty('Open a workspace to review recommended skills.');
+      try {
+        const storage = this.resolveService<AnalysisStorageService>(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          'AnalysisStorageService',
+        );
+        const saved = await storage.loadByRunId(workspaceRoot, runId);
+        if (!saved)
+          return empty(
+            'The saved analysis run was not found in this workspace.',
+          );
+        const summary = saved.stackSummary;
+        if (!summary?.items.length)
+          return empty('No technology stack was found in this analysis.');
+        const recommendation = this.resolveService<SkillRecommendationService>(
+          SKILL_RECOMMENDATION_SERVICE,
+          'SkillRecommendationService',
+        );
+        return await recommendation.recommendAnalysis({
+          items: summary.items,
+          summarySource: summary.source,
+          search: (query) => this.skillsShApi.search(query),
+        });
+      } catch (error: unknown) {
+        this.logger.error(
+          'Could not recommend skills from saved analysis',
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        return empty('Could not read the saved analysis or search for skills.');
+      }
     });
   }
 

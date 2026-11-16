@@ -14,6 +14,8 @@ import type {
   DeepProjectAnalysis,
   SkillRecommendation,
   SkillShEntry,
+  StackSummaryItem,
+  WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 
 /** Search function for the skills.sh catalog. */
@@ -24,6 +26,25 @@ export interface SkillRecommendationInput {
   /** Names of the dependencies the project declares (package.json keys). */
   dependencies: readonly string[];
   search: SkillCatalogSearch;
+}
+
+export interface AnalysisSkillRecommendationInput {
+  items: readonly StackSummaryItem[];
+  search: SkillCatalogSearch;
+  summarySource: 'structured' | 'legacy' | 'none';
+}
+
+const SEARCH_TIMEOUT_MS = 8_000;
+const MAX_TERMS = 30;
+
+function searchWithTimeout(search: SkillCatalogSearch, query: string): Promise<SkillShEntry[]> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Search timed out')), SEARCH_TIMEOUT_MS);
+    search(query).then(
+      (entries) => { clearTimeout(timer); resolve(entries); },
+      (error: unknown) => { clearTimeout(timer); reject(error); },
+    );
+  });
 }
 
 /** Derive the technology keyword from a dependency name. */
@@ -44,6 +65,52 @@ function tokenize(value: string): string[] {
 @injectable()
 export class SkillRecommendationService {
   constructor(@inject(TOKENS.LOGGER) private readonly logger: Logger) {}
+
+  async recommendAnalysis(input: AnalysisSkillRecommendationInput): Promise<WizardRecommendAnalysisSkillsResult> {
+    const detectedItems = input.items.slice(0, MAX_TERMS);
+    const results: SkillShEntry[][] = new Array(detectedItems.length);
+    const failures: { item: string; reason: string }[] = [];
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, detectedItems.length) }, async () => {
+      while (next < detectedItems.length) {
+        const index = next++;
+        const item = detectedItems[index];
+        try {
+          results[index] = await searchWithTimeout(input.search, item.name);
+        } catch (error) {
+          const reason = error instanceof Error && error.message === 'Search timed out'
+            ? 'Search timed out' : 'Search failed';
+          failures.push({ item: item.name, reason });
+          this.logger.warn('[SkillRecommendation] skills.sh search failed', { item: item.name, reason });
+          results[index] = [];
+        }
+      }
+    }));
+
+    const byKey = new Map<string, SkillRecommendation>();
+    const unmatchedItems: StackSummaryItem[] = [];
+    for (const [index, item] of detectedItems.entries()) {
+      const term = dependencyKeyword(item.name);
+      let matched = false;
+      for (const entry of results[index] ?? []) {
+        const words = [...tokenize(entry.skillId), ...tokenize(entry.name)];
+        const pairs = words.slice(0, -1).map((word, position) => word + words[position + 1]);
+        const complete = [entry.skillId, entry.name].some((value) => dependencyKeyword(value) === term);
+        if (term.length < 2 || (!complete && !words.includes(term) && (term.length < 3 || !pairs.includes(term)))) continue;
+        matched = true;
+        const key = `${entry.source}/${entry.skillId}`;
+        const score = 100 + Math.log10(1 + Math.max(0, entry.installs));
+        const existing = byKey.get(key);
+        if (!existing || existing.score < score) {
+          byKey.set(key, { skill: entry, evidence: item.name, score });
+        }
+      }
+      if (!matched && !failures.some((failure) => failure.item === item.name)) unmatchedItems.push(item);
+    }
+    const skills = [...byKey.values()].sort((a, b) => b.score - a.score || a.skill.skillId.localeCompare(b.skill.skillId));
+    return { skills, detectedItems, unmatchedItems, searchFailures: failures,
+      summarySource: input.summarySource };
+  }
 
   async recommend(
     input: SkillRecommendationInput,
@@ -66,7 +133,7 @@ export class SkillRecommendationService {
           const index = next++;
           const keyword = keywords[index];
           try {
-            results[index] = await input.search(keyword);
+            results[index] = await searchWithTimeout(input.search, keyword);
           } catch (error) {
             this.logger.warn('[SkillRecommendation] skills.sh search failed', {
               keyword,

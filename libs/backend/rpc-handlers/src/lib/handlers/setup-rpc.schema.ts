@@ -29,6 +29,9 @@ export const WizardAnalysisStatusParamsSchema = z.object({});
 export const WizardRecommendSkillsParamsSchema = z.object({
   analysis: ProjectAnalysisZodSchema,
 });
+export const WizardRecommendAnalysisSkillsParamsSchema = z.strictObject({
+  runId: z.string().trim().min(1).max(200),
+});
 export const WizardSearchSkillsParamsSchema = z.object({
   query: z.string().trim().min(1).max(200),
 });

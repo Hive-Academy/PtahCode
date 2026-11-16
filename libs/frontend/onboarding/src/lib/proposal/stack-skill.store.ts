@@ -6,13 +6,13 @@ import type {
   WizardSkillConsentPreview,
 } from '@ptah-extension/shared';
 
-export type TeamBuilderStage =
+export type StackSkillStage =
   'intent' | 'review' | 'consent' | 'installing' | 'launching';
 
 @Injectable({ providedIn: 'root' })
-export class TeamBuilderSkillStore {
+export class StackSkillStore {
   readonly intent = signal('');
-  readonly stage = signal<TeamBuilderStage>('intent');
+  readonly stage = signal<StackSkillStage>('intent');
   readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
@@ -67,3 +67,4 @@ export class TeamBuilderSkillStore {
     });
   }
 }
+

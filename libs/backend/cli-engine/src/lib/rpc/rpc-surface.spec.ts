@@ -177,6 +177,7 @@ describe('CLI RPC surface', () => {
         'enhancedPrompts:getRunState',
         'wizard:get-generation-run-state',
         'wizard:recommend-skills',
+        'wizard:recommend-analysis-skills',
         'wizard:search-skills',
         'wizard:get-project-guidance',
         'wizard:preview-skills-for-consent',

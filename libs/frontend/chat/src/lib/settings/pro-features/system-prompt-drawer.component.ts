@@ -245,7 +245,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
           <div class="py-8 text-center space-y-2" data-testid="system-prompt-empty-state">
             <lucide-angular [img]="SparklesIcon" class="w-8 h-8 text-secondary/40 mx-auto" aria-hidden="true" />
             <p class="text-xs text-base-content-muted max-w-xs mx-auto">
-              Run the Setup Wizard to generate an AI-enhanced system prompt tailored to your project.
+              Run Setup to analyze your project, review skills, and prepare project guidance.
             </p>
           </div>
         }
@@ -535,3 +535,4 @@ export class SystemPromptDrawerComponent {
     this.promptPreviewExpanded.set(true);
   }
 }
+

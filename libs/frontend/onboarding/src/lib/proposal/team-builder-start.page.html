@@ -96,7 +96,7 @@
     <p role="status" aria-live="polite">Installing skills...</p>
     }
     <div [attr.inert]="state.stage() === 'installing' ? '' : null">
-      <ptah-team-builder-skill-review
+      <ptah-stack-skill-review
         [recommendations]="state.recommendations()"
         [searchResults]="state.searchResults()"
         [guidanceFacts]="state.guidanceFacts()"
@@ -124,7 +124,7 @@
     }
   </div>
   }
-  <ptah-team-builder-skill-consent
+  <ptah-stack-skill-consent
     [open]="state.stage() === 'consent' || state.stage() === 'installing'"
     [previews]="state.preview()"
     [approvedIds]="state.approvedIds()"
@@ -135,3 +135,4 @@
     (cancelRequested)="closeConsent()"
   />
 </section>
+

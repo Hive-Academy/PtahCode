@@ -1,6 +1,8 @@
 import { inject } from '@angular/core';
 import { Router, type RedirectFunction, type Routes } from '@angular/router';
 import { AnalyzeWorkspacePage } from './analyze/analyze-workspace.page';
+import { AnalyzeSkillsPage } from './analyze/analyze-skills.page';
+
 import { ProjectGuidancePage } from './analyze/project-guidance.page';
 import { AnalyzeDonePage } from './analyze/analyze-done.page';
 import { OnboardingHomeComponent } from './home/onboarding-home.component';
@@ -22,8 +24,10 @@ import { TeamBuilderStartPage } from './proposal/team-builder-start.page';
 const onboardingHomeRedirect: RedirectFunction = () =>
   inject(Router).createUrlTree(['/onboarding']);
 
-const retiredAgentRedirect: RedirectFunction = () =>
-  inject(Router).createUrlTree(['/onboarding', 'analyze', 'guidance']);
+const retiredAgentRedirect: RedirectFunction = (route) =>
+  inject(Router).createUrlTree(['/onboarding', 'analyze', 'skills'], {
+    queryParams: route.queryParams,
+  });
 
 /**
  * The onboarding surface's route tree, loaded by the webview's `onboarding`
@@ -58,12 +62,18 @@ export const ONBOARDING_ROUTES: Routes = [
         data: { crumb: 'Analyze workspace' },
       },
       {
+        path: 'analyze/skills',
+        component: AnalyzeSkillsPage,
+        data: { crumb: 'Review skills' },
+      },
+      {
         path: 'analyze/agents',
         redirectTo: retiredAgentRedirect,
       },
       {
         path: 'analyze/generate',
         redirectTo: retiredAgentRedirect,
+
       },
       {
         path: 'analyze/guidance',

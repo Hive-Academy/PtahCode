@@ -150,7 +150,10 @@ import {
 } from '@ptah-extension/shared/testing';
 
 import { SetupRpcHandlers } from './setup-rpc.handlers';
-import { SKILL_PROJECT_GUIDANCE_SERVICE } from '../di/tokens';
+import {
+  SKILL_PROJECT_GUIDANCE_SERVICE,
+  SKILL_RECOMMENDATION_SERVICE,
+} from '../di/tokens';
 
 // ---------------------------------------------------------------------------
 // Token re-declaration (via Symbol.for) — avoids transitively loading the
@@ -375,6 +378,7 @@ describe('SetupRpcHandlers', () => {
           'wizard:list-analyses',
           'wizard:load-analysis',
           'wizard:recommend-skills',
+          'wizard:recommend-analysis-skills',
           'wizard:search-skills',
         ].sort(),
       );
@@ -478,7 +482,6 @@ describe('SetupRpcHandlers', () => {
       expect(response.success).toBe(false);
       expect(response.errorCode).toBe('INVALID_PARAMS');
     });
-
   });
 
   // -------------------------------------------------------------------------
@@ -939,6 +942,121 @@ describe('SetupRpcHandlers', () => {
         'wizard:list-analyses',
       );
       expect(result.analyses).toEqual(analyses);
+    });
+  });
+
+  describe('wizard:recommend-analysis-skills', () => {
+    it('uses the matching saved run and its structured stack', async () => {
+      const h = makeHarness();
+      const item = {
+        kind: 'framework',
+        name: 'Angular',
+        evidence: 'package.json',
+        sourcePhase: 'profile',
+      };
+      const recommendAnalysis = jest.fn().mockResolvedValue({
+        skills: [],
+        detectedItems: [item],
+        unmatchedItems: [],
+        searchFailures: [],
+        summarySource: 'structured',
+      });
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest
+          .fn()
+          .mockResolvedValue({
+            manifest: { runId: 'run-1' },
+            stackSummary: { source: 'structured', items: [item] },
+          }),
+      });
+      h.container.__register(SKILL_RECOMMENDATION_SERVICE, {
+        recommendAnalysis,
+      });
+      h.handlers.register();
+      const result = await call<{ detectedItems: unknown[] }>(
+        h,
+        'wizard:recommend-analysis-skills',
+        { runId: 'run-1' },
+      );
+      expect(result.detectedItems).toEqual([item]);
+      expect(recommendAnalysis).toHaveBeenCalledWith(
+        expect.objectContaining({ items: [item], summarySource: 'structured' }),
+      );
+    });
+
+    it('returns an empty explanation when the run is missing', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest.fn().mockResolvedValue(null),
+      });
+      h.handlers.register();
+      const result = await call<{ skills: unknown[]; warning: string }>(
+        h,
+        'wizard:recommend-analysis-skills',
+        { runId: 'missing' },
+      );
+      expect(result.skills).toEqual([]);
+      expect(result.warning).toMatch(/not found/);
+    });
+
+    it('returns an empty result when the saved run has no stack summary', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest
+          .fn()
+          .mockResolvedValue({ manifest: { runId: 'run-1' } }),
+      });
+      h.handlers.register();
+      const result = await call<{
+        skills: unknown[];
+        detectedItems: unknown[];
+        warning: string;
+      }>(h, 'wizard:recommend-analysis-skills', { runId: 'run-1' });
+      expect(result.skills).toEqual([]);
+      expect(result.detectedItems).toEqual([]);
+      expect(result.warning).not.toMatch(/raw error/i);
+    });
+
+    it('returns an empty result when no workspace is open', async () => {
+      const h = makeHarness({ workspaceFolders: [] });
+      h.handlers.register();
+      const result = await call<{
+        skills: unknown[];
+        detectedItems: unknown[];
+        warning: string;
+      }>(h, 'wizard:recommend-analysis-skills', { runId: 'run-1' });
+      expect(result.skills).toEqual([]);
+      expect(result.detectedItems).toEqual([]);
+      expect(result.warning).toMatch(/Open a workspace/);
+      expect(result.warning).not.toMatch(/raw error/i);
+    });
+
+    it('returns an empty result without exposing a storage error', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest
+          .fn()
+          .mockRejectedValue(new Error('raw error: secret path')),
+      });
+      h.handlers.register();
+      const result = await call<{
+        skills: unknown[];
+        detectedItems: unknown[];
+        warning: string;
+      }>(h, 'wizard:recommend-analysis-skills', { runId: 'run-1' });
+      expect(result.skills).toEqual([]);
+      expect(result.detectedItems).toEqual([]);
+      expect(result.warning).not.toMatch(/raw error|secret path/i);
+    });
+
+    it('rejects invalid params before loading storage', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const result = await callRaw(h, 'wizard:recommend-analysis-skills', {
+        runId: '',
+      });
+      expect(result.success).toBe(false);
+      expect(h.container.resolve).not.toHaveBeenCalled();
     });
   });
 

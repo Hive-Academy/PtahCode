@@ -23,7 +23,6 @@ import {
   GUIDANCE_RUN_ID,
   GUIDANCE_STATUS,
   GUIDANCE_TAB,
-  doneAgentRun,
   bootOnboardingGenerate,
   guidanceRun,
   rpcError,
@@ -237,45 +236,16 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
 
       test(`${size.prefix}done-facts`, async ({ page, fixtureServer }) => {
         await boot(page, fixtureServer.url, theme, size.viewport, DONE_ROUTE, {
-          'wizard:get-generation-run-state': { run: doneAgentRun() },
-          'enhancedPrompts:getRunState': { run: guidanceRun('completed') },
+          'harness:get-skill-selection': { mode: 'selected', slugs: ['angular'], available: [{ slug: 'angular', name: 'Angular', description: '', pluginId: null }], derived: false },
           'enhancedPrompts:getStatus': GUIDANCE_STATUS,
         });
         await expect(page.locator(DONE)).toBeVisible();
         await expect(
-          page.locator('[data-testid="analyze-done-facts"]'),
-        ).toContainText(/Written\s*1/);
-        await expect(
-          page.locator('[data-testid="analyze-done-facts"]'),
-        ).toContainText('Project guidance: on');
-        await expect(
-          page.locator('[data-testid="done-agent-outcomes"]'),
-        ).toContainText('Kept (your file)');
-        // An opened-folder target outside the harness root never reaches the
-        // Library, so its stale notice stays hidden.
-        await expect(page.locator(DONE)).toContainText(
-          'will not appear in the Library',
-        );
-        await expect(
-          page.locator('[data-testid="library-stale-notice"]'),
-        ).toHaveCount(0);
-        await expect(
-          page.locator('[data-testid="outcome-failure"]'),
-        ).not.toContainText('EACCES');
-        await expect(
-          page.locator('[data-testid="done-agent-outcomes"]'),
-        ).toContainText('Changed since preview (kept)');
-        for (const id of [
-          'done-open-chat',
-          'done-command-center',
-          'done-tribunal',
-          'done-run-again',
-        ]) {
-          await expect(page.locator(`[data-testid="${id}"]`)).toBeVisible();
-        }
-        await page
-          .locator('[data-testid="done-agent-outcomes"]')
-          .scrollIntoViewIfNeeded();
+          page.locator('[data-testid="done-skills"]'),
+        ).toContainText('Angular');
+        await expect(page.locator('[data-testid="done-guidance"]')).toContainText('On');
+        await expect(page.getByRole('button', { name: 'Open chat' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Run setup again' })).toBeVisible();
         await shoot(page, { view: `${size.prefix}done-facts`, theme });
       });
     }

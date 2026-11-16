@@ -85,7 +85,8 @@
       [disabled]="busy() || !allApproved()"
       (click)="install.emit()"
     >
-      {{ busy() ? 'Installing…' : 'Install and launch chat' }}
+      {{ busy() ? 'Installing…' : 'Install skills' }}
     </button>
   </div>
 </ptah-native-modal>
+

@@ -81,7 +81,8 @@ import { PhaseListComponent } from './phase-list.component';
             Analyze workspace
           </h1>
           <p class="text-sm text-base-content-muted">
-            Understand this project before creating project guidance.
+            Understand this project and find relevant skills.
+
           </p>
         </div>
       </header>
@@ -154,11 +155,12 @@ import { PhaseListComponent } from './phase-list.component';
           state="done"
           [viewState]="viewState()"
           title="Analysis complete"
-          continueLabel="Project guidance"
+          continueLabel="Review skills"
           [message]="
             'Completed in ' + duration(result.manifest.totalDurationMs)
           "
-          (continueRun)="continueGuidance()"
+          (continueRun)="reviewSkills()"
+
         >
           <ptah-phase-list [phases]="store.phaseRows()" />
         </ptah-run-panel>
@@ -311,6 +313,8 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     viewChild.required<ConfirmationModalComponent>('stopModal');
   protected readonly steps: readonly OnboardingStep[] = [
     { id: 'analyze', label: 'Analyze', state: 'current' },
+    { id: 'skills', label: 'Review skills', state: 'upcoming' },
+
     { id: 'guidance', label: 'Project guidance', state: 'upcoming' },
     { id: 'done', label: 'Done', state: 'upcoming' },
   ];
@@ -414,7 +418,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   protected async useSaved(filename: string): Promise<void> {
     try {
       const result = await this.store.selectAnalysis(filename);
-      if (this.destroyed) return;
+      if (this.destroyed || result === 'superseded') return;
       this.selectError.set(
         result === 'loaded'
           ? null
@@ -483,14 +487,16 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     this.releaseClock = null;
     this.openedAt.set(null);
   }
-  protected async continueGuidance(): Promise<void> {
+  protected async reviewSkills(): Promise<void> {
     const identity = {
       analysis: this.store.selected() ?? this.store.loaded()?.manifest.slug,
     };
-    const link = onboardingStepLink('analyze', 'guidance', identity);
+    const link = onboardingStepLink('analyze', 'skills', identity);
+
     await this.router.navigate([...link.commands], {
       queryParams: link.queryParams,
       state: { explicitBack: false },
     });
   }
 }
+

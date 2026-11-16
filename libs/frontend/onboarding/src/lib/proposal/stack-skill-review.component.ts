@@ -21,7 +21,7 @@ import {
 } from '@ptah-extension/ui';
 
 @Component({
-  selector: 'ptah-team-builder-skill-review',
+  selector: 'ptah-stack-skill-review',
   standalone: true,
   imports: [
     FormsModule,
@@ -33,9 +33,9 @@ import {
     PtahStatePanelComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  templateUrl: './team-builder-skill-review.component.html',
+  templateUrl: './stack-skill-review.component.html',
 })
-export class TeamBuilderSkillReviewComponent {
+export class StackSkillReviewComponent {
   readonly recommendations = input.required<SkillRecommendation[]>();
   readonly searchResults = input.required<SkillShEntry[]>();
   readonly guidanceFacts = input.required<ProjectGuidance[]>();
@@ -45,6 +45,7 @@ export class TeamBuilderSkillReviewComponent {
   readonly ownerDecisionError = input(false);
   readonly guidanceNote = input('');
   readonly busy = input(false);
+  readonly showOwnerDecision = input(true);
   readonly ownerDecisionChange = output<'match' | 'raise'>();
   readonly selectedIds = input.required<ReadonlySet<string>>();
   readonly loading = input(false);
@@ -79,3 +80,4 @@ export class TeamBuilderSkillReviewComponent {
     this.searchRequested.emit(this.query().trim());
   }
 }
+

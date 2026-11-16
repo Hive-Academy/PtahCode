@@ -253,7 +253,15 @@ describe('OnboardingHomeComponent', () => {
 
   it('offers the guidance secondary link', () => {
     render();
+    expect(
+      byTestId<HTMLAnchorElement>('onboarding-link-skills')?.getAttribute(
+        'href',
+      ),
+    ).toBe('/onboarding/analyze');
+    expect(byTestId<HTMLAnchorElement>('onboarding-link-skills')?.textContent).toContain('Analyze and review skills');
     expect(byTestId<HTMLAnchorElement>('onboarding-link-agents-only')).toBeNull();
+    expect([...el().querySelectorAll('a')].some((link) => link.getAttribute('href')?.includes('/analyze/agents'))).toBe(false);
+
     expect(
       byTestId<HTMLAnchorElement>(
         'onboarding-link-guidance-only',
