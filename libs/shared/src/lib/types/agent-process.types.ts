@@ -50,8 +50,17 @@ export const AgentId = {
   },
 };
 
+/**
+ * `starting`: the lane has an agent ID and a concurrency slot, but no running
+ * handle yet. It is a live (non-terminal) status, like `running`.
+ */
 export type AgentStatus =
-  'running' | 'completed' | 'failed' | 'timeout' | 'stopped';
+  'starting' | 'running' | 'completed' | 'failed' | 'timeout' | 'stopped';
+
+/** A lane holding a concurrency slot, whether its process handle exists yet or not. */
+export function isLiveAgentStatus(status: AgentStatus): boolean {
+  return status === 'starting' || status === 'running';
+}
 
 /**
  * Why an agent run failed or was stopped, beyond its `AgentStatus`.

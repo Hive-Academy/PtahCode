@@ -4663,8 +4663,24 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
     );
     expect(lines).toHaveLength(2);
     expect(JSON.stringify(lines)).not.toContain(task);
+    // The stubbed ptahAPI spawn bypasses the namespace builder, so none of
+    // the four namespace sub-steps ran. Their keys must still be logged,
+    // null, both on the successful spawn and on the throwing one.
+    const namespaceSteps = {
+      skillsMs: null,
+      roleMs: null,
+      guidanceMs: null,
+      pluginPathsMs: null,
+    };
     expect(lines[0]?.[2]).toEqual(
-      expect.objectContaining({ agentId: 'a-9', cli: 'auto-detect' }),
+      expect.objectContaining({
+        agentId: 'a-9',
+        cli: 'auto-detect',
+        ...namespaceSteps,
+      }),
+    );
+    expect(lines[1]?.[2]).toEqual(
+      expect.objectContaining({ agentId: null, ...namespaceSteps }),
     );
   });
 

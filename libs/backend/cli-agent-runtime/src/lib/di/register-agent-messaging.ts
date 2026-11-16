@@ -76,7 +76,12 @@ export function registerAgentOutputJournal(container: DependencyContainer): void
         () => ({
           readOutput: (agentId) => manager().readOutputForPersistence(agentId),
           hasRunningLanes: () =>
-            manager().listTrackedAgents().some((info) => info.status === 'running'),
+            manager()
+              .listTrackedAgents()
+              .some(
+                (info) =>
+                  info.status === 'running' || info.status === 'starting',
+              ),
         }),
       );
     }),
@@ -136,8 +141,19 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
       const metadata = (): SessionMetadataStore =>
         c.resolve<SessionMetadataStore>(SDK_TOKENS.SDK_SESSION_METADATA_STORE);
       const parentLevel: ParentLaneLevel = (parentSessionId) => {
-        const lifecycle = c.isRegistered(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER, true)
-          ? c.resolve<{ find(id: string): { realSessionId?: string; permissionLevel?: 'ask' | 'auto-edit' | 'yolo' | 'plan' } | undefined }>(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER) : undefined;
+        const lifecycle = c.isRegistered(
+          SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER,
+          true,
+        )
+          ? c.resolve<{
+              find(id: string):
+                | {
+                    realSessionId?: string;
+                    permissionLevel?: 'ask' | 'auto-edit' | 'yolo' | 'plan';
+                  }
+                | undefined;
+            }>(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER)
+          : undefined;
         const codex = c.isRegistered(SDK_TOKENS.CODEX_CHAT_ADAPTER, true)
           ? c.resolve<{ getPermissionLevel(id: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined; resolveLiveSessionId?(callerId: string): string | undefined } | null>(SDK_TOKENS.CODEX_CHAT_ADAPTER)
           : undefined;

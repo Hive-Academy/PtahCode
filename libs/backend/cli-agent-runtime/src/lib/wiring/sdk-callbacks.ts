@@ -334,7 +334,8 @@ function remapAgentProcessManagerParents(
     (a) =>
       remappedAgentIds.has(a.agentId) &&
       a.parentSessionId === realSessionId &&
-      a.status !== 'running',
+      a.status !== 'running' &&
+      a.status !== 'starting',
   );
   if (exitedWithParent.length > 0) {
     logger.info(

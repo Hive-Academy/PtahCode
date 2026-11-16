@@ -102,7 +102,19 @@ export function laneAccountText(
 
       <!-- Status badge -->
       <span
-        class="flex-shrink-0" ptahBadge [tone]="agent().status === 'running' ? 'info' : agent().status === 'completed' ? 'ok' : agent().status === 'failed' || agent().status === 'timeout' ? 'err' : agent().status === 'stopped' ? 'warn' : 'neutral'"
+        class="flex-shrink-0"
+        ptahBadge
+        [tone]="
+          agent().status === 'running' || agent().status === 'starting'
+            ? 'info'
+            : agent().status === 'completed'
+              ? 'ok'
+              : agent().status === 'failed' || agent().status === 'timeout'
+                ? 'err'
+                : agent().status === 'stopped'
+                  ? 'warn'
+                  : 'neutral'
+        "
       >
         {{ agent().status }}
       </span>
@@ -154,7 +166,11 @@ export function laneAccountText(
       }
 
       <!-- Resume button (non-running agents with cliSessionId) -->
-      @if (agent().status !== 'running' && agent().cliSessionId) {
+      @if (
+        agent().status !== 'running' &&
+        agent().status !== 'starting' &&
+        agent().cliSessionId
+      ) {
         <button
           type="button"
           ptahButton variant="ghost" size="xs" class="ml-auto flex-shrink-0"
@@ -175,12 +191,20 @@ export function laneAccountText(
       @if (timerEndedAt() !== undefined) {
         <ptah-timer
           class="text-[10px] text-base-content-muted flex-shrink-0"
-          [class.ml-auto]="agent().status !== 'running' && !agent().cliSessionId"
+          [class.ml-auto]="
+            agent().status !== 'running' &&
+            agent().status !== 'starting' &&
+            !agent().cliSessionId
+          "
           format="compact"
           [startedAt]="agent().startedAt"
           [endedAt]="timerEndedAt() ?? null"
         />
-      } @else if (agent().status !== 'running' && !agent().cliSessionId) {
+      } @else if (
+        agent().status !== 'running' &&
+        agent().status !== 'starting' &&
+        !agent().cliSessionId
+      ) {
         <span class="ml-auto" aria-hidden="true"></span>
       }
 
@@ -245,7 +269,7 @@ export class AgentCardHeaderComponent {
   protected readonly timerEndedAt = computed((): number | null | undefined => {
     const a = this.agent();
     if (!Number.isFinite(a.startedAt)) return undefined;
-    if (a.status === 'running') return null;
+    if (a.status === 'running' || a.status === 'starting') return null;
     return a.completedAt != null && Number.isFinite(a.completedAt)
       ? a.completedAt
       : undefined;
@@ -277,7 +301,7 @@ export class AgentCardHeaderComponent {
 
   /** Shown once the lane has left `running` with a host budget stop reason. */
   protected readonly stopText = computed(() =>
-    this.agent().status === 'running'
+    this.agent().status === 'running' || this.agent().status === 'starting'
       ? null
       : laneGuardStopText(this.agent().stopReason),
   );

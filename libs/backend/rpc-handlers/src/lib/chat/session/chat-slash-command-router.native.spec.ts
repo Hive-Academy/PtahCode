@@ -246,6 +246,22 @@ describe('native slash runtime routing', () => {
     expect(h.publishRuntimeNotices).not.toHaveBeenCalled();
   });
 
+  it('preserves the caller tab id in the slash re-query session config', async () => {
+    const h = harness({
+      runtime: 'claude-sdk',
+      model: 'sonnet',
+      providerProfile: { providerId: 'anthropic', model: 'sonnet', authEnv: {} },
+    });
+    await h.route();
+    expect(h.executeSlashCommand).toHaveBeenCalledWith(
+      sessionId,
+      '/compact',
+      expect.objectContaining({
+        sessionConfig: expect.objectContaining({ tabId: 'tab' }),
+      }),
+    );
+  });
+
   it('prepares slash relaunch before calling the routing adapter', async () => {
     const h = harness(native, 'review');
     h.executeSlashCommand.mockImplementation(async () => {

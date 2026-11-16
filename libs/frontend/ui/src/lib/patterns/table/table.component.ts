@@ -119,6 +119,54 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
       .ptah-table-message-cell {
         text-align: center;
       }
+      .ptah-table-group-row th {
+        text-align: start;
+        background: var(--ptah-card-bg-raised);
+      }
+      .ptah-table-group-title {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--ptah-gap-inline);
+      }
+      .ptah-table-bar-cell {
+        min-width: 8rem;
+      }
+      .ptah-table-sticky-header {
+        position: sticky;
+        inset-inline-start: 0;
+        z-index: 1;
+        background: var(--ptah-table-sticky-bg, var(--surface-1));
+        border-inline-end: 1px solid var(--ptah-card-border);
+      }
+      .ptah-table[data-density]
+        .ptah-table-grid
+        tbody
+        tr:hover
+        > .ptah-table-sticky-header {
+        background: var(--ptah-card-bg-subtle);
+      }
+      .ptah-table-score {
+        display: flex;
+        flex-direction: column;
+        gap: var(--ptah-gap-inline);
+      }
+      .ptah-table-score-unrated,
+      .ptah-table-score-stale {
+        color: var(--ptah-section-description-color);
+        font-size: var(--ptah-text-hint-size);
+      }
+      .ptah-table-cell-button {
+        cursor: pointer;
+        background: transparent;
+        border: 0;
+        padding: 0;
+        color: inherit;
+        font: inherit;
+      }
+      .ptah-table-cell-button:focus-visible {
+        outline: var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);
+        outline-offset: var(--ptah-focus-ring-offset);
+      }
     `,
   ],
 })
@@ -166,3 +214,4 @@ export * from './table-cells';
 export * from './table-row-actions.component';
 export * from './table-detail';
 export * from './table-order';
+export * from './table-matrix';

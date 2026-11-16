@@ -393,6 +393,7 @@ export class ChatSlashCommandRouterService {
           command,
           {
             sessionConfig: {
+              tabId,
               model:
                 execution.runtime === 'codex-app-server'
                   ? execution.seed.model

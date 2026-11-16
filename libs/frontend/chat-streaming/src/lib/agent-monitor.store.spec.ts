@@ -68,6 +68,20 @@ describe('AgentMonitorStore', () => {
   let backgroundAgentStore: BackgroundAgentStore;
   let rpcMock: ReturnType<typeof createMockRpcService>;
 
+  it('keeps a starting lane when clearing finished agents', () => {
+    const info: AgentProcessInfo = {
+      agentId: AgentId.create(),
+      cli: 'claude',
+      task: 'test',
+      workingDirectory: 'workspace',
+      status: 'starting',
+      startedAt: '2026-10-01T10:00:00.000Z',
+    };
+    store.onAgentSpawned(info);
+    store.clearCompleted();
+    expect(store.agents()).toHaveLength(1);
+  });
+
   beforeEach(() => {
     rpcMock = createMockRpcService();
     TestBed.configureTestingModule({

@@ -49,11 +49,26 @@ function cells(view: PtahUiAgentsView, columns = COLUMNS) {
 }
 
 describe('normalizeAgentStatus (R5.2)', () => {
+  it('counts a starting lane as live', () => {
+    const view = available(
+      resolvePtahUiAgents(
+        input({
+          turns: [turn(0)],
+          lanes: [
+            { agentId: 'lane', cli: 'codex', status: 'starting', startedAt: 1 },
+          ],
+        }),
+      ),
+    );
+    expect(view.rows[0].status).toBe('running');
+    expect(view.scalars).toMatchObject({ running: 1, completed: 0, failed: 0 });
+  });
   it.each([
     ['pending', 'pending'],
     ['streaming', 'running'],
     ['resumed', 'running'],
     ['running', 'running'],
+    ['starting', 'running'],
     ['paused', 'running'],
     ['background', 'running'],
     ['complete', 'completed'],

@@ -89,7 +89,7 @@ export function groupAgentsByWorkflowRun<T extends WorkflowGroupable>(
     let name: string | undefined;
 
     for (const m of members) {
-      if (m.status === 'running') running++;
+      if (m.status === 'running' || m.status === 'starting') running++;
       else if (m.status === 'completed') completed++;
       else if (isFailedStatus(m.status)) failed++;
       if (!name && m.workflowName) name = m.workflowName;

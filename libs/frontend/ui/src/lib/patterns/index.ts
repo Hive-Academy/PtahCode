@@ -4,6 +4,7 @@ export * from './description-list/description-list.component';
 export * from './instrument-band/instrument-band.component';
 export * from './editable-section/editable-section.component';
 export * from './disclosure/disclosure.component';
+export * from './disclosure/disclosure-lazy.directive';
 export * from './settings-layout/settings-layout.component';
 export * from './table/table.component';
 export * from './setting-row/setting-row.component';

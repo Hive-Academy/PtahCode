@@ -175,6 +175,13 @@ export class AgentMessageRouter {
     messageId?: string,
     allowPartialTurnLoss = false,
   ): Promise<AgentMessageOutcome> {
+    if (tracked.info.status === 'starting') {
+      return {
+        mode: 'unsupported',
+        reasonCode: 'continuation-unavailable',
+        detail: 'The lane is starting; try again when its handle is ready.',
+      };
+    }
     const handle = tracked.sdkHandle;
     const caps = this.resolveCapabilities(tracked);
     const turnInFlight = tracked.info.status === 'running';

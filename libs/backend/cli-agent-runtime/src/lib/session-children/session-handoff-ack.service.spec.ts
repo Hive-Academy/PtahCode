@@ -259,6 +259,28 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     });
   });
 
+  it('closes the original tab when the predecessor is identified by its resolved SDK session ID', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    const tabId = 'aaaaaaaa-2222-4333-8444-555555555555';
+    await store.record({
+      predecessorTabId: tabId,
+      predecessorSdkId: predecessorSessionId,
+      successorTabId: successorSessionId,
+      successorSdkId: null,
+      workspaceRoot: root,
+      handoffPath,
+      state: 'recorded',
+    });
+    const service = h.makeService(store);
+    expect(await service.acknowledge(h.request)).toMatchObject({
+      status: 'retryable-failure',
+    });
+    service.onCallerTurnFlushed({ tabId, sessionId: predecessorSessionId });
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'closed' });
+    expect(h.closer.close).toHaveBeenCalledWith(tabId, predecessorSessionId);
+  });
+
   it('reports already-closed when the record completes after the lookup', async () => {
     const h = harness();
     const store = h.makeStore();

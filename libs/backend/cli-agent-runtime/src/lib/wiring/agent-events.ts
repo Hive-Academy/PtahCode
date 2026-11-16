@@ -370,11 +370,12 @@ function wireAgentMonitorListeners(
     if (persistCliSession) {
       const info = agentProcessManager.findAgentInfo(delta.agentId);
       // Marks only; the journal's one interval writes it (no per-delta write).
-      if (info?.status === 'running') journal?.markDirty(String(delta.agentId));
+      if (info?.status === 'running' || info?.status === 'starting')
+        journal?.markDirty(String(delta.agentId));
       const activityAt = Date.parse(info?.lastActivityAt ?? '');
       const previousCheckpoint = activityCheckpoints.get(String(delta.agentId));
       if (
-        info?.status === 'running' &&
+        (info?.status === 'running' || info?.status === 'starting') &&
         info.cliSessionId &&
         Number.isFinite(activityAt) &&
         (previousCheckpoint === undefined ||
@@ -405,8 +406,16 @@ function wireAgentMonitorListeners(
     // Completion only persists output. It cannot attach an SDK session or
     // authorize a prompt; the adapter awaits its admission checkpoint.
     const current = agentProcessManager.findAgentInfo(info.agentId);
-    if (current && (current.startedAt !== info.startedAt || current.status === 'running' ||
-      (info.turnSeq !== undefined && current.turnSeq !== undefined && info.turnSeq < current.turnSeq))) return;
+    if (
+      current &&
+      (current.startedAt !== info.startedAt ||
+        current.status === 'running' ||
+        current.status === 'starting' ||
+        (info.turnSeq !== undefined &&
+          current.turnSeq !== undefined &&
+          info.turnSeq < current.turnSeq))
+    )
+      return;
     webviewManager
       .broadcastMessage(MESSAGE_TYPES.AGENT_MONITOR_EXITED, info)
       .catch((error) => {
@@ -453,7 +462,8 @@ function wireAgentMonitorListeners(
     (info: AgentProcessInfo) => {
       if (
         persistCliSession &&
-        (info.cliSessionId || info.status !== 'running')
+        (info.cliSessionId ||
+          (info.status !== 'running' && info.status !== 'starting'))
       ) {
         persistCliSessionReference(
           container,
@@ -694,7 +704,8 @@ export function persistCliSessionReference(
     // `agent:spawned` too, and copying the accumulated output there was half
     // the cost of TASK_2026_323 blocker B5 for output that is empty by
     // definition.
-    const agentHasFinished = info.status !== 'running';
+    const agentHasFinished =
+      info.status !== 'running' && info.status !== 'starting';
 
     if (
       agentHasFinished &&
@@ -797,9 +808,15 @@ export function persistCliSessionReference(
     const persistBulkThenReference = async (): Promise<'written' | 'skipped'> => {
       const isStale = (): boolean => {
         if (!container.isRegistered(TOKENS.AGENT_PROCESS_MANAGER)) return false;
-        const current = container.resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER).findAgentInfo(info.agentId);
-        return current !== undefined && (current.startedAt !== info.startedAt ||
-          (agentHasFinished && current.status === 'running'));
+        const current = container
+          .resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER)
+          .findAgentInfo(info.agentId);
+        return (
+          current !== undefined &&
+          (current.startedAt !== info.startedAt ||
+            (agentHasFinished &&
+              (current.status === 'running' || current.status === 'starting')))
+        );
       };
       if (isStale()) return 'skipped';
       if (

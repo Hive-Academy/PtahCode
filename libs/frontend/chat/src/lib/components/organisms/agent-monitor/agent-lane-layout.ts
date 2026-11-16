@@ -5,6 +5,9 @@ export interface LaneCandidate {
   readonly startedAt: number;
 }
 
+const isLiveLane = (status: string | undefined): boolean =>
+  status === 'running' || status === 'starting';
+
 export const MIN_LANE_WIDTH = 240;
 export const LANE_HANDLE_WIDTH = 6;
 
@@ -19,7 +22,7 @@ export function defaultLaneIds(
   return [...agents]
     .sort(
       (a, b) =>
-        Number(b.status === 'running') - Number(a.status === 'running') ||
+        Number(isLiveLane(b.status)) - Number(isLiveLane(a.status)) ||
         b.startedAt - a.startedAt,
     )
     .slice(0, count)
@@ -64,13 +67,13 @@ export function reconcileLanes(
     for (const id of defaults) {
       if (
         !options.newRunningIds.has(id) ||
-        byId.get(id)?.status !== 'running' ||
+        !isLiveLane(byId.get(id)?.status) ||
         ids.includes(id)
       )
         continue;
       const oldestIdle = [...recent]
         .reverse()
-        .find((shown) => byId.get(shown)?.status !== 'running');
+        .find((shown) => !isLiveLane(byId.get(shown)?.status));
       if (oldestIdle === undefined) break;
       ids[ids.indexOf(oldestIdle)] = id;
       recent = [id, ...recent.filter((shown) => shown !== oldestIdle)];

@@ -957,6 +957,15 @@ describe('LaneCompletionNotifier.signal', () => {
       expect(h.sendMessageToSession).not.toHaveBeenCalled();
       expect(h.logger.warn).toHaveBeenCalled();
     });
+    it('never signals a starting lane', async () => {
+      const h = createHarness();
+      const result = await h.notifier.signal(
+        createInfo({ status: 'starting' }),
+      );
+      expect(result.delivered).toBe(false);
+      expect(h.sendMessageToSession).not.toHaveBeenCalled();
+      expect(h.logger.warn).toHaveBeenCalled();
+    });
   });
 
   describe('refusals', () => {

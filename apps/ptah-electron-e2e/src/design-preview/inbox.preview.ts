@@ -111,7 +111,7 @@ test('machines inbox', async ({ app, ui, page }) => {
   for (const theme of THEMES) await shot(page, 'machines-main', theme);
 
   // Readiness after a check: the sample machine has no backend, so the result is sample data.
-  await page.getByTestId('machine-readiness-tile').locator('summary').click();
+  await page.getByTestId('machine-readiness-tile').getByRole('button', { name: /Readiness/ }).click();
   await page.waitForTimeout(300);
   for (const theme of THEMES) await shot(page, 'machines-readiness-closed', theme);
   await expect(page.locator('ptah-readiness-panel')).toBeVisible();
@@ -130,7 +130,7 @@ test('machines inbox', async ({ app, ui, page }) => {
   });
   await page.waitForTimeout(300);
   for (const theme of THEMES) await shot(page, 'machines-readiness', theme);
-  await page.getByTestId('machine-readiness-tile').locator('summary').click();
+  await page.getByTestId('machine-readiness-tile').getByRole('button', { name: /Readiness/ }).click();
 
   await size(app, 720, 1000);
   await page.waitForTimeout(400);

@@ -45,7 +45,7 @@ function boundedActivityAt(
 
 /**
  * Lifecycle fields rebuilt from a persisted lane reference. `restoreAgents`
- * excludes live `running` references before calling this helper. The store has
+ * excludes live `running` and `starting` references before calling this helper. The store has
  * already normalized an interrupted lane to `stopped` / `host-restart`.
  */
 export function restoreLaneLifecycle(
