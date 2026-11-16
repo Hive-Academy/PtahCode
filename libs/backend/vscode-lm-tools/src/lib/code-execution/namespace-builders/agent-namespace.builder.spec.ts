@@ -57,6 +57,10 @@ import {
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { PtahAPI } from '../types';
 import { runWithMcpRequestContext } from '../mcp-core/mcp-request-context';
+import {
+  agentSpawnTiming,
+  type AgentSpawnTiming,
+} from '../mcp-core/agent-spawn-dedupe';
 import { AgentMessageControlIdentityError } from './agent-message-control-actor';
 import {
   EXECUTION_CANCELLED_MESSAGE,
@@ -2063,5 +2067,124 @@ describe('buildAgentNamespace — messaging', () => {
     const ns = buildAgentNamespace(deps);
     await expect(ns.control(LANE, MESSAGE, 'cancel')).rejects.toThrow(/unavailable/);
     await expect(ns.control('invalid', MESSAGE, 'cancel')).rejects.toMatchObject({ code: 'not_found' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spawn timing — namespace step marks on the agentSpawnTiming store
+// ---------------------------------------------------------------------------
+
+describe('buildAgentNamespace — spawn timing', () => {
+  const emptyTiming = (): AgentSpawnTiming => ({
+    namespaceResolutionMs: null,
+    skillsMs: null,
+    roleMs: null,
+    guidanceMs: null,
+    pluginPathsMs: null,
+  });
+
+  it('times guidance and plugin paths separately while they run in parallel', async () => {
+    // A 40 ms real delay stays inside the suite's sleep budget and is far
+    // above the scheduler jitter a rounded-millisecond compare could flip on.
+    const { deps, mocks } = makeDeps({
+      getProjectGuidance: () =>
+        new Promise<string | undefined>((resolve) => {
+          setTimeout(() => resolve('project rules'), 40);
+        }),
+      getPluginPaths: async () => [],
+    });
+    mocks.processManager.spawn.mockResolvedValue({
+      agentId: 'a1',
+    } as SpawnAgentResult);
+    const timing = emptyTiming();
+    await agentSpawnTiming.run(timing, () =>
+      buildAgentNamespace(deps).spawn({ task: 'work', cli: 'codex' }),
+    );
+    expect(typeof timing.guidanceMs).toBe('number');
+    expect(typeof timing.pluginPathsMs).toBe('number');
+    if (timing.guidanceMs === null || timing.pluginPathsMs === null) {
+      throw new Error('parallel step timings must be numbers');
+    }
+    expect(timing.guidanceMs).toBeGreaterThan(timing.pluginPathsMs);
+    expect(timing.guidanceMs).toBeGreaterThanOrEqual(30);
+    expect(timing.namespaceResolutionMs).toBeGreaterThanOrEqual(
+      timing.guidanceMs,
+    );
+  });
+
+  it('leaves skillsMs and roleMs null when no skills and no role were requested', async () => {
+    const { deps, mocks } = makeDeps({
+      getProjectGuidance: async () => 'project rules',
+      getPluginPaths: async () => ['D:/ws/plugins'],
+    });
+    mocks.processManager.spawn.mockResolvedValue({
+      agentId: 'a1',
+    } as SpawnAgentResult);
+    const timing = emptyTiming();
+    await agentSpawnTiming.run(timing, () =>
+      buildAgentNamespace(deps).spawn({ task: 'work', cli: 'codex' }),
+    );
+    expect(timing.skillsMs).toBeNull();
+    expect(timing.roleMs).toBeNull();
+    expect(typeof timing.guidanceMs).toBe('number');
+    expect(typeof timing.pluginPathsMs).toBe('number');
+    expect(timing.namespaceResolutionMs).not.toBeNull();
+  });
+
+  it('records numbers for the skill reads and role resolution that ran', async () => {
+    const { deps, mocks } = makeDeps({
+      resolveAgentRole: async () => ROLE_DEFINITION,
+    });
+    mocks.processManager.spawn.mockResolvedValue({
+      agentId: 'a1',
+    } as SpawnAgentResult);
+    const timing = emptyTiming();
+    await agentSpawnTiming.run(timing, () =>
+      buildAgentNamespace(deps).spawn({
+        task: 'work',
+        cli: 'codex',
+        role: 'code-logic-reviewer',
+        skills: [{ name: 'review', text: 'Check evidence' }],
+      }),
+    );
+    expect(typeof timing.skillsMs).toBe('number');
+    expect(typeof timing.roleMs).toBe('number');
+    expect(timing.namespaceResolutionMs).not.toBeNull();
+  });
+
+  it('leaves guidanceMs and pluginPathsMs null when neither capability is wired', async () => {
+    const { deps, mocks } = makeDeps();
+    mocks.processManager.spawn.mockResolvedValue({
+      agentId: 'a1',
+    } as SpawnAgentResult);
+    const timing = emptyTiming();
+    await agentSpawnTiming.run(timing, () =>
+      buildAgentNamespace(deps).spawn({ task: 'work', cli: 'codex' }),
+    );
+    expect(timing.guidanceMs).toBeNull();
+    expect(timing.pluginPathsMs).toBeNull();
+    expect(timing.namespaceResolutionMs).not.toBeNull();
+  });
+
+  it('keeps a failed step null while the total still records the wait', async () => {
+    const { deps } = makeDeps({
+      resolveAgentRole: jest
+        .fn()
+        .mockRejectedValue(
+          new AgentRoleError('unknown_role', 'Unknown role "nope".', []),
+        ),
+    });
+    const timing = emptyTiming();
+    await expect(
+      agentSpawnTiming.run(timing, () =>
+        buildAgentNamespace(deps).spawn({
+          task: 'work',
+          cli: 'codex',
+          role: 'nope',
+        }),
+      ),
+    ).rejects.toThrow(/Unknown role/);
+    expect(timing.roleMs).toBeNull();
+    expect(timing.namespaceResolutionMs).not.toBeNull();
   });
 });

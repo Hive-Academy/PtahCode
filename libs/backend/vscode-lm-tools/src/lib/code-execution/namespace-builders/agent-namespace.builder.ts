@@ -22,7 +22,10 @@ import {
 } from '../mcp-core/agent-spawn-args.schema';
 import { readProviderAccountSelectionField } from '@ptah-extension/shared/schemas';
 import { getExecutionAbortSignal } from '../mcp-core/code-execution.engine';
-import { agentSpawnTiming } from '../mcp-core/agent-spawn-dedupe';
+import {
+  agentSpawnTiming,
+  type AgentSpawnTiming,
+} from '../mcp-core/agent-spawn-dedupe';
 import {
   mcpAckCallerAgentId,
   mcpControlActor,
@@ -375,6 +378,25 @@ const resolvedSkillsSchema = z.array(
     .refine((skill) => Boolean(skill.path || skill.text)),
 );
 
+/**
+ * Time one of the parallel namespace steps without serialising it: the step
+ * keeps running inside `Promise.all` and only a fulfilled step records its
+ * duration. A skipped, unwired or failed step leaves its field null, while
+ * `namespaceResolutionMs` still covers the whole wait in every case.
+ */
+function measureNamespaceStep<T>(
+  timing: AgentSpawnTiming | undefined,
+  field: 'guidanceMs' | 'pluginPathsMs',
+  startedAt: number | null,
+  step: Promise<T>,
+): Promise<T> {
+  if (!timing || startedAt === null) return step;
+  return step.then((value: T) => {
+    timing[field] = Math.round(performance.now() - startedAt);
+    return value;
+  });
+}
+
 export function buildAgentNamespace(
   deps: AgentNamespaceDependencies,
 ): AgentNamespace {
@@ -418,6 +440,8 @@ export function buildAgentNamespace(
             ? (request.phase?.skills ?? [])
             : request.skills,
         );
+        const skillsStartedAt =
+          resolvedSkills.length > 0 ? performance.now() : null;
         const skillText = resolvedSkills
           .map((skill) => {
             if (skill.text) return `### Skill: ${skill.name}\n${skill.text}`;
@@ -435,6 +459,9 @@ export function buildAgentNamespace(
             }
           })
           .join('\n\n');
+        if (timing && skillsStartedAt !== null) {
+          timing.skillsMs = Math.round(performance.now() - skillsStartedAt);
+        }
         const deliveryText = [request.phase?.text, skillText]
           .filter(Boolean)
           .join('\n\n');
@@ -477,6 +504,8 @@ export function buildAgentNamespace(
           };
         };
         let roleDefinition: AgentRoleDefinition | undefined;
+        const roleStartedAt =
+          request.role !== undefined ? performance.now() : null;
         if (request.role !== undefined) {
           if (!resolveAgentRole) {
             throw new Error(
@@ -490,6 +519,9 @@ export function buildAgentNamespace(
             getWorkspaceRoot(),
             request.role,
           );
+        }
+        if (timing && roleStartedAt !== null) {
+          timing.roleMs = Math.round(performance.now() - roleStartedAt);
         }
         if (request.ptahCliId) {
           const registry = getPtahCliRegistry?.();
@@ -640,9 +672,28 @@ export function buildAgentNamespace(
         // generated system prompt is never fetched for them: `buildTaskPrompt`
         // preferred it over the guidance, which bypassed the guidance cap on
         // every lane (TASK_2026_597, R3.4).
-        const [projectGuidance, pluginPaths] = await Promise.all([
+        const guidanceStartedAt = getProjectGuidance
+          ? performance.now()
+          : null;
+        const guidanceStep = measureNamespaceStep(
+          timing,
+          'guidanceMs',
+          guidanceStartedAt,
           getProjectGuidance?.() ?? Promise.resolve(undefined),
-          getPluginPaths?.() ?? Promise.resolve(undefined),
+        );
+        // Marked after the guidance call returns its promise, so synchronous
+        // guidance work is not counted as plugin-path time.
+        const pluginPathsStartedAt = getPluginPaths
+          ? performance.now()
+          : null;
+        const [projectGuidance, pluginPaths] = await Promise.all([
+          guidanceStep,
+          measureNamespaceStep(
+            timing,
+            'pluginPathsMs',
+            pluginPathsStartedAt,
+            getPluginPaths?.() ?? Promise.resolve(undefined),
+          ),
         ]);
         const workingDirectory = request.workingDirectory ?? getWorkspaceRoot();
 

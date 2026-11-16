@@ -518,3 +518,114 @@ describe('CliDetectionService role stamp', () => {
     expect(mockAdapterFor('codex').listModels).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('CliDetectionService named detection', () => {
+  beforeEach(() => {
+    mockAdapters.clear();
+    for (const [name, channel] of CHANNELS) mockAdapters.set(name, createAdapter(name, channel));
+    mockIsShellPathPending.mockReturnValue(false);
+  });
+
+  it('re-probes a not-installed CLI but serves an installed result from cache', async () => {
+    const { service } = createService();
+    mockAdapterFor('codex').detect.mockResolvedValueOnce({
+      cli: 'codex', installed: false, messagingMode: 'none',
+    });
+    expect((await service.getDetection('codex'))?.installed).toBe(false);
+    expect((await service.getDetection('codex'))?.installed).toBe(true);
+    expect((await service.getDetection('codex'))?.installed).toBe(true);
+    expect(mockAdapterFor('codex').detect).toHaveBeenCalledTimes(2);
+  });
+
+  it('serves stale installed detection immediately and starts one background refresh', async () => {
+    const { service } = createService();
+    await service.getDetection('codex');
+    let release: ((value: CliDetectionResult) => void) | undefined;
+    mockAdapterFor('codex').detect.mockImplementationOnce(() => new Promise((resolve) => {
+      release = resolve;
+    }));
+    service.invalidateCache();
+    const [first, second] = await Promise.all([
+      service.getDetection('codex'), service.getDetection('codex'),
+    ]);
+    expect(first?.version).toBe('1.0.0');
+    expect(second?.version).toBe('1.0.0');
+    expect(mockAdapterFor('codex').detect).toHaveBeenCalledTimes(2);
+    if (!release) throw new Error('Background probe did not start');
+    release({ cli: 'codex', installed: true, version: '2.0.0', messagingMode: 'queue' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect((await service.getDetection('codex'))?.version).toBe('2.0.0');
+    expect(mockAdapterFor('codex').detect).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a detached probe repopulate a dropped entry', async () => {
+    const { service } = createService();
+    let release: ((value: CliDetectionResult) => void) | undefined;
+    mockAdapterFor('codex').detect.mockImplementationOnce(() => new Promise((resolve) => {
+      release = resolve;
+    }));
+    const first = service.getDetection('codex');
+    service.dropDetection('codex');
+    if (!release) throw new Error('First probe did not start');
+    release({ cli: 'codex', installed: true, version: 'old', messagingMode: 'queue' });
+    await first;
+    expect((await service.getDetection('codex'))?.version).toBe('1.0.0');
+    expect(mockAdapterFor('codex').detect).toHaveBeenCalledTimes(2);
+  });
+
+  it('joins concurrent first probes for one CLI', async () => {
+    const { service } = createService();
+    const [first, second] = await Promise.all([
+      service.getDetection('codex'), service.getDetection('codex'),
+    ]);
+    expect(first).toEqual(second);
+    expect(mockAdapterFor('codex').detect).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns undefined for an unregistered CLI', async () => {
+    const { service } = createService();
+    expect(await service.getDetection('unregistered' as CliType)).toBeUndefined();
+  });
+
+  it('returns a completed Codex result during a stuck refresh and after invalidation', async () => {
+    const { service } = createService();
+    await service.detectAll();
+    mockAdapterFor('grok').detect.mockImplementation(() => new Promise(() => undefined));
+    const refresh = service.refresh();
+    expect((await service.getDetection('codex'))?.installed).toBe(true);
+    service.invalidateCache();
+    expect((await service.getDetection('codex'))?.installed).toBe(true);
+    void refresh;
+  });
+
+  it('resolves a first Codex probe while another adapter is stuck', async () => {
+    const { service } = createService();
+    mockAdapterFor('grok').detect.mockImplementation(() => new Promise(() => undefined));
+    void service.detectAll();
+    expect((await service.getDetection('codex'))?.cli).toBe('codex');
+    expect(mockAdapterFor('codex').detect).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops one completed result and probes only that CLI on next named detection', async () => {
+    const { service } = createService();
+    await service.detectAll();
+    service.dropDetection('codex');
+    await service.getDetection('codex');
+    expect(mockAdapterFor('codex').detect).toHaveBeenCalledTimes(2);
+    expect(mockAdapterFor('grok').detect).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs a slow probe with its outcome', async () => {
+    const clock = jest.spyOn(performance, 'now');
+    clock.mockReturnValueOnce(0).mockReturnValueOnce(1002);
+    try {
+      const { service, logger } = createService();
+      await service.getDetection('codex');
+      expect(logger.warn).toHaveBeenCalledWith('[CliDetection] slow probe', {
+        cli: 'codex', durationMs: 1002, outcome: 'installed',
+      });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+});

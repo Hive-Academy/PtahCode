@@ -347,6 +347,7 @@ function createMockCliDetection(
     getInstalledClis: jest.fn().mockResolvedValue([det]),
     detectAll: jest.fn().mockResolvedValue([det]),
     invalidateCache: jest.fn(),
+    dropDetection: jest.fn(),
   } as unknown as jest.Mocked<CliDetectionService>;
 }
 
@@ -600,6 +601,44 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   });
 
   describe('spawn() with SDK adapter', () => {
+    it.each([
+      ['ENOENT code', Object.assign(new Error('launch failure'), { code: 'ENOENT' }), true],
+      ['module error', new Error("Cannot find module 'x'"), false],
+      ['spawn EINVAL', new Error('spawn EINVAL'), true],
+    ])('drops detection only for missing executable: %s', async (_case, error, shouldDrop) => {
+      sdkAdapter.runSdk.mockRejectedValueOnce(error);
+      await expect(manager.spawn({ task: 'work', cli: 'codex', workingDirectory: '/workspace/root' }))
+        .rejects.toThrow();
+      if (shouldDrop) expect(cliDetection.dropDetection).toHaveBeenCalledTimes(1);
+      else expect(cliDetection.dropDetection).not.toHaveBeenCalled();
+      if (shouldDrop) expect(cliDetection.dropDetection).toHaveBeenCalledWith('codex');
+    });
+
+    it('logs one timing line when CLI detection rejects the spawn early', async () => {
+      cliDetection.getDetection.mockResolvedValueOnce({
+        cli: 'codex', installed: false, messagingMode: 'none',
+      });
+      await expect(manager.spawn({ task: 'work', cli: 'codex', workingDirectory: '/workspace/root' }))
+        .rejects.toThrow('not installed');
+      const lines = logger.info.mock.calls.filter(([message]) => message === '[AgentProcessManager] spawn step timing');
+      expect(lines).toHaveLength(1);
+      expect(lines[0][1]).toMatchObject({ cli: 'codex', agentId: null, outcome: 'error' });
+    });
+    it('logs one completed spawn timing with its agent ID', async () => {
+      const result = await manager.spawn({ task: 'work', cli: 'codex', workingDirectory: '/workspace/root' });
+      const lines = logger.info.mock.calls.filter(([message]) => message === '[AgentProcessManager] spawn step timing');
+      expect(lines).toHaveLength(1);
+      expect(lines[0][1]).toMatchObject({ cli: 'codex', agentId: result.agentId, outcome: 'ok' });
+    });
+
+    it('logs one failed spawn timing', async () => {
+      sdkAdapter.runSdk.mockRejectedValueOnce(new Error('launch failed'));
+      await expect(manager.spawn({ task: 'work', cli: 'codex', workingDirectory: '/workspace/root' }))
+        .rejects.toThrow('launch failed');
+      const lines = logger.info.mock.calls.filter(([message]) => message === '[AgentProcessManager] spawn step timing');
+      expect(lines).toHaveLength(1);
+      expect(lines[0][1]).toMatchObject({ cli: 'codex', outcome: 'error' });
+    });
     it('stamps one caller workspace across worktrees and keeps it on resume', async () => {
       ({ manager } = createManager({
         logger,
