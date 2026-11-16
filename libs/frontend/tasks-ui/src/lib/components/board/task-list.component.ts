@@ -54,6 +54,7 @@ import {
   PtahButtonDirective,
   PtahCheckboxDirective,
   PtahIconButtonDirective,
+  PtahMeterComponent,
 } from '@ptah-extension/ui';
 
 /** One status group, resolved for rendering. */
@@ -160,6 +161,7 @@ const MAX_VISIBLE_LABELS = 3;
     PtahButtonDirective,
     PtahCheckboxDirective,
     PtahIconButtonDirective,
+    PtahMeterComponent,
     LucideAngularModule,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -505,12 +507,18 @@ const MAX_VISIBLE_LABELS = 3;
                                 class="h-3 w-3 shrink-0"
                                 aria-hidden="true"
                               />
-                              <progress
-                                class="progress progress-primary h-1.5 w-16"
+                              <ptah-meter
+                                class="w-16"
                                 [value]="counts.done"
                                 [max]="counts.total"
+                                label="Child tasks completed"
+                                size="sm"
+                                tone="primary"
+                                [hideLabel]="true"
+                                [showValue]="false"
+                                barRole="progressbar"
                                 aria-hidden="true"
-                              ></progress>
+                              />
                               <span
                                 class="shrink-0 tabular-nums"
                                 aria-hidden="true"
