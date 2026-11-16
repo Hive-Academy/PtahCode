@@ -430,11 +430,7 @@ export class OpencodeCliAdapter implements CliAdapter {
       let stdout = '';
       let settled = false;
       let childClosed = false;
-      let childExited = false;
       const child = spawnCli(binary, args, { spawner: this.spawner, detached: true });
-      child.on('exit', () => {
-        childExited = true;
-      });
 
       const finish = (outcome: {
         stdout: string;
@@ -452,7 +448,7 @@ export class OpencodeCliAdapter implements CliAdapter {
         void child.whenSpawned.then((pid) => {
           if (pid && !childClosed && !child.killed) {
             void killProcessTree(pid, 'SIGTERM', undefined, {
-              groupOnly: childExited && process.platform !== 'win32',
+              groupOnly: process.platform !== 'win32',
             });
           }
         });
@@ -900,10 +896,6 @@ export class OpencodeCliAdapter implements CliAdapter {
     let firstSessionEvent = true;
     let sessionMismatch = false;
     let childClosed = false;
-    let childExited = false;
-    child.on('exit', () => {
-      childExited = true;
-    });
     const parseLine = (line: string): void =>
       this.handleLine(line, emitOutput, emitSegment, state, (event) => {
         if (event.type === 'error') {
@@ -927,7 +919,7 @@ export class OpencodeCliAdapter implements CliAdapter {
             void child.whenSpawned.then((pid) => {
               if (pid && !childClosed && !child.killed) {
                 void killProcessTree(pid, 'SIGTERM', undefined, {
-                  groupOnly: childExited && process.platform !== 'win32',
+                  groupOnly: process.platform !== 'win32',
                 });
               }
             });

@@ -133,7 +133,7 @@ export class ReviewCommandRunner implements IReviewCommandRunner {
         void this.killTree(child.pid, 'SIGTERM', (error: unknown) => {
           this.logger.error('Review command tree termination failed',
             error instanceof Error ? error : new Error(String(error)));
-        }, { groupOnly: exited });
+        }, { groupOnly: process.platform !== 'win32' });
       };
       const abort = (): void => { timedOut = true; stop(); };
       signal?.addEventListener('abort', abort, { once: true });

@@ -160,7 +160,10 @@ describe('AntigravityCliAdapter', () => {
 
   describe('detect()', () => {
     it('tree-kills a timed-out help probe', async () => {
+      // The worker has not forwarded exit; the fake child deliberately emits no exit event.
       jest.useFakeTimers();
+      const realPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       try {
         mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
         mockProbeCliVersion.mockResolvedValue('agy future-version');
@@ -172,12 +175,15 @@ describe('AntigravityCliAdapter', () => {
           FAKE_PID,
           'SIGTERM',
           undefined,
-          { groupOnly: false },
+          { groupOnly: process.platform !== 'win32' },
         );
         expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/agy', ['--help'],
           expect.objectContaining({ detached: true }));
         expect(currentChild?.kill).not.toHaveBeenCalled();
-      } finally { jest.useRealTimers(); }
+      } finally {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        jest.useRealTimers();
+      }
     });
     it('reports installed when resolveCliPath finds the binary', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
@@ -226,7 +232,10 @@ describe('AntigravityCliAdapter', () => {
 
   describe('listModels()', () => {
     it('tree-kills the model probe once on timeout', async () => {
+      // The worker has not forwarded exit; the fake child deliberately emits no exit event.
       jest.useFakeTimers();
+      const realPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       try {
         mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
         const models = adapter.listModels();
@@ -238,12 +247,15 @@ describe('AntigravityCliAdapter', () => {
           FAKE_PID,
           'SIGTERM',
           undefined,
-          { groupOnly: false },
+          { groupOnly: process.platform !== 'win32' },
         );
         expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/agy', ['models'],
           expect.objectContaining({ detached: true }));
         expect(currentChild?.kill).not.toHaveBeenCalled();
-      } finally { jest.useRealTimers(); }
+      } finally {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        jest.useRealTimers();
+      }
     });
     it('old format: one spaced label per line still lists models', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');

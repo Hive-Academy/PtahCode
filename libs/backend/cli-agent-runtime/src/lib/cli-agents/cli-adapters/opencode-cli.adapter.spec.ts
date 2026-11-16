@@ -210,7 +210,10 @@ describe('OpencodeCliAdapter', () => {
 
   describe('listModels()', () => {
     it('tree-kills the model probe once on timeout', async () => {
+      // The worker has not forwarded exit; the fake child deliberately emits no exit event.
       jest.useFakeTimers();
+      const realPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       try {
         mockResolveCliPath.mockResolvedValue('/usr/local/bin/opencode');
         const models = adapter.listModels();
@@ -221,12 +224,15 @@ describe('OpencodeCliAdapter', () => {
           FAKE_PID,
           'SIGTERM',
           undefined,
-          { groupOnly: false },
+          { groupOnly: process.platform !== 'win32' },
         );
         expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/opencode', ['models'],
           expect.objectContaining({ detached: true }));
         expect(currentChild?.kill).not.toHaveBeenCalled();
-      } finally { jest.useRealTimers(); }
+      } finally {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        jest.useRealTimers();
+      }
     });
     it('parses `opencode models` stdout into provider/model ids', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/opencode');
@@ -908,7 +914,7 @@ describe('OpencodeCliAdapter', () => {
         FAKE_PID,
         'SIGTERM',
         undefined,
-        { groupOnly: false },
+        { groupOnly: process.platform !== 'win32' },
       );
       expect(currentChild?.kill).not.toHaveBeenCalled();
       expect(segments.some((s) => s.type === 'error' && s.content.includes('session-mismatch'))).toBe(true);

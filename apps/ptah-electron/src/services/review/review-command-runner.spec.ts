@@ -31,6 +31,8 @@ describe('ReviewCommandRunner', () => {
   it.each(['timeout', 'abort', 'output cap', 'exited'] as const)(
     '%s uses the tree stop only while the child is live', async (reason) => {
       jest.useFakeTimers();
+      const realPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       const root = await mkdtemp(join(tmpdir(), 'ptah-review-stop-'));
       const checkout = join(root, 'repo');
       const source = join(root, 'attempts', 'claim', 'src');
@@ -74,9 +76,10 @@ describe('ReviewCommandRunner', () => {
         expect(killTree).toHaveBeenCalledTimes(reason === 'exited' && process.platform === 'win32' ? 0 : 1);
         if (reason !== 'exited' || process.platform !== 'win32')
           expect(killTree).toHaveBeenCalledWith(43210, 'SIGTERM', expect.any(Function),
-            { groupOnly: reason === 'exited' });
+            { groupOnly: process.platform !== 'win32' });
         expect(directKill).not.toHaveBeenCalled();
       } finally {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
         jest.useRealTimers();
         await rm(root, { recursive: true, force: true });
       }
