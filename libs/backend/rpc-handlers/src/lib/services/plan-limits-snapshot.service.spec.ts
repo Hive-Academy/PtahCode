@@ -104,7 +104,130 @@ function build(
   };
 }
 
-describe('PlanLimitsSnapshotService', () => {  it('shares normalized scopes in flight and forces a separate refresh', async () => {
+describe('PlanLimitsSnapshotService', () => {
+  it('serves a same-scope pull from the TTL cache and logs its path', async () => {
+    const s = build();
+    const first = await s.service.snapshot({ providerId: 'openai-codex' });
+    const second = await s.service.snapshot({ providerId: 'openai-codex' });
+    expect(second).toBe(first);
+    expect(s.discoverTargets).toHaveBeenCalledTimes(1);
+    expect(s.logger.debug).toHaveBeenLastCalledWith(
+      '[PlanLimitsSnapshot] snapshot served',
+      expect.objectContaining({ source: 'pull', path: 'ttl-cache', durationMs: expect.any(Number) }),
+    );
+  });
+
+  it('assembles again when the 30 second TTL expires', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    try {
+      const s = build();
+      await s.service.snapshot({});
+      jest.setSystemTime(new Date('2026-01-01T00:00:30Z'));
+      await s.service.snapshot({});
+      expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps cached snapshots separate by scope', async () => {
+    const s = build();
+    await s.service.snapshot({ providerId: 'openai-codex' });
+    await s.service.snapshot({ providerId: 'ollama-cloud' });
+    expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+  });
+
+  it('bypasses the cache on refresh and replaces the complete entry', async () => {
+    const s = build();
+    const first = await s.service.snapshot({});
+    const refreshed = await s.service.snapshot({ refresh: true });
+    const cached = await s.service.snapshot({});
+    expect(refreshed).not.toBe(first);
+    expect(cached).toBe(refreshed);
+    expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a newer refresh cached when an older pull settles later', async () => {
+    const s = build();
+    let release!: (rows: DiscoveredPlanOwner[]) => void;
+    s.discoverTargets.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const older = s.service.snapshot({});
+    const refreshed = await s.service.snapshot({ refresh: true });
+    release([]);
+    expect(await older).not.toBe(refreshed);
+    expect(await s.service.snapshot({})).toBe(refreshed);
+    expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache a snapshot when an owner read times out', async () => {
+    jest.useFakeTimers();
+    try {
+      const s = build();
+      s.discoverTargets.mockResolvedValue([
+        { kind: 'read', origin: 'lane', target: { providerId: 'ollama-cloud', ownerRef: OLLAMA } },
+      ]);
+      s.getOwnerSnapshot.mockImplementationOnce(() => new Promise(() => undefined));
+      const first = s.service.snapshot({});
+      await jest.advanceTimersByTimeAsync(3_000);
+      await expect(first).resolves.toMatchObject({ owners: [{ status: 'service-unavailable' }] });
+      await expect(s.service.snapshot({})).resolves.toMatchObject({ owners: [{ status: 'available' }] });
+      expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not cache a snapshot when an owner read throws', async () => {
+    const s = build();
+    s.discoverTargets.mockResolvedValue([
+      { kind: 'read', origin: 'lane', target: { providerId: 'ollama-cloud', ownerRef: OLLAMA } },
+    ]);
+    s.getOwnerSnapshot.mockRejectedValueOnce(new Error('read failed'));
+    await expect(s.service.snapshot({})).resolves.toMatchObject({ owners: [{ status: 'service-unavailable' }] });
+    await expect(s.service.snapshot({})).resolves.toMatchObject({ owners: [{ status: 'available' }] });
+    expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache incomplete discovery or serve an earlier complete entry after it', async () => {
+    const s = build();
+    const incomplete = Object.assign([] as DiscoveredPlanOwner[], { discoveryIncomplete: true });
+    await s.service.snapshot({});
+    s.discoverTargets.mockResolvedValueOnce(incomplete);
+    await expect(s.service.snapshot({ refresh: true })).resolves.toMatchObject({ discoveryIncomplete: true });
+    await s.service.snapshot({});
+    expect(s.discoverTargets).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not cache a rejected assembly', async () => {
+    const s = build();
+    s.discoverTargets.mockRejectedValueOnce(new Error('discovery down'));
+    await expect(s.service.snapshot({})).rejects.toThrow('discovery down');
+    await s.service.snapshot({});
+    expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares one cache entry between two orders of the same scope', async () => {
+    const s = build();
+    await s.service.snapshot({ sessionIds: ['b', 'a'], ownerKeys: ['y', 'x'] });
+    await s.service.snapshot({ sessionIds: ['a', 'b'], ownerKeys: ['x', 'y'] });
+    expect(s.discoverTargets).toHaveBeenCalledTimes(1);
+  });
+
+  it('evicts the least recent scope after 32 cached scopes', async () => {
+    const s = build();
+    await s.service.snapshot({ sessionIds: ['s0'] });
+    await s.service.snapshot({ sessionIds: ['s1'] });
+    for (let i = 2; i < 32; i += 1) await s.service.snapshot({ sessionIds: [`s${i}`] });
+    await s.service.snapshot({ sessionIds: ['s0'] }); // hit: s0 becomes the most recent
+    await s.service.snapshot({ sessionIds: ['s32'] }); // evicts s1
+    expect(s.discoverTargets).toHaveBeenCalledTimes(33);
+    await s.service.snapshot({ sessionIds: ['s0'] });
+    expect(s.discoverTargets).toHaveBeenCalledTimes(33);
+    await s.service.snapshot({ sessionIds: ['s1'] });
+    expect(s.discoverTargets).toHaveBeenCalledTimes(34);
+  });
+
+  it('shares normalized scopes in flight and forces a separate refresh', async () => {
     const s = build();
     let release!: (rows: DiscoveredPlanOwner[]) => void;
     s.discoverTargets.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
@@ -148,6 +271,7 @@ describe('PlanLimitsSnapshotService', () => {  it('shares normalized scopes in f
     const served = s.logger.debug.mock.calls.filter(([message]) => message === '[PlanLimitsSnapshot] snapshot served');
     expect(served).toHaveLength(2);
     expect(served[1][1]).toEqual(expect.objectContaining({ source: 'push', path: 'assembled', refresh: false, hasProvider: true, sessionCount: 1, ownerKeyCount: 1, pushes: 1 }));
+    expect(s.discoverTargets).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(served)).not.toMatch(/private-session|private-owner/);
   });
   it('links an ambient-only native home to its unknown owner and isolates other homes', async () => {
