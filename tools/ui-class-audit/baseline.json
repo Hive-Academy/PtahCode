@@ -476,8 +476,7 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
-    "<dynamic>": 2,
-    "skeleton": 2
+    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-connection-card.component.ts": {
     "<dynamic>": 4
@@ -486,7 +485,7 @@
     "<dynamic>": 8
   },
   "libs/frontend/chat/src/lib/settings/providers/providers-settings.component.ts": {
-    "<dynamic>": 8
+    "<dynamic>": 6
   },
   "libs/frontend/chat/src/lib/settings/providers/setting-scope-row.component.ts": {
     "<dynamic>": 5

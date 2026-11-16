@@ -61,6 +61,7 @@ describe('ProviderCatalogModalComponent', () => {
     expect(element.querySelector('dialog input, dialog button, dialog select')).toBe(query('provider-catalog-search'));
     expect(element.textContent).toContain('Available in catalog (3 unconfigured)');
     expect(rows()).toEqual(['openrouter', 'github-copilot', 'ollama']);
+    expect(element.querySelector('[data-provider="ollama"]')?.getAttribute('title')).toContain('Ollama — Local server');
     expect(element.querySelector('[data-provider="ollama"]')?.textContent).toContain('Local server · Run open-source models locally via Ollama · Default models available');
     expect(query('provider-catalog-custom')?.textContent).toContain('Custom endpoint gateway');
   });
@@ -93,7 +94,7 @@ describe('ProviderCatalogModalComponent', () => {
     fixture.componentInstance.providers.set([]);
     fixture.componentInstance.status.set('error'); fixture.detectChanges();
     expect(query('provider-catalog-error')?.textContent).toContain('Custom providers could not be loaded. Your saved settings have not changed.');
-    expect(query('provider-catalog-error')?.getAttribute('role')).toBe('alert');
+    expect(query('provider-catalog-error')?.querySelectorAll('[role="alert"]')).toHaveLength(1);
     expect(query('provider-catalog-empty')).toBeNull();
     button('Retry')?.click();
     expect(fixture.componentInstance.events).toEqual(['retry']);
