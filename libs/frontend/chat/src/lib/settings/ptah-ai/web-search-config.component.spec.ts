@@ -602,6 +602,13 @@ describe('WebSearchConfigComponent', () => {
       expect(byTestId('settings-web-search-status-tavily').textContent?.trim()).toBe('The connection test failed.');
       expect(visibleText()).not.toContain('host detail');
     });
+
+    it('the test button keeps its full accessible name', async () => {
+      await render();
+      expect(byTestId<HTMLButtonElement>('settings-web-search-test').getAttribute('aria-label')).toBe(
+        'Test web search connection',
+      );
+    });
   });
 
   it('uses no text size below 12 px anywhere in the component source (Batch 50b)', () => {

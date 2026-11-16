@@ -162,6 +162,7 @@ function providerLabel(provider: ProviderId): string {
                 : null
             "
             testId="settings-web-search-test"
+            ariaLabel="Test web search connection"
             (test)="testSearch()"
           />
         </div>
