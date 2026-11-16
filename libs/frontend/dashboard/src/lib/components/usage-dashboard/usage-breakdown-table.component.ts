@@ -16,23 +16,51 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent, ProviderMarkComponent } from '@ptah-extension/ui';
-import { type DayBreakdownRow, type ModelBreakdownRow } from './usage-summary.view-model';
-import { formatCompactTokens, formatDayShort, formatPercent, formatUsd, providerDisplayName } from './usage-formatting';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahSectionHeaderComponent,
+  ProviderMarkComponent,
+  PtahTableComponent,
+  PtahNumericCellDirective,
+} from '@ptah-extension/ui';
+import {
+  type DayBreakdownRow,
+  type ModelBreakdownRow,
+} from './usage-summary.view-model';
+import {
+  formatCompactTokens,
+  formatDayShort,
+  formatPercent,
+  formatUsd,
+  providerDisplayName,
+} from './usage-formatting';
 
 @Component({
   selector: 'ptah-usage-breakdown-table',
   standalone: true,
-  imports: [ProviderMarkComponent, PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent],
+  imports: [
+    ProviderMarkComponent,
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahSectionHeaderComponent,
+    PtahTableComponent,
+    PtahNumericCellDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex flex-col gap-2" data-testid="usage-breakdown">
       <div class="flex items-center justify-between gap-2">
         <ptah-section-header heading="Breakdown" [level]="4" />
-        <div class="flex gap-[var(--ptah-gap-controls)]" role="group" aria-label="Breakdown view">
+        <div
+          class="flex gap-[var(--ptah-gap-controls)]"
+          role="group"
+          aria-label="Breakdown view"
+        >
           <button
             type="button"
-            ptahButton size="xs"
+            ptahButton
+            size="xs"
             [variant]="mode() === 'model' ? 'primary' : 'ghost'"
             [selected]="mode() === 'model'"
             (click)="mode.set('model')"
@@ -41,7 +69,8 @@ import { formatCompactTokens, formatDayShort, formatPercent, formatUsd, provider
           </button>
           <button
             type="button"
-            ptahButton size="xs"
+            ptahButton
+            size="xs"
             [variant]="mode() === 'day' ? 'primary' : 'ghost'"
             [selected]="mode() === 'day'"
             (click)="mode.set('day')"
@@ -51,77 +80,90 @@ import { formatCompactTokens, formatDayShort, formatPercent, formatUsd, provider
         </div>
       </div>
 
-      <div class="overflow-x-auto">
-        @if (mode() === 'model') {
-          <table class="table table-xs" data-testid="usage-breakdown-model">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th class="text-right">Cost</th>
-                <th class="text-right" [attr.title]="shareTitle()">{{ shareHeading() }}</th>
-                <th class="text-right">Tokens</th>
+      @if (mode() === 'model') {
+        <ptah-table
+          label="Usage breakdown by model"
+          size="xs"
+          data-testid="usage-breakdown-model"
+        >
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th ptahNumeric>Cost</th>
+              <th ptahNumeric [attr.title]="shareTitle()">
+                {{ shareHeading() }}
+              </th>
+              <th ptahNumeric>Tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of modelRows(); track row.providerId + row.modelId) {
+              <tr data-testid="usage-model-row">
+                <td>
+                  <div class="flex items-center gap-2">
+                    <ptah-provider-mark
+                      [providerId]="row.providerId"
+                      size="sm"
+                      class="h-4 w-4 shrink-0"
+                    />
+                    <span class="truncate" [attr.title]="row.modelDisplayName">
+                      {{ row.modelDisplayName }}
+                    </span>
+                    <span ptahBadge size="xs" class="text-[10px]">
+                      {{ providerName(row.providerId) }}
+                    </span>
+                  </div>
+                </td>
+                <td
+                  ptahNumeric
+                  [attr.title]="
+                    row.costUsd === null
+                      ? 'No price for this model'
+                      : row.unpriced
+                        ? 'Some usage of this model is unpriced'
+                        : null
+                  "
+                >
+                  {{ modelCostLabel(row) }}
+                </td>
+                <td ptahNumeric>{{ shareLabel(row.shareOfCost) }}</td>
+                <td ptahNumeric>{{ compactTokens(row.tokens) }}</td>
               </tr>
-            </thead>
-            <tbody>
-              @for (row of modelRows(); track row.providerId + row.modelId) {
-                <tr data-testid="usage-model-row">
-                  <td>
-                    <div class="flex items-center gap-2">
-                      <ptah-provider-mark
-                        [providerId]="row.providerId"
-                        size="sm"
-                        class="h-4 w-4 shrink-0"
-                      />
-                      <span class="truncate" [attr.title]="row.modelDisplayName">
-                        {{ row.modelDisplayName }}
-                      </span>
-                      <span ptahBadge size="xs" class="text-[10px]">
-                        {{ providerName(row.providerId) }}
-                      </span>
-                    </div>
-                  </td>
-                  <td
-                    class="text-right tabular-nums"
-                    [attr.title]="row.costUsd === null ? 'No price for this model' : row.unpriced ? 'Some usage of this model is unpriced' : null"
-                  >
-                    {{ modelCostLabel(row) }}
-                  </td>
-                  <td class="text-right tabular-nums">{{ shareLabel(row.shareOfCost) }}</td>
-                  <td class="text-right tabular-nums">{{ compactTokens(row.tokens) }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        } @else {
-          <table class="table table-xs" data-testid="usage-breakdown-day">
-            <thead>
-              <tr>
-                <th>Day</th>
-                <th class="text-right">Cost</th>
-                <th class="text-right" [attr.title]="shareTitle()">{{ shareHeading() }}</th>
-                <th class="text-right">Tokens</th>
-                <th>Top model</th>
+            }
+          </tbody>
+        </ptah-table>
+      } @else {
+        <ptah-table
+          label="Usage breakdown by day"
+          size="xs"
+          data-testid="usage-breakdown-day"
+        >
+          <thead>
+            <tr>
+              <th>Day</th>
+              <th ptahNumeric>Cost</th>
+              <th ptahNumeric [attr.title]="shareTitle()">
+                {{ shareHeading() }}
+              </th>
+              <th ptahNumeric>Tokens</th>
+              <th>Top model</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of dayRows(); track row.day) {
+              <tr data-testid="usage-day-row">
+                <td>{{ dayLabel(row.day) }}</td>
+                <td ptahNumeric [attr.title]="dayTitle(row)">
+                  {{ dayCostLabel(row) }}
+                </td>
+                <td ptahNumeric>{{ shareLabel(row.shareOfCost) }}</td>
+                <td ptahNumeric>{{ compactTokens(row.tokens) }}</td>
+                <td class="truncate">{{ row.topModelDisplayName ?? '—' }}</td>
               </tr>
-            </thead>
-            <tbody>
-              @for (row of dayRows(); track row.day) {
-                <tr data-testid="usage-day-row">
-                  <td>{{ dayLabel(row.day) }}</td>
-                  <td
-                    class="text-right tabular-nums"
-                    [attr.title]="dayTitle(row)"
-                  >
-                    {{ dayCostLabel(row) }}
-                  </td>
-                  <td class="text-right tabular-nums">{{ shareLabel(row.shareOfCost) }}</td>
-                  <td class="text-right tabular-nums">{{ compactTokens(row.tokens) }}</td>
-                  <td class="truncate">{{ row.topModelDisplayName ?? '—' }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        }
-      </div>
+            }
+          </tbody>
+        </ptah-table>
+      }
     </div>
   `,
 })
