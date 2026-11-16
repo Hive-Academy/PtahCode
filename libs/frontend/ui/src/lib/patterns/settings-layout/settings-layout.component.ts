@@ -28,9 +28,18 @@ export interface PtahSettingsTab<TId extends string = string> {
   readonly badge?: string | number | null;
   readonly disabled?: boolean;
   readonly disabledReason?: string | null;
+  /** Parent navigation id. Used only in navigation mode. */
+  readonly parent?: TId;
+  /** Optional navigation status, shown as a dot and count. */
+  readonly stateMark?: {
+    readonly tone: 'neutral' | 'ok' | 'warn' | 'error';
+    readonly label: string;
+    readonly count?: string | number;
+  };
 }
 
 export type PtahSettingsTitleLevel = 1 | 2;
+export type PtahSettingsNavMode = 'tabs' | 'navigation';
 
 const TITLE_CLASS =
   'text-[length:var(--ptah-text-page-title-size)] leading-[var(--ptah-text-page-title-leading)] font-[number:var(--ptah-text-page-title-weight)]';
@@ -46,6 +55,17 @@ const TAB_CLASS = [
   'aria-selected:font-semibold aria-selected:bg-[var(--ptah-settings-nav-active-bg)]',
   'aria-selected:shadow-[inset_0_-2px_0_var(--ptah-settings-nav-active-edge)]',
   '[@container(min-width:768px)]:aria-selected:shadow-[inset_2px_0_0_var(--ptah-settings-nav-active-edge)]',
+  'aria-disabled:cursor-not-allowed aria-disabled:text-base-content-muted aria-disabled:hover:bg-transparent',
+].join(' ');
+
+const NAV_CLASS = [
+  'inline-flex w-full min-w-0 items-center gap-[var(--ptah-gap-inline)] text-start',
+  'h-[var(--ptah-settings-nav-item-h)] px-[var(--ptah-control-px)] rounded-[var(--ptah-radius-control)]',
+  'text-[length:var(--ptah-text-body-size)] leading-[var(--ptah-text-body-leading)] font-medium',
+  'hover:bg-[var(--ptah-btn-ghost-bg-hover)]',
+  'focus-visible:outline focus-visible:outline-[length:var(--ptah-focus-ring-width)] focus-visible:outline-offset-[length:var(--ptah-focus-ring-offset)] focus-visible:outline-[color:var(--ptah-focus-ring-color)]',
+  'aria-[current=page]:font-semibold aria-[current=page]:bg-[var(--ptah-settings-nav-active-bg)]',
+  'aria-[current=page]:shadow-[inset_2px_0_0_var(--ptah-settings-nav-active-edge)]',
   'aria-disabled:cursor-not-allowed aria-disabled:text-base-content-muted aria-disabled:hover:bg-transparent',
 ].join(' ');
 
@@ -87,33 +107,41 @@ const TAB_CLASS = [
     >
       @if (hasTabs()) {
         <nav
-          class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)] [@container(min-width:768px)]:sticky [@container(min-width:768px)]:top-0 [@container(min-width:768px)]:self-start"
+          class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)]"
+          [class]="navToggles()"
           [attr.aria-label]="navLabel()"
-          data-testid="settings-layout-nav"
+          [attr.data-testid]="navTestId()"
         >
-          <div class="hidden [@container(min-width:768px)]:[&:not(:empty)]:block"><ng-content select="[nav-header]" /></div>
+          <div [class]="navSlotClass()"><ng-content select="[nav-header]" /></div>
           <div
-            role="tablist"
-            class="flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] [@container(min-width:768px)]:flex-col [@container(min-width:768px)]:gap-[var(--ptah-gap-label)] [@container(min-width:768px)]:overflow-visible [@container(min-width:768px)]:[border-bottom:none]"
-            [attr.aria-orientation]="orientation()"
+            [attr.role]="navMode() === 'tabs' ? 'tablist' : null"
+            [class]="navListClass()"
+            [attr.aria-orientation]="navMode() === 'tabs' ? orientation() : null"
             data-testid="settings-layout-tablist"
           >
             @for (tab of tabs(); track tab.id; let i = $index) {
+              <div [class]="navMode() === 'navigation' && tab.parent ? 'relative ml-[var(--ptah-gap-section)] before:pointer-events-none before:absolute before:left-0 before:top-0 before:h-1/2 before:w-[var(--ptah-gap-inline)] before:rounded-bl-[var(--ptah-radius-control)] before:border-b before:border-l before:border-[var(--ptah-border-color)]' : ''">
               <button
                 #tabButton
                 type="button"
-                role="tab"
+                [attr.role]="navMode() === 'tabs' ? 'tab' : null"
                 [id]="tabId(tab.id)"
-                [class]="tabClass"
-                [attr.aria-selected]="tab.id === selected()"
-                [attr.aria-controls]="panelId"
+                [class]="navMode() === 'tabs' ? tabClass : navClass"
+                [class.tab-active]="navMode() === 'navigation' && tab.id === selected()"
+                [class.text-base-content]="navMode() === 'navigation' && inSection(tab.id)"
+                [class.shadow-[inset_2px_0_0_var(--ptah-border-color)]]="navMode() === 'navigation' && inSection(tab.id)"
+                [attr.data-active]="navMode() === 'navigation' && tab.id === selected() ? 'true' : null"
+                [attr.data-in-section]="navMode() === 'navigation' && inSection(tab.id) ? 'true' : null"
+                [attr.aria-current]="navMode() === 'navigation' && tab.id === selected() ? 'page' : null"
+                [attr.aria-selected]="navMode() === 'tabs' ? tab.id === selected() : null"
+                [attr.aria-controls]="navMode() === 'tabs' ? panelId : null"
                 [attr.aria-disabled]="tab.disabled ? 'true' : null"
                 [attr.aria-describedby]="tab.disabled && tab.disabledReason ? reasonId(tab.id) : null"
                 [attr.title]="tab.disabled && tab.disabledReason ? tab.disabledReason : null"
-                [tabIndex]="i === focusIndex() ? 0 : -1"
+                [tabIndex]="navMode() === 'tabs' ? (i === focusIndex() ? 0 : -1) : 0"
                 (click)="activate(tab)"
-                (keydown)="onKeydown($event)"
-                (focus)="focusIndex.set(i)"
+                (keydown)="navMode() === 'tabs' && onKeydown($event)"
+                (focus)="navMode() === 'tabs' && focusIndex.set(i)"
               >
                 @if (tab.icon; as icon) {
                   <lucide-angular
@@ -126,7 +154,14 @@ const TAB_CLASS = [
                 @if (hasBadge(tab.badge)) {
                   <span ptahBadge size="xs" data-testid="settings-layout-badge">{{ tab.badge }}</span>
                 }
+                @if (navMode() === 'navigation' && tab.stateMark; as mark) {
+                  <span role="img" class="inline-flex shrink-0 items-center gap-[var(--ptah-gap-label)] text-[length:var(--ptah-text-caption-size)]" [class]="markToneClass(mark.tone)" [attr.aria-label]="mark.label" data-testid="settings-layout-state-mark">
+                    <span class="size-[var(--ptah-icon-xs)] rounded-full bg-current" aria-hidden="true"></span>
+                    @if (mark.count !== undefined) { <span aria-hidden="true">{{ mark.count }}</span> }
+                  </span>
+                }
               </button>
+              </div>
             }
           </div>
           @for (tab of tabs(); track tab.id) {
@@ -134,7 +169,7 @@ const TAB_CLASS = [
               <span class="sr-only" [id]="reasonId(tab.id)">{{ tab.disabledReason }}</span>
             }
           }
-          <div class="hidden [@container(min-width:768px)]:[&:not(:empty)]:block"><ng-content select="[nav-footer]" /></div>
+          <div [class]="navSlotClass()"><ng-content select="[nav-footer]" /></div>
         </nav>
       }
       <div class="flex min-w-0 flex-col" data-testid="settings-layout-main">
@@ -161,12 +196,13 @@ const TAB_CLASS = [
             <ng-content select="[actions]" />
           </div>
         </header>
+        <div class="empty:hidden" data-testid="settings-layout-header-band"><ng-content select="[header-band]" /></div>
         <div
           class="flex w-full min-w-0 max-w-[var(--ptah-settings-content-max-w)] flex-col gap-[var(--ptah-gap-section)] scroll-pb-[calc(var(--ptah-control-h-md)+2*var(--ptah-surface-pad))]"
           [id]="panelId"
-          [attr.role]="hasTabs() ? 'tabpanel' : null"
-          [attr.aria-labelledby]="panelLabelledBy()"
-          [attr.tabindex]="hasTabs() ? 0 : null"
+          [attr.role]="hasTabs() && navMode() === 'tabs' ? 'tabpanel' : null"
+          [attr.aria-labelledby]="hasTabs() && navMode() === 'tabs' ? panelLabelledBy() : null"
+          [attr.tabindex]="hasTabs() && navMode() === 'tabs' ? 0 : null"
           data-testid="settings-layout-panel"
         >
           <ng-content />
@@ -188,6 +224,10 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   readonly titleLevel = input<PtahSettingsTitleLevel>(2);
   /** Accessible name of the nav and the tab list. */
   readonly navLabel = input('Settings sections');
+  /** Navigation uses native buttons and aria-current. Tabs remain the default. */
+  readonly navMode = input<PtahSettingsNavMode>('tabs');
+  /** Test hook for the nav; defaults to the existing layout hook. */
+  readonly navTestId = input('settings-layout-nav');
 
   /** Emits the id of a tab the user activates. Not for a disabled tab. */
   readonly selectedChange = output<TId>();
@@ -200,6 +240,7 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   protected readonly panelId = `${this.baseId}-panel`;
   protected readonly titleClass = TITLE_CLASS;
   protected readonly tabClass = TAB_CLASS;
+  protected readonly navClass = NAV_CLASS;
 
   /** True below `layout-split`. Set from a ResizeObserver on the host. */
   protected readonly narrow = signal(false);
@@ -213,9 +254,34 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   protected readonly focusIndex = linkedSignal(() => Math.max(0, this.selectedIndex()));
 
   protected readonly frameToggles = computed(() => ({
-    '[@container(min-width:768px)]:grid-cols-[var(--ptah-settings-nav-w)_minmax(0,1fr)]': this.hasTabs(),
-    '[@container(min-width:768px)]:gap-x-[var(--ptah-gap-section)]': this.hasTabs(),
+    '[@container(min-width:768px)]:grid-cols-[var(--ptah-settings-nav-w)_minmax(0,1fr)]': this.hasTabs() && this.navMode() === 'tabs',
+    '[@container(min-width:768px)]:gap-x-[var(--ptah-gap-section)]': this.hasTabs() && this.navMode() === 'tabs',
+    '[@container(min-width:640px)]:grid-cols-[14.5rem_minmax(0,1fr)]': this.hasTabs() && this.navMode() === 'navigation',
+    '[@container(min-width:640px)]:gap-x-[var(--ptah-gap-section)]': this.hasTabs() && this.navMode() === 'navigation',
   }));
+
+  protected readonly navToggles = computed(() => this.navMode() === 'navigation'
+    ? '[@container(min-width:640px)]:sticky [@container(min-width:640px)]:top-0 [@container(min-width:640px)]:self-start'
+    : '[@container(min-width:768px)]:sticky [@container(min-width:768px)]:top-0 [@container(min-width:768px)]:self-start');
+  protected readonly navSlotClass = computed(() => this.navMode() === 'navigation'
+    ? 'hidden [@container(min-width:640px)]:[&:not(:empty)]:block'
+    : 'hidden [@container(min-width:768px)]:[&:not(:empty)]:block');
+  protected readonly navListClass = computed(() => this.navMode() === 'navigation'
+    ? 'flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [@container(min-width:640px)]:flex-col [@container(min-width:640px)]:overflow-visible'
+    : 'flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] [@container(min-width:768px)]:flex-col [@container(min-width:768px)]:gap-[var(--ptah-gap-label)] [@container(min-width:768px)]:overflow-visible [@container(min-width:768px)]:[border-bottom:none]');
+
+  protected inSection(id: TId): boolean {
+    return this.tabs().some((tab) => tab.id === this.selected() && tab.parent === id);
+  }
+
+  protected markToneClass(tone: NonNullable<PtahSettingsTab<TId>['stateMark']>['tone']): string {
+    switch (tone) {
+      case 'ok': return 'text-state-done';
+      case 'warn': return 'text-state-need';
+      case 'error': return 'text-state-err';
+      default: return 'text-state-idle';
+    }
+  }
 
   protected readonly panelLabelledBy = computed(() => {
     const index = this.selectedIndex();
@@ -225,7 +291,7 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   constructor() {
     if (typeof ResizeObserver !== 'undefined') {
       const observer = new ResizeObserver(([entry]) => {
-        if (entry) this.narrow.set(entry.contentRect.width < LAYOUT_SPLIT_PX);
+        if (entry) this.narrow.set(entry.contentRect.width < (this.navMode() === 'navigation' ? 640 : LAYOUT_SPLIT_PX));
       });
       observer.observe(this.host.nativeElement);
       inject(DestroyRef).onDestroy(() => observer.disconnect());

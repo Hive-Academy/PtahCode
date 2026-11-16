@@ -20,11 +20,14 @@ type TabId = 'general' | 'accounts' | 'billing' | 'labs';
       [title]="title()"
       [description]="description()"
       [titleLevel]="titleLevel()"
+      [navMode]="navMode()"
+      [navTestId]="navTestId()"
       (selectedChange)="onSelected($event)"
     >
       <span nav-header data-testid="nav-header">Ptah</span>
       <span nav-footer data-testid="nav-footer">v1.0</span>
       <button actions type="button" data-testid="header-action">Reset</button>
+      <div header-band data-testid="instrument-band">Status</div>
       <p data-testid="panel-content">Panel</p>
     </ptah-settings-layout>
   `,
@@ -40,6 +43,8 @@ class HostComponent {
   readonly title = signal('Settings');
   readonly description = signal<string | null>('Manage the app.');
   readonly titleLevel = signal<PtahSettingsTitleLevel>(2);
+  readonly navMode = signal<'tabs' | 'navigation'>('tabs');
+  readonly navTestId = signal('settings-layout-nav');
   readonly emitted: TabId[] = [];
   onSelected(id: TabId): void {
     this.emitted.push(id);
@@ -302,5 +307,56 @@ describe('PtahSettingsLayoutComponent', () => {
     );
     expect(classes.length).toBeGreaterThan(0);
     expect(classes.filter((cls) => RAW_SPACING.test(cls))).toEqual([]);
+  });
+
+  it('keeps tabs as the default mode', () => {
+    expect(tabs()).toHaveLength(4);
+    expect(tablist()).not.toBeNull();
+    expect(tabs()[0].getAttribute('aria-selected')).toBe('true');
+    expect(tabs()[0].hasAttribute('aria-current')).toBe(false);
+  });
+
+  it('renders navigation buttons with active hooks and a projected band', () => {
+    host.navMode.set('navigation');
+    host.navTestId.set('settings-tabs');
+    fixture.detectChanges();
+    const nav = q('[data-testid="settings-tabs"]') as HTMLElement;
+    const buttons = Array.from(nav.querySelectorAll('button'));
+    expect(nav.getAttribute('aria-label')).toBe('Settings sections');
+    expect(tablist()).toBeNull();
+    expect(buttons[0].hasAttribute('role')).toBe(false);
+    expect(buttons[0].getAttribute('aria-current')).toBe('page');
+    expect(buttons[0].getAttribute('data-active')).toBe('true');
+    expect(buttons[0].classList.contains('tab-active')).toBe(true);
+    expect(buttons[1].hasAttribute('aria-current')).toBe(false);
+    expect(q('[data-testid="settings-layout-header-band"] [data-testid="instrument-band"]')).not.toBeNull();
+    expect(panel().hasAttribute('role')).toBe(false);
+    buttons[1].click();
+    expect(host.emitted).toEqual(['accounts']);
+  });
+
+  it('indents a child and marks its parent as in section', () => {
+    host.navMode.set('navigation');
+    host.tabs.set([
+      { id: 'general', label: 'General' },
+      { id: 'accounts', label: 'Accounts', parent: 'general' },
+    ]);
+    host.selected.set('accounts');
+    fixture.detectChanges();
+    const buttons = Array.from(el.querySelectorAll<HTMLButtonElement>('nav button'));
+    expect(buttons[0].getAttribute('data-in-section')).toBe('true');
+    expect(buttons[0].getAttribute('aria-current')).toBeNull();
+    expect(buttons[1].getAttribute('aria-current')).toBe('page');
+    expect(buttons[1].parentElement?.className).toContain('ml-[var(--ptah-gap-section)]');
+  });
+
+  it('shows a state dot and count with an accessible label', () => {
+    host.navMode.set('navigation');
+    host.tabs.set([{ id: 'general', label: 'General', stateMark: { tone: 'warn', count: 2, label: '2 need attention' } }]);
+    fixture.detectChanges();
+    const mark = q('[data-testid="settings-layout-state-mark"]') as HTMLElement;
+    expect(mark.getAttribute('aria-label')).toBe('2 need attention');
+    expect(mark.textContent?.trim()).toBe('2');
+    expect(mark.querySelector('[aria-hidden="true"]')).not.toBeNull();
   });
 });
