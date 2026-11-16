@@ -35,6 +35,8 @@ describe('AutoHandoffSourceCloserService', () => {
   let warn: jest.Mock;
   let markIdle: jest.Mock;
   let service: AutoHandoffSourceCloserService;
+  let idLookup: jest.Mock;
+  let sessionLookup: jest.Mock;
 
   beforeEach(() => {
     currentTab = tab();
@@ -45,6 +47,14 @@ describe('AutoHandoffSourceCloserService', () => {
     info = jest.fn();
     warn = jest.fn();
     markIdle = jest.fn();
+    idLookup = jest.fn((id: string) =>
+      currentTab && id === currentTab.id
+        ? { tab: currentTab, workspacePath: '/ws' }
+        : null,
+    );
+    sessionLookup = jest.fn((id: string) =>
+      currentTab && id === currentTab.claudeSessionId ? currentTab : null,
+    );
     TestBed.configureTestingModule({
       providers: [
         AutoHandoffSourceCloserService,
@@ -52,8 +62,8 @@ describe('AutoHandoffSourceCloserService', () => {
           provide: TabManagerService,
           useValue: {
             closeHandoffPredecessor: close,
-            findTabByIdAcrossWorkspaces: () =>
-              currentTab ? { tab: currentTab, workspacePath: '/ws' } : null,
+            findTabByIdAcrossWorkspaces: idLookup,
+            findTabBySessionId: sessionLookup,
           },
         },
         {
@@ -88,6 +98,44 @@ describe('AutoHandoffSourceCloserService', () => {
     expect(call.mock.calls).toEqual([
       ['session:handoffCloseResult', { requestId: 'r1', outcome: 'closed' }],
     ]);
+  });
+
+  it('closes the renderer tab when a stored predecessor tab id is a session id', async () => {
+    await service.closePredecessor({ ...request, predecessorTabId: 'sdk-1' });
+    expect(idLookup).toHaveBeenCalledWith('sdk-1');
+    expect(sessionLookup).toHaveBeenCalledWith('sdk-1');
+    expect(close).toHaveBeenCalledWith('tab-1', 'sdk-1', false);
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', {
+      requestId: 'r1', outcome: 'closed',
+    });
+  });
+
+  it('uses the sdk id when the stored predecessor id finds no tab', async () => {
+    await service.closePredecessor({ ...request, predecessorTabId: 'stale-session' });
+    expect(sessionLookup.mock.calls).toEqual([['stale-session'], ['sdk-1']]);
+    expect(close).toHaveBeenCalledWith('tab-1', 'sdk-1', false);
+  });
+
+  it('keeps the sdk match guard for a tab found by session id', async () => {
+    sessionLookup.mockReturnValue(currentTab);
+    await service.closePredecessor({
+      ...request,
+      predecessorTabId: 'stale-session',
+      predecessorSdkId: 'other-sdk',
+    });
+    expect(close).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', {
+      requestId: 'r1', outcome: 'blocked', blockerCode: 'sdk-mismatch',
+    });
+  });
+
+  it('replies absent when neither id finds a tab', async () => {
+    currentTab = null;
+    await service.closePredecessor({ ...request, predecessorTabId: 'missing' });
+    expect(close).not.toHaveBeenCalled();
+    expect(call).toHaveBeenCalledWith('session:handoffCloseResult', {
+      requestId: 'r1', outcome: 'absent',
+    });
   });
 
   it('mismatched SDK id replies false and leaves the tab open', async () => {
