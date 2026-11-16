@@ -54,6 +54,22 @@ interface EnvironmentHarness {
   };
 }
 
+describe('memory admission settings', () => {
+  afterEach(() => { delete process.env['PTAH_VERIFY_FAKE_FREE_GB']; });
+
+  it('clamps memory and queue timeout settings', () => {
+    expect(makeEnvironment({ config: { minFreeMemoryGb: -1, spawnQueueTimeoutMs: 1 } }).environment.minFreeMemoryGb()).toBe(0);
+    expect(makeEnvironment({ config: { minFreeMemoryGb: 200, spawnQueueTimeoutMs: 900_000 } }).environment.minFreeMemoryGb()).toBe(100);
+    expect(makeEnvironment({ config: { spawnQueueTimeoutMs: 1 } }).environment.spawnQueueTimeoutMs()).toBe(60_000);
+    expect(makeEnvironment({ config: { spawnQueueTimeoutMs: 900_000 } }).environment.spawnQueueTimeoutMs()).toBe(600_000);
+  });
+
+  it('reads the verification free memory override', () => {
+    process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '2.5';
+    expect(makeEnvironment().environment.freeMemory()).toBe(2.5 * 1024 ** 3);
+  });
+});
+
 function makeEnvironment(
   options: {
     providerRoot?: string | undefined;

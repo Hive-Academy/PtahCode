@@ -208,6 +208,8 @@ export interface LaneSpawnPolicyRefusal {
 }
 
 export interface AgentProcessInfo {
+  /** Admission is waiting for enough free memory. */
+  waitingForMemory?: boolean;
   /** CLI is a placeholder until detection resolves. */
   readonly cliDetectionPending?: boolean;
   /** Ptah MCP attachment warning, when the lane could not use its report tool. */
@@ -503,6 +505,7 @@ export interface AgentOutput {
 }
 
 export interface SpawnAgentResult {
+  readonly waitingForMemory?: boolean;
   /** CLI is a placeholder until detection resolves. */
   readonly cliDetectionPending?: boolean;
   /** Resolved skill text was included in the spawn prompt. */

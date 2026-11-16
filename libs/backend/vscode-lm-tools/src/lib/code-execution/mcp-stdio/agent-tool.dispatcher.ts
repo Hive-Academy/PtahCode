@@ -505,6 +505,7 @@ export class AgentToolDispatcher {
             permission: p.permission,
             network: p.network,
           };
+          const force = p.force;
           const admitted = typeof this.ptahAPI.agent.beginSpawn === 'function';
           const ticket = admitted ? this.ptahAPI.agent.beginSpawn(spawnRequest) : undefined;
           const pipeline = async () => {
@@ -520,8 +521,8 @@ export class AgentToolDispatcher {
             );
             if (gate.refusal) throw new StdioSpawnGateRefusal(gate.refusal);
             return await (ticket
-              ? this.ptahAPI.agent.executeSpawn(ticket, spawnRequest)
-              : this.ptahAPI.agent.spawn(spawnRequest));
+              ? this.ptahAPI.agent.executeSpawn(ticket, spawnRequest, force)
+              : this.ptahAPI.agent.spawn(spawnRequest, force));
           } catch (error: unknown) {
             if (ticket && error instanceof StdioSpawnGateRefusal) {
               this.ptahAPI.agent.failSpawn(ticket, error);
@@ -542,6 +543,7 @@ export class AgentToolDispatcher {
               cliDetectionPending: !spawnRequest.cli && !p.ptahCliId,
               status: 'starting' as const,
               startedAt: admission.startedAt,
+              ...(admission.waitingForMemory && { waitingForMemory: true }),
             }),
           );
         },
