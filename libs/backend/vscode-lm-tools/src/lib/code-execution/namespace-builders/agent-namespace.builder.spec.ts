@@ -1441,6 +1441,16 @@ describe('buildAgentNamespace — waitFor', () => {
     ).rejects.toThrow(/timed out after 100ms for agent x/);
   });
 
+  it('describes a starting lane as pending rather than exited', async () => {
+    const { deps, mocks } = makeDeps();
+    mocks.processManager.waitForAgents.mockResolvedValue({
+      mode: 'all', timedOut: true, waitedMs: 100,
+      entries: [{ agentId: 'x', state: 'running', info: { ...info, status: 'starting' } }],
+    });
+    await expect(buildAgentNamespace(deps).waitFor('x', { timeout: 100 }))
+      .rejects.toThrow('still starting');
+  });
+
   it.each([
     [-5, 0],
     [Number.NaN, 0],

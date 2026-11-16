@@ -32,6 +32,7 @@
 
 import { z } from 'zod';
 import type { EvaluatedSpawnGate } from '../mcp-core/agent-spawn-limit-gate';
+import { admitAndRaceSpawn, raceSpawnReply, SPAWN_REPLY_DEADLINE_MS } from '../mcp-core/agent-spawn-deadline';
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { CliDetectionResult } from '@ptah-extension/shared';
@@ -470,6 +471,7 @@ export class AgentToolDispatcher {
     // A named lane is checked before the spawn (bounded by SPAWN_GATE_WAIT_MS);
     // an auto-detected one bounds the lookup after `agent.spawn` settled.
     const target = spawnRequestTarget(p);
+    const replyStartedAt = Date.now();
     let gate: Awaited<ReturnType<typeof evaluateSpawnLimitGate>> | undefined;
     try {
       const root = this.spoolRoot();
@@ -482,6 +484,30 @@ export class AgentToolDispatcher {
         root,
         p,
         async () => {
+          const spawnRequest = {
+            task: p.task,
+            cli: p.cli,
+            ptahCliId: p.ptahCliId,
+            workingDirectory: p.workingDirectory,
+            timeout: p.timeout,
+            files: p.files,
+            taskFolder: p.taskFolder,
+            deliverables: p.deliverables,
+            model: p.model,
+            modelTier: p.modelTier,
+            resumeSessionId: p.resume_session_id,
+            parentSessionId: callerSessionId,
+            role: p.role,
+            effort: p.effort,
+            taskKind: p.taskKind,
+            routingSource: p.routingSource,
+            accountSelection: p.accountSelection,
+            permission: p.permission,
+            network: p.network,
+          };
+          const admitted = typeof this.ptahAPI.agent.beginSpawn === 'function';
+          const ticket = admitted ? this.ptahAPI.agent.beginSpawn(spawnRequest) : undefined;
+          const pipeline = async () => {
           try {
             gate = await evaluateSpawnLimitGate(
               target,
@@ -493,32 +519,31 @@ export class AgentToolDispatcher {
                 }),
             );
             if (gate.refusal) throw new StdioSpawnGateRefusal(gate.refusal);
-            return await this.ptahAPI.agent.spawn({
-              task: p.task,
-              cli: p.cli,
-              ptahCliId: p.ptahCliId,
-              workingDirectory: p.workingDirectory,
-              timeout: p.timeout,
-              files: p.files,
-              taskFolder: p.taskFolder,
-              deliverables: p.deliverables,
-              model: p.model,
-              modelTier: p.modelTier,
-              resumeSessionId: p.resume_session_id,
-              parentSessionId: callerSessionId,
-              role: p.role,
-              effort: p.effort,
-              taskKind: p.taskKind,
-              routingSource: p.routingSource,
-              accountSelection: p.accountSelection,
-              permission: p.permission,
-              network: p.network,
-            });
+            return await (ticket
+              ? this.ptahAPI.agent.executeSpawn(ticket, spawnRequest)
+              : this.ptahAPI.agent.spawn(spawnRequest));
           } catch (error: unknown) {
+            if (ticket && error instanceof StdioSpawnGateRefusal) {
+              this.ptahAPI.agent.failSpawn(ticket, error);
+            }
             // Callers that share this attempt need the gate of the caller that
             // started it, so each failure reply has the same limit text.
             throw new StdioSpawnAttemptError(error, gate);
           }
+          };
+          if (!ticket) return pipeline();
+          return admitAndRaceSpawn(
+            () => ticket,
+            () => pipeline(),
+            (admission) => this.ptahAPI.agent.markSpawnReplied(admission),
+            (admission) => ({
+              agentId: admission.agentId,
+              cli: spawnRequest.cli ?? (p.ptahCliId ? 'ptah-cli' : 'codex'),
+              cliDetectionPending: !spawnRequest.cli && !p.ptahCliId,
+              status: 'starting' as const,
+              startedAt: admission.startedAt,
+            }),
+          );
         },
         (spawned) =>
           isSpawnReplayValid(
@@ -549,15 +574,18 @@ export class AgentToolDispatcher {
           { agentId: result.agentId },
         );
       }
-      if (!gate) throw new Error('Spawn gate unavailable');
-      const { forced } = gate;
+      const forced = gate?.forced ?? false;
       if (!callerSessionId) {
         this.logger.warn('[MCP] Lane spawned without parent session', {
           transport: 'stdio',
           agentId: result.agentId,
         });
       }
-      const limits = await gate.resolveLimits(() => this.lookupAgentLimits());
+      const remainingMs = Math.max(0, SPAWN_REPLY_DEADLINE_MS - (Date.now() - replyStartedAt));
+      const limitRace = result.status === 'starting' || remainingMs === 0
+        ? undefined
+        : gate && await raceSpawnReply(null, gate.resolveLimits(() => this.lookupAgentLimits()), remainingMs);
+      const limits = limitRace?.kind === 'settled' ? limitRace.value : gate?.peekLimits();
       const formattedSpawn = appendPendingSpawnLimits(
         formatAgentSpawn(
           result,

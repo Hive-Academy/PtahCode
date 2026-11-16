@@ -601,6 +601,141 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   });
 
   describe('spawn() with SDK adapter', () => {
+    it('discards a pre-reply refusal without an exit event', () => {
+      const ticket = manager.beginSpawn({ task: 'blocked', cli: 'codex' });
+      const exited = jest.fn();
+      manager.events.on('agent:exited', exited);
+      manager.failSpawn(ticket, new Error('gate refused'));
+      expect(manager.listTrackedAgents()).toHaveLength(0);
+      expect(exited).not.toHaveBeenCalled();
+      expect(laneCompletion.signal).not.toHaveBeenCalled();
+    });
+    it.each([false, true])('expires a %s replied admission without a handle', async (replied) => {
+      setupVscodeConfig({ maxConcurrentAgents: 1 });
+      const request = { task: 'work', cli: 'codex' as const };
+      const ticket = manager.beginSpawn(request);
+      if (replied) manager.markSpawnReplied(ticket);
+      const exited = jest.fn();
+      manager.events.on('agent:exited', exited);
+      await jest.advanceTimersByTimeAsync(120_000);
+      expect(manager.findAgentInfo(ticket.agentId)?.status).toBe(replied ? 'failed' : undefined);
+      expect(exited).toHaveBeenCalledTimes(replied ? 1 : 0);
+      expect(laneCompletion.signal).toHaveBeenCalledTimes(replied ? 1 : 0);
+      expect(mcpCredentials.revokeSubject).toHaveBeenCalledWith(ticket.agentId);
+      expect(() => manager.beginSpawn(request)).not.toThrow();
+    });
+
+    it('disposes a starting admission and clears its watchdog', async () => {
+      const ticket = manager.beginSpawn({ task: 'work', cli: 'codex' });
+      await manager.disposeAll();
+      expect(manager.findAgentInfo(ticket.agentId)).toBeUndefined();
+      await jest.advanceTimersByTimeAsync(120_000);
+      expect(laneCompletion.signal).not.toHaveBeenCalled();
+    });
+
+    it('does not mark a stopped unreplied admission', async () => {
+      const ticket = manager.beginSpawn({ task: 'work', cli: 'codex' });
+      expect((await manager.stop(ticket.agentId)).status).toBe('stopped');
+      expect(manager.markSpawnReplied(ticket)).toBe(false);
+      expect(manager.findAgentInfo(ticket.agentId)).toBeUndefined();
+    });
+
+    it('marks a live starting admission', () => {
+      const ticket = manager.beginSpawn({ task: 'work', cli: 'codex' });
+      expect(manager.markSpawnReplied(ticket)).toBe(true);
+    });
+
+    it('admits a starting lane synchronously and counts its slot', () => {
+      setupVscodeConfig({ maxConcurrentAgents: 1 });
+      const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+      const ticket = manager.beginSpawn(request);
+      expect(manager.getStatus(ticket.agentId)).toMatchObject({
+        agentId: ticket.agentId, status: 'starting', startedAt: ticket.startedAt,
+      });
+      expect(() => manager.beginSpawn(request)).toThrow('Maximum concurrent agent limit reached');
+    });
+    it('moves the admitted record to running after the SDK handle arrives', async () => {
+      const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+      const ticket = manager.beginSpawn(request);
+      expect(manager.findAgentInfo(ticket.agentId)?.status).toBe('starting');
+      const result = await manager.executeSpawn(ticket, request);
+      expect(result.agentId).toBe(ticket.agentId);
+      expect(result.status).toBe('running');
+      expect(manager.findAgentInfo(ticket.agentId)?.status).toBe('running');
+      expect(laneCompletion.signal).not.toHaveBeenCalled();
+    });
+
+    it('fails a late launch once and releases the admitted slot', async () => {
+      setupVscodeConfig({ maxConcurrentAgents: 1 });
+      const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+      const ticket = manager.beginSpawn(request);
+      sdkAdapter.runSdk.mockRejectedValueOnce(new Error('launch failed'));
+      manager.markSpawnReplied(ticket);
+      const exited = jest.fn();
+      manager.events.on('agent:exited', exited);
+      await expect(manager.executeSpawn(ticket, request)).rejects.toThrow('launch failed');
+      expect(manager.findAgentInfo(ticket.agentId)?.status).toBe('failed');
+      expect(manager.readOutput(ticket.agentId).stderr).toContain('launch failed');
+      expect(exited).toHaveBeenCalledTimes(1);
+      expect(laneCompletion.signal).toHaveBeenCalledTimes(1);
+      expect(() => manager.beginSpawn(request)).not.toThrow();
+    });
+
+    it('stops a starting lane before the pipeline starts', async () => {
+      setupVscodeConfig({ maxConcurrentAgents: 1 });
+      const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+      const ticket = manager.beginSpawn(request);
+      manager.markSpawnReplied(ticket);
+      expect((await manager.stop(ticket.agentId)).status).toBe('stopped');
+      await expect(manager.executeSpawn(ticket, request)).rejects.toThrow('stopped');
+      expect(sdkAdapter.runSdk).not.toHaveBeenCalled();
+      expect(() => manager.beginSpawn(request)).not.toThrow();
+    });
+
+    it('aborts an SDK handle that arrives after stop', async () => {
+      const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+      const ticket = manager.beginSpawn(request);
+      manager.markSpawnReplied(ticket);
+      let resolveHandle!: (handle: SdkHandle) => void;
+      let reachedSdk!: () => void;
+      const sdkStarted = new Promise<void>((resolve) => { reachedSdk = resolve; });
+      sdkAdapter.runSdk.mockImplementationOnce(() => {
+        reachedSdk();
+        return new Promise<SdkHandle>((resolve) => { resolveHandle = resolve; });
+      });
+      const execution = manager.executeSpawn(ticket, request);
+      await sdkStarted;
+      await manager.stop(ticket.agentId);
+      sdkControls.resolve(0);
+      resolveHandle(sdkControls.handle);
+      await expect(execution).rejects.toThrow('stopped');
+      expect(sdkControls.abortController.signal.aborted).toBe(true);
+      expect(manager.findAgentInfo(ticket.agentId)?.status).toBe('stopped');
+      expect(laneCompletion.signal).toHaveBeenCalledTimes(1);
+    });
+
+    it('aborts a ptah-cli SDK handle delivered after an admitted lane stops', async () => {
+      const request = { task: 'provider work', cli: 'ptah-cli' as const, ptahCliId: 'provider-1' };
+      const ticket = manager.beginSpawn(request);
+      manager.markSpawnReplied(ticket);
+      await manager.stop(ticket.agentId);
+      await expect(manager.spawnFromSdkHandle(sdkControls.handle, {
+        task: request.task,
+        cli: 'ptah-cli',
+        workingDirectory: '/workspace/root',
+        expectsMcp: false,
+        admission: ticket,
+        agentId: ticket.agentId,
+      })).rejects.toThrow('stopped');
+      expect(sdkControls.abortController.signal.aborted).toBe(true);
+      expect(manager.findAgentInfo(ticket.agentId)?.status).toBe('stopped');
+    });
+
+    it('projects a starting lane as pending in wait', async () => {
+      const ticket = manager.beginSpawn({ task: 'work', cli: 'codex' });
+      const result = await manager.waitForAgents([ticket.agentId], 'all', 0);
+      expect(result.entries[0]).toMatchObject({ state: 'running', info: { status: 'starting' } });
+    });
     it.each([
       ['ENOENT code', Object.assign(new Error('launch failure'), { code: 'ENOENT' }), true],
       ['module error', new Error("Cannot find module 'x'"), false],

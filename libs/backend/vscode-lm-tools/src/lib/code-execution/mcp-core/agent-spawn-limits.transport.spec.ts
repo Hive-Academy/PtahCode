@@ -278,6 +278,143 @@ const TOO_LONG = new CliCommandLineTooLongError(
   'UTF-16 units',
 );
 
+describe('spawn reply deadline', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('admits only one of two concurrent HTTP spawns for the last slot', async () => {
+    jest.useFakeTimers();
+    const h = harness(SPAWNED);
+    let admitted = false;
+    h.ptahAPI.agent.beginSpawn = jest.fn(() => {
+      if (admitted) throw new Error('Maximum concurrent agent limit reached (1)');
+      admitted = true;
+      return { agentId: SPAWNED.agentId, startedAt: SPAWNED.startedAt };
+    });
+    h.ptahAPI.agent.executeSpawn = jest.fn(() => new Promise<SpawnAgentResult>(() => undefined));
+    h.ptahAPI.agent.failSpawn = jest.fn();
+    h.ptahAPI.agent.markSpawnReplied = jest.fn(() => true);
+    const first = overHttp(h, { task: 'first', cli: 'codex' });
+    const second = overHttp(h, { task: 'second', cli: 'codex' });
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect((await first).isError).toBe(false);
+    expect((await second).isError).toBe(true);
+    expect(h.ptahAPI.agent.beginSpawn).toHaveBeenCalledTimes(2);
+    expect(h.ptahAPI.agent.executeSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a starting reply over stdio at the deadline', async () => {
+    jest.useFakeTimers();
+    const h = harness(SPAWNED);
+    h.ptahAPI.agent.beginSpawn = jest.fn(() => ({ agentId: SPAWNED.agentId, startedAt: SPAWNED.startedAt }));
+    h.ptahAPI.agent.executeSpawn = jest.fn(() => new Promise<SpawnAgentResult>(() => undefined));
+    h.ptahAPI.agent.failSpawn = jest.fn();
+    h.ptahAPI.agent.markSpawnReplied = jest.fn(() => true);
+    const reply = overStdio(h, { task: 'stdio-deadline', cli: 'codex' });
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect((await reply).text).toContain('starting');
+    expect((await reply).text).not.toContain('Spawn gate unavailable');
+    expect(h.ptahAPI.agent.markSpawnReplied).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the running result when execution finishes before the deadline', async () => {
+    jest.useFakeTimers();
+    const h = harness(SPAWNED);
+    h.ptahAPI.agent.beginSpawn = jest.fn(() => ({ agentId: SPAWNED.agentId, startedAt: SPAWNED.startedAt }));
+    h.ptahAPI.agent.executeSpawn = jest.fn(async () => SPAWNED);
+    h.ptahAPI.agent.failSpawn = jest.fn();
+    h.ptahAPI.agent.markSpawnReplied = jest.fn(() => true);
+    const result = await overHttp(h, { task: 'fast-deadline', cli: 'codex' });
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain('## Agent Spawned');
+    expect(result.text).not.toContain('still starting');
+    expect(h.ptahAPI.agent.executeSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a blocked lane after synchronous admission without a signal', async () => {
+    jest.useFakeTimers();
+    const h = harness(SPAWNED);
+    h.limits.mockResolvedValue([CODEX_EXHAUSTED]);
+    h.ptahAPI.agent.beginSpawn = jest.fn(() => ({ agentId: SPAWNED.agentId, startedAt: SPAWNED.startedAt }));
+    h.ptahAPI.agent.executeSpawn = jest.fn(async () => SPAWNED);
+    h.ptahAPI.agent.failSpawn = jest.fn();
+    h.ptahAPI.agent.markSpawnReplied = jest.fn(() => true);
+    const result = await overHttp(h, { task: 'limit-deadline', cli: 'codex' });
+    expect(result.isError).toBe(true);
+    expect(h.ptahAPI.agent.beginSpawn).toHaveBeenCalledTimes(1);
+    expect(h.ptahAPI.agent.executeSpawn).not.toHaveBeenCalled();
+    expect(h.ptahAPI.agent.failSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: SPAWNED.agentId }),
+      expect.any(Error),
+    );
+  });
+
+  it('keeps a late execution rejection observed after the starting reply', async () => {
+    jest.useFakeTimers();
+    const h = harness(SPAWNED);
+    let fail: (error: Error) => void = () => { throw new Error('missing rejecter'); };
+    const pending = new Promise<SpawnAgentResult>((_resolve, reject) => { fail = reject; });
+    h.ptahAPI.agent.beginSpawn = jest.fn(() => ({ agentId: SPAWNED.agentId, startedAt: SPAWNED.startedAt }));
+    h.ptahAPI.agent.executeSpawn = jest.fn(() => pending);
+    h.ptahAPI.agent.failSpawn = jest.fn();
+    h.ptahAPI.agent.markSpawnReplied = jest.fn(() => true);
+    const reply = overHttp(h, { task: 'late-failure', cli: 'codex' });
+    await jest.advanceTimersByTimeAsync(0);
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect((await reply).text).toContain('starting');
+    fail(new Error('late failure'));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(h.ptahAPI.agent.executeSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not extend the reply past the deadline for auto lane limit text', async () => {
+    jest.useFakeTimers();
+    const h = harness(SPAWNED);
+    h.limits.mockImplementation(() => new Promise(() => undefined));
+    h.ptahAPI.agent.beginSpawn = jest.fn(() => ({ agentId: SPAWNED.agentId, startedAt: SPAWNED.startedAt }));
+    h.ptahAPI.agent.executeSpawn = jest.fn(() => new Promise((resolve) => {
+      setTimeout(() => resolve(SPAWNED), 1_700);
+    }));
+    h.ptahAPI.agent.failSpawn = jest.fn();
+    h.ptahAPI.agent.markSpawnReplied = jest.fn(() => true);
+    let settled = false;
+    const reply = overHttp(h, { task: 'auto-deadline' });
+    void reply.then(() => { settled = true; });
+    await jest.advanceTimersByTimeAsync(0);
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(settled).toBe(true);
+    expect((await reply).isError).toBe(false);
+  });
+
+  it('admits immediately, replies starting at the deadline, and replays the same lane', async () => {
+    jest.useFakeTimers();
+    const h = harness(SPAWNED);
+    let finish: (result: SpawnAgentResult) => void = () => { throw new Error('missing resolver'); };
+    const pending = new Promise<SpawnAgentResult>((resolve) => { finish = resolve; });
+    h.ptahAPI.agent.beginSpawn = jest.fn(() => ({ agentId: SPAWNED.agentId, startedAt: SPAWNED.startedAt }));
+    h.ptahAPI.agent.executeSpawn = jest.fn(() => pending);
+    h.ptahAPI.agent.failSpawn = jest.fn();
+    h.ptahAPI.agent.markSpawnReplied = jest.fn(() => true);
+    h.ptahAPI.agent.status = jest.fn(async () => ({
+      ...SPAWNED,
+      status: 'starting' as const,
+      task: 'deadline-test',
+      workingDirectory: process.cwd(),
+    }));
+    const reply = overHttp(h, { task: 'deadline-test', cli: 'codex', idempotencyKey: 'deadline-test' });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(h.ptahAPI.agent.beginSpawn).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(2_000);
+    const result = await reply;
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain('starting');
+    const replay = await overHttp(h, { task: 'deadline-test', cli: 'codex', idempotencyKey: 'deadline-test' });
+    expect(replay.text).toContain(SPAWNED.agentId);
+    expect(h.ptahAPI.agent.beginSpawn).toHaveBeenCalledTimes(1);
+    finish(SPAWNED);
+    await pending;
+  });
+});
+
 describe.each([
   ['protocol', overHttp],
   ['stdio', overStdio],

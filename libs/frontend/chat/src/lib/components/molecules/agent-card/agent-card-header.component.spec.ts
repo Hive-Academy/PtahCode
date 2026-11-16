@@ -48,10 +48,10 @@ describe('AgentCardHeaderComponent — prompt cache (N6)', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
-  it('shows the starting status without offering Stop', () => {
+  it('shows the starting status and offers Stop', () => {
     const el = setup(lane({ status: 'starting' }));
     expect(el.textContent).toContain('starting');
-    expect(el.querySelector('[aria-label="Stop agent"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Stop agent"]')).not.toBeNull();
   });
 
   it('keeps cache details in the usage card instead of duplicating them in the lane header', () => {

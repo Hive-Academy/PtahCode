@@ -149,8 +149,8 @@ export function laneAccountText(
         </span>
       }
 
-      <!-- Stop button (running agents only) -->
-      @if (agent().status === 'running') {
+      <!-- Stop button for live agents -->
+      @if (agent().status === 'running' || agent().status === 'starting') {
         <button
           type="button"
           ptahIconButton variant="danger" size="xs" label="Stop agent" class="ml-auto flex-shrink-0"
