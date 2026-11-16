@@ -19,3 +19,11 @@ Order: warning button first (required), then disclosure (16 settings sites), the
 
 ## Proof sites (non-settings only)
 To be declared per PR.
+
+## PR 1: warning tone (open)
+- PR: https://github.com/Hive-Academy/PtahCode/pull/1336, head d6d7c227a.
+- Proof site: delivery-status retry button (non-settings). Baseline lowered.
+- Checks: ui test/lint/typecheck pass, webview typecheck-templates pass. chat tests cannot start: marked.umd.js missing in shared node_modules (environment).
+- CI: no checks reported yet at report time.
+- Open minor findings: stale `tone` comment in button.directive.ts (7th file, over the six-file limit); no spec guard for the ghost hover rule narrowing.
+- Next: PR 2 disclosure, PR 3 table, in separate worktrees from main.
