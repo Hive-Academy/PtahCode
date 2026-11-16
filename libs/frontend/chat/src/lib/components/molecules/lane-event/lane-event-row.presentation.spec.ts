@@ -34,6 +34,19 @@ describe('parseLaneCompletion', () => {
     expect(result.extra).toEqual([]);
   });
 
+  it('keeps a failed report delivery and its recovery step visible', () => {
+    const body = envelope(['Report delivery: 0 sent; 1 failed.', 'Next: 1 report attempts failed; inspect the lane output and deliverable.']);
+    const result = parseLaneCompletion(body);
+    expect(result.reportsFailed).toBe(1);
+    expect(result.extra).toEqual(['Report delivery: 0 sent; 1 failed.', 'Next: 1 report attempts failed; inspect the lane output and deliverable.']);
+    const stats = deriveLaneEventPresentation(row({ events: [{ kind: 'completed', status: 'completed', verdict: 'delivered', body, timestamp: 1, messageId: 'm' }] })).stats;
+    expect(stats).toContainEqual({ label: 'Failed reports', value: '1', compact: '1 failed report' });
+  });
+
+  it('adds no failed-report stat when every report was delivered', () => {
+    expect(parseLaneCompletion(envelope(['Report delivery: 1 sent; 0 failed.'])).reportsFailed).toBe(0);
+  });
+
   it('tracks a declared but missing deliverable', () => {
     expect(parseLaneCompletion(envelope(['Deliverables:', '- absent.md — MISSING'])).deliverables)
       .toEqual([{ path: 'absent.md', state: 'MISSING', written: false }]);

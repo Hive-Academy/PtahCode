@@ -1278,7 +1278,7 @@ export class LaneCompletionNotifier {
     const body = buildLaneCompletionEnvelope(signal).replace(
       `verdict="${signal.verdict}"`,
       `verdict="${signal.verdict}"` +
-        ` report-delivery="${signal.reportsDelivered}-sent" reportsFailed="${failed}"`,
+        ` report-delivery="${signal.reportsDelivered}-sent" reports-failed="${failed}"`,
     ).replace('\nDeliverables:', `\n${attachment}\n${reports}${failed ? `\nNext: ${failed} report attempts failed; inspect the lane output and deliverable.` : ''}\nDeliverables:`);
     if (info.stopReason !== 'usage-limit' && info.stopReason !== 'auth')
       return body;
