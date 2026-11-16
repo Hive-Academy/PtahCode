@@ -292,7 +292,7 @@ function storedNumberIsValid(
               }
             </div>
 
-            <div class="flex min-w-0 flex-col gap-1">
+            <div class="flex min-w-0 flex-col gap-[var(--ptah-space-1)]">
               <label for="session-budget-token-measure" class="text-sm font-medium text-base-content">Token measure</label>
               <select
                 ptahSelect size="sm"
@@ -317,7 +317,7 @@ function storedNumberIsValid(
                 Current measure: {{ tokenMeasureLabels[tokenMeasureValue()] }}.
               </p>
               @if (tokenMeasureValue() === 'raw' && !recommendationDismissed()) {
-                <div class="rounded-md border border-info/30 bg-info/10 px-2 py-1 text-xs" data-testid="session-budget-token-measure-recommendation">
+                <div class="rounded-md border border-info/30 bg-info/10 px-[var(--ptah-space-2)] py-[var(--ptah-space-1)] text-xs" data-testid="session-budget-token-measure-recommendation">
                   <p>Weighted session tokens are recommended for a session budget. Switching keeps your saved token budget number unchanged.</p>
                   <button type="button" ptahButton variant="ghost" size="xs" [ptahBusyDisabled]="busy()" (click)="selectWeighted()" data-testid="session-budget-token-measure-switch">Switch to weighted</button>
                   <button type="button" ptahButton variant="ghost" size="xs" (click)="dismissRecommendation()">Dismiss</button>
