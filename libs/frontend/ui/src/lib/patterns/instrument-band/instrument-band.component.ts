@@ -88,10 +88,19 @@ export class PtahInstrumentBandComponent {
     if (!segment.targetId) return;
     const target = this.document.getElementById(segment.targetId);
     if (!target) return;
-    if (!target.hasAttribute('tabindex')) {
-      target.setAttribute('tabindex', '-1');
-      target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
+    if (target.hasAttribute('tabindex')) {
+      target.focus();
+      return;
     }
+    const removeTemporaryTabindex = () => target.removeAttribute('tabindex');
+    target.setAttribute('tabindex', '-1');
+    target.addEventListener('blur', removeTemporaryTabindex, { once: true });
     target.focus();
+    // A disabled or hidden target cannot take focus, so no blur occurs. Remove the
+    // temporary tabindex at once, so it cannot keep the target out of Tab navigation.
+    if (this.document.activeElement !== target) {
+      target.removeEventListener('blur', removeTemporaryTabindex);
+      removeTemporaryTabindex();
+    }
   }
 }
