@@ -985,7 +985,7 @@ export class PluginRpcHandlers {
     libraryPass: LibraryPassStatus;
   }> {
     const configRoot = this.configRoot(harnessRoot);
-    const config = this.pluginLoader.getWorkspacePluginConfig(configRoot);
+    const config = await this.pluginLoader.getWorkspacePluginConfigForWrite(configRoot);
     const enabledPluginIds = [
       ...new Set([...config.enabledPluginIds, pluginId]),
     ];
@@ -1034,7 +1034,7 @@ export class PluginRpcHandlers {
   private async deactivateExternalPlugin(pluginId: string): Promise<void> {
     const harnessRoot = this.harnessRoot();
     const configRoot = this.configRoot(harnessRoot);
-    const config = this.pluginLoader.getWorkspacePluginConfig(configRoot);
+    const config = await this.pluginLoader.getWorkspacePluginConfigForWrite(configRoot);
 
     await this.pluginLoader.saveWorkspacePluginConfig(
       {

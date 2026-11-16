@@ -158,6 +158,7 @@ type MockPluginLoader = jest.Mocked<
     PluginLoaderService,
     | 'getAvailablePlugins'
     | 'getWorkspacePluginConfig'
+    | 'getWorkspacePluginConfigForWrite'
     | 'saveWorkspacePluginConfig'
     | 'resolvePluginPaths'
     | 'resolveCurrentPluginPaths'
@@ -198,6 +199,11 @@ function createMockPluginLoader(
         disabledSkillIds: [],
         disabledPluginIds: [],
         lastUpdated: 0,
+      },
+    ),
+    getWorkspacePluginConfigForWrite: jest.fn().mockResolvedValue(
+      overrides.workspaceConfig ?? {
+        enabledPluginIds: [], disabledSkillIds: [], disabledPluginIds: [], lastUpdated: 0,
       },
     ),
     saveWorkspacePluginConfig: jest.fn().mockResolvedValue(undefined),

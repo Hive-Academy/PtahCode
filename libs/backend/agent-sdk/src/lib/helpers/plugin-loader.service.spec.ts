@@ -120,6 +120,8 @@ function makeHarness(options: {
     Array<{ dir: string; name?: string; description?: string }>
   >;
   enabledPluginIds?: string[];
+  /** No stored plugin configuration yet. */
+  freshConfig?: boolean;
   disabledSkillIds?: string[];
   disabledPluginIds?: string[];
   /** Omit the persisted disabledPluginIds key entirely (pre-toggle configs). */
@@ -241,7 +243,7 @@ function makeHarness(options: {
     externalStore,
     createWorkspaceProvider(workspaceRoot) as never,
   );
-  service.initialize(pluginsBasePath, createStateStorage(persisted));
+  service.initialize(pluginsBasePath, createStateStorage(options.freshConfig ? undefined : persisted));
 
   return {
     service,
@@ -781,6 +783,26 @@ describe('PluginLoaderService.getAvailablePlugins (marketplace visibility)', () 
 });
 
 describe('PluginLoaderService.resolveCurrentPluginPaths (junction source of truth)', () => {
+  it('enables only ptah-core in a fresh workspace and exposes its SDK path', async () => {
+    const h = track(makeHarness({
+      bundledDirs: ['ptah-core', 'ptah-angular'],
+      freshConfig: true,
+    }));
+    const core = path.join(h.pluginsBasePath, 'ptah-core');
+    expect(h.service.getWorkspacePluginConfig().enabledPluginIds).toEqual(['ptah-core']);
+    expect(h.service.resolveCurrentPluginPaths()).toEqual([core]);
+    expect((await h.service.getEffectivePluginConfig()).overlayPluginPaths).toEqual([core]);
+  });
+
+  it('keeps a saved empty choice and an explicit core disable off', () => {
+    const empty = track(makeHarness({ bundledDirs: ['ptah-core'], enabledPluginIds: [] }));
+    const disabled = track(makeHarness({
+      bundledDirs: ['ptah-core'],
+      disabledPluginIds: ['ptah-core'],
+    }));
+    expect(empty.service.resolveCurrentPluginPaths()).toEqual([]);
+    expect(disabled.service.resolveCurrentPluginPaths()).toEqual([]);
+  });
   it('appends harness plugin dirs after the enabled bundled plugins', () => {
     const h = track(
       makeHarness({

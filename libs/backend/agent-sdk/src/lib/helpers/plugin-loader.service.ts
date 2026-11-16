@@ -9,7 +9,7 @@
  * - Resolve plugin IDs to absolute directory paths for SDK consumption
  *
  * Two activation models live side by side (see `PluginSource` in shared):
- * - Bundled plugins are OPT-IN: active only while listed in `enabledPluginIds`.
+ * - Bundled plugins are opt-in, except ptah-core in an unsaved workspace.
  * - Harness plugins are OPT-OUT: the user authored them by clicking Apply, so
  *   they are active the moment they appear on disk and stay active until their
  *   id lands in `disabledPluginIds`.
@@ -157,8 +157,15 @@ export interface EffectivePluginConfig {
 
 /** One read of the workspace `PluginConfigState` layer. */
 type WorkspaceLayerRead =
-  | { status: 'ok'; config: PluginConfigState }
+  | { status: 'ok'; config: PluginConfigState; saved: boolean }
   | { status: 'error'; reason: CapabilityPolicyReason };
+
+/** Apply the core default only where no saved workspace choice exists. */
+function withCoreDefault(config: PluginConfigState, saved: boolean): PluginConfigState {
+  if (saved || config.enabledPluginIds.includes('ptah-core') ||
+      config.disabledPluginIds?.includes('ptah-core')) return config;
+  return { ...config, enabledPluginIds: [...config.enabledPluginIds, 'ptah-core'] };
+}
 
 /**
  * What a scan of one or more plugin directories found: the skills it could
@@ -1167,7 +1174,7 @@ export class PluginLoaderService {
    *   folder's name.
    * @returns Current PluginConfigState with enabled plugin IDs and timestamp
    */
-  getWorkspacePluginConfig(workspaceRoot?: string): PluginConfigState {
+  getWorkspacePluginConfig(workspaceRoot?: string, options: { applyDefault?: boolean } = {}): PluginConfigState {
     const storage = this.storageFor(workspaceRoot);
     if (storage === null) {
       this.logger.debug(
@@ -1177,7 +1184,26 @@ export class PluginLoaderService {
       return emptyPluginConfig();
     }
 
-    return normalizePluginConfig(storage.get<unknown>(PLUGIN_CONFIG_KEY));
+    const stored = storage.get<unknown>(PLUGIN_CONFIG_KEY);
+    const config = normalizePluginConfig(stored);
+    return options.applyDefault === false ? config : withCoreDefault(config, stored != null);
+  }
+
+  /** Preserve the effective core choice when an unrelated action first saves a workspace. */
+  async getWorkspacePluginConfigForWrite(
+    workspaceRoot?: string,
+    effectiveConfig?: PluginConfigState,
+  ): Promise<PluginConfigState> {
+    const layer = this.readWorkspaceLayer(workspaceRoot);
+    if (layer.status === 'error') {
+      throw new CapabilityPolicyUnknownError([layer.reason]);
+    }
+    const config = layer.config;
+    if (layer.saved) return config;
+    const effective = effectiveConfig ?? (await this.getEffectivePluginConfig(workspaceRoot)).config;
+    if (!effective.enabledPluginIds.includes('ptah-core') ||
+        effective.disabledPluginIds?.includes('ptah-core')) return config;
+    return { ...config, enabledPluginIds: [...config.enabledPluginIds, 'ptah-core'] };
   }
 
   /**
@@ -1209,7 +1235,7 @@ export class PluginLoaderService {
           },
         };
       }
-      return { status: 'ok', config: emptyPluginConfig() };
+      return { status: 'ok', config: emptyPluginConfig(), saved: false };
     }
 
     // Workspace state has no file path of its own to name, so the reason names
@@ -1233,7 +1259,7 @@ export class PluginLoaderService {
     }
 
     if (stored === undefined || stored === null) {
-      return { status: 'ok', config: emptyPluginConfig() };
+      return { status: 'ok', config: emptyPluginConfig(), saved: false };
     }
     const config = parsePluginConfig(stored);
     if (config === null) {
@@ -1243,7 +1269,7 @@ export class PluginLoaderService {
       };
     }
 
-    return { status: 'ok', config };
+    return { status: 'ok', config, saved: true };
   }
 
   /**
@@ -1324,13 +1350,14 @@ export class PluginLoaderService {
       throw new CapabilityPolicyUnknownError(reasons);
     }
 
-    const config = layerGlobalItems(
+    const layered = layerGlobalItems(
       layerAncestorConfigs(
         localConfig,
         ancestors.map(({ pluginConfig }) => pluginConfig),
       ),
       globalSnapshot.items,
     );
+    const config = withCoreDefault(layered, workspace.status === 'ok' && workspace.saved);
     return {
       config,
       fingerprint: harnessPolicyFingerprint({
@@ -1991,7 +2018,7 @@ export class PluginLoaderService {
       );
       return [];
     }
-    return this.overlayPathsFor(workspace.config, workspaceRoot);
+    return this.overlayPathsFor(withCoreDefault(workspace.config, workspace.saved), workspaceRoot);
   }
 
   /** The overlay `config` implies for `workspaceRoot`. */

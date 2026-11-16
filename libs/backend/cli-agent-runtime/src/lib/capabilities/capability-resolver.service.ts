@@ -103,6 +103,7 @@ export type CapabilityPluginSource = Pick<
   | 'getEffectivePluginConfig'
   | 'hasWorkspaceState'
   | 'getWorkspacePluginConfig'
+  | 'getWorkspacePluginConfigForWrite'
   | 'saveWorkspacePluginConfig'
   | 'getAvailablePlugins'
   | 'resolvePluginPaths'
@@ -674,7 +675,7 @@ export class CapabilityResolverService implements ICapabilityResolver {
     // accessor for the stored workspace layer without the global items layered
     // in — and is never a resolution input (those come from
     // `getEffectivePluginConfig` alone).
-    const stored = this.deps.plugins.getWorkspacePluginConfig(ctx.stateRoot);
+    const stored = await this.deps.plugins.getWorkspacePluginConfigForWrite(ctx.stateRoot, effective.config);
     const defaultValue = this.requireKnownPluginOrSkill(
       catalog,
       effective.config,

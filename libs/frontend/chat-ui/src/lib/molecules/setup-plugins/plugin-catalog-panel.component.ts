@@ -1005,6 +1005,7 @@ export class PluginCatalogPanelComponent implements OnInit {
    * the whole "enabled" signal for harness plugins.
    */
   async saveConfiguration(): Promise<void> {
+    if (this.isLoading()) return;
     this.savedNotice.set(false);
     this.isSaving.set(true);
     this.saveError.set(null);
@@ -1023,6 +1024,10 @@ export class PluginCatalogPanelComponent implements OnInit {
       const disabledPluginIds = Array.from(harnessIds).filter(
         (id) => !selected.has(id),
       );
+      if (this.availablePlugins().some((plugin) => plugin.id === 'ptah-core') &&
+          !selected.has('ptah-core')) {
+        disabledPluginIds.push('ptah-core');
+      }
 
       const result = await this.rpcService.call(
         'plugins:save-config',

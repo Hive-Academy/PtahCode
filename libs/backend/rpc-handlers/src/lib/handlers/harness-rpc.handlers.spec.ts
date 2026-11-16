@@ -188,6 +188,7 @@ function buildSuite(folders: string[] = ['/ws']): Suite {
       disabledSkillIds: [],
     }),
     getEffectivePluginConfig: jest.fn(),
+    getWorkspacePluginConfigForWrite: jest.fn(async () => pluginLoader.getWorkspacePluginConfig()),
     discoverSkillsForPlugins: jest.fn(),
     resolvePluginPaths: jest.fn().mockReturnValue([]),
     saveWorkspacePluginConfig: jest.fn().mockResolvedValue(undefined),
