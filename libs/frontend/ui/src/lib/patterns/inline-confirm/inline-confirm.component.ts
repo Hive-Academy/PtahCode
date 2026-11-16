@@ -71,8 +71,9 @@ export class PtahInlineConfirmComponent implements OnDestroy {
 
   onConfirm(): void {
     if (this.busy()) return;
+    // Focus stays in the group: a consumer can keep it open with `busy` for an async action.
+    // ngOnDestroy returns focus to the opener when the consumer closes the group.
     this.confirm.emit();
-    this.restoreFocus();
   }
 
   onCancel(): void {

@@ -20,6 +20,19 @@ class HostComponent {
   readonly row = viewChild.required(PtahSettingRowComponent);
 }
 
+@Component({
+  standalone: true,
+  imports: [PtahSettingRowComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <div>
+      <ptah-setting-row label="First setting"><input type="checkbox" /></ptah-setting-row>
+      <ptah-setting-row label="Second setting"><input type="checkbox" /></ptah-setting-row>
+    </div>
+  `,
+})
+class TwoRowsHostComponent {}
+
 describe('PtahSettingRowComponent', () => {
   let fixture: ComponentFixture<HostComponent>;
   let host: HostComponent;
@@ -45,16 +58,31 @@ describe('PtahSettingRowComponent', () => {
     expect(host.row().reasonId()).toBe('run-checks-reason');
   });
 
-  it('shows a linked reason and dims only the control column when disabled', () => {
+  it('shows a linked reason and does not dim or make inert any part of the row when disabled', () => {
     host.disabled.set(true);
     fixture.detectChanges();
     expect(element.querySelector('#run-checks-reason')?.textContent).toContain('Unavailable here');
     const row = element.querySelector('[data-testid="setting-row"]') as HTMLElement;
     expect(row.getAttribute('data-disabled')).toBe('true');
     expect(row.hasAttribute('aria-disabled')).toBe(false);
-    expect(row.classList.contains('opacity-50')).toBe(false);
     expect(element.querySelector('[inert]')).toBeNull();
-    expect(element.querySelector('.opacity-50')?.contains(element.querySelector('#run-checks-reason'))).toBe(false);
+    expect(element.querySelector('.opacity-50')).toBeNull();
+  });
+
+  it('puts the divider on each host so sibling rows in one parent show it', () => {
+    const list = TestBed.createComponent(TwoRowsHostComponent);
+    list.detectChanges();
+    const rows = Array.from((list.nativeElement as HTMLElement).querySelectorAll('ptah-setting-row'));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.parentElement).toBe(rows[0].parentElement);
+      expect(row.classList.contains('border-b')).toBe(true);
+      expect(row.classList.contains('border-surface-border')).toBe(true);
+      expect(row.classList.contains('last:border-b-0')).toBe(true);
+      const inner = row.querySelector('[data-testid="setting-row"]') as HTMLElement;
+      expect(inner.classList.contains('border-b')).toBe(false);
+      expect(inner.classList.contains('py-ptah-field')).toBe(true);
+    }
   });
 
   it('uses compact spacing and a 640 px container stack class', () => {

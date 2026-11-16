@@ -9,7 +9,7 @@ import { PtahInlineConfirmComponent } from './inline-confirm.component';
   template: `
     <button id="trigger" type="button" (click)="open.set(true)">Open</button>
     @if (open()) {
-      <ptah-inline-confirm message="Remove this item?" detail="This cannot be undone" [tone]="tone()" [busy]="busy()" confirmTestId="confirm-action" cancelTestId="cancel-action" data-testid="confirm-group" (confirm)="confirmed(); open.set(false)" (cancelled)="cancelled(); open.set(false)" />
+      <ptah-inline-confirm message="Remove this item?" detail="This cannot be undone" [tone]="tone()" [busy]="busy()" confirmTestId="confirm-action" cancelTestId="cancel-action" data-testid="confirm-group" (confirm)="confirmed()" (cancelled)="cancelled(); open.set(false)" />
     }
   `,
 })
@@ -17,9 +17,13 @@ class HostComponent {
   readonly open = signal(false);
   readonly tone = signal<'default' | 'danger'>('default');
   readonly busy = signal(false);
+  closeOnConfirm = true;
   confirms = 0;
   cancellations = 0;
-  confirmed(): void { this.confirms++; }
+  confirmed(): void {
+    this.confirms++;
+    if (this.closeOnConfirm) this.open.set(false);
+  }
   cancelled(): void { this.cancellations++; }
 }
 
@@ -59,13 +63,27 @@ describe('PtahInlineConfirmComponent', () => {
     expect(document.activeElement).toBe(find('#trigger'));
   });
 
-  it('emits confirm and returns focus', () => {
+  it('emits confirm and returns focus when the consumer closes the group', () => {
     find('#trigger').focus();
     open();
     find('[data-testid="confirm-action"]').click();
     fixture.detectChanges();
     expect(host.confirms).toBe(1);
+    expect(find('[data-testid="confirm-group"]')).toBeNull();
     expect(document.activeElement).toBe(find('#trigger'));
+  });
+
+  it('keeps focus in the group on confirm while the consumer keeps it open and busy', () => {
+    host.closeOnConfirm = false;
+    find('#trigger').focus();
+    open();
+    find('[data-testid="confirm-action"]').click();
+    host.busy.set(true);
+    fixture.detectChanges();
+    expect(host.confirms).toBe(1);
+    const group = find('[data-testid="confirm-group"]');
+    expect(group.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(find('#trigger'));
   });
 
   it('blocks confirm when busy, keeps it focusable and uses the danger button variant', () => {

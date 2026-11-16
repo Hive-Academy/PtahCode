@@ -6,7 +6,9 @@ let nextSettingRowId = 0;
  * A setting title and hint beside one projected control.
  * When `disabled` is set, the consumer disables the projected control itself and adds
  * `reasonId()` to its aria-describedby. The row does not make the control inert, so a
- * screen reader still finds the control and reads the reason.
+ * screen reader still finds the control and reads the reason. The row does not dim the
+ * control column: the disabled control shows its own disabled style, and opacity on the
+ * column can drop the text contrast under 4.5:1.
  */
 @Component({
   selector: 'ptah-setting-row',
@@ -14,11 +16,12 @@ let nextSettingRowId = 0;
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     'data-ptah-pattern': 'setting-row',
-    class: 'block [container-type:inline-size]',
+    // The divider is on the host: sibling rows in one parent show it, and the last row does not.
+    class: 'block border-b border-surface-border last:border-b-0 [container-type:inline-size]',
   },
   template: `
     <div
-      class="grid min-w-0 grid-cols-1 items-center gap-x-ptah-group gap-y-ptah-label border-b border-surface-border last:border-b-0 [@container(min-width:640px)]:grid-cols-[minmax(0,1fr)_auto]"
+      class="grid min-w-0 grid-cols-1 items-center gap-x-ptah-group gap-y-ptah-label [@container(min-width:640px)]:grid-cols-[minmax(0,1fr)_auto]"
       [class.py-ptah-field]="density() === 'default'"
       [class.py-ptah-controls]="density() === 'compact'"
       [attr.data-disabled]="disabled() ? 'true' : null"
@@ -40,7 +43,7 @@ let nextSettingRowId = 0;
           <p class="text-base-content-muted" [id]="reasonId()">{{ reason }}</p>
         }
       </div>
-      <div class="flex min-w-0 flex-wrap items-center gap-ptah-controls [@container(min-width:640px)]:justify-self-end" [class.opacity-50]="disabled()">
+      <div class="flex min-w-0 flex-wrap items-center gap-ptah-controls [@container(min-width:640px)]:justify-self-end">
         <ng-content select="[meta]" />
         <ng-content />
       </div>
