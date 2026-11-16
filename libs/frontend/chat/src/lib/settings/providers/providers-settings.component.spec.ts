@@ -604,6 +604,7 @@ describe('ProvidersSettingsComponent', () => {
     state.activeProviderId.set(null); state.connections.set(ready([])); await render();
     expect(element.textContent).toContain('Choose a provider to start the main agent.');
     expect(element.textContent).toContain('No connections configured.');
+    expect(element.textContent).toContain('Connect a provider to get started.');
     expect(element.querySelector('ptah-state-panel[state="empty"]')).not.toBeNull();
   });
   it('renders each resolvedModel arm of the route (Main Agent node)', async () => {
@@ -779,8 +780,9 @@ describe('ProvidersSettingsComponent', () => {
       const region = element.querySelector('[data-testid="main-agent-region"]');
       expect(region?.querySelector('[data-read-error="scopes"]')?.textContent).toContain('Setting sources could not be loaded.');
       const connections = element.querySelector('section[aria-labelledby="providers-connections-heading"]');
-      expect(connections?.querySelector('[data-read-error="connections"]')).not.toBeNull();
-      expect(connections?.querySelector('ptah-alert[data-read-error="connections"]')).not.toBeNull();
+       const connectionsAlert = connections?.querySelector('ptah-alert[data-read-error="connections"]');
+       expect(connectionsAlert?.textContent?.replace(/\s+/g, ' ')).toContain('Providers could not be loaded. Your saved settings have not changed.');
+       expect(connectionsAlert?.querySelectorAll('[role="alert"]')).toHaveLength(1);
       button('Retry setting sources').click(); await render();
       expect(state.refreshScopes).toHaveBeenCalledTimes(1);
       expect(state.refreshConnections).not.toHaveBeenCalled();

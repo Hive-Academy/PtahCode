@@ -42,9 +42,9 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
       <div class="-mx-3 max-h-[50vh] space-y-3 overflow-y-auto pt-3 text-xs" data-testid="provider-catalog-body">
         @switch (status()) {
           @case ('error') {
-            <ptah-alert role="alert" tone="error" [compact]="true" live="assertive" data-testid="provider-catalog-error">
+            <ptah-alert tone="error" [compact]="true" live="assertive" data-testid="provider-catalog-error">
               <p class="text-base-content">Custom providers could not be loaded. Your saved settings have not changed.</p>
-              <button alertAction type="button" ptahButton variant="ghost" (click)="retryRequested.emit()">Retry</button>
+              <button alertAction type="button" ptahButton (click)="retryRequested.emit()">Retry</button>
             </ptah-alert>
           }
           @case ('loading') {
@@ -59,17 +59,17 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
             @if (rows().length) {
               <ul aria-label="Providers in the catalog">
                 @for (row of rows(); track row.id) {
-                  <li [attr.data-provider]="row.id">
+                  <li [attr.data-provider]="row.id" [attr.title]="row.name + ' — ' + row.detail">
                     <div ptahListRow [title]="row.name" [meta]="row.detail">
                       <span leading [class]="row.avatar" aria-hidden="true">{{ row.initials }}</span>
-                    <div trailing class="flex shrink-0 items-center gap-1.5">
-                      @if (row.signIn) {
-                        <button type="button" ptahButton variant="ghost"
-                          [attr.aria-label]="'Sign in to ' + row.name" (click)="signInRequested.emit(row.id)">Sign in</button>
-                      }
-                      <button type="button" ptahButton [disabled]="!canSetUp()"
-                        [attr.aria-label]="'Connect ' + row.name" (click)="providerChosen.emit(row.id)">Connect</button>
-                    </div>
+                      <div trailing class="flex shrink-0 items-center gap-1.5">
+                        @if (row.signIn) {
+                          <button type="button" ptahButton variant="ghost"
+                            [attr.aria-label]="'Sign in to ' + row.name" (click)="signInRequested.emit(row.id)">Sign in</button>
+                        }
+                        <button type="button" ptahButton [disabled]="!canSetUp()"
+                          [attr.aria-label]="'Connect ' + row.name" (click)="providerChosen.emit(row.id)">Connect</button>
+                      </div>
                     </div>
                   </li>
                 }

@@ -239,12 +239,14 @@ const CONTROL =
             }
           </div>
 
+          <!-- Connections: under the Main agent, on the same card. -->
           <section
             aria-labelledby="providers-connections-heading"
             class="space-y-3 border-t border-base-content/10 pt-6"
             data-testid="providers-connections-card"
             [attr.aria-busy]="state.connections().status === 'loading'"
           >
+            <!-- Header (prototype): title + count pill left; filter and the primary "Connect provider" right. -->
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div class="flex min-w-0 flex-wrap items-center gap-2">
                 <h2
@@ -256,7 +258,10 @@ const CONTROL =
                   Connections
                 </h2>
                 @if (state.connections().status === 'ready') {
-                  <span ptahBadge data-testid="connections-count">
+                  <span
+                    ptahBadge
+                    data-testid="connections-count"
+                  >
                     {{ connections().length }} configured ·
                     {{ catalog().length }} available in catalog</span
                   >
@@ -300,6 +305,8 @@ const CONTROL =
             @if (requestedDrawer()?.tab === 'credentials' && state.connections().status === 'ready' && !codexConnectionPresent()) {
               <button type="button" ptahButton variant="primary" class="mt-3" data-testid="connect-codex" (click)="connectMissingCodex()">Connect Codex</button>
             }
+            <!-- Catalog caption, directly under the header: one passive line, the names truncate (full list in the
+                 title). "Connect provider" above is the one way into the catalog. -->
             <div
               class="flex min-w-0 text-xs text-base-content-muted"
               data-testid="catalog-hint"
@@ -314,7 +321,7 @@ const CONTROL =
               </p>
             </div>
             @if (state.connections().status === 'error') {
-              <ptah-alert role="alert" tone="error" [compact]="true" live="assertive" data-read-error="connections">
+              <ptah-alert tone="error" [compact]="true" live="assertive" data-read-error="connections">
                 <p class="min-w-0">
                   Providers could not be loaded. Your saved settings have not
                   changed.
@@ -330,11 +337,10 @@ const CONTROL =
               state.connections().status === 'ready' && connections().length === 0
             ) {
               <ptah-state-panel state="empty" title="No connections configured."
-                body="Connect a provider to get started." actionLabel="Connect provider"
-                (action)="openCatalog()" />
+                body="Connect a provider to get started." />
             }
             @if (state.connections().status === 'loading') {
-              <div role="status" aria-label="Loading connections" aria-busy="true"><ptah-skeleton [lines]="2" size="sm" /></div>
+              <div aria-label="Loading connections"><ptah-skeleton [lines]="2" size="sm" /></div>
             }
             @if (filter() && connections().length && !shownConnections().length) {
               <p
@@ -353,6 +359,9 @@ const CONTROL =
                 </button>
               </p>
             }
+            <!-- Compact cards (≤ 80 px): the whole card opens the drawer, which holds every per-state action but one.
+                 Rows come from the CONTAINER width (auto-fit: empty tracks collapse, so a few cards share the whole row).
+                 Each column is at least 27 rem; below 27 rem the one column shrinks to the container (onboarding's 400 px content area). -->
             <div
               class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,27rem),1fr))] items-start gap-2"
               data-testid="connections-grid"
