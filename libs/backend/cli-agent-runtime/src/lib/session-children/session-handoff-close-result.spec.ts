@@ -1,4 +1,5 @@
 import { handoffCloseAckResult } from './session-handoff-close-result';
+import type { HandoffCloseResult } from './session-handoff.port';
 
 describe('handoffCloseAckResult', () => {
   it('returns closed when the predecessor closes successfully', () => {
@@ -9,9 +10,9 @@ describe('handoffCloseAckResult', () => {
     });
   });
 
-  it('returns already-closed when the predecessor tab is not found', () => {
+  it('refuses an unknown predecessor instead of reporting it already closed', () => {
     const result = handoffCloseAckResult({ kind: 'absent' });
-    expect(result.status).toBe('already-closed');
+    expect(result.status).toBe('refused');
     expect(result.reason).toContain('not found');
   });
 
@@ -28,7 +29,7 @@ describe('handoffCloseAckResult', () => {
   });
 
   it('returns refused for terminal blocker codes', () => {
-    const terminalBlockers: Array<any> = [
+    const terminalBlockers: HandoffCloseResult[] = [
       { kind: 'blocked' as const, code: 'unsent-input' },
       { kind: 'blocked' as const, code: 'queued-message' },
       { kind: 'blocked' as const, code: 'permission-prompt' },
@@ -46,7 +47,7 @@ describe('handoffCloseAckResult', () => {
   });
 
   it('returns retryable-failure for non-terminal blocker codes', () => {
-    const nonTerminalBlockers: Array<any> = [
+    const nonTerminalBlockers: HandoffCloseResult[] = [
       { kind: 'blocked' as const, code: 'streaming' },
       { kind: 'blocked' as const, code: 'resuming' },
       { kind: 'blocked' as const, code: 'switching' },

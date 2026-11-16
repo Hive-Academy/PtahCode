@@ -281,17 +281,6 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     expect(h.closer.close).toHaveBeenCalledWith(tabId, predecessorSessionId);
   });
 
-  it('refuses a genuinely absent predecessor instead of reporting it already closed', async () => {
-    const h = harness();
-    const store = h.makeStore();
-    await record(store);
-    const service = h.makeService(store);
-    await armAndFlush(service, h.request);
-    h.closer.close.mockResolvedValueOnce({ kind: 'absent' });
-    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'refused' });
-    expect(h.closer.close).toHaveBeenCalledTimes(1);
-  });
-
   it('reports already-closed when the record completes after the lookup', async () => {
     const h = harness();
     const store = h.makeStore();
