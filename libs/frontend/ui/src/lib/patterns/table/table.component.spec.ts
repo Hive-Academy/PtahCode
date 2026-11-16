@@ -6,12 +6,39 @@ import {
   PtahTableRowDirective,
 } from './table.component';
 
+class ResizeObserverStub {
+  static current: ResizeObserverStub;
+  private readonly callback: ResizeObserverCallback;
+  readonly disconnect = jest.fn();
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    ResizeObserverStub.current = this;
+  }
+
+  observe(): void {
+    return;
+  }
+
+  width(width: number): void {
+    this.callback(
+      [{ contentRect: { width } } as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+  }
+}
+
 @Component({
   standalone: true,
   imports: [PtahTableComponent, PtahNumericCellDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ptah-table label="Usage by day" [size]="size()" [density]="density()">
+    <ptah-table
+      label="Usage by day"
+      [size]="size()"
+      [density]="density()"
+      [collapseBelow]="collapseBelow()"
+    >
       <thead>
         <tr>
           <th>Day</th>
@@ -30,6 +57,7 @@ import {
 class HostComponent {
   readonly size = signal<'xs' | 'sm'>('xs');
   readonly density = signal<'default' | 'compact' | undefined>(undefined);
+  readonly collapseBelow = signal(0);
 }
 
 @Component({
@@ -47,13 +75,21 @@ class DefaultHostComponent {}
 
 describe('PtahTableComponent', () => {
   let fixture: ComponentFixture<HostComponent>;
+  const originalResizeObserver = globalThis.ResizeObserver;
 
   beforeEach(async () => {
+    globalThis.ResizeObserver =
+      ResizeObserverStub as unknown as typeof ResizeObserver;
     await TestBed.configureTestingModule({
       imports: [HostComponent, DefaultHostComponent],
     }).compileComponents();
     fixture = TestBed.createComponent(HostComponent);
     fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    fixture.destroy();
+    globalThis.ResizeObserver = originalResizeObserver;
   });
 
   it('renders projected table sections in an accessible native table with an overflow wrapper', () => {
@@ -110,5 +146,30 @@ describe('PtahTableComponent', () => {
     fixture.detectChanges();
     expect(table.getAttribute('data-density')).toBe('compact');
     expect(PtahTableRowDirective).toBeDefined();
+  });
+
+  it('observes host width and exposes collapse state and announcements', () => {
+    const table = fixture.nativeElement.querySelector(
+      'ptah-table',
+    ) as HTMLElement;
+    const component = fixture.debugElement.children[0]
+      .componentInstance as PtahTableComponent;
+    expect(table.getAttribute('data-collapsed')).toBe('false');
+    fixture.componentInstance.collapseBelow.set(800);
+    fixture.detectChanges();
+    expect(table.getAttribute('data-collapsed')).toBe('false');
+    ResizeObserverStub.current.width(799);
+    fixture.detectChanges();
+    expect(table.getAttribute('data-collapsed')).toBe('true');
+    ResizeObserverStub.current.width(800);
+    fixture.detectChanges();
+    expect(table.getAttribute('data-collapsed')).toBe('false');
+    component.announce('Quill moved to position 2 of 3');
+    fixture.detectChanges();
+    expect(table.querySelector('[aria-live="polite"]')?.textContent).toContain(
+      'Quill moved to position 2 of 3',
+    );
+    fixture.destroy();
+    expect(ResizeObserverStub.current.disconnect).toHaveBeenCalled();
   });
 });
