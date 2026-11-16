@@ -1,5 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { NativePopoverComponent } from '@ptah-extension/ui';
 import { ProvidersSettingsStateService } from '@ptah-extension/core';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import type { SystemCliMatrixRow } from './cli-matrix-rows';
@@ -58,6 +60,12 @@ describe('LanesTableDetailComponent', () => {
     fixture.componentRef.setInput('openKind', 'credentials');
     fixture.detectChanges();
     await fixture.whenStable();
+    const trigger = host.querySelector<HTMLElement>('[data-popover-kind="credentials"]');
+    trigger?.focus();
+    const popover = fixture.debugElement.queryAll(By.directive(NativePopoverComponent))
+      .find((element) => element.nativeElement.querySelector('[data-popover-kind="credentials"]'))
+      ?.componentInstance as NativePopoverComponent | undefined;
+    popover?.opened.emit();
     expect(host.querySelector('[data-testid="cursor-credential-key"]')).toBe(document.activeElement);
   });
 

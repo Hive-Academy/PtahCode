@@ -3,6 +3,8 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  Injector,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -253,12 +255,10 @@ export type LaneTableRow = CliMatrixRow & {
                         density="compact"
                         class="min-w-0 font-mono"
                         data-popover-kind="model"
-                        [disabled]="
-                          !row.interactive || rowBusy(row) || !canWrite()
-                        "
-                        [attr.data-busy]="busy() ? '' : null"
-                        [attr.aria-disabled]="busy() ? 'true' : null"
-                        [attr.aria-busy]="busy() ? 'true' : null"
+                        [disabled]="!row.interactive || !canWrite()"
+                        [attr.data-busy]="rowBusy(row) ? '' : null"
+                        [attr.aria-disabled]="rowBusy(row) ? 'true' : null"
+                        [attr.aria-busy]="rowBusy(row) ? 'true' : null"
                         [attr.aria-label]="'Model default for ' + row.name"
                         [attr.aria-expanded]="isOpen(row, 'model', place)"
                         [title]="modelOf(row).title"
@@ -294,12 +294,10 @@ export type LaneTableRow = CliMatrixRow & {
                         size="xs"
                         density="compact"
                         data-popover-kind="effort"
-                        [disabled]="
-                          !row.interactive || rowBusy(row) || !canWrite()
-                        "
-                        [attr.data-busy]="busy() ? '' : null"
-                        [attr.aria-disabled]="busy() ? 'true' : null"
-                        [attr.aria-busy]="busy() ? 'true' : null"
+                        [disabled]="!row.interactive || !canWrite()"
+                        [attr.data-busy]="rowBusy(row) ? '' : null"
+                        [attr.aria-disabled]="rowBusy(row) ? 'true' : null"
+                        [attr.aria-busy]="rowBusy(row) ? 'true' : null"
                         [attr.aria-label]="'Effort default for ' + row.name"
                         [attr.aria-expanded]="isOpen(row, 'effort', place)"
                         [title]="effortOf(row)"
@@ -568,6 +566,7 @@ export class LanesTableComponent {
   private readonly table = viewChild(PtahTableComponent);
   protected readonly pendingDelete = signal<LaneTableRow | null>(null);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
   private readonly destroyRef = inject(DestroyRef);
   private readonly orderFocusReturning = signal(false);
   private readonly deleteFocus = new LanesTableDeleteFocus();
@@ -632,12 +631,15 @@ export class LanesTableComponent {
     effect(() => {
       const open = this.openCell();
       if (!open) return;
+      const currentRow = this.rows().find(r => r.id === open.row.id);
       if (
-        !this.rows().includes(open.row) ||
+        !currentRow ||
         !open.row.interactive ||
         (open.place === 'detail' && !this.table()?.collapsed())
       ) {
         this.openCell.set(null);
+      } else if (currentRow !== open.row) {
+        this.openCell.set({ ...open, row: currentRow });
       }
     });
     effect(() => this.deleteFocus.onRowsChanged(this.rows()));
@@ -700,7 +702,16 @@ export class LanesTableComponent {
     );
   }
   protected closePopover(): void {
+    const open = this.openCell();
     this.openCell.set(null);
+    if (open) {
+      afterNextRender(() => {
+        const scope = open.place === 'detail'
+          ? this.element.nativeElement.querySelector<HTMLElement>(`#lane-detail-${open.row.id}`)
+          : this.element.nativeElement.querySelector<HTMLElement>(`[data-testid="cli-matrix-row-${open.row.id}"]`);
+        scope?.querySelector<HTMLElement>(`[data-popover-kind="${open.field}"]`)?.focus();
+      }, { injector: this.injector });
+    }
   }
   protected effortOf(row: LaneTableRow): string {
     return (

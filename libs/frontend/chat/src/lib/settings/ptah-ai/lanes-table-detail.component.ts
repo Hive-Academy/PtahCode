@@ -1,9 +1,13 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   computed,
+  effect,
+  inject,
   input,
   output,
+  viewChildren,
 } from '@angular/core';
 import type { CliType } from '@ptah-extension/shared';
 import {
@@ -156,6 +160,7 @@ import { cliCapabilityView } from './cli-capability-view';
           placement="bottom-start"
           [hasBackdrop]="true"
           backdropClass="transparent"
+          (opened)="focusCredentialKey()"
           (closed)="popoverClosed.emit()"
         >
           <button
@@ -264,7 +269,20 @@ import { cliCapabilityView } from './cli-capability-view';
   `,
 })
 export class LanesTableDetailComponent {
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly popovers = viewChildren(NativePopoverComponent);
   readonly row = input.required<LaneTableRow>();
+  constructor() {
+    // A new row value can come with a row move (install state changed: the
+    // table puts installed rows first). The move hides an open native popover.
+    effect(() => {
+      this.row();
+      for (const popover of this.popovers()) popover.reattach();
+    });
+  }
+  protected focusCredentialKey(): void {
+    this.element.nativeElement.querySelector<HTMLElement>('[data-testid="cursor-credential-key"]')?.focus();
+  }
   protected readonly systemRow = computed((): SystemCliMatrixRow | null => {
     const row = this.row();
     return row.kind === 'system' ? row : null;

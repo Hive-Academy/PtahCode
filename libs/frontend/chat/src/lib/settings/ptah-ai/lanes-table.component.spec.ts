@@ -308,6 +308,9 @@ describe('LanesTableComponent', () => {
       '[aria-label="Model default for Codex"]',
     ) as HTMLButtonElement;
     expect(trigger.getAttribute('aria-busy')).toBe('true');
+    // Busy is aria-disabled, not disabled: the trigger keeps focus during a save.
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.getAttribute('aria-disabled')).toBe('true');
     trigger.click();
     fixture.detectChanges();
     expect(

@@ -409,7 +409,7 @@ async function captureMatrixPopovers(
   await page.keyboard.press('Escape');
   await expect(page.locator(popover)).toHaveCount(0);
   // Effort: the CLI's allowlist as a two-column grid, the saved value pressed (interactions/orchestration-3).
-  await page.locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="effort"]').click();
+  await page.locator('#lane-detail-codex [data-popover-kind="effort"]').click();
   await expect(page.locator(`${popover} [aria-pressed="true"]`)).toHaveText(
     'Medium',
   );
@@ -1394,7 +1394,7 @@ for (const host of ['vscode', 'electron'] as const) {
       for (const [cli, label] of Object.entries(expected)) {
         await expandMatrixDetail(page, cli);
         const version = page.locator(
-          `#lane-detail-${cli} [data-testid="cli-provider-facts"] [data-ptah-description-row]:has(dt:text-is("Version")) span`,
+          `#lane-detail-${cli} [data-testid="cli-provider-facts"] [data-ptah-description-row]:has(dt:text-is("Version")) span[title]`,
         );
         await expect(version).toHaveText(label);
         await expect(version).toHaveAttribute('title', LIVE_VERSIONS[cli]);

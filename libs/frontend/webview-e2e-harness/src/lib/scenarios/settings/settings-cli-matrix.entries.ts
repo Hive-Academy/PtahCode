@@ -908,7 +908,7 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       await pi.getByRole('button', { name: 'More actions for Pi' }).click();
       await expect(pi.getByRole('menuitem', { name: 'Test' })).toBeDisabled();
       await page.keyboard.press('Escape');
-      await expect(pi.getByRole('checkbox', { name: 'Pi enabled' })).toBeDisabled();
+      await expect(pi.getByRole('switch', { name: 'Pi enabled' })).toBeDisabled();
       await pi.getByRole('button', { name: 'Details for Pi' }).click();
       await throughMatrixPopover(page, page.locator('#lane-detail-pi [data-popover-kind="install"]'), 'cli-provider-popover-content', async (panel) => {
         await expect(panel).toContainText('npm install -g @earendil-works/pi-coding-agent');
