@@ -168,7 +168,12 @@ describe('AntigravityCliAdapter', () => {
         await jest.advanceTimersByTimeAsync(8000);
         await detecting;
         expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
-        expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+        expect(mockKillProcessTree).toHaveBeenCalledWith(
+          FAKE_PID,
+          'SIGTERM',
+          undefined,
+          { groupOnly: false },
+        );
         expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/agy', ['--help'],
           expect.objectContaining({ detached: true }));
         expect(currentChild?.kill).not.toHaveBeenCalled();
@@ -229,7 +234,12 @@ describe('AntigravityCliAdapter', () => {
         await jest.advanceTimersByTimeAsync(8000);
         expect(await models).toEqual([]);
         expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
-        expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+        expect(mockKillProcessTree).toHaveBeenCalledWith(
+          FAKE_PID,
+          'SIGTERM',
+          undefined,
+          { groupOnly: false },
+        );
         expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/agy', ['models'],
           expect.objectContaining({ detached: true }));
         expect(currentChild?.kill).not.toHaveBeenCalled();

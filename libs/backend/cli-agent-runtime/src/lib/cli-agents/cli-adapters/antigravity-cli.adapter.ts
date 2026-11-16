@@ -519,10 +519,18 @@ export class AntigravityCliAdapter implements CliAdapter {
         clearTimeout(timer);
         resolve(supported);
       };
+      let childExited = false;
       const child = spawnCli(binary, ['--help'], { spawner: this.spawner, detached: true });
+      child.on('exit', () => {
+        childExited = true;
+      });
       const timer = setTimeout(() => {
         void child.whenSpawned.then((pid) => {
-          if (pid && !childClosed && !child.killed) void killProcessTree(pid);
+          if (pid && !childClosed && !child.killed) {
+            void killProcessTree(pid, 'SIGTERM', undefined, {
+              groupOnly: childExited && process.platform !== 'win32',
+            });
+          }
         });
         finish(false);
       }, 8000);
@@ -585,10 +593,18 @@ export class AntigravityCliAdapter implements CliAdapter {
     return new Promise((resolve) => {
       let stdout = '';
       let childClosed = false;
+      let childExited = false;
       const child = spawnCli(binary, ['models'], { spawner: this.spawner, detached: true });
+      child.on('exit', () => {
+        childExited = true;
+      });
       const timer = setTimeout(() => {
         void child.whenSpawned.then((pid) => {
-          if (pid && !childClosed && !child.killed) void killProcessTree(pid);
+          if (pid && !childClosed && !child.killed) {
+            void killProcessTree(pid, 'SIGTERM', undefined, {
+              groupOnly: childExited && process.platform !== 'win32',
+            });
+          }
         });
         resolve(undefined);
       }, timeoutMs);

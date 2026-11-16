@@ -217,7 +217,12 @@ describe('OpencodeCliAdapter', () => {
         await jest.advanceTimersByTimeAsync(8000);
         expect(await models).toEqual([]);
         expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
-        expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+        expect(mockKillProcessTree).toHaveBeenCalledWith(
+          FAKE_PID,
+          'SIGTERM',
+          undefined,
+          { groupOnly: false },
+        );
         expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/opencode', ['models'],
           expect.objectContaining({ detached: true }));
         expect(currentChild?.kill).not.toHaveBeenCalled();
@@ -899,7 +904,12 @@ describe('OpencodeCliAdapter', () => {
       expect(await handle.done).toBe(1);
       await Promise.resolve();
       expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
-      expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+      expect(mockKillProcessTree).toHaveBeenCalledWith(
+        FAKE_PID,
+        'SIGTERM',
+        undefined,
+        { groupOnly: false },
+      );
       expect(currentChild?.kill).not.toHaveBeenCalled();
       expect(segments.some((s) => s.type === 'error' && s.content.includes('session-mismatch'))).toBe(true);
       expect(segments.some((s) => s.type === 'text')).toBe(false);
