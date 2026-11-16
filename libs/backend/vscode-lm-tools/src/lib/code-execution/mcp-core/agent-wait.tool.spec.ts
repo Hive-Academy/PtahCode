@@ -77,6 +77,9 @@ function deps(
 }
 
 describe('buildAgentWaitTool', () => {
+  it('describes starting as a pending lane status', () => {
+    expect(buildAgentWaitTool().description).toContain('status (or starting)');
+  });
   it('advertises the name, the bounds and the required ids', () => {
     const tool = buildAgentWaitTool();
     expect(tool.name).toBe(AGENT_WAIT_TOOL_NAME);
@@ -228,7 +231,7 @@ describe('runAgentWait', () => {
             {
               agentId: 'lane-1',
               state: 'exited',
-              info: info('lane-1', { status: 'starting', exitCode: undefined }),
+              info: info('lane-1', { status: 'starting', exitCode: 7 }),
             },
           ],
         },
@@ -236,7 +239,8 @@ describe('runAgentWait', () => {
       ),
     );
     expect(text).toContain('0 of 1 known lane(s) ended, 1 still running');
-    expect(text).toContain('lane is starting');
+    expect(text).toContain('starting, lane is starting');
+    expect(text).not.toContain('exit 7');
   });
 
   it('does not report an HTTP cap when mode any ends early', async () => {

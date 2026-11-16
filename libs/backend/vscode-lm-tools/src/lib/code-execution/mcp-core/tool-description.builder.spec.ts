@@ -8,6 +8,7 @@ import {
   buildAgentMessageAckTool,
   buildAgentListTool,
   buildAgentReadTool,
+  buildAgentStatusTool,
   buildAgentReportTool,
   buildAgentSpawnTool,
   buildAstAnalyzeTool,
@@ -26,6 +27,7 @@ import {
   buildTaskListTool,
   DESCRIPTION_LANGUAGE_NAMES,
 } from './tool-description.builder';
+
 import {
   SYMBOL_INDEX_DEFAULT_LIMIT,
   SYMBOL_INDEX_MAX_LIMIT,
@@ -37,6 +39,14 @@ import {
   type LanguageCapability,
 } from '@ptah-extension/workspace-intelligence';
 import type { MCPToolDefinition } from '../types';
+
+describe('agent lane descriptions', () => {
+  it('explains starting and the delayed CLI session', () => {
+    expect(buildAgentSpawnTool().description).toContain('reply "starting"');
+    expect(buildAgentStatusTool().description).toContain('starting/running/completed');
+    expect(buildAgentReadTool().description).toContain('starting or running');
+  });
+});
 
 /** The description budget the execute_code guard applies (the only size assertion). */
 const DESCRIPTION_CHAR_BUDGET = 1_000;

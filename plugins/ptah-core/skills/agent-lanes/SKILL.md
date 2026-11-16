@@ -126,7 +126,7 @@ When the work calls for a role, pass it as the `role` parameter — never paste 
 ## 4. Run
 
 ```
-spawn   ptah_agent_spawn({ task, deliverables, cli | ptahCliId, … })  → agentId
+spawn   ptah_agent_spawn({ task, deliverables, cli | ptahCliId, … })  → agentId (status may be starting)
 wait    <agent-lane-completed> arrives in this session when the lane ends
 read    ptah_agent_read({ agentId })                     then Read the deliverable file
 stop    ptah_agent_stop({ agentId })                     for a lane you no longer need
@@ -155,9 +155,9 @@ lane, so a skeleton-first deliverable (§3) still counts.
 output with `ptah_agent_status({ agentId })` and `ptah_agent_read({ agentId })`, then verify the
 declared deliverables' contents. A missing or empty file is not complete. If push is unavailable
 (for example, no live spawning session, no parent session, or no chat runtime), make one status/read
-check. If it reports `running`, continue other independent work and re-check with at most 5 status
+check. If it reports `starting` or `running`, continue other independent work and re-check with at most 5 status
 checks per lane, at least 60 s apart. Do not use a tight loop, timer, or watcher. If the fifth check still reports
-`running`, stop waiting: tell the user the lane is still running (include its agent ID and lane) and
+`starting` or `running`, stop waiting: tell the user the lane is still live (include its agent ID and lane) and
 end the turn, or, if it has clearly exceeded its expected duration, use `ptah_agent_stop` and
 recover per §5 as a non-limit timeout, never as a usage limit.
 For a verdict other than `delivered`, read the output and recover per §5.
@@ -167,7 +167,7 @@ A later signal from the same agent supersedes an earlier one.
 Do not start review of a deliverable while a queued message for that lane is pending; wait for
 that turn's signal, then read and verify the final file.
 
-Status is one of `running`, `completed`, `failed`, `timeout`, `stopped`.
+Status is one of `starting`, `running`, `completed`, `failed`, `timeout`, `stopped`. Save the agent ID; the same request or `idempotencyKey` replays the lane. The CLI Session ID comes later from `ptah_agent_status`. Do not poll.
 
 - **Concurrency**: at most 3 lanes in flight by default. Wider only when the workflow allows it and
   the user agreed to the added cost. Queue the rest and spawn as slots free.

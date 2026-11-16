@@ -150,6 +150,19 @@ describe('WebSearchConfigComponent', () => {
     }
   });
 
+  it('stacks the label when editing an already configured API key', async () => {
+    responses['webSearch:getApiKeyStatus'] = () => ok({ configured: true });
+    await render();
+    for (const provider of ['tavily', 'serper', 'exa']) {
+      byTestId<HTMLButtonElement>(`settings-web-search-key-btn-${provider}`).click();
+      await settle();
+      const field = byTestId<HTMLInputElement>('settings-web-search-key-input').closest('ptah-field');
+      expect(field?.querySelector('[data-ptah-field]')?.getAttribute('data-appearance')).toBe('stacked');
+      byTestId<HTMLButtonElement>(`settings-web-search-key-btn-${provider}`).click();
+      await settle();
+    }
+  });
+
   it('loads config and every key status, and keeps the harness selectors', async () => {
     responses['webSearch:getApiKeyStatus'] = () => ok({ configured: true });
     await render();
@@ -157,8 +170,9 @@ describe('WebSearchConfigComponent', () => {
     expect(calls('webSearch:getApiKeyStatus')).toEqual([
       { provider: 'tavily' }, { provider: 'serper' }, { provider: 'exa' },
     ]);
-    expect(element.querySelector('table.table.table-xs')).not.toBeNull();
-    const section = element.querySelector<HTMLElement>('#web-search-heading')?.closest('section');
+    expect(element.querySelectorAll('[role="listitem"]')).toHaveLength(3);
+    const section = element.querySelector<HTMLElement>('section[data-glass-surface]');
+    expect(section?.querySelector('ptah-form-section h2')?.textContent).toContain('Web Search');
     expect(section?.classList).toContain('border-base-content/10');
     expect(section?.classList).not.toContain('card');
     expect(section?.getAttribute('data-glass-surface')).toBe('content');
@@ -177,9 +191,9 @@ describe('WebSearchConfigComponent', () => {
     await render();
 
     const alert = byTestId('settings-web-search-error');
-    expect(alert.getAttribute('role')).toBe('alert');
-    expect(alert.textContent?.trim()).toBe('Could not load the web search settings.');
-    expect(alert.classList).toContain('text-base-content');
+    expect(alert.querySelector('[role="alert"]')).not.toBeNull();
+    expect(alert.textContent).toContain('Could not load the web search settings.');
+    expect(alert.textContent).toContain('Retry');
   });
 
   it('keeps the free-tier copy and signup links (V3)', async () => {
@@ -191,11 +205,10 @@ describe('WebSearchConfigComponent', () => {
   it('keeps each provider row to one name line and one free-tier line (map §3.2 density, Batch 50)', async () => {
     responses['webSearch:getApiKeyStatus'] = () => ok({ configured: true });
     await render();
-    const providerCell = byTestId('settings-web-search-signup-serper').closest('td') as HTMLElement;
+    const providerCell = byTestId('settings-web-search-signup-serper').closest('[title]') as HTMLElement;
     expect(providerCell.getAttribute('title')).toBe('Google Search API. Fast, reliable results. Free tier: 2,500 searches/month.');
     expect(providerCell.querySelector('.sr-only')?.textContent).toContain('Google Search API. Fast, reliable results.');
     const line = byTestId('settings-web-search-signup-serper').parentElement as HTMLElement;
-    expect(line.classList).toContain('whitespace-nowrap');
     expect(line.textContent?.replace(/\s+/g, ' ').trim()).toBe('Free tier: 2,500 searches/month. Get API key');
     // D3: the free-tier line is 12 px (text-xs, 16 px line) so the row stays at about 42 px, within 48.
     expect(line.classList).toContain('text-xs');
@@ -204,6 +217,9 @@ describe('WebSearchConfigComponent', () => {
     const actions = byTestId('settings-web-search-clear-btn-serper').parentElement as HTMLElement;
     expect(actions.classList).toContain('flex-nowrap');
     expect(actions.contains(byTestId('settings-web-search-key-btn-serper'))).toBe(true);
+    const row = actions.parentElement as HTMLElement;
+    expect(row.classList).toContain('flex-nowrap');
+    expect(row.contains(providerCell)).toBe(true);
   });
 
   it('underlines the Get API key links persistently, not only on hover (D3, WCAG 1.4.1)', async () => {
@@ -370,7 +386,7 @@ describe('WebSearchConfigComponent', () => {
       await settle();
 
       expect(byTestId('settings-web-search-clear-group-tavily').getAttribute('role')).toBe('group');
-      expect(byTestId('settings-web-search-clear-confirm-tavily').classList).toContain('border-error');
+      expect(byTestId('settings-web-search-clear-confirm-tavily').hasAttribute('data-ptah-button')).toBe(true);
       expect(clear.getAttribute('aria-expanded')).toBe('true');
       expect(clear.classList).not.toContain('btn-active');
       expect(clear.hasAttribute('aria-pressed')).toBe(false);
@@ -475,11 +491,8 @@ describe('WebSearchConfigComponent', () => {
       expect(serper.textContent).toContain('The connection test failed.');
       expect(serper.textContent).not.toContain('Unauthorized');
       expect(byTestId('settings-web-search-status-exa').textContent).toContain('Not tested');
-      for (const cell of [tavily, serper]) {
-        const badge = cell.querySelector('[data-ptah-badge][data-size="sm"][data-tone="neutral"]');
-        expect(badge?.classList).toContain('text-base-content');
-        expect(badge?.getAttribute('data-appearance')).toBe('outline');
-      }
+      expect(tavily.querySelector('ptah-status')?.getAttribute('data-ink')).toBe('done');
+      expect(serper.querySelector('ptah-status')?.getAttribute('data-ink')).toBe('err');
     });
   });
 
@@ -519,7 +532,7 @@ describe('WebSearchConfigComponent', () => {
     it.each(HOST_FAILURES)('config load fails with %s', async (_case, respond) => {
       responses['webSearch:getConfig'] = respond;
       await render();
-      expect(byTestId('settings-web-search-error').textContent?.trim()).toBe('Could not load the web search settings.');
+      expect(byTestId('settings-web-search-error').textContent).toContain('Could not load the web search settings.');
       expect(visibleText()).not.toContain('host detail');
     });
 
@@ -589,10 +602,23 @@ describe('WebSearchConfigComponent', () => {
       expect(byTestId('settings-web-search-status-tavily').textContent?.trim()).toBe('The connection test failed.');
       expect(visibleText()).not.toContain('host detail');
     });
+
+    it('the test button keeps its full accessible name', async () => {
+      await render();
+      expect(byTestId<HTMLButtonElement>('settings-web-search-test').getAttribute('aria-label')).toBe(
+        'Test web search connection',
+      );
+    });
   });
 
   it('uses no text size below 12 px anywhere in the component source (Batch 50b)', () => {
-    const source = readFileSync(join(__dirname, 'web-search-config.component.ts'), 'utf8');
-    expect(source.match(/text-\[(?:\d|1[01])(?:\.\d+)?px\]/g)).toBeNull();
+    for (const file of [
+      'web-search-config.component.ts',
+      'web-search-provider-rows.component.ts',
+      'web-search-key-editor.component.ts',
+    ]) {
+      const source = readFileSync(join(__dirname, file), 'utf8');
+      expect(source.match(/text-\[(?:\d|1[01])(?:\.\d+)?px\]/g)).toBeNull();
+    }
   });
 });

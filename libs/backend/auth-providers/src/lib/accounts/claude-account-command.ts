@@ -8,6 +8,7 @@ import {
 } from '@ptah-extension/platform-core';
 import type { ProviderAccountActionResult, ProviderAccountResultCode } from '@ptah-extension/shared';
 import { parseClaudeAccountStatus, type ClaudeAccountStatus } from './claude-account-status';
+import { parseClaudeAccountEmail } from './claude-account-email';
 import type { ClaudeRegistryQueryResult } from './claude-auth-settings-scan';
 import type {
   ClaudeAuthContext,
@@ -351,6 +352,28 @@ export class ClaudeAccountCommand implements ClaudeCliProbe {
       ? null
       : parseClaudeAccountStatus(run.stdout, run.exitCode, context.canonicalDir, this.host.platform);
     return { status, terminated: run.terminated, ...receipt };
+  }
+
+  /** One route-guarded status child for an explicit email reveal. Raw output stays inside this method. */
+  async revealEmail(context: ClaudeAuthContext, signal: AbortSignal): Promise<{
+    readonly email: string | null; readonly identityReference: string | null; readonly emailOnlyReference: string | null;
+    readonly terminated: boolean; readonly routeChanged?: true; readonly closeReceipt?: ClaudeChildCloseReceipt;
+  }> {
+    const route = context.route;
+    if (!claudeAccountRouteHolds(route)) return { email: null, identityReference: null, emailOnlyReference: null, terminated: true, routeChanged: true };
+    const run = await this.run({
+      command: context.executable.command, args: [...context.executable.prefixArgs, 'auth', 'status', '--json'],
+      env: context.env, cwd: context.cwd, limitMs: CLAUDE_ACCOUNT_CHILD_LIMITS.statusMs,
+      outputBytes: CLAUDE_ACCOUNT_CHILD_LIMITS.statusOutputBytes, signal, launchGuard: claudeAccountRouteGuard(route),
+    });
+    const receipt = closeReceiptOf(run);
+    if (!claudeAccountRouteHolds(route)) return { email: null, identityReference: null, emailOnlyReference: null,
+      terminated: run.terminated, routeChanged: true, ...receipt };
+    const parsed = run.stopped || !run.terminated ? null :
+      parseClaudeAccountEmail(run.stdout, run.exitCode, context.canonicalDir, this.host.platform);
+    return { email: parsed?.email ?? null, identityReference: parsed?.identityReference ?? null,
+      emailOnlyReference: parsed?.emailOnlyReference ?? null,
+      terminated: run.terminated, ...receipt };
   }
 
   /**

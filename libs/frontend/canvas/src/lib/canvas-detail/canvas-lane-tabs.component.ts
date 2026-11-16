@@ -20,6 +20,7 @@ import { SessionAgentRosterService } from '@ptah-extension/chat';
 import {
   AgentAvatarComponent,
   agentAccessibleLabel,
+  isRunningAgentWord,
   type AgentKind,
 } from '@ptah-extension/chat-ui';
 import { injectWallClock } from '@ptah-extension/core';
@@ -309,7 +310,9 @@ export class CanvasLaneTabsComponent {
   readonly agents = computed(() => this.roster.roster(this.tabId()));
   private readonly ticking = computed(() =>
     this.agents().some(
-      (agent) => agent.status === 'running' && typeof agent.startedAt === 'number',
+      (agent) =>
+        isRunningAgentWord(agent.status) &&
+        typeof agent.startedAt === 'number',
     ),
   );
   protected readonly now = injectWallClock('second', () => this.ticking());
@@ -353,7 +356,10 @@ export class CanvasLaneTabsComponent {
       this.focusedChipKey(),
     );
     if (this.rail()) {
-      const active = this.agents().filter(agent => agent.status === 'running' || agent.status === 'waiting');
+      const active = this.agents().filter(
+        (agent) =>
+          isRunningAgentWord(agent.status) || agent.status === 'waiting',
+      );
       const candidates = active.length ? active : this.agents().filter(agent => agent.kind === 'orchestrator');
       visible = candidates.slice(0, 5);
       hidden = candidates.slice(5);

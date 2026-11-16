@@ -5,7 +5,10 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { ProvidersSettingsStateService, type ProvidersEditContext } from '@ptah-extension/core';
+import {
+  ProvidersSettingsStateService,
+  type ProvidersEditContext,
+} from '@ptah-extension/core';
 import {
   SUBAGENT_PROMPT_CACHE_TTL_SETTINGS,
   type SubagentPromptCacheTtlSetting,
@@ -17,7 +20,13 @@ import {
   type SettingsSaveResult,
 } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective, PtahSelectDirective } from '@ptah-extension/ui';
+import {
+  PtahAlertComponent,
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahFormSectionComponent,
+  PtahSelectDirective,
+} from '@ptah-extension/ui';
 
 const ENV_VAR = 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL';
 const LABEL = 'Subagent prompt-cache TTL';
@@ -45,95 +54,86 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
 @Component({
   selector: 'ptah-subagent-cache-ttl-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahSelectDirective],
+  imports: [
+    SettingsBusyDisabledDirective,
+    PtahButtonDirective,
+    PtahSelectDirective,
+    PtahAlertComponent,
+    PtahFieldComponent,
+    PtahFormSectionComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section
-      data-glass-surface="content"
-      class="flex flex-col gap-[var(--ptah-gap-heading)] text-sm text-base-content"
-      aria-labelledby="subagent-cache-ttl-heading"
-      data-testid="subagent-cache-ttl-setting"
-    >
-      <div
-        section-header
-        class="border-b border-base-content/10 pb-[var(--ptah-space-2)]"
+    <section>
+      <ptah-form-section
+        heading="Subagent prompt cache"
+        description="How long the prompt cache of subagent requests stays valid."
+        data-testid="subagent-cache-ttl-setting"
+        data-glass-surface="content"
       >
-        <h3
-          id="subagent-cache-ttl-heading"
-          class="text-base font-semibold text-base-content"
-        >
-          Subagent prompt cache
-        </h3>
-        <p class="mt-[var(--ptah-gap-label)] text-xs text-base-content-muted">
-          How long the prompt cache of subagent requests stays valid.
-        </p>
-      </div>
-      <div class="flex min-h-12 flex-wrap items-center justify-between gap-[var(--ptah-space-3)]">
-        <label
-          for="subagent-cache-ttl"
-          class="text-sm font-medium text-base-content"
-          >Subagent prompt-cache TTL</label
-        >
-        <select
-          ptahSelect size="sm"
-          id="subagent-cache-ttl"
-          class="w-full text-sm sm:w-80"
-          [value]="shown() ?? ''"
-          [ptahBusyDisabled]="saving() || needsRecheck() || feedback.saving()"
-          [attr.aria-describedby]="
-            envNotice() ? 'subagent-cache-ttl-env' : null
-          "
-          (change)="select($event)"
-          data-testid="subagent-cache-ttl"
-        >
-          @if (shown() === null) {
-            <option value="" disabled selected>Unknown</option>
-          }
-          @for (option of options; track option.value) {
-            <option
-              [value]="option.value"
-              [selected]="option.value === shown()"
-            >
-              {{ option.label }}
-            </option>
-          }
-        </select>
-      </div>
-      @if (envNotice(); as notice) {
-        <p
-          id="subagent-cache-ttl-env"
-          class="rounded-md border border-info/30 bg-info/10 px-[var(--ptah-space-2)] py-[var(--ptah-space-1)] text-xs text-base-content"
-          data-testid="subagent-cache-ttl-env"
-        >
-          @if (notice.invalid) {
-            <code class="font-mono">{{ envVar }}</code> has an invalid value and
-            is ignored by Ptah.
-          } @else {
-            <code class="font-mono">{{ envVar }}={{ notice.value }}</code> is
-            set in your environment and takes precedence.
-          }
-        </p>
-      }
-      @if (saved() === null) {
-        <p
-          class="text-xs text-base-content-muted"
-          role="status"
-          data-testid="subagent-cache-ttl-unloaded"
-        >
-          The saved setting could not be read.
-        </p>
-      }
-      @if (needsRecheck()) {
-        <button
-          type="button"
-          ptahButton
-          [busy]="saving()"
-          (click)="recheck()"
-          data-testid="subagent-cache-ttl-recheck"
-        >
-          Check saved setting again
-        </button>
-      }
+        <ptah-field label="Subagent prompt-cache TTL" appearance="stacked">
+          <select
+            ptahSelect
+            size="sm"
+            id="subagent-cache-ttl"
+            [value]="shown() ?? ''"
+            [ptahBusyDisabled]="saving() || needsRecheck() || feedback.saving()"
+            [attr.aria-describedby]="
+              envNotice() ? 'subagent-cache-ttl-env' : null
+            "
+            (change)="select($event)"
+            data-testid="subagent-cache-ttl"
+          >
+            @if (shown() === null) {
+              <option value="" disabled selected>Unknown</option>
+            }
+            @for (option of options; track option.value) {
+              <option
+                [value]="option.value"
+                [selected]="option.value === shown()"
+              >
+                {{ option.label }}
+              </option>
+            }
+          </select>
+        </ptah-field>
+        @if (envNotice(); as notice) {
+          <ptah-alert
+            tone="info"
+            [compact]="true"
+            id="subagent-cache-ttl-env"
+            data-testid="subagent-cache-ttl-env"
+          >
+            @if (notice.invalid) {
+              <code class="font-mono">{{ envVar }}</code> has an invalid value
+              and is ignored by Ptah.
+            } @else {
+              <code class="font-mono">{{ envVar }}={{ notice.value }}</code> is
+              set in your environment and takes precedence.
+            }
+          </ptah-alert>
+        }
+        @if (saved() === null) {
+          <p
+            class="text-xs text-base-content-muted"
+            role="status"
+            data-testid="subagent-cache-ttl-unloaded"
+          >
+            The saved setting could not be read.
+          </p>
+        }
+        @if (needsRecheck()) {
+          <button
+            type="button"
+            ptahButton
+            [busy]="saving()"
+            (click)="recheck()"
+            data-testid="subagent-cache-ttl-recheck"
+          >
+            Check saved setting again
+          </button>
+        }
+      </ptah-form-section>
     </section>
   `,
   styles: `
@@ -203,7 +203,8 @@ export class SubagentCacheTtlSettingComponent {
         write: () => this.write(next, context, result),
         // The Undo is a write too: it is reconciled the same way once its own toast is shown.
         undo: () => this.write(saved, context, undo),
-        undoSettled: (undoOutcome) => this.reconcile(undo.attempt, saved, undoOutcome),
+        undoSettled: (undoOutcome) =>
+          this.reconcile(undo.attempt, saved, undoOutcome),
       });
       this.reconcile(result.attempt, next, outcome);
     } finally {
@@ -254,13 +255,17 @@ export class SubagentCacheTtlSettingComponent {
   }
 
   /** `toastSaid`: the toast reported this write as saved, so a read-back mismatch needs its own alert. */
-  private settle(requested: SubagentPromptCacheTtlSetting, toastSaid: boolean): void {
+  private settle(
+    requested: SubagentPromptCacheTtlSetting,
+    toastSaid: boolean,
+  ): void {
     if (this.state.commit().status === 'unconfirmed' || this.saved() === null) {
       this.unconfirmed.set(true);
       // The toast said "Saved", but nothing was read back: correct it.
       if (toastSaid) this.feedback.announce(NOT_CONFIRMED, 'alert');
       return;
     }
-    if (toastSaid && this.saved() !== requested) this.feedback.announce(NOT_SAVED, 'alert');
+    if (toastSaid && this.saved() !== requested)
+      this.feedback.announce(NOT_SAVED, 'alert');
   }
 }

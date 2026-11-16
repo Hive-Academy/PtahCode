@@ -1,6 +1,14 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  input,
+} from '@angular/core';
 import type { CliAdapterManifest } from '@ptah-extension/shared';
-import { PtahDescriptionListComponent, type PtahDescriptionItem } from '@ptah-extension/ui';
+import {
+  PtahDescriptionListComponent,
+  type PtahDescriptionItem,
+} from '@ptah-extension/ui';
 import { cliCapabilityView } from './cli-capability-view';
 
 /**
@@ -13,10 +21,24 @@ import { cliCapabilityView } from './cli-capability-view';
   imports: [PtahDescriptionListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
-  template: `<ptah-description-list [items]="items()" ariaLabel="Capabilities" data-testid="cli-capability-summary" />`,
+  template: `@if (compact()) {
+      <span data-testid="cli-capability-summary" [title]="summary()">{{
+        summary()
+      }}</span>
+    } @else {
+      <ptah-description-list
+        [items]="items()"
+        ariaLabel="Capabilities"
+        data-testid="cli-capability-summary"
+      />
+    }`,
 })
 export class CliCapabilityCellsComponent {
   readonly manifest = input<CliAdapterManifest>();
+  readonly compact = input(false);
+  protected readonly summary = computed(() =>
+    cliCapabilityView(this.manifest()).summary.join(', '),
+  );
   protected readonly items = computed<readonly PtahDescriptionItem[]>(() =>
     cliCapabilityView(this.manifest()).badges.map((badge) => ({
       key: badge.label,

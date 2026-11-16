@@ -80,10 +80,13 @@ Every tool call resends the whole thread, so cost is requests × context. Finish
  * parent activity or session-id resolution.
  */
 const CLI_DELEGATION_PATTERN = `**CLI Delegation Pattern (Spawn → completion signal → Read):**
-1. \`ptah_agent_spawn { task: "..." }\` — self-contained prompt, no shared context. Pass the \`cli\` (or \`ptahCliId\`) you took from \`ptah_agent_list\`.
-2. **Wait for \`<agent-lane-completed>\`.** It may be pending until parent activity or session-id resolution. Do useful work meanwhile; do not poll.
-3. \`ptah_agent_read { agentId: "..." }\` — read the result once the signal arrives.
-4. If the signal cannot arrive, check status/read once. If still running, make at most 5 status checks, at least 60 seconds apart. Also use status once to recover a CLI Session ID for resume.`;
+1. \`ptah_agent_spawn { task: "..." }\` — save agent ID, even when status is \`starting\`. The same request or \`idempotencyKey\` replays that lane. Use \`cli\` or \`ptahCliId\` from \`ptah_agent_list\`.
+2. **Wait for \`<agent-lane-completed>\`.** It may be pending until parent activity. Work meanwhile; do not poll.
+3. \`ptah_agent_read { agentId: "..." }\` — read after the signal.
+4. Without a signal, check status/read once.
+   If starting or running, make at most 5 status checks, at least 60 seconds
+   apart. The CLI Session ID arrives later via status.
+   Status: starting/running/completed/failed/timeout/stopped.`;
 
 /**
  * Ptah Core System Prompt

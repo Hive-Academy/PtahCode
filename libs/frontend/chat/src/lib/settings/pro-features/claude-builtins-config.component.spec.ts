@@ -154,7 +154,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
     it('renders groups 1 and 2 from the catalog, unchecked by default, with costs and the applies note', async () => {
       await render();
       expect(
-        element.querySelector('section')?.getAttribute('data-glass-surface'),
+        element.querySelector('ptah-form-section')?.getAttribute('data-glass-surface'),
       ).toBe('content');
 
       expect(call).toHaveBeenCalledWith('agent:getClaudeBuiltins', {});
@@ -173,8 +173,8 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       // Everything off: 2,890 (tools) + 1,110 (skills) = 4,000.
       expect(savings()).toBe('Currently hidden: about 4,000 tokens per new session (estimate).');
       expect(byTestId('claude-tools-savings').getAttribute('aria-live')).toBe('polite');
-      for (const table of Array.from(element.querySelectorAll('table'))) {
-        const heading = element.querySelector(`#${table.getAttribute('aria-labelledby')}`);
+      for (const group of Array.from(element.querySelectorAll('[role="group"][aria-labelledby]'))) {
+        const heading = element.querySelector(`#${group.getAttribute('aria-labelledby')}`);
         expect(heading?.tagName).toBe('H3');
       }
     });
@@ -194,7 +194,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       responses['agent:getClaudeBuiltins'] = () => new Promise((r) => { resolve = r; });
       await render();
 
-      expect(element.querySelector('section')?.getAttribute('aria-busy')).toBe('true');
+      expect(element.querySelector('ptah-form-section')?.getAttribute('aria-busy')).toBe('true');
       expect(element.querySelectorAll('[data-testid="claude-tools-skeleton-row"]')).toHaveLength(9);
       expect(queryTestId('claude-tools-synced-empty')).toBeNull();
       expect(element.querySelector('[data-testid^="settings-toggle-claude-"]')).toBeNull();
@@ -243,7 +243,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       { id: 'anthropic-skills:docx', name: 'docx', description: 'Creates and edits Word documents.', approxTokens: 120 },
       { id: 'anthropic-skills:init', name: 'init', description: 'Account copy of a skill named init.', approxTokens: 80 },
     ];
-    const syncedTable = () => element.querySelector('table[aria-labelledby="claude-tools-group-synced-skills"]');
+    const syncedTable = () => element.querySelector('[role="group"][aria-labelledby="claude-tools-group-synced-skills"]');
     const withSynced = () =>
       ok(catalog({ syncedSkills: SYNCED, enabledTools: [...stored.tools], enabledSkills: [...stored.skills] }));
 
@@ -254,13 +254,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       const docx = skillBox('anthropic-skills:docx');
       expect(docx.checked).toBe(false);
       expect(docx.getAttribute('aria-label')).toBe('docx skill');
-      expect(syncedTable()?.querySelectorAll('tbody tr')).toHaveLength(2);
-      expect(Array.from(syncedTable()?.querySelectorAll('th') ?? []).map((th) => th.textContent?.trim())).toEqual([
-        'On',
-        'Skill',
-        'Token cost',
-        'Description',
-      ]);
+      expect(syncedTable()?.children).toHaveLength(2);
       expect(syncedTable()?.textContent).toContain('Creates and edits Word documents.');
       expect(syncedTable()?.textContent).toContain('~120');
       expect(syncedTable()?.textContent).not.toContain('anthropic-skills:');

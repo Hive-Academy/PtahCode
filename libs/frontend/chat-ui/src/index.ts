@@ -231,6 +231,7 @@ export {
   type AgentKind,
   type AgentLabelParts,
   type AgentStatusWord,
+  isRunningAgentWord,
 } from './lib/atoms/agent-avatar/agent-avatar.types';
 export {
   backgroundAgentStatusWord,

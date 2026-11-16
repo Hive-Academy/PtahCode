@@ -145,13 +145,13 @@ export async function openVoiceDrawer(page: Page, direction: 'stt' | 'tts'): Pro
   return page.locator('[data-testid="native-drawer-panel"]');
 }
 
-/** Chooses a voice provider for `direction` in the matrix popover (a save on selection). */
+/** Chooses a voice provider for `direction` in the matrix select (a save on selection). */
 export async function chooseVoiceProvider(page: Page, direction: 'stt' | 'tts', providerId: string): Promise<void> {
   await searchVoiceTab(page);
-  await page.locator(`[data-testid="voice-provider-btn-${direction}"]`).click();
-  const option = page.locator(`[data-testid="voice-provider-option-${direction}-${providerId}"]`);
-  await visibleEnabled(option);
-  await option.click();
+  const select = page.locator(`[data-testid="voice-provider-btn-${direction}"]`);
+  await visibleEnabled(select);
+  await expect(page.locator(`[data-testid="voice-provider-option-${direction}-${providerId}"]`)).toBeEnabled();
+  await select.selectOption(providerId);
 }
 
 /**

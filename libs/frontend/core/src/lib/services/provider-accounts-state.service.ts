@@ -729,6 +729,7 @@ type AccountWriteMethod = Exclude<
   ProviderAccountRpcMethodName,
   | 'provider:listAccounts'
   | 'provider:getAccountStatus'
+  | 'provider:revealAccountEmail'
   | 'provider:getAmbientClaudeStatus'
 >;
 type AccountWriteResult = RpcMethodResult<AccountWriteMethod>;

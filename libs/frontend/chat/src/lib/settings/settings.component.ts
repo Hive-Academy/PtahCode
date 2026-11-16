@@ -14,26 +14,36 @@ import {
   ArrowLeft,
   Plug,
   Layers,
+  TableProperties,
   SlidersHorizontal,
   AudioLines,
-  RotateCw,
+  Wrench,
 } from 'lucide-angular';
 import {
   MotionStageDirective,
   PROVIDER_MODELS_LOADER,
   PtahButtonDirective,
   PtahIconButtonDirective,
+  PtahSettingsLayoutComponent,
+  PtahDescriptionListComponent,
+  PtahStatusComponent,
+  PtahStatePanelComponent,
+  PtahSkeletonComponent,
 } from '@ptah-extension/ui';
 // Two declarations on purpose: each component import must hold only the `@defer`-only class, or
 // Angular keeps the whole tab (Providers with its named-accounts UI and agents routing, Context Management) in the eager chunk.
 import { ProvidersSettingsComponent } from './providers/providers-settings.component';
-import type { ProvidersSettingsDrawerRequest, ProvidersSettingsFocusTarget } from './providers/providers-settings.component';
+import type {
+  ProvidersSettingsDrawerRequest,
+  ProvidersSettingsFocusTarget,
+} from './providers/providers-settings.component';
 import { ProvidersModelsLoader } from './providers/providers-models-loader.service';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
 import { SettingsToastComponent } from './feedback/settings-toast.component';
 import { AgentsRoutingSettingsComponent } from './providers/agents-routing-settings.component';
 import type { AgentsRoutingFocusTarget } from './providers/agents-routing-settings.component';
 import { OrchestrationSettingsComponent } from './ptah-ai/orchestration-settings.component';
+import { DecisionMatrixPageComponent } from './ptah-ai/decision-matrix-page.component';
 import { AdvancedSettingsComponent } from './advanced-settings.component';
 import { SearchVoiceSettingsComponent } from './search-voice-settings.component';
 import {
@@ -112,6 +122,7 @@ const isAgentsRoutingSection = (
     ProvidersSettingsComponent,
     AgentsRoutingSettingsComponent,
     OrchestrationSettingsComponent,
+    DecisionMatrixPageComponent,
     AdvancedSettingsComponent,
     SearchVoiceSettingsComponent,
     SettingsToastComponent,
@@ -119,6 +130,11 @@ const isAgentsRoutingSection = (
     MotionStageDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    PtahSettingsLayoutComponent,
+    PtahDescriptionListComponent,
+    PtahStatusComponent,
+    PtahStatePanelComponent,
+    PtahSkeletonComponent,
   ],
   // Page-scoped: the toast timer dies with the page; one models loader for every tab.
   providers: [
@@ -126,74 +142,18 @@ const isAgentsRoutingSection = (
     { provide: PROVIDER_MODELS_LOADER, useClass: ProvidersModelsLoader },
   ],
   templateUrl: './settings.component.html',
-  // Card-tab layout follows the header's own width (a VS Code sidebar can be ~300 px), not the
-  // viewport: one row of four from 46rem (the widest label fits on one line), a 2x2 grid below,
-  // icon-only tiles below 18rem (the label stays in the accessible name and title).
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  // Glass (data-glass on, any theme): the page plane clears like the other shell pages, so the blurred chrome
+  // pane and its scene show behind the settings layout. Light and dark keep the solid surface-0 plane.
   styles: `
-    .settings-header {
-      display: block;
-      container-type: inline-size;
-    }
-    /* Glass (data-glass on, any theme): the page plane clears like the other shell pages, so the blurred chrome pane
-       and its scene show between the cards; light and dark keep the solid surface-0 plane. The header and the security
-       line keep a plate (their text sits on the pane), the tabs a tile; the active tab keeps a stronger fill. */
     :host-context([data-glass='on']) .settings-page {
       background-color: transparent;
     }
-    .settings-tabs {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0;
-    }
-    .settings-tab:not(.tab-active):hover {
-      color: oklch(var(--bc));
-    }
-    /* One row from 36rem: the Electron page beside its sidebar (~42rem) keeps one row of four tabs. */
-    @container (min-width: 36rem) {
-      .settings-tabs {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-      }
-      .settings-tab-label {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-    }
-    /* Tighter tiles until 46rem: 12 px labels (the Settings floor) and a 4 px icon gap there; 14 px (text-sm) from
-       46rem. A label that still does not fit its quarter (Context Management at 1024 px with the Workspaces panel open,
-       ~39-42rem) wraps between words onto a second line instead of ending in an ellipsis. */
-    @container (min-width: 36rem) and (max-width: 45.99rem) {
-      .settings-tab {
-        padding-inline: 0.375rem;
-        gap: 0.25rem;
-        font-size: 0.75rem;
-      }
-      .settings-tab-label {
-        white-space: normal;
-        line-height: 1rem;
-      }
-    }
-    @container (max-width: 17.99rem) {
-      .settings-tabs {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-      }
-      .settings-tab {
-        padding-inline: 0;
-      }
-      .settings-tab-label {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border-width: 0;
-      }
+    /* The Setup section is a glass card like the Advanced sections above it (same inset as theirs). */
+    :host-context([data-glass='on']) [data-glass-surface='content'] {
+      padding: 1.25rem;
     }
   `,
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SettingsComponent implements OnInit {
   private readonly appState = inject(AppStateManager);
@@ -202,19 +162,65 @@ export class SettingsComponent implements OnInit {
   readonly authState = inject(AuthStateService);
   private readonly document = inject(DOCUMENT);
   readonly ArrowLeftIcon = ArrowLeft;
-  readonly RotateCwIcon = RotateCw;
+  readonly SetupIcon = Wrench;
   /** Card tabs, in order. Each label is the button's exact accessible name (live-app scripts use it). */
   readonly settingsTabs = [
     { id: 'claude-auth', label: 'Providers', icon: Plug },
     { id: 'orchestration', label: 'Context Management', icon: Layers },
+    ...(this.vscodeService.isElectron
+      ? ([
+          {
+            id: 'matrix',
+            label: 'Decision matrix',
+            icon: TableProperties,
+            parent: 'orchestration',
+          },
+        ] as const)
+      : []),
     { id: 'pro-features', label: 'Advanced', icon: SlidersHorizontal },
     { id: 'tools', label: 'Search & Voice', icon: AudioLines },
   ] as const;
   readonly activeSettingsTab = signal<
-    'providers' | 'claude-auth' | 'orchestration' | 'pro-features' | 'tools'
+    | 'providers'
+    | 'claude-auth'
+    | 'orchestration'
+    | 'matrix'
+    | 'pro-features'
+    | 'tools'
   >('claude-auth');
+  readonly selectedSettingsTab = computed(() =>
+    this.activeSettingsTab() === 'providers'
+      ? 'claude-auth'
+      : this.activeSettingsTab(),
+  );
+  readonly activeTabTitle = computed(
+    () =>
+      this.settingsTabs.find((tab) => tab.id === this.selectedSettingsTab())
+        ?.label ?? 'Providers',
+  );
+  readonly activeTabDescription = computed(
+    () =>
+      ({
+        providers:
+          'Choose which models and CLI agents do the work, and in which order lanes run.',
+        'claude-auth':
+          'Choose which models and CLI agents do the work, and in which order lanes run.',
+        orchestration:
+          'Limits that keep chats and lanes inside your budget and plan limits.',
+        matrix: 'The routing model uses these ratings to suggest a lane.',
+        'pro-features':
+          'Membership, agent behaviour, the MCP server, tools and setup.',
+        tools: 'Web search providers, voice engines and workspace checks.',
+      })[this.selectedSettingsTab()],
+  );
+  readonly contextRows = computed(() => [
+    ...(this.workspaceName()
+      ? [{ key: 'workspace', term: 'Workspace', value: this.workspaceName() }]
+      : []),
+    { key: 'app', term: 'App', value: this.appLabel },
+  ]);
   readonly settingsTabIndex = computed(() =>
-    this.settingsTabs.findIndex((tab) => tab.id === (this.activeSettingsTab() === 'providers' ? 'claude-auth' : this.activeSettingsTab())),
+    this.settingsTabs.findIndex((tab) => tab.id === this.selectedSettingsTab()),
   );
 
   readonly providersTarget = signal<ProvidersSettingsFocusTarget | null>(null);
@@ -227,11 +233,17 @@ export class SettingsComponent implements OnInit {
    * which opens the setup wizard for that provider.
    */
   readonly requestedProviderId = signal<string | undefined>(undefined);
-  readonly requestedDrawer = signal<ProvidersSettingsDrawerRequest | null>(null);
+  readonly requestedDrawer = signal<ProvidersSettingsDrawerRequest | null>(
+    null,
+  );
 
   openCodexSettings(): void {
     this.setActiveTab('providers');
-    this.requestedDrawer.set(this.isElectron ? { providerId: 'openai-codex', tab: 'credentials' } : null);
+    this.requestedDrawer.set(
+      this.isElectron
+        ? { providerId: 'openai-codex', tab: 'credentials' }
+        : null,
+    );
   }
 
   readonly isElectron = this.vscodeService.isElectron;
@@ -297,6 +309,15 @@ export class SettingsComponent implements OnInit {
       this.setActiveTab('providers');
       this.providersTarget.set(isProvidersSection(section) ? section : null);
       this.agentsRoutingTarget.set(null);
+    } else if (
+      this.isElectron &&
+      (section === 'capability-matrix' ||
+        section === 'decision-matrix' ||
+        section === 'matrix')
+    ) {
+      this.setActiveTab('matrix');
+      this.providersTarget.set(null);
+      this.agentsRoutingTarget.set(null);
     } else if (isAgentsRoutingSection(section)) {
       this.setActiveTab('providers');
       this.agentsRoutingTarget.set(section);
@@ -313,7 +334,12 @@ export class SettingsComponent implements OnInit {
    */
   setActiveTab(
     tab:
-      'providers' | 'claude-auth' | 'orchestration' | 'pro-features' | 'tools',
+      | 'providers'
+      | 'claude-auth'
+      | 'orchestration'
+      | 'matrix'
+      | 'pro-features'
+      | 'tools',
   ): void {
     const next = tab === 'providers' ? 'claude-auth' : tab;
     if (next !== 'claude-auth') this.requestedDrawer.set(null);

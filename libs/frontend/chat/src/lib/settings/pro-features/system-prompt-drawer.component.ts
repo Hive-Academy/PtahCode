@@ -21,10 +21,20 @@ import {
   RotateCw,
   Sparkles,
 } from 'lucide-angular';
-import { ClaudeRpcService, WorkspaceScopeService, WALL_CLOCK_COARSE_MS, injectWallClock } from '@ptah-extension/core';
+import {
+  ClaudeRpcService,
+  WorkspaceScopeService,
+  WALL_CLOCK_COARSE_MS,
+  injectWallClock,
+} from '@ptah-extension/core';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import type { EnhancedPromptsGetStatusResponse } from '@ptah-extension/shared';
-import { NativeDrawerComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  NativeDrawerComponent,
+  PtahButtonDirective,
+  PtahInlineConfirmComponent,
+  PtahAlertComponent,
+} from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
 const PROMPT_STATUS_LOAD_FAILED = 'Could not load the system prompt status.';
@@ -56,7 +66,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
  * - A15: Regenerate prompt (S-confirm: inline confirm first; inline progress up to 120 s; failure in the page toast)
  * - A16: Download prompt as markdown file (D15: {success:false} or failed RPC shows an alert toast, never silent)
  * - A17: View/Hide prompt preview rendered through {@link MarkdownBlockComponent} (safe DOMPurify chokepoint)
- * - A18: Empty-state guidance when no prompt has been generated yet — only after a successful status read
+ * - A18: Empty-state guidance when no prompt has been generated yet â€” only after a successful status read
  *
  * The host reports a running regeneration in status. The drawer refreshes that status while open.
  *
@@ -72,6 +82,8 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
     NativeDrawerComponent,
     MarkdownBlockComponent,
     PtahButtonDirective,
+    PtahInlineConfirmComponent,
+    PtahAlertComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -82,32 +94,54 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
       (closed)="closed.emit()"
     >
       @if (isOpen()) {
-        <div drawer-header class="flex items-center gap-2" data-testid="system-prompt-drawer">
-          <lucide-angular [img]="SparklesIcon" class="w-4 h-4 text-secondary" aria-hidden="true" />
+        <div
+          drawer-header
+          class="flex items-center gap-[var(--ptah-gap-controls)]"
+          data-testid="system-prompt-drawer"
+        >
+          <lucide-angular
+            [img]="SparklesIcon"
+            class="w-4 h-4 text-secondary"
+            aria-hidden="true"
+          />
           <div>
-            <h2 class="text-sm font-semibold text-base-content" data-testid="system-prompt-drawer-title">
+            <h2
+              class="text-sm font-semibold text-base-content"
+              data-testid="system-prompt-drawer-title"
+            >
               System prompt
             </h2>
-            <p class="text-xs text-base-content-muted" data-testid="system-prompt-drawer-subtitle">
+            <p
+              class="text-xs text-base-content-muted"
+              data-testid="system-prompt-drawer-subtitle"
+            >
               {{ subtitle() }}
             </p>
           </div>
         </div>
       }
 
-      <div class="space-y-4 p-4 text-xs text-base-content">
+      <div
+        class="flex flex-col gap-[var(--ptah-gap-field)] text-xs text-base-content"
+      >
         @if (error(); as err) {
           <div
             role="alert"
-            class="flex items-center gap-1.5 rounded border border-error/40 p-2 text-xs text-base-content"
+            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-error/40 text-xs text-base-content"
             data-testid="system-prompt-drawer-error"
           >
-            <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
+            <lucide-angular
+              [img]="AlertCircleIcon"
+              class="w-3.5 h-3.5 text-error shrink-0"
+              aria-hidden="true"
+            />
             <span class="flex-1">{{ err }}</span>
             @if (statusLoadFailed() && !isLoading()) {
               <button
                 type="button"
-                ptahButton variant="ghost" size="xs"
+                ptahButton
+                variant="ghost"
+                size="xs"
                 (click)="loadStatus()"
                 data-testid="system-prompt-status-retry"
               >
@@ -120,17 +154,26 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
         @if (regenerationStartedAt() !== null) {
           <div
             role="status"
-            class="flex items-center gap-1.5 rounded border border-base-300 p-2 text-xs text-base-content"
+            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-base-300 text-xs text-base-content"
             data-testid="regenerate-may-be-running"
           >
-            <lucide-angular [img]="ClockIcon" class="w-3.5 h-3.5 text-warning shrink-0" aria-hidden="true" />
+            <lucide-angular
+              [img]="ClockIcon"
+              class="w-3.5 h-3.5 text-warning shrink-0"
+              aria-hidden="true"
+            />
             <span class="flex-1">
-              Regeneration may still be running ({{ regenerationElapsedSeconds() === null ? '—' : regenerationElapsedSeconds() + ' s elapsed' }}).
-              Regenerate stays off until the host finishes.
+              Regeneration may still be running ({{
+                regenerationElapsedSeconds() === null
+                  ? 'â€”'
+                  : regenerationElapsedSeconds() + ' s elapsed'
+              }}). Regenerate stays off until the host finishes.
             </span>
             <button
               type="button"
-              ptahButton variant="ghost" size="xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               [disabled]="isLoading()"
               (click)="checkRegenerate()"
               data-testid="regenerate-check-again"
@@ -141,98 +184,117 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
         }
 
         @if (isLoading()) {
-          <p class="text-xs text-base-content-muted" role="status" data-testid="system-prompt-drawer-loading">
-            Loading system prompt status…
+          <p
+            class="text-xs text-base-content-muted"
+            role="status"
+            data-testid="system-prompt-drawer-loading"
+          >
+            Loading system prompt statusâ€¦
           </p>
         } @else if (hasGeneratedPrompt()) {
           <!-- Metadata (A14) -->
-          <div class="space-y-2 rounded border border-base-300 p-3 bg-base-200/40">
+          <div class="rounded border border-base-300 bg-base-200/40">
             @if (generatedAt(); as ts) {
-              <div class="flex items-center gap-1.5 text-xs text-base-content-muted" data-testid="system-prompt-generated-at">
-                <lucide-angular [img]="ClockIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+              <div
+                class="flex items-center gap-[var(--ptah-gap-label)] text-xs text-base-content-muted"
+                data-testid="system-prompt-generated-at"
+              >
+                <lucide-angular
+                  [img]="ClockIcon"
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
                 <span>Generated: {{ ts }}</span>
               </div>
             }
             @if (detectedStackSummary(); as stack) {
-              <div class="text-xs text-base-content-muted truncate" [title]="stack" data-testid="system-prompt-detected-stack">
-                <span class="font-semibold text-base-content">Stack:</span> {{ stack }}
+              <div
+                class="text-xs text-base-content-muted truncate"
+                [title]="stack"
+                data-testid="system-prompt-detected-stack"
+              >
+                <span class="font-semibold text-base-content">Stack:</span>
+                {{ stack }}
               </div>
             }
           </div>
 
-          <!-- Inline confirm for Regenerate (A15, S-confirm, P8) -->
           @if (confirmingRegenerate()) {
-            <div
-              role="group"
-              aria-label="Confirm regenerate system prompt"
-              class="rounded border border-base-300 p-3 bg-base-200/60 space-y-2"
+            <ptah-inline-confirm
+              ariaLabel="Confirm regenerate system prompt"
+              message="Regenerate system prompt?"
+              detail="Regenerate replaces your current project system prompt with fresh guidance tailored to your project. This may take up to 2 minutes."
+              confirmLabel="Regenerate prompt"
+              tone="danger"
+              [busy]="isRegenerating()"
+              confirmTestId="regenerate-confirm-button"
+              cancelTestId="regenerate-cancel-button"
               data-testid="regenerate-confirm"
-              (keydown.escape)="cancelRegenerate($event)"
-            >
-              <p class="text-xs text-base-content">
-                Regenerate replaces your current project system prompt with fresh guidance tailored to your project. This may take up to 2 minutes.
-              </p>
-              <div class="flex flex-wrap gap-2">
-                <!-- Keep raw: the error-colored outline border and neutral text differ from the owner's outline recipe. -->
-                <button
-                  type="button"
-                  class="btn btn-outline btn-xs border-error text-base-content"
-                  [disabled]="isRegenerating()"
-                  (click)="confirmRegenerate()"
-                  data-testid="regenerate-confirm-button"
-                >
-                  @if (isRegenerating()) {
-                    <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-                  }
-                  <span>Regenerate prompt</span>
-                </button>
-                <button
-                  #regenerateCancel
-                  type="button"
-                  ptahButton variant="ghost" size="xs"
-                  [disabled]="isRegenerating()"
-                  (click)="cancelRegenerate()"
-                  data-testid="regenerate-cancel-button"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+              (confirm)="confirmRegenerate()"
+              (cancelled)="cancelRegenerate()"
+            />
           }
 
           <!-- Generation Progress (Gap G5) -->
           @if (isRegenerating()) {
-            <div class="space-y-1" role="status" data-testid="regenerate-progress">
-              <div class="flex items-center justify-between text-xs text-base-content-muted">
-                <span>Generating fresh guidance…</span>
+            <div
+              class="flex flex-col gap-[var(--ptah-gap-label)]"
+              role="status"
+              data-testid="regenerate-progress"
+            >
+              <div
+                class="flex items-center justify-between text-xs text-base-content-muted"
+              >
+                <span>Generating fresh guidanceâ€¦</span>
                 <span>Up to 120 s</span>
               </div>
-              <progress class="progress progress-primary w-full" aria-label="Prompt generation progress"></progress>
+              <progress
+                class="progress progress-primary w-full"
+                aria-label="Prompt generation progress"
+              ></progress>
             </div>
           }
 
           <!-- View / Preview generated prompt (A17) -->
-          <div class="space-y-2">
+          <div class="flex flex-col gap-[var(--ptah-gap-label)]">
             <button
               type="button"
-              ptahButton variant="ghost" size="xs" density="compact" align="start" class="gap-1.5 w-full text-base-content"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              density="compact"
+              align="start"
+              class="gap-[var(--ptah-gap-label)] w-full text-base-content"
               (click)="togglePromptPreview()"
               aria-label="Toggle Prompt Preview"
               data-testid="system-prompt-preview-toggle"
             >
-              <lucide-angular [img]="SparklesIcon" class="w-3.5 h-3.5 text-secondary" aria-hidden="true" />
-              <span>{{ promptPreviewExpanded() ? 'Hide' : 'View' }} Generated Prompt</span>
+              <lucide-angular
+                [img]="SparklesIcon"
+                class="w-3.5 h-3.5 text-secondary"
+                aria-hidden="true"
+              />
+              <span
+                >{{ promptPreviewExpanded() ? 'Hide' : 'View' }} Generated
+                Prompt</span
+              >
             </button>
 
             @if (promptPreviewExpanded()) {
               @if (isLoadingContent()) {
-                <div class="flex items-center gap-1.5 text-xs text-base-content-muted p-2" role="status">
-                  <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-                  <span>Loading prompt content…</span>
+                <div
+                  class="flex items-center gap-[var(--ptah-gap-label)] text-xs text-base-content-muted"
+                  role="status"
+                >
+                  <span
+                    class="loading loading-spinner loading-xs"
+                    aria-hidden="true"
+                  ></span>
+                  <span>Loading prompt contentâ€¦</span>
                 </div>
               } @else if (promptPreviewContent(); as content) {
                 <div
-                  class="max-h-96 overflow-y-auto border border-base-300 rounded p-3 bg-base-200/50"
+                  class="max-h-96 overflow-y-auto border border-base-300 rounded bg-base-200/50"
                   data-testid="system-prompt-markdown-preview"
                 >
                   <ptah-markdown-block [content]="content" />
@@ -242,39 +304,61 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
           </div>
         } @else if (status() !== null && !statusLoadFailed()) {
           <!-- Empty state guidance (A18): only a successful read can say there is no prompt -->
-          <div class="py-8 text-center space-y-2" data-testid="system-prompt-empty-state">
-            <lucide-angular [img]="SparklesIcon" class="w-8 h-8 text-secondary/40 mx-auto" aria-hidden="true" />
-            <p class="text-xs text-base-content-muted max-w-xs mx-auto">
-              Run Setup to analyze your project, review skills, and prepare project guidance.
+          <div class="text-center" data-testid="system-prompt-empty-state">
+            <lucide-angular
+              [img]="SparklesIcon"
+              class="w-8 h-8 text-secondary/40 self-center"
+              aria-hidden="true"
+            />
+            <p class="text-xs text-base-content-muted max-w-xs self-center">
+              Run Setup to analyze your project, review skills, and prepare
+              project guidance.
             </p>
           </div>
         }
       </div>
 
       @if (isOpen()) {
-        <div drawer-footer class="flex items-center justify-between gap-2 border-t border-base-300 px-4 py-3">
-          <div class="flex items-center gap-2">
+        <div
+          drawer-footer
+          class="flex items-center justify-between gap-[var(--ptah-gap-controls)] border-t border-base-300"
+        >
+          <div class="flex items-center gap-[var(--ptah-gap-controls)]">
             <button
               #regenerateButton
               type="button"
-              ptahButton size="xs"
-              [busy]="isRegenerating() || isDownloading() || regenerationStartedAt() !== null"
+              ptahButton
+              size="xs"
+              [busy]="
+                isRegenerating() ||
+                isDownloading() ||
+                regenerationStartedAt() !== null
+              "
               [disabled]="!hasGeneratedPrompt()"
               (click)="requestRegenerate()"
               aria-label="Regenerate Enhanced Prompt"
               data-testid="system-prompt-regenerate-button"
             >
               @if (isRegenerating()) {
-                <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-                <span>Generating…</span>
+                <span
+                  class="loading loading-spinner loading-xs"
+                  aria-hidden="true"
+                ></span>
+                <span>Generatingâ€¦</span>
               } @else {
-                <lucide-angular [img]="RotateCwIcon" class="w-3 h-3" aria-hidden="true" />
+                <lucide-angular
+                  [img]="RotateCwIcon"
+                  class="w-3 h-3"
+                  aria-hidden="true"
+                />
                 <span>Regenerate</span>
               }
             </button>
             <button
               type="button"
-              ptahButton variant="ghost" size="xs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               [busy]="isRegenerating() || isDownloading()"
               [disabled]="!hasGeneratedPrompt()"
               (click)="downloadEnhancedPrompt()"
@@ -282,10 +366,17 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
               data-testid="system-prompt-download-button"
             >
               @if (isDownloading()) {
-                <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-                <span>Downloading…</span>
+                <span
+                  class="loading loading-spinner loading-xs"
+                  aria-hidden="true"
+                ></span>
+                <span>Downloadingâ€¦</span>
               } @else {
-                <lucide-angular [img]="DownloadIcon" class="w-3 h-3" aria-hidden="true" />
+                <lucide-angular
+                  [img]="DownloadIcon"
+                  class="w-3 h-3"
+                  aria-hidden="true"
+                />
                 <span>Download</span>
               }
             </button>
@@ -293,7 +384,8 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
 
           <button
             type="button"
-            ptahButton variant="ghost"
+            ptahButton
+            variant="ghost"
             (click)="closed.emit()"
             data-testid="system-prompt-drawer-close"
           >
@@ -314,8 +406,8 @@ export class SystemPromptDrawerComponent {
   private readonly injector = inject(Injector);
   /** Regenerate and download outcomes show as the Settings page toast; load failures stay inline with Retry. */
   private readonly feedback = inject(SettingsSaveFeedbackService);
-  private readonly regenerateCancel = viewChild<ElementRef<HTMLButtonElement>>('regenerateCancel');
-  private readonly regenerateButton = viewChild<ElementRef<HTMLButtonElement>>('regenerateButton');
+  private readonly regenerateButton =
+    viewChild<ElementRef<HTMLButtonElement>>('regenerateButton');
 
   readonly SparklesIcon = Sparkles;
   readonly ClockIcon = Clock;
@@ -337,12 +429,22 @@ export class SystemPromptDrawerComponent {
   readonly confirmingRegenerate = signal(false);
   readonly isDownloading = signal(false);
 
-  readonly regenerationStartedAt = computed(() => parseIso(this.status()?.regenerationStartedAt));
-  private readonly now = injectWallClock('second', () => this.isOpen() && this.regenerationStartedAt() !== null);
-  private readonly coarseNow = injectWallClock('coarse', () => this.isOpen() && this.regenerationStartedAt() !== null);
+  readonly regenerationStartedAt = computed(() =>
+    parseIso(this.status()?.regenerationStartedAt),
+  );
+  private readonly now = injectWallClock(
+    'second',
+    () => this.isOpen() && this.regenerationStartedAt() !== null,
+  );
+  private readonly coarseNow = injectWallClock(
+    'coarse',
+    () => this.isOpen() && this.regenerationStartedAt() !== null,
+  );
   readonly regenerationElapsedSeconds = computed(() => {
     const startedAt = this.regenerationStartedAt();
-    return startedAt === null ? null : Math.max(0, Math.floor((this.now() - startedAt) / 1000));
+    return startedAt === null
+      ? null
+      : Math.max(0, Math.floor((this.now() - startedAt) / 1000));
   });
   private lastReconciliationTick: number | null = null;
 
@@ -372,8 +474,9 @@ export class SystemPromptDrawerComponent {
   });
 
   readonly subtitle = computed(() => {
-    if (this.isLoading()) return 'Loading system prompt…';
-    if (this.statusLoadFailed() && this.status() === null) return 'Status not loaded';
+    if (this.isLoading()) return 'Loading system promptâ€¦';
+    if (this.statusLoadFailed() && this.status() === null)
+      return 'Status not loaded';
     if (!this.hasGeneratedPrompt()) return 'No prompt generated yet';
     return 'Project-tailored system prompt for AI sessions';
   });
@@ -390,14 +493,16 @@ export class SystemPromptDrawerComponent {
       }
     });
     // P8: the opened regenerate confirm takes focus on Cancel, so Esc reaches it.
-    effect(() => this.regenerateCancel()?.nativeElement.focus());
     effect(() => {
       if (!this.isOpen() || this.regenerationStartedAt() === null) {
         this.lastReconciliationTick = null;
         return;
       }
       const tick = this.coarseNow();
-      if (this.lastReconciliationTick !== null && tick - this.lastReconciliationTick >= WALL_CLOCK_COARSE_MS) {
+      if (
+        this.lastReconciliationTick !== null &&
+        tick - this.lastReconciliationTick >= WALL_CLOCK_COARSE_MS
+      ) {
         untracked(() => void this.checkRegenerate(true));
         this.lastReconciliationTick = tick;
       } else if (this.lastReconciliationTick === null) {
@@ -438,7 +543,9 @@ export class SystemPromptDrawerComponent {
   cancelRegenerate(event?: Event): void {
     event?.stopPropagation();
     this.confirmingRegenerate.set(false);
-    afterNextRender(() => this.regenerateButton()?.nativeElement.focus(), { injector: this.injector });
+    afterNextRender(() => this.regenerateButton()?.nativeElement.focus(), {
+      injector: this.injector,
+    });
   }
 
   /** Re-read host status after the RPC settles, including failures and timeouts. */
@@ -519,7 +626,9 @@ export class SystemPromptDrawerComponent {
       try {
         const result = await this.rpcService.call(
           'enhancedPrompts:getPromptContent',
-          { workspacePath: this.workspacePath() },
+          {
+            workspacePath: this.workspacePath(),
+          },
         );
         if (result.isSuccess() && result.data.content) {
           this.promptPreviewContent.set(result.data.content);
@@ -535,4 +644,3 @@ export class SystemPromptDrawerComponent {
     this.promptPreviewExpanded.set(true);
   }
 }
-

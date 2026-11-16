@@ -14,8 +14,21 @@ import {
   LucideAngularModule,
   Sparkles,
 } from 'lucide-angular';
-import { ClaudeRpcService, EffortStateService, WorkspaceScopeService } from '@ptah-extension/core';
-import { NativePopoverComponent, PtahButtonDirective, PtahCheckboxDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import {
+  ClaudeRpcService,
+  EffortStateService,
+  WorkspaceScopeService,
+} from '@ptah-extension/core';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+  PtahToggleDirective,
+  PtahIconButtonDirective,
+  PtahFormSectionComponent,
+  PtahSettingRowComponent,
+  PtahStatusComponent,
+  PtahAlertComponent,
+} from '@ptah-extension/ui';
 import type {
   EffortLevel,
   EnhancedPromptsGetStatusResponse,
@@ -54,7 +67,8 @@ const ULTRACODE_OFF_FAILED =
   'Could not turn off Ultracode: your previous reasoning effort was not restored.';
 
 /** M1: every row description is one clamped line; the full text is its `title` and stays in the DOM for readers. */
-const PROMPT_NOTE_ON = "Ptah's project-specific prompt, used for all sessions when on.";
+const PROMPT_NOTE_ON =
+  "Ptah's project-specific prompt, used for all sessions when on.";
 const PROMPT_NOTE_WIZARD =
   'Run Setup to analyze your project, review skills, and prepare project guidance.';
 const PROMPT_NOTE_UNKNOWN = 'The system prompt status is not loaded yet.';
@@ -69,7 +83,6 @@ interface LoadError {
   readonly retry: () => Promise<unknown>;
 }
 
-
 /**
  * "Agent behaviour" card on the Advanced tab (pattern map rows A10, A11, A26, A27, A29).
  *
@@ -81,180 +94,231 @@ interface LoadError {
  * previous value.
  *
  * `EffortStateService.setEffort` resolves whether its write landed (it rolls its signal back on
- * failure); the effort write is decided from that result (map §9 item 11, Batch 55b m-3).
+ * failure); the effort write is decided from that result (map Â§9 item 11, Batch 55b m-3).
  * Ultracode decides the same way inside `UltracodeStateService`.
  */
 @Component({
   selector: 'ptah-agent-behaviour-section',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, NativePopoverComponent, SystemPromptDrawerComponent, PtahButtonDirective, PtahCheckboxDirective, PtahIconButtonDirective],
+  imports: [
+    SettingsBusyDisabledDirective,
+    LucideAngularModule,
+    NativePopoverComponent,
+    SystemPromptDrawerComponent,
+    PtahButtonDirective,
+    PtahToggleDirective,
+    PtahIconButtonDirective,
+    PtahFormSectionComponent,
+    PtahSettingRowComponent,
+    PtahStatusComponent,
+    PtahAlertComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     <section
       data-glass-surface="content"
-      class="border-b border-base-content/10 pb-7"
       aria-labelledby="agent-behaviour-heading"
       data-testid="agent-behaviour-card"
     >
-      <div class="flex items-center gap-1.5 mb-2">
-        <lucide-angular [img]="BotIcon" class="w-4 h-4 text-secondary" aria-hidden="true" />
-        <h2 id="agent-behaviour-heading" class="text-xs font-bold uppercase tracking-wider text-base-content">
-          Agent behaviour
-        </h2>
-      </div>
-
-      @for (failure of loadErrors(); track failure.message) {
-        <div role="alert" class="mb-2 flex items-center gap-1.5 rounded border border-error/40 p-2 text-xs text-base-content"
-          data-testid="agent-behaviour-load-error">
-          <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
-          <span class="flex-1">{{ failure.message }}</span>
-          <button type="button" ptahButton variant="ghost" size="xs" (click)="failure.retry()"
-            data-testid="agent-behaviour-load-retry">
-            Retry
+      <h2 id="agent-behaviour-heading" class="sr-only">Agent behaviour</h2>
+      <ptah-form-section heading="Agent behaviour" [level]="2" [divider]="true">
+        @for (failure of loadErrors(); track failure.message) {
+          <ptah-alert
+            tone="error"
+            role="alert"
+            live="assertive"
+            data-testid="agent-behaviour-load-error"
+            >{{ failure.message }}
+            <button
+              alertAction
+              type="button"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              (click)="failure.retry()"
+              data-testid="agent-behaviour-load-retry"
+            >
+              Retry
+            </button></ptah-alert
+          >
+        }
+        <ptah-setting-row
+          label="System prompt mode"
+          controlId="agent-behaviour-prompt-toggle"
+          data-testid="agent-behaviour-row-prompt"
+        >
+          <span
+            status
+            class="truncate text-xs max-w-0 text-base-content-muted"
+            id="agent-behaviour-prompt-note"
+            [title]="promptNote()"
+            >{{ promptNote() }}</span
+          >
+          <span meta data-testid="agent-behaviour-prompt-status"
+            ><ptah-status
+              [status]="promptEnabled() ? 'online' : 'offline'"
+              [label]="promptEnabled() ? 'Ptah Enhanced' : 'Default'"
+            />{{
+              promptEnabled()
+                ? 'Active for all sessions'
+                : 'Standard system prompt'
+            }}</span
+          >
+          <input
+            id="agent-behaviour-prompt-toggle"
+            type="checkbox"
+            ptahToggle
+            [checked]="promptEnabled()"
+            [ptahBusyDisabled]="promptToggleDisabled() || saving()"
+            (change)="onPromptModeChange($event)"
+            aria-label="Toggle Enhanced System Prompt"
+            aria-describedby="agent-behaviour-prompt-note"
+          />
+          <button
+            type="button"
+            ptahIconButton
+            label="System prompt details"
+            size="xs"
+            (click)="drawerOpen.set(true)"
+            data-testid="agent-behaviour-prompt-details"
+          >
+            <lucide-angular
+              [img]="ChevronRightIcon"
+              class="w-3.5 h-3.5 text-secondary"
+              aria-hidden="true"
+            />
           </button>
-        </div>
-      }
-
-      <div class="overflow-x-auto">
-        <table class="table table-xs w-full">
-          <thead>
-            <tr>
-              <th class="w-10" scope="col">On</th>
-              <th scope="col">Setting</th>
-              <th scope="col">Value / status</th>
-              <th class="text-right" scope="col">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- A10/A11: System prompt mode -->
-            <tr data-testid="agent-behaviour-row-prompt">
-              <td class="align-top">
-                <input type="checkbox" ptahCheckbox size="xs"
-                  [checked]="promptEnabled()" [ptahBusyDisabled]="promptToggleDisabled() || saving()"
-                  (change)="onPromptModeChange($event)"
-                  aria-label="Toggle Enhanced System Prompt" aria-describedby="agent-behaviour-prompt-note" />
-              </td>
-              <td class="align-top max-w-0 w-full">
-                <div class="font-bold text-base-content">System prompt mode</div>
-                <p id="agent-behaviour-prompt-note" class="text-xs text-base-content-muted truncate" [title]="promptNote()">
-                  {{ promptNote() }}
-                </p>
-              </td>
-              <td class="align-top" data-testid="agent-behaviour-prompt-status">
-                <div>
-                  <span class="badge badge-outline badge-sm gap-1 whitespace-nowrap text-base-content">
-                    @if (promptEnabled()) {
-                      <lucide-angular [img]="SparklesIcon" class="w-3 h-3 text-secondary" aria-hidden="true" />
-                      Ptah Enhanced
-                    } @else {
-                      Default
-                    }
-                  </span>
-                </div>
-                <div class="text-xs text-base-content-muted whitespace-nowrap">
-                  {{ promptEnabled() ? 'Active for all sessions' : 'Standard system prompt' }}
-                </div>
-              </td>
-              <td class="align-top text-right">
-                <button type="button" ptahIconButton label="System prompt details" size="xs" (click)="drawerOpen.set(true)"
-                  data-testid="agent-behaviour-prompt-details">
-                  <lucide-angular [img]="ChevronRightIcon" class="w-3.5 h-3.5 text-base-content" aria-hidden="true" />
-                </button>
-              </td>
-            </tr>
-
-            <!-- A26 / G9: Chat reasoning effort (P5 popover, save on selection) -->
-            <tr data-testid="agent-behaviour-row-effort">
-              <td class="align-top"></td>
-              <td class="align-top max-w-0 w-full">
-                <div class="font-bold text-base-content">Chat reasoning effort</div>
-                <p id="agent-behaviour-effort-note" class="text-xs text-base-content-muted truncate" [title]="effortNote()">
-                  {{ effortNote() }}
-                </p>
-              </td>
-              <td class="align-top">
-                <ptah-native-popover [isOpen]="effortPopoverOpen()" placement="bottom-start"
-                  backdropClass="transparent" (closed)="effortPopoverOpen.set(false)">
-                  <button type="button" trigger ptahButton variant="ghost" size="xs"
-                    [disabled]="saving() || ultracode.enabled()" (click)="effortPopoverOpen.set(true)"
-                    [attr.aria-label]="'Chat reasoning effort: ' + effortLabel() + '. Change effort'"
-                    aria-describedby="agent-behaviour-effort-note"
-                    aria-haspopup="dialog" [attr.aria-expanded]="effortPopoverOpen()"
-                    data-testid="agent-behaviour-effort-value">
-                    <span class="font-mono">{{ effortLabel() }}</span>
-                    <lucide-angular [img]="ChevronDownIcon" class="w-3 h-3 text-base-content-muted" aria-hidden="true" />
+        </ptah-setting-row>
+        <ptah-setting-row
+          label="Chat reasoning effort"
+          data-testid="agent-behaviour-row-effort"
+        >
+          <span
+            status
+            class="truncate text-xs max-w-0 text-base-content-muted"
+            id="agent-behaviour-effort-note"
+            [title]="effortNote()"
+            >{{ effortNote() }}</span
+          >
+          <ptah-native-popover
+            [isOpen]="effortPopoverOpen()"
+            placement="bottom-start"
+            backdropClass="transparent"
+            (closed)="effortPopoverOpen.set(false)"
+          >
+            <button
+              type="button"
+              trigger
+              ptahButton
+              variant="ghost"
+              size="xs"
+              [disabled]="saving() || ultracode.enabled()"
+              (click)="effortPopoverOpen.set(true)"
+              [attr.aria-label]="
+                'Chat reasoning effort: ' + effortLabel() + '. Change effort'
+              "
+              aria-describedby="agent-behaviour-effort-note"
+              aria-haspopup="dialog"
+              [attr.aria-expanded]="effortPopoverOpen()"
+              data-testid="agent-behaviour-effort-value"
+            >
+              {{ effortLabel()
+              }}<lucide-angular
+                [img]="ChevronDownIcon"
+                class="w-3 h-3"
+                aria-hidden="true"
+              />
+            </button>
+            <div
+              content
+              class="w-56"
+              role="dialog"
+              aria-label="Chat reasoning effort"
+            >
+              <p>Reasoning effort</p>
+              <div class="grid grid-cols-3 gap-[var(--ptah-gap-label)]">
+                @for (choice of effortChoices; track choice.value) {
+                  <button
+                    type="button"
+                    ptahButton
+                    size="xs"
+                    [variant]="
+                      currentEffort() === choice.value ? 'primary' : 'secondary'
+                    "
+                    [attr.aria-pressed]="currentEffort() === choice.value"
+                    [ptahBusyDisabled]="saving()"
+                    (click)="selectEffort(choice.value)"
+                    [attr.data-testid]="
+                      'agent-behaviour-effort-choice-' +
+                      (choice.value || 'default')
+                    "
+                  >
+                    {{ choice.label }}
                   </button>
-                  <div content class="w-56 p-3 space-y-1.5" role="dialog" aria-label="Chat reasoning effort">
-                    <p class="text-xs font-semibold text-base-content-muted">Reasoning effort</p>
-                    <div class="grid grid-cols-3 gap-1">
-                      @for (choice of effortChoices; track choice.value) {
-                        <button type="button" class="btn btn-xs text-[10px] popover-effort-btn"
-                          [class.btn-primary]="currentEffort() === choice.value"
-                          [class.btn-outline]="currentEffort() !== choice.value"
-                          [attr.aria-pressed]="currentEffort() === choice.value"
-                          [ptahBusyDisabled]="saving()" (click)="selectEffort(choice.value)"
-                          [attr.data-testid]="'agent-behaviour-effort-choice-' + (choice.value || 'default')">
-                          {{ choice.label }}
-                        </button>
-                      }
-                    </div>
-                  </div>
-                </ptah-native-popover>
-              </td>
-              <td class="align-top"></td>
-            </tr>
-
-            <!-- A27: Dynamic workflows (PR-2: the "paid plan" sentence is removed) -->
-            <tr data-testid="agent-behaviour-row-workflows">
-              <td class="align-top">
-                <input type="checkbox" ptahCheckbox size="xs"
-                  [checked]="workflowsEnabled()" [ptahBusyDisabled]="!workflowsLoaded() || saving()"
-                  (change)="onWorkflowsChange($event)" aria-label="Toggle dynamic workflows"
-                  aria-describedby="agent-behaviour-workflows-note" />
-              </td>
-              <td class="align-top max-w-0 w-full">
-                <div class="font-bold text-base-content">Dynamic workflows</div>
-                <p id="agent-behaviour-workflows-note" class="text-xs text-base-content-muted truncate" [title]="workflowsNote">
-                  {{ workflowsNote }}
-                </p>
-              </td>
-              <td class="align-top text-xs text-base-content whitespace-nowrap" data-testid="agent-behaviour-workflows-status">
-                @if (workflowsLoaded()) {
-                  {{ workflowsEnabled() ? 'On' : 'Off' }}
-                } @else {
-                  <span class="text-base-content-muted" aria-hidden="true">—</span>
-                  <span class="sr-only">Not loaded</span>
                 }
-              </td>
-              <td class="align-top"></td>
-            </tr>
-
-            <!-- A29: Ultracode (restores the previous effort when turned off) -->
-            <tr data-testid="agent-behaviour-row-ultracode">
-              <td class="align-top">
-                <input type="checkbox" ptahCheckbox size="xs"
-                  [checked]="ultracode.enabled()" [ptahBusyDisabled]="saving()"
-                  (change)="onUltracodeChange($event)" aria-label="Toggle Ultracode mode"
-                  aria-describedby="agent-behaviour-ultracode-note" />
-              </td>
-              <td class="align-top max-w-0 w-full">
-                <div class="font-bold text-base-content">Ultracode</div>
-                <p id="agent-behaviour-ultracode-note" class="text-xs text-base-content-muted truncate" [title]="ultracodeNote">
-                  {{ ultracodeNote }}
-                </p>
-              </td>
-              <td class="align-top text-xs text-base-content whitespace-nowrap" data-testid="agent-behaviour-ultracode-status">
-                {{ ultracode.enabled() ? 'On' : 'Off' }}
-                <span class="ml-1 text-xs text-base-content-muted">Pins X-High while on</span>
-              </td>
-              <td class="align-top"></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </div>
+            </div></ptah-native-popover
+          >
+        </ptah-setting-row>
+        <ptah-setting-row
+          label="Dynamic workflows"
+          controlId="agent-behaviour-workflows-toggle"
+          data-testid="agent-behaviour-row-workflows"
+        >
+          <span
+            status
+            class="truncate text-xs max-w-0 text-base-content-muted"
+            id="agent-behaviour-workflows-note"
+            [title]="workflowsNote"
+            >{{ workflowsNote }}</span
+          >
+          <span meta data-testid="agent-behaviour-workflows-status">{{
+            workflowsLoaded()
+              ? workflowsEnabled()
+                ? 'On'
+                : 'Off'
+              : 'Not loaded'
+          }}</span>
+          <input
+            id="agent-behaviour-workflows-toggle"
+            type="checkbox"
+            ptahToggle
+            [checked]="workflowsEnabled()"
+            [ptahBusyDisabled]="!workflowsLoaded() || saving()"
+            (change)="onWorkflowsChange($event)"
+            aria-label="Toggle dynamic workflows"
+            aria-describedby="agent-behaviour-workflows-note"
+          />
+        </ptah-setting-row>
+        <ptah-setting-row
+          label="Ultracode"
+          controlId="agent-behaviour-ultracode-toggle"
+          data-testid="agent-behaviour-row-ultracode"
+        >
+          <span
+            status
+            class="truncate text-xs max-w-0 text-base-content-muted"
+            id="agent-behaviour-ultracode-note"
+            [title]="ultracodeNote"
+            >{{ ultracodeNote }}</span
+          >
+          <span meta data-testid="agent-behaviour-ultracode-status"
+            >{{ ultracode.enabled() ? 'On' : 'Off' }} Pins X-High while on</span
+          >
+          <input
+            id="agent-behaviour-ultracode-toggle"
+            type="checkbox"
+            ptahToggle
+            [checked]="ultracode.enabled()"
+            [ptahBusyDisabled]="saving()"
+            (change)="onUltracodeChange($event)"
+            aria-label="Toggle Ultracode mode"
+            aria-describedby="agent-behaviour-ultracode-note"
+          />
+        </ptah-setting-row>
+      </ptah-form-section>
     </section>
-
     @defer (when drawerOpen()) {
       <ptah-system-prompt-drawer
         [isOpen]="drawerOpen()"
@@ -290,19 +354,26 @@ export class AgentBehaviourSectionComponent implements OnInit {
   /** Save triggers are disabled while any settings write is in flight (D3). */
   readonly saving = this.feedback.saving;
 
-  private readonly promptStatus = signal<EnhancedPromptsGetStatusResponse | null>(null);
+  private readonly promptStatus =
+    signal<EnhancedPromptsGetStatusResponse | null>(null);
   private readonly promptLoadError = signal<string | null>(null);
-  readonly promptEnabled = computed(() => this.promptStatus()?.enabled ?? false);
+  readonly promptEnabled = computed(
+    () => this.promptStatus()?.enabled ?? false,
+  );
   /** The mode can only be turned on once a prompt has been generated (A10). */
   readonly promptToggleDisabled = computed(
-    () => !(this.promptStatus()?.hasGeneratedPrompt ?? false) && !this.promptEnabled(),
+    () =>
+      !(this.promptStatus()?.hasGeneratedPrompt ?? false) &&
+      !this.promptEnabled(),
   );
 
   /** `workflows.disabled`; `null` until `agent:getConfig` answers. */
   private readonly workflowsDisabled = signal<boolean | null>(null);
   private readonly workflowsLoadError = signal<string | null>(null);
   readonly workflowsLoaded = computed(() => this.workflowsDisabled() !== null);
-  readonly workflowsEnabled = computed(() => this.workflowsDisabled() === false);
+  readonly workflowsEnabled = computed(
+    () => this.workflowsDisabled() === false,
+  );
 
   /** A failed status read never claims there is no prompt: until one read succeeds the note says it is not loaded. */
   readonly promptNote = computed(() => {
@@ -311,21 +382,28 @@ export class AgentBehaviourSectionComponent implements OnInit {
   });
 
   readonly effortNote = computed(
-    () => `Same value as Providers > Main Agent effort${this.ultracode.enabled() ? ' · Pinned to X-High by Ultracode' : ''}`,
+    () =>
+      `Same value as Providers > Main Agent effort${this.ultracode.enabled() ? ' Â· Pinned to X-High by Ultracode' : ''}`,
   );
 
   readonly loadErrors = computed<readonly LoadError[]>(() => {
     const errors: LoadError[] = [];
     const prompt = this.promptLoadError();
     const workflows = this.workflowsLoadError();
-    if (prompt !== null) errors.push({ message: prompt, retry: () => this.loadPromptStatus() });
-    if (workflows !== null) errors.push({ message: workflows, retry: () => this.loadWorkflows() });
+    if (prompt !== null)
+      errors.push({ message: prompt, retry: () => this.loadPromptStatus() });
+    if (workflows !== null)
+      errors.push({ message: workflows, retry: () => this.loadWorkflows() });
     return errors;
   });
 
-  readonly currentEffort = computed<EffortLevel | ''>(() => this.effortState.currentEffort() ?? '');
+  readonly currentEffort = computed<EffortLevel | ''>(
+    () => this.effortState.currentEffort() ?? '',
+  );
   readonly effortLabel = computed(
-    () => EFFORT_CHOICES.find((choice) => choice.value === this.currentEffort())?.label ?? 'Default',
+    () =>
+      EFFORT_CHOICES.find((choice) => choice.value === this.currentEffort())
+        ?.label ?? 'Default',
   );
   readonly effortPopoverOpen = signal(false);
 
@@ -389,7 +467,9 @@ export class AgentBehaviourSectionComponent implements OnInit {
    */
   protected async loadPromptStatus(): Promise<boolean> {
     try {
-      const result = await this.rpcService.call('enhancedPrompts:getStatus', { workspacePath: this.workspaceScope.activeWorkspacePath() ?? '.' });
+      const result = await this.rpcService.call('enhancedPrompts:getStatus', {
+        workspacePath: this.workspaceScope.activeWorkspacePath() ?? '.',
+      });
       if (result.isSuccess() && !result.data.error) {
         this.promptStatus.set(result.data);
         this.promptLoadError.set(null);
@@ -423,7 +503,10 @@ export class AgentBehaviourSectionComponent implements OnInit {
    */
   private async writePromptMode(enabled: boolean): Promise<WriteResult> {
     try {
-      const result = await this.rpcService.call('enhancedPrompts:setEnabled', { workspacePath: this.workspaceScope.activeWorkspacePath() ?? '.', enabled });
+      const result = await this.rpcService.call('enhancedPrompts:setEnabled', {
+        workspacePath: this.workspaceScope.activeWorkspacePath() ?? '.',
+        enabled,
+      });
       if (!result.isSuccess() || !result.data.success) {
         return { ok: false, message: PROMPT_MODE_SAVE_FAILED };
       }
@@ -431,20 +514,30 @@ export class AgentBehaviourSectionComponent implements OnInit {
       return { ok: false, message: PROMPT_MODE_SAVE_FAILED };
     }
     if (!(await this.loadPromptStatus())) {
-      this.promptStatus.update((status) => (status === null ? status : { ...status, enabled }));
+      this.promptStatus.update((status) =>
+        status === null ? status : { ...status, enabled },
+      );
     }
     return { ok: true };
   }
 
-  /** Map §9 item 11: decided from the write's own result, never from a read-back of the shared signal. */
-  private async writeEffort(effort: EffortLevel | undefined): Promise<WriteResult> {
+  /** Map Â§9 item 11: decided from the write's own result, never from a read-back of the shared signal. */
+  private async writeEffort(
+    effort: EffortLevel | undefined,
+  ): Promise<WriteResult> {
     if (this.ultracode.enabled()) return { ok: false, message: EFFORT_PINNED };
-    return (await this.effortState.setEffort(effort)) ? { ok: true } : { ok: false, message: EFFORT_SAVE_FAILED };
+    return (await this.effortState.setEffort(effort))
+      ? { ok: true }
+      : { ok: false, message: EFFORT_SAVE_FAILED };
   }
 
-  private async writeWorkflowsDisabled(disabled: boolean): Promise<WriteResult> {
+  private async writeWorkflowsDisabled(
+    disabled: boolean,
+  ): Promise<WriteResult> {
     try {
-      const result = await this.rpcService.call('agent:setConfig', { workflowsDisabled: disabled });
+      const result = await this.rpcService.call('agent:setConfig', {
+        workflowsDisabled: disabled,
+      });
       if (!result.isSuccess() || !result.data.success) {
         return { ok: false, message: WORKFLOWS_SAVE_FAILED };
       }
@@ -458,7 +551,9 @@ export class AgentBehaviourSectionComponent implements OnInit {
   /** `UltracodeStateService` reads the effort back and keeps the mode on its saved side. */
   private async writeUltracode(enabled: boolean): Promise<WriteResult> {
     if (await this.ultracode.toggle(enabled)) return { ok: true };
-    return { ok: false, message: enabled ? ULTRACODE_ON_FAILED : ULTRACODE_OFF_FAILED };
+    return {
+      ok: false,
+      message: enabled ? ULTRACODE_ON_FAILED : ULTRACODE_OFF_FAILED,
+    };
   }
 }
-

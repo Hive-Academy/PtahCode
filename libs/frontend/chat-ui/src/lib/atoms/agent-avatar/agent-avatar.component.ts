@@ -75,6 +75,7 @@ const RING_OUTSET_PX = 4;
 const RING_STROKE_PX = 2;
 
 const RING_BY_STATUS: Readonly<Record<AgentStatusWord, RingKind | null>> = {
+  starting: 'solid',
   running: 'solid',
   waiting: 'waiting',
   failed: 'solid',
@@ -84,6 +85,7 @@ const RING_BY_STATUS: Readonly<Record<AgentStatusWord, RingKind | null>> = {
 };
 
 const RING_INK_BY_STATUS: Readonly<Record<AgentStatusWord, string>> = {
+  starting: 'text-info',
   running: 'text-state-run',
   waiting: 'text-state-need',
   failed: 'text-state-err',
@@ -93,6 +95,7 @@ const RING_INK_BY_STATUS: Readonly<Record<AgentStatusWord, string>> = {
 };
 
 const BADGE_BY_STATUS: Readonly<Record<AgentStatusWord, StatusBadge | null>> = {
+  starting: null,
   running: null,
   done: { icon: Check, inkClass: 'border-state-done text-state-done' },
   failed: { icon: CircleAlert, inkClass: 'border-state-err text-state-err' },

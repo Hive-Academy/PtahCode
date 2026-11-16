@@ -485,7 +485,7 @@ describe('Electron DI — shared RPC handler resolution', () => {
 });
 
 describe('Electron DI — provider accounts (TASK_2026_712 D32)', () => {
-  it('resolves ProviderAccountRpcHandlers once and registers exactly its eleven methods', () => {
+  it('resolves ProviderAccountRpcHandlers once and registers exactly its twelve methods', () => {
     const c = buildMinimalContainer();
     c.register(TOKENS.WEBVIEW_MANAGER, {
       useValue: { broadcastMessage: jest.fn(async () => undefined) },
@@ -512,6 +512,7 @@ describe('Electron DI — provider accounts (TASK_2026_712 D32)', () => {
       startSignIn: jest.fn(),
       cancelSignIn: jest.fn(),
       signOut: jest.fn(),
+      revealEmail: jest.fn(),
       onStateChanged: jest.fn(() => unsubscribe),
     };
     c.register(AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_ACCOUNT_ACTIONS, {
@@ -535,7 +536,7 @@ describe('Electron DI — provider accounts (TASK_2026_712 D32)', () => {
       [...ProviderAccountRpcHandlers.METHODS].sort(),
     );
     expect(registered).toContain('provider:getAmbientClaudeStatus');
-    expect(registered).toHaveLength(11);
+    expect(registered).toHaveLength(12);
     expect(new Set(registered).size).toBe(registered.length);
   });
 

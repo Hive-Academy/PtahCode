@@ -34,7 +34,7 @@ import {
   Injector,
   afterNextRender,
 } from '@angular/core';
-import { LucideAngularModule, Wrench, AlertCircle } from 'lucide-angular';
+import { LucideAngularModule, AlertCircle } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
   AgentGetClaudeBuiltinsResult,
@@ -43,7 +43,7 @@ import type {
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahBadgeDirective, PtahButtonDirective, PtahCheckboxDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahCheckboxDirective, PtahFormSectionComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
 
 export const COULD_NOT_LOAD_CLAUDE_BUILTINS =
   'Could not load the Claude Code tool and skill settings.';
@@ -72,30 +72,22 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
 @Component({
   selector: 'ptah-claude-builtins-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahSurfaceDirective, PtahBadgeDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahFormSectionComponent, PtahBadgeDirective, PtahSkeletonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <section
-      ptahSurface padding="sm"
+    <ptah-form-section
+      heading="Claude Code tools & skills"
+      description="Choose which of Claude Code's own tools and skills Ptah sessions start with. Fewer items means a smaller first message and lower token use."
       data-glass-surface="content"
       aria-labelledby="claude-tools-heading"
       [attr.aria-busy]="loadState() === 'loading' ? 'true' : null"
     >
-      <div class="flex items-center gap-1.5 mb-2">
-        <lucide-angular [img]="WrenchIcon" class="w-4 h-4 text-secondary shrink-0" aria-hidden="true" />
-        <h2 id="claude-tools-heading" class="text-xs font-bold uppercase tracking-wider text-base-content">
-          Claude Code tools &amp; skills
-        </h2>
-      </div>
-      <p class="text-xs text-base-content-muted mb-3">
-        Choose which of Claude Code's own tools and skills Ptah sessions start with. Fewer items means a smaller
-        first message and lower token use.
-      </p>
+      <h2 id="claude-tools-heading" class="sr-only">Claude Code tools &amp; skills</h2>
 
-      <div role="note" class="flex gap-2 rounded border border-info/50 p-2 text-xs text-base-content mb-3"
+      <div role="note" class="flex gap-[var(--ptah-gap-controls)] rounded border border-info/50 p-[var(--ptah-gap-controls)] text-xs text-base-content mb-[var(--ptah-gap-field)]"
         data-testid="claude-tools-applies-note">
-        <span class="mt-1 inline-block w-2 h-2 rounded-full bg-info shrink-0" aria-hidden="true"></span>
+        <span class="mt-[var(--ptah-gap-label)] inline-block w-2 h-2 rounded-full bg-info shrink-0" aria-hidden="true"></span>
         <span>
           Changes apply to <strong>new sessions</strong>. Sessions that are already open keep what they started
           with. These settings apply to all your workspaces.
@@ -105,7 +97,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
       @if (errorMessage(); as message) {
         <div
           role="alert"
-          class="flex items-center gap-1.5 mb-3 rounded border border-error/40 p-2 text-xs text-base-content"
+          class="flex items-center gap-[var(--ptah-gap-inline)] mb-[var(--ptah-gap-field)] rounded border border-error/40 p-[var(--ptah-gap-controls)] text-xs text-base-content"
           data-testid="claude-tools-load-error"
         >
           <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
@@ -116,7 +108,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
           </button>
         </div>
       } @else {
-        <p class="text-xs text-base-content mb-3" aria-live="polite" data-testid="claude-tools-savings">
+        <p class="text-xs text-base-content mb-[var(--ptah-gap-field)]" aria-live="polite" data-testid="claude-tools-savings">
           @if (loaded()) {
             Currently hidden: about {{ savingsLabel() }} tokens per new session (estimate).
           }
@@ -126,26 +118,17 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
         <h3 id="claude-tools-group-tools" class="text-xs font-semibold text-base-content">
           Built-in tools (off by default)
         </h3>
-        <p class="text-xs text-base-content-muted mb-1">
+        <p class="text-xs text-base-content-muted mb-[var(--ptah-gap-label)]">
           Turn a tool on to let agents use it. A skill that needs a tool also has its own checkbox below; both must
           be on.
         </p>
-        <div class="overflow-x-auto mb-3">
-          <table class="table table-xs" aria-labelledby="claude-tools-group-tools">
-            <thead>
-              <tr>
-                <th class="w-10" scope="col">On</th>
-                <th scope="col">Tool</th>
-                <th scope="col">Token cost</th>
-                <th scope="col">Description</th>
-                <th scope="col">Skills that need it</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div class="overflow-x-auto mb-[var(--ptah-gap-field)]">
+          <div class="flex flex-col" role="group" aria-labelledby="claude-tools-group-tools">
+            
               @if (loaded()) {
                 @for (tool of tools(); track tool.id) {
-                  <tr>
-                    <td class="align-top">
+                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]">
+                    <div class="align-top">
                       <input
                         type="checkbox"
                         ptahCheckbox size="xs"
@@ -155,53 +138,44 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                         [attr.aria-label]="tool.id + ' tool'"
                         [attr.data-testid]="'settings-toggle-claude-tool-' + tool.id"
                       />
-                    </td>
-                    <td class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ tool.id }}</td>
-                    <td class="align-top">
+                    </div>
+                    <div class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ tool.id }}</div>
+                    <div class="align-top">
                       <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(tool.approxTokens) }}</span>
-                    </td>
-                    <td class="align-top text-xs text-base-content-muted">{{ tool.description }}</td>
-                    <td class="align-top text-xs text-base-content-muted">
+                    </div>
+                    <div class="w-full text-xs text-base-content-muted">{{ tool.description }}</div>
+                    <div class="w-full text-xs text-base-content-muted">
                       {{ tool.skillsNeedingIt.length ? tool.skillsNeedingIt.join(', ') : 'None' }}
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 }
               } @else {
                 @for (row of skeletonRows; track row) {
-                  <tr data-testid="claude-tools-skeleton-row">
-                    <td class="align-top">
+                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]" data-testid="claude-tools-skeleton-row">
+                    <div class="align-top">
                       <input type="checkbox" ptahCheckbox size="xs" disabled
                         aria-label="Loading tool" />
-                    </td>
-                    <td colspan="4"><div class="skeleton h-4 w-full"></div></td>
-                  </tr>
+                    </div>
+                    <div class="flex-1"><ptah-skeleton shape="lines" [lines]="1" /></div>
+                  </div>
                 }
               }
-            </tbody>
-          </table>
+            
+          </div>
         </div>
 
         <!-- Group 2: terminal-only built-in skills -->
         <h3 id="claude-tools-group-terminal-skills" class="text-xs font-semibold text-base-content">
           Terminal-only built-in skills (off by default)
         </h3>
-        <p class="text-xs text-base-content-muted mb-1">Skills made for the terminal version of Claude Code.</p>
+        <p class="text-xs text-base-content-muted mb-[var(--ptah-gap-label)]">Skills made for the terminal version of Claude Code.</p>
         <div class="overflow-x-auto">
-          <table class="table table-xs" aria-labelledby="claude-tools-group-terminal-skills">
-            <thead>
-              <tr>
-                <th class="w-10" scope="col">On</th>
-                <th scope="col">Skill</th>
-                <th scope="col">Token cost</th>
-                <th scope="col">Description</th>
-                <th scope="col">Needs tool</th>
-              </tr>
-            </thead>
-            <tbody>
+          <div class="flex flex-col" role="group" aria-labelledby="claude-tools-group-terminal-skills">
+            
               @if (loaded()) {
                 @for (skill of terminalSkills(); track skill.id) {
-                  <tr>
-                    <td class="align-top">
+                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]">
+                    <div class="align-top">
                       <input
                         type="checkbox"
                         ptahCheckbox size="xs"
@@ -212,50 +186,50 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                         [attr.aria-describedby]="isDependencyBlocked(skill) ? 'claude-skill-dep-' + skill.id : null"
                         [attr.data-testid]="'settings-toggle-claude-skill-' + skill.id"
                       />
-                    </td>
-                    <td class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ skill.id }}</td>
-                    <td class="align-top">
+                    </div>
+                    <div class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ skill.id }}</div>
+                    <div class="align-top">
                       <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(skill.approxTokens) }}</span>
-                    </td>
-                    <td class="align-top text-xs text-base-content-muted">{{ skill.description }}</td>
-                    <td class="align-top text-xs text-base-content-muted">
+                    </div>
+                    <div class="w-full text-xs text-base-content-muted">{{ skill.description }}</div>
+                    <div class="w-full text-xs text-base-content-muted">
                       {{ skill.needsTool ?? 'None' }}
                       @if (isDependencyBlocked(skill)) {
-                        <span ptahBadge appearance="outline" size="xs" tone="warn" class="block mt-1 whitespace-nowrap"
+                        <span ptahBadge appearance="outline" size="xs" tone="warn" class="block mt-[var(--ptah-gap-label)] whitespace-nowrap"
                           [attr.data-testid]="'claude-skill-dependency-' + skill.id">
                           {{ skill.needsTool }} tool is off
                         </span>
-                        <span [id]="'claude-skill-dep-' + skill.id" class="block mt-0.5">
+                        <span [id]="'claude-skill-dep-' + skill.id" class="block mt-[var(--ptah-gap-label)]">
                           This skill is on but unavailable until the {{ skill.needsTool }} tool is on.
                         </span>
                       }
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 }
               } @else {
                 @for (row of skeletonRows; track row) {
-                  <tr data-testid="claude-tools-skeleton-row">
-                    <td class="align-top">
+                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]" data-testid="claude-tools-skeleton-row">
+                    <div class="align-top">
                       <input type="checkbox" ptahCheckbox size="xs" disabled
                         aria-label="Loading skill" />
-                    </td>
-                    <td colspan="4"><div class="skeleton h-4 w-full"></div></td>
-                  </tr>
+                    </div>
+                    <div class="flex-1"><ptah-skeleton shape="lines" [lines]="1" /></div>
+                  </div>
                 }
               }
-            </tbody>
-          </table>
+            
+          </div>
         </div>
 
         <!-- Group 3: skills synced from the claude.ai account -->
-        <h3 id="claude-tools-group-synced-skills" class="text-xs font-semibold text-base-content mt-3">
+        <h3 id="claude-tools-group-synced-skills" class="text-xs font-semibold text-base-content mt-[var(--ptah-gap-field)]">
           Skills synced from your claude.ai account (hidden by default)
         </h3>
-        <p class="text-xs text-base-content-muted mb-1">
+        <p class="text-xs text-base-content-muted mb-[var(--ptah-gap-label)]">
           Found in your Claude home folder. Turn one on to use it in new sessions.
         </p>
         @if (loaded() && syncedSkills().length === 0) {
-          <div class="rounded-lg border border-dashed border-base-300 p-3 text-center text-xs"
+          <div class="rounded-lg border border-dashed border-base-300 p-[var(--ptah-gap-field)] text-center text-xs"
             data-testid="claude-tools-synced-empty">
             <strong class="text-base-content">No claude.ai skills found</strong>
             <span class="block text-base-content-muted">
@@ -264,20 +238,12 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
           </div>
         } @else {
           <div class="overflow-x-auto">
-            <table class="table table-xs" aria-labelledby="claude-tools-group-synced-skills">
-              <thead>
-                <tr>
-                  <th class="w-10" scope="col">On</th>
-                  <th scope="col">Skill</th>
-                  <th scope="col">Token cost</th>
-                  <th scope="col">Description</th>
-                </tr>
-              </thead>
-              <tbody>
+            <div class="flex flex-col" role="group" aria-labelledby="claude-tools-group-synced-skills">
+              
                 @if (loaded()) {
                   @for (skill of syncedSkills(); track skill.id) {
-                    <tr>
-                      <td class="align-top">
+                    <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]">
+                      <div class="align-top">
                         <input
                           type="checkbox"
                           ptahCheckbox size="xs"
@@ -287,38 +253,33 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                           [attr.aria-label]="skillName(skill) + ' skill'"
                           [attr.data-testid]="'settings-toggle-claude-skill-' + skill.id"
                         />
-                      </td>
-                      <td class="align-top font-medium text-xs text-base-content whitespace-nowrap">
+                      </div>
+                      <div class="align-top font-medium text-xs text-base-content whitespace-nowrap">
                         {{ skillName(skill) }}
-                      </td>
-                      <td class="align-top">
+                      </div>
+                      <div class="align-top">
                         <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(skill.approxTokens) }}</span>
-                      </td>
-                      <td class="align-top text-xs text-base-content-muted">{{ skill.description }}</td>
-                    </tr>
+                      </div>
+                      <div class="w-full text-xs text-base-content-muted">{{ skill.description }}</div>
+                    </div>
                   }
                 } @else {
                   @for (row of skeletonRows; track row) {
-                    <tr data-testid="claude-tools-skeleton-row">
-                      <td class="align-top">
+                    <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]" data-testid="claude-tools-skeleton-row">
+                      <div class="align-top">
                         <input type="checkbox" ptahCheckbox size="xs" disabled
                           aria-label="Loading skill" />
-                      </td>
-                      <td colspan="3"><div class="skeleton h-4 w-full"></div></td>
-                    </tr>
+                      </div>
+                      <div class="flex-1"><ptah-skeleton shape="lines" [lines]="1" /></div>
+                    </div>
                   }
                 }
-              </tbody>
-            </table>
+              
+            </div>
           </div>
         }
       }
-    </section>
-  `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
+    </ptah-form-section>
   `,
 })
 export class ClaudeBuiltinsConfigComponent implements OnInit {
@@ -327,7 +288,6 @@ export class ClaudeBuiltinsConfigComponent implements OnInit {
   private readonly injector = inject(Injector);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
-  readonly WrenchIcon = Wrench;
   readonly AlertCircleIcon = AlertCircle;
   readonly skeletonRows = [0, 1, 2] as const;
 

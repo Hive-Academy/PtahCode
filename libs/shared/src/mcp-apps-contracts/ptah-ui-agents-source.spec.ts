@@ -60,7 +60,7 @@ describe('normalizeAgentStatus (R5.2)', () => {
         }),
       ),
     );
-    expect(view.rows[0].status).toBe('running');
+    expect(view.rows[0].status).toBe('starting');
     expect(view.scalars).toMatchObject({ running: 1, completed: 0, failed: 0 });
   });
   it.each([
@@ -68,7 +68,7 @@ describe('normalizeAgentStatus (R5.2)', () => {
     ['streaming', 'running'],
     ['resumed', 'running'],
     ['running', 'running'],
-    ['starting', 'running'],
+    ['starting', 'starting'],
     ['paused', 'running'],
     ['background', 'running'],
     ['complete', 'completed'],

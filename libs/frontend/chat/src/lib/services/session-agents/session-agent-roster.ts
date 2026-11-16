@@ -198,6 +198,7 @@ export function buildSessionAgentRoster(
   ];
   const hasLiveAgents = agents.some(
     (agent) =>
+      agent.status === 'starting' ||
       agent.status === 'running' ||
       agent.status === 'waiting' ||
       agent.status === 'queued',

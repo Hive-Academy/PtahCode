@@ -22,7 +22,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { LucideAngularModule, Palette, Plus } from 'lucide-angular';
+import { LucideAngularModule, Plus } from 'lucide-angular';
 import type {
   InvalidOutputStyle,
   OutputStyleDetail,
@@ -35,7 +35,7 @@ import {
   type OutputStyleSelectionRequest,
 } from './output-style-list.component';
 import { OutputStyleEditorComponent } from './output-style-editor.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFormSectionComponent } from '@ptah-extension/ui';
 
 const OUTPUT_STYLE_ACTIVATE_FAILED = 'Could not change the active output style.';
 const OUTPUT_STYLE_DELETE_FAILED = 'Could not delete the output style.';
@@ -53,31 +53,21 @@ const OUTPUT_STYLE_PARITY_FAILED =
     OutputStyleListComponent,
     OutputStyleEditorComponent,
     PtahButtonDirective,
+    PtahFormSectionComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <section
+    <ptah-form-section
+      heading="Output Style"
+      description="Choose how the agent writes to you: how much it explains, how it structures an answer, and what wording it prefers. A style influences the agent voice; it does not replace Ptah instructions."
       data-glass-surface="content"
-      class="border-b border-base-content/10 pb-7"
       aria-labelledby="output-style-heading"
       data-testid="output-style-card"
     >
-      <div class="flex items-center justify-between gap-3 mb-2">
-        <div class="flex items-center gap-1.5">
-          <lucide-angular
-            [img]="PaletteIcon"
-            class="w-4 h-4 text-secondary"
-            aria-hidden="true"
-          />
-          <h2
-            id="output-style-heading"
-            class="text-xs font-bold uppercase tracking-wider text-base-content"
-          >
-            Output Style
-          </h2>
-        </div>
-        <div class="flex items-center gap-2">
+      <div class="flex items-center gap-[var(--ptah-gap-field)] mb-[var(--ptah-gap-controls)]">
+        <h2 id="output-style-heading" class="sr-only">Output Style</h2>
+        <div class="[margin-inline-start:auto] flex items-center gap-[var(--ptah-gap-controls)]">
           <span class="text-xs text-base-content-muted">
             {{ store.styles().length }} available
           </span>
@@ -95,13 +85,6 @@ const OUTPUT_STYLE_PARITY_FAILED =
           </button>
         </div>
       </div>
-
-      <p class="text-xs text-base-content-muted mb-3">
-        Choose how the agent writes to you — how much it explains, how it
-        structures an answer, what wording it prefers. A style influences the
-        agent's voice; it does not replace the instructions Ptah already gives
-        it.
-      </p>
 
       <ptah-output-style-list
         [styles]="store.styles()"
@@ -136,12 +119,7 @@ const OUTPUT_STYLE_PARITY_FAILED =
           />
         }
       }
-    </section>
-  `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
+    </ptah-form-section>
   `,
 })
 export class OutputStyleConfigComponent implements OnInit {
@@ -153,7 +131,6 @@ export class OutputStyleConfigComponent implements OnInit {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
 
-  readonly PaletteIcon = Palette;
   readonly PlusIcon = Plus;
 
   readonly view = signal<'list' | 'editor'>('list');
@@ -268,7 +245,7 @@ export class OutputStyleConfigComponent implements OnInit {
   }
 
   private editButtonFor(name: string): HTMLButtonElement | undefined {
-    const rows = this.host.nativeElement.querySelectorAll<HTMLElement>('tr[data-testid^="output-style-row-"]');
+    const rows = this.host.nativeElement.querySelectorAll<HTMLElement>('[data-testid^="output-style-row-"]');
     return Array.from(rows)
       .filter((row) => row.getAttribute('data-testid') === `output-style-row-${name}`)
       .map((row) => row.querySelector<HTMLButtonElement>('[data-testid="output-style-edit-button"]'))

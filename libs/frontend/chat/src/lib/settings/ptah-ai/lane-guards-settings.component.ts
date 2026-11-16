@@ -11,7 +11,8 @@ import type { AgentOrchestrationConfig } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
-  SettingsFieldComponent,
+  PtahFieldComponent,
+  PtahFormSectionComponent,
   PtahButtonDirective,
   PtahInputDirective,
 } from '@ptah-extension/ui';
@@ -51,101 +52,104 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
   standalone: true,
   imports: [
     SettingsBusyDisabledDirective,
-    SettingsFieldComponent,
+    PtahFieldComponent,
+    PtahFormSectionComponent,
     PtahButtonDirective,
     PtahInputDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section
-      data-glass-surface="content"
-      class="flex flex-col gap-3 text-sm text-base-content"
-      aria-labelledby="lane-guards-heading"
-      data-testid="settings-section-lane-guards"
-    >
-      <div section-header class="border-b border-base-content/10 pb-2">
-        <h3 id="lane-guards-heading" class="text-base font-semibold text-base-content">
-          Lane guards
-        </h3>
-        <p class="mt-0.5 text-xs text-base-content-muted">
-          Stop background lanes that are stuck in a loop.
-        </p>
-      </div>
-
-      @switch (load()) {
-        @case ('loading') {
-          <p role="status" aria-live="polite" data-testid="lane-guards-loading">
-            Loading lane guards…
-          </p>
-        }
-        @case ('error') {
-          <div role="alert" class="space-y-1.5">
-            <p data-testid="lane-guards-load-error">
-              The lane guard settings could not be read. Your saved settings
-              have not changed.
-            </p>
-            <button
-              type="button"
-              ptahButton
-              (click)="reload()"
-              data-testid="lane-guards-retry"
+    <section>
+      <ptah-form-section
+        heading="Lane guards"
+        description="Stop background lanes that are stuck in a loop."
+        data-glass-surface="content"
+        data-testid="settings-section-lane-guards"
+      >
+        @switch (load()) {
+          @case ('loading') {
+            <p
+              role="status"
+              aria-live="polite"
+              data-testid="lane-guards-loading"
             >
-              Retry lane guards
-            </button>
-          </div>
-        }
-        @default {
-          <p
-            id="lane-guards-intro"
-            class="text-xs text-base-content-muted"
-            data-testid="lane-guards-intro"
-          >
-            This guard stops a lane when it repeats the same call this many times.
-            Lanes also have a weighted token budget and a duration limit.
-            A lane gets an early warning when it reaches the budget warning ratio, or when one more turn of its largest size would cross the limit.
-            The first turn that crosses the token limit is a grace turn: the lane is warned again, and its next turn stops it.
-            A lane stopped by its budget does not resume; start a fresh lane for the remaining work.
-          </p>
-          <div class="grid max-w-sm gap-y-5">
+              Loading lane guards…
+            </p>
+          }
+          @case ('error') {
+            <div role="alert" class="space-y-1.5">
+              <p data-testid="lane-guards-load-error">
+                The lane guard settings could not be read. Your saved settings
+                have not changed.
+              </p>
+              <button
+                type="button"
+                ptahButton
+                (click)="reload()"
+                data-testid="lane-guards-retry"
+              >
+                Retry lane guards
+              </button>
+            </div>
+          }
+          @default {
+            <p
+              id="lane-guards-intro"
+              class="text-xs text-base-content-muted"
+              data-testid="lane-guards-intro"
+            >
+              This guard stops a lane when it repeats the same call this many
+              times. Lanes also have a weighted token budget and a duration
+              limit. A lane gets an early warning when it reaches the budget
+              warning ratio, or when one more turn of its largest size would
+              cross the limit. The first turn that crosses the token limit is a
+              grace turn: the lane is warned again, and its next turn stops it.
+              A lane stopped by its budget does not resume; start a fresh lane
+              for the remaining work.
+            </p>
             @for (field of fields; track field.key) {
-              <div ptahSettingsField class="flex min-w-0 flex-col gap-1"
-                [fieldId]="field.testId"
+              <ptah-field
+                appearance="stacked"
+                class="lane-guards-number-field"
                 [label]="field.label"
                 [hint]="field.help + ' Range: ' + field.min + ' or greater.'"
                 [error]="fieldMessage(field.key)"
-                [errorRole]="'alert'"
-                [errorTestId]="field.testId + '-error'">
-                <ng-container ngProjectAs="[settingsFieldControl]"><div class="join flex w-full">
-                  <input
-                    type="text"
-                    inputmode="numeric"
-                    [id]="field.testId"
-                    ptahInput
-                    size="sm"
-                    class="join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
-                    [invalid]="!!fieldMessage(field.key)"
-                    [value]="drafts()[field.key]"
-                    [attr.aria-describedby]="describedBy(field)"
-                    [ptahBusyDisabled]="busy() || feedback.saving()"
-                    (input)="edit(field.key, $event)"
-                    (change)="commit(field.key)"
-                    [attr.data-testid]="field.testId"
-                  />
+                errorRole="alert"
+                [errorTestId]="field.testId + '-error'"
+              >
+                <input
+                  type="text"
+                  inputmode="numeric"
+                  [id]="field.testId"
+                  ptahInput
+                  size="sm"
+                  class="min-w-0 flex-1 text-right tabular-nums"
+                  [invalid]="!!fieldMessage(field.key)"
+                  [value]="drafts()[field.key]"
+                  [ptahBusyDisabled]="busy() || feedback.saving()"
+                  (input)="edit(field.key, $event)"
+                  (change)="commit(field.key)"
+                  [attr.data-testid]="field.testId"
+                />
+                <span ptahFieldTrailing aria-hidden="true">calls</span>
+                @if (fieldMessage(field.key)) {
                   <span
-                    class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted"
-                    aria-hidden="true"
-                    >calls</span
+                    ptahFieldBeforeHint
+                    class="text-xs text-base-content-muted"
+                    >{{ field.help }} Range: {{ field.min }} or greater.</span
                   >
-                </div></ng-container>
-              </div>
+                }
+              </ptah-field>
             }
-          </div>
+          }
         }
-      }
-
+      </ptah-form-section>
     </section>
   `,
   styles: `
+    .lane-guards-number-field {
+      max-inline-size: 22rem;
+    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
@@ -183,13 +187,6 @@ export class LaneGuardsSettingsComponent implements OnInit {
 
   protected fieldMessage(key: LaneGuardKey): string | null {
     return this.fieldErrors()[key] ?? this.rejected()[key] ?? null;
-  }
-
-  protected describedBy(field: (typeof LANE_GUARD_FIELDS)[number]): string {
-    const help = `${field.testId}-help`;
-    return this.fieldMessage(field.key)
-      ? `${help} ${field.testId}-error`
-      : help;
   }
 
   protected edit(key: LaneGuardKey, event: Event): void {

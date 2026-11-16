@@ -40,6 +40,7 @@ export const PROVIDER_ACCOUNT_RPC_METHOD_NAMES = [
   'provider:renameAccount',
   'provider:removeAccount',
   'provider:getAccountStatus',
+  'provider:revealAccountEmail',
   'provider:startAccountSignIn',
   'provider:cancelAccountSignIn',
   'provider:signOutAccount',
@@ -189,6 +190,10 @@ export type ProviderGetAccountStatusResult = ProviderAccountRpcResult<{
   readonly operation?: ProviderAccountOperation;
 }>;
 
+/** The profile ID is the only caller-controlled route input. */
+export interface ProviderRevealAccountEmailParams { readonly profileId: string }
+export type ProviderRevealAccountEmailResult = ProviderAccountRpcResult<{ readonly email: string }>;
+
 export interface ProviderStartAccountSignInParams extends ProviderAccountProfileWrite {
   readonly workspaceRoot: string;
 }
@@ -302,6 +307,10 @@ export interface ProviderAccountRpcMethodRegistry {
   'provider:getAccountStatus': {
     params: ProviderGetAccountStatusParams;
     result: ProviderGetAccountStatusResult;
+  };
+  'provider:revealAccountEmail': {
+    params: ProviderRevealAccountEmailParams;
+    result: ProviderRevealAccountEmailResult;
   };
   'provider:startAccountSignIn': {
     params: ProviderStartAccountSignInParams;

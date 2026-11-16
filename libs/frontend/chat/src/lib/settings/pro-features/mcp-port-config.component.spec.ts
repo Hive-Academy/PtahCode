@@ -20,7 +20,8 @@ import { isDisabledControl } from '../feedback/busy-disabled.testing';
 type Responder = () => RpcResult<unknown> | Promise<RpcResult<unknown>>;
 
 const ok = <T>(data: T) => new RpcResult<T>(true, data);
-const fail = (message: string) => new RpcResult<unknown>(false, undefined, message);
+const fail = (message: string) =>
+  new RpcResult<unknown>(false, undefined, message);
 
 describe('McpPortConfigComponent', () => {
   let fixture: ComponentFixture<McpPortConfigComponent>;
@@ -117,25 +118,59 @@ describe('McpPortConfigComponent', () => {
       expect(component.isNamespaceEnabled('browser')).toBe(true);
       expect(component.browserAllowLocalhost()).toBe(true);
       expect(component.externalCallerAccess()).toBe('full');
+      for (const testId of ['mcp-port-input', 'mcp-external-caller-access']) {
+        const field = byTestId(testId).closest('ptah-field');
+        expect(
+          field
+            ?.querySelector('[data-ptah-field]')
+            ?.getAttribute('data-appearance'),
+        ).toBe('stacked');
+      }
     });
 
     it.each<[string, Responder]>([
       ['an RPC failure', () => fail('host detail: load failed')],
-      ['a throw', () => { throw new Error('host detail: socket'); }],
-    ])('Serious 3: %s shows a fixed load error with Retry and disables every control', async (_, respond) => {
-      responses['agent:getConfig'] = respond;
-      await render();
+      [
+        'a throw',
+        () => {
+          throw new Error('host detail: socket');
+        },
+      ],
+    ])(
+      'Serious 3: %s shows a fixed load error with Retry and disables every control',
+      async (_, respond) => {
+        responses['agent:getConfig'] = respond;
+        await render();
 
-      const alert = byTestId('mcp-config-load-error');
-      expect(alert.getAttribute('role')).toBe('alert');
-      expect(alert.textContent).toContain(COULD_NOT_LOAD_MCP_CONFIG);
-      expect(alert.textContent).not.toContain('host detail');
-      expect(isDisabledControl(byTestId<HTMLInputElement>('mcp-port-input'))).toBe(true);
-      expect(isDisabledControl(byTestId<HTMLButtonElement>('mcp-port-save-btn'))).toBe(true);
-      expect(isDisabledControl(byTestId<HTMLSelectElement>('mcp-external-caller-access'))).toBe(true);
-      expect(isDisabledControl(byTestId<HTMLInputElement>('settings-toggle-mcp-namespace-git'))).toBe(true);
-      expect(isDisabledControl(byTestId<HTMLInputElement>('settings-toggle-browser-allow-localhost'))).toBe(true);
-    });
+        const alert = byTestId('mcp-config-load-error');
+        expect(alert.getAttribute('role')).toBe('alert');
+        expect(alert.textContent).toContain(COULD_NOT_LOAD_MCP_CONFIG);
+        expect(alert.textContent).not.toContain('host detail');
+        expect(
+          isDisabledControl(byTestId<HTMLInputElement>('mcp-port-input')),
+        ).toBe(true);
+        expect(
+          isDisabledControl(byTestId<HTMLButtonElement>('mcp-port-save-btn')),
+        ).toBe(true);
+        expect(
+          isDisabledControl(
+            byTestId<HTMLSelectElement>('mcp-external-caller-access'),
+          ),
+        ).toBe(true);
+        expect(
+          isDisabledControl(
+            byTestId<HTMLInputElement>('settings-toggle-mcp-namespace-git'),
+          ),
+        ).toBe(true);
+        expect(
+          isDisabledControl(
+            byTestId<HTMLInputElement>(
+              'settings-toggle-browser-allow-localhost',
+            ),
+          ),
+        ).toBe(true);
+      },
+    );
 
     it('Serious 3: never writes defaults over the stored list while the config is not loaded', async () => {
       responses['agent:getConfig'] = () => fail('load failed');
@@ -148,7 +183,10 @@ describe('McpPortConfigComponent', () => {
       await component.onExternalCallerAccessChange('full');
       await settle();
 
-      expect(call).not.toHaveBeenCalledWith('agent:setConfig', expect.anything());
+      expect(call).not.toHaveBeenCalledWith(
+        'agent:setConfig',
+        expect.anything(),
+      );
       expect(queryTestId('allow-localhost-confirm')).toBeNull();
     });
 
@@ -157,28 +195,53 @@ describe('McpPortConfigComponent', () => {
       await render();
 
       responses['agent:getConfig'] = () =>
-        ok({ mcpPort: 52000, disabledMcpNamespaces: ['browser'], browserAllowLocalhost: false });
+        ok({
+          mcpPort: 52000,
+          disabledMcpNamespaces: ['browser'],
+          browserAllowLocalhost: false,
+        });
       byTestId<HTMLButtonElement>('mcp-config-load-retry').click();
       await settle();
 
       expect(queryTestId('mcp-config-load-error')).toBeNull();
       expect(component.isNamespaceEnabled('browser')).toBe(false);
-      expect(isDisabledControl(byTestId<HTMLInputElement>('settings-toggle-mcp-namespace-git'))).toBe(false);
+      expect(
+        isDisabledControl(
+          byTestId<HTMLInputElement>('settings-toggle-mcp-namespace-git'),
+        ),
+      ).toBe(false);
 
       await component.toggleNamespace('git');
       await settle();
-      expect(call).toHaveBeenCalledWith('agent:setConfig', { disabledMcpNamespaces: ['browser', 'git'] });
+      expect(call).toHaveBeenCalledWith('agent:setConfig', {
+        disabledMcpNamespaces: ['browser', 'git'],
+      });
     });
 
     it('keeps the controls disabled until the read answers', async () => {
       let answer: (value: RpcResult<unknown>) => void = () => undefined;
-      responses['agent:getConfig'] = () => new Promise<RpcResult<unknown>>((resolve) => (answer = resolve));
+      responses['agent:getConfig'] = () =>
+        new Promise<RpcResult<unknown>>((resolve) => (answer = resolve));
       await render();
 
-      expect(isDisabledControl(byTestId<HTMLInputElement>('settings-toggle-mcp-namespace-git'))).toBe(true);
-      answer(ok({ mcpPort: 51820, disabledMcpNamespaces: [], browserAllowLocalhost: false }));
+      expect(
+        isDisabledControl(
+          byTestId<HTMLInputElement>('settings-toggle-mcp-namespace-git'),
+        ),
+      ).toBe(true);
+      answer(
+        ok({
+          mcpPort: 51820,
+          disabledMcpNamespaces: [],
+          browserAllowLocalhost: false,
+        }),
+      );
       await settle();
-      expect(isDisabledControl(byTestId<HTMLInputElement>('settings-toggle-mcp-namespace-git'))).toBe(false);
+      expect(
+        isDisabledControl(
+          byTestId<HTMLInputElement>('settings-toggle-mcp-namespace-git'),
+        ),
+      ).toBe(false);
     });
   });
 
@@ -186,9 +249,7 @@ describe('McpPortConfigComponent', () => {
     it('renders the control and saves the selected value through the RPC', async () => {
       await render();
 
-      const select = byTestId<HTMLSelectElement>(
-        'mcp-external-caller-access',
-      );
+      const select = byTestId<HTMLSelectElement>('mcp-external-caller-access');
       expect(select.value).toBe('read-only');
       expect(element.textContent).toContain('External MCP callers');
       expect(element.textContent).toContain('Read-only (recommended)');
@@ -204,9 +265,9 @@ describe('McpPortConfigComponent', () => {
       });
       expect(component.externalCallerAccess()).toBe('full');
       expect(component.savedExternalCallerAccess()).toBe('full');
-      expect(
-        byTestId('mcp-external-caller-access-hint').classList,
-      ).toContain('text-warning');
+      expect(byTestId('mcp-external-caller-access-hint').classList).toContain(
+        'text-warning',
+      );
     });
 
     it.each<[string, Responder]>([
@@ -260,14 +321,25 @@ describe('McpPortConfigComponent', () => {
       // Under range
       component.onPortInput(1000);
       fixture.detectChanges();
-      expect(component.validationError()).toBe('Port must be between 1024 and 65535');
+      expect(component.validationError()).toBe(
+        'Port must be between 1024 and 65535',
+      );
       expect(isDisabledControl(saveBtn)).toBe(true);
 
       // Over range
       component.onPortInput(70000);
       fixture.detectChanges();
-      expect(component.validationError()).toBe('Port must be between 1024 and 65535');
+      expect(component.validationError()).toBe(
+        'Port must be between 1024 and 65535',
+      );
       expect(isDisabledControl(saveBtn)).toBe(true);
+      // F1: the error never hides the range and restart note.
+      expect(byTestId('mcp-port-validation-error').textContent).toContain(
+        'Port must be between 1024 and 65535',
+      );
+      expect(byTestId('mcp-port-hint').textContent).toContain(
+        'Range 1024 to 65535',
+      );
 
       // Valid and dirty
       component.onPortInput(51999);
@@ -318,7 +390,12 @@ describe('McpPortConfigComponent', () => {
       await settle();
 
       expect(component.saveError()).toBe(COULD_NOT_SAVE_PORT);
-      expect(byTestId('mcp-port-validation-error').textContent).toContain(COULD_NOT_SAVE_PORT);
+      expect(byTestId('mcp-port-validation-error').textContent).toContain(
+        COULD_NOT_SAVE_PORT,
+      );
+      expect(byTestId('mcp-port-hint').textContent).toContain(
+        'Changes apply after the MCP',
+      );
       expect(feedback.toast()?.tone).toBe('alert');
       expect(feedback.toast()?.message).toBe(COULD_NOT_SAVE_PORT);
       expect(feedback.toast()?.message).not.toContain('host detail');
@@ -503,13 +580,19 @@ describe('McpPortConfigComponent', () => {
       const outer = jest.fn();
       document.body.addEventListener('keydown', outer);
       try {
-        const checkbox = byTestId<HTMLInputElement>('settings-toggle-browser-allow-localhost');
+        const checkbox = byTestId<HTMLInputElement>(
+          'settings-toggle-browser-allow-localhost',
+        );
         checkbox.click();
         fixture.detectChanges();
         fixture.detectChanges();
-        expect(document.activeElement).toBe(byTestId('allow-localhost-cancel-btn'));
+        expect(document.activeElement).toBe(
+          byTestId('allow-localhost-cancel-btn'),
+        );
 
-        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        );
         fixture.detectChanges();
         await fixture.whenStable();
 
@@ -517,21 +600,29 @@ describe('McpPortConfigComponent', () => {
         expect(checkbox.checked).toBe(false);
         expect(document.activeElement).toBe(checkbox);
         expect(outer).not.toHaveBeenCalled();
-        expect(call).not.toHaveBeenCalledWith('agent:setConfig', { browserAllowLocalhost: true });
+        expect(call).not.toHaveBeenCalledWith('agent:setConfig', {
+          browserAllowLocalhost: true,
+        });
       } finally {
         document.body.removeEventListener('keydown', outer);
         element.remove();
       }
     });
 
-    it('m3: the Allow localhost confirm button uses the same red outline as the other confirms', async () => {
+    it('m3: the Allow localhost confirm uses the same danger tone as the other confirms', async () => {
       await render();
-      byTestId<HTMLInputElement>('settings-toggle-browser-allow-localhost').click();
+      byTestId<HTMLInputElement>(
+        'settings-toggle-browser-allow-localhost',
+      ).click();
       fixture.detectChanges();
 
       const button = byTestId<HTMLButtonElement>('allow-localhost-confirm-btn');
-      expect(button.classList).toContain('border-error');
-      expect(button.classList).not.toContain('border-warning');
+      expect(button.classList).toContain('btn-error');
+      expect(button.classList).not.toContain('btn-warning');
+      const panel = queryTestId('allow-localhost-confirm')?.querySelector(
+        '[data-testid="inline-confirm"]',
+      );
+      expect(panel?.classList).toContain('border-state-err');
     });
 
     it('disabling saves immediately with Undo (S-sel)', async () => {

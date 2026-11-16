@@ -1,171 +1,67 @@
-<!--
-  SettingsComponent - Compact VS Code Sidebar Design
-
-  Visibility Rules:
-  - Authentication: Always visible
-  - Model Selection & Autopilot: Visible after auth configured
-  - MCP Port & LLM Providers: Available to everyone
-
-  Follows VS Code UX Guidelines:
-  - Icons: 16-20px (was 24px+)
-  - Headings: 14-16px (text-sm)
-  - Padding: 12-16px (px-3, py-3)
-  - Compact spacing: space-y-3, gap-2
--->
-
-<!-- Glass: the page plane clears (component styles) so the blurred chrome pane and its scene show under the cards. -->
 <div class="settings-page h-full overflow-y-auto bg-surface-0">
-  <div
-    class="mx-auto w-full max-w-screen-2xl space-y-[var(--ptah-gap-section)] px-3 py-3 md:px-6 lg:px-8"
+  <ptah-settings-layout
+    navMode="navigation"
+    navTestId="settings-tabs"
+    navLabel="Settings sections"
+    [tabs]="settingsTabs"
+    [selected]="selectedSettingsTab()"
+    (selectedChange)="setActiveTab($event)"
+    [title]="activeTabTitle()"
+    [description]="activeTabDescription()"
+    [titleLevel]="1"
   >
-    <!-- Header (prototypes/final/index.html:82-95): Back, title, workspace and app context -->
-    <!-- Glass: the header text sits on its own plate (a local text scrim), not on the bare pane. -->
-    <header class="settings-header">
-      <div
-        class="flex items-center justify-between gap-3 pb-2 border-b border-base-300"
-      >
-        <div class="flex items-center gap-[var(--ptah-gap-controls)]">
-          <button
-            type="button"
-            ptahIconButton label="Back to Chat" class="text-base-content-muted hover:text-base-content"
-            (click)="backToChat()"
-            data-testid="settings-back"
-          >
-            <lucide-angular
-              [img]="ArrowLeftIcon"
-              class="w-4 h-4"
-              aria-hidden="true"
-            />
-          </button>
-          <h1 class="text-lg font-semibold tracking-tight text-base-content">
-            Settings
-          </h1>
+    <div nav-header class="flex items-center gap-ptah-inline">
+      <button type="button" ptahIconButton label="Back to Chat" data-testid="settings-back" (click)="backToChat()">
+        <lucide-angular [img]="ArrowLeftIcon" class="w-4 h-4" aria-hidden="true" />
+      </button>
+      <span class="font-semibold">Settings</span>
+    </div>
+    <!-- The layout hides [nav-header] below its 640px split, so a narrow container keeps a way back
+         in the header actions. It has no test id: settings-back stays unique. The wrapper owns the
+         hide rule: the ptahButton display rule has id specificity and wins over a utility on the button. -->
+    <span actions class="[@container(min-width:640px)]:hidden" data-narrow-back-slot>
+      <button type="button" ptahIconButton label="Back to Chat" data-narrow-back (click)="backToChat()">
+        <lucide-angular [img]="ArrowLeftIcon" class="w-4 h-4" aria-hidden="true" />
+      </button>
+    </span>
+    <!-- The layout hides [nav-footer] below its 640px split: a custom endpoint keeps a compact warning here.
+         It has no test id (custom-provider-security-copy stays unique). The wrapper owns the hide rule. -->
+    @if (authState.isCustomProviderSelected()) {
+      <div header-band class="[@container(min-width:640px)]:hidden" data-narrow-endpoint-warning>
+        <div class="mb-ptah-group flex min-w-0 flex-wrap items-center gap-ptah-inline text-xs text-base-content-muted">
+          <ptah-status status="warning" label="Custom endpoint" />
+          <code class="min-w-0 break-words font-semibold">{{ authState.selectedCustomHost() }}</code>
         </div>
-        <p
-          class="flex min-w-0 items-center text-xs text-base-content-muted whitespace-pre"
-          data-testid="settings-context"
-        >
-          @if (workspaceName(); as name) {
-            <span class="min-w-0 truncate" [attr.title]="workspacePath()"
-              >Workspace:
-              <strong class="font-medium text-base-content">{{
-                name
-              }}</strong></span
-            >
-            <span> · </span>
-          }
-          <span class="shrink-0"
-            >App:
-            <strong class="font-medium text-base-content">{{
-              appLabel
-            }}</strong></span
-          >
-        </p>
       </div>
-
-      <!-- Tab bar: 4 enabled tabs (D9); buttons keep their names (live-app scripts use getByRole('button')) -->
-      <!-- Card tabs. `tab-active` stays on the active button as the e2e hook (settings scenarios assert it). -->
-      <nav
-        class="settings-tabs mt-[var(--ptah-gap-heading)] border-b border-base-content/10"
-        aria-label="Settings sections"
-        data-testid="settings-tabs"
-      >
-        @for (tab of settingsTabs; track tab.id) {
-          @let active = activeSettingsTab() === tab.id;
-          <button
-            type="button"
-            class="settings-tab relative flex min-w-0 items-center justify-center gap-[var(--ptah-gap-controls)] border-b-2 border-transparent px-[var(--ptah-space-2)] py-[var(--ptah-space-2)] text-sm leading-5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-            [class.text-base-content-muted]="!active"
-            [class.tab-active]="active"
-            [class.!border-primary]="active"
-            [class.font-semibold]="active"
-            [class.text-base-content]="active"
-            [attr.data-active]="active ? 'true' : null"
-            [attr.aria-current]="active ? 'page' : null"
-            [attr.aria-label]="tab.label"
-            [attr.title]="tab.label"
-            (click)="setActiveTab(tab.id)"
-          >
-            <lucide-angular
-              [img]="tab.icon"
-              class="h-4 w-4 shrink-0"
-              [class.text-primary]="active"
-              aria-hidden="true"
-            />
-            <span class="settings-tab-label min-w-0 text-center">{{
-              tab.label
-            }}</span>
-          </button>
-        }
-      </nav>
-    </header>
-
+    }
+    <!-- px-ptah-control-x is the inline padding of the nav items, so the footer content starts on their edge. -->
+    <div nav-footer class="flex flex-col gap-ptah-controls px-ptah-control-x">
+      <div data-testid="settings-context" class="[--ptah-dl-compact-term-w:5.5rem]" [attr.title]="workspacePath()">
+        <ptah-description-list density="compact" [items]="contextRows()" />
+      </div>
+      @if (authState.isCustomProviderSelected()) {
+        <div data-testid="custom-provider-security-copy" class="flex min-w-0 items-start gap-ptah-inline text-xs text-base-content-muted">
+          <ptah-status status="warning" appearance="dot" label="Custom endpoint" />
+          <p class="min-w-0 break-words">Your own endpoint. Credentials and prompts go from this machine to <code class="font-semibold">{{ authState.selectedCustomHost() }}</code> — a host you added. Ptah does not operate, vet, or monitor it, and no Ptah server is involved either way.</p>
+        </div>
+      } @else {
+        <div data-testid="builtin-provider-security-copy" class="flex min-w-0 items-start gap-ptah-inline text-xs text-base-content-muted">
+          <ptah-status status="online" appearance="dot" label="Local" />
+          <p class="min-w-0 break-words">Runs 100% locally. Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.</p>
+        </div>
+      }
+    </div>
     <div ptahMotionStage [motionIndex]="settingsTabIndex()">
     <!-- ============================================ -->
     <!-- Tab 1: Providers (tab id remains claude-auth) -->
     <!-- ============================================ -->
     @if (activeSettingsTab() === 'claude-auth') {
-      <div class="ptah-motion-panel space-y-8" animate.leave="ptah-motion-leave">
-      <div class="ptah-motion-panel" animate.enter="ptah-motion-enter">
-      <!--
-        Two mutually exclusive security statements (TASK_2026_236). The built-in
-        line asserts something auditable about endpoints that ship in Ptah's
-        source. A user-typed endpoint cannot borrow that claim: Ptah neither
-        operates nor vets the host, and an OpenAI-lane entry is additionally
-        served through a translation proxy running on this machine — so the
-        custom line names the host instead of making a promise about it.
-      -->
-      <!-- D10: one text-xs line; the dot carries the tone, and the full sentence stays in the DOM and the title. -->
-      @if (authState.isCustomProviderSelected()) {
-        <div
-          class="flex min-w-0 items-center gap-[var(--ptah-space-1)] text-xs text-base-content-muted"
-          data-testid="custom-provider-security-copy"
-          [attr.title]="
-            'Your own endpoint. Credentials and prompts go from this machine to ' +
-            authState.selectedCustomHost() +
-            ' — a host you added.'
-          "
-        >
-          <span
-            class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-            aria-hidden="true"
-          ></span>
-          <p class="min-w-0 truncate">
-            <strong class="font-semibold text-base-content"
-              >Your own endpoint.</strong
-            >
-            Credentials and prompts go from this machine to
-            <code class="font-semibold">{{
-              authState.selectedCustomHost()
-            }}</code>
-            — a host you added. Ptah does not operate, vet, or monitor it, and
-            no Ptah server is involved either way.
-          </p>
-        </div>
-      } @else {
-        <div
-          class="flex min-w-0 items-center gap-[var(--ptah-space-1)] text-xs text-base-content-muted"
-          data-testid="builtin-provider-security-copy"
-        >
-          <span
-            class="h-1.5 w-1.5 shrink-0 rounded-full bg-success"
-            aria-hidden="true"
-          ></span>
-          <p class="min-w-0 truncate">
-            <strong class="font-semibold text-base-content"
-              >Runs 100% locally.</strong
-            >
-            Your credentials go directly from this machine to the AI provider —
-            no proxies, no Ptah servers involved.
-          </p>
-        </div>
-      }
-      </div>
+      <div class="ptah-motion-panel" animate.leave="ptah-motion-leave">
       <!-- Deferred like tabs 2-4: the Providers page (with its named-accounts UI) and the agents routing below it
            (CLI matrix, background model roles) are one chunk, so the eager route stays inside its bundle budget and
            one load failure shows one recovery. Deep links apply once the page renders. -->
       @defer (on immediate) {
-        <div class="ptah-motion-panel space-y-8" animate.enter="ptah-motion-enter">
+        <div class="ptah-motion-panel flex flex-col gap-[var(--ptah-gap-section)]" animate.enter="ptah-motion-enter">
         <ptah-providers-settings
           class="block"
           [focusTarget]="providersTarget()"
@@ -182,31 +78,16 @@
         />
         </div>
       } @placeholder {
-        <div class="min-h-24" aria-busy="true"></div>
+        <div aria-busy="true"><ptah-skeleton shape="block" /></div>
       } @error {
         <!-- The boot auth check lands here when no credential is set, so a failed chunk must stay
              recoverable. A remount would fail again (the failure is cached): Reload restarts the renderer. -->
-        <div
-          class="flex flex-col items-start gap-[var(--ptah-gap-heading)] rounded-lg border border-base-300 p-[var(--ptah-surface-pad)]"
-          data-testid="providers-settings-load-error"
-          role="alert"
-        >
-          <p class="text-sm text-base-content">
-            The Providers page could not load. Reload the window to try again.
-          </p>
-          <button
-            type="button"
-            ptahButton variant="primary"
-            data-testid="providers-settings-reload"
-            (click)="reloadWindow()"
-          >
-            <lucide-angular
-              [img]="RotateCwIcon"
-              class="w-3.5 h-3.5"
-              aria-hidden="true"
-            />
-            Reload
-          </button>
+        <div data-testid="providers-settings-load-error" class="flex flex-col items-start gap-ptah-controls">
+          <!-- The panel shows no projected content in the error state, so the one Reload button
+               (with its test id) follows the panel instead of the panel's own action. The panel's
+               error section is the one alert region: a second role="alert" here would announce twice. -->
+          <ptah-state-panel state="error" body="The Providers page could not load. Reload the window to try again." />
+          <button type="button" ptahButton variant="primary" data-testid="providers-settings-reload" (click)="reloadWindow()">Reload</button>
         </div>
       }
       </div>
@@ -215,17 +96,30 @@
     <!-- ============================================ -->
     <!-- Tab 2: Context Management (tab id remains orchestration) -->
     <!-- ============================================ -->
-    <!-- Tabs 2, 3 and 4 are deferred into their own chunks (the eager route is at its bundle budget);
+    <!-- Context Management, Advanced and Search & Voice are deferred into their own chunks (the eager route is at its bundle budget);
          the aria-busy placeholder keeps the harness waitForSettled waiting until they load.
          It owns no deep-link section: the CLI matrix and the background roles moved to Providers. -->
     @if (activeSettingsTab() === 'orchestration') {
-      <div class="ptah-motion-panel space-y-8" animate.leave="ptah-motion-leave">
+      <div class="ptah-motion-panel" animate.leave="ptah-motion-leave">
       @defer (on immediate) {
         <div class="ptah-motion-panel" animate.enter="ptah-motion-enter">
-        <ptah-orchestration-settings />
+        <ptah-orchestration-settings (openMatrix)="setActiveTab('matrix')" />
         </div>
       } @placeholder {
-        <div class="min-h-24" aria-busy="true"></div>
+        <div aria-busy="true"><ptah-skeleton shape="block" /></div>
+      }
+      </div>
+    }
+
+    <!-- Child page of Context Management: Decision matrix (Electron only) -->
+    @if (activeSettingsTab() === 'matrix' && isElectron) {
+      <div class="ptah-motion-panel" animate.leave="ptah-motion-leave">
+      @defer (on immediate) {
+        <div class="ptah-motion-panel" animate.enter="ptah-motion-enter">
+        <ptah-decision-matrix-page (back)="setActiveTab('orchestration')" />
+        </div>
+      } @placeholder {
+        <div aria-busy="true"><ptah-skeleton shape="block" /></div>
       }
       </div>
     }
@@ -234,37 +128,33 @@
     <!-- Tab 3: Advanced (membership, agent behaviour, output style, MCP, VS Code LM) -->
     <!-- ============================================ -->
     @if (activeSettingsTab() === 'pro-features') {
-      <div class="ptah-motion-panel space-y-8" animate.leave="ptah-motion-leave">
+      <div class="ptah-motion-panel flex flex-col gap-[var(--ptah-gap-section)]" animate.leave="ptah-motion-leave">
       @defer (on immediate) {
         <div class="ptah-motion-panel" animate.enter="ptah-motion-enter">
         <ptah-advanced-settings (modelChanged)="onModelChanged()" />
         </div>
       } @placeholder {
-        <div class="min-h-24" aria-busy="true"></div>
+        <div aria-busy="true"><ptah-skeleton shape="block" /></div>
       }
+      <!-- Same shape as the Advanced sections above it (icon, uppercase heading, note, then the
+           controls under the heading), so Setup reads as one more section of the tab. -->
       <section
-        class="settings-plate mt-[var(--ptah-gap-heading)] rounded-xl border border-base-300 bg-base-200 p-[var(--ptah-surface-pad)]"
-        aria-label="Setup"
+        class="flex flex-col gap-ptah-controls border-t border-base-content/10 pt-ptah-section"
+        aria-labelledby="settings-setup-heading"
+        data-testid="settings-setup"
+        data-glass-surface="content"
       >
-        <h2 class="mb-2 text-base font-semibold">Setup</h2>
-        <div class="flex flex-wrap gap-[var(--ptah-gap-controls)]">
-          <button
-            type="button"
-            ptahButton
-            data-testid="settings-run-onboarding-again"
-            (click)="runOnboardingAgain()"
-          >
-            Run onboarding again
-          </button>
+        <div class="flex flex-col gap-ptah-label">
+          <div class="flex items-center gap-ptah-inline">
+            <lucide-angular [img]="SetupIcon" class="w-4 h-4 text-secondary shrink-0" aria-hidden="true" />
+            <h2 id="settings-setup-heading" class="text-xs font-bold uppercase tracking-wider text-base-content">Setup</h2>
+          </div>
+          <p class="text-xs text-base-content-muted">Run the first-run steps again.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-ptah-controls">
+          <button type="button" ptahButton variant="secondary" data-testid="settings-run-onboarding-again" (click)="runOnboardingAgain()">Run onboarding again</button>
           @if (isElectron) {
-            <button
-              type="button"
-              ptahButton
-              data-testid="settings-check-claude-code"
-              (click)="checkClaudeCode()"
-            >
-              Check Claude Code
-            </button>
+            <button type="button" ptahButton variant="secondary" data-testid="settings-check-claude-code" (click)="checkClaudeCode()">Check Claude Code</button>
           }
         </div>
       </section>
@@ -275,19 +165,18 @@
     <!-- Tab 4: Search & Voice (web search + voice transcription) -->
     <!-- ============================================ -->
     @if (activeSettingsTab() === 'tools') {
-      <div class="ptah-motion-panel space-y-8" animate.leave="ptah-motion-leave">
+      <div class="ptah-motion-panel" animate.leave="ptah-motion-leave">
       @defer (on immediate) {
         <div class="ptah-motion-panel" animate.enter="ptah-motion-enter">
         <ptah-search-voice-settings />
         </div>
       } @placeholder {
-        <div class="min-h-24" aria-busy="true"></div>
+        <div aria-busy="true"><ptah-skeleton shape="block" /></div>
       }
       </div>
     }
     </div>
-  </div>
 
-  <!-- Save-on-selection feedback (SettingsSaveFeedbackService) -->
+  </ptah-settings-layout>
   <ptah-settings-toast />
 </div>

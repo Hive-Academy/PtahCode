@@ -2,6 +2,7 @@ import type { SessionAgent } from '@ptah-extension/chat';
 import {
   formatAgentDuration,
   agentRunDurationMs,
+  isRunningAgentWord,
   type AgentStatusWord,
 } from '@ptah-extension/chat-ui';
 
@@ -33,6 +34,7 @@ export const DOCK_INLINE_MAX = 5;
 export type DockGroup = 'orchestrator' | 'active' | 'finished';
 
 const STATUS_INK: Readonly<Record<AgentStatusWord, string>> = {
+  starting: 'text-info',
   running: 'text-state-run',
   waiting: 'text-state-need',
   failed: 'text-state-err',
@@ -167,7 +169,7 @@ export function agentDurationMs(
 ): number | null {
   return agentRunDurationMs(
     {
-      running: agent.status === 'running',
+      running: isRunningAgentWord(agent.status),
       startedAt: agent.startedAt,
       endedAt: agent.endedAt,
     },

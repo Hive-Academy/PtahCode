@@ -16,7 +16,6 @@ import {
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahInstrumentBandComponent,
-  PtahPageHeaderComponent,
   PtahSelectDirective,
   PtahToolbarComponent,
   type PtahInstrumentBandSegment,
@@ -33,22 +32,22 @@ import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.co
     PtahButtonDirective,
     PtahIconButtonDirective,
     PtahInstrumentBandComponent,
-    PtahPageHeaderComponent,
     PtahSelectDirective,
     PtahToolbarComponent,
   ],
   template: `
-    <ptah-page-header
-      title="Decision matrix"
-      description="The routing model uses these ratings to suggest a lane."
-      backLabel="Context management"
-      (back)="back.emit()"
-    >
-      <span status class="text-xs text-base-content-muted">{{
-        ratedMeta()
-      }}</span>
+    <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
       <button
-        actions
+        ptahButton
+        variant="ghost"
+        type="button"
+        (click)="back.emit()"
+        aria-label="Context management"
+      >
+        Context management
+      </button>
+      <span class="text-xs text-base-content-muted">{{ ratedMeta() }}</span>
+      <button
         ptahIconButton
         type="button"
         label="Refresh ratings"
@@ -57,7 +56,7 @@ import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.co
       >
         <lucide-angular [img]="RefreshIcon" aria-hidden="true" />
       </button>
-    </ptah-page-header>
+    </div>
     <ptah-instrument-band
       [segments]="segments()"
       [loading]="busy()"

@@ -13,6 +13,7 @@ import {
   NativeTabGroupComponent,
   type NativeTab,
   PtahButtonDirective,
+  PtahFormActionsComponent,
 } from '@ptah-extension/ui';
 import type { VoiceProviderConfigDto } from '@ptah-extension/shared';
 import { LocalSttPanelComponent } from './local-stt-panel.component';
@@ -45,6 +46,7 @@ const TABS: readonly NativeTab[] = [
     LocalTtsPanelComponent,
     ElevenLabsPanelComponent,
     PtahButtonDirective,
+    PtahFormActionsComponent,
   ],
   template: `
     <ptah-native-drawer [isOpen]="direction() !== null" widthClass="w-full max-w-2xl"
@@ -102,10 +104,12 @@ const TABS: readonly NativeTab[] = [
         </section>
       </ng-template>
       @if (direction() !== null) {
-        <div drawer-footer class="flex items-center justify-between gap-2 border-t border-base-300 px-4 py-3">
-          <span class="text-xs text-base-content-muted">Each control saves itself. Esc to close</span>
-          <button type="button" ptahButton variant="ghost" [disabled]="saving()" (click)="requestClose()"
-            data-testid="voice-details-close">Close</button>
+        <div drawer-footer>
+          <ptah-form-actions label="Voice details actions" flush>
+            <span start class="text-xs text-base-content-muted">Each control saves itself. Esc to close</span>
+            <button type="button" ptahButton variant="ghost" [disabled]="saving()" (click)="requestClose()"
+              data-testid="voice-details-close">Close</button>
+          </ptah-form-actions>
         </div>
       }
     </ptah-native-drawer>

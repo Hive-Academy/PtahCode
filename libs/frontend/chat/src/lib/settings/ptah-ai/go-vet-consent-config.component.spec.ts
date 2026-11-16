@@ -488,10 +488,33 @@ describe('GoVetConsentConfigComponent', () => {
     const { fixture } = mount(rpc);
     await settle(fixture);
 
-    expect(text(fixture, 'go-vet-consent-error')).toBe(
+    const error = q(fixture, 'go-vet-consent-error');
+    expect(error).not.toBeNull();
+    const errorElement = error as HTMLElement;
+    expect(errorElement.querySelector('[role="alert"]')).not.toBeNull();
+    expect(errorElement.textContent).toContain(
       'Could not read the go vet setting for this workspace.',
     );
+    expect(errorElement.querySelector('button')?.textContent?.trim()).toBe('Retry');
     expect(toggle(fixture).disabled).toBe(true);
+  });
+
+  it('clears the load error after Retry succeeds', async () => {
+    const rpc = createMockRpcService();
+    routeRpc(rpc, {
+      [GET]: [
+        () => rpcError('host detail'),
+        () => rpcSuccess(getResult()),
+      ],
+    });
+    const { fixture } = mount(rpc);
+    await settle(fixture);
+    expect(q(fixture, 'go-vet-consent-error')).not.toBeNull();
+
+    q(fixture, 'go-vet-consent-error')?.querySelector('button')?.click();
+    await settle(fixture);
+    expect(q(fixture, 'go-vet-consent-error')).toBeNull();
+    expect(text(fixture, 'go-vet-consent-root')).toBe(ROOT_A);
   });
 
   it('keeps the toggle disabled when no workspace is open', async () => {
@@ -508,7 +531,7 @@ describe('GoVetConsentConfigComponent', () => {
     expect(toggle(fixture).disabled).toBe(true);
   });
 
-  it('renders the unboxed section, table-xs rows, a daisyUI toggle switch and a plain text state (V26/V27)', async () => {
+  it('renders consent details, status and the labelled switch with the shared patterns', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult({ state: 'on' }))] });
     const { fixture } = mount(rpc);
@@ -518,35 +541,26 @@ describe('GoVetConsentConfigComponent', () => {
     expect(card?.classList).toContain('border-base-content/10');
     expect(card?.classList).not.toContain('card');
     expect(card?.classList).not.toContain('bg-base-200');
-    expect(q(fixture, 'go-vet-consent-table')?.classList).toContain('table-xs');
-    expect(q(fixture, 'go-vet-consent-root')?.tagName).toBe('TD');
+    const details = q(fixture, 'go-vet-consent-table');
+    expect(details?.tagName).toBe('PTAH-DESCRIPTION-LIST');
+    expect(Array.from(details?.querySelectorAll('dt') ?? []).map((term) => term.textContent?.trim()))
+      .toEqual(['Workspace', 'Go binary']);
+    expect(q(fixture, 'go-vet-consent-root')?.textContent).toContain(ROOT_A);
+    expect(q(fixture, 'go-vet-consent-binary')?.textContent).toContain('go');
 
     const sw = toggle(fixture);
     expect(sw.getAttribute('role')).toBe('switch');
     expect(sw.getAttribute('aria-checked')).toBe('true');
-    expect(sw.classList).toContain('toggle');
-    expect(sw.classList).toContain('toggle-sm');
-    expect(sw.classList).not.toContain('checkbox');
-    expect(q(fixture, 'go-vet-consent-toggle-target')?.classList).toContain('min-w-6');
+    expect(sw.closest('ptah-setting-row')).not.toBeNull();
+    expect(q(fixture, 'go-vet-consent-toggle-target')?.contains(sw)).toBe(true);
 
-    // A small text state beside the switch, not a second badge.
     const state = q(fixture, 'go-vet-consent-state');
-    expect(state?.classList).not.toContain('badge');
-    expect(state?.classList).toContain('text-base-content');
-    expect(state?.querySelector('.bg-success')).not.toBeNull();
-
-    // The switch row spans both columns and its label does not wrap; the
-    // Workspace / Go binary rows keep their narrow label column.
-    const labelCell = sw.closest('td');
-    expect(labelCell?.getAttribute('colspan')).toBe('2');
+    expect(state?.textContent?.trim()).toBe('On');
+    expect(state?.querySelector('ptah-status')?.getAttribute('data-ink')).toBe('done');
     const label = fixture.nativeElement.querySelector(
       'label[for="go-vet-consent-toggle"]',
     ) as HTMLElement | null;
-    expect(label?.classList).toContain('whitespace-nowrap');
-    const rowHeaders = Array.from(
-      q(fixture, 'go-vet-consent-table')?.querySelectorAll('th[scope="row"]') ?? [],
-    ).map((th) => th.textContent?.trim());
-    expect(rowHeaders).toEqual(['Workspace', 'Go binary']);
+    expect(label?.textContent).toContain('Allow go vet in this workspace');
   });
 
   it('opens the P8 confirm with Cancel focused, and Esc cancels it with focus back on the switch (V28)', async () => {
@@ -559,11 +573,23 @@ describe('GoVetConsentConfigComponent', () => {
     await settle(fixture);
 
     const confirm = q(fixture, 'go-vet-consent-confirm');
-    expect(confirm?.getAttribute('role')).toBe('group');
-    expect(confirm?.classList).toContain('border-base-300');
+    expect(confirm).not.toBeNull();
+    const confirmGroup = confirm as HTMLElement;
+    expect(confirmGroup.getAttribute('role')).toBe('group');
+    expect(confirmGroup.getAttribute('aria-describedby')?.split(' ')).toContain(
+      'go-vet-confirm-root',
+    );
+    expect(confirmGroup.querySelector('[data-testid="inline-confirm"]')).not.toBeNull();
+    const root = confirmGroup.querySelector('#go-vet-confirm-root');
+    expect(root).not.toBeNull();
+    expect(root?.textContent?.trim()).toBe(ROOT_A);
+    // One description only: the inner confirm group must not announce the root again.
+    const innerGroup = confirmGroup.querySelector('ptah-inline-confirm');
+    expect(innerGroup).not.toBeNull();
+    expect(innerGroup?.hasAttribute('aria-describedby')).toBe(false);
     expect(document.activeElement).toBe(q(fixture, 'go-vet-consent-cancel'));
 
-    confirm?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    confirmGroup.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await settle(fixture);
 
     expect(q(fixture, 'go-vet-consent-confirm')).toBeNull();
@@ -629,9 +655,10 @@ describe('GoVetConsentConfigComponent', () => {
     const { fixture } = mount(rpc);
     await settle(fixture);
 
-    expect(text(fixture, 'go-vet-consent-error')).toBe(
+    expect(text(fixture, 'go-vet-consent-error')).toContain(
       'Could not read the go vet setting for this workspace.',
     );
+    expect(q(fixture, 'go-vet-consent-error')?.querySelector('button')?.textContent?.trim()).toBe('Retry');
     expect(fixture.nativeElement.textContent).not.toContain('host detail');
   });
 

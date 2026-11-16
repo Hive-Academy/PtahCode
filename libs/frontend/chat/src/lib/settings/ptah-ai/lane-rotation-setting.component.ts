@@ -14,7 +14,11 @@ import {
   settingNotConfirmedMessage,
   settingNotSavedMessage,
 } from '../feedback/settings-save-feedback.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahSettingRowComponent,
+  PtahSkeletonComponent,
+} from '@ptah-extension/ui';
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
@@ -40,7 +44,12 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 @Component({
   selector: 'ptah-lane-rotation-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
+  imports: [
+    SettingsBusyDisabledDirective,
+    PtahButtonDirective,
+    PtahSettingRowComponent,
+    PtahSkeletonComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -50,13 +59,8 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
       data-testid="lane-rotation-setting"
     >
       <div class="border-b border-base-content/10 pb-2">
-        <div class="flex items-center justify-between gap-3">
-          <label
-            id="lane-rotation-heading"
-            for="lane-rotation-toggle"
-            class="text-base font-semibold text-base-content"
-            >{{ label }}</label
-          >
+        <span id="lane-rotation-heading" hidden>{{ label }}</span>
+        <ptah-setting-row [label]="label" controlId="lane-rotation-toggle">
           @if (load() === 'ready' && stored() !== null) {
             <input
               id="lane-rotation-toggle"
@@ -70,38 +74,61 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
               data-testid="lane-rotation-toggle"
             />
           }
-        </div>
+        </ptah-setting-row>
         <p
           id="lane-rotation-help"
           class="mt-0.5 text-xs text-base-content-muted"
         >
-          When several executors are equally suitable, Ptah cycles which one
-          it picks. Off keeps the first candidate.
+          When several executors are equally suitable, Ptah cycles which one it
+          picks. Off keeps the first candidate.
         </p>
         @if (lastPicks().length > 0) {
-          <ul class="rotation-picks mt-3 grid grid-cols-1 gap-2 text-xs" data-testid="lane-rotation-last-picks">
+          <ul
+            class="rotation-picks mt-3 grid grid-cols-1 gap-2 text-xs"
+            data-testid="lane-rotation-last-picks"
+          >
             @for (pick of lastPicks(); track pick.key) {
-              <li class="min-h-11 rounded-lg border border-base-content/20 bg-base-200/40 p-2">
-                <span class="block text-base-content-muted">Last pick ({{ names.route(pick.key).text }})</span>
-                <span class="font-medium text-base-content">{{ names.executor(pick.candidateId).text }}</span>
+              <li
+                class="min-h-11 rounded-lg border border-base-content/20 bg-base-200/40 p-2"
+              >
+                <span class="block text-base-content-muted"
+                  >Last pick ({{ names.route(pick.key).text }})</span
+                >
+                <span class="font-medium text-base-content">{{
+                  names.executor(pick.candidateId).text
+                }}</span>
                 @if (names.executor(pick.candidateId).raw; as raw) {
-                  <details class="mt-1"><summary class="flex min-h-11 cursor-pointer items-center">ID details</summary><code class="break-all">{{ raw }}</code></details>
+                  <details class="mt-1">
+                    <summary class="flex min-h-11 cursor-pointer items-center">
+                      ID details
+                    </summary>
+                    <code class="break-all">{{ raw }}</code>
+                  </details>
                 }
               </li>
             }
           </ul>
         } @else if (load() === 'ready' && !lastPicksUnavailable()) {
-          <p class="mt-2 text-xs text-base-content-muted">No recent picks yet</p>
+          <p class="mt-2 text-xs text-base-content-muted">
+            No recent picks yet
+          </p>
         }
         @if (lastPicksUnavailable()) {
-          <div class="mt-2 flex items-center gap-2 text-xs text-warning" role="status">Recent picks unavailable
-            <button type="button" ptahButton (click)="retryPicks()">Retry</button>
+          <div
+            class="mt-2 flex items-center gap-2 text-xs text-warning"
+            role="status"
+          >
+            Recent picks unavailable
+            <button type="button" ptahButton (click)="retryPicks()">
+              Retry
+            </button>
           </div>
         }
       </div>
 
       @switch (load()) {
         @case ('loading') {
+          <ptah-skeleton shape="lines" />
           <p
             class="text-xs text-base-content-muted"
             role="status"
@@ -134,8 +161,16 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
-    @container (min-width: 480px) { .rotation-picks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @container (min-width: 850px) { .rotation-picks { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @container (min-width: 480px) {
+      .rotation-picks {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @container (min-width: 850px) {
+      .rotation-picks {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
   `,
 })
 export class LaneRotationSettingComponent implements OnInit {
@@ -149,7 +184,9 @@ export class LaneRotationSettingComponent implements OnInit {
   protected readonly stored = signal<boolean | null>(null);
   protected readonly load = signal<'loading' | 'ready' | 'error'>('loading');
   protected readonly saving = signal(false);
-  protected readonly lastPicks = signal<readonly { key: string; candidateId: string }[]>([]);
+  protected readonly lastPicks = signal<
+    readonly { key: string; candidateId: string }[]
+  >([]);
   protected readonly lastPicksUnavailable = signal(false);
 
   ngOnInit(): void {
@@ -173,16 +210,25 @@ export class LaneRotationSettingComponent implements OnInit {
   private async readLastPicks(): Promise<void> {
     try {
       const params: AgentGetCapabilityMatrixParams = {};
-      const response = await this.rpc.call('agent:getCapabilityMatrix', params, { timeout: RPC_TIMEOUT_MS });
+      const response = await this.rpc.call(
+        'agent:getCapabilityMatrix',
+        params,
+        { timeout: RPC_TIMEOUT_MS },
+      );
       if (response.isSuccess()) {
         this.lastPicks.set(response.data.lastPicks ?? []);
-        this.lastPicksUnavailable.set(response.data.lastPicksUnavailable === true || response.data.lastPicks === undefined);
+        this.lastPicksUnavailable.set(
+          response.data.lastPicksUnavailable === true ||
+            response.data.lastPicks === undefined,
+        );
       } else {
         this.lastPicksUnavailable.set(true);
       }
     } catch (error: unknown) {
       // degradation-audit: reported - rotation history is optional while the setting remains usable.
-      this.logger.warn('LaneRotationSetting', 'rotation history read failed', { errorType: errorTypeOf(error) });
+      this.logger.warn('LaneRotationSetting', 'rotation history read failed', {
+        errorType: errorTypeOf(error),
+      });
       this.lastPicksUnavailable.set(true);
     }
   }
