@@ -764,11 +764,25 @@ export class CliDIContainer {
           try {
             const result = await resolver.resolve(file);
             if (result.kind === 'ok') return { repositoryId: result.identity.repoId, worktreePath: file };
-            logger.warn('Repository identity backfill could not resolve path');
+            // Only a rejected git runner (timeout, spawn failure) can be transient,
+            // and only when the path still exists: a deleted worktree also rejects.
+            // Each other code is a definitive answer, so the row gets its retry mark.
+            if (result.error === 'common-dir-git-failed') {
+              let exists = true;
+              try {
+                await c.resolve<IFileSystemProvider>(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER).realpath(file);
+              } catch (error: unknown) {
+                if (!(error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) throw error;
+                exists = false;
+              }
+              if (exists) throw new Error(`Repository identity backfill probe failed: ${result.error}`);
+            }
+            logger.debug('Repository identity backfill could not resolve path');
             return null;
           } catch (error: unknown) {
-            logger.error('Repository identity backfill failed', error instanceof Error ? error : new Error(String(error)));
-            return null;
+            const failure = error instanceof Error ? error : new Error(String(error));
+            logger.warn('Repository identity backfill probe failed', failure);
+            throw failure;
           }
         } };
       },

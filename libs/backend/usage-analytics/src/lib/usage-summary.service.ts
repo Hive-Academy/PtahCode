@@ -11,6 +11,7 @@ import { OpenCodeSource } from './sources/opencode.source';
 import { GrokSource } from './sources/grok.source';
 import { UsagePricingService } from './usage-pricing.service';
 import type { UsageContribution, UsageSource, UsageSourceResult } from './usage-source.types';
+import { setImmediate as yieldImmediate } from 'node:timers/promises';
 
 const DAY_MS = 86_400_000;
 const LEDGER_SLICE_MS = 3_600_000;
@@ -94,14 +95,17 @@ export class UsageAnalyticsService {
             ...mergeKnownCost(prior.knownCostUsd, fact.knownCostUsd),
           } : fact);
           }
-          if (signal) await new Promise<void>((resolve) => setImmediate(resolve));
+          await yieldImmediate();
         }
         if (!signal?.aborted) {
         ledgerSessionCount = await this.statsRepository.getWorkspaceSessionCount(workspaceKey, since, until);
+        await yieldImmediate();
         if (signal?.aborted) throw new Error('time-budget');
         messageCount += await this.statsRepository.getWorkspaceMessageCount(workspaceKey, since, until);
+        await yieldImmediate();
         if (signal?.aborted) throw new Error('time-budget');
         const topRows = await this.statsRepository.getWorkspaceTopSessions(workspaceKey, since, until);
+        await yieldImmediate();
         for (const row of topRows) {
           ledgerTopSessions.push(UsageTopSessionSchema.parse({
             sessionId: row.session_id,
@@ -133,11 +137,18 @@ export class UsageAnalyticsService {
     if (this.statsRepository && workspaceKey && !signal?.aborted) {
       try {
         const ids = await this.statsRepository.getWorkspaceRepositoryIds(workspaceKey, since, until);
+        await yieldImmediate();
         repositories = [];
+        let lastRepositoryYield = performance.now();
         for (const id of ids) {
           if (signal?.aborted) break;
           const totals = await this.statsRepository.getRepositoryUsageTotals(id, since, until);
           repositories.push({ ...totals, worktreePaths: totals.worktreePaths.slice(0, 1000) });
+          if (performance.now() - lastRepositoryYield >= 20) {
+            await yieldImmediate();
+            if (signal?.aborted) break;
+            lastRepositoryYield = performance.now();
+          }
         }
       } catch (error: unknown) {
         this.logger.warn('[UsageAnalytics] Repository totals unavailable', { reason: error instanceof Error ? error.name : 'unknown' });
@@ -196,7 +207,12 @@ export class UsageAnalyticsService {
         const result = read.result;
         let overflow = false;
         let interrupted = false;
+        let lastYield = performance.now();
         for (const contribution of result.contributions) {
+          if (performance.now() - lastYield >= 20) {
+            await yieldImmediate();
+            lastYield = performance.now();
+          }
           if (signal?.aborted) { interrupted = true; break; }
           if (!validContribution(contribution, since, until)) continue;
           if (sourceId === 'codex' && contribution.sessionId && this.statsRepository && workspaceKey) {

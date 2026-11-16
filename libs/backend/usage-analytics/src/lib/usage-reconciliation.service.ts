@@ -77,6 +77,7 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
   private firstTimer: NodeJS.Timeout | null = null;
   private idleDelayMs = ACTIVE_IDLE_MS;
   private afterPass?: () => Promise<void>;
+  private lastBackfillAt = 0;
   private readonly collectors: readonly ReconciliationCollector[];
 
   constructor(
@@ -97,6 +98,7 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
     if (this.started) return;
     this.started = true;
     this.idleDelayMs = ACTIVE_IDLE_MS;
+    this.lastBackfillAt = 0;
     this.firstTimer = setTimeout(() => {
       this.firstTimer = null;
       this.requestPass();
@@ -146,9 +148,10 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
     } catch (error: unknown) {
       this.logger.error('Usage reconciliation pass failed', error instanceof Error ? error : new Error('Unknown reconciliation failure'));
     } finally {
-      if (this.afterPass) {
+      if (this.afterPass && (changed || this.lastBackfillAt === 0 || Date.now() - this.lastBackfillAt >= QUIET_IDLE_MS)) {
         try {
           await this.afterPass();
+          this.lastBackfillAt = Date.now();
         } catch (error: unknown) {
           this.logger.error('Usage reconciliation after-pass hook failed', error instanceof Error ? error : new Error('Unknown after-pass failure'));
         }

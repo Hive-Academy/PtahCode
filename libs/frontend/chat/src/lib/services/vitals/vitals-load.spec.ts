@@ -141,6 +141,22 @@ describe('VitalsLoadCache', () => {
     expect(state()).toEqual(vitalsReady(5));
   });
 
+  it('keeps the default retry interval constant after repeated failures', async () => {
+    const fetch: Fetch = jest.fn().mockResolvedValue(VITALS_ERROR);
+    const cache = new VitalsLoadCache(fetch);
+    cache.read();
+    await flush();
+    jest.advanceTimersByTime(VITALS_ERROR_RETRY_MS);
+    cache.read();
+    await flush();
+    jest.advanceTimersByTime(VITALS_ERROR_RETRY_MS - 1);
+    cache.read();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    jest.advanceTimersByTime(1);
+    cache.read();
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it('does not loop when an effect reads it and the fetch fails', async () => {
     const fetch: Fetch = jest.fn().mockResolvedValue(VITALS_ERROR);
     const cache = new VitalsLoadCache(fetch);

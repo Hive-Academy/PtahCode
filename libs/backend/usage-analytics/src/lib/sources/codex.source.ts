@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { createHash } from 'node:crypto';
+import { setImmediate as yieldImmediate } from 'node:timers/promises';
 import { z } from 'zod';
 import type { UsageSource, UsageSourceResult, UsageContribution } from '../usage-source.types';
 import { FileFactsCache, inRange, workspaceMatches, type ParsedFile } from './file-facts';
@@ -44,7 +45,12 @@ export class CodexSource implements UsageSource {
   private async parse(lines: AsyncIterable<string>, file: string, signal?: AbortSignal): Promise<ParsedFile> {
     const facts: UsageContribution[] = []; let malformed = 0;
     let model = 'unknown'; let cwd: string | undefined; let sessionId: string | undefined;
+    let lastYield = performance.now();
     for await (const line of lines) {
+      if (performance.now() - lastYield >= 20) {
+        await yieldImmediate();
+        lastYield = performance.now();
+      }
       if (signal?.aborted) break;
       let raw: unknown;
       try { raw = JSON.parse(line); } catch { malformed++; continue; }

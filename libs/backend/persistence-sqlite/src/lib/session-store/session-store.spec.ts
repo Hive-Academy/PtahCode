@@ -10,6 +10,7 @@ import { SessionStoreDatabase } from './session-store-database';
 import { SqliteSessionRecordRepository } from './sqlite-session-record-repository';
 import { SqliteHostRunLeaseRepository } from './sqlite-host-run-lease-repository';
 import { SESSION_STORE_MIGRATIONS } from './session-store-migrations';
+import { SqliteMigrationRunner } from '../migration-runner';
 
 interface RawDatabase {
   exec(sql: string): unknown;
@@ -138,6 +139,31 @@ describeDb('SessionStoreDatabase', () => {
         'host_run_leases',
       ]),
     );
+    const columns = db.prepare('PRAGMA table_info(session_usage_turns)').all() as { name: string }[];
+    const indexes = db.prepare('PRAGMA index_list(session_usage_turns)').all() as { name: string }[];
+    expect(columns.map((column) => column.name)).toContain('repository_backfill_attempted_at_ms');
+    expect(indexes.map((index) => index.name)).toEqual(expect.arrayContaining([
+      'idx_session_usage_backfill_rowid', 'idx_session_usage_codex_run',
+    ]));
+    store.close();
+  });
+
+  it('upgrades a populated version 7 session store without losing rows', async () => {
+    const file = path.join(dir, 'upgrade.sqlite');
+    const oldDb = openDb(file);
+    await new SqliteMigrationRunner(oldDb, logger).applyAll(SESSION_STORE_MIGRATIONS.slice(0, -1), { vecExtensionLoaded: false });
+    oldDb.exec(`INSERT INTO session_usage_turns
+      (session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,cost_authority,source,revision)
+      VALUES ('saved','codex-checkpoint','run','turn','model','event',1,'codex','unpriced','live',1)`);
+    oldDb.close();
+    const store = new SessionStoreDatabase(file, logger, openDb);
+    const db = await store.ready();
+    const row = db.prepare('SELECT session_id, repository_backfill_attempted_at_ms FROM session_usage_turns').get() as { session_id: string; repository_backfill_attempted_at_ms: number | null };
+    expect(row).toEqual({ session_id: 'saved', repository_backfill_attempted_at_ms: null });
+    const indexes = db.prepare('PRAGMA index_list(session_usage_turns)').all() as { name: string }[];
+    expect(indexes.map((index) => index.name)).toEqual(expect.arrayContaining([
+      'idx_session_usage_backfill_rowid', 'idx_session_usage_codex_run',
+    ]));
     store.close();
   });
 

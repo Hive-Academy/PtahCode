@@ -24,6 +24,7 @@ export type UsageVitalsRange = 7 | 90;
  * summary (same budget as `analytics-usage.store.ts`).
  */
 export const USAGE_VITALS_TIMEOUT_MS = 40_000;
+export const USAGE_VITALS_ERROR_RETRY_MS = 30_000;
 
 /**
  * Most entries kept. The screens read at most four keys at once (all
@@ -62,7 +63,8 @@ export class UsageVitalsCache {
       // Re-insert so eviction drops the least recently read entry.
       this.entries.delete(key);
     } else {
-      entry = new VitalsLoadCache(() => this.fetch(workspace, range));
+      entry = new VitalsLoadCache(() => this.fetch(workspace, range), USAGE_VITALS_ERROR_RETRY_MS,
+        { exponentialBackoff: true });
     }
     this.entries.set(key, entry);
     this.evictOverflow();

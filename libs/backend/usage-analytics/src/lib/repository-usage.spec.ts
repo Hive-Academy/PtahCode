@@ -10,7 +10,8 @@ function fixture(): { raw: DatabaseSync; repository: SessionStatsRepository } {
     CREATE TABLE session_usage_turns (session_id TEXT, repository_id TEXT, worktree_path TEXT,
       workspace_key TEXT, billable INTEGER, occurred_at_ms INTEGER, input_tokens INTEGER,
       output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
-      known_cost_micro_usd INTEGER, source TEXT);`);
+      known_cost_micro_usd INTEGER, source TEXT, repository_backfill_attempted_at_ms INTEGER);
+    CREATE INDEX idx_session_usage_backfill_rowid ON session_usage_turns (repository_id);`);
   const db: Pick<SqliteDatabase, 'exec' | 'prepare'> = {
     exec: (sql) => raw.exec(sql),
     prepare: (sql) => {
@@ -40,7 +41,7 @@ describe('repository usage identity', () => {
   it('aggregates two worktrees, retains paths and exposes unknown coverage', async () => {
     const { raw, repository } = fixture();
     try {
-      const insert = raw.prepare(`INSERT INTO session_usage_turns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const insert = raw.prepare(`INSERT INTO session_usage_turns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`);
       insert.run('a', 'git-common', '/repo/main', '/repo/main', 1, 10, 5, 0, 0, 0, 100, 'live');
       insert.run('b', 'git-common', '/repo/linked', '/repo/linked', 1, 20, null, 3, 0, 0, null, 'replay');
       insert.run('c', 'git-common', '/repo/linked', '/repo/linked', 0, 20, 999, 0, 0, 0, 999, 'replay');
@@ -54,7 +55,7 @@ describe('repository usage identity', () => {
   it('backfills existing and later live rows while isolating a non-git workspace', async () => {
     const { raw, repository } = fixture();
     try {
-      const insert = raw.prepare(`INSERT INTO session_usage_turns VALUES (?, NULL, NULL, ?, 1, 10, 1, 0, 0, 0, NULL, 'live')`);
+      const insert = raw.prepare(`INSERT INTO session_usage_turns VALUES (?, NULL, NULL, ?, 1, 10, 1, 0, 0, 0, NULL, 'live', NULL)`);
       insert.run('a', '/repo/main');
       insert.run('b', '/repo/linked');
       insert.run('c', '/scratch');

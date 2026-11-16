@@ -22,6 +22,32 @@ import { SessionStatsRepository } from '@ptah-extension/persistence-sqlite';
 describe('UsageAnalyticsService', () => {
   afterEach(() => jest.restoreAllMocks());
 
+  it('lets a timer run during a long contribution loop', async () => {
+    const contribution: UsageContribution = {
+      key: 'one', sourceId: 'codex', timestampMs: Date.now(), providerId: 'codex',
+      modelId: 'test', inputUncachedTokens: 1, cacheReadTokens: 0,
+      cacheWriteTokens: 0, outputTokens: 1,
+    };
+    const empty = { contributions: [], status: { sourceId: 'external', status: 'complete' as const } };
+    jest.spyOn(CodexSource.prototype, 'read').mockResolvedValue({ ...empty, contributions: [contribution, { ...contribution, key: 'two' }] });
+    for (const source of [OpenCodeSource, GrokSource, CliSessionSource]) jest.spyOn(source.prototype, 'read').mockResolvedValue(empty);
+    let timerFired = false;
+    let sawTimerAtSecondPrice = false;
+    let calls = 0;
+    const service = new UsageAnalyticsService({ read: async () => empty }, { price: async () => {
+      calls++;
+      if (calls === 1) {
+        setTimeout(() => { timerFired = true; }, 0);
+        const until = performance.now() + 25;
+        while (performance.now() < until) { /* model a costly synchronous price lookup */ }
+      } else sawTimerAtSecondPrice = timerFired;
+      return { costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced', priceSource: 'unavailable' };
+    } }, { warn: jest.fn() });
+    await service.summarize({ range: 7 }, '/work');
+    expect(calls).toBe(2);
+    expect(sawTimerAtSecondPrice).toBe(true);
+  });
+
   it('includes repository totals for identities in the requested workspace', async () => {
     const repository = new SessionStatsRepository({ ready: async () => { throw new Error('unused'); } });
     jest.spyOn(repository, 'getWorkspaceCoverage').mockResolvedValue(null);
@@ -48,6 +74,36 @@ describe('UsageAnalyticsService', () => {
       repositoryId: 'repo-a', knownCostMicroUsd: 250000, hasUnknownTokens: true,
     })]);
     expect(summary.repositories?.[0].worktreePaths).toHaveLength(1000);
+  });
+
+  it('lets a timer run between costly repository totals queries', async () => {
+    const repository = new SessionStatsRepository({ ready: async () => { throw new Error('unused'); } });
+    jest.spyOn(repository, 'getWorkspaceCoverage').mockResolvedValue(null);
+    jest.spyOn(repository, 'getWorkspaceUsageGroups').mockResolvedValue([]);
+    jest.spyOn(repository, 'getWorkspaceSessionCount').mockResolvedValue(0);
+    jest.spyOn(repository, 'getWorkspaceMessageCount').mockResolvedValue(0);
+    jest.spyOn(repository, 'getWorkspaceTopSessions').mockResolvedValue([]);
+    jest.spyOn(repository, 'getWorkspaceRepositoryIds').mockResolvedValue(['repo-a', 'repo-b']);
+    let timerFired = false;
+    let sawTimerAtSecondQuery = false;
+    jest.spyOn(repository, 'getRepositoryUsageTotals').mockImplementation(async (id) => {
+      if (id === 'repo-a') {
+        setTimeout(() => { timerFired = true; }, 0);
+        const until = performance.now() + 25;
+        while (performance.now() < until) { /* model synchronous SQLite work */ }
+      } else sawTimerAtSecondQuery = timerFired;
+      return { repositoryId: id, worktreePaths: [], inputTokens: 0, outputTokens: 0,
+        cacheReadTokens: 0, cacheWriteTokens: 0, knownCostMicroUsd: 0, hasUnknownTokens: false };
+    });
+    const empty = { contributions: [], status: { sourceId: 'external', status: 'complete' as const } };
+    for (const source of [CodexSource, OpenCodeSource, GrokSource, CliSessionSource]) {
+      jest.spyOn(source.prototype, 'read').mockResolvedValue(empty);
+    }
+    const service = new UsageAnalyticsService({ read: async () => empty },
+      { price: async () => ({ costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced', priceSource: 'unavailable' }) },
+      { warn: jest.fn() }, repository);
+    await service.summarize({ range: 7 }, '/work/a');
+    expect(sawTimerAtSecondQuery).toBe(true);
   });
 
   it('does not start ledger SQL when the budget has expired', async () => {
