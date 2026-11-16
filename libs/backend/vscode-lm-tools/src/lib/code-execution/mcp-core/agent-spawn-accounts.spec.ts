@@ -16,7 +16,7 @@ import type {
   AgentProcessManager,
   CliDetectionService,
 } from '@ptah-extension/cli-agent-runtime';
-import { SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
+import { AgentId, SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { AgentSpawnArgsSchema } from './agent-spawn-args.schema';
 import {
@@ -81,6 +81,10 @@ function makeHarness(): Harness {
     );
   const processManager: Partial<AgentProcessManager> = {
     spawn,
+    beginSpawn: jest.fn(() => ({ agentId: AgentId.from('aaaaaaaa-bbbb-4ccc-8ddd-000000000001'), startedAt: '2026-10-24T00:00:00.000Z' })),
+    executeSpawn: jest.fn((_ticket, request) => spawn(request)),
+    markSpawnReplied: jest.fn(() => true),
+    failSpawn: jest.fn(),
     spawnFromSdkHandle,
     prepareSdkHandleSpawn,
     reserveAgentId: jest.fn().mockReturnValue('reserved-1'),

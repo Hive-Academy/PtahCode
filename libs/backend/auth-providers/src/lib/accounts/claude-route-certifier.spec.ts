@@ -359,6 +359,23 @@ describe('ClaudeRouteCertifier.certify', () => {
       await expect(h.certifier.certify(certifyRequest(route))).resolves.toEqual({ ok: false, code: 'identity-mismatch', terminated: true });
     });
 
+    it('certifies a legacy email-only profile and launches with the full reference', async () => {
+      const h = harness();
+      const route = newRoute();
+      h.statusFor.set(route.canonicalPath, statusJson({ orgName: 'Later Org', configDirectory: route.canonicalPath }));
+      const result = await h.certifier.certify(certifyRequest(route));
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.launch.identityReference).toBe(claudeIdentityReference(EMAIL, 'Later Org'));
+    });
+
+    it('refuses a different stored full-form reference', async () => {
+      const h = harness();
+      const route = newRoute();
+      h.statusFor.set(route.canonicalPath, statusJson({ orgName: 'Later Org', configDirectory: route.canonicalPath }));
+      await expect(h.certifier.certify(certifyRequest(route, claudeIdentityReference(EMAIL, 'Other Org'))))
+        .resolves.toMatchObject({ ok: false, code: 'identity-mismatch' });
+    });
+
     it('class P with a different config directory is identity-mismatch', async () => {
       const h = harness();
       const route = newRoute();

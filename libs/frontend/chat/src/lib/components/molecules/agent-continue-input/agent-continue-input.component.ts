@@ -13,7 +13,7 @@ import { laneGuardStopText } from '../agent-card/agent-card-header.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (
-      visible() ||
+      visible() || agent().status === 'starting' ||
       (variant() === 'composer' &&
         (agent().status === 'running' ||
           agent().status === 'starting' ||
@@ -35,7 +35,7 @@ import { laneGuardStopText } from '../agent-card/agent-card-header.component';
               <ng-container laneControls [ngTemplateOutlet]="controls" />
             }
           </ptah-lane-composer>
-        } @else if (variant() === 'composer') {
+        } @else if (variant() === 'composer' || agent().status === 'starting') {
           <ng-container [ngTemplateOutlet]="controls" />
         }
         @if (variant() === 'composer' && terminalStatus(); as message) {
@@ -44,7 +44,7 @@ import { laneGuardStopText } from '../agent-card/agent-card-header.component';
       </div>
     }
     <ng-template #controls>
-      @if (agent().status === 'running') {
+      @if (agent().status === 'running' || agent().status === 'starting') {
         <button type="button" [class]="stopButtonClass" aria-label="Stop generating" title="Stop generating"
           [disabled]="stopPending()" (click)="stopRequested.emit($event)">
           @if (stopPending()) { <span class="loading loading-spinner loading-xs"></span> }

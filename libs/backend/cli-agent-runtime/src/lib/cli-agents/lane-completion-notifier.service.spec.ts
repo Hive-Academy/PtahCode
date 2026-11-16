@@ -21,7 +21,7 @@ import {
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
-import { AgentId, type AgentProcessInfo } from '@ptah-extension/shared';
+import { AgentId, parseLaneEnvelope, type AgentProcessInfo } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { IFileSystemProvider } from '@ptah-extension/platform-core';
 import type { SessionUsageSink } from '@ptah-extension/agent-sdk';
@@ -1281,7 +1281,8 @@ describe('terminal read reconciliation', () => {
       deliverables: ['report.md'],
     }), { reportsDelivered: 0, reportAttempts: 1, reportsFailed: 1 });
     expect(result.signal?.verdict).toBe('delivered');
-    expect(h.envelope()).toContain('reportsFailed="1"');
+    expect(h.envelope()).toContain('reports-failed="1"');
+    expect(parseLaneEnvelope(h.envelope() ?? '')?.kind).toBe('completed');
     expect(h.envelope()).toContain('Next: 1 report attempts failed');
   });
 });

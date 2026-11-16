@@ -335,7 +335,9 @@ describe('AgentProcessManager account reference lifecycle', () => {
     const spawned = manager.spawn({ cli: CLAUDE, task: 'next', resumeSessionId: 'sdk-session', timeout: 0 });
     for (let i = 0; i < 30; i++) await Promise.resolve();
     expect(registry.persistReference).toHaveBeenCalledWith(reference, 'sdk-session');
-    expect(manager.listTrackedAgents()).toHaveLength(0);
+    expect(manager.listTrackedAgents()).toEqual([
+      expect.objectContaining({ status: 'starting' }),
+    ]);
     checkpoint.resolve();
     await spawned;
     expect(laneAccountFields(manager.findAgentInfo(manager.listTrackedAgents()[0].agentId)!)).toEqual(reference);

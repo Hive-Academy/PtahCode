@@ -18,6 +18,11 @@ export interface TrackedAgent {
   /** Warning withheld at a turn boundary; attached to the next parent message once. */
   heldBudgetWarning?: string;
   info: AgentProcessInfo;
+  /** Admission has been returned to an MCP caller. */
+  spawnReplied?: boolean;
+  /** CLI label was filled only to satisfy the record shape. */
+  provisionalCli?: boolean;
+  admissionTimer?: NodeJS.Timeout;
   /** Child process for CLI-based agents, null for SDK-based agents */
   process: ChildProcess | null;
   sdkHandle?: SdkHandle;

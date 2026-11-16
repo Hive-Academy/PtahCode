@@ -69,6 +69,9 @@ import {
   PtahButtonDirective,
   PtahFieldComponent,
   PtahInputDirective,
+  PtahAlertComponent,
+  PtahStatePanelComponent,
+  PtahSkeletonComponent,
 } from '@ptah-extension/ui';
 
 /**
@@ -112,6 +115,9 @@ const CONTROL =
     PtahButtonDirective,
     PtahFieldComponent,
     PtahInputDirective,
+    PtahAlertComponent,
+    PtahStatePanelComponent,
+    PtahSkeletonComponent,
   ],
   template: `
     <div
@@ -315,26 +321,26 @@ const CONTROL =
               </p>
             </div>
             @if (state.connections().status === 'error') {
-              <div role="alert" [class]="readError" data-read-error="connections">
+              <ptah-alert tone="error" [compact]="true" live="assertive" data-read-error="connections">
                 <p class="min-w-0">
                   Providers could not be loaded. Your saved settings have not
                   changed.
                 </p>
-                <button
-                  type="button"
-                  [class]="retryControl"
+                <button alertAction type="button" ptahButton variant="ghost"
                   (click)="state.refreshConnections()"
                 >
                   Retry providers
                 </button>
-              </div>
+              </ptah-alert>
             }
             @if (
               state.connections().status === 'ready' && connections().length === 0
             ) {
-              <p class="text-sm text-base-content-muted">
-                No connections configured. Connect a provider to get started.
-              </p>
+              <ptah-state-panel state="empty" title="No connections configured."
+                body="Connect a provider to get started." />
+            }
+            @if (state.connections().status === 'loading') {
+              <div aria-label="Loading connections"><ptah-skeleton [lines]="2" size="sm" /></div>
             }
             @if (filter() && connections().length && !shownConnections().length) {
               <p
@@ -355,9 +361,9 @@ const CONTROL =
             }
             <!-- Compact cards (≤ 80 px): the whole card opens the drawer, which holds every per-state action but one.
                  Rows come from the CONTAINER width (auto-fit: empty tracks collapse, so a few cards share the whole row).
-                 Each column is at least 22 rem; below 22 rem the one column shrinks to the container (onboarding's 400 px content area). -->
+                 Each column is at least 27 rem; below 27 rem the one column shrinks to the container (onboarding's 400 px content area). -->
             <div
-              class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] items-start gap-2"
+              class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,27rem),1fr))] items-start gap-2"
               data-testid="connections-grid"
             >
               @for (connection of shownConnections(); track connection.id) {

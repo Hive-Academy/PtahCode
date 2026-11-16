@@ -298,7 +298,10 @@ export class ClaudeRouteCertifier {
     // Step 6b: class O refuses before any identity comparison (D14 note 2).
     if (status.accountClass !== 'P') return this.unsupportedSource('account-class', terminated);
     if (profile.identityRef === null) return refuse('identity-unproved', terminated);
-    if (!status.configDirectoryMatches || status.identityReference !== profile.identityRef) {
+    if (status.identityReference === null) return refuse('identity-unproved', terminated);
+    if (!status.configDirectoryMatches ||
+      (status.identityReference !== profile.identityRef &&
+        !(status.organizationPresent && status.emailOnlyReference === profile.identityRef))) {
       return refuse('identity-mismatch', terminated);
     }
 
@@ -325,7 +328,7 @@ export class ClaudeRouteCertifier {
         settingSources: Object.freeze([...request.settingSources]),
         policy: context.policy,
         accountClass: 'personal',
-        identityReference: profile.identityRef,
+        identityReference: status.identityReference,
       }),
     };
   }

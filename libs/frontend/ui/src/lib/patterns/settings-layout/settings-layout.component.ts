@@ -169,8 +169,8 @@ const NAV_CLASS = [
                 [attr.title]="tab.disabled && tab.disabledReason ? tab.disabledReason : null"
                 [tabIndex]="navMode() === 'tabs' ? (i === focusIndex() ? 0 : -1) : 0"
                 (click)="activate(tab)"
-                (keydown)="navMode() === 'tabs' && onKeydown($event)"
-                (focus)="navMode() === 'tabs' && focusIndex.set(i)"
+                (keydown)="onKeydown($event)"
+                (focus)="onTabFocus(i)"
               >
                 @if (tab.icon; as icon) {
                   <lucide-angular
@@ -358,7 +358,17 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
     this.selectedChange.emit(tab.id);
   }
 
+  protected onTabFocus(index: number): void {
+    if (this.navMode() === 'tabs') this.focusIndex.set(index);
+  }
+
+  /**
+   * Roving keys apply to tabs mode only. The check is here, not in the template: a template
+   * expression that returns false makes Angular call preventDefault, which blocks Tab, Enter
+   * and Space on navigation links.
+   */
   protected onKeydown(event: KeyboardEvent): void {
+    if (this.navMode() !== 'tabs') return;
     const tabs = this.tabs();
     const count = tabs.length;
     if (count === 0) return;
