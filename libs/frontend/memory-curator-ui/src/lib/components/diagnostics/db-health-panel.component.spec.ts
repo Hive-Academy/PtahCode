@@ -156,10 +156,31 @@ describe('DbHealthPanelComponent', () => {
     const fixture = TestBed.createComponent(DbHealthPanelComponent);
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
+    const meter = root.querySelector(
+      'ptah-meter[data-testid="embedder-progress"]',
+    );
     expect(
-      root.querySelector('[data-testid="embedder-progress"]'),
-    ).not.toBeNull();
+      meter
+        ?.querySelector('[role="progressbar"]')
+        ?.getAttribute('aria-valuenow'),
+    ).toBe('42');
     expect(root.textContent ?? '').toContain('42%');
+  });
+
+  it('shows indeterminate download progress when percent is unknown', () => {
+    recovery.embedderDownloading.set(true);
+    recovery.embedderStatus.set({ ready: false, downloading: true });
+    const fixture = TestBed.createComponent(DbHealthPanelComponent);
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    const meter = root.querySelector(
+      'ptah-meter[data-testid="embedder-progress"]',
+    );
+    const bar = meter?.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute('aria-label')).toBe('ONNX model download');
+    expect(bar?.hasAttribute('aria-valuenow')).toBe(false);
+    expect(root.textContent ?? '').toContain('In progress');
   });
 
   it('renders toast when lastToast is set and dismisses it on click', () => {
