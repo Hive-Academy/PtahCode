@@ -50,7 +50,11 @@ import {
   acknowledgeTerminalRead,
 } from '@ptah-extension/cli-agent-runtime';
 import { AgentSpawnArgsSchema } from './agent-spawn-args.schema';
-import { AgentSpawnDedupe, agentSpawnTiming } from './agent-spawn-dedupe';
+import {
+  AgentSpawnDedupe,
+  agentSpawnTiming,
+  type AgentSpawnTiming,
+} from './agent-spawn-dedupe';
 import { isSpawnReplayValid } from './agent-spawn-replay-status';
 import {
   AgentMessageAckArgsSchema,
@@ -1178,8 +1182,12 @@ async function handleIndividualTool(
         let spawnedAt: number | undefined;
         let agentId: string | undefined;
         let spawnCli: string | undefined;
-        const namespaceTiming = {
-          namespaceResolutionMs: null as number | null,
+        const namespaceTiming: AgentSpawnTiming = {
+          namespaceResolutionMs: null,
+          skillsMs: null,
+          roleMs: null,
+          guidanceMs: null,
+          pluginPathsMs: null,
         };
         try {
           const callerSessionId = request._callerSessionId?.trim() || undefined;
@@ -1436,6 +1444,10 @@ async function handleIndividualTool(
                 ? null
                 : Math.round(gatedAt - dedupedAt),
             namespaceResolutionMs: namespaceTiming.namespaceResolutionMs,
+            skillsMs: namespaceTiming.skillsMs,
+            roleMs: namespaceTiming.roleMs,
+            guidanceMs: namespaceTiming.guidanceMs,
+            pluginPathsMs: namespaceTiming.pluginPathsMs,
             spawnMs:
               spawnedAt === undefined || gatedAt === undefined
                 ? null

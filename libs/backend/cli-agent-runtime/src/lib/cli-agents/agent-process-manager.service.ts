@@ -9,6 +9,7 @@
  * - Cross-platform process termination (SIGTERM/taskkill)
  */
 import { randomUUID } from 'node:crypto';
+import { SpawnStepTiming } from './spawn-step-timing';
 import { laneMcpTokenCapability } from './lane-mcp-token-rule';
 import { worktreeMainRoot } from './git-main-checkout-root';
 import { injectable, inject } from 'tsyringe';
@@ -537,7 +538,15 @@ export class AgentProcessManager {
    * B10).
    */
   async spawn(request: SpawnAgentRequest): Promise<SpawnAgentResult> {
-    await this.reserveSpawnSlot();
+    try {
+      await this.reserveSpawnSlot();
+    } catch (error: unknown) {
+      this.logger.info('[AgentProcessManager] spawn step timing', {
+        cli: request.cli ?? null, agentId: null, outcome: 'error',
+        ...new SpawnStepTiming().result(),
+      });
+      throw error;
+    }
     try {
       return await this.doSpawn(request);
     } finally {
@@ -553,6 +562,11 @@ export class AgentProcessManager {
    * Re-checking here would double-count that reservation.
    */
   private async doSpawn(request: SpawnAgentRequest): Promise<SpawnAgentResult> {
+    const timing = new SpawnStepTiming();
+    let timedCli: CliType | null = request.cli ?? null;
+    let timedAgentId: string | null = null;
+    let outcome: 'ok' | 'error' = 'error';
+    try {
     this.logger.info('[AgentProcessManager] Spawn request received', {
       requestedCli: request.cli ?? 'auto-detect',
       task:
@@ -564,6 +578,7 @@ export class AgentProcessManager {
       taskFolder: request.taskFolder,
     });
     const cli = request.cli ?? (await this.spawnEnvironment.preferredCli());
+    timedCli = cli;
     if (!cli) {
       throw new Error(
         'No CLI agent available. Install Codex CLI, Copilot, or Ptah CLI ' +
@@ -576,6 +591,7 @@ export class AgentProcessManager {
       source: request.cli ? 'user-specified' : 'auto-detected',
     });
     const detection = await this.cliDetection.getDetection(cli);
+    timing.mark('detectionMs');
     if (!detection || !detection.installed) {
       this.logger.error('[AgentProcessManager] CLI not installed', {
         cli,
@@ -615,18 +631,22 @@ export class AgentProcessManager {
       cli,
       workingDirectory,
     );
+    timing.mark('validationMs');
     // AFTER validation, BEFORE the process exists. `workingDirectory` may be a
     // sub-package of a monorepo (E14) — the preflight resolves it to the
     // workspace root, which is where every CLI-discoverable directory lives.
     await this.spawnEnvironment.runHarnessPreflight(workingDirectory);
+    timing.mark('preflightMs');
     const mcpPort =
       request.attachMcp !== false && adapter.supportsMcp !== false
         ? await this.spawnEnvironment.mcpPort()
         : undefined;
+    timing.mark('mcpPortMs');
     const gated = request.resumeSessionId
       ? await this.gateResume(request.task, request.resumeSessionId, cli)
       : undefined;
-    return this.doSpawnSdk({
+    timing.mark('resumeGateMs');
+    const result = await this.doSpawnSdk({
       // Only a real resume keeps the stored run and its reference. A fresh
       // handoff is a new run, so the old reference is not forwarded (the
       // binding checkpoint would refuse the new run as `invalid-bound`).
@@ -660,7 +680,14 @@ export class AgentProcessManager {
         permission: request.permission,
         network: request.network,
       },
-    });
+    }, timing, (id) => { timedAgentId = id; });
+    outcome = 'ok';
+    return result;
+    } finally {
+      this.logger.info('[AgentProcessManager] spawn step timing', {
+        cli: timedCli, agentId: timedAgentId, outcome, ...timing.result(),
+      });
+    }
   }
 
   /**
@@ -991,6 +1018,8 @@ export class AgentProcessManager {
    */
   private async doSpawnSdk(
     options: SdkSpawnOptions,
+    timing?: SpawnStepTiming,
+    onAgentId?: (id: string) => void,
   ): Promise<SpawnAgentResult> {
     const {
       runSdk,
@@ -1008,6 +1037,7 @@ export class AgentProcessManager {
       originalTask,
     } = options;
     const agentId = AgentId.create();
+    onAgentId?.(agentId);
     const startedAt = new Date().toISOString();
     const previous = previousResumeRecord(
       this.agents.values(),
@@ -1193,7 +1223,16 @@ export class AgentProcessManager {
         instructionFileStore: this.instructionFiles,
         ...(request.phase ? { phase: request.phase } : {}),
       });
+      timing?.mark('runSdkMs');
     } catch (error: unknown) {
+      // A Node `spawn EINVAL` error carries the code `EINVAL`, so the wording
+      // is checked even when a code is present.
+      if (error instanceof Error && (
+        ('code' in error && error.code === 'ENOENT') ||
+        /ENOENT|spawn EINVAL/i.test(error.message)
+      )) {
+        this.cliDetection.dropDetection(cli);
+      }
       // The spawn failure is the error the caller needs; the cleanup behind
       // it must never replace it (4332578869).
       await this.removeInstructionFiles(agentId);
@@ -1248,6 +1287,7 @@ export class AgentProcessManager {
         selectedEffort: laneEffort.effort ?? 'none',
       },
     );
+    timing?.mark('trackMs');
     return resumeDecision ? { ...spawned, resumeDecision } : spawned;
   }
 
