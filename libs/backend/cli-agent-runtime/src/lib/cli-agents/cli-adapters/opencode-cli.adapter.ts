@@ -444,7 +444,9 @@ export class OpencodeCliAdapter implements CliAdapter {
       };
 
       const timer = setTimeout(() => {
-        child.kill();
+        void child.whenSpawned.then((pid) => {
+          if (pid && !child.killed) void killProcessTree(pid);
+        });
         finish({ stdout: '', exitCode: null, timedOut: true, errored: false });
       }, timeoutMs);
 
@@ -907,7 +909,9 @@ export class OpencodeCliAdapter implements CliAdapter {
           if (launch.expectedSessionId && event.sessionID !== launch.expectedSessionId) {
             sessionMismatch = true;
             emitSegment({ type: 'error', content: 'session-mismatch: OpenCode resumed a different session' });
-            child.kill();
+            void child.whenSpawned.then((pid) => {
+              if (pid && !child.killed) void killProcessTree(pid);
+            });
             return false;
           }
           boundSessionId = event.sessionID;

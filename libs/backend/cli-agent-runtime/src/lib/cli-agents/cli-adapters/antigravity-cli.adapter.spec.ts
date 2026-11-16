@@ -159,6 +159,19 @@ describe('AntigravityCliAdapter', () => {
   });
 
   describe('detect()', () => {
+    it('tree-kills a timed-out help probe', async () => {
+      jest.useFakeTimers();
+      try {
+        mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+        mockProbeCliVersion.mockResolvedValue('agy future-version');
+        const detecting = new AntigravityCliAdapter().detect();
+        await jest.advanceTimersByTimeAsync(8000);
+        await detecting;
+        expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
+        expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+        expect(currentChild?.kill).not.toHaveBeenCalled();
+      } finally { jest.useRealTimers(); }
+    });
     it('reports installed when resolveCliPath finds the binary', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
       mockProbeCliVersion.mockResolvedValue('agy 1.1.3');
@@ -204,6 +217,19 @@ describe('AntigravityCliAdapter', () => {
   });
 
   describe('listModels()', () => {
+    it('tree-kills the model probe once on timeout', async () => {
+      jest.useFakeTimers();
+      try {
+        mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+        const models = adapter.listModels();
+        await Promise.resolve();
+        await jest.advanceTimersByTimeAsync(8000);
+        expect(await models).toEqual([]);
+        expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
+        expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+        expect(currentChild?.kill).not.toHaveBeenCalled();
+      } finally { jest.useRealTimers(); }
+    });
     it('old format: one spaced label per line still lists models', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
       const models = adapter.listModels();

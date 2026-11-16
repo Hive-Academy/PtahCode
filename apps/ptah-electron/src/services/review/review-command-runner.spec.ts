@@ -11,6 +11,7 @@ jest.mock('node:child_process', () => {
 });
 
 const repoA = { owner: 'Hive-Academy', name: 'PtahCode' } as const;
+const logger = { error: jest.fn() };
 
 function mockChild(largeOutput: boolean): childProcess.ChildProcess {
   const stdout = new PassThrough();
@@ -27,6 +28,58 @@ function mockChild(largeOutput: boolean): childProcess.ChildProcess {
 }
 
 describe('ReviewCommandRunner', () => {
+  it.each(['timeout', 'abort', 'output cap', 'exited'] as const)(
+    '%s uses the tree stop only while the child is live', async (reason) => {
+      jest.useFakeTimers();
+      const root = await mkdtemp(join(tmpdir(), 'ptah-review-stop-'));
+      const checkout = join(root, 'repo');
+      const source = join(root, 'attempts', 'claim', 'src');
+      await mkdir(checkout);
+      await mkdir(source, { recursive: true });
+      const child = Object.assign(new childProcess.ChildProcess(), {
+        stdout: new PassThrough(), stderr: new PassThrough(),
+      });
+      Object.defineProperty(child, 'pid', { value: 43210, configurable: true });
+      const directKill = jest.spyOn(child, 'kill').mockReturnValue(true);
+      let spawned: () => void = () => undefined;
+      const spawnReady = new Promise<void>((resolve) => { spawned = resolve; });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => { spawned(); return child; });
+      const killTree = jest.fn(async () => undefined);
+      const controller = new AbortController();
+      const runner = new ReviewCommandRunner(
+        async () => ({ repoRoot: checkout, attemptsRoot: join(root, 'attempts') }),
+        { error: jest.fn() }, killTree,
+      );
+      try {
+        const result = runner.run(repoA, 'node', ['--version'], source, 100, controller.signal);
+        await spawnReady;
+        if (reason === 'exited') {
+          Object.defineProperty(child, 'exitCode', { value: 0, configurable: true });
+          child.emit('exit', 0, null);
+          controller.abort();
+        } else if (reason === 'timeout') {
+          await jest.advanceTimersByTimeAsync(100);
+          controller.abort();
+        } else if (reason === 'abort') {
+          controller.abort();
+          controller.abort();
+        } else {
+          child.stdout.emit('data', Buffer.alloc(1_000_001, 'x'));
+          controller.abort();
+        }
+        child.emit('close', 0, null);
+        await expect(result).resolves.toMatchObject({
+          exitCode: 0, timedOut: true,
+        });
+        expect(killTree).toHaveBeenCalledTimes(reason === 'exited' ? 0 : 1);
+        if (reason !== 'exited') expect(killTree).toHaveBeenCalledWith(43210, 'SIGTERM', expect.any(Function));
+        expect(directKill).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
   it('preserves a UTF-8 filename split between stdout chunks', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ptah-review-utf8-'));
     const checkout = join(root, 'repo');
@@ -49,7 +102,7 @@ describe('ReviewCommandRunner', () => {
         });
         return child;
       });
-      const runner = new ReviewCommandRunner(async () => ({ repoRoot: checkout, attemptsRoot: attempts }));
+      const runner = new ReviewCommandRunner(async () => ({ repoRoot: checkout, attemptsRoot: attempts }), logger);
       await expect(runner.run(repoA, 'git', ['ls-files', '-s', '-z'], source, 1_000))
         .resolves.toMatchObject({ stdout: 'café.ts\0', timedOut: false });
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -71,7 +124,7 @@ describe('ReviewCommandRunner', () => {
       const outside = join(root, 'outside');
       const attempts = join(root, 'attempts');
       await Promise.all([mkdir(checkout), mkdir(outside), mkdir(attempts)]);
-      const runner = new ReviewCommandRunner(async () => ({ repoRoot: checkout, attemptsRoot: attempts }));
+      const runner = new ReviewCommandRunner(async () => ({ repoRoot: checkout, attemptsRoot: attempts }), logger);
       const allowed = [
         ['cat-file', '-e', `${'a'.repeat(40)}^{commit}`],
         ['fetch', '--no-tags', 'origin', '+refs/pull/123/head'],
@@ -132,7 +185,7 @@ describe('ReviewCommandRunner', () => {
       const runner = new ReviewCommandRunner(async (repo) => {
         expect(repo).toEqual(repoA);
         return { repoRoot: checkoutA, attemptsRoot: attempts };
-      });
+      }, logger);
 
       await expect(runner.run(repoA, 'git', ['worktree', 'add'], checkoutA, 1_000))
         .rejects.toBeInstanceOf(ReviewCommandScopeError);
@@ -165,7 +218,7 @@ describe('ReviewCommandRunner', () => {
     await mkdir(source, { recursive: true });
     const roots = jest.fn(async () => ({ repoRoot: checkout, attemptsRoot: attempts }));
     try {
-      const runner = new ReviewCommandRunner(roots);
+      const runner = new ReviewCommandRunner(roots, logger);
       await expect(runner.run(repoA, 'node', ['--version'], source, 10_000))
         .resolves.toMatchObject({ timedOut: false });
       await rm(source, { recursive: true });

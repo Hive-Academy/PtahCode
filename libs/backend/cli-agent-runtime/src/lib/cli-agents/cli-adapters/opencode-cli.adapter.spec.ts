@@ -209,6 +209,18 @@ describe('OpencodeCliAdapter', () => {
   });
 
   describe('listModels()', () => {
+    it('tree-kills the model probe once on timeout', async () => {
+      jest.useFakeTimers();
+      try {
+        mockResolveCliPath.mockResolvedValue('/usr/local/bin/opencode');
+        const models = adapter.listModels();
+        await jest.advanceTimersByTimeAsync(8000);
+        expect(await models).toEqual([]);
+        expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
+        expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+        expect(currentChild?.kill).not.toHaveBeenCalled();
+      } finally { jest.useRealTimers(); }
+    });
     it('parses `opencode models` stdout into provider/model ids', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/opencode');
       const models = adapter.listModels();
@@ -881,7 +893,10 @@ describe('OpencodeCliAdapter', () => {
       }) + '\n');
       currentChild?.emitClose(0);
       expect(await handle.done).toBe(1);
-      expect(currentChild?.kill).toHaveBeenCalled();
+      await Promise.resolve();
+      expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
+      expect(mockKillProcessTree).toHaveBeenCalledWith(FAKE_PID);
+      expect(currentChild?.kill).not.toHaveBeenCalled();
       expect(segments.some((s) => s.type === 'error' && s.content.includes('session-mismatch'))).toBe(true);
       expect(segments.some((s) => s.type === 'text')).toBe(false);
     });

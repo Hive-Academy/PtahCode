@@ -520,7 +520,9 @@ export class AntigravityCliAdapter implements CliAdapter {
       };
       const child = spawnCli(binary, ['--help'], { spawner: this.spawner });
       const timer = setTimeout(() => {
-        child.kill();
+        void child.whenSpawned.then((pid) => {
+          if (pid && !child.killed) void killProcessTree(pid);
+        });
         finish(false);
       }, 8000);
       const capture = (data: string): void => {
@@ -583,7 +585,9 @@ export class AntigravityCliAdapter implements CliAdapter {
       let stdout = '';
       const child = spawnCli(binary, ['models'], { spawner: this.spawner });
       const timer = setTimeout(() => {
-        child.kill();
+        void child.whenSpawned.then((pid) => {
+          if (pid && !child.killed) void killProcessTree(pid);
+        });
         resolve(undefined);
       }, timeoutMs);
 
