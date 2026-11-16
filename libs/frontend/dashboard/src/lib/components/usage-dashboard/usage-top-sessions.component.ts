@@ -38,9 +38,9 @@ import { formatCompactTokens, formatUsd } from './usage-formatting';
             <tr>
               <th>Session</th>
               <th>Model</th>
-              <th class="text-right">Cost</th>
-              <th class="text-right">Tokens</th>
-              <th class="text-right">Last active</th>
+              <th ptahNumeric>Cost</th>
+              <th ptahNumeric>Tokens</th>
+              <th ptahNumeric>Last active</th>
             </tr>
           </thead>
           <tbody>
@@ -75,7 +75,8 @@ import { formatCompactTokens, formatUsd } from './usage-formatting';
                 </td>
                 <td ptahNumeric>{{ compact(session.tokens) }}</td>
                 <td
-                  class="text-right whitespace-nowrap"
+                  ptahNumeric
+                  class="whitespace-nowrap"
                   [attr.title]="session.lastActive"
                 >
                   {{ relative(session.lastActive) }}

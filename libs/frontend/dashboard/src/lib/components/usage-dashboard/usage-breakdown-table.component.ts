@@ -89,11 +89,11 @@ import {
           <thead>
             <tr>
               <th>Model</th>
-              <th class="text-right">Cost</th>
-              <th class="text-right" [attr.title]="shareTitle()">
+              <th ptahNumeric>Cost</th>
+              <th ptahNumeric [attr.title]="shareTitle()">
                 {{ shareHeading() }}
               </th>
-              <th class="text-right">Tokens</th>
+              <th ptahNumeric>Tokens</th>
             </tr>
           </thead>
           <tbody>
@@ -141,11 +141,11 @@ import {
           <thead>
             <tr>
               <th>Day</th>
-              <th class="text-right">Cost</th>
-              <th class="text-right" [attr.title]="shareTitle()">
+              <th ptahNumeric>Cost</th>
+              <th ptahNumeric [attr.title]="shareTitle()">
                 {{ shareHeading() }}
               </th>
-              <th class="text-right">Tokens</th>
+              <th ptahNumeric>Tokens</th>
               <th>Top model</th>
             </tr>
           </thead>
