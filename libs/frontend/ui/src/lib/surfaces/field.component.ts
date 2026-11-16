@@ -111,6 +111,7 @@ let fieldId = 0;
       <ng-content select="[ptahFieldTrailing]" />
       <span class="ptah-field__rail" aria-hidden="true"></span>
     </div>
+    <ng-content select="[ptahFieldBeforeHint]" />
     @if (hint() || error() || counter()) {
       <div class="ptah-field__footer">
         @if (hint() || error()) {
@@ -118,6 +119,8 @@ let fieldId = 0;
             [id]="descriptionId"
             class="ptah-field__message"
             [attr.data-error]="error() ? 'true' : null"
+            [attr.role]="error() ? errorRole() : null"
+            [attr.data-testid]="error() ? errorTestId() : null"
           >
             {{ error() || hint() }}
           </p>
@@ -127,6 +130,7 @@ let fieldId = 0;
         }
       </div>
     }
+    <ng-content select="[ptahFieldAfterError]" />
     <ng-template #labelTpl>
       <label class="ptah-field__label" [id]="labelId" [attr.for]="labelFor()"
         >{{ label()
@@ -140,6 +144,8 @@ export class PtahFieldComponent {
   readonly label = input.required<string>();
   readonly hint = input<string | null>(null);
   readonly error = input<string | null>(null);
+  readonly errorRole = input<'alert' | 'status' | null>(null);
+  readonly errorTestId = input<string | null>(null);
   readonly appearance = input<PtahFieldAppearance>('floating');
   readonly size = input<PtahFieldSize>('md');
   readonly required = input(false, { transform: booleanAttribute });

@@ -71,4 +71,26 @@ describe('PtahInstrumentBandComponent', () => {
       target.remove();
     }
   });
+
+  it('removes the temporary tabindex when the target cannot take focus', () => {
+    const target = document.createElement('button');
+    target.id = 'connections-section';
+    target.disabled = true;
+    document.body.appendChild(target);
+    // jsdom focuses a disabled button that has a tabindex. A browser does not, so copy that here.
+    const focus = jest.spyOn(target, 'focus').mockImplementation(() => undefined);
+    try {
+      const fixture = render();
+      const button = (fixture.nativeElement as HTMLElement).querySelector('button') as HTMLButtonElement;
+      button.click();
+      expect(focus).toHaveBeenCalled();
+      expect(document.activeElement).not.toBe(target);
+      expect(target.hasAttribute('tabindex')).toBe(false);
+      target.disabled = false;
+      expect(target.tabIndex).toBe(0);
+    } finally {
+      focus.mockRestore();
+      target.remove();
+    }
+  });
 });
