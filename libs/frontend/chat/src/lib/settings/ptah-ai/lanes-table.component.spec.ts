@@ -1,8 +1,24 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { Component, input, output } from '@angular/core';
+import { By } from '@angular/platform-browser';
+import { PtahTableComponent, PtahTableOrderButtonsComponent } from '@ptah-extension/ui';
+import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.component';
+import type { CliMatrixCellField, CliMatrixRow } from './cli-matrix-rows';
 import {
   LanesTableComponent,
   type LaneTableRow,
 } from './lanes-table.component';
+
+@Component({
+  selector: 'ptah-cli-model-effort-popover',
+  standalone: true,
+  template: '',
+})
+class StubModelEffortPopoverComponent {
+  readonly row = input.required<CliMatrixRow>();
+  readonly field = input.required<CliMatrixCellField>();
+  readonly closed = output<void>();
+}
 
 const instance = (
   id: string,
@@ -53,6 +69,7 @@ const uninstalled = (id: 'codex' | 'copilot'): LaneTableRow =>
   system(id, {
     installed: false,
     enabled: false,
+    interactive: false,
     version: null,
     versionLabel: null,
     status: { kind: 'not-installed', label: 'Not installed', tone: 'neutral' },
@@ -67,7 +84,12 @@ async function mount(
 }> {
   await TestBed.configureTestingModule({
     imports: [LanesTableComponent],
-  }).compileComponents();
+  })
+    .overrideComponent(LanesTableComponent, {
+      remove: { imports: [CliModelEffortPopoverComponent] },
+      add: { imports: [StubModelEffortPopoverComponent] },
+    })
+    .compileComponents();
   const fixture = TestBed.createComponent(LanesTableComponent);
   fixture.componentRef.setInput('rows', rows);
   fixture.componentRef.setInput('orderMode', orderMode);
@@ -78,7 +100,223 @@ async function mount(
 const q = (host: HTMLElement, sel: string): HTMLElement | null =>
   host.querySelector<HTMLElement>(sel);
 
+function narrow(fixture: ComponentFixture<LanesTableComponent>): void {
+  const table = fixture.debugElement.query(By.directive(PtahTableComponent))
+    .componentInstance as PtahTableComponent;
+  Object.defineProperty(table, 'collapsed', { value: () => true });
+  fixture.detectChanges();
+}
+
 describe('LanesTableComponent', () => {
+  it('opens Model for the selected row and closes from the popover', async () => {
+    const row = system('codex');
+    const { fixture, host } = await mount([row]);
+    const trigger = q(
+      host,
+      '[aria-label="Model default for Codex"]',
+    ) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(false);
+    trigger.click();
+    fixture.detectChanges();
+    const popovers = fixture.debugElement.queryAll(
+      By.directive(StubModelEffortPopoverComponent),
+    );
+    expect(popovers).toHaveLength(1);
+    const popover = popovers[0]
+      .componentInstance as StubModelEffortPopoverComponent;
+    expect(popover.row()).toBe(row);
+    expect(popover.field()).toBe('model');
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    popover.closed.emit();
+    fixture.detectChanges();
+    expect(
+      fixture.debugElement.queryAll(
+        By.directive(StubModelEffortPopoverComponent),
+      ),
+    ).toHaveLength(0);
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens exactly one Model editor from the detail row', async () => {
+    const row = system('codex');
+    const { fixture, host } = await mount([row]);
+    narrow(fixture);
+    (q(host, 'ptah-table-row-expander button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const detail = q(host, '#lane-detail-codex') as HTMLElement;
+    const trigger = detail.querySelector<HTMLButtonElement>(
+      '[aria-label="Model default for Codex"]',
+    ) as HTMLButtonElement;
+    expect(trigger).not.toBeNull();
+    trigger.click();
+    fixture.detectChanges();
+    const popovers = fixture.debugElement.queryAll(
+      By.directive(StubModelEffortPopoverComponent),
+    );
+    expect(popovers).toHaveLength(1);
+    expect(
+      (
+        popovers[0].componentInstance as StubModelEffortPopoverComponent
+      ).field(),
+    ).toBe('model');
+    expect(
+      (popovers[0].componentInstance as StubModelEffortPopoverComponent).row(),
+    ).toBe(row);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(
+      host.querySelectorAll('[data-testid="cli-matrix-model"]'),
+    ).toHaveLength(1);
+  });
+
+  it('switches from the detail Model editor to the cell editor without duplication', async () => {
+    const { fixture, host } = await mount([system('codex')]);
+    narrow(fixture);
+    (q(host, 'ptah-table-row-expander button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const detailTrigger = q(
+      host,
+      '#lane-detail-codex [aria-label="Model default for Codex"]',
+    ) as HTMLButtonElement;
+    const cellTrigger = q(
+      host,
+      '[data-testid="cli-matrix-model"] [aria-label="Model default for Codex"]',
+    ) as HTMLButtonElement;
+    detailTrigger.click();
+    fixture.detectChanges();
+    expect(detailTrigger.getAttribute('aria-expanded')).toBe('true');
+    cellTrigger.click();
+    fixture.detectChanges();
+    expect(
+      fixture.debugElement.queryAll(
+        By.directive(StubModelEffortPopoverComponent),
+      ),
+    ).toHaveLength(1);
+    expect(detailTrigger.getAttribute('aria-expanded')).toBe('false');
+    expect(cellTrigger.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('opens Effort for a supported system row and only one popover at a time', async () => {
+    const codex = system('codex', {
+      effort: { key: 'codexReasoningEffort', value: 'high' },
+    });
+    const copilot = system('copilot', {
+      effort: { key: 'copilotReasoningEffort', value: '' },
+    });
+    const { fixture, host } = await mount([codex, copilot]);
+    const codexEffort = q(
+      host,
+      '[aria-label="Effort default for Codex"]',
+    ) as HTMLButtonElement;
+    expect(codexEffort.textContent?.trim()).toBe('high');
+    codexEffort.click();
+    fixture.detectChanges();
+    let popovers = fixture.debugElement.queryAll(
+      By.directive(StubModelEffortPopoverComponent),
+    );
+    expect(popovers).toHaveLength(1);
+    expect(
+      (
+        popovers[0].componentInstance as StubModelEffortPopoverComponent
+      ).field(),
+    ).toBe('effort');
+    expect(
+      (popovers[0].componentInstance as StubModelEffortPopoverComponent).row(),
+    ).toBe(codex);
+    (
+      q(host, '[aria-label="Model default for Copilot"]') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    popovers = fixture.debugElement.queryAll(
+      By.directive(StubModelEffortPopoverComponent),
+    );
+    expect(popovers).toHaveLength(1);
+    expect(
+      (popovers[0].componentInstance as StubModelEffortPopoverComponent).row(),
+    ).toBe(copilot);
+    expect(codexEffort.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('keeps noninteractive Model and Effort disabled and omits unsupported Effort', async () => {
+    const { host } = await mount([
+      uninstalled('codex'),
+      instance('off', { interactive: false, selectedModel: '' }),
+      system('copilot'),
+    ]);
+    expect(
+      (q(host, '[aria-label="Model default for Codex"]') as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (
+        q(
+          host,
+          '[aria-label="Model default for Lane off"]',
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        q(
+          host,
+          '[aria-label="Effort default for Lane off"]',
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(q(host, '[aria-label="Effort default for Copilot"]')).toBeNull();
+  });
+
+  it('opens the instance Model and Effort editors', async () => {
+    const row = instance('a', { selectedModel: 'local/model' });
+    const { fixture, host } = await mount([row]);
+    for (const field of ['model', 'effort'] as const) {
+      (
+        q(
+          host,
+          `[aria-label="${field === 'model' ? 'Model' : 'Effort'} default for Lane a"]`,
+        ) as HTMLButtonElement
+      ).click();
+      fixture.detectChanges();
+      const popovers = fixture.debugElement.queryAll(
+        By.directive(StubModelEffortPopoverComponent),
+      );
+      expect(popovers).toHaveLength(1);
+      expect(
+        (
+          popovers[0].componentInstance as StubModelEffortPopoverComponent
+        ).field(),
+      ).toBe(field);
+      expect(
+        (
+          popovers[0].componentInstance as StubModelEffortPopoverComponent
+        ).row(),
+      ).toBe(row);
+    }
+  });
+
+  it('does not open an editor while busy or before an instance model loads', async () => {
+    const { fixture, host } = await mount([
+      system('codex'),
+      instance('loading'),
+    ]);
+    fixture.componentRef.setInput('busy', true);
+    fixture.detectChanges();
+    const trigger = q(
+      host,
+      '[aria-label="Model default for Codex"]',
+    ) as HTMLButtonElement;
+    expect(trigger.getAttribute('aria-busy')).toBe('true');
+    trigger.click();
+    fixture.detectChanges();
+    expect(
+      fixture.debugElement.queryAll(
+        By.directive(StubModelEffortPopoverComponent),
+      ),
+    ).toHaveLength(0);
+    expect(q(host, '[aria-label="Model default for Lane loading"]')).toBeNull();
+    expect(
+      q(host, '[aria-label="Effort default for Lane loading"]'),
+    ).not.toBeNull();
+  });
   it('keeps instance row hooks and emits toggle and actions', async () => {
     const row = instance('local-one', { name: 'Local one' });
     const { fixture, host } = await mount([row]);
@@ -107,10 +345,28 @@ describe('LanesTableComponent', () => {
     fixture.componentInstance.delete.subscribe(del);
     fixture.componentInstance.capabilities.subscribe(caps);
 
-    q(host, '[aria-label="More actions for Lane a"]')?.click();
+    const open = () => {
+      const trigger = q(
+        host,
+        '[aria-label="More actions for Lane a"]',
+      ) as HTMLButtonElement;
+      trigger.click();
+      fixture.detectChanges();
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      expect(q(host, 'ptah-table-row-actions [role="menu"]')).not.toBeNull();
+    };
+    open();
+    expect(q(host, '[data-testid="cli-matrix-edit-a"]')).not.toBeNull();
     fixture.detectChanges();
     q(host, '[data-testid="cli-matrix-edit-a"]')?.click();
+    open();
     q(host, '[data-testid="cli-matrix-delete-a"]')?.click();
+    fixture.detectChanges();
+    expect(q(host, 'ptah-inline-confirm')).not.toBeNull();
+    const confirm = q(host, 'ptah-inline-confirm button') as HTMLButtonElement;
+    confirm.click();
+    fixture.detectChanges();
+    open();
     const all = Array.from(host.querySelectorAll<HTMLElement>('button')).find(
       (b) => b.textContent?.trim() === 'All capabilities',
     );
@@ -121,7 +377,119 @@ describe('LanesTableComponent', () => {
     expect(caps).toHaveBeenCalledWith(row);
   });
 
+  it('cancels Delete and returns focus to the row actions trigger', async () => {
+    const row = instance('a');
+    const { fixture, host } = await mount([row]);
+    const deleted = jest.fn();
+    fixture.componentInstance.delete.subscribe(deleted);
+    const trigger = q(
+      host,
+      '[aria-label="More actions for Lane a"]',
+    ) as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+    (
+      q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    expect(q(host, 'ptah-inline-confirm')).not.toBeNull();
+    expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
+    const cancel = Array.from(
+      host.querySelectorAll('ptah-inline-confirm button'),
+    ).find(
+      (button) => button.textContent?.trim() === 'Cancel',
+    ) as HTMLButtonElement;
+    cancel.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+    expect(q(host, 'ptah-inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(deleted).not.toHaveBeenCalled();
+  });
+
+  it('focuses the next row actions trigger when Confirm removes the deleted row', async () => {
+    const rows = [instance('a'), instance('b')];
+    const { fixture, host } = await mount(rows);
+    let completeDelete: (() => void) | undefined;
+    const deleted = jest.fn((row: LaneTableRow) => {
+      completeDelete = () => fixture.componentRef.setInput('rows', rows.filter((item) => item !== row));
+    });
+    fixture.componentInstance.delete.subscribe(deleted);
+    const original = q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement;
+    original.click();
+    fixture.detectChanges();
+    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(original);
+    completeDelete?.();
+    fixture.detectChanges();
+    await Promise.resolve();
+    expect(deleted).toHaveBeenCalledWith(rows[0]);
+    expect(q(host, '[data-testid="cli-matrix-row-a"]')).toBeNull();
+    expect(document.activeElement).toBe(q(host, '[aria-label="More actions for Lane b"]'));
+  });
+
+  it('keeps the delete focus fallback while the row stays, then focuses it on removal', async () => {
+    const rows = [instance('a'), instance('b')];
+    const { fixture, host } = await mount(rows);
+    (q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentRef.setInput('rows', [...rows]);
+    fixture.detectChanges();
+    await Promise.resolve();
+    fixture.componentRef.setInput('rows', [rows[1]]);
+    fixture.detectChanges();
+    await Promise.resolve();
+    expect(q(host, '[data-testid="cli-matrix-row-a"]')).toBeNull();
+    expect(document.activeElement).toBe(q(host, '[aria-label="More actions for Lane b"]'));
+  });
+
+  it('focuses the next row actions trigger when Confirm removes the row synchronously', async () => {
+    const rows = [instance('a'), instance('b')];
+    const { fixture, host } = await mount(rows);
+    fixture.componentInstance.delete.subscribe((row) => {
+      fixture.componentRef.setInput('rows', rows.filter((item) => item !== row));
+    });
+    (q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(q(host, '[aria-label="More actions for Lane b"]'));
+  });
+
   describe('order', () => {
+    it('blocks moves while busy or without write permission', async () => {
+      const a = instance('a');
+      const b = instance('b');
+      const { fixture, host } = await mount([a, b], true);
+      const moved = jest.fn();
+      fixture.componentInstance.moved.subscribe(moved);
+      const button = q(host, '[data-testid="cli-matrix-row-a"] [data-order-down]') as HTMLButtonElement;
+      const order = fixture.debugElement.queryAll(By.directive(PtahTableOrderButtonsComponent))[0]
+        .componentInstance as PtahTableOrderButtonsComponent;
+      for (const blocked of [{ busy: true }, { busyRows: { a: true } }, { canWrite: false }]) {
+        fixture.componentRef.setInput('busy', false);
+        fixture.componentRef.setInput('busyRows', {});
+        fixture.componentRef.setInput('canWrite', true);
+        for (const [key, value] of Object.entries(blocked)) fixture.componentRef.setInput(key, value);
+        fixture.detectChanges();
+        expect(button.matches(':disabled')).toBe(true);
+        button.click();
+        order.moveDown.emit();
+        expect(moved).not.toHaveBeenCalled();
+      }
+    });
     it('emits moved up and down and disables the ends', async () => {
       const a = instance('a');
       const b = instance('b');
@@ -196,7 +564,7 @@ describe('LanesTableComponent', () => {
     it('is muted, shows a dash, no order buttons and a disabled toggle', async () => {
       const { fixture, host } = await mount([uninstalled('copilot')], true);
       const attention = jest.fn();
-      fixture.componentInstance.attention.subscribe(attention);
+      fixture.componentInstance.installGuide.subscribe(attention);
       const row = q(host, '[data-testid="cli-provider-card-copilot"]');
       expect(row?.getAttribute('data-state')).toBe('muted');
       expect(row?.querySelector('td')?.textContent?.trim()).toBe('—');
@@ -244,7 +612,7 @@ describe('LanesTableComponent', () => {
       });
       const { fixture, host } = await mount([row]);
       const attention = jest.fn();
-      fixture.componentInstance.attention.subscribe(attention);
+      fixture.componentInstance.signIn.subscribe(attention);
       const signIn = Array.from(host.querySelectorAll('button')).find(
         (b) => b.textContent?.trim() === 'Sign in',
       );
@@ -290,17 +658,14 @@ describe('LanesTableComponent', () => {
           host,
           `[data-testid="cli-matrix-row-${id}"] [data-testid="cli-matrix-model"]`,
         )?.textContent?.trim();
-      expect(model('a')).toBe('provider default');
-      expect(model('b')).toBe('—');
+      expect(model('a')).toContain('provider default');
+      expect(model('b')).toContain('—');
     });
   });
 
-  it('gives the config file hint an img role', async () => {
-    const { host } = await mount([
-      instance('a', { configFileHint: '~/.config/a.json' }),
-    ]);
-    const hint = q(host, '[role="img"]');
-    expect(hint?.getAttribute('aria-label')).toBe('~/.config/a.json');
+  it('does not show a config hint without a source', async () => {
+    const { host } = await mount([instance('a')]);
+    expect(q(host, '[role="img"]')).toBeNull();
   });
 
   it('shows the empty state in a message cell', async () => {
@@ -308,6 +673,99 @@ describe('LanesTableComponent', () => {
     const cell = q(host, 'td.ptah-table-message-cell');
     expect(cell?.textContent).toContain('No lanes available.');
     expect(cell?.getAttribute('colspan')).toBe('9');
+  });
+
+  it('distinguishes loading and error from an empty result and retries', async () => {
+    const { fixture, host } = await mount([]);
+    fixture.componentRef.setInput('loading', true);
+    fixture.detectChanges();
+    expect(host.textContent).toContain('Loading lanes');
+    expect(host.textContent).not.toContain('No lanes available');
+    fixture.componentRef.setInput('loading', false);
+    fixture.componentRef.setInput('error', 'Could not load lanes');
+    fixture.detectChanges();
+    const retry = jest.fn();
+    fixture.componentInstance.retry.subscribe(retry);
+    expect(host.textContent).toContain('Could not load lanes');
+    Array.from(host.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === 'Retry')
+      ?.click();
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the editor when its row is removed and reinserted', async () => {
+    const row = system('codex');
+    const { fixture, host } = await mount([row]);
+    (
+      q(host, '[aria-label="Model default for Codex"]') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    expect(
+      fixture.debugElement.queryAll(
+        By.directive(StubModelEffortPopoverComponent),
+      ),
+    ).toHaveLength(1);
+    fixture.componentRef.setInput('rows', []);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('rows', [row]);
+    fixture.detectChanges();
+    expect(
+      fixture.debugElement.queryAll(
+        By.directive(StubModelEffortPopoverComponent),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('guards writes and announces test progress once', async () => {
+    const row = instance('a');
+    const { fixture, host } = await mount([row]);
+    fixture.componentRef.setInput('canWrite', false);
+    fixture.componentRef.setInput('testingRows', { a: true });
+    fixture.detectChanges();
+    const toggle = q(
+      host,
+      '[data-testid="cli-matrix-toggle-a"]',
+    ) as HTMLInputElement;
+    expect(toggle.disabled).toBe(true);
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event('change'));
+    expect(toggle.checked).toBe(true);
+    q(host, '[aria-label="More actions for Lane a"]')?.click();
+    fixture.detectChanges();
+    expect(
+      (q(host, '[data-testid="cli-matrix-test-a"]') as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(host.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(q(host, '[aria-live="polite"]')?.textContent).toContain(
+      'Running test for Lane a',
+    );
+  });
+
+  it('disables Test for uninstalled and busy rows and displays a result', async () => {
+    const { fixture, host } = await mount([
+      uninstalled('copilot'),
+      instance('a'),
+    ]);
+    fixture.componentRef.setInput('busyRows', { a: true });
+    fixture.componentRef.setInput('testResults', { a: 'Answered in 1.4 s' });
+    fixture.detectChanges();
+    for (const name of ['Copilot', 'Lane a']) {
+      q(host, `[aria-label="More actions for ${name}"]`)?.click();
+      fixture.detectChanges();
+      const row = q(
+        host,
+        name === 'Copilot'
+          ? '[data-testid="cli-provider-card-copilot"]'
+          : '[data-testid="cli-matrix-row-a"]',
+      );
+      expect(
+        (row?.querySelector('[role="menuitem"]') as HTMLButtonElement).disabled,
+      ).toBe(true);
+    }
+    expect(host.textContent).toContain('Answered in 1.4 s');
   });
 
   it('toggles the detail row through the expander', async () => {
