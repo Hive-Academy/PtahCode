@@ -408,11 +408,6 @@
     "mb-2": 1,
     "px-1.5": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts": {
-    "gap-2": 1,
-    "mt-0.5": 1,
-    "pb-2": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "gap-1": 1,
     "gap-2": 1,
