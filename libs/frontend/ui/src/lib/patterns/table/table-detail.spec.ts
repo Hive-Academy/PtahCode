@@ -92,25 +92,27 @@ describe('table detail', () => {
     const root = fixture.nativeElement as HTMLElement;
     const cells = root.querySelectorAll<HTMLElement>('[ptahCollapsible]');
     const row = root.querySelector<HTMLElement>('#quill-detail');
-    const button = root.querySelector<HTMLButtonElement>(
+    const button = root.querySelector<HTMLElement>('ptah-table-row-expander');
+    const inner = root.querySelector<HTMLButtonElement>(
       'ptah-table-row-expander button',
     );
     expect(cells[0].hidden).toBe(false);
     expect(row?.hidden).toBe(true);
     expect(button?.hidden).toBe(true);
+    expect(getComputedStyle(button as HTMLElement).display).toBe('none');
     ResizeObserverStub.current.width(700);
     fixture.detectChanges();
     expect(cells[0].hidden).toBe(true);
     expect(cells[1].hidden).toBe(true);
     expect(button?.hidden).toBe(false);
     expect(row?.hidden).toBe(true);
-    expect(button?.getAttribute('aria-label')).toBe('Details for Quill');
-    expect(button?.getAttribute('aria-controls')).toBe('quill-detail');
-    expect(button?.getAttribute('aria-expanded')).toBe('false');
-    button?.click();
+    expect(inner?.getAttribute('aria-label')).toBe('Details for Quill');
+    expect(inner?.getAttribute('aria-controls')).toBe('quill-detail');
+    expect(inner?.getAttribute('aria-expanded')).toBe('false');
+    inner?.click();
     fixture.detectChanges();
     expect(row?.hidden).toBe(false);
-    expect(button?.getAttribute('aria-expanded')).toBe('true');
+    expect(inner?.getAttribute('aria-expanded')).toBe('true');
     expect(root.querySelector('#quill-detail button')).toBeTruthy();
     ResizeObserverStub.current.width(900);
     fixture.detectChanges();
@@ -124,15 +126,15 @@ describe('table detail', () => {
     fixture.detectChanges();
     ResizeObserverStub.current.width(700);
     fixture.detectChanges();
-    const button = (
+    const inner = (
       fixture.nativeElement as HTMLElement
     ).querySelector<HTMLButtonElement>('ptah-table-row-expander button');
-    button?.click(); // a native button turns Enter and Space into click
+    inner?.click(); // a native button turns Enter and Space into click
     fixture.detectChanges();
-    expect(button?.getAttribute('aria-expanded')).toBe('true');
-    button?.click();
+    expect(inner?.getAttribute('aria-expanded')).toBe('true');
+    inner?.click();
     fixture.detectChanges();
-    expect(button?.getAttribute('aria-expanded')).toBe('false');
+    expect(inner?.getAttribute('aria-expanded')).toBe('false');
     fixture.destroy();
   });
 

@@ -39,6 +39,7 @@ export class PtahCollapsibleCellDirective {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'ptah-table-row-expander',
+    '[hidden]': 'context !== null && !context.collapsed()',
   },
   template: `<button
     ptahIconButton
@@ -46,7 +47,6 @@ export class PtahCollapsibleCellDirective {
     [label]="label()"
     [attr.aria-expanded]="expanded()"
     [attr.aria-controls]="controls()"
-    [hidden]="context !== null && !context.collapsed()"
     (click)="expanded.set(!expanded())"
   >
     <svg

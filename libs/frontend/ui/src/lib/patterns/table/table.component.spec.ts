@@ -148,7 +148,7 @@ describe('PtahTableComponent', () => {
     expect(PtahTableRowDirective).toBeDefined();
   });
 
-  it('observes host width and exposes collapse state and announcements', () => {
+  it('observes host width and exposes collapse state and announcements', async () => {
     const table = fixture.nativeElement.querySelector(
       'ptah-table',
     ) as HTMLElement;
@@ -165,6 +165,7 @@ describe('PtahTableComponent', () => {
     fixture.detectChanges();
     expect(table.getAttribute('data-collapsed')).toBe('false');
     component.announce('Quill moved to position 2 of 3');
+    await Promise.resolve();
     fixture.detectChanges();
     expect(table.querySelector('[aria-live="polite"]')?.textContent).toContain(
       'Quill moved to position 2 of 3',

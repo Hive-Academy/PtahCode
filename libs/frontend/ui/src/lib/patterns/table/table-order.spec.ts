@@ -56,6 +56,7 @@ describe('table order buttons', () => {
     expect(fixture.componentInstance.downCount).toBe(1);
     expect(down?.disabled).toBe(false);
     expect(document.activeElement).toBe(down);
+    fixture.detectChanges();
     expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain(
       'Quill moved to position 2 of 3',
     );
@@ -68,6 +69,7 @@ describe('table order buttons', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     expect(fixture.componentInstance.upCount).toBe(1);
+    fixture.detectChanges();
     expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain(
       'Quill moved to position 2 of 3',
     );

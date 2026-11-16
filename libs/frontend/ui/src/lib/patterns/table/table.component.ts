@@ -4,6 +4,7 @@ import {
   Directive,
   DestroyRef,
   ElementRef,
+  forwardRef,
   computed,
   inject,
   input,
@@ -20,7 +21,7 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
   providers: [
     {
       provide: PTAH_TABLE_CONTEXT,
-      useFactory: () => inject(PtahTableComponent),
+      useExisting: forwardRef(() => PtahTableComponent),
     },
   ],
   host: {
@@ -148,7 +149,9 @@ export class PtahTableComponent implements PtahTableContext {
   }
 
   announce(message: string): void {
-    this.announcement.set(message);
+    // Clear first so a repeated message is read again by the live region.
+    this.announcement.set('');
+    queueMicrotask(() => this.announcement.set(message));
   }
 }
 
