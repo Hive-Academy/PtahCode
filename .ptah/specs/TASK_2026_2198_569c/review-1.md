@@ -26,7 +26,7 @@ and correct:
 - Spec: a fresh database and an upgrade from the previous version both end with the column and
   both indexes; the step is safe on a database that already has rows.
 - Nothing about this remains in `migrations/` or its specs (they assert max version 75).
-- Prove it on a COPY of the real database: copy `C:\Users\abdal\.ptah\state\sessions.sqlite` to
+- Prove it on a COPY of the real database: copy `C:\Users\<user>\.ptah\state\sessions.sqlite` to
   `.ptah/tmp/` (NEVER write to the original), run the real session store migration code path on
   the copy, and report: migration time in ms (it runs on the main thread at start, about 71k
   rows), `EXPLAIN QUERY PLAN` of the backfill page query (no `TEMP B-TREE`), and the time of
