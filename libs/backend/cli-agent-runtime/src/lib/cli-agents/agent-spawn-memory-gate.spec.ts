@@ -76,6 +76,22 @@ describe('AgentSpawnMemoryGate', () => {
     expect(failed).toHaveBeenCalledTimes(1);
   });
 
+  it('never queues and never serializes when minFreeMemoryGb is 0', async () => {
+    gate = new AgentSpawnMemoryGate(
+      () => 0, () => 0, () => 300_000,
+      (waiting) => active.some((other) => other !== waiting &&
+        !other.info.waitingForMemory && other.info.status === 'running'), failed,
+    );
+    const first = lane();
+    const second = lane();
+    const firstPromise = gate.wait(first);
+    const secondPromise = gate.wait(second);
+    await expect(firstPromise).resolves.toBeUndefined();
+    await expect(secondPromise).resolves.toBeUndefined();
+    expect(first.info.waitingForMemory).toBeUndefined();
+    expect(second.info.waitingForMemory).toBeUndefined();
+  });
+
   it('removes a stopped lane and lets force bypass memory', async () => {
     const running = lane(); running.info.status = 'running'; active.push(running);
     const stopped = lane(); const pending = gate.wait(stopped);

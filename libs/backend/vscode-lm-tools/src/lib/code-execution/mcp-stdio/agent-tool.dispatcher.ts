@@ -543,6 +543,7 @@ export class AgentToolDispatcher {
               cliDetectionPending: !spawnRequest.cli && !p.ptahCliId,
               status: 'starting' as const,
               startedAt: admission.startedAt,
+              ...(admission.waitingForMemory && { waitingForMemory: true }),
             }),
           );
         },

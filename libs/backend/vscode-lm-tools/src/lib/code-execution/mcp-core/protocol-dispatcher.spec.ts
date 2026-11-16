@@ -4762,6 +4762,7 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
         cli: 'codex',
         role: 'reviewer',
       }),
+      undefined,
     );
     const { text, isError } = agentToolResult(res);
     expect(isError).toBeUndefined();

@@ -1327,6 +1327,7 @@ async function handleIndividualTool(
                     cliDetectionPending: !spawnRequest.cli && !ptahCliId,
                     status: 'starting' as const,
                     startedAt: admission.startedAt,
+                    ...(admission.waitingForMemory && { waitingForMemory: true }),
                   }),
                 );
               },

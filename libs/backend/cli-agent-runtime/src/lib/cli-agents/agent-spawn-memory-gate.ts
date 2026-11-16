@@ -30,6 +30,7 @@ export class AgentSpawnMemoryGate {
       return Promise.resolve();
     }
     tracked.info.waitingForMemory = true;
+    (tracked as any)._enteredQueue = true;
     clearTimeout(tracked.admissionTimer);
     tracked.admissionTimer = undefined;
     return new Promise<void>((resolve, reject) => {

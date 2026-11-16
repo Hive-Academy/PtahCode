@@ -607,6 +607,7 @@ export class AgentProcessManager {
     }
     try {
       await this.memoryGate.wait(tracked, force);
+      ticket.waitingForMemory = (tracked as any)._enteredQueue ?? false;
       if (tracked.info.status !== 'starting') {
         throw new Error('Lane stopped before spawn');
       }
@@ -629,6 +630,10 @@ export class AgentProcessManager {
     tracked.info.waitingForMemory = false;
     this.mcpCredentials?.revokeSubject(ticket.agentId);
     if (!tracked.spawnReplied) {
+      const completedAt = new Date().toISOString();
+      tracked.info = { ...tracked.info, status: 'failed', completedAt, lastActivityAt: completedAt };
+      tracked.stderrBuffer = error instanceof Error ? error.message : String(error);
+      tracked.hasExited = true;
       this.agents.delete(ticket.agentId);
       return;
     }

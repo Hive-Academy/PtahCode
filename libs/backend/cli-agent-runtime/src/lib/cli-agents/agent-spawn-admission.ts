@@ -4,6 +4,7 @@ import type { TrackedAgent } from './tracked-agent';
 export interface SpawnAdmission {
   readonly agentId: AgentId;
   readonly startedAt: string;
+  waitingForMemory?: boolean;
 }
 
 export const SPAWN_ADMISSION_WATCHDOG_MS = 120_000;
