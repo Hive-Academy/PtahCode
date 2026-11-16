@@ -361,6 +361,13 @@ async function captureMatrixPopovers(
     `B30 matrix ${host}/${theme}: first card bottom ${await bottomOf(page, '[data-testid="cli-provider-grid"] [data-testid^="cli-provider-card-"]')}; overflow ${overflow}px; cards ${rows.join(', ')}`,
   );
   expect(overflow, 'CLI matrix horizontal overflow').toBeLessThanOrEqual(0);
+  // Regression: toggle width must be usable (>= 24 px)
+  const toggleWidth = await matrix
+    .locator('[data-testid^="cli-matrix-toggle-"]')
+    .first()
+    .boundingBox()
+    .then((box) => box?.width ?? 0);
+  expect(toggleWidth, 'Toggle width must be usable').toBeGreaterThanOrEqual(24);
   const viewport = page.viewportSize();
   const onScreen = async (selector: string) => {
     const box = await page.locator(selector).boundingBox();
