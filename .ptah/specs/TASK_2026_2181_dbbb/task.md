@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2181_dbbb
-status: in_review
+status: done
 type: BUGFIX
 title: Fix slow ptah_agent_spawn and lost lane completion signals
 depends_on: []

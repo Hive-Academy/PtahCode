@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2179_c70e
-status: in_review
+status: done
 type: BUGFIX
 title: Make handoff ack survive a lost record read
 depends_on: []
