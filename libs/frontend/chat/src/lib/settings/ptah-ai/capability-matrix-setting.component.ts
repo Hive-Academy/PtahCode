@@ -558,8 +558,8 @@ export class CapabilityMatrixSettingComponent implements OnInit {
       );
       this.loadingChange.emit(false);
     } catch (error: unknown) {
-      if (request !== this.requestSequence) return;
       // degradation-audit: reported - a failed read shows the error state with Retry.
+      if (request !== this.requestSequence) return;
       this.logger.warn(
         'CapabilityMatrixSetting',
         'agent:getCapabilityMatrix failed',
