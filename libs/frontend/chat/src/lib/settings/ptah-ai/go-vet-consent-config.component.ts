@@ -11,22 +11,24 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import {
-  AlertCircle,
-  AlertTriangle,
-  LucideAngularModule,
-  ShieldCheck,
-} from 'lucide-angular';
+import { AlertTriangle, LucideAngularModule } from 'lucide-angular';
 import { ClaudeRpcService, WorkspaceScopeService } from '@ptah-extension/core';
 import type {
   DiagnosticsGoVetConsentGetResult,
   DiagnosticsGoVetConsentSetError,
   GoVetConsentStaleReasonDto,
 } from '@ptah-extension/shared';
+import { SettingsSectionStateComponent } from '../shared/settings-section-state.component';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
   PtahButtonDirective,
   PtahToggleDirective,
+  PtahFormSectionComponent,
+  PtahSettingRowComponent,
+  PtahDescriptionListComponent,
+  PtahDescriptionItemComponent,
+  PtahStatusComponent,
+  PtahInlineConfirmComponent,
 } from '@ptah-extension/ui';
 
 /** Why a stored consent no longer holds (User Decision 25), in the user's words. */
@@ -76,7 +78,18 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
 @Component({
   selector: 'ptah-go-vet-consent-config',
   standalone: true,
-  imports: [LucideAngularModule, PtahButtonDirective, PtahToggleDirective],
+  imports: [
+    LucideAngularModule,
+    PtahButtonDirective,
+    PtahToggleDirective,
+    PtahFormSectionComponent,
+    PtahSettingRowComponent,
+    PtahDescriptionListComponent,
+    PtahDescriptionItemComponent,
+    PtahStatusComponent,
+    PtahInlineConfirmComponent,
+    SettingsSectionStateComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -85,24 +98,13 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
       <section
         data-glass-surface="content"
         class="border-b border-base-content/10 pb-7"
-        aria-labelledby="go-vet-consent-title"
         data-testid="go-vet-consent-card"
       >
-        <div>
-          <div class="flex items-center gap-1.5 mb-2">
-            <lucide-angular
-              [img]="ShieldCheckIcon"
-              class="w-4 h-4 text-secondary"
-              aria-hidden="true"
-            />
-            <h2
-              id="go-vet-consent-title"
-              class="text-xs font-bold uppercase tracking-wider text-base-content"
-            >
-              Diagnostics: <code class="normal-case">go vet</code>
-            </h2>
-          </div>
-
+        <ptah-form-section
+          id="go-vet-consent-title"
+          heading="Diagnostics: go vet"
+          level="2"
+        >
           <p class="text-xs text-base-content-muted mb-2">
             When on, Ptah's diagnostics tools run your installed Go toolchain
             (<code>go vet</code>) on the Go packages they are asked to check. It
@@ -114,104 +116,72 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
             the Go binary changes.
           </p>
 
-          <!-- P4 detail rows (V26) + the "On" row (V27). -->
-          <table class="table table-xs" data-testid="go-vet-consent-table">
-            <tbody>
-              @if (consent(); as c) {
-                <tr>
-                  <th
-                    scope="row"
-                    class="w-24 align-top font-medium text-base-content"
-                  >
-                    Workspace
-                  </th>
-                  <td
-                    class="align-top font-mono break-all text-base-content"
-                    data-testid="go-vet-consent-root"
-                  >
-                    {{ c.workspace?.root ?? 'No workspace folder is open' }}
-                  </td>
-                </tr>
-                <tr>
-                  <th
-                    scope="row"
-                    class="w-24 align-top font-medium text-base-content"
-                  >
-                    Go binary
-                  </th>
-                  <td
-                    class="align-top font-mono break-all text-base-content"
-                    data-testid="go-vet-consent-binary"
-                  >
-                    {{ c.goBinary ?? 'none found on PATH' }}
-                  </td>
-                </tr>
-              }
-              <!-- The switch row spans both columns so its label reads on one
-                   line while Workspace / Go binary keep the narrow label column. -->
-              <tr>
-                <td colspan="2" class="align-middle">
-                  <div class="flex items-center justify-between gap-3">
-                    <label
-                      for="go-vet-consent-toggle"
-                      class="font-medium whitespace-nowrap text-base-content"
-                    >
-                      Allow <code>go vet</code> in this workspace
-                    </label>
-                    <div class="flex items-center gap-2">
-                      <!-- P10: plain text state; the colour is carried by the
-                           dot only. -->
-                      <span
-                        class="inline-flex items-center gap-1 whitespace-nowrap text-base-content"
-                        data-testid="go-vet-consent-state"
-                      >
-                        <span
-                          class="inline-block w-1.5 h-1.5 rounded-full"
-                          [class.bg-success]="badgeView() === 'on'"
-                          [class.bg-warning]="badgeView() === 'stale'"
-                          [class.bg-info]="badgeView() === 'pending'"
-                          [class.bg-base-content-muted]="badgeView() === 'off'"
-                          aria-hidden="true"
-                        ></span>
-                        {{ badgeLabel() }}
-                      </span>
-                      <!-- 24×24 px hit area around the switch (WCAG 2.5.8);
-                           role="switch" keeps the on/off semantics (G1). -->
-                      <label
-                        class="inline-flex items-center justify-center min-w-6 min-h-6"
-                        [class.cursor-pointer]="!toggleDisabled()"
-                        data-testid="go-vet-consent-toggle-target"
-                      >
-                        <input
-                          #toggle
-                          id="go-vet-consent-toggle"
-                          type="checkbox"
-                          ptahToggle
-                          size="sm"
-                          [checked]="toggleChecked()"
-                          [attr.aria-checked]="toggleChecked()"
-                          [disabled]="toggleDisabled()"
-                          aria-describedby="go-vet-consent-status"
-                          (change)="onToggle($event)"
-                          data-testid="go-vet-consent-toggle"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div id="go-vet-consent-status" aria-live="polite" class="mt-1">
-            @if (loading()) {
-              <p
-                class="text-xs text-base-content-muted"
-                data-testid="go-vet-consent-loading"
-              >
-                Checking the go vet setting…
-              </p>
+          <ptah-description-list
+            ariaLabel="go vet consent details"
+            data-testid="go-vet-consent-table"
+          >
+            @if (consent(); as c) {
+              <div ptahDescriptionItem term="Workspace">
+                <span
+                  class="font-mono break-all"
+                  data-testid="go-vet-consent-root"
+                  >{{
+                    c.workspace?.root ?? 'No workspace folder is open'
+                  }}</span
+                >
+              </div>
+              <div ptahDescriptionItem term="Go binary">
+                <span
+                  class="font-mono break-all"
+                  data-testid="go-vet-consent-binary"
+                  >{{ c.goBinary ?? 'none found on PATH' }}</span
+                >
+              </div>
             }
+          </ptah-description-list>
+          <ptah-setting-row
+            label="Allow go vet in this workspace"
+            controlId="go-vet-consent-toggle"
+          >
+            <span status data-testid="go-vet-consent-state"
+              ><ptah-status
+                [status]="
+                  badgeView() === 'on'
+                    ? 'online'
+                    : badgeView() === 'stale'
+                      ? 'warning'
+                      : badgeView() === 'pending'
+                        ? 'pending'
+                        : 'offline'
+                "
+                [label]="badgeLabel()"
+            /></span>
+            <label data-testid="go-vet-consent-toggle-target">
+              <input
+                #toggle
+                id="go-vet-consent-toggle"
+                type="checkbox"
+                ptahToggle
+                size="sm"
+                [checked]="toggleChecked()"
+                [attr.aria-checked]="toggleChecked()"
+                [disabled]="toggleDisabled()"
+                aria-describedby="go-vet-consent-status"
+                (change)="onToggle($event)"
+                data-testid="go-vet-consent-toggle"
+              />
+            </label>
+          </ptah-setting-row>
+
+          @if (loading()) {
+            <div data-testid="go-vet-consent-loading">
+              <ptah-settings-section-state
+                state="loading"
+                [skeletonLines]="1"
+              />
+            </div>
+          }
+          <div id="go-vet-consent-status" aria-live="polite" class="mt-1">
             <!-- V29: the stale reason is safety-relevant, so it stays in the
                  card rather than only in a toast. -->
             @if (staleText(); as reason) {
@@ -233,74 +203,41 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
           </div>
 
           @if (errorMessage(); as message) {
-            <!-- P2 inline alert: colour on the icon and border only. -->
-            <div
-              class="mt-2 flex items-start gap-1.5 rounded border border-error/40 p-2 text-xs text-base-content"
-              role="alert"
-              data-testid="go-vet-consent-error"
-            >
-              <lucide-angular
-                [img]="AlertCircleIcon"
-                class="w-3.5 h-3.5 shrink-0 text-error"
-                aria-hidden="true"
-              />
-              <span>{{ message }}</span>
-            </div>
+            <ptah-settings-section-state
+              state="error"
+              [errorText]="message"
+              errorTestId="go-vet-consent-error"
+              (retry)="load()"
+            />
           }
 
           @if (confirmingRoot(); as root) {
-            <!-- P8 inline confirm (V28): names the exact root; Cancel gets
-                 initial focus, Esc cancels, focus returns to the switch. -->
             <div
-              class="mt-2 space-y-2 rounded border border-base-300 p-3"
               role="group"
               aria-labelledby="go-vet-confirm-title"
               aria-describedby="go-vet-confirm-root"
-              (keydown.escape)="cancelEnable($event)"
               data-testid="go-vet-consent-confirm"
+              (keydown.escape)="cancelEnable($event)"
             >
-              <p
+              <ptah-inline-confirm
                 id="go-vet-confirm-title"
-                class="flex items-center gap-1.5 text-xs font-medium text-base-content"
-              >
-                <lucide-angular
-                  [img]="AlertTriangleIcon"
-                  class="w-3.5 h-3.5 shrink-0 text-warning"
-                  aria-hidden="true"
-                />
-                Allow go vet to run in this folder?
-              </p>
-              <p
+                message="Allow go vet to run in this folder?"
+                ariaLabel="Allow go vet to run in this folder?"
+                confirmLabel="Allow go vet"
+                confirmTestId="go-vet-consent-allow"
+                cancelTestId="go-vet-consent-cancel"
+                (confirm)="confirmEnable()"
+                (cancelled)="cancelEnable()"
+              />
+              <span
                 id="go-vet-confirm-root"
-                class="text-xs font-mono break-all text-base-content"
+                class="block text-xs text-base-content-muted"
                 data-testid="go-vet-consent-confirm-root"
+                >{{ root }}</span
               >
-                {{ root }}
-              </p>
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  ptahButton
-                  variant="primary"
-                  (click)="confirmEnable()"
-                  data-testid="go-vet-consent-allow"
-                >
-                  Allow go vet
-                </button>
-                <button
-                  #cancelButton
-                  type="button"
-                  ptahButton
-                  variant="ghost"
-                  (click)="cancelEnable()"
-                  data-testid="go-vet-consent-cancel"
-                >
-                  Cancel
-                </button>
-              </div>
             </div>
           }
-        </div>
+        </ptah-form-section>
       </section>
     }
   `,
@@ -316,8 +253,6 @@ export class GoVetConsentConfigComponent {
   private readonly injector = inject(Injector);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
-  readonly ShieldCheckIcon = ShieldCheck;
-  readonly AlertCircleIcon = AlertCircle;
   readonly AlertTriangleIcon = AlertTriangle;
 
   /** Last applied GET answer; `null` until the first one arrives. */
@@ -337,8 +272,6 @@ export class GoVetConsentConfigComponent {
 
   private readonly toggleRef =
     viewChild<ElementRef<HTMLInputElement>>('toggle');
-  private readonly cancelButtonRef =
-    viewChild<ElementRef<HTMLButtonElement>>('cancelButton');
 
   /** Hidden while support is unknown and when the host answers unsupported. */
   readonly visible = computed(
@@ -402,6 +335,7 @@ export class GoVetConsentConfigComponent {
 
   /** GET; applied only if no newer GET started and the scope is unchanged. */
   async load(): Promise<void> {
+    this.errorMessage.set(null);
     const seq = ++this.getSeq;
     const key = this.scope.scopeKey();
     const isCurrent = (): boolean =>
@@ -473,9 +407,6 @@ export class GoVetConsentConfigComponent {
     this.errorMessage.set(null);
     this.confirmingToken = this.consent()?.confirmToken;
     this.confirmingRoot.set(root);
-    afterNextRender(() => this.cancelButtonRef()?.nativeElement.focus(), {
-      injector: this.injector,
-    });
   }
 
   private focusToggle(): void {

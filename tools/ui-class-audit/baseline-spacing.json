@@ -321,25 +321,15 @@
   "libs/frontend/chat/src/lib/settings/ptah-ai/elevenlabs-panel.component.ts": {
     "gap-1": 5,
     "gap-1.5": 1,
-    "gap-2": 4,
+    "gap-2": 3,
     "mt-1": 4,
-    "mt-2": 1,
-    "p-3": 1,
-    "pr-8": 1,
-    "space-y-2": 2
+    "space-y-2": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/go-vet-consent-config.component.ts": {
-    "gap-1": 2,
-    "gap-1.5": 3,
-    "gap-2": 2,
-    "gap-3": 1,
-    "mb-2": 2,
+    "gap-1": 1,
+    "mb-2": 1,
     "mt-1": 1,
-    "mt-2": 2,
-    "p-2": 1,
-    "p-3": 1,
-    "pb-7": 1,
-    "space-y-2": 1
+    "pb-7": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/host-routing-setting.component.ts": {
     "gap-3": 1,
@@ -411,41 +401,26 @@
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
     "gap-1": 1,
-    "gap-1.5": 2,
-    "gap-2": 1,
-    "mb-2": 2,
-    "mb-3": 2,
-    "mt-0.5": 1,
-    "p-2": 2,
-    "p-3": 1,
-    "pb-7": 1,
-    "space-y-1": 1
+    "gap-1.5": 1,
+    "mb-3": 1,
+    "p-2": 1,
+    "pb-7": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-details-drawer.component.ts": {
     "-mx-2": 1,
-    "gap-2": 1,
     "mb-3": 1,
     "mt-4": 1,
     "pt-4": 3,
-    "px-2": 2,
-    "px-4": 1,
-    "py-3": 1
+    "px-2": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-config.component.ts": {
-    "gap-1": 2,
-    "gap-1.5": 3,
-    "gap-2": 2,
-    "gap-3": 2,
-    "mb-2": 1,
-    "mb-3": 2,
-    "mt-1.5": 1,
     "mt-2": 1,
-    "mt-3": 1,
-    "p-2": 1,
-    "p-3": 2,
-    "pb-7": 1,
+    "pb-7": 1
+  },
+  "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-key-editor.component.ts": {
+    "gap-2": 1,
+    "p-3": 1,
     "pr-9": 1,
-    "px-1": 1,
-    "space-y-2": 2
+    "space-y-2": 1
   }
 }

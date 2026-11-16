@@ -34,12 +34,27 @@ import {
   type ElevenLabsSelectRow,
 } from './elevenlabs-select-rows';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { SettingsConnectionTestComponent } from '../shared/settings-connection-test.component';
+import {
+  SAVE_KEY_FAILED_MESSAGE,
+  CLEAR_KEY_FAILED_MESSAGE,
+  SAVE_SETTINGS_FAILED_MESSAGE,
+  LOAD_VOICES_FAILED_MESSAGE,
+  VOICES_PERMISSION_HINT,
+  VOICES_FALLBACK_HINT,
+  TEST_OK_MESSAGE,
+  TEST_FAILED_MESSAGE,
+  testFailureMessage,
+} from './elevenlabs-panel-messages';
 import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
+  PtahFormSectionComponent,
+  PtahFieldComponent,
+  PtahInlineConfirmComponent,
 } from '@ptah-extension/ui';
 
 type WriteResult = { ok: true } | { ok: false; message: string };
@@ -50,34 +65,10 @@ interface TestResult {
   readonly message: string;
 }
 
-// F1: the backend returns raw error.message on every failure, so a visible
-// message is always one of these fixed sentences — never host error text.
-const SAVE_KEY_FAILED_MESSAGE = 'Could not save the ElevenLabs API key.';
-const CLEAR_KEY_FAILED_MESSAGE = 'Could not clear the ElevenLabs API key.';
-const SAVE_SETTINGS_FAILED_MESSAGE = 'Could not save the ElevenLabs settings.';
-const LOAD_VOICES_FAILED_MESSAGE = 'Could not load your ElevenLabs voices.';
-const VOICES_PERMISSION_HINT =
-  'This key cannot list voices. Enable Voices (read) for it in ElevenLabs, or enter a voice ID.';
-const VOICES_FALLBACK_HINT = 'You can still enter a voice ID.';
 /** The host speaks with this voice while none is saved (`elevenlabs-tts-provider.ts` DEFAULT_VOICE_ID). */
 const DEFAULT_VOICE_LABEL = 'Rachel (21m00Tcm4TlvDq8ikWAM)';
 /** Mirrors the host's voice-id rule (`voice-rpc.schema.ts` CONFIG_ID). */
 const VOICE_ID_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
-const TEST_OK_MESSAGE = 'Connection works.';
-const TEST_FAILED_MESSAGE = 'The connection test failed.';
-/** One fixed sentence per `VoiceErrorCategory` the probe can report (V22). */
-const TEST_CATEGORY_MESSAGE: Readonly<Record<string, string>> = {
-  auth: 'Authentication: ElevenLabs rejected the key.',
-  quota: 'Quota: the ElevenLabs account is out of credits or rate-limited.',
-  network: 'Network: could not reach ElevenLabs.',
-};
-const TEST_OTHER_CATEGORY_MESSAGE =
-  'Provider error: ElevenLabs could not complete the test.';
-
-function testFailureMessage(category: string | undefined): string {
-  if (!category) return TEST_FAILED_MESSAGE;
-  return TEST_CATEGORY_MESSAGE[category] ?? TEST_OTHER_CATEGORY_MESSAGE;
-}
 
 /**
  * ElevenLabs cloud provider panel, drawer D-VOICE (pattern map V21-V25), rendered once per
@@ -96,18 +87,18 @@ function testFailureMessage(category: string | undefined): string {
 @Component({
   selector: 'ptah-elevenlabs-panel',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahSelectDirective],
+  imports: [SettingsBusyDisabledDirective, SettingsConnectionTestComponent, LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective, PtahSelectDirective, PtahFormSectionComponent, PtahFieldComponent, PtahInlineConfirmComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <table class="table table-sm" data-testid="elevenlabs-panel-table">
-      <tbody>
+    <ptah-form-section heading="ElevenLabs" level="3" data-testid="elevenlabs-panel-table">
+
         <!-- V21: stored key status + Clear (S-confirm, no Undo) -->
-        <tr>
-          <th scope="row" class="w-24 align-top font-medium text-base-content">
+        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+          <div class="text-sm font-medium text-base-content">
             API key
-          </th>
-          <td class="align-top">
+          </div>
+          <div class="min-w-0">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <span
                 class="flex items-center gap-1.5 text-xs font-semibold text-base-content"
@@ -129,21 +120,7 @@ function testFailureMessage(category: string | undefined): string {
               @if (config().apiKeyConfigured) {
                 <div class="flex items-center gap-1">
                   @if (!showKeyForm()) {
-                    <button
-                      type="button"
-                      ptahButton
-                      size="xs"
-                      [disabled]="!canTest()"
-                      (click)="testConnection()"
-                      data-testid="elevenlabs-test-btn"
-                    >
-                      @if (isTesting()) {
-                        <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-                        <span>Testing…</span>
-                      } @else {
-                        <span>Test</span>
-                      }
-                    </button>
+                    <ptah-settings-connection-test label="Test" testId="elevenlabs-test-btn" [disabled]="!canTest()" [state]="isTesting() ? 'running' : 'idle'" (test)="testConnection()" />
                   }
                   <button
                     type="button"
@@ -196,53 +173,28 @@ function testFailureMessage(category: string | undefined): string {
               </div>
             }
             @if (config().apiKeyConfigured && confirmingClear()) {
-              <div
-                role="group"
-                aria-label="Confirm clear ElevenLabs API key"
-                class="mt-2 space-y-2 rounded border border-base-300 p-3"
-                (keydown.escape)="cancelClear($event)"
+              <ptah-inline-confirm
+                message="Clear the stored ElevenLabs key from this machine?"
+                detail="ElevenLabs voice stops working until a key is added."
+                ariaLabel="Confirm clear ElevenLabs API key"
+                confirmLabel="Clear key" tone="danger" [busy]="saving()"
+                confirmTestId="elevenlabs-clear-confirm"
+                cancelTestId="elevenlabs-clear-cancel"
                 data-testid="elevenlabs-clear-group"
-              >
-                <p class="text-xs text-base-content">
-                  Clear the stored ElevenLabs key from this machine? ElevenLabs
-                  voice stops working until a key is added.
-                </p>
-                <div class="flex gap-2">
-                  <!-- Outline has no owner variant; preserve the destructive confirmation style. -->
-                  <button
-                    type="button"
-                    class="btn btn-outline btn-sm border-error text-base-content"
-                    [ptahBusyDisabled]="saving()"
-                    (click)="clearKey()"
-                    data-testid="elevenlabs-clear-confirm"
-                  >
-                    Clear key
-                  </button>
-                  <button
-                    #clearCancel
-                    type="button"
-                    ptahButton
-                    variant="ghost"
-                    (click)="cancelClear()"
-                    data-testid="elevenlabs-clear-cancel"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
+                (confirm)="clearKey()" (cancelled)="cancelClear()" />
             }
-          </td>
-        </tr>
+          </div>
+        </div>
 
         <!-- V21/V22: new key, verify-then-save (G13); behind Replace once a key is saved. -->
         @if (showKeyForm()) {
-        <tr>
-          <th scope="row" class="w-24 align-top font-medium text-base-content">
+        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+          <div class="text-sm font-medium text-base-content">
             {{ config().apiKeyConfigured ? 'New key' : 'Add key' }}
-          </th>
-          <td class="align-top">
+          </div>
+          <div class="min-w-0">
             <div class="flex items-center gap-1">
-              <div class="relative flex-1">
+              <ptah-field label="ElevenLabs API key" appearance="floating" class="flex-1">
                 <input
                   ptahInput
                   size="sm"
@@ -253,7 +205,7 @@ function testFailureMessage(category: string | undefined): string {
                   spellcheck="false"
                   aria-label="ElevenLabs API key"
                   aria-describedby="elevenlabs-key-help"
-                  class="w-full pr-8 font-mono"
+                  class="w-full font-mono"
                   [value]="keyDraft()"
                   [disabled]="saving()"
                   [placeholder]="
@@ -264,7 +216,7 @@ function testFailureMessage(category: string | undefined): string {
                   (input)="onKeyInput($event)"
                   data-testid="elevenlabs-key-input"
                 />
-                <span class="absolute right-0 top-0">
+                <span ptahFieldTrailing>
                   <button
                     type="button"
                     ptahIconButton
@@ -281,25 +233,8 @@ function testFailureMessage(category: string | undefined): string {
                     />
                   </button>
                 </span>
-              </div>
-              <button
-                type="button"
-                ptahButton
-                size="xs"
-                [disabled]="!canTest()"
-                (click)="testConnection()"
-                data-testid="elevenlabs-test-btn"
-              >
-                @if (isTesting()) {
-                  <span
-                    class="loading loading-spinner loading-xs"
-                    aria-hidden="true"
-                  ></span>
-                  <span>Testing…</span>
-                } @else {
-                  <span>Test connection</span>
-                }
-              </button>
+              </ptah-field>
+              <ptah-settings-connection-test label="Test connection" testId="elevenlabs-test-btn" [disabled]="!canTest()" [state]="isTesting() ? 'running' : 'idle'" (test)="testConnection()" />
               <button
                 type="button"
                 ptahButton
@@ -340,20 +275,17 @@ function testFailureMessage(category: string | undefined): string {
                 </span>
               }
             </div>
-          </td>
-        </tr>
+          </div>
+        </div>
         }
 
         @if (direction() === 'tts' && !keyOnly()) {
           <!-- V23: voice (S-sel + Undo) -->
-          <tr>
-            <th
-              scope="row"
-              class="w-24 align-top font-medium text-base-content"
-            >
+          <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+            <div class="text-sm font-medium text-base-content">
               Voice
-            </th>
-            <td class="align-top">
+            </div>
+            <div class="min-w-0">
               @if (!config().apiKeyConfigured) {
                 <p
                   class="text-xs text-base-content-muted"
@@ -432,7 +364,8 @@ function testFailureMessage(category: string | undefined): string {
                 </div>
                 </div>
               } @else {
-                <select
+                <ptah-field label="Voice" appearance="stacked">
+<select
                   ptahSelect
                   size="sm"
                   id="elevenlabs-voice"
@@ -452,21 +385,20 @@ function testFailureMessage(category: string | undefined): string {
                     </option>
                   }
                 </select>
+</ptah-field>
               }
-            </td>
-          </tr>
+            </div>
+          </div>
         }
         <!-- V24 (TTS model, output format) / V25 (STT model): S-sel + Undo -->
         @for (row of selectRows(); track row.key) {
-          <tr>
-            <th
-              scope="row"
-              class="w-24 align-top font-medium text-base-content"
-            >
+          <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+            <div class="text-sm font-medium text-base-content">
               {{ row.label }}
-            </th>
-            <td class="align-top">
-              <select
+            </div>
+            <div class="min-w-0">
+              <ptah-field label="Model or format" appearance="stacked">
+<select
                 ptahSelect
                 size="sm"
                 [id]="'elevenlabs-' + row.slug"
@@ -486,11 +418,12 @@ function testFailureMessage(category: string | undefined): string {
                   </option>
                 }
               </select>
-            </td>
-          </tr>
+</ptah-field>
+            </div>
+          </div>
         }
-      </tbody>
-    </table>
+
+    </ptah-form-section>
   `,
 })
 export class ElevenLabsPanelComponent {
@@ -578,16 +511,12 @@ export class ElevenLabsPanelComponent {
 
   private readonly clearButton =
     viewChild<ElementRef<HTMLButtonElement>>('clearBtn');
-  private readonly clearCancelButton =
-    viewChild<ElementRef<HTMLButtonElement>>('clearCancel');
 
   constructor() {
     // Loads voices on mount and again once a first key is saved and the container re-reads.
     effect(() => {
       if (this.showVoicePicker()) untracked(() => void this.loadVoices());
     });
-    // P8: the inline confirm takes focus on its Cancel button when it opens.
-    effect(() => this.clearCancelButton()?.nativeElement.focus());
   }
 
   onKeyInput(event: Event): void {

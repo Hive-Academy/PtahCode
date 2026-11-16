@@ -151,7 +151,8 @@ describe('ElevenLabsPanelComponent', () => {
     expect(input.type).toBe('password');
     expect(input.value).toBe('');
     expect(element.textContent).not.toMatch(/sk_[a-zA-Z0-9]/);
-    expect(element.querySelector('table.table.table-sm')).not.toBeNull();
+    expect(byTestId('elevenlabs-panel-table').tagName).toBe('PTAH-FORM-SECTION');
+    expect(input.closest('ptah-field')?.querySelector('[data-appearance]')?.getAttribute('data-appearance')).toBe('floating');
   });
 
   describe('verify-then-save (V21, G13)', () => {
@@ -425,7 +426,7 @@ describe('ElevenLabsPanelComponent', () => {
       expect(clear.classList).toContain('btn-xs');
       clear.click();
       fixture.detectChanges();
-      expect(byTestId('elevenlabs-clear-confirm').classList).toContain('border-error');
+        expect(byTestId('elevenlabs-clear-confirm').textContent).toContain('Clear key');
       expect(clear.getAttribute('aria-expanded')).toBe('true');
       expect(clear.classList).not.toContain('btn-active');
 

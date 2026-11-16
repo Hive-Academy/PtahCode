@@ -87,7 +87,7 @@ async function assertAdvancedFold(page: Page, host: Host, theme: string): Promis
 const SEARCH_VOICE_FOLD_ENFORCED = true;
 
 async function assertSearchVoiceFold(page: Page, host: Host, theme: string): Promise<void> {
-  const providerRows = page.locator('ptah-web-search-config tbody tr');
+  const providerRows = page.locator('ptah-web-search-config [role="list"][aria-label="Web search providers"] > [role="listitem"]');
   const measured = {
     scroll: await scrollTops(page),
     webSearch: await bottomOf(page.locator('ptah-web-search-config')),
@@ -222,7 +222,12 @@ for (const host of HOSTS) {
     await escape('Search: web search clear confirm', () => by('settings-web-search-clear-btn-tavily'),
       by('settings-web-search-clear-group-tavily'), () => by('settings-web-search-clear-cancel-tavily').click());
     if (host === 'electron') {
-      await escape('Voice: provider popover', () => by('voice-provider-btn-stt'), by('voice-provider-option-stt-local'));
+      await attempt(findings, 'Voice: provider select', async () => {
+        const select = by('voice-provider-btn-stt');
+        await select.focus();
+        await expect(select).toBeFocused();
+        await expect(by('voice-provider-option-stt-local')).toBeEnabled();
+      });
       for (const direction of ['stt', 'tts'] as const) {
         await escape(`Voice: details drawer (${direction})`, () => by(`voice-engine-details-${direction}`), by('voice-details-drawer'));
       }

@@ -23,6 +23,10 @@ import {
   PtahButtonDirective,
   PtahInputDirective,
   PtahSelectDirective,
+  PtahFormSectionComponent,
+  PtahMeterComponent,
+  PtahFieldComponent,
+  PtahSettingRowComponent,
 } from '@ptah-extension/ui';
 
 /** Matches the backend TTS download-progress sentinel (`TTS_PROGRESS_MODEL`). */
@@ -81,6 +85,10 @@ interface VoiceGroup {
     PtahButtonDirective,
     PtahInputDirective,
     PtahSelectDirective,
+  PtahFormSectionComponent,
+  PtahMeterComponent,
+  PtahFieldComponent,
+  PtahSettingRowComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -107,15 +115,11 @@ interface VoiceGroup {
       </div>
     }
 
-    <table class="table table-sm" data-testid="local-tts-panel-table">
-      <tbody>
+    <ptah-form-section heading="Local text to speech" level="3" data-testid="local-tts-panel-table">
+
         <!-- V13: source. Returning to Curated saves immediately; a custom source
              is committed by its Save button (V15). -->
-        <tr>
-          <th scope="row" class="w-24 align-top font-medium text-base-content">
-            Source
-          </th>
-          <td class="align-top">
+        <ptah-setting-row label="Source" hint="Choose where the voice model comes from.">
             <div
               class="flex items-center gap-1"
               role="radiogroup"
@@ -138,19 +142,15 @@ interface VoiceGroup {
                 </button>
               }
             </div>
-          </td>
-        </tr>
+        </ptah-setting-row>
 
         <!-- V15: custom id or folder (only for non-curated sources) -->
         @if (source() !== 'curated') {
-          <tr>
-            <th
-              scope="row"
-              class="w-24 align-top font-medium text-base-content"
-            >
+          <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+            <div class="text-sm font-medium text-base-content">
               Custom model
-            </th>
-            <td class="align-top">
+            </div>
+            <div class="min-w-0">
               <div class="flex items-center gap-1">
                 <input
                   id="local-tts-custom"
@@ -200,16 +200,16 @@ interface VoiceGroup {
                   }}
                 </p>
               }
-            </td>
-          </tr>
+            </div>
+          </div>
         }
 
         <!-- V17: Kokoro voice -->
-        <tr>
-          <th scope="row" class="w-24 align-top font-medium text-base-content">
+        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+          <div class="text-sm font-medium text-base-content">
             Voice
-          </th>
-          <td class="align-top">
+          </div>
+          <div class="min-w-0">
             @if (isLoadingVoices()) {
               <div
                 class="text-[10px] text-base-content-muted"
@@ -218,7 +218,8 @@ interface VoiceGroup {
                 Loading voices…
               </div>
             } @else {
-              <select
+              <ptah-field label="Voice" appearance="stacked">
+<select
                 id="local-tts-voice"
                 aria-label="Voice"
                 ptahSelect
@@ -242,33 +243,36 @@ interface VoiceGroup {
                   </optgroup>
                 }
               </select>
+</ptah-field>
             }
-          </td>
-        </tr>
+          </div>
+        </div>
 
         <!-- V18/V19: preview + download + live progress -->
-        <tr>
-          <th scope="row" class="w-24 align-top font-medium text-base-content">
+        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+          <div class="text-sm font-medium text-base-content">
             Download
-          </th>
-          <td class="align-top">
+          </div>
+          <div class="min-w-0">
             @if (isTtsDownloading()) {
               <div
                 class="flex items-center gap-2"
                 data-testid="local-tts-download-status"
               >
-                <progress
-                  class="progress progress-primary flex-1 h-2"
-                  [value]="ttsDownloadPercent() ?? 0"
-                  max="100"
-                  data-testid="local-tts-download-progress"
-                ></progress>
-                <span class="text-[10px] text-base-content-muted w-20 text-right">
-                  @if (ttsDownloadPercent() !== null) {
-                    Downloading {{ ttsDownloadPercent() }}%
-                  } @else {
-                    Starting…
-                  }
+                <ptah-meter class="flex-1" [value]="ttsDownloadPercent() ?? 0"
+                  [indeterminate]="ttsDownloadPercent() === null" [max]="100"
+                  label="Voice model download progress" [hideLabel]="true"
+                  [showValue]="false" barRole="progressbar"
+                  data-testid="local-tts-download-progress" />
+                <span class="text-[10px] text-base-content-muted w-20 text-right" role="status">
+                  <span class="sr-only">Downloading voice model</span>
+                  <span aria-hidden="true">
+                    @if (ttsDownloadPercent() !== null) {
+                      Downloading {{ ttsDownloadPercent() }}%
+                    } @else {
+                      Starting…
+                    }
+                  </span>
                 </span>
               </div>
             } @else {
@@ -333,10 +337,10 @@ interface VoiceGroup {
                 </div>
               </div>
             }
-          </td>
-        </tr>
-      </tbody>
-    </table>
+          </div>
+        </div>
+
+    </ptah-form-section>
   `,
 })
 export class LocalTtsPanelComponent implements OnInit {

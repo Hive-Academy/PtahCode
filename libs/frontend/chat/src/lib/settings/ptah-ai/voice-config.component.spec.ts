@@ -19,7 +19,6 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import { By } from '@angular/platform-browser';
 import { VoiceConfigComponent } from './voice-config.component';
 import { VoiceDetailsDrawerComponent } from './voice-details-drawer.component';
-import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
 function providers(elevenlabsAvailable = false): VoiceProviderCapabilityDto[] {
   return [
@@ -120,9 +119,9 @@ describe('VoiceConfigComponent', () => {
   const calls = (method: string) => call.mock.calls.filter(([m]) => m === method).map(([, params]) => params);
 
   async function choose(direction: 'stt' | 'tts', id: string): Promise<void> {
-    byTestId<HTMLButtonElement>(`voice-provider-btn-${direction}`).click();
-    fixture.detectChanges();
-    byTestId<HTMLButtonElement>(`voice-provider-option-${direction}-${id}`).click();
+    const select = byTestId<HTMLSelectElement>(`voice-provider-btn-${direction}`);
+    select.value = id;
+    select.dispatchEvent(new Event('change'));
     await settle();
   }
 
@@ -140,7 +139,8 @@ describe('VoiceConfigComponent', () => {
     await settle();
     expect(queryTestId('voice-config-loading')).toBeNull();
     expect(element.textContent).toContain('Local engines run offline;');
-    expect(element.querySelector('table.table.table-xs')).not.toBeNull();
+    expect(byTestId('voice-engines-matrix')).not.toBeNull();
+    expect(byTestId('voice-provider-btn-stt').closest('ptah-field')?.querySelector('[data-appearance]')?.getAttribute('data-appearance')).toBe('stacked');
     expect(byTestId('voice-provider-btn-stt').textContent).toContain('Local (Whisper / Kokoro)');
     expect(byTestId('voice-engine-model-stt').textContent).toContain('base.en');
     expect(byTestId('voice-engine-model-tts').textContent).toContain('af_heart');
@@ -219,14 +219,11 @@ describe('VoiceConfigComponent', () => {
   it('keeps an unavailable provider disabled with its reason as visible text (V10)', async () => {
     responses['voice:listProviders'] = () => ok({ ok: true, providers: providers(false), active: { tts: 'local', stt: 'local' } });
     await render();
-    byTestId<HTMLButtonElement>('voice-provider-btn-stt').click();
-    fixture.detectChanges();
-
-    const option = byTestId<HTMLButtonElement>('voice-provider-option-stt-elevenlabs');
-    expect(isDisabledControl(option)).toBe(true);
-    expect(option.getAttribute('role')).toBe('radio');
+    const option = byTestId<HTMLOptionElement>('voice-provider-option-stt-elevenlabs');
+    expect(option.disabled).toBe(true);
+    expect(option.textContent).toContain('API key not configured');
     expect(byTestId('voice-provider-reason-stt-elevenlabs').textContent).toContain('API key not configured');
-    expect(byTestId('voice-provider-option-stt-local').getAttribute('aria-checked')).toBe('true');
+    expect(byTestId<HTMLOptionElement>('voice-provider-option-stt-local').selected).toBe(true);
   });
 
   it('saves a provider on selection, re-reads config, and Undo writes the previous provider (V10/V11)', async () => {
@@ -240,7 +237,7 @@ describe('VoiceConfigComponent', () => {
     expect(calls('voice:setProviderConfig')).toEqual([{ sttProvider: 'elevenlabs' }]);
     expect(calls('voice:getProviderConfig').length).toBe(2);
     expect(component.sttProviderId()).toBe('elevenlabs');
-    expect(byTestId('voice-provider-btn-stt').textContent).toContain('ElevenLabs');
+    expect(byTestId<HTMLSelectElement>('voice-provider-btn-stt').value).toBe('elevenlabs');
     expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved speech-to-text provider.', canUndo: true });
 
     await feedback.undo();
@@ -262,7 +259,7 @@ describe('VoiceConfigComponent', () => {
     await choose('tts', 'elevenlabs');
 
     expect(component.ttsProviderId()).toBe('local');
-    expect(byTestId('voice-provider-btn-tts').textContent).toContain('Local');
+    expect(byTestId<HTMLSelectElement>('voice-provider-btn-tts').value).toBe('local');
     expect(feedback.toast()).toEqual({
       tone: 'alert', message: 'Could not save the text-to-speech engine.', canUndo: false,
     });
@@ -334,8 +331,6 @@ describe('VoiceConfigComponent', () => {
     expect(calls('voice:getProviderConfig').length).toBe(2);
     component.drawerDirection.set(null);
     fixture.detectChanges();
-    byTestId<HTMLButtonElement>('voice-provider-btn-stt').click();
-    fixture.detectChanges();
-    expect(isDisabledControl(byTestId<HTMLButtonElement>('voice-provider-option-stt-elevenlabs'))).toBe(false);
+    expect(byTestId<HTMLOptionElement>('voice-provider-option-stt-elevenlabs').disabled).toBe(false);
   });
 });
