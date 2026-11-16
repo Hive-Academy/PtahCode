@@ -1,0 +1,5 @@
+# Clean stale Nx workspace data
+
+Run `npm run clean:stale-nx` to inspect candidates. It prints a table and makes no changes. Use `npm run clean:stale-nx -- --older-than-hours 48` to increase the age threshold for registered worktrees with no live recorded daemon. Removed or unregistered worktrees require one hour without a modified file. Use `--json` for structured output and `--apply` to perform the listed actions.
+
+The command scans `.claude-worktrees/*/.nx/workspace-data`, reads Nx's `d/server-process.json`, and checks `git worktree list --porcelain`. It excludes the main checkout, the current worktree, live daemon PIDs, recent files, and worktrees with a live verify lock holder. It refuses symlinks and junctions inside candidate directories. Process termination requires a path-boundary match for the exact worktree in the Nx daemon command line; Nx daemons started through the shared `node_modules` junction often lack that evidence and are reported as "not attributable". The command reports scan and action failures with a nonzero exit status.
