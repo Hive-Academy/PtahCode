@@ -98,6 +98,22 @@ export type LaneTableRow = CliMatrixRow & {
         </tr>
       </thead>
       <tbody>
+        @if (error() && rows().length > 0) {
+          <tr>
+            <td [ptahMessageCell]="9">
+              {{ error() }}
+              <button
+                ptahButton
+                type="button"
+                variant="ghost"
+                size="xs"
+                (click)="retry.emit()"
+              >
+                Retry
+              </button>
+            </td>
+          </tr>
+        }
         @for (row of rows(); track row.id) {
           @let position = positions().get(row.id);
           <tr
@@ -357,9 +373,7 @@ export type LaneTableRow = CliMatrixRow & {
               <input
                 ptahToggle
                 type="checkbox"
-                [checked]="
-                  row.enabled && (row.kind === 'instance' || row.installed)
-                "
+                [checked]="enabledShown(row)"
                 [disabled]="
                   (row.kind === 'system' && !row.installed) ||
                   rowBusy(row) ||
@@ -605,6 +619,10 @@ export class LanesTableComponent {
     return this.busy() || !!this.busyRows()[row.id];
   }
 
+  protected enabledShown(row: LaneTableRow): boolean {
+    return row.enabled && (row.kind === 'instance' || row.installed);
+  }
+
   protected moveRow(row: LaneTableRow, direction: -1 | 1): void {
     if (this.rowBusy(row) || !this.canWrite()) return;
     this.moved.emit({ row, direction });
@@ -612,8 +630,8 @@ export class LanesTableComponent {
 
   protected toggleRow(row: LaneTableRow, event: Event): void {
     const control = event.target as HTMLInputElement;
-    if (this.rowBusy(row) || !this.canWrite()) {
-      control.checked = row.enabled;
+    if ((row.kind === 'system' && !row.installed) || this.rowBusy(row) || !this.canWrite()) {
+      control.checked = this.enabledShown(row);
       return;
     }
     this.toggled.emit({ row, event });

@@ -693,6 +693,24 @@ describe('LanesTableComponent', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  it('shows a refresh error and Retry while rows remain', async () => {
+    const { fixture, host } = await mount([instance('a')]);
+    const retry = jest.fn();
+    fixture.componentInstance.retry.subscribe(retry);
+    fixture.componentRef.setInput('error', 'Could not refresh lanes');
+    fixture.detectChanges();
+
+    const message = q(host, 'td.ptah-table-message-cell');
+    expect(message?.textContent).toContain('Could not refresh lanes');
+    const button = Array.from(message?.querySelectorAll('button') ?? []).find(
+      (candidate) => candidate.textContent?.trim() === 'Retry',
+    );
+    expect(button).toBeDefined();
+    button?.click();
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+  });
+
   it('clears the editor when its row is removed and reinserted', async () => {
     const row = system('codex');
     const { fixture, host } = await mount([row]);
@@ -742,6 +760,22 @@ describe('LanesTableComponent', () => {
     expect(q(host, '[aria-live="polite"]')?.textContent).toContain(
       'Running test for Lane a',
     );
+  });
+
+  it('refuses an uninstalled system toggle and restores its unchecked state', async () => {
+    const row = system('codex', { installed: false, enabled: true });
+    const { fixture, host } = await mount([row]);
+    const toggled = jest.fn();
+    fixture.componentInstance.toggled.subscribe(toggled);
+    const toggle = q(host, '[aria-label="Codex enabled"]') as HTMLInputElement;
+
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.checked).toBe(false);
+    toggle.click();
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+    expect(toggled).not.toHaveBeenCalled();
+    expect(toggle.checked).toBe(false);
   });
 
   it('disables Test for uninstalled and busy rows and displays a result', async () => {
