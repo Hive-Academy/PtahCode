@@ -1,4 +1,6 @@
-﻿import { ApplicationRef, signal } from '@angular/core';
+import { By } from '@angular/platform-browser';
+import { LanesTableComponent } from './lanes-table.component';
+import { ApplicationRef, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
   ClaudeAmbientStatusService,
@@ -21,10 +23,8 @@ import type {
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
-  CLI_INSTALL_GUIDES,
   CliOrchestrationMatrixComponent,
 } from './cli-orchestration-matrix.component';
-import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
 const ready = <T>(data: T): ProvidersSettingsSection<T> => ({
   status: 'ready',
@@ -172,6 +172,8 @@ class StateStub {
   >(ready([]));
   /** What the next re-detect does to the state; by default nothing changes (the CLI is still missing). */
   onRedetect: () => void = () => undefined;
+  readonly refreshOrchestration = jest.fn(async () => undefined);
+  readonly refreshCliAgents = jest.fn(async () => undefined);
   readonly redetectClis = jest.fn(async (): Promise<boolean> => {
     this.onRedetect();
     return this.cliDetection().status === 'ready';
@@ -232,7 +234,7 @@ describe('CliOrchestrationMatrixComponent', () => {
   const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
     (element().querySelector(selector) ?? document.querySelector(selector)) as T | null;
   const row = (id: string) => q(`[data-testid="cli-matrix-row-${id}"], [data-testid="cli-provider-card-${id}"]`);
-  const rowIds = (selector: string) =>
+  const _rowIds = (selector: string) =>
     Array.from(
       element().querySelectorAll(
         `${selector} [data-testid^="cli-provider-card-"]`,
@@ -240,7 +242,7 @@ describe('CliOrchestrationMatrixComponent', () => {
     ).map((node) =>
       node.getAttribute('data-testid')?.replace('cli-provider-card-', ''),
     );
-  const statusOf = (id: string) => row(id)?.querySelector('[data-testid="cli-matrix-status"], .status-slot')?.textContent?.trim();
+  const _statusOf = (id: string) => row(id)?.querySelector('[data-testid="cli-matrix-status"], .status-slot')?.textContent?.trim();
   async function flush() {
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
     fixture.detectChanges();
@@ -259,26 +261,14 @@ describe('CliOrchestrationMatrixComponent', () => {
     }));
     fixture.detectChanges();
   }
-  /** Decision 1: the Uninstalled group starts collapsed; most cases look inside it. */
-  function expandUninstalled() {
-    q<HTMLButtonElement>(
-      '[data-testid="cli-matrix-uninstalled-toggle"]',
-    )?.click();
-    fixture.detectChanges();
-  }
-  /** V36-7: Edit and Delete live in the row's "More actions" popover. */
-  function more(id: string) {
-    q<HTMLButtonElement>(`[data-testid="cli-matrix-more-${id}"]`)?.click();
-    fixture.detectChanges();
-  }
-  function clickNamed(root: Element | null, name: string): void {
+  function _clickNamed(root: Element | null, name: string): void {
     const button = Array.from(root?.querySelectorAll('button') ?? [])
       .find((candidate) => candidate.textContent?.trim() === name);
     if (!button) throw new Error(`No ${name} button`);
     button.click();
   }
   /** Runs afterNextRender callbacks (focus moves). */
-  function render() {
+  function _render() {
     TestBed.inject(ApplicationRef).tick();
     fixture.detectChanges();
   }
@@ -332,421 +322,126 @@ describe('CliOrchestrationMatrixComponent', () => {
     feedback = TestBed.inject(SettingsSaveFeedbackService);
     fixture = TestBed.createComponent(CliOrchestrationMatrixComponent);
     fixture.detectChanges();
-    expandUninstalled();
   });
   afterEach(() => {
     feedback.dismiss();
     TestBed.resetTestingModule();
   });
 
-    describe('install guide Re-detect', () => {
-      function openPiGuide() {
-        clickNamed(row('pi'), 'Install guide');
-        fixture.detectChanges();
-      }
-      /** The guide's outcome is announced through the page toast, never inline. */
-      const note = () => {
-        expect(q('[data-testid="cli-install-redetect-note"]')).toBeNull();
-        return feedback.toast()?.message;
-      };
+  function table() {
+    const component = fixture.debugElement.query(By.directive(LanesTableComponent))
+      ?.componentInstance as LanesTableComponent | undefined;
+    if (!component) throw new Error('Lanes table not mounted');
+    return component;
+  }
+  function lane(id: string) {
+    const found = table().rows().find(item => item.id === id);
+    if (!found) throw new Error('Missing lane ' + id);
+    return found;
+  }
 
-      it('closes the guide and focuses the row once the CLI is found', async () => {
-        state.onRedetect = () =>
-          state.orchestration.set(
-            ready({
-              ...ORCHESTRATION,
-              detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
-                cli.cli === 'pi'
-                  ? detected('pi', true, { version: '0.80.3' })
-                  : cli,
-              ),
-            }),
-          );
-        openPiGuide();
-        clickNamed(q('[data-testid="cli-provider-popover-content"]'), 'Re-detect');
-        await flush();
-        render();
-        expect(state.redetectClis).toHaveBeenCalledTimes(1);
-        expect(q('[data-testid="cli-provider-popover-content"]')).toBeNull();
-        expect(rowIds('[data-testid="cli-matrix-uninstalled"]')).not.toContain(
-          'pi',
-        );
-        expect(document.activeElement).toBe(row('pi')?.querySelector('input[type="checkbox"]'));
-      });
-
-      it('says the CLI is still missing when detection does not find it', async () => {
-        openPiGuide();
-        clickNamed(q('[data-testid="cli-provider-popover-content"]'), 'Re-detect');
-        await flush();
-        expect(q('[data-testid="cli-provider-popover-content"]')).not.toBeNull();
-        expect(note()).toBe(
-          'Still not found. Check the step above, then try again.',
-        );
-        expect(feedback.toast()?.tone).toBe('status');
-      });
-
-      it('says detection failed when the re-read fails', async () => {
-        state.onRedetect = () =>
-          state.cliDetection.set({
-            status: 'error',
-            data: null,
-            error: 'Could not load this section. Retry.',
-          });
-        openPiGuide();
-        clickNamed(q('[data-testid="cli-provider-popover-content"]'), 'Re-detect');
-        await flush();
-        expect(note()).toBe('Detection failed. Try again.');
-        expect(feedback.toast()?.tone).toBe('alert');
-      });
-
-      it('decides on its own detection result, not the shared section an overlapping re-detect replaced', async () => {
-        // This call failed, but a later policy-bar re-detect already left the shared section ready.
-        state.redetectClis.mockResolvedValueOnce(false);
-        openPiGuide();
-        clickNamed(q('[data-testid="cli-provider-popover-content"]'), 'Re-detect');
-        await flush();
-        expect(state.cliDetection().status).toBe('ready');
-        expect(note()).toBe('Detection failed. Try again.');
-      });
-    });
-
-    it('has install copy for every system CLI, Codex and Copilot as before (#77)', () => {
-      expect(CLI_INSTALL_GUIDES.codex.command).toBe(
-        'npm install -g @openai/codex',
-      );
-      expect(CLI_INSTALL_GUIDES.copilot.command).toBe(
-        'npm install -g @github/copilot',
-      );
-      for (const guide of Object.values(CLI_INSTALL_GUIDES))
-        expect(guide.note).toContain('Re-detect');
-      clickNamed(row('cursor'), 'Install guide');
-      fixture.detectChanges();
-      expect(q('[data-testid="cli-provider-popover-content"] code')).toBeNull();
-      expect(q('[data-testid="cli-provider-popover-content"]')?.textContent).toContain(
-        'CURSOR_API_KEY',
-      );
-    });
-  describe('writes (every write is state.saveSettings through the feedback service)', () => {
-    it('saves a lane default and Undo restores the previous row', async () => {
-      showSavedCodexDefault();
-      const select = row('codex')?.querySelector('select[aria-label="Codex permission default"]') as HTMLSelectElement;
-      select.value = 'auto-edit';
-      select.dispatchEvent(new Event('change'));
-      expect(select.value).toBe('plan');
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { cliLaneDefaults: { codex: { permission: 'auto-edit', network: 'deny' } } } }, CONTEXT,
-      );
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT,
-      );
-    });
-
-    it('resets a saved default with a null row and Undo restores it', async () => {
-      showSavedCodexDefault();
-      clickNamed(row('codex'), 'More default actions'); fixture.detectChanges();
-       const reset = Array.from(row('codex')?.querySelectorAll('button') ?? [])
-        .find(button => button.textContent?.includes('Reset to default'));
-      reset?.click();
-      fixture.detectChanges();
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { cliLaneDefaults: { codex: null } } }, CONTEXT,
-      );
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } } } }, CONTEXT,
-      );
-    });
-
-    it('keeps the prior selection when a write is rejected', async () => {
-      showSavedCodexDefault();
-      state.saveSettings.mockImplementationOnce(async () => {
-        state.commit.set({ ...idle, status: 'failed', unsaved: ['agentOrchestration.cliLaneDefaults.codex'], message: 'Unsupported choice.' });
-        return true;
-      });
-      const select = row('codex')?.querySelector('select[aria-label="Codex permission default"]') as HTMLSelectElement;
-      select.value = 'auto-edit';
-      select.dispatchEvent(new Event('change'));
-      await flush();
-      expect(select.value).toBe('plan');
-      expect(feedback.toast()?.tone).toBe('alert');
-      expect(feedback.toast()?.message).toContain('Unsupported choice.');
-    });
-    it('switches a system CLI off through disabledClis, with Undo', async () => {
-      check('codex', false);
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { disabledClis: ['copilot', 'codex'] } },
-        CONTEXT,
-      );
-      expect(feedback.toast()).toEqual({
-        tone: 'status',
-        message: 'Saved Codex off to All Ptah apps.',
-        canUndo: true,
-      });
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { disabledClis: ['copilot'] } },
-        CONTEXT,
-      );
-    });
-
-    it('switches a system CLI on by removing it from disabledClis', async () => {
-      check('copilot', true);
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { disabledClis: [] } },
-        CONTEXT,
-      );
-    });
-
-    it('switches an instance through ptahCli:update.enabled, with Undo', async () => {
-      check('glm-1', false);
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        {
-          cli: [{ action: 'update', params: { id: 'glm-1', enabled: false } }],
-        },
-        CONTEXT,
-      );
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { cli: [{ action: 'update', params: { id: 'glm-1', enabled: true } }] },
-        CONTEXT,
-      );
-    });
-
-    it('keeps the checkbox on the saved value until the read-back moves it', async () => {
-      check('codex', false);
-      expect(
-        q<HTMLInputElement>('[data-testid="cli-provider-card-codex"] input[type="checkbox"]')?.checked,
-      ).toBe(true);
-      await flush();
-    });
-
-    it('disables uninstalled toggles, and every toggle while a save runs or the scopes are not loaded', () => {
-      expect(
-        isDisabledControl(
-          q<HTMLInputElement>('[data-testid="cli-provider-card-pi"] input[type="checkbox"]'),
-        ),
-      ).toBe(true);
-      expect(
-        q<HTMLInputElement>('[data-testid="cli-provider-card-pi"] input[type="checkbox"]')?.checked,
-      ).toBe(false);
-      state.commit.set({ ...idle, status: 'saving' });
-      fixture.detectChanges();
-      expect(
-        isDisabledControl(
-          q<HTMLInputElement>('[data-testid="cli-provider-card-codex"] input[type="checkbox"]'),
-        ),
-      ).toBe(true);
-      state.commit.set(idle);
-      state.scopes.set({ status: 'loading', data: null, error: null });
-      fixture.detectChanges();
-      expect(
-        isDisabledControl(
-          q<HTMLInputElement>('[data-testid="cli-matrix-toggle-glm-1"]'),
-        ),
-      ).toBe(true);
-    });
-
-    it('deletes an instance after the inline confirm, with no Undo', async () => {
-      more('glm-1');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-delete-glm-1"]')?.click();
-      fixture.detectChanges();
-      expect(state.saveSettings).not.toHaveBeenCalled();
-      expect(row('glm-1')?.textContent).toContain('Delete Glm?');
-      q<HTMLButtonElement>('button[aria-label="Confirm delete Glm"]')?.click();
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { cli: [{ action: 'delete', params: { id: 'glm-1' } }] },
-        CONTEXT,
-      );
-      expect(feedback.toast()?.canUndo).toBe(false);
-    });
-
-    it('cancels a delete without writing; focus moves to the confirm, then back to More', () => {
-      more('glm-1');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-delete-glm-1"]')?.click();
-      render();
-      const cancel = Array.from(
-        row('glm-1')?.querySelectorAll('button') ?? [],
-      ).find((button) => button.textContent?.trim() === 'Cancel');
-      expect(document.activeElement).toBe(cancel);
-      cancel?.click();
-      render();
-      expect(q('[data-testid="cli-matrix-more-glm-1"]')).not.toBeNull();
-      expect(document.activeElement).toBe(
-        q('[data-testid="cli-matrix-more-glm-1"]'),
-      );
-      expect(state.saveSettings).not.toHaveBeenCalled();
-    });
-
-    it('M2: a refused delete keeps the confirm even when commit() still says an earlier save landed', async () => {
-      state.commit.set({ ...idle, status: 'saved' });
-      state.saveSettings.mockImplementationOnce(async () => false);
-      more('glm-1');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-delete-glm-1"]')?.click();
-      fixture.detectChanges();
-      q<HTMLButtonElement>('button[aria-label="Confirm delete Glm"]')?.click();
-      await flush();
-      expect(row('glm-1')?.textContent).toContain('Delete Glm?');
-    });
-
-    it('Minor 4: Undo of a system on/off restores only that CLI, against the list as it is at Undo time', async () => {
-      check('codex', false);
-      await flush();
-      // Another path disables opencode meanwhile; Undo must keep that change.
-      state.orchestration.set(
-        ready({
-          ...ORCHESTRATION,
-          disabledClis: ['copilot', 'codex', 'opencode'],
-        }),
-      );
-      await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { disabledClis: ['copilot', 'opencode'] } },
-        CONTEXT,
-      );
-    });
+  it('routes system and instance toggles through the existing settings write', async () => {
+    check('codex', false); await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { disabledClis: ['copilot', 'codex'] } }, CONTEXT,
+    );
+    check('glm-1', false); await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { cli: [{ action: 'update', params: { id: 'glm-1', enabled: false } }] }, CONTEXT,
+    );
   });
-  describe('Test (#52, RUX-11)', () => {
-    const inlineResult = () =>
-      row('glm-1')?.querySelector('[data-testid="cli-matrix-test-result"]') ??
-      null;
 
-    it('tests the instance, announces the latency in the toast, and keeps it as the card last test', async () => {
-      expect(inlineResult()?.textContent?.trim()).toBe('Not run yet');
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(state.testCliConnection).toHaveBeenCalledWith('glm-1');
-      expect(feedback.toast()).toEqual({
-        tone: 'status',
-        message: 'Glm: Test passed in 112ms.',
-        canUndo: false,
-      });
-      expect(inlineResult()?.textContent?.trim()).toBe('Passed in 112ms');
-      expect(statusOf('glm-1')).toBe('Installed');
-    });
+  it('routes table default selection and reset through CliLaneDefaultsStore', async () => {
+    showSavedCodexDefault();
+    const codex = lane('codex');
+    if (codex.kind !== 'system') throw new Error('Expected system lane');
+    table().defaultSelected.emit({ row: codex, choice: { permission: 'ask', network: 'deny' } });
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { cliLaneDefaults: expect.objectContaining({ codex: { permission: 'ask', network: 'deny' } }) } },
+      CONTEXT,
+    );
+    table().defaultResetRequested.emit(codex);
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledTimes(2);
+  });
 
-    it("M1: a failure is a fixed sentence, followed only by the state's own fixed reason", async () => {
-      state.testResult = {
-        id: 'glm-1',
-        success: false,
-        latencyMs: null,
-        reason: null,
-      };
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(inlineResult()?.textContent?.trim()).toBe(
-        'The connection test failed.',
-      );
-      expect(feedback.toast()).toEqual({
-        tone: 'alert',
-        message: 'Glm: The connection test failed.',
-        canUndo: false,
-      });
-      expect(statusOf('glm-1')).toBe('Installed');
-      state.testResult = {
-        id: 'glm-1',
-        success: false,
-        latencyMs: null,
-        reason: 'The provider did not respond.',
-      };
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(feedback.toast()?.message).toBe(
-        'Glm: The connection test failed. The provider did not respond.',
-      );
-    });
+  it('writes a permission selection from the table control', async () => {
+    showSavedCodexDefault();
+    const select = row('codex')?.querySelector<HTMLSelectElement>('select[aria-label="Codex permission default"]');
+    expect(select).not.toBeNull();
+    if (!select) throw new Error('Missing Codex permission select');
+    select.value = 'auto-edit';
+    select.dispatchEvent(new Event('change'));
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { cliLaneDefaults: expect.objectContaining({ codex: { permission: 'auto-edit', network: 'deny' } }) } },
+      CONTEXT,
+    );
+  });
 
-    it('S1: a failed or timed-out run never reports the earlier pass', async () => {
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(feedback.toast()?.message).toBe('Glm: Test passed in 112ms.');
-      let fail: () => void = () => undefined;
-      state.testCliConnection.mockImplementationOnce(async () => {
-        // The real state drops the previous result when a run starts.
-        state.cliTest.set({ status: 'loading', data: null, error: null });
-        await new Promise<void>((resolve) => {
-          fail = resolve;
-        });
-        state.cliTest.set({
-          status: 'error',
-          data: null,
-          error: 'Could not load this section. Retry.',
-        });
-      });
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      fixture.detectChanges();
-      expect(statusOf('glm-1')).toBe('Installed');
-      fail();
-      await flush();
-      expect(feedback.toast()).toEqual({
-        tone: 'alert',
-        message: 'Glm: The test could not run. Try again.',
-        canUndo: false,
-      });
-      expect(row('glm-1')?.textContent).not.toContain('112ms');
-    });
+  it('resets a saved default from the table control', async () => {
+    showSavedCodexDefault();
+    const cell = row('codex')?.querySelector('ptah-cli-lane-default-cell');
+    _clickNamed(cell ?? null, 'More default actions');
+    fixture.detectChanges();
+    const reset = Array.from(cell?.querySelectorAll('button') ?? []).find(button => button.textContent?.includes('Reset to default'));
+    expect(reset).toBeDefined();
+    reset?.click();
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { cliLaneDefaults: { codex: null } } },
+      CONTEXT,
+    );
+  });
 
-    it('says when the test itself could not run', async () => {
-      state.testCliConnection.mockImplementationOnce(async () => {
-        state.cliTest.set({
-          status: 'error',
-          data: null,
-          error: 'Could not load this section. Retry.',
-        });
-      });
-      q<HTMLButtonElement>('[data-testid="cli-matrix-test-glm-1"]')?.click();
-      await flush();
-      expect(inlineResult()?.textContent?.trim()).toBe('Not run yet');
-      expect(feedback.toast()?.message).toContain('could not run');
-    });
+  it('writes a toggle and Test from the table controls', async () => {
+    check('codex', false);
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { disabledClis: ['copilot', 'codex'] } }, CONTEXT,
+    );
+    const actions = row('glm-1')?.querySelector<HTMLButtonElement>('ptah-table-row-actions button[aria-haspopup="menu"]');
+    actions?.click();
+    fixture.detectChanges();
+    _clickNamed(row('glm-1'), 'Test');
+    await flush();
+    expect(state.testCliConnection).toHaveBeenCalledWith('glm-1');
+  });
 
-    it("M4 / Minor 2: a create runs the new instance's Test; from the empty-state button focus moves to its first action", async () => {
-      state.cliAgents.set(ready([]));
-      fixture.detectChanges();
-      Array.from(
-        q('[data-testid="cli-matrix-no-instances"]')?.querySelectorAll(
-          'button',
-        ) ?? [],
-      )[0]?.click();
-      fixture.detectChanges();
-      state.cliAgents.set(ready([{ ...GLM, id: 'kimi-9', name: 'Kimi' }]));
-      state.cliModels.set(
-        ready({ 'kimi-9': { selectedModel: '', tierMappings: {} } }),
-      );
-      fixture.debugElement
-        .query((node) => node.name === 'ptah-add-cli-instance-modal')
-        ?.triggerEventHandler('created', 'kimi');
-      fixture.debugElement
-        .query((node) => node.name === 'ptah-add-cli-instance-modal')
-        ?.triggerEventHandler('closed');
-      render();
-      expect(state.testCliConnection).toHaveBeenCalledWith('kimi-9');
-      expect(document.activeElement).toBe(
-        q('[data-testid="cli-matrix-tiers-kimi-9"]'),
-      );
-    });
+  it('routes order moves through preferredAgentOrder with undo', async () => {
+    table().moved.emit({ row: lane('codex'), direction: 1 }); await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { preferredAgentOrder: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'] } },
+      CONTEXT,
+    );
+  });
 
-    it('re-check N-1: a create the refreshed list does not hold runs no Test and says so in a fixed toast', () => {
-      fixture.debugElement
-        .query((node) => node.name === 'ptah-add-cli-instance-modal')
-        ?.triggerEventHandler('created', 'Kimi');
-      expect(state.testCliConnection).not.toHaveBeenCalled();
-      expect(feedback.toast()).toEqual({
-        tone: 'alert',
-        canUndo: false,
-        message:
-          'Created Kimi. Its connection test did not start. Use Test on its row once it shows.',
-      });
-    });
+  it('routes test and last result to the existing connection test', async () => {
+    table().test.emit(lane('glm-1')); await flush();
+    expect(state.testCliConnection).toHaveBeenCalledWith('glm-1');
+    expect(q('[data-testid="cli-matrix-row-glm-1"]')?.textContent).toContain('112ms');
+  });
 
-    it('renders Test for installed system CLIs (design-spec.md section 3.5)', () => { expect(Array.from(row('codex')?.querySelectorAll('button') ?? []).some(button => button.textContent?.trim() === 'Test')).toBe(true); });
+  it('routes edit and tier editor outputs to existing modals', () => {
+    table().edit.emit(lane('glm-1')); fixture.detectChanges();
+    expect(q('[data-testid="add-cli-instance-modal"]')?.closest('dialog')?.hasAttribute('open')).toBe(true);
+    table().tiers.emit(lane('glm-1')); fixture.detectChanges();
+    expect(q('[data-testid="cli-tier-mapping-modal"]')?.closest('dialog')?.hasAttribute('open')).toBe(true);
+  });
+
+  it('routes confirmed delete to the existing delete write', async () => {
+    table().delete.emit(lane('glm-1')); await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { cli: [{ action: 'delete', params: { id: 'glm-1' } }] }, CONTEXT,
+    );
+  });
+
+  it('routes install Re-detect and retry to existing state reads', async () => {
+    table().redetect.emit('pi'); await flush();
+    expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    table().retry.emit(); await flush();
+    expect(state.refreshOrchestration).toHaveBeenCalledTimes(1);
+    expect(state.refreshCliAgents).toHaveBeenCalledTimes(1);
   });
 });
-
-

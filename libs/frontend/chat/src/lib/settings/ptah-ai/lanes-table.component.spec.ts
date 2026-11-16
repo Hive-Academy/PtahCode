@@ -263,6 +263,9 @@ describe('LanesTableComponent', () => {
       ).disabled,
     ).toBe(true);
     expect(q(host, '[aria-label="Effort default for Copilot"]')).toBeNull();
+    // A row with no effort editor shows "n/a", with a hidden "Effort" prefix for screen readers.
+    const na = q(host, '[data-testid="cli-provider-card-copilot"] [data-testid="lanes-effort-na"]');
+    expect(na?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Effort n/a');
   });
 
   it('opens the instance Model and Effort editors', async () => {
@@ -305,6 +308,9 @@ describe('LanesTableComponent', () => {
       '[aria-label="Model default for Codex"]',
     ) as HTMLButtonElement;
     expect(trigger.getAttribute('aria-busy')).toBe('true');
+    // Busy is aria-disabled, not disabled: the trigger keeps focus during a save.
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.getAttribute('aria-disabled')).toBe('true');
     trigger.click();
     fixture.detectChanges();
     expect(
@@ -469,6 +475,15 @@ describe('LanesTableComponent', () => {
   });
 
   describe('order', () => {
+    it('suppresses a focus tooltip during the order button focus return', async () => {
+      const { host } = await mount([instance('a'), instance('b')], true);
+      const button = q(host, '[data-testid="cli-matrix-row-a"] [data-order-down]') as HTMLButtonElement;
+      const focused = jest.fn();
+      button.addEventListener('focus', focused);
+      button.click();
+      button.dispatchEvent(new FocusEvent('focus', { bubbles: false }));
+      expect(focused).not.toHaveBeenCalled();
+    });
     it('blocks moves while busy or without write permission', async () => {
       const a = instance('a');
       const b = instance('b');
@@ -582,6 +597,13 @@ describe('LanesTableComponent', () => {
   });
 
   describe('system row', () => {
+    it('keeps one version hook and wide defaults when details are expanded', async () => {
+      const { fixture, host } = await mount([system('codex')]);
+      q(host, '[data-testid="cli-provider-card-codex"] ptah-table-row-expander button')?.click();
+      fixture.detectChanges();
+      expect(host.querySelectorAll('[data-testid="cli-matrix-version"]')).toHaveLength(1);
+      expect(q(host, '#lane-detail-codex > td > dl')).toBeNull();
+    });
     it('has card and version hooks and a clean model label', async () => {
       const { host } = await mount([
         system('codex', {
@@ -592,15 +614,21 @@ describe('LanesTableComponent', () => {
       const version = q(host, '[data-testid="cli-matrix-version"]');
       expect(version?.textContent).toContain('v1.2.3');
       expect(version?.getAttribute('title')).toBe('v1.2.3');
+      // The cell holds the model and the effort; the model button holds the label only.
       const model = q(host, '[data-testid="cli-matrix-model"]');
-      expect(model?.textContent?.trim()).toBe('gpt-5');
+      expect(
+        model?.querySelector('[data-popover-kind="model"]')?.textContent?.trim(),
+      ).toBe('gpt-5');
       expect(model?.getAttribute('title')).toBe('gpt-5 (GPT 5)');
     });
 
     it('shows CLI default for an empty model', async () => {
       const { host } = await mount([system('codex')]);
       expect(
-        q(host, '[data-testid="cli-matrix-model"]')?.textContent?.trim(),
+        q(
+          host,
+          '[data-testid="cli-matrix-model"] [data-popover-kind="model"]',
+        )?.textContent?.trim(),
       ).toBe('CLI default');
     });
   });
@@ -796,7 +824,8 @@ describe('LanesTableComponent', () => {
           : '[data-testid="cli-matrix-row-a"]',
       );
       expect(
-        (row?.querySelector('[role="menuitem"]') as HTMLButtonElement).disabled,
+        (Array.from(row?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
+          .find(button => button.textContent?.trim() === 'Test') as HTMLButtonElement).disabled,
       ).toBe(true);
     }
     expect(host.textContent).toContain('Answered in 1.4 s');

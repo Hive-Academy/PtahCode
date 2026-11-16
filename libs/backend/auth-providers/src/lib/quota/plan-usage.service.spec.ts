@@ -167,6 +167,39 @@ function harness(storageOverride?: IStateStorage) {
 }
 
 describe('PlanUsageService', () => {
+  it('logs cache hits, joined flights, starts and each bypass without owner keys', async () => {
+    const h = harness();
+    const first = h.service.getOwnerSnapshot(codexTarget());
+    const joined = h.service.getOwnerSnapshot(codexTarget());
+    await Promise.all([first, joined]);
+    await h.service.getOwnerSnapshot(codexTarget());
+    await h.service.getOwnerSnapshot(codexTarget(), { refresh: true });
+    h.advance(30_001);
+    await h.service.getOwnerSnapshot(codexTarget());
+    const named = { ...claudeTarget(), claudeRoute: { kind: 'named' } as PlanOwnerTarget['claudeRoute'] };
+    await h.service.getOwnerSnapshot(named);
+    await h.service.getOwnerSnapshot(named);
+    const unsupported = { ...codexTarget(codexOwner(999)), providerId: 'unsupported' };
+    await h.service.getOwnerSnapshot(unsupported);
+    await h.service.getOwnerSnapshot(unsupported, { allowCliFallback: true });
+    const lines = h.logger.debug.mock.calls.filter(([message]) => message === '[PlanUsage] owner snapshot request');
+    expect(lines.map(([, payload]) => payload)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ outcome: 'flight-start', bypass: 'empty' }),
+      expect.objectContaining({ outcome: 'flight-join', bypass: 'empty' }),
+      expect.objectContaining({ outcome: 'cache-hit' }),
+      expect.objectContaining({ bypass: 'refresh' }),
+      expect.objectContaining({ bypass: 'expired' }),
+      expect.objectContaining({ bypass: 'named-route' }),
+      expect.objectContaining({ bypass: 'cli-fallback' }),
+    ]));
+    expect(lines.slice(0, 3).map(([, payload]) => payload)).toEqual([
+      expect.objectContaining({ outcome: 'flight-start', hits: 0, joins: 0, starts: 1 }),
+      expect.objectContaining({ outcome: 'flight-join', hits: 0, joins: 1, starts: 1 }),
+      expect.objectContaining({ outcome: 'cache-hit', hits: 1, joins: 1, starts: 1 }),
+    ]);
+    expect(JSON.stringify(lines)).not.toContain(CODEX_A.key);
+    expect(JSON.stringify(lines)).not.toContain(CLAUDE_A.key);
+  });
   it('backs off failed OAuth reads per owner while preserving each live no-session result', async () => {
     const h = harness();
     h.readPlanUsage.mockResolvedValue(null);

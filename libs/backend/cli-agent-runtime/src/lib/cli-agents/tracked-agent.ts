@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'child_process';
 import type {
   AgentProcessInfo,
+  ExternalOwnerKey,
   CliOutputSegment,
   FlatStreamEventUnion,
 } from '@ptah-extension/shared';
@@ -10,6 +11,8 @@ import type { AgentBudgetCoordinator } from './agent-budget-coordinator';
 import type { LaneModelLogState } from './lane-model-log';
 
 export interface TrackedAgent {
+  /** Authenticated external transport owner; never exposed through AgentProcessInfo. */
+  externalOwner?: ExternalOwnerKey;
   /** In-memory model selection and adapter-reported evidence for terminal logging. */
   modelLog?: LaneModelLogState;
   budget?: AgentBudgetCoordinator;

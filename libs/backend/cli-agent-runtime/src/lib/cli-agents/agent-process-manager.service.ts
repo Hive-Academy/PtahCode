@@ -9,6 +9,7 @@
  * - Cross-platform process termination (SIGTERM/taskkill)
  */
 import { randomUUID } from 'node:crypto';
+import type { ExternalCompletionRecorder } from './external-delivery';
 import { SpawnStepTiming } from './spawn-step-timing';
 import { laneMcpTokenCapability } from './lane-mcp-token-rule';
 import { worktreeMainRoot } from './git-main-checkout-root';
@@ -482,6 +483,8 @@ export class AgentProcessManager {
     private readonly outputJournal?: AgentOutputJournal,
     @inject(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { isOptional: true })
     private readonly usageReconciliationTrigger?: import('@ptah-extension/platform-core').UsageReconciliationTrigger,
+    @inject(CLI_AGENT_RUNTIME_TOKENS.EXTERNAL_COMPLETION_RECORDER, { isOptional: true })
+    private readonly externalCompletions?: ExternalCompletionRecorder,
   ) {
     // Lane state and failure callbacks are adapted to the shared admission queue.
     const hasOtherActiveLane = (waiting: TrackedAgent) =>
@@ -583,6 +586,7 @@ export class AgentProcessManager {
       startedAt,
     });
     tracked.provisionalCli = !request.cli && !request.ptahCliId;
+    tracked.externalOwner = request.externalOwner;
     this.agents.set(agentId, tracked);
     armSpawnAdmissionWatchdog(tracked, () => {
       this.failSpawn({ agentId, startedAt }, new Error('Lane did not start within 120 s'));
@@ -4083,7 +4087,8 @@ export class AgentProcessManager {
           ? { repeatedCalls: tracked.repeatedCalls }
           : {}),
       }),
-    ).catch((error: unknown) => {
+    ).then((result) => this.externalCompletions?.recordFromSignal(info, tracked.externalOwner, result))
+      .catch((error: unknown) => {
       this.logger.error(
         '[AgentProcessManager] Completion signal failed',
         error instanceof Error ? error : new Error('Completion signal failed'),

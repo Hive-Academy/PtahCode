@@ -37,6 +37,7 @@
  * name only, never its message, which may quote a response body or a path.
  */
 import { inject, injectable } from 'tsyringe';
+import { createHash } from 'node:crypto';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import {
@@ -90,11 +91,24 @@ interface NativeSessionMetadata {
 type CodexHomeOwnerResolver = Pick<ProviderOwnerResolver, 'ownerForCodexHome'>;
 /** Leaves six seconds for RPC transport and rendering (30 second client timeout). */
 const SNAPSHOT_BUDGET_MS = 24_000;
+const PLAN_LIMITS_SNAPSHOT_TTL_MS = 30_000;
+const MAX_SNAPSHOT_KEYS = 32;
 const RESERVED_READ_MS = SLOW_LIMIT_LOOKUP_DEADLINE_MS;
+type AssembledSnapshot = {
+  snapshot: PlanLimitsSnapshot;
+  discoveryMs: number;
+  readsMs: number;
+  cacheable: boolean;
+};
 
 @injectable()
 export class PlanLimitsSnapshotService {
-  private readonly pendingSnapshots = new Map<string, Promise<PlanLimitsSnapshot>>();
+  private readonly pendingSnapshots = new Map<string, Promise<AssembledSnapshot>>();
+  private readonly cachedSnapshots = new Map<string, { result: AssembledSnapshot; expiresAt: number }>();
+  private readonly latestCacheAssembly = new Map<string, symbol>();
+  private pulls = 0;
+  private joins = 0;
+  private pushes = 0;
   /** Scope of the most recent RPC request; the push repeats it. */
   private lastRequest: PlanOwnerDiscoveryRequest = {};
 
@@ -112,26 +126,49 @@ export class PlanLimitsSnapshotService {
     private readonly ownerResolver?: CodexHomeOwnerResolver,
   ) {}
 
+  protected now(): number { return Date.now(); }
+
   /**
    * The snapshot for an RPC request. Its scope (not `refresh`) becomes the
-   * scope of later pushes. Never rejects.
+   * scope of later pushes. An owner read failure never rejects. A discovery
+   * failure rejects and is not cached.
+   *
+   * A complete pull is cached for 30 s per scope. The cache has no
+   * invalidation hook: a credential change or a session that opens inside the
+   * TTL shows on the next push, on `refresh: true`, or after the TTL.
    */
   async snapshot(
     request: PlanLimitsSnapshotRequest,
   ): Promise<PlanLimitsSnapshot> {
+    const started = this.now();
+    this.pulls += 1;
     const scope = discoveryRequest(request);
     this.lastRequest = scope;
-    const key = JSON.stringify({
-      providerId: scope.selectedProviderId,
-      sessionIds: [...new Set(scope.sessionIds ?? [])].sort(),
-      ownerKeys: [...new Set(scope.ownerKeys ?? [])].sort(),
-      refresh: request.refresh === true,
-    });
+    const key = scopeKey(scope, request.refresh === true);
     const existing = this.pendingSnapshots.get(key);
-    if (existing) return existing;
+    if (existing) {
+      this.joins += 1;
+      const result = await existing;
+      this.logSnapshot('pull', 'joined', key, scope, request.refresh === true, started, result);
+      return result.snapshot;
+    }
+    const cacheKey = scopeKey(scope, false);
+    if (request.refresh !== true) {
+      const cached = this.cachedSnapshots.get(cacheKey);
+      if (cached && this.now() < cached.expiresAt) {
+        // Re-insert on a hit so that the 32-key bound evicts the least recent.
+        this.cachedSnapshots.delete(cacheKey);
+        this.cachedSnapshots.set(cacheKey, cached);
+        this.logSnapshot('pull', 'ttl-cache', key, scope, false, started, cached.result);
+        return cached.result.snapshot;
+      }
+      if (cached) this.cachedSnapshots.delete(cacheKey);
+    }
+    const cacheAssembly = Symbol();
+    this.latestCacheAssembly.set(cacheKey, cacheAssembly);
     const pending = this.assemble(scope, request.refresh === true);
     // Bound retained keys even when callers submit many distinct scopes.
-    if (this.pendingSnapshots.size >= 32) {
+    if (this.pendingSnapshots.size >= MAX_SNAPSHOT_KEYS) {
       const oldest = this.pendingSnapshots.keys().next().value;
       if (oldest !== undefined) this.pendingSnapshots.delete(oldest);
     }
@@ -140,12 +177,58 @@ export class PlanLimitsSnapshotService {
       () => { if (this.pendingSnapshots.get(key) === pending) this.pendingSnapshots.delete(key); },
       () => { if (this.pendingSnapshots.get(key) === pending) this.pendingSnapshots.delete(key); },
     );
-    return pending;
+    try {
+      const result = await pending;
+      if (this.latestCacheAssembly.get(cacheKey) === cacheAssembly) {
+        if (!result.cacheable) {
+          this.cachedSnapshots.delete(cacheKey);
+        } else {
+          this.cachedSnapshots.delete(cacheKey);
+          if (this.cachedSnapshots.size >= MAX_SNAPSHOT_KEYS) {
+            const oldest = this.cachedSnapshots.keys().next().value;
+            if (oldest !== undefined) this.cachedSnapshots.delete(oldest);
+          }
+          this.cachedSnapshots.set(cacheKey, {
+            result, expiresAt: this.now() + PLAN_LIMITS_SNAPSHOT_TTL_MS,
+          });
+        }
+      }
+      this.logSnapshot('pull', 'assembled', key, scope, request.refresh === true, started, result);
+      return result.snapshot;
+    } finally {
+      if (this.latestCacheAssembly.get(cacheKey) === cacheAssembly) {
+        this.latestCacheAssembly.delete(cacheKey);
+      }
+    }
   }
 
   /** The snapshot for a push: the last request's scope, cached reads. */
   async currentSnapshot(): Promise<PlanLimitsSnapshot> {
-    return this.assemble(this.lastRequest, false);
+    const started = this.now();
+    this.pushes += 1;
+    const scope = this.lastRequest;
+    const key = scopeKey(scope, false);
+    const result = await this.assemble(scope, false);
+    this.logSnapshot('push', 'assembled', key, scope, false, started, result);
+    return result.snapshot;
+  }
+
+  private logSnapshot(
+    source: 'pull' | 'push', path: 'joined' | 'assembled' | 'ttl-cache', key: string,
+    scope: PlanOwnerDiscoveryRequest, refresh: boolean, started: number,
+    result: AssembledSnapshot,
+  ): void {
+    this.logger.debug('[PlanLimitsSnapshot] snapshot served', {
+      source, path, scopeId: createHash('sha256').update(key).digest('hex').slice(0, 8),
+      hasProvider: scope.selectedProviderId !== undefined,
+      sessionCount: scope.sessionIds?.length ?? 0,
+      ownerKeyCount: scope.ownerKeys?.length ?? 0,
+      refresh, durationMs: this.now() - started,
+      discoveryMs: result.discoveryMs, readsMs: result.readsMs,
+      owners: result.snapshot.owners.length,
+      discoveryIncomplete: result.snapshot.discoveryIncomplete,
+      pulls: this.pulls, joins: this.joins, pushes: this.pushes,
+    });
   }
 
   /**
@@ -176,18 +259,23 @@ export class PlanLimitsSnapshotService {
   private async assemble(
     scope: PlanOwnerDiscoveryRequest,
     refresh: boolean,
-  ): Promise<PlanLimitsSnapshot> {
-    const deadlineAt = Date.now() + SNAPSHOT_BUDGET_MS;
+  ): Promise<AssembledSnapshot> {
+    const deadlineAt = this.now() + SNAPSHOT_BUDGET_MS;
+    const discoveryStarted = this.now();
     const entries = await this.discovery.discoverTargets(scope, deadlineAt - RESERVED_READ_MS);
+    const discoveryMs = this.now() - discoveryStarted;
+    const readsStarted = this.now();
+    let cacheable = entries.discoveryIncomplete !== true;
     const owners = await Promise.all(
-      entries.map((entry) => this.ownerSnapshot(entry, refresh, true, deadlineAt)),
+      entries.map((entry) => this.ownerSnapshot(entry, refresh, true, deadlineAt, () => { cacheable = false; })),
     );
-    return {
-      generatedAt: Date.now(),
+    const readsMs = this.now() - readsStarted;
+    return { discoveryMs, readsMs, cacheable, snapshot: {
+      generatedAt: this.now(),
       owners,
       discoveryIncomplete: entries.discoveryIncomplete === true,
       sessionOwners: await this.sessionOwners(scope.sessionIds ?? [], owners),
-    };
+    } };
   }
 
   private async ownerSnapshot(
@@ -195,9 +283,10 @@ export class PlanLimitsSnapshotService {
     refresh: boolean,
     withDeadline: boolean,
     deadlineAt?: number,
+    onFallback?: () => void,
   ): Promise<PlanLimitOwnerSnapshot> {
     if (entry.kind === 'known') return entry.snapshot;
-    const snapshot = await this.readOwner(entry.target, refresh, withDeadline, deadlineAt);
+    const snapshot = await this.readOwner(entry.target, refresh, withDeadline, deadlineAt, onFallback);
     return entry.unknownReason
       ? { ...snapshot, unknownReason: entry.unknownReason }
       : snapshot;
@@ -214,16 +303,18 @@ export class PlanLimitsSnapshotService {
     refresh: boolean,
     withDeadline: boolean,
     deadlineAt?: number,
+    onFallback?: () => void,
   ): Promise<PlanLimitOwnerSnapshot> {
     const controller = withDeadline ? new AbortController() : undefined;
     const remainingMs = controller
-      ? Math.min(limitLookupDeadlineMs(target.providerId), (deadlineAt ?? Date.now()) - Date.now())
+      ? Math.min(limitLookupDeadlineMs(target.providerId), (deadlineAt ?? this.now()) - this.now())
       : 0;
     if (controller && remainingMs <= 0) {
       this.logger.debug('[PlanLimitsSnapshot] owner read ended without a snapshot', {
         providerId: target.providerId,
         reason: 'timeout',
       });
+      onFallback?.();
       return this.unreadSnapshot(target.ownerRef);
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -253,6 +344,7 @@ export class PlanLimitsSnapshotService {
               : typeof error,
         },
       );
+      onFallback?.();
       return this.unreadSnapshot(target.ownerRef);
     } finally {
       if (timer !== undefined) clearTimeout(timer);
@@ -318,4 +410,14 @@ function discoveryRequest(
       ownerKeys: [...request.ownerKeys],
     }),
   };
+}
+
+/** The dedupe key of one scope; its hash is the logged `scopeId`. */
+function scopeKey(scope: PlanOwnerDiscoveryRequest, refresh: boolean): string {
+  return JSON.stringify({
+    providerId: scope.selectedProviderId,
+    sessionIds: [...new Set(scope.sessionIds ?? [])].sort(),
+    ownerKeys: [...new Set(scope.ownerKeys ?? [])].sort(),
+    refresh,
+  });
 }

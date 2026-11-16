@@ -1,6 +1,8 @@
 import { AGENT_MESSAGE_DISPATCH_JOURNAL } from '../cli-agents/messaging/agent-message-dispatch-journal.port';
 
 export const CLI_AGENT_RUNTIME_TOKENS = {
+  EXTERNAL_COMPLETION_OUTBOX: Symbol.for('ExternalCompletionOutbox'),
+  EXTERNAL_COMPLETION_RECORDER: Symbol.for('ExternalCompletionRecorder'),
   PARENT_DELIVERY_EVENT_SINK: Symbol.for('ParentDeliveryEventSink'),
   AGENT_MESSAGE_COORDINATOR: Symbol.for('AgentMessageCoordinator'),
   /** Durable lane message envelopes (`AgentMessageEnvelopeStore`). */

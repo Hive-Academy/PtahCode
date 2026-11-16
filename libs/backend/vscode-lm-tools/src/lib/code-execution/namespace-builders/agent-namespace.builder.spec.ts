@@ -77,6 +77,7 @@ import {
 
 interface ProcessManagerMock {
   spawn: jest.Mock;
+  beginSpawn: jest.Mock;
   spawnFromSdkHandle: jest.Mock;
   prepareSdkHandleSpawn: jest.Mock;
   reserveAgentId: jest.Mock;
@@ -99,6 +100,7 @@ interface RegistryMock {
 function createProcessManager(): ProcessManagerMock {
   return {
     spawn: jest.fn(),
+    beginSpawn: jest.fn(),
     spawnFromSdkHandle: jest.fn(),
     // Pass-through by default: no resume id, nothing to gate or refuse.
     prepareSdkHandleSpawn: jest.fn(
@@ -1685,6 +1687,21 @@ describe('buildAgentNamespace — waitForAgents', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildAgentNamespace — spawn boundary', () => {
+  it('drops caller-supplied external owners from spawn and beginSpawn', async () => {
+    const { deps, mocks } = makeDeps();
+    const externalOwner = {
+      transport: 'http' as const,
+      principal: 'a'.repeat(32),
+      exclusive: true,
+    };
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a' } as SpawnAgentResult);
+    const namespace = buildAgentNamespace(deps);
+    await namespace.spawn({ task: 't', cli: 'codex', externalOwner });
+    namespace.beginSpawn({ task: 't', cli: 'codex', externalOwner });
+    expect(mocks.processManager.spawn.mock.calls[0][0]).not.toHaveProperty('externalOwner');
+    expect(mocks.processManager.beginSpawn.mock.calls[0][0]).not.toHaveProperty('externalOwner');
+  });
+
   it.each([
     ['a number', 3],
     ['an empty string', ''],

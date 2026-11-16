@@ -421,6 +421,29 @@ export class NativePopoverComponent implements OnDestroy {
   }
 
   /**
+   * Shows the open panel again after the parent view moved it in the DOM (for
+   * example a reordered @for row). A moved [popover] leaves the top layer with
+   * no toggle event, so the shell stays hidden while isOpen() is still true.
+   * Focus that fell to the body during the move returns to the panel.
+   */
+  reattach(): void {
+    afterNextRender(
+      () => {
+        const layer = this.layerElement;
+        if (!this.isOpen() || this.destroyed || !this.layerShowing) return;
+        if (!layer?.isConnected || layer.matches(':popover-open')) return;
+        layer.showPopover();
+        this.floatingUI.update();
+        const active = layer.ownerDocument.activeElement;
+        if (!active || active === layer.ownerDocument.body) {
+          this.floatingRef()?.nativeElement.focus();
+        }
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /**
    * Close the popover: cleanup positioning, restore focus.
    */
   private closePopover(): void {

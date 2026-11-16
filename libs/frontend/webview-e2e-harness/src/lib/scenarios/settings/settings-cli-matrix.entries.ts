@@ -54,35 +54,27 @@ async function closeMatrixModal(
 /** The fixture's one Ptah CLI instance, "Glm" (BRIEF:66-67). */
 const GLM_ID = 'glm-instance-1';
 
-/** System CLIs the shared fixture reports as not installed: their rows sit in the Uninstalled group. */
-const UNINSTALLED_IN_FIXTURE: ReadonlySet<string> = new Set(['cursor', 'pi']);
-
-/**
- * Gate V 36 decision 1: the Uninstalled group is collapsed by default behind its disclosure button. Expands it when it
- * is collapsed (the tab keeps its state between entries); returns the toggle.
- */
-export async function expandUninstalled(page: Page): Promise<Locator> {
-  const toggle = page.locator('[data-testid="cli-matrix-uninstalled-toggle"]');
-  await visibleEnabled(toggle);
-  if ((await toggle.getAttribute('aria-expanded')) === 'false')
-    await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  return toggle;
-}
-
 /** Returns a provider card, or the existing Ptah CLI instance card. */
 async function matrixCard(page: Page, id: string): Promise<Locator> {
   await agentsRoutingTab(page);
   const card = page.locator(`[data-testid="${id === GLM_ID ? 'cli-matrix-row' : 'cli-provider-card'}-${id}"]`);
-  if (UNINSTALLED_IN_FIXTURE.has(id) && !(await card.count()))
-    await expandUninstalled(page);
   await expect(card).toBeVisible();
+  const details = card.locator('ptah-table-row-expander button');
+  if ((await details.getAttribute('aria-expanded')) === 'false') {
+    if (await details.isVisible()) await details.click();
+    else {
+      await card.locator('ptah-table-row-actions button[aria-haspopup="menu"]').click();
+      await card.getByRole('menuitem', { name: 'Details' }).click();
+    }
+  }
   return card;
 }
 
 /** The visible value button beside a provider card's field label. */
 function providerField(card: Locator, field: 'Model' | 'Effort' | 'Safety'): Locator {
-  return card.locator(`span:text-is("${field}") + ptah-native-popover button[trigger]`);
+  return field === 'Safety'
+    ? card.locator('xpath=following-sibling::tr[1]//*[@data-popover-kind="permission"]')
+    : card.locator(`[data-popover-kind="${field.toLowerCase()}"]`);
 }
 
 /**
@@ -91,14 +83,14 @@ function providerField(card: Locator, field: 'Model' | 'Effort' | 'Safety'): Loc
  */
 async function openMoreActions(
   page: Page,
-  row: Locator,
+  _row: Locator,
   id: string,
 ): Promise<Locator> {
-  const more = row.locator(`[data-testid="cli-matrix-more-${id}"]`);
+  const more = page.locator(`#lane-detail-${id} ptah-table-row-actions button[aria-haspopup="menu"]`);
   await visibleEnabled(more);
   await more.click();
   await expect(
-    page.locator('[data-testid="cli-matrix-more-menu"]'),
+    page.locator(`#lane-detail-${id} [role="menu"]`),
   ).toBeVisible();
   return more;
 }
@@ -159,7 +151,7 @@ async function throughInstanceModel(
   const glm = await matrixCard(page, GLM_ID);
   await throughCellPopover(
     page,
-    glm.locator(`[data-testid="cli-matrix-model-${GLM_ID}"]`),
+    glm.locator('[data-testid="cli-matrix-model"] [data-popover-kind="model"]'),
     body,
   );
 }
@@ -697,10 +689,7 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       const tiers = glm.locator(`[data-testid="cli-matrix-tiers-${GLM_ID}"]`);
       if (await tiers.isVisible()) await tiers.click();
       else {
-        await glm.locator(`[data-testid="cli-matrix-more-${GLM_ID}"]`).click();
-        await glm
-          .locator(`[data-testid="cli-matrix-more-tiers-${GLM_ID}"]`)
-          .click();
+        await page.locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`).click();
       }
       const dialog = page.locator(
         'dialog:has([data-testid="cli-tier-mapping-modal"])',
@@ -787,10 +776,10 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     // Batch 31: Cursor's Credentials (on its Uninstalled row: it installs once a key resolves). Masked key with
     // show/hide and the "Set" status; nothing is saved here (the fixture has no stored-key read-back).
     reach: async (page) => {
-      const cursor = await matrixCard(page, 'cursor');
+      await matrixCard(page, 'cursor');
       await throughMatrixPopover(
         page,
-        cursor.getByRole('button', { name: 'Credentials' }),
+        page.locator('#lane-detail-cursor [data-popover-kind="credentials"]'),
         'cursor-credential-popover',
         async (panel) => {
           await expect(
@@ -833,7 +822,7 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     reach: async (page) => {
       const row = await matrixCard(page, GLM_ID);
       await expect(
-        row.locator('[data-testid="cli-matrix-key-status"]'),
+        row.locator('xpath=following-sibling::tr[1]//*[@data-testid="cli-matrix-key-status"]'),
       ).toHaveText('Key set');
     },
   },
@@ -845,7 +834,7 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       const row = await matrixCard(page, GLM_ID);
       // The instance card's tier mapping: each tier's label over its model.
       for (const tier of ['Sonnet', 'Opus', 'Haiku']) {
-        const slot = row.locator(`[data-tier="${tier.toLowerCase()}"]`);
+        const slot = row.locator(`xpath=following-sibling::tr[1]//*[@data-tier="${tier.toLowerCase()}"]`);
         await expect(slot).toContainText(tier);
         await expect(slot).toContainText('glm-5.3:cloud');
       }
@@ -875,7 +864,7 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       await expect(providerField(copilot, 'Safety')).toHaveText('Auto-approve: Off');
       await throughMatrixPopover(
         page,
-        codex.getByRole('button', { name: 'All capabilities' }),
+        page.locator('#lane-detail-codex [data-popover-kind="capabilities"]'),
         'cli-provider-popover-content',
         async (panel) => {
           await expect(panel).toHaveAttribute('aria-label', 'Codex capabilities');
@@ -899,40 +888,32 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     capability:
       'Per-CLI grouping of delegated settings, hidden when not installed',
     status: 'restored',
-    // Installed rows first; Cursor and Pi in the "Uninstalled" group, as plain text, with an install guide.
+    // Installed rows first; Cursor and Pi remain visible with Not installed status and an install guide.
     reach: async (page) => {
-      // Gate V 36 decision 1: the group is a disclosure ("Uninstalled CLI agents (2)"), collapsed by default.
+      // The table keeps uninstalled rows visible after installed rows.
       await agentsRoutingTab(page);
-      const uninstalled = page.locator(
-        '[data-testid="cli-matrix-uninstalled"]',
-      );
-      const toggle = await expandUninstalled(page);
-      await expect(toggle).toHaveText('Uninstalled CLI agents (2)');
-      await expect(
-        uninstalled.locator('[data-testid^="cli-provider-card-"]'),
-      ).toHaveCount(2);
-      await expect(
-        uninstalled.locator('[data-testid="cli-provider-card-cursor"]'),
-      ).toBeVisible();
-      await expect(
-        uninstalled.locator('[data-testid="cli-provider-card-pi"]'),
-      ).toBeVisible();
-      const pi = uninstalled.locator('[data-testid="cli-provider-card-pi"]');
+      const cursor = await matrixCard(page, 'cursor');
+      const pi = await matrixCard(page, 'pi');
+      await expect(cursor).toBeVisible();
+      await expect(pi).toBeVisible();
       await expect(providerField(pi, 'Model')).toBeDisabled();
-      await expect(pi.locator('.status-slot')).toContainText('Not installed');
-      await expect(pi.getByRole('button', { name: 'Test', exact: true })).toBeDisabled();
-      await expect(pi.getByRole('checkbox', { name: 'Pi enabled' })).toBeDisabled();
-      await throughMatrixPopover(
-        page,
-        pi.getByRole('button', { name: 'Install guide' }),
-        'cli-provider-popover-content',
-        async (panel) => {
-          await expect(panel).toContainText(
-            'npm install -g @earendil-works/pi-coding-agent',
-          );
-          await visibleEnabled(panel.getByRole('button', { name: 'Re-detect' }));
-        },
-      );
+      await expect(pi).toContainText('Not installed');
+      await expect(cursor).toContainText('Not installed');
+      const rows = page.locator('[data-testid^="cli-provider-card-"]');
+      expect(await rows.allTextContents()).toEqual(expect.arrayContaining([expect.stringContaining('Cursor'), expect.stringContaining('Pi')]));
+      expect(await cursor.evaluate((node) => {
+        const piRow = document.querySelector('[data-testid="cli-provider-card-pi"]');
+        return piRow !== null && Boolean(node.compareDocumentPosition(piRow) & Node.DOCUMENT_POSITION_FOLLOWING);
+      })).toBe(true);
+      await pi.getByRole('button', { name: 'More actions for Pi' }).click();
+      await expect(pi.getByRole('menuitem', { name: 'Test' })).toBeDisabled();
+      await page.keyboard.press('Escape');
+      await expect(pi.getByRole('switch', { name: 'Pi enabled' })).toBeDisabled();
+      await pi.getByRole('button', { name: 'Details for Pi' }).click();
+      await throughMatrixPopover(page, page.locator('#lane-detail-pi [data-popover-kind="install"]'), 'cli-provider-popover-content', async (panel) => {
+        await expect(panel).toContainText('npm install -g @earendil-works/pi-coding-agent');
+        await visibleEnabled(panel.getByRole('button', { name: 'Re-detect' }));
+      });
       const shared = page.getByRole('region', { name: 'Ptah CLI shared defaults' });
       await expect(shared).toBeVisible();
       await expect(shared.getByRole('combobox', { name: 'Ptah CLI permission default' })).toBeVisible();
@@ -984,10 +965,8 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
         await visibleEnabled(test);
         await test.click();
       } else {
-        await row.locator(`[data-testid="cli-matrix-more-${GLM_ID}"]`).click();
-        const menuTest = row.locator(
-          `[data-testid="cli-matrix-more-test-${GLM_ID}"]`,
-        );
+        await page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`).click();
+        const menuTest = page.locator(`#lane-detail-${GLM_ID} [role="menuitem"]:text-is("Test")`);
         await visibleEnabled(menuTest);
         await menuTest.click();
       }
