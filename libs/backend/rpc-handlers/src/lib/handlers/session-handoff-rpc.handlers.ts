@@ -12,6 +12,7 @@
  * label is `null`; the rest of the chain is still returned.
  */
 import { injectable, inject } from 'tsyringe';
+import { resolve } from 'node:path';
 import { TOKENS, RpcUserError } from '@ptah-extension/vscode-core';
 import type { Logger, RpcHandler } from '@ptah-extension/vscode-core';
 import {
@@ -21,6 +22,7 @@ import {
 } from '@ptah-extension/agent-sdk';
 import {
   CLI_AGENT_RUNTIME_TOKENS,
+  type ISessionHandoff,
   type ISessionHandoffChain,
 } from '@ptah-extension/cli-agent-runtime';
 import type {
@@ -29,7 +31,17 @@ import type {
   SessionHandoffChainParams,
   SessionHandoffChainResult,
 } from '@ptah-extension/shared';
-import { SessionHandoffChainParamsSchema } from './session-handoff-rpc.schema';
+import {
+  SessionHandoffChainParamsSchema,
+  SessionHandoffStatusParamsSchema,
+} from './session-handoff-rpc.schema';
+
+type HandoffStatusParams = { sessionId: string; tabId: string };
+type HandoffStatusResult = {
+  state: 'absent' | 'starting' | 'recorded' | 'closePending' | 'closeCompleted' | 'unavailable';
+  successorSessionId: string | null;
+};
+const UNAVAILABLE: HandoffStatusResult = { state: 'unavailable', successorSessionId: null };
 
 const LOG_PREFIX = '[SessionHandoffChain]';
 
@@ -40,6 +52,7 @@ export class SessionHandoffChainRpcHandlers {
   /** RPC methods owned by this handler (manifest coverage invariant). */
   static readonly METHODS = [
     'session:handoffChain',
+    'session:handoffStatus',
   ] as const satisfies readonly RpcMethodName[];
 
   constructor(
@@ -53,6 +66,8 @@ export class SessionHandoffChainRpcHandlers {
     /** Absent: every label is `null` and the single-store read is used. */
     @inject(SDK_TOKENS.SDK_SESSION_METADATA_STORE, { isOptional: true })
     private readonly metadataStore?: SessionMetadataStore,
+    @inject(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF, { isOptional: true })
+    private readonly handoff?: ISessionHandoff,
   ) {}
 
   register(): void {
@@ -60,10 +75,45 @@ export class SessionHandoffChainRpcHandlers {
       SessionHandoffChainParams,
       SessionHandoffChainResult
     >('session:handoffChain', (params) => this.handoffChain(params));
+    this.rpcHandler.registerMethod<HandoffStatusParams, HandoffStatusResult>(
+      'session:handoffStatus',
+      (params) => this.handoffStatus(params),
+    );
 
     this.logger.debug('Session handoff chain RPC handlers registered', {
       methods: [...SessionHandoffChainRpcHandlers.METHODS],
     });
+  }
+
+  private async handoffStatus(params: unknown): Promise<HandoffStatusResult> {
+    const parsed = SessionHandoffStatusParamsSchema.safeParse(params);
+    if (!parsed.success) {
+      throw new RpcUserError(
+        'Invalid session:handoffStatus params (sessionId, tabId)',
+        'INVALID_PARAMS',
+      );
+    }
+
+    const { sessionId, tabId } = parsed.data;
+    const metadata = await this.loadMetadata(sessionId);
+    const workspaceId = metadata?.workspaceId?.trim();
+    const workspaceRoot = workspaceId ? resolve(workspaceId) : undefined;
+    if (!workspaceRoot || !this.handoff) return UNAVAILABLE;
+
+    try {
+      const { state, successorSessionId } = await this.handoff.status({
+        sessionId,
+        tabId,
+        workspaceRoot,
+      });
+      return { state, successorSessionId };
+    } catch (error: unknown) {
+      this.logger.error(
+        `${LOG_PREFIX} status read failed for ${sessionId}`,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return UNAVAILABLE;
+    }
   }
 
   private async handoffChain(

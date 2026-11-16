@@ -63,12 +63,17 @@ export class VitalsLoadCache<T> {
   private inFlight: Promise<void> | null = null;
   private lastSuccessAt: number | null = null;
   private lastFailureAt: number | null = null;
+  private consecutiveFailures = 0;
 
   /** The cached state, without starting a fetch; `loading` until the first one settles. */
   readonly value: Signal<VitalsLoad<T>> = this.state.asReadonly();
 
   /** `fetch` must resolve with the settled state; a rejection becomes `error`. */
-  constructor(private readonly fetch: () => Promise<VitalsLoad<T>>) {}
+  constructor(
+    private readonly fetch: () => Promise<VitalsLoad<T>>,
+    private readonly errorRetryMs = VITALS_ERROR_RETRY_MS,
+    private readonly options: { exponentialBackoff?: boolean } = {},
+  ) {}
 
   /** The cached state; starts a fetch when nothing fresh is cached. */
   read(): Signal<VitalsLoad<T>> {
@@ -87,7 +92,10 @@ export class VitalsLoadCache<T> {
     if (this.inFlight !== null) return false;
     const now = Date.now();
     if (this.lastFailureAt !== null) {
-      return now - this.lastFailureAt >= VITALS_ERROR_RETRY_MS;
+      const retryMs = this.options.exponentialBackoff
+        ? Math.min(300_000, this.errorRetryMs * 2 ** Math.max(0, Math.min(this.consecutiveFailures - 1, 5)))
+        : this.errorRetryMs;
+      return now - this.lastFailureAt >= retryMs;
     }
     return (
       this.lastSuccessAt === null ||
@@ -114,9 +122,11 @@ export class VitalsLoadCache<T> {
       next = VITALS_ERROR;
     }
     if (next.status === 'error') {
+      this.consecutiveFailures++;
       this.lastFailureAt = Date.now();
       if (!isSettledAnswer(this.state())) this.state.set(VITALS_ERROR);
     } else {
+      this.consecutiveFailures = 0;
       this.lastFailureAt = null;
       this.lastSuccessAt = Date.now();
       this.state.set(next);

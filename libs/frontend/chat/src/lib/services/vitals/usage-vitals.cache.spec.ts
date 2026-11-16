@@ -3,10 +3,11 @@ import { ClaudeRpcService, LoggingService, RpcResult } from '@ptah-extension/cor
 import type { UsageSummary } from '@ptah-extension/shared';
 import {
   USAGE_VITALS_MAX_ENTRIES,
+  USAGE_VITALS_ERROR_RETRY_MS,
   USAGE_VITALS_TIMEOUT_MS,
   UsageVitalsCache,
 } from './usage-vitals.cache';
-import { VITALS_ERROR_RETRY_MS, VITALS_READY_TTL_MS } from './vitals-load';
+import { VITALS_READY_TTL_MS } from './vitals-load';
 
 const SUMMARY: UsageSummary = {
   version: 1,
@@ -164,11 +165,32 @@ describe('UsageVitalsCache', () => {
     expect(state()).toEqual({ status: 'error' });
     expect(logger.error).toHaveBeenCalledTimes(1);
 
-    jest.advanceTimersByTime(VITALS_ERROR_RETRY_MS);
+    jest.advanceTimersByTime(USAGE_VITALS_ERROR_RETRY_MS - 1);
+    cache.summary('/ws', 90);
+    expect(call).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(1);
     cache.summary('/ws', 90);
     await flush();
     expect(call).toHaveBeenCalledTimes(2);
     expect(state()).toEqual({ status: 'ready', value: SUMMARY });
+  });
+
+  it('keeps one request in flight and doubles the delay after repeated failures', async () => {
+    let finish: ((value: RpcResult<UsageSummary>) => void) | undefined;
+    call.mockImplementationOnce(() => new Promise<RpcResult<UsageSummary>>((resolve) => { finish = resolve; }));
+    call.mockResolvedValueOnce(new RpcResult(false, undefined, 'boom'));
+    cache.summary('/ws', 90);
+    cache.summary('/ws', 90);
+    expect(call).toHaveBeenCalledTimes(1);
+    finish?.(new RpcResult(false, undefined, 'boom'));
+    await flush();
+    jest.advanceTimersByTime(USAGE_VITALS_ERROR_RETRY_MS);
+    cache.summary('/ws', 90);
+    await flush();
+    expect(call).toHaveBeenCalledTimes(2);
+    jest.advanceTimersByTime(USAGE_VITALS_ERROR_RETRY_MS);
+    cache.summary('/ws', 90);
+    expect(call).toHaveBeenCalledTimes(2);
   });
 
   it('reports a rejected call as error', async () => {

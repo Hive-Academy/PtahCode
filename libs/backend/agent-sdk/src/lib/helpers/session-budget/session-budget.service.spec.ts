@@ -86,6 +86,7 @@ const ROTATION_THRESHOLD = 300_000;
 function harness(initial: Partial<SessionBudgetConfig> = {}): Harness {
   let config: SessionBudgetConfig = {
     ...SESSION_BUDGET_DEFAULT_CONFIG,
+    tokenMeasure: 'raw',
     ...initial,
   };
   const logger = createMockLogger();
@@ -291,13 +292,13 @@ describe('SessionBudgetService — tighten', () => {
 });
 
 describe('SessionBudgetService.recordCompaction', () => {
-  it('handoffAfterCompactions compactions raise the stage to handoff', () => {
+  it('only a qualifying completion raises the stage to handoff', () => {
     const h = harness();
     h.service.observe(at(10, 1));
     h.service.recordCompaction(SID);
     h.service.recordCompaction(SID);
     expect(h.service.observe(at(11, 2))?.stage).toBe('normal');
-    h.service.recordCompaction(SID);
+    h.service.recordCompaction(SID, { postCompactionContextTokens: 100_000, effectiveAutoCompactWindowTokens: 200_000 });
     expect(h.service.observe(at(12, 3))).toMatchObject({
       stage: 'handoff',
       compactions: 3,
@@ -309,6 +310,13 @@ describe('SessionBudgetService.recordCompaction', () => {
     h.service.recordCompaction(SID);
     h.service.recordCompaction(SID);
     h.service.recordCompaction(SID);
+    expect(h.service.observe(at(1, 1))?.stage).toBe('normal');
+  });
+
+  it('uses a completion received before the first authoritative figure', () => {
+    const h = harness();
+    h.setConfig({ handoffAfterCompactions: 1 });
+    h.service.recordCompaction(SID, { postCompactionContextTokens: 120_000, effectiveAutoCompactWindowTokens: 200_000 });
     expect(h.service.observe(at(1, 1))?.stage).toBe('handoff');
   });
 });

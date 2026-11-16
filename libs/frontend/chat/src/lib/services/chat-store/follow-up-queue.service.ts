@@ -442,6 +442,7 @@ export class FollowUpQueueService {
       if (this.isStaleAutoHandoff(entry, tab, bound)) {
         this.logger.info(LOG, 'automatic hand-off not sent: the confirmed stage is below the limit', { tabId });
         this.store.settle(entry.clientMessageId, 'withdrawn');
+        this.autoHandoff.release(bound);
         this.pump(tabId);
         return;
       }
@@ -460,7 +461,7 @@ export class FollowUpQueueService {
    */
   private isStaleAutoHandoff(entry: QueuedFollowUpEntry, tab: TabState, bound: string): boolean {
     const handoff = this.autoHandoff.entry(bound);
-    if (handoff?.state !== 'fired' || handoff.queued?.clientMessageId !== entry.clientMessageId) return false;
+    if (handoff?.state !== 'pending' || handoff.queued?.clientMessageId !== entry.clientMessageId) return false;
     return tab.sessionBudget?.stage !== 'limit';
   }
 

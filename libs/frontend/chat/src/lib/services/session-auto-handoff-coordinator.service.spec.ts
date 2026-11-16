@@ -1,11 +1,12 @@
 ﻿import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { LoggingService } from '@ptah-extension/core';
+import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import { QueuedFollowUpStore, TabManagerService, TabWorkspacePartitionService } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
 import { SessionId, type SessionBudgetState } from '@ptah-extension/shared';
 import { FollowUpQueueService } from './chat-store/follow-up-queue.service';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
+import { ChatStore } from './chat.store';
 import { SessionAutoHandoffService } from './session-auto-handoff.service';
 import { SessionAutoHandoffCoordinatorService } from './session-auto-handoff-coordinator.service';
 import { SessionHandoffSkillService, type HandoffSkillProbe } from './session-handoff-skill.service';
@@ -38,6 +39,8 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   let send: jest.Mock;
   let probe: jest.Mock;
   let withdraw: jest.Mock;
+  let statusCall: jest.Mock;
+  let compacting: WritableSignal<boolean>;
   let info: jest.Mock;
   let now: number;
   let probeGate: Promise<void> | null;
@@ -64,6 +67,8 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     background = [];
     revision = signal(0);
     permission = signal(false);
+    compacting = signal(false);
+    statusCall = jest.fn(async () => ({ success: true, data: { state: 'absent', successorSessionId: null } }));
     now = 1_000_000;
     nextId = 0;
     probeGate = null;
@@ -105,6 +110,8 @@ describe('SessionAutoHandoffCoordinatorService', () => {
       { provide: SessionHandoffSkillService, useValue: { probe: () => probe() } },
       { provide: FollowUpQueueService, useValue: { withdraw } },
       { provide: LoggingService, useValue: { info, warn: jest.fn() } },
+      { provide: ClaudeRpcService, useValue: { call: statusCall } },
+      { provide: ChatStore, useValue: { isCompactingForTab: () => compacting() } },
     ] });
     store = TestBed.inject(QueuedFollowUpStore);
     handoff = TestBed.inject(SessionAutoHandoffService);
@@ -117,9 +124,201 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     await run();
     expect(send).toHaveBeenCalledWith(COMMAND, { tabId: TAB });
     expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off fired', { sessionId: SESSION, tabId: TAB, delivery: 'sent' });
+    statusCall.mockResolvedValue({ success: true, data: { state: 'recorded', successorSessionId: null } });
     patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
     await run();
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send when the durable status is starting', async () => {
+    statusCall.mockResolvedValue({ success: true, data: { state: 'starting', successorSessionId: null } });
+    start([makeTab(TAB)]);
+    await run();
+    expect(send).not.toHaveBeenCalled();
+    expect(handoff.entry(SESSION)?.state).toBe('pending');
+  });
+
+  it('does not send to a tab rebound while the pre-send status is pending', async () => {
+    let resolve!: (value: { success: true; data: { state: 'absent' } }) => void;
+    statusCall.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    start([makeTab(TAB)]);
+    TestBed.tick();
+    await settle();
+    patch(TAB, { claudeSessionId: OTHER_SESSION });
+    resolve({ success: true, data: { state: 'absent' } });
+    await run();
+    expect(send).not.toHaveBeenCalled();
+    expect(handoff.entry(SESSION)).toBeNull();
+  });
+
+  it('keeps a delivered entry when unavailable status finishes after delivery', async () => {
+    start([makeTab(TAB)]);
+    await run();
+    let resolve!: (value: { success: true; data: { state: 'unavailable' } }) => void;
+    statusCall.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const coordinator = TestBed.inject(SessionAutoHandoffCoordinatorService);
+    const pending = coordinator['reconcile'](TAB, SESSION, 1);
+    handoff.transition(SESSION, 'delivered');
+    resolve({ success: true, data: { state: 'unavailable' } });
+    await pending;
+    expect(handoff.entry(SESSION)?.state).toBe('delivered');
+  });
+
+  it('keeps a delivered entry when a stale status request rejects', async () => {
+    start([makeTab(TAB)]);
+    handoff.claim(SESSION);
+    handoff.recordQueued(SESSION, null);
+    let reject!: (error: Error) => void;
+    statusCall.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const pending = TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 1);
+    handoff.transition(SESSION, 'delivered');
+    reject(new Error('status unavailable'));
+    await pending;
+    expect(handoff.entry(SESSION)?.state).toBe('delivered');
+  });
+
+  it('does not release a delivered entry when streaming begins during status lookup', async () => {
+    start([makeTab(TAB)]);
+    handoff.claim(SESSION);
+    handoff.recordQueued(SESSION, null);
+    handoff.transition(SESSION, 'delivered');
+    let resolve!: (value: { success: true; data: { state: 'absent' } }) => void;
+    statusCall.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const pending = TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 1);
+    patch(TAB, { status: 'streaming' });
+    resolve({ success: true, data: { state: 'absent' } });
+    await pending;
+    expect(handoff.entry(SESSION)?.state).toBe('delivered');
+  });
+
+  it('reconciles a delivered turn after polling expires and the stream settles', async () => {
+    start([makeTab(TAB, { status: 'streaming' })]);
+    handoff.claim(SESSION);
+    handoff.recordQueued(SESSION, null);
+    handoff.transition(SESSION, 'delivered');
+    statusCall.mockResolvedValue({ success: true, data: { state: 'absent' } });
+    await TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 12);
+    const callsBeforeSettlement = statusCall.mock.calls.length;
+    patch(TAB, { status: 'loaded' });
+    await run();
+    expect(statusCall.mock.calls.length).toBeGreaterThan(callsBeforeSettlement);
+  });
+
+  it('keeps a visible status error and does not send when status is unavailable', async () => {
+    statusCall.mockResolvedValue({ success: true, data: { state: 'unavailable', successorSessionId: null } });
+    start([makeTab(TAB)]);
+    await run();
+    expect(send).not.toHaveBeenCalled();
+    expect(handoff.entry(SESSION)?.state).toBe('pending');
+    expect(handoff.entry(SESSION)?.statusError).toBe(true);
+  });
+
+  it('releases a never-sent claim after authoritative absent and retries', async () => {
+    statusCall.mockResolvedValue({ success: true, data: { state: 'unavailable' } });
+    start([makeTab(TAB)]);
+    await run();
+    expect(handoff.entry(SESSION)?.attempts).toBe(0);
+    statusCall.mockResolvedValue({ success: true, data: { state: 'absent' } });
+    await TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 1);
+    await run();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans an unsent pending claim when the confirmed stage falls below limit', async () => {
+    statusCall.mockResolvedValue({ success: true, data: { state: 'unavailable' } });
+    start([makeTab(TAB)]);
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, stage: 'handoff' } });
+    await run();
+    expect(handoff.entry(SESSION)).toBeNull();
+  });
+
+  it('resends a direct delivered command after authoritative absent', async () => {
+    start([makeTab(TAB)]);
+    await run();
+    expect(handoff.entry(SESSION)?.clientMessageId).toBeNull();
+    await run();
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('resumes a claimed deferral after compaction finishes', async () => {
+    let resolveStatus!: (value: { success: true; data: { state: 'absent' } }) => void;
+    statusCall.mockImplementationOnce(() => new Promise((resolve) => { resolveStatus = resolve; }));
+    start([makeTab(TAB)]);
+    TestBed.tick();
+    await Promise.resolve();
+    compacting.set(true);
+    resolveStatus({ success: true, data: { state: 'absent' } });
+    await run();
+    expect(send).not.toHaveBeenCalled();
+    compacting.set(false);
+    await run();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['recorded', 'closePending', 'closeCompleted'] as const)('does not resend when status is %s', async (state) => {
+    statusCall.mockResolvedValue({ success: true, data: { state, successorSessionId: null } });
+    start([makeTab(TAB)]);
+    await run();
+    expect(send).not.toHaveBeenCalled();
+    expect(handoff.entry(SESSION)?.state).toBe(state === 'closeCompleted' ? 'completed' : 'recorded');
+  });
+
+  it('defers until compaction ends', async () => {
+    compacting.set(true);
+    start([makeTab(TAB)]);
+    await run();
+    expect(send).not.toHaveBeenCalled();
+    compacting.set(false);
+    await run();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails a deferral that remains compacting after ten minutes', async () => {
+    jest.useFakeTimers();
+    compacting.set(true);
+    start([makeTab(TAB)]);
+    try {
+      TestBed.tick();
+      jest.advanceTimersByTime(600_000);
+      expect(send).not.toHaveBeenCalled();
+      expect(handoff.entry(SESSION)?.state).toBe('failed');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('drops a deferred intent when its tab changes session', () => {
+    jest.useFakeTimers();
+    try {
+      compacting.set(true);
+      start([makeTab(TAB)]);
+      TestBed.tick();
+      patch(TAB, { claudeSessionId: OTHER_SESSION, sessionBudget: null });
+      TestBed.tick();
+      jest.advanceTimersByTime(600_000);
+      expect(send).not.toHaveBeenCalled();
+      expect(handoff.entry(SESSION)).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('stops after five settled deliveries with authoritative absent status', async () => {
+    send.mockImplementation(async (_content: string, options: { tabId: string }) => {
+      const clientMessageId = `attempt-${++nextId}`;
+      store.add({ clientMessageId, tabId: options.tabId, sessionId: SESSION, content: COMMAND, isCommand: true, phase: 'held' });
+      return { success: true, queued: { clientMessageId, tabId: options.tabId, sessionId: SESSION } };
+    });
+    start([makeTab(TAB)]);
+    await run();
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      expect(send).toHaveBeenCalledTimes(attempt);
+      store.settle(queued().clientMessageId, 'delivered');
+      await run();
+    }
+    expect(handoff.entry(SESSION)?.state).toBe('failed');
+    expect(send).toHaveBeenCalledTimes(5);
   });
 
   it('fires for a background workspace partition', async () => {
@@ -131,7 +330,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   it('holds the slash hand-off behind a running turn until delivery', async () => {
     start([makeTab(TAB, {
       status: 'streaming',
-      sessionBudget: { ...BUDGET, stage: 'handoff', percent: 82 },
+      sessionBudget: { ...BUDGET },
       liveBudgetStage: 'limit',
     })]);
     await run();
@@ -140,26 +339,26 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     expect(handoff.entry(SESSION)?.queued?.clientMessageId).toBe(queued()?.clientMessageId);
     store.settle(queued().clientMessageId, 'delivered');
     await run();
-    expect(handoff.entry(SESSION)?.state).toBe('fired');
+    expect(handoff.entry(SESSION)?.state).toBe('delivered');
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('withdraws a hand-off queued on the live estimate when the confirmed stage stays below the limit', async () => {
+  it('does not queue a hand-off based only on a live estimate', async () => {
     start([makeTab(TAB, {
       status: 'streaming',
       sessionBudget: { ...BUDGET, stage: 'handoff', percent: 82 },
       liveBudgetStage: 'limit',
     })]);
     await run();
-    expect(queued()?.content).toBe(COMMAND);
+    expect(queued()).toBeUndefined();
     patch(TAB, { liveBudgetStage: null, sessionBudget: { ...BUDGET, stage: 'handoff', percent: 91, revision: 13 } });
     await run();
-    expect(withdraw).toHaveBeenCalledTimes(1);
+    expect(withdraw).not.toHaveBeenCalled();
     expect(queued()).toBeUndefined();
     expect(handoff.entry(SESSION)).toBeNull();
     patch(TAB, { status: 'loaded', sessionBudget: { ...BUDGET, revision: 14 } });
     await run();
-    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it.each(['withdrawn', 'failed'] as const)(

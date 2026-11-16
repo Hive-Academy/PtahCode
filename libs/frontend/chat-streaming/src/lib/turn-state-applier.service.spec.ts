@@ -263,8 +263,13 @@ describe('TurnStateApplier', () => {
         consumedClientMessageId: 'P',
       }), 'tab-1');
 
-      expect(finalizeCurrentMessage).toHaveBeenCalledWith('tab-1', true, true);
+      expect(finalizeCurrentMessage).toHaveBeenCalledWith('tab-1', true, true, undefined);
       expect(queuedPrompts.queuedAtTail('tab-1', messages)).toEqual(new Set(['Q']));
+    });
+
+    it('passes the stop cause from the aborted event to finalization', () => {
+      applier.apply(turnState({ terminalReason: 'aborted_streaming', stopCause: 'parent-steer' }), 'tab-1');
+      expect(finalizeCurrentMessage).toHaveBeenCalledWith('tab-1', true, true, 'parent-steer');
     });
 
     it('retires the named id even if the terminal revision is rejected', () => {
@@ -305,7 +310,7 @@ describe('TurnStateApplier', () => {
           'tab-1',
         );
         if (terminalReason === 'aborted_streaming' || terminalReason === 'aborted_tools') {
-          expect(finalizeCurrentMessage).toHaveBeenCalledWith('tab-1', true, true);
+          expect(finalizeCurrentMessage).toHaveBeenCalledWith('tab-1', true, true, undefined);
         } else {
           expect(finalizeCurrentMessage).toHaveBeenCalledWith('tab-1', isAborted);
         }

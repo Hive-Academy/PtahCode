@@ -85,7 +85,7 @@ describe('AgentContinueInputComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Stopped');
   });
 
-  it('offers no Stop or message composer while the lane is starting', () => {
+  it('offers Stop but no message composer while the lane is starting', () => {
     setup(
       makeAgent({
         status: 'starting',
@@ -94,8 +94,12 @@ describe('AgentContinueInputComponent', () => {
     );
     expect(
       fixture.nativeElement.querySelector('[aria-label="Stop generating"]'),
-    ).toBeNull();
+    ).not.toBeNull();
     expect(fixture.nativeElement.querySelector('textarea')).toBeNull();
+    const requested = jest.fn();
+    fixture.componentInstance.stopRequested.subscribe(requested);
+    (fixture.nativeElement.querySelector('[aria-label="Stop generating"]') as HTMLButtonElement).click();
+    expect(requested).toHaveBeenCalledTimes(1);
   });
 
   it('shows the composer and emits Stop for a running steer-capable lane without continuation', () => {

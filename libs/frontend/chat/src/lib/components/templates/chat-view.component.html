@@ -139,8 +139,10 @@
           [displayStage]="budgetDisplayStage()"
           [dismissedStage]="budgetDismissedStage()"
           [wrapUpSent]="budgetWrapUpSent()"
+          [handoffLabel]="budgetHandoffLabel()"
           [autoHandoffQueued]="budgetAutoHandoffQueued()"
           (wrapUp)="onBudgetWrapUp()"
+          (retryHandoff)="onBudgetRetryHandoff()"
           (dismiss)="onBudgetDismiss()"
           (cancelAutoHandoff)="onBudgetCancelAutoHandoff()"
         />

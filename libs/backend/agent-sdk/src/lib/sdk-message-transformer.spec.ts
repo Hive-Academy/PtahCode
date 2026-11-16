@@ -33,7 +33,40 @@ import { LiveUsageTracker } from './helpers/live-usage-tracker';
 import { SessionTurnStateRegistry } from './helpers/session-turn-state.registry';
 import { CompactionBoundaryGenerationRegistry } from './helpers/compaction-boundary-generation-registry';
 import { SubagentStopNotices } from './helpers/compaction/subagent-stop-notices';
+import { SdkAdapterEvents } from './helpers/sdk-adapter-events.service';
 import type { SDKBackgroundTasksChangedMessage } from './types/sdk-types/claude-sdk.types';
+
+describe('interrupted turn stop cause', () => {
+  it('emits the current cause once and leaves it available to the failure hook', () => {
+    const logger = makeLogger();
+    const events = new SdkAdapterEvents(logger);
+    const turns = new SessionTurnStateRegistry();
+    const transformer = new SdkMessageTransformer(
+      logger, makeAuthEnv(),
+      makeSubagentRegistry() as never,
+      makeModelResolver() as never,
+      makeSessionLifecycle([]) as never,
+      new LiveUsageTracker(), turns, new CompactionBoundaryGenerationRegistry(),
+      new SubagentStopNotices(), undefined, events,
+    );
+    turns.markGenerating('sess-1');
+    events.recordStopCause(['sess-1'], 'user-stop');
+    const first = transformer.settleInterruptedTurn('sess-1' as never, 'prompt-1');
+    expect(first).toMatchObject({ stopCause: 'user-stop', terminalReason: 'aborted_streaming' });
+    expect(events.takeStopCause('sess-1')).toBe('user-stop');
+    turns.markGenerating('sess-1');
+    events.recordStopCause(['sess-1'], 'runtime-cap');
+    const [resultEvent] = transformer.transform(
+      { type: 'result', subtype: 'success', terminal_reason: 'aborted_tools' } as never,
+      'sess-1' as never,
+    );
+    expect(resultEvent).toMatchObject({ stopCause: 'runtime-cap', terminalReason: 'aborted_tools' });
+    expect(events.takeStopCause('sess-1')).toBe('runtime-cap');
+    turns.markGenerating('sess-1');
+    const second = transformer.settleInterruptedTurn('sess-1' as never, 'prompt-2');
+    expect(second).not.toHaveProperty('stopCause', 'user-stop');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Typed mock helpers

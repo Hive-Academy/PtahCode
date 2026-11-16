@@ -112,6 +112,10 @@ interface BudgetEntry {
   /** Settings the figure was computed with (a change resets the stage). */
   configKey: string | null;
   compactions: number;
+  pendingCompletion?: {
+    readonly postCompactionContextTokens: number | null;
+    readonly effectiveAutoCompactWindowTokens: number | null;
+  };
   /** Highest stage rank whose action already ran (once per stage entry). */
   actedRank: number;
   window?: SessionBudgetWindow;
@@ -274,14 +278,23 @@ export class SessionBudgetService {
    * One main-loop `compact_boundary` (F8). Counts toward the
    * `handoffAfterCompactions` trigger; in memory only.
    */
-  recordCompaction(sessionId: string): void {
+  recordCompaction(
+    sessionId: string,
+    completion?: {
+      readonly postCompactionContextTokens: number | null;
+      readonly effectiveAutoCompactWindowTokens: number | null;
+    },
+  ): void {
     const entry = this.trackedEntry(sessionId, 'live');
     if (!entry) return;
     entry.compactions += 1;
-    if (!entry.snapshot || !entry.figure) return;
+    if (!entry.snapshot || !entry.figure) {
+      entry.pendingCompletion = completion;
+      return;
+    }
     const config = this.configSource.getConfig();
     if (!config.enabled) return;
-    this.applyEvaluation(entry, config, true);
+    this.applyEvaluation(entry, config, true, completion);
   }
 
   /**
@@ -372,7 +385,7 @@ export class SessionBudgetService {
     if ((snapshot.revision ?? -1) > (entry.liveFigure?.revision ?? -1)) {
       entry.liveFigure = null;
     }
-    return this.applyEvaluation(entry, config, source === 'live');
+    return this.applyEvaluation(entry, config, source === 'live', entry.pendingCompletion);
   }
 
   /** Evaluate the entry's snapshot, store the figure, schedule actions. */
@@ -380,6 +393,10 @@ export class SessionBudgetService {
     entry: BudgetEntry,
     config: SessionBudgetConfig,
     runActions: boolean,
+    completion?: {
+      readonly postCompactionContextTokens: number | null;
+      readonly effectiveAutoCompactWindowTokens: number | null;
+    },
   ): SessionBudgetState | undefined {
     const snapshot = entry.snapshot;
     if (!snapshot) return undefined;
@@ -396,8 +413,12 @@ export class SessionBudgetService {
       compactions: entry.compactions,
       resetStage: configChanged,
       resetMeasure: configChanged,
+      postCompactionContextTokens: completion?.postCompactionContextTokens ?? null,
+      effectiveAutoCompactWindowTokens:
+        completion?.effectiveAutoCompactWindowTokens ?? null,
     });
     entry.figure = figure;
+    entry.pendingCompletion = undefined;
     entry.configKey = key;
     if (configChanged) {
       // The estimate was measured against the old settings; the next one

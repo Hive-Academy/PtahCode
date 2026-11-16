@@ -419,7 +419,7 @@ describe('SessionStatsSummaryComponent', () => {
       expect(text(root, 'stats-tokens')).toBe('14.9M');
       expect(text(root, 'stats-tokens-budget')).toBe('/ 50.0M');
       expect(tokensTitle(root)).toContain(
-        'Session budget: 29% used (14.9M of 50.0M).',
+        'Raw session tokens: 29% used (14.9M of 50.0M).',
       );
       expect(root.querySelector('[data-testid="stats-cost-limit"]')).toBeNull();
 

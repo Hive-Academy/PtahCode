@@ -7,7 +7,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { LoggingService } from '@ptah-extension/core';
+import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import {
   QueuedFollowUpStore,
   TabManagerService,
@@ -16,9 +16,9 @@ import {
 } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
 import type { SessionBudgetState } from '@ptah-extension/shared';
-import { displayBudgetStage } from '../components/molecules/notifications/session-budget-format';
 import { FollowUpQueueService } from './chat-store/follow-up-queue.service';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
+import { ChatStore } from './chat.store';
 import { SessionAutoHandoffService } from './session-auto-handoff.service';
 import { SessionHandoffSkillService } from './session-handoff-skill.service';
 import { buildHandoffCommand } from './session-handoff-prompts';
@@ -33,7 +33,7 @@ interface HandoffCandidate {
 /** A queued hand-off whose session is no longer at its limit. */
 interface StaleHandoff {
   readonly sessionId: string;
-  readonly queued: QueuedFollowUpRef;
+  readonly queued: QueuedFollowUpRef | null;
 }
 
 /**
@@ -52,8 +52,8 @@ const LOG_CONTEXT = '[SessionAutoHandoff]';
  * automatically at 100%" (`sessionBudget.autoHandoffAtLimit`, TASK_2026_863).
  *
  * The old trigger lived in the per-view `SessionBudgetActionsService` and read
- * only the SHOWN tab and its visible banner, so a background tab — or a
- * background workspace partition — that reached its limit never fired. This
+ * only the SHOWN tab and its visible banner, so a background tab â€” or a
+ * background workspace partition â€” that reached its limit never fired. This
  * coordinator watches the budget state of EVERY mounted tab, in the active
  * workspace and every background partition:
  *
@@ -86,9 +86,14 @@ export class SessionAutoHandoffCoordinatorService {
   private readonly autoHandoff = inject(SessionAutoHandoffService);
   private readonly skill = inject(SessionHandoffSkillService);
   private readonly logger = inject(LoggingService);
+  private readonly rpc = inject(ClaudeRpcService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly retryRevision = signal(0);
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly reconcileTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Delivered turns still streaming when the bounded status poll expires. */
+  private readonly awaitingSettlement = new Map<string, string>();
+  private readonly deferralTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Sessions with a probe or send in flight; guarded synchronously, so a re-run cannot double-fire. */
   private readonly inFlight = new Set<string>();
@@ -98,6 +103,8 @@ export class SessionAutoHandoffCoordinatorService {
   private readonly nextAttemptAt = new Map<string, number>();
   /** Failed attempts per session since the last qualifying change. */
   private readonly failedAttempts = new Map<string, number>();
+  /** Successful command submissions, retained when a stale pending claim is released. */
+  private readonly sentAttempts = new Map<string, number>();
   /** Sessions that exhausted {@link MAX_FAILED_ATTEMPTS}; left alone for this page's lifetime. */
   private readonly givenUp = new Set<string>();
   private readonly loggedSkips = new Set<string>();
@@ -107,12 +114,24 @@ export class SessionAutoHandoffCoordinatorService {
   constructor() {
     this.destroyRef.onDestroy(() => {
       if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+      for (const timer of this.reconcileTimers.values()) clearTimeout(timer);
+      for (const timer of this.deferralTimers.values()) clearTimeout(timer);
       this.loggedSkips.clear();
     });
     effect(() => {
       this.retryRevision();
       const candidates = this.candidates();
       const stale = this.staleQueued();
+      for (const [sessionId, tabId] of this.awaitingSettlement) {
+        const tab = this.budgetTabs().find((item) => item.id === tabId);
+        if (!tab || tab.claudeSessionId !== sessionId || this.autoHandoff.entry(sessionId)?.state !== 'delivered') {
+          this.awaitingSettlement.delete(sessionId);
+        } else if (tab.status !== 'streaming') {
+          this.awaitingSettlement.delete(sessionId);
+          this.scheduleReconcile(tabId, sessionId, 0);
+        }
+      }
+      this.clearObsoleteTimers();
       if (candidates.length === 0 && stale.length === 0) return;
       untracked(() => {
         for (const item of stale) void this.withdrawStale(item);
@@ -124,7 +143,7 @@ export class SessionAutoHandoffCoordinatorService {
   /**
    * Every session that must fire now, one tab each: a limit budget with the
    * setting on, not yet claimed, cancelled, wrapped up by hand, marked without
-   * the skill, in flight, rate-gated or given up — and with no pending
+   * the skill, in flight, rate-gated or given up â€” and with no pending
    * permission prompt on its tab. Called inside the effect: every read here
    * that can change (tab state in both partitions, the permission prompts)
    * re-runs the effect when it changes.
@@ -135,7 +154,7 @@ export class SessionAutoHandoffCoordinatorService {
     const sessions = new Set<string>();
     for (const tab of this.budgetTabs()) {
       const budget = tab.sessionBudget;
-      if (!budget || budgetStage(tab) !== 'limit') continue;
+      if (!budget || budget.stage !== 'limit') continue;
       const sessionId = tab.claudeSessionId;
       if (typeof sessionId !== 'string') continue;
       if (budget.sessionId !== sessionId) {
@@ -149,7 +168,19 @@ export class SessionAutoHandoffCoordinatorService {
       if (sessions.has(sessionId)) continue; // the first tab per session sends
       sessions.add(sessionId);
       const entry = this.autoHandoff.entry(sessionId);
-      if (entry !== null) {
+      // This tracked read wakes a deferred intent when compaction ends.
+      const compacting = this.compacting(tab.id);
+      if (!compacting) {
+        const timer = this.deferralTimers.get(sessionId);
+        if (timer) clearTimeout(timer);
+        this.deferralTimers.delete(sessionId);
+      }
+      if (entry !== null && !(entry.state === 'pending' && entry.attempts > 0 && entry.queued === null)) {
+        const timer = this.deferralTimers.get(sessionId);
+        if (timer && entry.state === 'cancelled') {
+          clearTimeout(timer);
+          this.deferralTimers.delete(sessionId);
+        }
         this.logSkip(sessionId, entry.state === 'cancelled' ? 'cancelled' : 'already claimed', tab.id);
         continue;
       }
@@ -185,7 +216,7 @@ export class SessionAutoHandoffCoordinatorService {
 
   private atLimit(tabId: string): boolean {
     const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab ?? null;
-    return tab !== null && budgetStage(tab) === 'limit';
+    return tab?.sessionBudget?.stage === 'limit';
   }
 
   /** Tabs in both partitions; the tracked reads re-run the effect when either changes. */
@@ -210,10 +241,10 @@ export class SessionAutoHandoffCoordinatorService {
     for (const tab of this.budgetTabs()) {
       const sessionId = tab.claudeSessionId;
       if (typeof sessionId !== 'string' || tab.sessionBudget?.sessionId !== sessionId) continue;
-      if (budgetStage(tab) === 'limit') continue;
+      if (tab.sessionBudget.stage === 'limit') continue;
       const entry = this.autoHandoff.entry(sessionId);
-      if (entry?.state !== 'fired' || !entry.queued || entry.queued.tabId !== tab.id) continue;
-      if (this.withdrawing.has(sessionId) || !this.followUpStore.isPending(entry.queued.clientMessageId)) continue;
+      if (entry?.state !== 'pending' || this.withdrawing.has(sessionId)) continue;
+      if (entry.queued && (entry.queued.tabId !== tab.id || !this.followUpStore.isPending(entry.queued.clientMessageId))) continue;
       found.push({ sessionId, queued: entry.queued });
     }
     return found;
@@ -223,6 +254,10 @@ export class SessionAutoHandoffCoordinatorService {
   private async withdrawStale({ sessionId, queued }: StaleHandoff): Promise<void> {
     this.withdrawing.add(sessionId);
     try {
+      if (!queued) {
+        this.autoHandoff.release(sessionId);
+        return;
+      }
       const withdrawn = await this.injector.get(FollowUpQueueService).withdraw(queued, { restore: false });
       this.logger.info(
         LOG_CONTEXT,
@@ -254,6 +289,10 @@ export class SessionAutoHandoffCoordinatorService {
     const { tabId, sessionId } = candidate;
     this.inFlight.add(sessionId);
     try {
+      if (this.compacting(tabId)) {
+        this.deferCompaction(candidate);
+        return;
+      }
       const probe = await this.skill.probe();
       if (probe === 'missing') {
         // Confirmed: this workspace resolves no `/session-handoff`. The
@@ -273,10 +312,14 @@ export class SessionAutoHandoffCoordinatorService {
         return;
       }
       // The probe was asynchronous: re-read the tab, not the view. A tab
-      // switch does not abort it — the hand-off belongs to the session.
+      // switch does not abort it â€” the hand-off belongs to the session.
       const target = this.stillQualifies(tabId, sessionId);
       if (!target) {
         this.logSkip(sessionId, 'tab no longer qualifies or is not mounted', tabId);
+        return;
+      }
+      if (this.compacting(tabId)) {
+        this.deferCompaction(candidate);
         return;
       }
       if (
@@ -288,6 +331,24 @@ export class SessionAutoHandoffCoordinatorService {
       }
       if (!this.autoHandoff.claim(sessionId)) {
         this.logSkip(sessionId, 'already claimed', tabId);
+        return;
+      }
+      if ((this.sentAttempts.get(sessionId) ?? 0) >= MAX_FAILED_ATTEMPTS) {
+        this.autoHandoff.transition(sessionId, 'failed');
+        return;
+      }
+      if (!(await this.checkBeforeSend(tabId, sessionId))) {
+        this.scheduleReconcile(tabId, sessionId, 1);
+        return;
+      }
+      if (!this.stillQualifies(tabId, sessionId)) {
+        this.autoHandoff.release(sessionId);
+        return;
+      }
+      if (this.autoHandoff.isManuallyWrappedUp(sessionId) || this.autoHandoff.entry(sessionId)?.state !== 'pending') return;
+      if (this.compacting(tabId)) {
+        this.autoHandoff.release(sessionId);
+        this.deferCompaction(candidate);
         return;
       }
       const outcome = await this.messageDispatch.sendOrQueueMessage(
@@ -303,6 +364,11 @@ export class SessionAutoHandoffCoordinatorService {
       // Queued (the turn runs): delivery is reported by the follow-up store.
       const queued = outcome.queued ?? null;
       this.autoHandoff.recordQueued(sessionId, queued);
+      this.sentAttempts.set(sessionId, (this.sentAttempts.get(sessionId) ?? 0) + 1);
+      if (!queued) {
+        this.autoHandoff.transition(sessionId, 'delivered');
+      }
+      this.scheduleReconcile(tabId, sessionId, 0);
       this.logger.info(LOG_CONTEXT, 'automatic hand-off fired', { sessionId, tabId, delivery: queued ? 'queued' : 'sent' });
       if (queued) this.watchQueued(sessionId, queued);
     } catch (error: unknown) {
@@ -326,9 +392,8 @@ export class SessionAutoHandoffCoordinatorService {
   private watchQueued(sessionId: string, queued: QueuedFollowUpRef): void {
     this.followUpStore.onSettled(queued.clientMessageId, (outcome) => {
       if (outcome === 'delivered' || outcome === 'steered') {
-        if (this.autoHandoff.entry(sessionId) === null) {
-          this.autoHandoff.claim(sessionId);
-        }
+        this.autoHandoff.transition(sessionId, 'delivered');
+        this.scheduleReconcile(queued.tabId, sessionId, 0);
         return;
       }
       if (this.autoHandoff.entry(sessionId)?.state === 'cancelled') return;
@@ -360,7 +425,133 @@ export class SessionAutoHandoffCoordinatorService {
     if (budget.sessionId !== sessionId) return null;
     if (budget.autoHandoff !== true) return null;
     if (tab.status === 'resuming') return null;
-    return handoffStageReached(tab) ? { budget } : null;
+    return budget.stage === 'limit' ? { budget } : null;
+  }
+
+  private compacting(tabId: string): boolean {
+    return this.injector.get(ChatStore).isCompactingForTab(tabId);
+  }
+
+  private clearObsoleteTimers(): void {
+    for (const [sessionId, timer] of this.deferralTimers) {
+      const bound = this.budgetTabs().some((tab) => tab.claudeSessionId === sessionId && tab.sessionBudget?.sessionId === sessionId);
+      if (bound && this.autoHandoff.entry(sessionId)?.state !== 'cancelled') continue;
+      clearTimeout(timer);
+      this.deferralTimers.delete(sessionId);
+    }
+    for (const [sessionId, timer] of this.reconcileTimers) {
+      const bound = this.budgetTabs().some((tab) => tab.claudeSessionId === sessionId && tab.sessionBudget?.sessionId === sessionId);
+      if (bound && this.autoHandoff.entry(sessionId)?.state !== 'cancelled') continue;
+      clearTimeout(timer);
+      this.reconcileTimers.delete(sessionId);
+    }
+    for (const [sessionId, tabId] of this.awaitingSettlement) {
+      if (!this.budgetTabs().some((tab) => tab.id === tabId && tab.claudeSessionId === sessionId)) {
+        this.awaitingSettlement.delete(sessionId);
+      }
+    }
+  }
+
+  private deferCompaction(candidate: HandoffCandidate): void {
+    const { sessionId, tabId } = candidate;
+    if (this.deferralTimers.has(sessionId)) return;
+    const timer = setTimeout(() => {
+      this.deferralTimers.delete(sessionId);
+      if (this.compacting(tabId) && this.stillQualifies(tabId, sessionId)) {
+        this.autoHandoff.claim(sessionId);
+        this.autoHandoff.transition(sessionId, 'failed');
+      } else {
+        this.retryRevision.update((value) => value + 1);
+      }
+    }, 600_000);
+    this.deferralTimers.set(sessionId, timer);
+  }
+
+  private async checkBeforeSend(tabId: string, sessionId: string): Promise<boolean> {
+    const result = await this.rpc.call('session:handoffStatus', { tabId, sessionId }).catch((error: unknown) => {
+      this.logger.warn(LOG_CONTEXT, 'handoff status lookup failed', { tabId, sessionId, error });
+      return null;
+    });
+    if (!result) {
+      this.autoHandoff.transition(sessionId, 'pending', true);
+      return false;
+    }
+    const status = result.success && result.data ? result.data : { state: 'unavailable' as const };
+    if (status.state === 'recorded' || status.state === 'closePending') {
+      this.autoHandoff.transition(sessionId, 'recorded');
+      return false;
+    }
+    if (status.state === 'closeCompleted') {
+      this.autoHandoff.transition(sessionId, 'completed');
+      return false;
+    }
+    if (status.state === 'unavailable') {
+      this.autoHandoff.transition(sessionId, this.autoHandoff.entry(sessionId)?.state ?? 'pending', true);
+      return false;
+    }
+    return status.state === 'absent';
+  }
+
+  private scheduleReconcile(tabId: string, sessionId: string, step: number): void {
+    const previous = this.reconcileTimers.get(sessionId);
+    if (previous) clearTimeout(previous);
+    const delay = step === 0 ? 0 : RETRY_DELAYS_MS[Math.min(step - 1, RETRY_DELAYS_MS.length - 1)];
+    const timer = setTimeout(() => {
+      this.reconcileTimers.delete(sessionId);
+      void this.reconcile(tabId, sessionId, step);
+    }, delay);
+    this.reconcileTimers.set(sessionId, timer);
+  }
+
+  private async reconcile(tabId: string, sessionId: string, step: number): Promise<void> {
+    const entry = this.autoHandoff.entry(sessionId);
+    if (!entry || entry.state === 'cancelled' || entry.state === 'completed' || entry.state === 'failed') return;
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
+    if (tab?.claudeSessionId !== sessionId) return;
+    try {
+      const result = await this.rpc.call('session:handoffStatus', { tabId, sessionId });
+      const current = this.autoHandoff.entry(sessionId);
+      const currentTab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
+      if (!current || current.state === 'cancelled' || current.state === 'completed' || current.state === 'failed' || currentTab?.claudeSessionId !== sessionId) return;
+      const status = result.success && result.data ? result.data : { state: 'unavailable' as const };
+      if (status.state === 'recorded' || status.state === 'closePending') {
+        this.autoHandoff.transition(sessionId, 'recorded');
+        if (step < 12) this.scheduleReconcile(tabId, sessionId, step + 1);
+        return;
+      }
+      if (status.state === 'closeCompleted') {
+        this.autoHandoff.transition(sessionId, 'completed');
+        return;
+      }
+      if (status.state === 'unavailable') {
+        this.autoHandoff.transition(sessionId, current.state, true);
+      } else if (status.state === 'absent' && current.state === 'pending' && current.attempts === 0 && current.queued === null) {
+        this.autoHandoff.release(sessionId);
+        this.retryRevision.update((value) => value + 1);
+        return;
+      } else if (status.state === 'absent' && current.state === 'delivered' && currentTab.status !== 'streaming') {
+        if ((this.sentAttempts.get(sessionId) ?? current.attempts) >= MAX_FAILED_ATTEMPTS) {
+          this.autoHandoff.transition(sessionId, 'failed');
+          return;
+        }
+        if (!this.compacting(tabId) && this.stillQualifies(tabId, sessionId)) {
+          this.autoHandoff.releaseForResend(sessionId);
+          this.retryRevision.update((value) => value + 1);
+          return;
+        }
+      }
+    } catch (error: unknown) {
+      this.logger.warn(LOG_CONTEXT, 'handoff status lookup failed', { tabId, sessionId, error });
+      const current = this.autoHandoff.entry(sessionId);
+      if (current && current.state !== 'cancelled' && current.state !== 'completed' && current.state !== 'failed') {
+        this.autoHandoff.transition(sessionId, current.state, true);
+      }
+    }
+    if (step < 12) this.scheduleReconcile(tabId, sessionId, step + 1);
+    else if (this.autoHandoff.entry(sessionId)?.state === 'delivered' &&
+      this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab?.status === 'streaming') {
+      this.awaitingSettlement.set(sessionId, tabId);
+    }
   }
 
   /**
@@ -373,6 +564,8 @@ export class SessionAutoHandoffCoordinatorService {
       this.failedAttempts.delete(sessionId);
       this.nextAttemptAt.delete(sessionId);
       this.givenUp.add(sessionId);
+      this.autoHandoff.claim(sessionId);
+      this.autoHandoff.transition(sessionId, 'failed');
       this.scheduleRetryWake();
       this.logger.warn(
         LOG_CONTEXT,
@@ -410,28 +603,4 @@ export class SessionAutoHandoffCoordinatorService {
       this.retryRevision.update((value) => value + 1);
     }, next - now);
   }
-}
-
-/**
- * True when the tab shows a session budget whose display stage reached
- * `limit`: the higher of the authoritative stage and the live estimate of the
- * running turn (D25) — the same rule the banner shows.
- */
-function handoffStageReached(tab: TabState): boolean {
-  const budget = tab.sessionBudget;
-  if (!budget) return false;
-  if (budget.autoHandoff !== true) return false;
-  if (typeof tab.claudeSessionId !== 'string') return false;
-  if (budget.sessionId !== tab.claudeSessionId) return false;
-  return budgetStage(tab) === 'limit';
-}
-
-function budgetStage(tab: TabState): string | undefined {
-  const budget = tab.sessionBudget;
-  if (!budget) return undefined;
-  return (
-    tab.status === 'streaming'
-      ? displayBudgetStage(budget.stage, tab.liveBudgetStage ?? null)
-      : budget.stage
-  );
 }

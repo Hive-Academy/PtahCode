@@ -58,6 +58,7 @@ function harness(overrides: Partial<SessionNamespaceDependencies> = {}) {
   const handoff: jest.Mocked<ISessionHandoff> = {
     handoff: jest.fn().mockResolvedValue(HANDED_OFF),
     acknowledge: jest.fn().mockResolvedValue({ status: 'closed', reason: 'Closed.' }),
+    status: jest.fn().mockResolvedValue({ state: 'absent' }),
   };
   let caller: string | undefined = 'tab-parent';
   const onWorktreeChanged = jest.fn();

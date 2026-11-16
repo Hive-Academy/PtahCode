@@ -46,9 +46,21 @@ export class SettingsSectionReadyDirective {}
         </div>
       }
       @case ('error') {
-        <ptah-alert tone="error" [compact]="true" live="assertive" [attr.data-testid]="errorTestId()">
+        <ptah-alert
+          tone="error"
+          [compact]="true"
+          live="assertive"
+          [attr.data-testid]="errorTestId()"
+        >
           {{ errorText() }}
-          <button alertAction ptahButton type="button" variant="ghost" (click)="retry.emit()">
+          <button
+            alertAction
+            ptahButton
+            type="button"
+            variant="ghost"
+            [attr.data-testid]="retryTestId()"
+            (click)="retry.emit()"
+          >
             {{ retryLabel() }}
           </button>
         </ptah-alert>
@@ -71,9 +83,12 @@ export class SettingsSectionReadyDirective {}
   `,
 })
 export class SettingsSectionStateComponent {
-  protected readonly readyTemplate = contentChild(SettingsSectionReadyDirective, {
-    read: TemplateRef,
-  });
+  protected readonly readyTemplate = contentChild(
+    SettingsSectionReadyDirective,
+    {
+      read: TemplateRef,
+    },
+  );
 
   readonly state = input.required<SettingsSectionState>();
   readonly errorText = input('Could not load this section.');
@@ -83,6 +98,8 @@ export class SettingsSectionStateComponent {
   readonly emptyBody = input<string | null>(null);
   readonly emptyActionLabel = input<string | null>(null);
   readonly errorTestId = input<string | null>(null);
+  /** Test id for the real Retry button, so a consumer keeps its retry hook without a second button. */
+  readonly retryTestId = input<string | null>(null);
 
   readonly retry = output<void>();
   readonly emptyAction = output<void>();

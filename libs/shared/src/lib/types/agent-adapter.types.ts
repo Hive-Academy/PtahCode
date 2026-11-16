@@ -28,6 +28,7 @@ import type { ProviderProfile } from './provider-profile.types';
 import type { ProviderAccountSelection } from './provider-account.types';
 import type { SessionBudgetState } from './session-budget.types';
 import type { RuntimeConsumer } from './session-runtime.types';
+import type { TurnStopCause } from './sdk-hook.types';
 
 /**
  * Callback signatures — mirrored from agent-sdk's SdkAgentAdapter public API.
@@ -382,7 +383,7 @@ export interface IAgentAdapter extends IAIProvider, FollowUpQueueOperations {
   ): Promise<AsyncIterable<FlatStreamEventUnion>>;
 
   /** Interrupt the current assistant turn; session stays alive. */
-  interruptCurrentTurn(sessionId: SessionId): Promise<boolean>;
+  interruptCurrentTurn(sessionId: SessionId, cause?: TurnStopCause): Promise<boolean>;
 
   /** Interrupt and clean up the session entirely. */
   interruptSession(

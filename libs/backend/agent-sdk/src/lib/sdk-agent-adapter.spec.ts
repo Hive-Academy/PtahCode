@@ -407,6 +407,7 @@ function makeAdapter(
     config?: Record<string, unknown>;
     platformInfo?: Partial<IPlatformInfo>;
     workspaceRoot?: string | null;
+    budgetWindow?: number | null;
   } = {},
 ): AdapterHarness {
   const logger = createMockLogger();
@@ -458,6 +459,7 @@ function makeAdapter(
     statsOwner,
     historyReader as unknown as SessionHistoryReaderService,
     sessionBudget,
+    { getConfig: () => ({ enabled: true, contextTokenThreshold: options.budgetWindow ?? null, envWindow: null }) },
   );
 
   return {
@@ -1749,7 +1751,7 @@ describe('SdkAgentAdapter', () => {
       const transformArg = h.streamTransformer.transform.mock.calls[0][0];
       expect(transformArg.activityWatchdog).toBe(activityWatchdog);
       // The compaction tap's callbacks reach the stream (TASK_2026_614 D.11).
-      expect(transformArg.onMessage).toBe(onMessage);
+      expect(typeof transformArg.onMessage).toBe('function');
       expect(transformArg.onStreamEnd).toBe(onStreamEnd);
       expect(transformArg.beforeLiveStatsDispose).toBe(beforeLiveStatsDispose);
       expect(transformArg.sdkQuery).toBe(sdkQuery);
@@ -2064,7 +2066,7 @@ describe('SdkAgentAdapter', () => {
       expect(h.streamTransformer.transform).toHaveBeenCalledTimes(2);
       const reused = h.streamTransformer.transform.mock.calls[1][0];
       expect(reused.sdkQuery).toBe(sdkQuery);
-      expect(reused.onMessage).toBe(onMessage);
+      expect(typeof reused.onMessage).toBe('function');
       expect(reused.onStreamEnd).toBe(onStreamEnd);
       expect(reused.beforeLiveStatsDispose).toBe(beforeLiveStatsDispose);
     });
@@ -2102,7 +2104,7 @@ describe('SdkAgentAdapter', () => {
       const transformArg = h.streamTransformer.transform.mock.calls[0][0];
       expect(transformArg.activityWatchdog).toBe(activityWatchdog);
       // The compaction tap's callbacks reach the stream (TASK_2026_614 D.11).
-      expect(transformArg.onMessage).toBe(onMessage);
+      expect(typeof transformArg.onMessage).toBe('function');
       expect(transformArg.onStreamEnd).toBe(onStreamEnd);
       expect(transformArg.beforeLiveStatsDispose).toBe(beforeLiveStatsDispose);
       expect(transformArg.sdkQuery).toBe(sdkQuery);
@@ -2852,7 +2854,7 @@ describe('SdkAgentAdapter', () => {
       const transformArg = h.streamTransformer.transform.mock.calls[0][0];
       expect(transformArg.activityWatchdog).toBe(activityWatchdog);
       // The compaction tap's callbacks reach the stream (TASK_2026_614 D.11).
-      expect(transformArg.onMessage).toBe(onMessage);
+      expect(typeof transformArg.onMessage).toBe('function');
       expect(transformArg.onStreamEnd).toBe(onStreamEnd);
       expect(transformArg.beforeLiveStatsDispose).toBe(beforeLiveStatsDispose);
       expect(transformArg.sdkQuery).toBe(sdkQuery);
@@ -3202,13 +3204,16 @@ describe('SdkAgentAdapter', () => {
       };
     }
 
-    async function startNewSession(h: AdapterHarness, onStats?: jest.Mock) {
+    async function startNewSession(h: AdapterHarness, onStats?: jest.Mock, nativeAnthropic = false) {
       await h.adapter.initialize();
       if (onStats) h.adapter.setResultStatsCallback(onStats);
       h.sessionLifecycle.executeQuery.mockResolvedValueOnce({
         sdkQuery: createFakeQuery(),
         initialModel: 'claude-sonnet-4-20250514',
         abortController: new AbortController(),
+        capacityRoute: nativeAnthropic
+          ? { kind: 'native', providerId: 'anthropic' }
+          : { kind: 'proxy', providerId: 'proxy' },
       } as ExecuteQueryResult);
       // Tracking id `tab_1` differs from the real SDK id (AS-1, F1).
       await h.adapter.startChatSession(makeSessionConfig());
@@ -3315,7 +3320,10 @@ describe('SdkAgentAdapter', () => {
       expect(typeof arg.onCompactBoundary).toBe('function');
 
       arg.onCompactBoundary?.(REAL_ID as unknown as SessionId);
-      expect(h.sessionBudget.recordCompaction).toHaveBeenCalledWith(REAL_ID);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenCalledWith(REAL_ID, {
+        postCompactionContextTokens: null,
+        effectiveAutoCompactWindowTokens: null,
+      });
 
       h.sessionBudget.recordCompaction.mockImplementationOnce(() => {
         throw new Error('boom');
@@ -3324,6 +3332,79 @@ describe('SdkAgentAdapter', () => {
         arg.onCompactBoundary?.(REAL_ID as unknown as SessionId),
       ).not.toThrow();
       expect(h.logger.warn).toHaveBeenCalled();
+    });
+
+    it('passes this boundary post count and configured window exactly once', async () => {
+      const h = makeAdapter({ budgetWindow: 120_000 });
+      const arg = await startNewSession(h);
+      await arg.onMessage?.({
+        type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+        compact_metadata: { trigger: 'auto', pre_tokens: 168_173, post_tokens: 33_450 },
+      } as SDKMessage);
+      arg.onCompactBoundary?.(REAL_ID as SessionId);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenCalledTimes(1);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenCalledWith(REAL_ID, {
+        postCompactionContextTokens: 33_450,
+        effectiveAutoCompactWindowTokens: 120_000,
+      });
+    });
+
+    it('uses a compaction sample across SDK id rekey and clears it on session end', async () => {
+      const h = makeAdapter({ budgetWindow: 120_000 });
+      const arg = await startNewSession(h);
+      await arg.onMessage?.({
+        type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+        compact_metadata: { trigger: 'auto', pre_tokens: 160_000, post_tokens: 31_000 },
+      } as SDKMessage);
+      arg.onCompactBoundary?.('tab_1' as SessionId);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenLastCalledWith('tab_1', {
+        postCompactionContextTokens: 31_000,
+        effectiveAutoCompactWindowTokens: 120_000,
+      });
+      h.adapter.endSession('tab_1' as SessionId);
+      arg.onCompactBoundary?.(REAL_ID as SessionId);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenLastCalledWith(REAL_ID, {
+        postCompactionContextTokens: null,
+        effectiveAutoCompactWindowTokens: null,
+      });
+    });
+
+    it('passes null for a missing post count with a known window', async () => {
+      const h = makeAdapter({ budgetWindow: 120_000 });
+      const arg = await startNewSession(h);
+      await arg.onMessage?.({
+        type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+        compact_metadata: { trigger: 'auto', pre_tokens: 168_173 },
+      } as SDKMessage);
+      arg.onCompactBoundary?.(REAL_ID as SessionId);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenCalledTimes(1);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenCalledWith(REAL_ID, {
+        postCompactionContextTokens: null, effectiveAutoCompactWindowTokens: 120_000,
+      });
+    });
+
+    it('uses the native Anthropic default and leaves a proxy window unknown', async () => {
+      const native = makeAdapter();
+      const nativeArg = await startNewSession(native, undefined, true);
+      await nativeArg.onMessage?.({
+        type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+        compact_metadata: { trigger: 'auto', pre_tokens: 168_173, post_tokens: 33_450 },
+      } as SDKMessage);
+      nativeArg.onCompactBoundary?.(REAL_ID as SessionId);
+      expect(native.sessionBudget.recordCompaction).toHaveBeenCalledWith(REAL_ID, {
+        postCompactionContextTokens: 33_450, effectiveAutoCompactWindowTokens: 200_000,
+      });
+
+      const h = makeAdapter();
+      const arg = await startNewSession(h);
+      await arg.onMessage?.({
+        type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+        compact_metadata: { trigger: 'auto', pre_tokens: 168_173, post_tokens: 33_450 },
+      } as SDKMessage);
+      arg.onCompactBoundary?.(REAL_ID as SessionId);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenCalledWith(REAL_ID, {
+        postCompactionContextTokens: 33_450, effectiveAutoCompactWindowTokens: null,
+      });
     });
 
     it('delegates the turn terminal before releasing the result turn', async () => {

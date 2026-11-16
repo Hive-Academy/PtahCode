@@ -282,7 +282,7 @@ export class SessionRegistry {
   private readonly realSessionIdReboundListeners =
     new Set<SessionRealSessionIdReboundListener>();
 
-  constructor(private readonly logger: Logger) {}
+  constructor(private readonly logger: Logger, private readonly onTurnStarted?: (id: string) => void) {}
 
   /**
    * Subscribe to idle evictions (`evictStale`). Returns the disposer that
@@ -683,6 +683,12 @@ export class SessionRegistry {
    * and 0 while one is (TASK_2026_363).
    */
   markTurnStarted(rec: SessionRecord): void {
+    this.onTurnStarted?.(rec.tabId);
+    // A resumed session keeps its SDK id under a new tab id, so a stop cause
+    // left from the previous tab is keyed by the SDK id only.
+    if (rec.realSessionId && rec.realSessionId !== rec.tabId) {
+      this.onTurnStarted?.(rec.realSessionId);
+    }
     if (!rec.turnInFlight) {
       rec.activityHold?.beginTurn?.();
       rec.activityHold?.release();

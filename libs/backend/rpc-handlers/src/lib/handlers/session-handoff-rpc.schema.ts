@@ -10,3 +10,8 @@ import { UUID_REGEX } from '@ptah-extension/shared';
 export const SessionHandoffChainParamsSchema = z.object({
   sessionId: z.string().regex(UUID_REGEX),
 });
+
+export const SessionHandoffStatusParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  tabId: z.string().min(1),
+});

@@ -19,6 +19,7 @@ import type { SessionLifecycleManager } from './helpers/session-lifecycle-manage
 import type { LiveUsageTracker } from './helpers/live-usage-tracker';
 import type { SessionTurnStateRegistry } from './helpers/session-turn-state.registry';
 import { toTurnStateEvent } from './helpers/session-turn-state.registry';
+import type { SdkAdapterEvents } from './helpers/sdk-adapter-events.service';
 import {
   firstQueuedClientMessageId,
   takeAwaitingEcho,
@@ -198,6 +199,8 @@ export class SdkMessageTransformer implements TransformerState {
     private readonly stopNotices: SubagentStopNotices,
     @inject(SDK_TOKENS.HOST_ATTENTION_COORDINATOR, { isOptional: true })
     private readonly hostAttention?: HostAttentionCoordinator,
+    @inject(SDK_TOKENS.SDK_ADAPTER_EVENTS, { isOptional: true })
+    private readonly adapterEvents?: SdkAdapterEvents,
   ) {
     this.helpers = {
       logger: this.logger,
@@ -228,6 +231,7 @@ export class SdkMessageTransformer implements TransformerState {
       this.compactionBoundaryRegistry,
       this.stopNotices,
       this.hostAttention,
+      this.adapterEvents,
     );
     // A shell started in an earlier stream of the session (resume, query
     // restart, worker_restart) must still be known as a shell here.
@@ -253,6 +257,7 @@ export class SdkMessageTransformer implements TransformerState {
         this.turnState.settleTurn(sessionId, 'aborted_streaming'),
       ),
       consumedClientMessageId: clientMessageId,
+      stopCause: this.adapterEvents?.peekStopCause(sessionId),
     };
   }
 
@@ -481,7 +486,12 @@ export class SdkMessageTransformer implements TransformerState {
         ) {
           void this.hostAttention?.presentSessionFailure(sessionId, Date.now());
         }
-        return events;
+        return events.map((event) =>
+          event.eventType === 'turn_state' &&
+          (event.terminalReason === 'aborted_streaming' || event.terminalReason === 'aborted_tools')
+            ? { ...event, stopCause: sessionId ? this.adapterEvents?.peekStopCause(sessionId) : undefined }
+            : event,
+        );
       }
 
       if (isStreamEvent(sdkMessage)) {

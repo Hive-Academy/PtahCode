@@ -165,10 +165,30 @@ export class SessionStatsRepository {
     const db = await this.store.ready();
     const rows: unknown[] = db.prepare(`SELECT t.rowid AS rowId, t.session_id AS sessionId,
       COALESCE(t.worktree_path, s.workspace_path, t.workspace_key, s.workspace_key) AS workspacePath
-      FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.repository_id IS NULL AND t.rowid > ? ORDER BY t.rowid LIMIT ?`)
-      .all(safeInteger.parse(afterRowId), safeInteger.parse(limit));
+      FROM session_usage_turns t INDEXED BY idx_session_usage_backfill_rowid
+      LEFT JOIN sessions s ON s.session_id = t.session_id
+      WHERE t.repository_id IS NULL
+        AND (t.repository_backfill_attempted_at_ms IS NULL OR t.repository_backfill_attempted_at_ms <= ?)
+        AND COALESCE(t.worktree_path, s.workspace_path, t.workspace_key, s.workspace_key) IS NOT NULL
+        AND t.rowid > ? ORDER BY t.rowid LIMIT ?`)
+      .all(Date.now() - 7 * 86_400_000, safeInteger.parse(afterRowId), safeInteger.parse(limit));
     return rows.map((row) => z.object({ rowId: safeInteger, sessionId: text, workspacePath: text.nullable() }).parse(row));
+  }
+
+  async markRepositoryUsageUnresolved(rowIds: readonly number[]): Promise<void> {
+    if (rowIds.length === 0) return;
+    const db = await this.store.ready();
+    const update = db.prepare(`UPDATE session_usage_turns SET repository_backfill_attempted_at_ms = ?
+      WHERE rowid = ? AND repository_id IS NULL`);
+    const attemptedAt = Date.now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const rowId of rowIds) update.run(attemptedAt, safeInteger.parse(rowId));
+      db.exec('COMMIT');
+    } catch (error: unknown) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   async setRepositoryUsageIdentity(rows: readonly { rowId: number; repositoryId: string; worktreePath: string }[]): Promise<number> {
@@ -320,6 +340,10 @@ export class SessionStatsRepository {
         pricing_version=excluded.pricing_version, revision=excluded.revision,
         workspace_key=excluded.workspace_key, host=excluded.host,
         native_thread_id=excluded.native_thread_id, repository_id=excluded.repository_id,
+        repository_backfill_attempted_at_ms=CASE
+          WHEN session_usage_turns.worktree_path IS NOT excluded.worktree_path
+            OR session_usage_turns.workspace_key IS NOT excluded.workspace_key THEN NULL
+          ELSE session_usage_turns.repository_backfill_attempted_at_ms END,
         worktree_path=excluded.worktree_path, missing_reason=excluded.missing_reason,
         billable=excluded.billable, coverage_start_ms=excluded.coverage_start_ms,
         coverage_end_ms=excluded.coverage_end_ms,
@@ -625,11 +649,18 @@ export class SessionStatsRepository {
     const db = await this.store.ready();
     const row: unknown = db.prepare(`SELECT 1 AS present FROM session_usage_turns t
       LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE COALESCE(s.workspace_key, t.workspace_key) = ?
-        AND ((t.producer = 'codex-checkpoint' AND t.run_id = ?)
-          OR (t.producer = 'cli-lane' AND t.provider_id IN ('codex', 'openai-codex') AND t.session_id = ?))
+      WHERE t.producer = 'codex-checkpoint' AND t.run_id = ?
+        AND COALESCE(s.workspace_key, t.workspace_key) = ?
+        AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
+      UNION ALL
+      SELECT 1 AS present FROM session_usage_turns t
+      LEFT JOIN sessions s ON s.session_id = t.session_id
+      WHERE t.producer = 'cli-lane' AND t.session_id = ?
+        AND t.provider_id IN ('codex', 'openai-codex')
+        AND COALESCE(s.workspace_key, t.workspace_key) = ?
         AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ? LIMIT 1`)
-      .get(text.parse(workspaceKey), text.parse(nativeThreadId), text.parse(nativeThreadId), from, until);
+      .get(text.parse(nativeThreadId), text.parse(workspaceKey), from, until,
+        text.parse(nativeThreadId), text.parse(workspaceKey), from, until);
     return row !== undefined;
   }
 

@@ -9562,7 +9562,7 @@ function handoffDeps(
     (Pick<ISessionHandoff, 'handoff'> & Partial<ISessionHandoff>) | undefined,
 ) {
   const service: ISessionHandoff | undefined = handoff
-    ? { acknowledge: jest.fn(), ...handoff }
+    ? { acknowledge: jest.fn(), status: jest.fn(), ...handoff }
     : undefined;
   return buildDeps({
     ptahAPI: buildPtahAPIStub({

@@ -64,10 +64,10 @@ const LAYER_ORDER: readonly SettingScope[] = ['global', 'app', 'workspace'];
           }
           {{ group.label }}
         </button>
-        <div content role="dialog" [attr.aria-label]="group.label" class="w-max max-w-[18rem] space-y-2 p-2.5 text-xs"
+        <div content role="dialog" [attr.aria-label]="group.label" class="w-max max-w-[18rem] space-y-ptah-label p-ptah-controls text-xs"
           data-testid="main-scope-layer-popover">
           <p class="font-semibold text-base-content">{{ group.label }}</p>
-          <ul class="flex flex-col items-start gap-1.5">
+          <ul class="flex flex-col items-start gap-ptah-inline">
             @for (field of group.fields; track field.key) {
               <li>
                 <ptah-setting-scope-row [fieldName]="field.fieldName" [shortFieldName]="field.shortFieldName" [scope]="field.entry.scope"

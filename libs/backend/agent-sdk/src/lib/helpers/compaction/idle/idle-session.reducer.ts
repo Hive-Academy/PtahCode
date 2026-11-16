@@ -112,6 +112,8 @@ export function reduceIdleSession(
         runToken: signal.runToken,
         lastTurn: null,
         reading: null,
+        compactBoundaryObserved: false,
+        postBoundaryBaseline: null,
         activitySinceTurnEnd: false,
         prefixChangedSinceTurnEnd: false,
         rateLimit: null,
@@ -182,6 +184,13 @@ export function reduceIdleSession(
         }
         break;
       case 'turn-context': {
+        if (state.compactBoundaryObserved && state.postBoundaryBaseline == null &&
+            state.lastTurn?.turnId === signal.turnId && !state.idlePeriodClosed &&
+            !state.activitySinceTurnEnd && !state.prefixChangedSinceTurnEnd &&
+            signal.totalTokens !== null && Number.isFinite(signal.totalTokens) && signal.totalTokens >= 0) {
+          next = { ...state, postBoundaryBaseline: signal.totalTokens };
+          break;
+        }
         const reason = noArmReason(state, signal, ctx);
         if (reason) {
           effects.push({ type: 'log', level: 'debug', reason });
@@ -284,6 +293,7 @@ export function reduceIdleSession(
         }
         break;
       case 'post-compact':
+        next = { ...state, compactBoundaryObserved: true, postBoundaryBaseline: null };
         if (
           attempt?.kind === 'in-flight' &&
           (attempt.phase === 'boundary' || attempt.phase === 'boundary-ended')
@@ -296,7 +306,7 @@ export function reduceIdleSession(
         ) {
           release();
           next = {
-            ...state,
+            ...next,
             compactionOpen: false,
             attempt: {
               ...attempt,
@@ -309,7 +319,7 @@ export function reduceIdleSession(
             },
           };
         } else {
-          next = { ...state, compactionOpen: false };
+          next = { ...next, compactionOpen: false };
         }
         break;
       case 'attempt-due':
@@ -356,7 +366,7 @@ export function reduceIdleSession(
           attempt?.kind === 'in-flight' &&
           attempt.attemptId === signal.attemptId
         ) {
-          effects.push({
+          if (signal.reason !== 'min-at-sdk-window') effects.push({
             type: 'log',
             level: signal.type === 'fire-skipped' ? 'info' : 'warn',
             reason: signal.reason,
@@ -402,11 +412,11 @@ export function reduceIdleSession(
         }
         break;
       case 'rekey':
-        next = { ...state, sessionId: signal.toId };
+        next = { ...state, sessionId: signal.toId, postBoundaryBaseline: null };
         break;
       case 'session-released':
         release();
-        next = { ...state, attempt: null, compactionOpen: false };
+        next = { ...state, attempt: null, compactionOpen: false, compactBoundaryObserved: false, postBoundaryBaseline: null };
         break;
     }
   }

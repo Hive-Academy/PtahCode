@@ -143,8 +143,8 @@
       </div>
     }
 
-    @if (message().isInterrupted) {
-      <div class="mt-2 text-[11px] text-base-content-muted" data-testid="chat-turn-interrupted">Interrupted</div>
+    @if (message().isInterrupted && interruptedLabel()) {
+      <div class="mt-2 text-[11px] text-base-content-muted" data-testid="chat-turn-interrupted">{{ interruptedLabel() }}</div>
     }
 
     @if (showActions()) {

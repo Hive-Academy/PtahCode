@@ -183,6 +183,13 @@ CREATE TABLE usage_source_cursor (
 CREATE INDEX idx_usage_source_cursor_updated ON usage_source_cursor (updated_at_ms);
 `;
 
+const S0008_USAGE_BACKFILL_LOOKUP = `
+ALTER TABLE session_usage_turns ADD COLUMN repository_backfill_attempted_at_ms INTEGER;
+CREATE INDEX idx_session_usage_backfill_rowid ON session_usage_turns (repository_id);
+CREATE INDEX idx_session_usage_codex_run ON session_usage_turns (run_id, occurred_at_ms)
+  WHERE producer = 'codex-checkpoint';
+`;
+
 export const SESSION_STORE_MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'S0001_sessions', sql: S0001_SESSIONS },
   { version: 2, name: 'S0002_session_stats', sql: S0002_SESSION_STATS },
@@ -191,4 +198,5 @@ export const SESSION_STORE_MIGRATIONS: readonly Migration[] = [
   { version: 5, name: 'S0005_usage_dimensions', sql: S0005_USAGE_DIMENSIONS },
   { version: 6, name: 'S0006_usage_coverage', sql: S0006_USAGE_COVERAGE },
   { version: 7, name: 'S0007_usage_source_cursor', sql: S0007_USAGE_SOURCE_CURSOR },
+  { version: 8, name: 'S0008_usage_backfill_lookup', sql: S0008_USAGE_BACKFILL_LOOKUP },
 ];

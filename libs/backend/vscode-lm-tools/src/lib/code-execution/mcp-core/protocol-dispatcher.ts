@@ -56,6 +56,7 @@ import {
   type AgentSpawnTiming,
 } from './agent-spawn-dedupe';
 import { isSpawnReplayValid } from './agent-spawn-replay-status';
+import { admitAndRaceSpawn, raceSpawnReply, SPAWN_REPLY_DEADLINE_MS } from './agent-spawn-deadline';
 import {
   AgentMessageAckArgsSchema,
   AgentMessageArgsSchema,
@@ -1176,6 +1177,7 @@ async function handleIndividualTool(
       }
       case 'ptah_agent_spawn': {
         const startedAt = performance.now();
+        const replyStartedAt = Date.now();
         let parsedAt = startedAt;
         let dedupedAt: number | undefined;
         let gatedAt: number | undefined;
@@ -1249,6 +1251,32 @@ async function handleIndividualTool(
               root,
               spawnArgs,
               async () => {
+                const spawnRequest = {
+                  task,
+                  cli: spawnArgs.cli,
+                  ptahCliId,
+                  workingDirectory: spawnArgs.workingDirectory,
+                  timeout: spawnArgs.timeout,
+                  files: spawnArgs.files,
+                  taskFolder: spawnArgs.taskFolder,
+                  deliverables: spawnArgs.deliverables,
+                  model: spawnArgs.model,
+                  modelTier,
+                  resumeSessionId: spawnArgs.resume_session_id,
+                  parentSessionId: callerSessionId,
+                  role: spawnArgs.role,
+                  phase: spawnArgs.phase,
+                  skills: spawnArgs.skills,
+                  effort: spawnArgs.effort,
+                  taskKind: spawnArgs.taskKind,
+                  routingSource: spawnArgs.routingSource,
+                  accountSelection: spawnArgs.accountSelection,
+                  permission: spawnArgs.permission,
+                  network: spawnArgs.network,
+                };
+                const admitted = typeof ptahAPI.agent.beginSpawn === 'function';
+                const ticket = admitted ? ptahAPI.agent.beginSpawn(spawnRequest) : undefined;
+                const pipeline = async () => {
                 try {
                   gate = await evaluateSpawnLimitGate(
                     target,
@@ -1273,38 +1301,33 @@ async function handleIndividualTool(
                   if (gate.refusal) throw new SpawnGateRefusal(gate.refusal);
                   try {
                     return await agentSpawnTiming.run(namespaceTiming, () =>
-                      ptahAPI.agent.spawn({
-                        task,
-                        cli: spawnArgs.cli,
-                        ptahCliId,
-                        workingDirectory: spawnArgs.workingDirectory,
-                        timeout: spawnArgs.timeout,
-                        files: spawnArgs.files,
-                        taskFolder: spawnArgs.taskFolder,
-                        deliverables: spawnArgs.deliverables,
-                        model: spawnArgs.model,
-                        modelTier,
-                        resumeSessionId: spawnArgs.resume_session_id,
-                        parentSessionId: callerSessionId,
-                        role: spawnArgs.role,
-                        phase: spawnArgs.phase,
-                        skills: spawnArgs.skills,
-                        effort: spawnArgs.effort,
-                        taskKind: spawnArgs.taskKind,
-                        routingSource: spawnArgs.routingSource,
-                        // Already refused above unless omitted or ambient on a `claude`
-                        // lane (`agentSpawnAccountRefusal`), so forwarding admits nothing.
-                        accountSelection: spawnArgs.accountSelection,
-                        permission: spawnArgs.permission,
-                        network: spawnArgs.network,
-                      }),
+                      ticket
+                        ? ptahAPI.agent.executeSpawn(ticket, spawnRequest)
+                        : ptahAPI.agent.spawn(spawnRequest),
                     );
                   } finally {
                     spawnedAt = performance.now();
                   }
                 } catch (error: unknown) {
+                  if (ticket && error instanceof SpawnGateRefusal) {
+                    ptahAPI.agent.failSpawn(ticket, error);
+                  }
                   throw new SpawnAttemptError(error, gate);
                 }
+                };
+                if (!ticket) return pipeline();
+                return admitAndRaceSpawn(
+                  () => ticket,
+                  () => pipeline(),
+                  (admission) => ptahAPI.agent.markSpawnReplied(admission),
+                  (admission) => ({
+                    agentId: admission.agentId,
+                    cli: spawnRequest.cli ?? (ptahCliId ? 'ptah-cli' : 'codex'),
+                    cliDetectionPending: !spawnRequest.cli && !ptahCliId,
+                    status: 'starting' as const,
+                    startedAt: admission.startedAt,
+                  }),
+                );
               },
               (spawned) =>
                 isSpawnReplayValid(
@@ -1411,9 +1434,22 @@ async function handleIndividualTool(
 
           // A named lane used its bounded pre-spawn lookup. An auto-detected
           // lane starts its bounded lookup only after the spawn has settled.
-          const limits = target
+          const resolveAutoLimits = async () => {
+            const remainingMs = Math.max(
+              0,
+              SPAWN_REPLY_DEADLINE_MS - (Date.now() - replyStartedAt),
+            );
+            if (!gate || remainingMs === 0) return gate?.peekLimits();
+            const lookup = await raceSpawnReply(
+              null,
+              gate.resolveLimits(() => lookupAgentLimits(ptahAPI)),
+              remainingMs,
+            );
+            return lookup.kind === 'settled' ? lookup.value : gate.peekLimits();
+          };
+          const limits = target || result.status === 'starting'
             ? gate?.peekLimits()
-            : await gate?.resolveLimits(() => lookupAgentLimits(ptahAPI));
+            : await resolveAutoLimits();
           const formattedSpawn = formatAgentSpawn(
             result,
             {

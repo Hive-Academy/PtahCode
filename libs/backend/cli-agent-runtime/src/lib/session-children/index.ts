@@ -60,6 +60,8 @@ export type {
   SessionHandoffResult,
   SessionHandoffAckRequest,
   SessionHandoffAckResult,
+  SessionHandoffStatusRequest,
+  SessionHandoffStatusResult,
   HandoffPredecessorCloser,
   HandoffCloseResult,
 } from './session-handoff.port';

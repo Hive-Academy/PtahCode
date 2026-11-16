@@ -756,6 +756,7 @@ describe('FollowUpQueueService', () => {
       expect(send).not.toHaveBeenCalled();
       expect(settled).toHaveBeenCalledWith('withdrawn');
       expect(store.forTab('tab-1')).toHaveLength(0);
+      expect(handoff.entry(S1)).toBeNull();
     });
 
     it('sends an automatic hand-off whose confirmed stage is the limit', async () => {

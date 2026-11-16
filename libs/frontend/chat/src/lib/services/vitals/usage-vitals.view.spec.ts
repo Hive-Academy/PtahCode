@@ -16,7 +16,7 @@ import {
   summary,
   type FakePlanLimits,
 } from './testing/vitals-fixtures';
-import { UsageVitalsCache } from './usage-vitals.cache';
+import { USAGE_VITALS_ERROR_RETRY_MS, UsageVitalsCache } from './usage-vitals.cache';
 import {
   ACTIVITY_DAY_COUNT,
   SPEND_DAY_COUNT,
@@ -229,7 +229,7 @@ describe('usage vitals view', () => {
       expect(load()).toEqual(VITALS_ERROR);
 
       // A tick inside the floor does not refetch.
-      jest.advanceTimersByTime(VITALS_ERROR_RETRY_MS - 1);
+      jest.advanceTimersByTime(USAGE_VITALS_ERROR_RETRY_MS - 1);
       tick.set(1);
       TestBed.flushEffects();
       await flush();

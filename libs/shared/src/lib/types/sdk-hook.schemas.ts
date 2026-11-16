@@ -93,6 +93,13 @@ export const SdkTurnFailedPayloadSchema = z.object({
   error: SdkAssistantMessageErrorSchema,
   errorDetails: z.string().nullable(),
   terminalReason: SdkTerminalReasonSchema.nullable(),
+  stopCause: z.enum([
+    'user-stop',
+    'parent-steer',
+    'runtime-cap',
+    'host-stop',
+    'internal-abort',
+  ]).optional(),
   timestamp: z.number().int().nonnegative(),
 });
 

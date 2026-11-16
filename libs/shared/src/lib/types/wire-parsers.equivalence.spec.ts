@@ -431,6 +431,9 @@ describe('wire parser ≡ Zod schema equivalence', () => {
         { ...TURN_FAILED, error: 'max_output_tokens' },
         { ...TURN_FAILED, terminalReason: 'hook_stopped' },
         { ...TURN_FAILED, errorDetails: 'boom' },
+        ...(['user-stop', 'parent-steer', 'runtime-cap', 'host-stop', 'internal-abort'] as const)
+          .map((stopCause) => ({ ...TURN_FAILED, stopCause })),
+        { ...TURN_FAILED, stopCause: 'invalid' },
       ],
     );
   });

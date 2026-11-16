@@ -103,6 +103,7 @@ export interface ExecutionChatMessage {
   readonly isInterrupted?: boolean;
 
   /** Raw text content (for user messages) */
+  readonly stopCause?: import('../sdk-hook.types').TurnStopCause;
   readonly rawContent?: string;
 
   /**
