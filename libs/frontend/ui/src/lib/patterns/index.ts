@@ -1,6 +1,7 @@
 export * from './form-section/form-section.component';
 export * from './form-actions/form-actions.component';
 export * from './description-list/description-list.component';
+export * from './instrument-band/instrument-band.component';
 export * from './editable-section/editable-section.component';
 export * from './disclosure/disclosure.component';
 export * from './settings-layout/settings-layout.component';
