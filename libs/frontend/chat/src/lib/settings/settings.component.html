@@ -10,30 +10,43 @@
     [description]="activeTabDescription()"
     [titleLevel]="1"
   >
-    <div nav-header class="flex items-center">
+    <div nav-header class="flex items-center gap-ptah-inline">
       <button type="button" ptahIconButton label="Back to Chat" data-testid="settings-back" (click)="backToChat()">
         <lucide-angular [img]="ArrowLeftIcon" class="w-4 h-4" aria-hidden="true" />
       </button>
       <span class="font-semibold">Settings</span>
     </div>
     <!-- The layout hides [nav-header] below its 640px split, so a narrow container keeps a way back
-         in the header actions. It has no test id: settings-back stays unique. -->
-    <button actions type="button" ptahIconButton label="Back to Chat" class="[@container(min-width:640px)]:hidden" data-narrow-back (click)="backToChat()">
-      <lucide-angular [img]="ArrowLeftIcon" class="w-4 h-4" aria-hidden="true" />
-    </button>
-    <div nav-footer>
+         in the header actions. It has no test id: settings-back stays unique. The wrapper owns the
+         hide rule: the ptahButton display rule has id specificity and wins over a utility on the button. -->
+    <span actions class="[@container(min-width:640px)]:hidden" data-narrow-back-slot>
+      <button type="button" ptahIconButton label="Back to Chat" data-narrow-back (click)="backToChat()">
+        <lucide-angular [img]="ArrowLeftIcon" class="w-4 h-4" aria-hidden="true" />
+      </button>
+    </span>
+    <!-- The layout hides [nav-footer] below its 640px split: a custom endpoint keeps a compact warning here.
+         It has no test id (custom-provider-security-copy stays unique). The wrapper owns the hide rule. -->
+    @if (authState.isCustomProviderSelected()) {
+      <div header-band class="[@container(min-width:640px)]:hidden" data-narrow-endpoint-warning>
+        <div class="mb-ptah-group flex min-w-0 flex-wrap items-center gap-ptah-inline text-xs text-base-content-muted">
+          <ptah-status status="warning" label="Custom endpoint" />
+          <code class="min-w-0 break-words font-semibold">{{ authState.selectedCustomHost() }}</code>
+        </div>
+      </div>
+    }
+    <div nav-footer class="flex flex-col gap-ptah-controls">
       <div data-testid="settings-context" [attr.title]="workspacePath()">
         <ptah-description-list density="compact" [items]="contextRows()" />
       </div>
       @if (authState.isCustomProviderSelected()) {
-        <div data-testid="custom-provider-security-copy" class="flex min-w-0 items-center text-xs text-base-content-muted" [attr.title]="customSecurityCopy()">
+        <div data-testid="custom-provider-security-copy" class="flex min-w-0 items-start gap-ptah-inline text-xs text-base-content-muted">
           <ptah-status status="warning" appearance="dot" label="Custom endpoint" />
-          <p class="min-w-0 truncate">Your own endpoint. Credentials and prompts go from this machine to <code class="font-semibold">{{ authState.selectedCustomHost() }}</code> — a host you added. Ptah does not operate, vet, or monitor it, and no Ptah server is involved either way.</p>
+          <p class="min-w-0 break-words">Your own endpoint. Credentials and prompts go from this machine to <code class="font-semibold">{{ authState.selectedCustomHost() }}</code> — a host you added. Ptah does not operate, vet, or monitor it, and no Ptah server is involved either way.</p>
         </div>
       } @else {
-        <div data-testid="builtin-provider-security-copy" class="flex min-w-0 items-center text-xs text-base-content-muted" title="Runs 100% locally. Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.">
+        <div data-testid="builtin-provider-security-copy" class="flex min-w-0 items-start gap-ptah-inline text-xs text-base-content-muted">
           <ptah-status status="online" appearance="dot" label="Local" />
-          <p class="min-w-0 truncate">Runs 100% locally. Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.</p>
+          <p class="min-w-0 break-words">Runs 100% locally. Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.</p>
         </div>
       }
     </div>
@@ -68,7 +81,7 @@
       } @error {
         <!-- The boot auth check lands here when no credential is set, so a failed chunk must stay
              recoverable. A remount would fail again (the failure is cached): Reload restarts the renderer. -->
-        <div data-testid="providers-settings-load-error">
+        <div data-testid="providers-settings-load-error" class="flex flex-col items-start gap-ptah-controls">
           <!-- The panel shows no projected content in the error state, so the one Reload button
                (with its test id) follows the panel instead of the panel's own action. The panel's
                error section is the one alert region: a second role="alert" here would announce twice. -->

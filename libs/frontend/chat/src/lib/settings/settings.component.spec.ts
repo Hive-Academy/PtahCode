@@ -685,7 +685,11 @@ describe('SettingsComponent header', () => {
     const narrowBack = element.querySelector<HTMLButtonElement>('[data-narrow-back]');
     expect(narrowBack?.getAttribute('aria-label')).toBe('Back to Chat');
     expect(narrowBack?.hasAttribute('data-testid')).toBe(false);
-    expect(narrowBack?.classList.contains('[@container(min-width:640px)]:hidden')).toBe(true);
+    // The wrapper owns the hide rule: ptahButton's display rule beats a utility on the button.
+    expect(narrowBack?.classList.contains('[@container(min-width:640px)]:hidden')).toBe(false);
+    expect(
+      narrowBack?.closest('[data-narrow-back-slot]')?.classList.contains('[@container(min-width:640px)]:hidden'),
+    ).toBe(true);
     expect(narrowBack?.closest('[nav-header]')).toBeNull();
   });
 
@@ -795,14 +799,44 @@ describe('SettingsComponent security copy', () => {
     expect(builtIn.textContent.replace(/\s+/g, ' ')).toContain(
       'Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.',
     );
-    // D10 (Batch 28): one text-xs line (12 px floor), truncated rather than wrapped.
+    // D10 (Batch 28) kept text-xs (12 px floor). In the narrow nav footer the claim wraps:
+    // one truncated line hid most of it.
     expect(builtIn.className).toContain('text-xs');
-    expect(builtIn.querySelector('p')?.className).toContain('truncate');
+    expect(builtIn.querySelector('p')?.className).not.toContain('truncate');
+    // The text is visible in full, so no title repeats it (a title is not reachable by keyboard or touch).
+    expect(builtIn.hasAttribute('title')).toBe(false);
     expect(
       fixture.nativeElement.querySelector(
         '[data-testid="custom-provider-security-copy"]',
       ),
     ).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-narrow-endpoint-warning]'),
+    ).toBeNull();
+  });
+
+  it('keeps a narrow-only custom endpoint warning in the header band', () => {
+    isCustomProviderSelected.set(true);
+    selectedCustomHost.set('192.168.1.50:8000');
+    const fixture = render();
+
+    const warning = fixture.nativeElement.querySelector(
+      '[data-narrow-endpoint-warning]',
+    ) as HTMLElement | null;
+    expect(warning?.hasAttribute('header-band')).toBe(true);
+    expect(
+      warning?.classList.contains('[@container(min-width:640px)]:hidden'),
+    ).toBe(true);
+    expect(warning?.hasAttribute('data-testid')).toBe(false);
+    expect(warning?.querySelector('code')?.textContent?.trim()).toBe(
+      '192.168.1.50:8000',
+    );
+    expect(warning?.textContent).toContain('Custom endpoint');
+    expect(
+      fixture.nativeElement.querySelectorAll(
+        '[data-testid="custom-provider-security-copy"]',
+      ).length,
+    ).toBe(1);
   });
 
   it('swaps in a host-naming claim for a user-defined provider', () => {
@@ -817,6 +851,8 @@ describe('SettingsComponent security copy', () => {
     const text = custom.textContent.replace(/\s+/g, ' ');
     expect(text).toContain('192.168.1.50:8000');
     expect(text).toContain('Ptah does not operate, vet, or monitor it');
+    expect(custom.hasAttribute('title')).toBe(false);
+    expect(custom.querySelector('p')?.className).not.toContain('truncate');
     expect(
       fixture.nativeElement.querySelector(
         '[data-testid="builtin-provider-security-copy"]',

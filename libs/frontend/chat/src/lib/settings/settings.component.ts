@@ -176,7 +176,6 @@ export class SettingsComponent implements OnInit {
     ...(this.workspaceName() ? [{ key: 'workspace', term: 'Workspace', value: this.workspaceName() }] : []),
     { key: 'app', term: 'App', value: this.appLabel },
   ]);
-  readonly customSecurityCopy = computed(() => `Your own endpoint. Credentials and prompts go from this machine to ${this.authState.selectedCustomHost()} — a host you added. Ptah does not operate, vet, or monitor it, and no Ptah server is involved either way.`);
   readonly settingsTabIndex = computed(() =>
     this.settingsTabs.findIndex((tab) => tab.id === this.selectedSettingsTab()),
   );
