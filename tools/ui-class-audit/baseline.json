@@ -224,11 +224,6 @@
     "btn-primary": 1,
     "btn-warning": 1
   },
-  "libs/frontend/chat/src/lib/components/molecules/delivery-status/delivery-status.component.ts": {
-    "btn": 1,
-    "btn-warning": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/components/molecules/execution-header/execution-header.component.ts": {
     "<dynamic>": 1
   },

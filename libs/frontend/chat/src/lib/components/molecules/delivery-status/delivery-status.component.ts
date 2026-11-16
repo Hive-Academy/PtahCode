@@ -34,7 +34,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           class="mt-1 rounded-box border border-warning p-2 text-xs" (keydown.escape)="confirming.set(null)">
           <p class="text-warning">This may already have reached {{ receipt() ? 'the lane' : 'the parent chat' }}. Retrying can run it twice.</p>
           <div class="mt-1 flex gap-2">
-            <button type="button" class="btn btn-warning btn-xs" (click)="confirm()">Retry anyway</button>
+            <button type="button" ptahButton variant="primary" tone="warning" size="xs" (click)="confirm()">Retry anyway</button>
             <button type="button" ptahButton variant="ghost" size="xs" (click)="confirming.set(null)">Keep waiting</button>
           </div>
         </div>
