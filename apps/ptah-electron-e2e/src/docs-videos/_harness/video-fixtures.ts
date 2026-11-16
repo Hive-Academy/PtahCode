@@ -86,7 +86,7 @@ export async function waitForSettledSettings(page: Page): Promise<void> {
     .not.toContainText('Loading the provider catalog', { timeout: 120_000 });
   await expect(matrix).toHaveAttribute('aria-busy', 'false', { timeout: 120_000 });
   await expect(page.getByTestId('policy-order')).toBeVisible({ timeout: 120_000 });
-  await expect(matrix.getByTestId('cli-matrix-row-codex'))
+  await expect(matrix.getByTestId('cli-provider-card-codex'))
     .toBeVisible({ timeout: 120_000 });
   await expect(settings).not.toContainText('Detecting…', { timeout: 120_000 });
 }

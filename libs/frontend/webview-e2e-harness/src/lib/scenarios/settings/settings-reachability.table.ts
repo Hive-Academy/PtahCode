@@ -975,11 +975,8 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
         'Providers',
         async (variantPage) => {
           // Gate V 36 decision 1: the Uninstalled group opens from its disclosure first.
-          await variantPage
-            .locator('[data-testid="cli-matrix-uninstalled-toggle"]')
-            .click();
           const guide = variantPage.locator(
-            '[data-testid="cli-matrix-uninstalled"] [data-testid="cli-matrix-install-codex"]',
+            '[data-testid="cli-provider-card-codex"] button:text-is("Install guide")',
           );
           await visibleEnabled(guide);
           await guide.click();
@@ -997,15 +994,20 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
     // V36-7: an instance's Edit sits in its "More actions" popover; Esc closes it again.
     reach: async (page) => {
       await agentsRoutingTab(page);
-      await page
-        .locator('[data-testid="cli-matrix-more-glm-instance-1"]')
-        .click();
+      const row = page.locator('[data-testid="cli-matrix-row-glm-instance-1"]');
+      const details = row.locator('ptah-table-row-expander button');
+      if (await details.isVisible()) await details.click();
+      else {
+        await row.locator('ptah-table-row-actions button[aria-haspopup="menu"]').click();
+        await row.getByRole('menuitem', { name: 'Details' }).click();
+      }
+      await page.locator('#lane-detail-glm-instance-1 ptah-table-row-actions button[aria-haspopup="menu"]').click();
       await visibleEnabled(
-        page.locator('[data-testid="cli-matrix-edit-glm-instance-1"]'),
+        page.locator('#lane-detail-glm-instance-1 [role="menuitem"]:text-is("Edit")'),
       );
       await page.keyboard.press('Escape');
       await expect(
-        page.locator('[data-testid="cli-matrix-more-menu"]'),
+        page.locator('#lane-detail-glm-instance-1 [role="menu"]'),
       ).toHaveCount(0);
     },
   },

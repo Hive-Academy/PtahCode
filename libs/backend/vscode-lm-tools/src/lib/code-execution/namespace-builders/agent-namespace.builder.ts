@@ -709,8 +709,11 @@ export function buildAgentNamespace(
         // raw accountSelection is replaced by the parsed one from the check
         // above: only a selection on a `claude` lane gets this far (ambient,
         // omitted, or named on a fresh spawn), and it is forwarded as typed.
+        // A caller-supplied externalOwner is dropped: only the authenticated
+        // transport binding may set it, never the request body.
         const {
           parentSessionId: _rawParentSessionId,
+          externalOwner: _rawExternalOwner,
           parentLevel: _rawParentLevel,
           resumePolicy: _rawResumePolicy,
           roleDefinition: _callerRoleDefinition,
@@ -760,7 +763,7 @@ export function buildAgentNamespace(
     resolveCallerParentId,
     spawn: (request, force?: boolean) => executeNamespaceSpawn(request, undefined, force),
     beginSpawn: (request) => {
-      const { accountSelection: _accountSelection, ...safeRequest } = request;
+      const { accountSelection: _accountSelection, externalOwner: _rawExternalOwner, ...safeRequest } = request;
       const rawSessionId = isMcpRequestInFlight()
         ? getCallerSessionId()?.trim() || undefined
         : request.parentSessionId?.trim() || undefined;

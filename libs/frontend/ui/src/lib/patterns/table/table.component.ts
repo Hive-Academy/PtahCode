@@ -93,11 +93,15 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
         white-space: nowrap;
       }
       .ptah-table-control-cell select,
-      .ptah-table-control-cell [ptahSelect],
-      .ptah-table-control-cell [ptahToggle] {
+      .ptah-table-control-cell [ptahSelect] {
         min-height: var(--ptah-control-h-sm);
         height: var(--ptah-control-h-sm);
         width: auto;
+        font-size: var(--ptah-text-hint-size);
+      }
+      .ptah-table-control-cell [ptahToggle] {
+        min-height: var(--ptah-control-h-sm);
+        height: var(--ptah-control-h-sm);
         font-size: var(--ptah-text-hint-size);
       }
       .ptah-table-actions-cell {

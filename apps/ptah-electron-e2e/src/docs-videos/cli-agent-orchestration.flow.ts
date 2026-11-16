@@ -11,7 +11,7 @@ test('pre-run CLI orchestration surface', async ({ ui, page, markStart, finish }
   await revealSlowly(page, matrix);
   await expect(matrix).toBeVisible();
   await hold(page, 2500);
-  await pointTo(page, matrix.getByTestId('cli-matrix-row-codex'));
+  await pointTo(page, matrix.getByTestId('cli-provider-card-codex'));
   await holdEnding(page);
   await finish('cli-agent-orchestration');
 });
