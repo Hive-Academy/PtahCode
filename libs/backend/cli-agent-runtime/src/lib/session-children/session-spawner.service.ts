@@ -1015,7 +1015,8 @@ export class SessionSpawnerService implements ISessionSpawner {
             });
             return this.sent(child, request.mode, 'started-turn');
           }
-          const interrupted = await this.interruptTurn(adapter, target);
+           // A busy explicit parent steer is the only send mode that interrupts.
+           const interrupted = await this.interruptTurn(adapter, target, 'parent-steer');
           if (!interrupted.ok) {
             return {
               delivered: false,
@@ -1023,6 +1024,7 @@ export class SessionSpawnerService implements ISessionSpawner {
               detail: `the current turn could not be interrupted${interrupted.detail}; nothing was sent`,
             };
           }
+           this.log(`${child.childSessionId} turn interrupted (parent-steer)`);
           await adapter.sendMessageToSession(target, request.message, {
             origin,
           });
@@ -1210,7 +1212,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     let reason = 'stopped-by-parent';
     let stop: Awaited<ReturnType<typeof this.verifyAndHardStop>>;
     try {
-      stop = await this.verifyAndHardStop(id, target.sdkSessionId);
+       stop = await this.verifyAndHardStop(id, target.sdkSessionId, 'host-stop');
     } catch (error) {
       if (runtime) runtime.stopping = false;
       throw error;
@@ -1255,7 +1257,9 @@ export class SessionSpawnerService implements ISessionSpawner {
   private async verifyAndHardStop(
     childSessionId: string,
     sdkSessionId?: string,
+    stopCause: 'host-stop' | 'runtime-cap' = 'host-stop',
   ): Promise<{ stopped: boolean; interruptError?: string }> {
+    this.log(`${childSessionId} hard stop requested (${stopCause})`);
     const adapter = this.adapter;
     const tabId = SessionId.safeParse(childSessionId);
     if (!adapter || !tabId) return { stopped: true };
@@ -1267,7 +1271,15 @@ export class SessionSpawnerService implements ISessionSpawner {
     let interruptError: string | undefined;
     for (const candidate of ids) {
       try {
-        await adapter.interruptSession(candidate, 'parent-stop');
+        // The adapter's SessionEndCause contract uses parent-stop for both
+        // host stop paths; stopCause preserves the origin at this boundary.
+        const turnInterrupt = adapter.isSessionActive(candidate)
+          ? adapter.interruptCurrentTurn(candidate, stopCause)
+          : Promise.resolve(false);
+        await Promise.all([
+          turnInterrupt,
+          adapter.interruptSession(candidate, 'parent-stop'),
+        ]);
       } catch (error: unknown) {
         interruptError = errorMessage(error);
       }
@@ -2106,9 +2118,10 @@ export class SessionSpawnerService implements ISessionSpawner {
   private async interruptTurn(
     adapter: IAgentAdapter,
     target: SessionId,
+    cause?: 'parent-steer',
   ): Promise<{ ok: boolean; detail: string }> {
     try {
-      const ok = await adapter.interruptCurrentTurn(target);
+      const ok = await adapter.interruptCurrentTurn(target, cause);
       return { ok, detail: '' };
     } catch (error: unknown) {
       // degradation-audit: reported - returned as `interrupt-failed`.
@@ -2218,13 +2231,13 @@ export class SessionSpawnerService implements ISessionSpawner {
    * once the interrupt settles, so a result the run emits meanwhile cannot
    * bring the entry back.
    */
-  private interruptInBackground(childSessionId: string): Promise<boolean> {
+  private interruptInBackground(childSessionId: string, stopCause: 'host-stop' | 'runtime-cap' = 'host-stop'): Promise<boolean> {
     const id = SessionId.safeParse(childSessionId);
     if (!this.adapter || !id) {
       this.releaseBudget(childSessionId);
       return Promise.resolve(false);
     }
-    return this.verifyAndHardStop(childSessionId, this.registry.get(childSessionId)?.sdkSessionId)
+    return this.verifyAndHardStop(childSessionId, this.registry.get(childSessionId)?.sdkSessionId, stopCause)
       .then((result) => {
         if (!result.stopped) {
           this.log(
@@ -2361,6 +2374,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       const stop = await this.verifyAndHardStop(
         childSessionId,
         child.sdkSessionId,
+        'runtime-cap',
       );
       if (!stop.stopped || stop.interruptError) {
         // Incomplete stop is logged; succession proceeds anyway (degradation path).
@@ -2399,7 +2413,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       'runtime-cap',
     );
     this.releaseResources(child.childSessionId);
-    this.interruptInBackground(child.childSessionId);
+    this.interruptInBackground(child.childSessionId, 'runtime-cap');
   }
 
   private async hostSucceed(

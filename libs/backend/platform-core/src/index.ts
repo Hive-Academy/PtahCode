@@ -410,6 +410,7 @@ export {
 } from './file-settings-manager';
 export { migrateLegacyCompactionThreshold } from './legacy-threshold-migration';
 export { migrateAgentBudgetSettings } from './agent-budget-settings-migration';
+export { migrateSessionBudgetMeasure } from './session-budget-measure-migration';
 export type { FileSettingsDefaults } from './file-settings-manager';
 export { SettingsPersistError } from './file-settings-errors';
 export {

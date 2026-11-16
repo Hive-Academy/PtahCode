@@ -4,6 +4,7 @@ import {
 } from '../compaction-state.types';
 import {
   IDLE_FIRE_LATENESS_MS,
+  IDLE_POST_BOUNDARY_GROWTH_TOKENS,
   type IdleAttempt,
   type IdleSessionState,
   type IdleSkipReason,
@@ -15,6 +16,7 @@ export interface FireGateLookups {
     readonly idleCompactionEnabled: boolean;
     readonly autoCompactEnabled: boolean;
     readonly minTokens: number;
+    readonly effectiveSdkWindow: number | null;
   };
   coordinatorState(sessionId: string): CoordinatorState | undefined;
   coordinatorClaim(sessionId: string): unknown;
@@ -45,8 +47,21 @@ export function evaluateFireGate(
   )
     return 'lapsed';
   if (state.reading?.turnId !== attempt.turnId) return 'no-reading';
+  if (lookups.settings.effectiveSdkWindow !== null &&
+      lookups.settings.minTokens >= lookups.settings.effectiveSdkWindow)
+    return 'min-at-sdk-window';
   if (state.reading.totalTokens < lookups.settings.minTokens)
     return 'below-min-tokens';
+  const postBoundaryBaseline = state.postBoundaryBaseline;
+  if (state.compactBoundaryObserved && postBoundaryBaseline == null)
+    return 'post-boundary-baseline-unknown';
+  if (lookups.settings.effectiveSdkWindow !== null &&
+      state.reading.totalTokens >= lookups.settings.effectiveSdkWindow)
+    return 'at-sdk-window';
+  if (state.compactBoundaryObserved && postBoundaryBaseline != null) {
+    if (state.reading.totalTokens < postBoundaryBaseline + IDLE_POST_BOUNDARY_GROWTH_TOKENS)
+      return 'below-post-boundary-growth';
+  }
   if (state.activitySinceTurnEnd) return 'activity-since-arm';
   if (state.prefixChangedSinceTurnEnd) return 'prompt-prefix-changed';
   const coordinator = lookups.coordinatorState(state.sessionId);

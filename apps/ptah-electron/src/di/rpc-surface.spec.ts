@@ -130,7 +130,7 @@ describe('Electron RPC surface', () => {
 
   it('serves the session handoff chain (TASK_2026_876)', () => {
     expect(surface.registered).toEqual(
-      expect.arrayContaining(['session:handoffChain']),
+      expect.arrayContaining(['session:handoffChain', 'session:handoffStatus']),
     );
   });
 

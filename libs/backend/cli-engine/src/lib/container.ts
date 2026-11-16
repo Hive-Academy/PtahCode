@@ -46,6 +46,7 @@ import {
   ContentDownloadService,
     resolvePtahHomeDir,
   migrateAgentBudgetSettings,
+  migrateSessionBudgetMeasure,
 } from '@ptah-extension/platform-core';
 import type {
   IFileDialog,
@@ -454,6 +455,14 @@ export class CliDIContainer {
     } catch (error: unknown) {
       budgetMigrationError = error instanceof Error ? error : new Error(String(error));
     }
+    let measureMigrationError: Error | undefined;
+    try {
+      migrateSessionBudgetMeasure(userDataPath, {
+        warn: (message) => budgetMigrationWarnings.push(message),
+      });
+    } catch (error: unknown) {
+      measureMigrationError = error instanceof Error ? error : new Error(String(error));
+    }
 
     const platformOptions: CliPlatformOptions = {
       appPath,
@@ -512,6 +521,7 @@ export class CliDIContainer {
     container.register(TOKENS.LOGGER, { useValue: logger });
     for (const message of budgetMigrationWarnings) logger.warn(message);
     if (budgetMigrationError) logger.error('[CLI DI] Agent budget settings migration failed', budgetMigrationError);
+    if (measureMigrationError) logger.error('[CLI DI] Session budget measure migration failed', measureMigrationError);
 
     logger.info('[CLI DI] Starting service registration...');
     registerVsCodeCorePlatformAgnostic(container, logger, {

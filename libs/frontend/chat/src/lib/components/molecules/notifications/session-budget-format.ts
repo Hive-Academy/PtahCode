@@ -59,7 +59,9 @@ export function budgetAmount(budget: SessionBudgetState): string {
   const limit = formatTokens(budget.limit);
   switch (budget.measure) {
     case 'tokens':
-      return `${used} of ${limit} tokens`;
+      return `${used} of ${limit} Raw session tokens`;
+    case 'weighted-tokens':
+      return `${used} of ${limit} Weighted session tokens`;
     case 'weighted-fallback':
       return `${used} of ${limit} weighted tokens (estimate)`;
     case 'cost-lower-bound':

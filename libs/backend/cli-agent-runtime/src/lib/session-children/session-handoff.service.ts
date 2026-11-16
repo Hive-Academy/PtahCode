@@ -68,6 +68,8 @@ import type {
   SessionHandoffResult,
   SessionHandoffAckRequest,
   SessionHandoffAckResult,
+  SessionHandoffStatusRequest,
+  SessionHandoffStatusResult,
   HandoffPredecessorCloser,
 } from './session-handoff.port';
 
@@ -252,6 +254,31 @@ export class SessionHandoffService
     request: SessionHandoffAckRequest,
   ): Promise<SessionHandoffAckResult> {
     return this.acknowledgeOnce(request);
+  }
+
+  async status(
+    request: SessionHandoffStatusRequest,
+  ): Promise<SessionHandoffStatusResult> {
+    if (!request.tabId || !request.sessionId || !request.workspaceRoot)
+      return { state: 'unavailable', successorSessionId: null };
+    try {
+      if (!this.ackStore) throw new Error('handoff acknowledgement storage unavailable');
+      const record = await this.ackStore.statusForPredecessor(
+        request.tabId,
+        request.sessionId,
+        request.workspaceRoot,
+      );
+      if (record) return { state: record.state, successorSessionId: record.successorSdkId };
+      const known = this.recoverableRecords.get(request.tabId);
+      if ((known?.predecessorSdkId === request.sessionId && known.workspaceRoot === request.workspaceRoot) ||
+          (this.inFlight.has(request.tabId) && this.inFlightSdkIds.get(request.tabId) === request.sessionId) ||
+          this.findHandedOff(request.tabId, request.sessionId))
+        return { state: 'unavailable', successorSessionId: null };
+      return { state: 'absent', successorSessionId: null };
+    } catch (error: unknown) {
+      this.reportError('handoff status lookup failed', error);
+      return { state: 'unavailable', successorSessionId: null };
+    }
   }
 
   private async acknowledgeOnce(

@@ -89,6 +89,7 @@ export class StopFailureHookHandler {
                   return { continue: true };
                 }
 
+                const stopCause = sdkAdapterEvents.takeStopCause(resolvedSessionId);
                 sdkAdapterEvents.emitTurnFailed({
                   sessionId: resolvedSessionId,
                   cwd: resolvedCwd,
@@ -96,6 +97,7 @@ export class StopFailureHookHandler {
                   error: input.error,
                   errorDetails: input.error_details ?? null,
                   terminalReason,
+                  ...(stopCause ? { stopCause } : {}),
                   timestamp: Date.now(),
                 });
               } catch (error: unknown) {

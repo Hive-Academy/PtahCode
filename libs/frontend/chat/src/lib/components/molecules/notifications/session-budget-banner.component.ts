@@ -24,6 +24,8 @@ interface BudgetMeter {
 
 const BODY =
   'Ask the agent to finish its running work, write a handoff document and give you a prompt for a new session.';
+const LIFETIME_NOTE = 'This is a lifetime figure for the session, not the current context size.';
+const RAW_NOTE = ' Weighted session tokens are recommended; choose Weighted session tokens in Session budget settings.';
 
 const PLATE = 'relative block overflow-hidden px-4 border-t text-xs';
 const FILL =
@@ -60,7 +62,7 @@ let nextBannerId = 0;
         [attr.role]="current === 'limit' ? 'alert' : 'status'"
         [attr.aria-live]="current === 'limit' ? 'assertive' : 'polite'"
         [attr.aria-describedby]="bodyId"
-        [title]="body"
+        [title]="tooltip()"
         data-testid="session-budget-banner"
       >
         @if (meter(); as meter) {
@@ -98,7 +100,7 @@ let nextBannerId = 0;
             class="sr-only"
             [id]="bodyId"
             data-testid="session-budget-body"
-            >{{ body }}</span
+            >{{ tooltip() }}</span
           >
           <div class="ml-auto flex flex-shrink-0 items-center gap-1">
             @if (autoHandoffQueued()) {
@@ -116,12 +118,15 @@ let nextBannerId = 0;
               type="button"
               ptahButton variant="ghost" size="xs"
               [attr.aria-describedby]="bodyId"
-              [disabled]="wrapUpSent()"
+              [disabled]="wrapUpSent() || handoffLabel() === 'Handoff failed'"
               (click)="wrapUp.emit()"
               data-testid="session-budget-wrap-up"
             >
-              {{ wrapUpSent() ? 'Wrap-up requested' : 'Wrap up & hand off' }}
+              {{ handoffLabel() ?? (wrapUpSent() ? 'Wrap-up requested' : 'Wrap up & hand off') }}
             </button>
+            @if (handoffLabel() === 'Handoff failed') {
+              <button type="button" ptahButton variant="ghost" size="xs" (click)="retryHandoff.emit()" data-testid="session-budget-retry">Retry handoff</button>
+            }
             <button
               type="button"
               ptahButton variant="ghost" size="xs"
@@ -150,6 +155,8 @@ export class SessionBudgetBannerComponent {
 
   /** True once the wrap-up message was sent for this session. */
   readonly wrapUpSent = input(false);
+  readonly handoffLabel = input<string | null>(null);
+  readonly retryHandoff = output<void>();
 
   /** True while the automatic hand-off is queued and can still be cancelled. */
   readonly autoHandoffQueued = input(false);
@@ -161,7 +168,10 @@ export class SessionBudgetBannerComponent {
   /** "Cancel" on a queued automatic hand-off. */
   readonly cancelAutoHandoff = output<void>();
 
-  protected readonly body = BODY;
+  protected readonly tooltip = computed(() => {
+    const measure = this.budget()?.measure;
+    return `${BODY} ${LIFETIME_NOTE}${measure === 'tokens' ? RAW_NOTE : ''}`;
+  });
   protected readonly GaugeIcon = Gauge;
   /** Id of the screen-reader advice text that the banner and its actions point to. */
   protected readonly bodyId = `session-budget-body-${nextBannerId++}`;

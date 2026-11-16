@@ -49,6 +49,7 @@ function harness(send?: IdleCompactSender['sendIdleCompact'], owner?: SessionSta
   let autoEnabled = true;
   let minimum = 200_000;
   let failSettingsOnce = false;
+  let readsUntilFailure = -1;
   let phase = 'idle';
   let onConfig:
     | ((event: { affectsConfiguration(section: string): boolean }) => void)
@@ -60,6 +61,11 @@ function harness(send?: IdleCompactSender['sendIdleCompact'], owner?: SessionSta
   const offPost = jest.fn();
   const config = {
     getIdleCompactionConfig: () => {
+      if (readsUntilFailure === 0) {
+        readsUntilFailure = -1;
+        throw new Error('temporary fire config failure');
+      }
+      if (readsUntilFailure > 0) readsUntilFailure -= 1;
       if (failSettingsOnce) {
         failSettingsOnce = false;
         throw new Error('temporary config failure');
@@ -141,6 +147,7 @@ function harness(send?: IdleCompactSender['sendIdleCompact'], owner?: SessionSta
     failNextSettingsRead: () => {
       failSettingsOnce = true;
     },
+    failSecondSettingsRead: () => { readsUntilFailure = 1; },
     setPhase: (value: string) => {
       phase = value;
     },
@@ -687,6 +694,22 @@ describe('IdleCompactionService', () => {
     expect(h.sender.sendIdleCompact).toHaveBeenCalledTimes(1);
     h.service.sessionReleased('s');
     expect(h.scheduler.actions).toHaveLength(0);
+    h.service.dispose();
+    h.coordinator.dispose();
+  });
+
+  it('keeps the group alive when configuration fails during fire', async () => {
+    const h = harness();
+    h.arm();
+    h.failSecondSettingsRead();
+    h.advance(DUE);
+    await settle();
+    expect(h.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ reason: 'lookup-failed' }));
+    h.service.turnEnded('s', 'later', { ...request, anchorAt: DUE });
+    h.service.turnContext('s', 'later', 250_000);
+    h.advance(DUE * 2);
+    await settle();
+    expect(h.sender.sendIdleCompact).toHaveBeenCalledTimes(1);
     h.service.dispose();
     h.coordinator.dispose();
   });

@@ -86,6 +86,30 @@ const boundary = (): IdleStep =>
 const postcompacted = (): IdleStep => step(precompact(), sig('post-compact'));
 
 describe('reduceIdleSession', () => {
+  it('takes the first valid post-compact reading as baseline without arming', () => {
+    const ended = step(initial, sig('post-compact')).state;
+    const ready = step(ended, turn()).state;
+    expect(step(ready, context('t', null)).state.postBoundaryBaseline).toBeNull();
+    const baseline = step(ready, context('t', 120_000)).state;
+    expect(baseline.postBoundaryBaseline).toBe(120_000);
+    expect(baseline.attempt).toBeNull();
+    expect(step(baseline, context('t', 170_000)).state.attempt?.kind).toBe('pending');
+    const nextBoundary = step(baseline, sig('post-compact')).state;
+    expect(nextBoundary.postBoundaryBaseline).toBeNull();
+    expect(step(nextBoundary, context('t', 80_000)).state.postBoundaryBaseline).toBe(80_000);
+  });
+  it('keeps the boundary armed on rekey and clears it on release', () => {
+    const baseline = step(initial, sig('post-compact')).state;
+    const withBaseline = step(step(baseline, turn()).state, context('t', 120_000)).state;
+    expect(step(withBaseline, { type: 'rekey', sessionId: 's', toId: 'next' }).state).toMatchObject({ compactBoundaryObserved: true, postBoundaryBaseline: null });
+    expect(step(withBaseline, { type: 'session-released', sessionId: 's' }).state).toMatchObject({ compactBoundaryObserved: false, postBoundaryBaseline: null });
+  });
+  it('ignores stale and activity-tainted readings for the post-boundary baseline', () => {
+    const ready = step(step(initial, sig('post-compact')).state, turn()).state;
+    expect(step(ready, context('old', 120_000)).state.postBoundaryBaseline).toBeNull();
+    const active = step(ready, sig('input')).state;
+    expect(step(active, context('t', 120_000)).state.postBoundaryBaseline).toBeNull();
+  });
   it('arms from the matching ended turn, deriving a due timer', () => {
     const state = armed();
     expect(state.attempt).toMatchObject({

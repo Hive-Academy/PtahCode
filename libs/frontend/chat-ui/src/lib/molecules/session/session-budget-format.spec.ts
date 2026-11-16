@@ -66,6 +66,20 @@ describe('session-budget-format', () => {
       expect(tokensBudgetSuffix(TOKENS_BUDGET)).toBe('/ 50.0M');
     });
 
+    it('shows weighted tokens on the token chip with the correct tooltip', () => {
+      const weighted = { ...TOKENS_BUDGET, measure: 'weighted-tokens' as const };
+      expect(tokensBudgetSuffix(weighted)).toBe('/ 50.0M');
+      const line = budgetTooltip(weighted, FIGURES);
+      expect(line).toContain('Weighted session tokens: 29% used (14.9M of 50.0M)');
+      expect(costTooltip(weighted, line)).toBeNull();
+      expect(tokensTooltip(weighted, line, 'Breakdown')).toContain(line);
+    });
+
+    it('uses weighted usage even when the TOKENS chip differs', () => {
+      const weighted = { ...TOKENS_BUDGET, measure: 'weighted-tokens' as const, used: 1_000_000, percent: 2 };
+      expect(budgetTooltip(weighted, { ...FIGURES, tokensLabel: '10.0M' })).toContain('2% used (1.0M of 50.0M)');
+    });
+
     it.each([null, COST_BUDGET, LOWER_BOUND_BUDGET, WEIGHTED_BUDGET])(
       'is null for any other budget: %#',
       (budget) => {
@@ -122,7 +136,7 @@ describe('session-budget-format', () => {
 
     it('tokens: uses the chip label, not the budget used figure', () => {
       expect(budgetTooltip({ ...TOKENS_BUDGET, used: 1 }, FIGURES)).toBe(
-        `Session budget: 29% used (14.9M of 50.0M). ${THRESHOLDS}`,
+        `Raw session tokens: 29% used (14.9M of 50.0M). ${THRESHOLDS}`,
       );
     });
 

@@ -36,7 +36,7 @@ describe('SessionBudgetActionsService manual wrap-up', () => {
       { provide: FollowUpQueueService, useValue: {} },
       { provide: SessionHandoffSkillService, useValue: { probe: jest.fn().mockResolvedValue('available') } },
       { provide: ActionBannerService, useValue: { showError } },
-      { provide: ChatStore, useValue: { sendOrQueueMessage: (...args: unknown[]) => send(...args) } },
+      { provide: ChatStore, useValue: { sendOrQueueMessage: (...args: unknown[]) => send(...args), isCompactingForTab: () => false } },
     ] });
     store = TestBed.inject(QueuedFollowUpStore);
     send = jest.fn().mockImplementation(async (content: string) => {

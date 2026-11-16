@@ -35,6 +35,7 @@ const lookups: FireGateLookups = {
     idleCompactionEnabled: true,
     autoCompactEnabled: true,
     minTokens: 200_000,
+    effectiveSdkWindow: null,
   },
   coordinatorState: () => CompactionState.OBSERVE_ONLY,
   coordinatorClaim: () => null,
@@ -44,6 +45,24 @@ const gate = (s: IdleSessionState = state, l: FireGateLookups = lookups) =>
   evaluateFireGate(s, attempt, l);
 
 describe('evaluateFireGate', () => {
+  it('fires inside the first-party window before a compact boundary', () => {
+    const settings = { ...lookups.settings, minTokens: 150_000, effectiveSdkWindow: 200_000 };
+    expect(gate({ ...state, reading: { turnId: 't', totalTokens: 150_000 } }, { ...lookups, settings })).toBeNull();
+    expect(gate({ ...state, reading: { turnId: 't', totalTokens: 199_999 } }, { ...lookups, settings })).toBeNull();
+    expect(gate({ ...state, reading: { turnId: 't', totalTokens: 200_000 } }, { ...lookups, settings })).toBe('at-sdk-window');
+  });
+  it('requires 50k growth after each boundary', () => {
+    const settings = { ...lookups.settings, minTokens: 150_000, effectiveSdkWindow: 200_000 };
+    const s = { ...state, compactBoundaryObserved: true, postBoundaryBaseline: 120_000 };
+    expect(gate({ ...s, reading: { turnId: 't', totalTokens: 169_999 } }, { ...lookups, settings })).toBe('below-post-boundary-growth');
+    expect(gate({ ...s, reading: { turnId: 't', totalTokens: 170_000 } }, { ...lookups, settings })).toBeNull();
+    expect(gate({ ...s, postBoundaryBaseline: null }, { ...lookups, settings })).toBe('post-boundary-baseline-unknown');
+  });
+  it('uses min and growth when window unknown; disables explicit min at known window', () => {
+    const s = { ...state, compactBoundaryObserved: true, postBoundaryBaseline: 200_000 };
+    expect(gate(s)).toBeNull();
+    expect(gate(s, { ...lookups, settings: { ...lookups.settings, effectiveSdkWindow: 200_000 } })).toBe('min-at-sdk-window');
+  });
   it('AC 3.1: checks both switches first', () => {
     expect(
       gate(state, {

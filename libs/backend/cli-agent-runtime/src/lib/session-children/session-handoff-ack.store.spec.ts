@@ -54,6 +54,51 @@ describe('SessionHandoffAckStore', () => {
     return { documents, a, b, storage, setRecords, getRecords };
   }
 
+  it('reads only the matching predecessor SDK identity and workspace without writing', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/a', [{
+      ...baseRecord,
+      predecessorSdkId: 'sdk-before',
+      successorSdkId: 'sdk-after',
+    }]);
+    const store = new SessionHandoffAckStore(fixture.storage);
+    await expect(store.statusForPredecessor('before', 'sdk-before', '/a'))
+      .resolves.toEqual({ state: 'recorded', successorSdkId: 'sdk-after' });
+    await expect(store.statusForPredecessor('before', 'wrong', '/a'))
+      .resolves.toBeUndefined();
+    await expect(store.statusForPredecessor('before', 'sdk-before', '/b'))
+      .resolves.toBeUndefined();
+    expect(fixture.getRecords('/a')).toHaveLength(1);
+  });
+
+  it('rejects a partial status read instead of trusting a stale record', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/a', [{ ...baseRecord, predecessorSdkId: 'sdk-before' }]);
+    const failed = new Error('read unavailable');
+    const unreadable = {
+      ...fixture.b,
+      getReadinessState: () => ({ status: 'not-ready' as const }),
+      whenReady: async () => { throw failed; },
+    };
+    const storage = {
+      ...fixture.storage,
+      getStorageForWorkspace: (root: string) =>
+        root === '/a' ? fixture.a : root === '/b' ? unreadable : undefined,
+    };
+    const store = new SessionHandoffAckStore(storage);
+    await expect(store.statusForPredecessor('before', 'sdk-before', '/a'))
+      .rejects.toBe(failed);
+  });
+
+  it('rejects a schema-degraded candidate during authoritative status lookup', async () => {
+    const fixture = scopedFixture();
+    fixture.setRecords('/a', [{ ...baseRecord, predecessorSdkId: 'sdk-before' }]);
+    fixture.documents.get('/b')?.set(HANDOFF_ACK_STORAGE_KEY, { schemaVersion: 1, records: [{ bad: true }] });
+    const store = new SessionHandoffAckStore(fixture.storage);
+    await expect(store.statusForPredecessor('before', 'sdk-before', '/a'))
+      .rejects.toThrow('invalid data');
+  });
+
   it('finds and transitions an unregistered-root write through a scoped proxy without default storage', async () => {
     const fixture = scopedFixture();
     const store = new SessionHandoffAckStore(fixture.storage);

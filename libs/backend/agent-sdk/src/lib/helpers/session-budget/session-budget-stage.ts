@@ -75,8 +75,10 @@ export function measureSessionBudget(
 
   if (config.unit === 'tokens') {
     return {
-      measure: 'tokens',
-      used: snapshot.tokenCount ?? null,
+      measure: config.tokenMeasure === 'weighted' ? 'weighted-tokens' : 'tokens',
+      used: config.tokenMeasure === 'weighted'
+        ? weightedSessionTokens(snapshot.tokens)
+        : snapshot.tokenCount ?? null,
       limit: config.tokens,
       lowerBound: partialCoverage,
     };
@@ -142,6 +144,8 @@ export interface SessionBudgetStageInput {
   readonly band: SessionBudgetStage;
   readonly compactions: number;
   readonly handoffAfterCompactions: number;
+  readonly postCompactionContextTokens: number | null;
+  readonly effectiveAutoCompactWindowTokens: number | null;
   /** The stage before this evaluation; `null` when there is none. */
   readonly previous: SessionBudgetStage | null;
   /** True after a settings change: the floor is dropped. */
@@ -153,7 +157,12 @@ export function nextSessionBudgetStage(
   input: SessionBudgetStageInput,
 ): SessionBudgetStage {
   const computed =
-    input.compactions >= input.handoffAfterCompactions
+    input.compactions >= input.handoffAfterCompactions &&
+    input.postCompactionContextTokens !== null &&
+    input.effectiveAutoCompactWindowTokens !== null &&
+    input.effectiveAutoCompactWindowTokens > 0 &&
+    input.postCompactionContextTokens >=
+      0.5 * input.effectiveAutoCompactWindowTokens
       ? higherSessionBudgetStage(input.band, 'handoff')
       : input.band;
   if (input.previous === null || input.resetStage) return computed;
@@ -192,6 +201,8 @@ export interface SessionBudgetEvaluationInput {
   readonly resetStage: boolean;
   /** Drop the sticky `weighted-fallback` measure (a settings change). */
   readonly resetMeasure: boolean;
+  readonly postCompactionContextTokens?: number | null;
+  readonly effectiveAutoCompactWindowTokens?: number | null;
 }
 
 /** The figure and stage fields of a state; the service adds the rest. */
@@ -232,7 +243,7 @@ function keepPreviousFigure(
   }
   // The kept measure's limit is rebuilt from the current settings.
   const limit =
-    previous.measure === 'tokens'
+    previous.measure === 'tokens' || previous.measure === 'weighted-tokens'
       ? config.tokens
       : previous.measure === 'weighted-fallback'
         ? config.fallbackWeightedTokens
@@ -269,6 +280,8 @@ export function evaluateSessionBudget(
     band: sessionBudgetPercentBand(figure.used, figure.limit, config),
     compactions: input.compactions,
     handoffAfterCompactions: config.handoffAfterCompactions,
+    postCompactionContextTokens: input.postCompactionContextTokens ?? null,
+    effectiveAutoCompactWindowTokens: input.effectiveAutoCompactWindowTokens ?? null,
     previous: previous?.stage ?? null,
     resetStage: input.resetStage,
   });

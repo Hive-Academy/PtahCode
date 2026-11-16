@@ -37,6 +37,26 @@ function getHookCallback(
 }
 
 describe('StopFailureHookHandler', () => {
+  it('forwards a recorded stop cause once', async () => {
+    const logger = makeLogger();
+    const events = new SdkAdapterEvents(logger);
+    const captured: Array<{ stopCause?: string }> = [];
+    events.onTurnFailed((event) => captured.push(event));
+    const fn = getHookCallback(new StopFailureHookHandler(logger, events), 'sess-1', '/workspace');
+    const input = { hook_event_name: 'StopFailure', error: 'rate_limit' } as unknown as HookInput;
+    events.recordStopCause(['tab-1', 'sess-1'], 'parent-steer');
+    await fn(input, undefined, { signal: new AbortController().signal });
+    await fn(input, undefined, { signal: new AbortController().signal });
+    expect(captured[0].stopCause).toBe('parent-steer');
+    expect(events.peekStopCause('sess-1')).toBe('parent-steer');
+    expect(events.peekStopCause('sess-1')).toBeUndefined();
+    expect(captured[1].stopCause).toBeUndefined();
+    expect(events.takeStopCause('tab-1')).toBeUndefined();
+    events.recordStopCause(['tab-1', 'sess-1'], 'runtime-cap');
+    events.clearStopCause('tab-1');
+    await fn(input, undefined, { signal: new AbortController().signal });
+    expect(captured[2].stopCause).toBeUndefined();
+  });
   it('happy path: forwards SDK fields onto SdkAdapterTurnFailedEvent', async () => {
     const logger = makeLogger();
     const events = new SdkAdapterEvents(logger);

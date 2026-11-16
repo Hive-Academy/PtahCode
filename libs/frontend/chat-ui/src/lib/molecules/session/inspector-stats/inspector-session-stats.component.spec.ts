@@ -174,6 +174,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     ['tokens', 'tighten', 'bg-state-need', '42% of the 10.0k token budget'],
     ['cost', 'limit', 'bg-state-err', '42% of the $10 cost budget'],
     ['tokens', 'normal', 'bg-[var(--ptah-gold)]', '42% of the 10.0k token budget'],
+    ['weighted-tokens', 'normal', 'bg-[var(--ptah-gold)]', '42% of the 10.0k token budget'],
   ] as const)('keeps the %s budget bar values and %s tone', (measure, stage, fillClass, valueText) => {
     TestBed.configureTestingModule({
       imports: [InspectorSessionStatsComponent],
@@ -181,7 +182,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     });
     const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
     const budget: SessionBudgetState = {
-      sessionId: 's', stage, unit: measure, measure, used: measure === 'cost' ? 4.2 : 4200,
+      sessionId: 's', stage, unit: measure === 'cost' ? 'cost' : 'tokens', measure, used: measure === 'cost' ? 4.2 : 4200,
       limit: measure === 'cost' ? 10 : 10_000,
       percent: 42, lowerBound: false, revision: null, compactions: 0, autoHandoff: false,
     };
@@ -195,7 +196,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     const meter = (fixture.nativeElement as HTMLElement).querySelector('ptah-meter');
     const bar = meter?.querySelector('[role="progressbar"]');
     expect(meter?.classList.contains('mt-auto')).toBe(true);
-    expect(bar?.getAttribute('aria-label')).toBe(`Session ${measure === 'tokens' ? 'token' : 'cost'} budget`);
+    expect(bar?.getAttribute('aria-label')).toBe(measure === 'cost' ? 'Session cost budget' : measure === 'weighted-tokens' ? 'Weighted session tokens' : 'Raw session tokens');
     expect(bar?.getAttribute('aria-valuenow')).toBe('42');
     expect(bar?.getAttribute('aria-valuetext')).toBe(valueText);
     expect(bar?.firstElementChild?.classList.contains(fillClass)).toBe(true);

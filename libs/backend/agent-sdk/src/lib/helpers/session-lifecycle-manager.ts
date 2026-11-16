@@ -38,6 +38,7 @@ import {
   type PhaseSkillV1,
   type PermissionLevel,
   type SessionBudgetWindow,
+  type TurnStopCause,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
@@ -76,6 +77,7 @@ import { SessionControl } from './session-lifecycle/session-control.service';
 import { SessionBudgetService } from './session-budget/session-budget.service';
 import type { SessionEndCallbackRegistry } from './session-end-callback-registry';
 import type { SessionEndCause } from './session-end-callback-registry';
+import type { SdkAdapterEvents } from './sdk-adapter-events.service';
 import type { SdkQueryRunner } from './sdk-query-runner.service';
 import type { NoActivityWatchdog } from './no-activity-watchdog';
 import type { UsageCostSource } from '../session-stats/session-stats-owner.service';
@@ -446,8 +448,10 @@ export class SessionLifecycleManager {
     private readonly sessionBudget: SessionBudgetService | null = null,
     @inject(SDK_TOKENS.SDK_IDLE_COMPACTION, { isOptional: true })
     private readonly idleCompaction: IdleCompactionFacadePort | null = null,
+    @inject(SDK_TOKENS.SDK_ADAPTER_EVENTS, { isOptional: true })
+    private readonly adapterEvents: SdkAdapterEvents | null = null,
   ) {
-    this._registry = new SessionRegistry(this.logger);
+    this._registry = new SessionRegistry(this.logger, (id) => this.adapterEvents?.clearStopCause(id));
     this._streamPump = new SessionStreamPump(
       this.logger,
       this._registry,
@@ -479,8 +483,9 @@ export class SessionLifecycleManager {
       this.modelResolver,
       this.sessionEndRegistry,
       compactionProvider ? () => compactionProvider.getConfig() : null,
-      (sessionId) => this.onTurnTerminal(sessionId),
+      (sessionId, preserveStopCause) => this.onTurnTerminal(sessionId, preserveStopCause),
       (tabId) => this.queryOptionsBuilder.revokeMcpSubject(tabId),
+      this.adapterEvents,
     );
     this._registry.startEvictionSweep();
     this.watchCompactionThreshold();
@@ -589,11 +594,12 @@ export class SessionLifecycleManager {
    * At a turn's end, before waking a held queue: the turn's budget estimate
    * must not outlive the turn, nor may its pending notices reach the next one.
    */
-  onTurnTerminal(sessionId: SessionId): void {
+  onTurnTerminal(sessionId: SessionId, preserveStopCause = false): void {
     const rec = this._registry.find(sessionId as string);
     const budgetSessionId = rec?.realSessionId ?? (sessionId as string);
     this.sessionBudget?.onTurnTerminal(budgetSessionId);
     this._registry.markTurnEnded(sessionId as string);
+    if (!preserveStopCause) this.adapterEvents?.clearStopCause(sessionId as string);
   }
 
   /**
@@ -742,8 +748,8 @@ export class SessionLifecycleManager {
    * @param sessionId - Session whose current turn should be interrupted
    * @returns true if interrupt was called, false if session/query not found
    */
-  async interruptCurrentTurn(sessionId: SessionId): Promise<boolean> {
-    return this._control.interruptCurrentTurn(sessionId);
+  async interruptCurrentTurn(sessionId: SessionId, cause?: TurnStopCause): Promise<boolean> {
+    return this._control.interruptCurrentTurn(sessionId, cause);
   }
 
   /**

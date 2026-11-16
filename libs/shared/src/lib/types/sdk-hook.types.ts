@@ -10,6 +10,14 @@
  * SubagentStop (Phase 3).
  */
 
+/** Why an active assistant turn stopped before normal completion. */
+export type TurnStopCause =
+  | 'user-stop'
+  | 'parent-steer'
+  | 'runtime-cap'
+  | 'host-stop'
+  | 'internal-abort';
+
 /**
  * Wire payload for `MESSAGE_TYPES.SESSION_COMPACTION_COMPLETE`
  * (`'session:compactionComplete'`).
@@ -136,6 +144,8 @@ export interface SdkTurnFailedPayload {
   readonly error: SdkAssistantMessageError;
   readonly errorDetails: string | null;
   readonly terminalReason: SdkTerminalReason | null;
+  /** Origin of an aborted turn, when known. */
+  readonly stopCause?: TurnStopCause;
   readonly timestamp: number;
 }
 

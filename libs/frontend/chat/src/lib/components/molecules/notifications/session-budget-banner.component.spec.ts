@@ -28,6 +28,7 @@ describe('SessionBudgetBannerComponent', () => {
       dismissedStage?: SessionBudgetStage | null;
       wrapUpSent?: boolean;
       autoHandoffQueued?: boolean;
+      handoffLabel?: string;
     } = {},
   ): HTMLElement {
     TestBed.configureTestingModule({ imports: [SessionBudgetBannerComponent] });
@@ -40,6 +41,7 @@ describe('SessionBudgetBannerComponent', () => {
     if (extra.wrapUpSent !== undefined) {
       fixture.componentRef.setInput('wrapUpSent', extra.wrapUpSent);
     }
+    if (extra.handoffLabel !== undefined) fixture.componentRef.setInput('handoffLabel', extra.handoffLabel);
     if (extra.autoHandoffQueued !== undefined) {
       fixture.componentRef.setInput(
         'autoHandoffQueued',
@@ -64,6 +66,12 @@ describe('SessionBudgetBannerComponent', () => {
 
   describe('automatic hand-off', () => {
     const LIMIT: SessionBudgetState = { ...BASE, stage: 'limit' };
+
+    it.each(['Wrap-up requested', 'Handoff recorded', 'Handoff completed', 'Handoff failed'])('shows %s', (label) => {
+      const host = render(LIMIT, { handoffLabel: label });
+      expect(byTestId(host, 'session-budget-wrap-up')?.textContent?.trim()).toBe(label);
+      expect(Boolean(byTestId(host, 'session-budget-retry'))).toBe(label === 'Handoff failed');
+    });
 
     it('shows nothing about it unless it is queued', () => {
       const host = render(LIMIT);
@@ -127,10 +135,10 @@ describe('SessionBudgetBannerComponent', () => {
     expect(banner?.getAttribute('role')).toBe('status');
     expect(banner?.classList).toContain('border-warning/30');
     expect(byTestId(host, 'session-budget-title')?.textContent?.trim()).toBe(
-      'Session used 41.2M of 50.0M tokens',
+      'Session used 41.2M of 50.0M Raw session tokens',
     );
     expect(byTestId(host, 'session-budget-body')?.textContent?.trim()).toBe(
-      'Ask the agent to finish its running work, write a handoff document and give you a prompt for a new session.',
+      'Ask the agent to finish its running work, write a handoff document and give you a prompt for a new session. This is a lifetime figure for the session, not the current context size. Weighted session tokens are recommended; choose Weighted session tokens in Session budget settings.',
     );
     expect(
       byTestId(host, 'session-budget-meter')?.getAttribute('aria-valuenow'),
@@ -145,6 +153,14 @@ describe('SessionBudgetBannerComponent', () => {
       'Dismiss',
     );
     expect(host.querySelectorAll('button')).toHaveLength(2);
+  });
+
+  it('labels weighted session tokens and omits the raw recommendation', () => {
+    const host = render({ ...BASE, measure: 'weighted-tokens' });
+    expect(byTestId(host, 'session-budget-title')?.textContent).toContain('Weighted session tokens');
+    const tooltip = byTestId(host, 'session-budget-banner')?.getAttribute('title');
+    expect(tooltip).toContain('lifetime figure for the session');
+    expect(tooltip).not.toContain('recommended');
   });
 
   it('keeps the advice reachable: tooltip, description and a meter with a range', () => {

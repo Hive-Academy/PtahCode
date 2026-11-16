@@ -75,6 +75,18 @@ export interface ISessionHandoff {
   /** Never throws: every failure is a closed refusal. */
   handoff(request: SessionHandoffRequest): Promise<SessionHandoffResult>;
   acknowledge(request: SessionHandoffAckRequest): Promise<SessionHandoffAckResult>;
+  status(request: SessionHandoffStatusRequest): Promise<SessionHandoffStatusResult>;
+}
+
+export interface SessionHandoffStatusRequest {
+  readonly tabId: string;
+  readonly sessionId: string;
+  readonly workspaceRoot: string;
+}
+
+export interface SessionHandoffStatusResult {
+  readonly state: 'absent' | 'starting' | 'recorded' | 'closePending' | 'closeCompleted' | 'unavailable';
+  readonly successorSessionId: string | null;
 }
 
 export interface SessionHandoffAckRequest {

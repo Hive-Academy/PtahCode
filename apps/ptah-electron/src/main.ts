@@ -31,6 +31,7 @@ import {
   StateStorageRecoveryRequiredError,
   migrateLegacyCompactionThreshold,
   migrateAgentBudgetSettings,
+  migrateSessionBudgetMeasure,
   resolvePtahSettingsDir,
   type IArtifactStore,
 } from '@ptah-extension/platform-core';
@@ -107,6 +108,14 @@ if (!gotLock) {
     });
   } catch (error: unknown) {
     console.error('[Ptah Electron] Agent budget settings migration failed',
+      error instanceof Error ? error : new Error(String(error)));
+  }
+  try {
+    migrateSessionBudgetMeasure(activeSettingsDir, {
+      warn: (message) => agentBudgetMigrationWarnings.push(message),
+    });
+  } catch (error: unknown) {
+    console.error('[Ptah Electron] Session budget measure migration failed',
       error instanceof Error ? error : new Error(String(error)));
   }
   /**

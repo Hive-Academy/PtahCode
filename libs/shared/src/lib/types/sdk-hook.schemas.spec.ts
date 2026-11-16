@@ -1,4 +1,21 @@
-import { SessionTurnStateSchema } from './sdk-hook.schemas';
+import { SdkTurnFailedPayloadSchema, SessionTurnStateSchema } from './sdk-hook.schemas';
+
+describe('SdkTurnFailedPayloadSchema', () => {
+  const payload = {
+    sessionId: 'session', cwd: 'D:/repo', lastAssistantMessage: null,
+    error: 'unknown', errorDetails: null, terminalReason: null, timestamp: 1,
+  };
+
+  it.each(['user-stop', 'parent-steer', 'runtime-cap', 'host-stop', 'internal-abort'])(
+    'preserves stop cause %s', (stopCause) => {
+      expect(SdkTurnFailedPayloadSchema.parse({ ...payload, stopCause }).stopCause).toBe(stopCause);
+    },
+  );
+
+  it('rejects an unknown stop cause', () => {
+    expect(SdkTurnFailedPayloadSchema.safeParse({ ...payload, stopCause: 'other' }).success).toBe(false);
+  });
+});
 
 describe('SessionTurnStateSchema', () => {
   const valid = {

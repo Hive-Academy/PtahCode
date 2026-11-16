@@ -1343,6 +1343,13 @@ export interface RpcMethodRegistry
     params: SessionHandoffChainParams;
     result: SessionHandoffChainResult;
   };
+  'session:handoffStatus': {
+    params: { sessionId: string; tabId: string };
+    result: {
+      state: 'absent' | 'starting' | 'recorded' | 'closePending' | 'closeCompleted' | 'unavailable';
+      successorSessionId: string | null;
+    };
+  };
   'session:handoffCloseResult': {
     params: {
       requestId: string;
@@ -3768,6 +3775,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'session:setOrganization': true,
   'session:getOrganization': true,
   'session:handoffChain': true,
+  'session:handoffStatus': true,
   'session:handoffCloseResult': true,
   'session:linkTask': true,
   'session:unlinkTask': true,
