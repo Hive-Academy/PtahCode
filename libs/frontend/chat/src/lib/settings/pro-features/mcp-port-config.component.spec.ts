@@ -333,6 +333,13 @@ describe('McpPortConfigComponent', () => {
         'Port must be between 1024 and 65535',
       );
       expect(isDisabledControl(saveBtn)).toBe(true);
+      // F1: the error never hides the range and restart note.
+      expect(byTestId('mcp-port-validation-error').textContent).toContain(
+        'Port must be between 1024 and 65535',
+      );
+      expect(byTestId('mcp-port-hint').textContent).toContain(
+        'Range 1024 to 65535',
+      );
 
       // Valid and dirty
       component.onPortInput(51999);
@@ -385,6 +392,9 @@ describe('McpPortConfigComponent', () => {
       expect(component.saveError()).toBe(COULD_NOT_SAVE_PORT);
       expect(byTestId('mcp-port-validation-error').textContent).toContain(
         COULD_NOT_SAVE_PORT,
+      );
+      expect(byTestId('mcp-port-hint').textContent).toContain(
+        'Changes apply after the MCP',
       );
       expect(feedback.toast()?.tone).toBe('alert');
       expect(feedback.toast()?.message).toBe(COULD_NOT_SAVE_PORT);

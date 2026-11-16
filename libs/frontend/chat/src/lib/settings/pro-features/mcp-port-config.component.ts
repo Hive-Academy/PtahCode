@@ -110,7 +110,6 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
           label="MCP port"
           appearance="stacked"
           class="w-full max-w-sm"
-          hint="Default 51820. Range 1024 to 65535. Changes apply after the MCP server restarts."
           size="sm"
           [error]="validationError() ?? saveError()"
           errorRole="alert"
@@ -129,6 +128,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             placeholder="51820"
             [disabled]="saving() || !loaded()"
             aria-label="MCP server port"
+            aria-describedby="mcp-port-hint"
             data-testid="mcp-port-input"
           />
           <button
@@ -145,6 +145,16 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
           >
             Save
           </button>
+          <!-- Before the footer, so the error never hides the range and restart note. -->
+          <p
+            ptahFieldBeforeHint
+            id="mcp-port-hint"
+            class="text-xs text-base-content-muted"
+            data-testid="mcp-port-hint"
+          >
+            Default 51820. Range 1024 to 65535. Changes apply after the MCP
+            server restarts.
+          </p>
         </ptah-field>
         <ptah-field
           label="External MCP callers"
