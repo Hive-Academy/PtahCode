@@ -117,7 +117,9 @@ jobs:
       # covers a script that DELETES rows from the production database, and an
       # un-run spec rots into a false green.
       - name: Run scripts/ tests
-        run: npm run test:scripts
+        run: |
+          npm run test:scripts
+          node --test scripts/perf/clean-stale-nx.test.mjs
 
       # ptah-docs builds in the `docs-build` job: inside this multi-task run
       # it took 14-21 min, against 13 s on its own.
