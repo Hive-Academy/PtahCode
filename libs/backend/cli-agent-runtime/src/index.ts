@@ -1,4 +1,5 @@
 export * from './lib/cli-agents';
+export type { SpawnAdmission } from './lib/cli-agents/agent-spawn-admission';
 export { parentLanePermission } from './lib/cli-agents/parent-lane-permission';
 export { laneMcpTokenCapability } from './lib/cli-agents/lane-mcp-token-rule';
 export { AgentSpawnEnvironment } from './lib/cli-agents/agent-spawn-environment.service';

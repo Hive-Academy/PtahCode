@@ -106,10 +106,16 @@ export class AgentSpawnDedupe<T extends { agentId: string }> {
         ([, entry]) => entry.settled,
       );
       if (oldestSettled) this.entries.delete(oldestSettled[0]);
-      else return { promise: Promise.resolve().then(start), replay: false };
+      else return { promise: start(), replay: false };
     }
-    // Schedule the work after insertion so a concurrent request observes this promise.
-    const promise = Promise.resolve().then(start);
+    // Admission inside start is synchronous, before this method's first await.
+    // Its returned promise remains the one concurrent callers replay.
+    let promise: Promise<T>;
+    try {
+      promise = start();
+    } catch (error: unknown) {
+      promise = Promise.reject(error);
+    }
     const entry = {
       promise,
       startedAt: now,

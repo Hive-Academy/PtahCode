@@ -1864,12 +1864,15 @@ export function formatAgentSpawn(
       {
         p: [
           `**Agent ID:** ${result.agentId}`,
-          `**CLI:** ${cliLabel}`,
+          `**CLI:** ${result.cliDetectionPending ? 'Detection pending' : cliLabel}`,
           ...(options?.modelTier
             ? [`**Model Tier:** ${options.modelTier}`]
             : []),
           ...(roleLine ? [roleLine] : []),
           `**Status:** ${result.status}`,
+          ...(result.status === 'starting'
+            ? ['Wait for the completion signal; ptah_agent_status shows when this lane starts running.']
+            : []),
           ...formatLanePolicyLines(result),
           `**Started:** ${result.startedAt}`,
           ...(result.cliSessionId
@@ -1935,7 +1938,7 @@ export function formatAgentStatus(
         a.task.length > 80 ? a.task.substring(0, 77) + '...' : a.task;
       const cliLabel = formatCliLabel(a.cli, a.ptahCliName);
       const lines = [
-        `**CLI:** ${cliLabel}`,
+        `**CLI:** ${a.cliDetectionPending ? 'Detection pending' : cliLabel}`,
         `**Status:** ${a.status}`,
         ...formatLanePolicyLines(a),
         `**Task:** ${task}`,
@@ -2008,7 +2011,7 @@ export function formatAgentStop(result: AgentProcessInfo): string {
       {
         p: [
           `**Agent ID:** ${result.agentId}`,
-          `**CLI:** ${cliLabel}`,
+          `**CLI:** ${result.cliDetectionPending ? 'Detection pending' : cliLabel}`,
           `**Status:** ${result.status}`,
           ...(result.cliSessionId
             ? [`**CLI Session ID:** ${result.cliSessionId}`]

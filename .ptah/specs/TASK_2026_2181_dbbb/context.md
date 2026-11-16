@@ -45,3 +45,28 @@ with 9.7 GB. Host load can be a cause of fault 1.
 - A concurrency limit for lanes and sessions that depends on free memory.
 
 Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processes-investigation.md`.
+
+## Program phases
+
+| Phase | Task ID | Pull request | State |
+| --- | --- | --- | --- |
+| B1: measurement and first fixes | TASK_2026_2181_dbbb | see `batch-1-report.md` | done |
+| B2.1: retry-safe `ptah_agent_spawn` | TASK_2026_2181_dbbb | #1329 | merged |
+| B2.2: bounded CLI detection on spawn | TASK_2026_2181_dbbb | #1343 | merged |
+| B2.3a: `starting` status in all readers | TASK_2026_2181_dbbb | #1354 | merged |
+| B2.3b: synchronous admission and reply deadline | TASK_2026_2181_dbbb | branch `feat/lane-spawn-reply-deadline` | in review |
+| B2.4 to B2.6: status, wait and read polish, renderer, agent text | TASK_2026_2181_dbbb | none | not started |
+| B3: completion signals for external MCP clients | TASK_2026_2181_dbbb | none | not started |
+| P2: Nx daemon and worktree cost measurement | none | none | not started |
+| P3: process tree stop on Windows | none | none | not started |
+| P4: memory-based concurrency limit for lanes and sessions | none | none | plan owed to the user before code |
+| P5: host load (task index rebuild storm, `provider:getPlanLimits`) | none | none | not started |
+
+P4 baseline (recommendation of the coordinator, 2026-11-16, the user can change it): queue a
+lane, do not refuse it. A queued lane shows `starting` with the reason "waiting for memory".
+Start a lane only when 3 GB is free. Always start when no lane runs. After 5 minutes in the
+queue the lane becomes `failed` with one completion signal. `force: true` skips the memory
+condition. The fixed lane cap stays.
+
+P5 order: measurement first, then merge or debounce the rebuild triggers and cache the plan
+limits for a short time. It comes after B2.3b and B3.
