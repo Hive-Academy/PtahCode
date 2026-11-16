@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2246_6c85
-status: in_progress
+status: in_review
 type: REFACTORING
 title: Cache complete plan limits snapshots for 30 s
 depends_on: []
