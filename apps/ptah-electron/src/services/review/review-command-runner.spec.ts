@@ -12,6 +12,7 @@ jest.mock('node:child_process', () => {
 
 const repoA = { owner: 'Hive-Academy', name: 'PtahCode' } as const;
 const logger = { error: jest.fn() };
+const emptyQuery = async () => [];
 
 function mockChild(largeOutput: boolean): childProcess.ChildProcess {
   const stdout = new PassThrough();
@@ -28,6 +29,135 @@ function mockChild(largeOutput: boolean): childProcess.ChildProcess {
 }
 
 describe('ReviewCommandRunner', () => {
+  it('makes no Windows query when the command exits normally', async () => {
+    jest.useFakeTimers();
+    const realPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const root = await mkdtemp(join(tmpdir(), 'ptah-review-win-normal-'));
+    const checkout = join(root, 'repo');
+    const source = join(root, 'attempts', 'claim', 'src');
+    await mkdir(checkout);
+    await mkdir(source, { recursive: true });
+    const child = Object.assign(new childProcess.ChildProcess(), {
+      stdout: new PassThrough(), stderr: new PassThrough(),
+    });
+    Object.defineProperty(child, 'pid', { value: 43215, configurable: true });
+    jest.mocked(childProcess.spawn).mockImplementationOnce(() => {
+      void Promise.resolve().then(() => {
+        child.emit('exit', 0, null);
+        child.emit('close', 0, null);
+      });
+      return child;
+    });
+    const query = jest.fn(async () => []);
+    const clock = jest.fn().mockReturnValueOnce(10_000).mockReturnValueOnce(20_000);
+    const runner = new ReviewCommandRunner(
+      async () => ({ repoRoot: checkout, attemptsRoot: join(root, 'attempts') }),
+      logger, jest.fn(async () => undefined), query, clock);
+    try {
+      await expect(runner.run(repoA, 'node', ['--version'], source, 100))
+        .resolves.toMatchObject({ timedOut: false, exitCode: 0 });
+      expect(query).not.toHaveBeenCalled();
+      expect(clock).toHaveBeenCalledTimes(2);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+      jest.useRealTimers();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  it.each(['live root', 'exited root'] as const)(
+    'settles a Windows %s stop when the CIM query rejects', async (state) => {
+      jest.useFakeTimers();
+      const realPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'ptah-review-win-stop-'));
+      const checkout = join(root, 'repo');
+      const source = join(root, 'attempts', 'claim', 'src');
+      await mkdir(checkout);
+      await mkdir(source, { recursive: true });
+      const child = Object.assign(new childProcess.ChildProcess(), {
+        stdout: new PassThrough(), stderr: new PassThrough(),
+      });
+      Object.defineProperty(child, 'pid', { value: 43212, configurable: true });
+      let closedPipes = 0;
+      for (const pipe of [child.stdout, child.stderr]) pipe.once('close', () => {
+        closedPipes += 1;
+        if (closedPipes === 2) child.emit('close', 0, null);
+      });
+      let spawned: () => void = () => undefined;
+      const spawnReady = new Promise<void>((resolve) => { spawned = resolve; });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => { spawned(); return child; });
+      const query = jest.fn(async () => { throw new Error('CIM unavailable'); });
+      const killTree = jest.fn(async () => undefined);
+      const runner = new ReviewCommandRunner(
+        async () => ({ repoRoot: checkout, attemptsRoot: join(root, 'attempts') }),
+        logger, killTree, query, () => state === 'exited root' ? 20_000 : 10_000);
+      try {
+        const result = runner.run(repoA, 'node', ['--version'], source, 100);
+        await spawnReady;
+        if (state === 'exited root') child.emit('exit', 0, null);
+        await jest.advanceTimersByTimeAsync(100);
+        await expect(result).resolves.toMatchObject({ timedOut: true, exitCode: 0 });
+        expect(child.stdout.destroyed).toBe(true);
+        expect(child.stderr.destroyed).toBe(true);
+        expect(killTree).toHaveBeenCalledTimes(state === 'live root' ? 1 : 0);
+        expect(query).toHaveBeenCalledTimes(state === 'live root' ? 0 : 1);
+      } finally {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        jest.useRealTimers();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+  it.each(['verified', 'reused'] as const)(
+    'stops only a %s Windows descendant after root exit', async (identity) => {
+      jest.useFakeTimers();
+      const realPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const root = await mkdtemp(join(tmpdir(), 'ptah-review-win-desc-'));
+      const checkout = join(root, 'repo');
+      const source = join(root, 'attempts', 'claim', 'src');
+      await mkdir(checkout);
+      await mkdir(source, { recursive: true });
+      const child = Object.assign(new childProcess.ChildProcess(), {
+        stdout: new PassThrough(), stderr: new PassThrough(),
+      });
+      Object.defineProperty(child, 'pid', { value: 43213, configurable: true });
+      let closedPipes = 0;
+      for (const pipe of [child.stdout, child.stderr]) pipe.once('close', () => {
+        closedPipes += 1;
+        if (closedPipes === 2) child.emit('close', 0, null);
+      });
+      let spawned: () => void = () => undefined;
+      const spawnReady = new Promise<void>((resolve) => { spawned = resolve; });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => { spawned(); return child; });
+      const row = (pid: number, parent: number, created: number) =>
+        ({ ProcessId: pid, ParentProcessId: parent, CreationDate: `/Date(${created})/` });
+      const query = jest.fn(async () => [
+        row(43213, 1, 15_000),
+        row(43214, 43213, identity === 'verified' ? 15_000 : 22_000),
+      ]);
+      const killTree = jest.fn(async () => undefined);
+      const runner = new ReviewCommandRunner(
+        async () => ({ repoRoot: checkout, attemptsRoot: join(root, 'attempts') }),
+        logger, killTree, query, jest.fn().mockReturnValueOnce(10_000).mockReturnValueOnce(20_000));
+      try {
+        const result = runner.run(repoA, 'node', ['--version'], source, 100);
+        await spawnReady;
+        await Promise.resolve();
+        child.emit('exit', 0, null);
+        await jest.advanceTimersByTimeAsync(100);
+        await expect(result).resolves.toMatchObject({ timedOut: true, exitCode: 0 });
+        expect(query).toHaveBeenCalledTimes(1);
+        expect(killTree).toHaveBeenCalledTimes(identity === 'verified' ? 1 : 0);
+        if (identity === 'verified') expect(killTree).toHaveBeenCalledWith(43214, 'SIGTERM', expect.any(Function));
+      } finally {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        jest.useRealTimers();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
   it.each(['timeout', 'abort', 'output cap', 'exited'] as const)(
     '%s uses the tree stop only while the child is live', async (reason) => {
       jest.useFakeTimers();
@@ -50,7 +180,7 @@ describe('ReviewCommandRunner', () => {
       const controller = new AbortController();
       const runner = new ReviewCommandRunner(
         async () => ({ repoRoot: checkout, attemptsRoot: join(root, 'attempts') }),
-        { error: jest.fn() }, killTree,
+        { error: jest.fn() }, killTree, emptyQuery,
       );
       try {
         const result = runner.run(repoA, 'node', ['--version'], source, 100, controller.signal);
@@ -102,7 +232,7 @@ describe('ReviewCommandRunner', () => {
     const killTree = jest.fn(async () => undefined);
     try {
       const runner = new ReviewCommandRunner(
-        async () => ({ repoRoot: checkout, attemptsRoot: join(root, 'attempts') }), logger, killTree);
+        async () => ({ repoRoot: checkout, attemptsRoot: join(root, 'attempts') }), logger, killTree, emptyQuery);
       const result = runner.run(repoA, 'node', ['--version'], source, 100);
       await spawnReady;
       child.emit('exit', 0, null);
@@ -142,7 +272,7 @@ describe('ReviewCommandRunner', () => {
         });
         return child;
       });
-      const runner = new ReviewCommandRunner(async () => ({ repoRoot: checkout, attemptsRoot: attempts }), logger);
+      const runner = new ReviewCommandRunner(async () => ({ repoRoot: checkout, attemptsRoot: attempts }), logger, undefined, emptyQuery);
       await expect(runner.run(repoA, 'git', ['ls-files', '-s', '-z'], source, 1_000))
         .resolves.toMatchObject({ stdout: 'café.ts\0', timedOut: false });
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -164,7 +294,7 @@ describe('ReviewCommandRunner', () => {
       const outside = join(root, 'outside');
       const attempts = join(root, 'attempts');
       await Promise.all([mkdir(checkout), mkdir(outside), mkdir(attempts)]);
-      const runner = new ReviewCommandRunner(async () => ({ repoRoot: checkout, attemptsRoot: attempts }), logger);
+      const runner = new ReviewCommandRunner(async () => ({ repoRoot: checkout, attemptsRoot: attempts }), logger, undefined, emptyQuery);
       const allowed = [
         ['cat-file', '-e', `${'a'.repeat(40)}^{commit}`],
         ['fetch', '--no-tags', 'origin', '+refs/pull/123/head'],
@@ -225,7 +355,7 @@ describe('ReviewCommandRunner', () => {
       const runner = new ReviewCommandRunner(async (repo) => {
         expect(repo).toEqual(repoA);
         return { repoRoot: checkoutA, attemptsRoot: attempts };
-      }, logger);
+      }, logger, undefined, emptyQuery);
 
       await expect(runner.run(repoA, 'git', ['worktree', 'add'], checkoutA, 1_000))
         .rejects.toBeInstanceOf(ReviewCommandScopeError);
@@ -258,7 +388,7 @@ describe('ReviewCommandRunner', () => {
     await mkdir(source, { recursive: true });
     const roots = jest.fn(async () => ({ repoRoot: checkout, attemptsRoot: attempts }));
     try {
-      const runner = new ReviewCommandRunner(roots, logger);
+      const runner = new ReviewCommandRunner(roots, logger, undefined, emptyQuery);
       await expect(runner.run(repoA, 'node', ['--version'], source, 10_000))
         .resolves.toMatchObject({ timedOut: false });
       await rm(source, { recursive: true });

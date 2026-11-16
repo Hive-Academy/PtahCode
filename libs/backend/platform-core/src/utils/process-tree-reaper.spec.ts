@@ -48,7 +48,7 @@ describe('killProcessTree', () => {
       'C:\\Windows\\System32\\taskkill.exe',
       ['/pid', '4242', '/T', '/F'],
       // A GUI parent (Electron main) would otherwise flash a console window.
-      { windowsHide: true },
+      { windowsHide: true, timeout: 3_000 },
       expect.any(Function),
     );
   });
@@ -66,9 +66,31 @@ describe('killProcessTree', () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       'taskkill',
       ['/pid', '4242', '/T', '/F'],
-      { windowsHide: true },
+      { windowsHide: true, timeout: 3_000 },
       expect.any(Function),
     );
+  });
+
+  it('reports taskkill exit code and stderr', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    mockExecFile.mockImplementationOnce((...args: unknown[]) => {
+      const done = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+      done(Object.assign(new Error('failed'), { code: 5 }), '', 'Access denied');
+    });
+    const onError = jest.fn();
+    await killProcessTree(4242, 'SIGTERM', onError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('exit code 5): Access denied') }));
+  });
+
+  it('accepts a taskkill process-not-found result', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    mockExecFile.mockImplementationOnce((...args: unknown[]) => {
+      const done = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+      done(Object.assign(new Error('failed'), { code: 128 }), '', 'Der Prozess "4242" wurde nicht gefunden.');
+    });
+    const onError = jest.fn();
+    await killProcessTree(4242, 'SIGTERM', onError);
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('escalates a live POSIX process group after the grace period', async () => {
