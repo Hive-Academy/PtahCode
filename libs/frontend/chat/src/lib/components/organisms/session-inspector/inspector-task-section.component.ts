@@ -186,8 +186,7 @@ let nextTaskSectionId = 0;
                   class="min-w-0 flex-1"
                   [value]="progress.done"
                   [max]="progress.total"
-                  label="Tasks complete"
-                  [valueText]="
+                  [label]="
                     progress.done + ' of ' + progress.total + ' tasks complete'
                   "
                   size="sm"
