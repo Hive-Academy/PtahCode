@@ -2,6 +2,7 @@ import type {
   MonitoredAgent,
   SubagentRecord,
 } from '@ptah-extension/chat-streaming';
+import { isLiveAgentStatus } from '@ptah-extension/shared';
 
 export const MAX_RUNNING_SESSIONS = 9;
 export const RUNNING_CAP_MESSAGE = `${MAX_RUNNING_SESSIONS} sessions are running. Wait for one to finish to start another.`;
@@ -46,7 +47,7 @@ export function runningSessionKeys(
       agents.some(
         (agent) =>
           sessionId !== null &&
-          agent.status === 'running' &&
+          isLiveAgentStatus(agent.status) &&
           agent.parentSessionId === sessionId,
       ) ||
       subagents.some(

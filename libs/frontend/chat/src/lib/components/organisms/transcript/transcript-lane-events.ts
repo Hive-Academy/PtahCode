@@ -31,9 +31,17 @@ export function laneMetricsForRow(
   if (!monitor || monitor.agentId !== row.agentId || newest.get(row.agentId) !== row.rowKey) return null;
   const last = row.events.at(-1);
   if (!last || monitor.startedAt > last.timestamp) return null;
-  const completion = row.events.filter(event => event.kind === 'completed').at(-1);
-  if (completion && (monitor.status === 'running' ||
-    (monitor.completedAt !== undefined && Math.abs(monitor.completedAt - completion.timestamp) > 60_000))) return null;
+  const completion = row.events
+    .filter((event) => event.kind === 'completed')
+    .at(-1);
+  if (
+    completion &&
+    (monitor.status === 'running' ||
+      monitor.status === 'starting' ||
+      (monitor.completedAt !== undefined &&
+        Math.abs(monitor.completedAt - completion.timestamp) > 60_000))
+  )
+    return null;
   return monitor;
 }
 

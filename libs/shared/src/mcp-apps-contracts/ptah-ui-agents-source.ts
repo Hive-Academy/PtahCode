@@ -130,6 +130,7 @@ const UNAVAILABLE = 'unavailable';
 
 const STATUS_MAP: Readonly<Record<string, PtahUiAgentStatus>> = {
   pending: 'pending',
+  starting: 'running',
   running: 'running',
   streaming: 'running',
   resumed: 'running',

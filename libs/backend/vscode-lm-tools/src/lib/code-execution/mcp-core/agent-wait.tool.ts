@@ -192,7 +192,9 @@ function headerOf(
     (e): e is Extract<AgentWaitEntry, { info: AgentProcessInfo }> =>
       'info' in e,
   );
-  const running = known.filter((e) => e.state === 'running').length;
+  const running = known.filter(
+    (e) => e.info.status === 'running' || e.info.status === 'starting',
+  ).length;
   const ended = known.length - running;
   const capNote =
     result.timedOut && cappedFromTimeoutSec !== undefined && running > 0
@@ -268,7 +270,9 @@ async function describeEntry(
     `${formatDuration(durationOf(info, now))}, ${stopReasonOf(info)}`;
   const [details, lastLines] = await Promise.all([
     deliverableLines(info, statFile),
-    entry.state === 'exited' ? lastLinesOf(entry.agentId, deps) : [],
+    entry.state === 'exited' && info.status !== 'starting'
+      ? lastLinesOf(entry.agentId, deps)
+      : [],
   ]);
   return { head: cap(head), details, lastLines };
 }
@@ -276,6 +280,8 @@ async function describeEntry(
 /** Why the lane is where it is, in words the orchestrator can act on. */
 function stopReasonOf(info: AgentProcessInfo): string {
   switch (info.status) {
+    case 'starting':
+      return 'lane is starting';
     case 'running':
       return 'still running';
     case 'completed':

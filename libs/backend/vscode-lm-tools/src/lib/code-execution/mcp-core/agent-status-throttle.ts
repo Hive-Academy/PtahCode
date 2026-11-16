@@ -51,7 +51,7 @@ const deliveriesByOwner = new WeakMap<
  *
  * The full body is returned when: no single agentId was asked for; the caller
  * has neither an agent nor a session identity (callers that cannot be told
- * apart must not throttle one another); the agent is not `running` (a
+ * apart must not throttle one another); the agent is not live (`starting` or `running`) (a
  * terminal status is never hidden, and its entry is dropped); the status or
  * the CLI session id changed; or the last full body is 60 s old. A short
  * answer does not extend the window. A failed status lookup never reaches
@@ -86,7 +86,7 @@ export function checkRepeatAgentStatus(
   }
 
   const key = `${callerKey}\u0000${agentId}`;
-  if (result.status !== 'running') {
+  if (result.status !== 'running' && result.status !== 'starting') {
     deliveries.delete(key);
     return null;
   }

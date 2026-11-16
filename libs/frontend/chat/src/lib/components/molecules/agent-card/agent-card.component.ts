@@ -125,7 +125,9 @@ import {
             [streamEvents]="agent().streamEvents"
             [streamRevision]="agent().streamRevision"
             [stderrSegments]="parsedStderr()"
-            [isStreaming]="agent().status === 'running'"
+            [isStreaming]="
+              agent().status === 'running' || agent().status === 'starting'
+            "
             [scrollTrigger]="scrollTrigger()"
             [presentation]="presentation()"
           />

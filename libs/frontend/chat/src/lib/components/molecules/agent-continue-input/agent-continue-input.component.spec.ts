@@ -36,8 +36,13 @@ describe('AgentContinueInputComponent', () => {
   function setup(agent = makeAgent(), variant: 'panel' | 'composer' = 'composer'): void {
     state = { queue: { mode: 'queue-next-turn', usesResume: agent.status !== 'running' && !!agent.cliSessionId }, now: { mode: 'steer' } };
     receipts.set(new Map());
-    sendMessage = jest.fn().mockResolvedValue({ mode: 'queue-next-turn', receipt: { id: 'm-1', state: 'accepted' } });
-    cancelMessage = jest.fn().mockResolvedValue({ id: 'm-1', reason: 'cancelled-by-user' });
+    sendMessage = jest.fn().mockResolvedValue({
+      mode: 'queue-next-turn',
+      receipt: { id: 'm-1', state: 'accepted' },
+    });
+    cancelMessage = jest
+      .fn()
+      .mockResolvedValue({ id: 'm-1', reason: 'cancelled-by-user' });
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       imports: [AgentContinueInputComponent],
@@ -78,6 +83,19 @@ describe('AgentContinueInputComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('[aria-label="Resume codex session"]')).not.toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Stopped');
+  });
+
+  it('offers no Stop or message composer while the lane is starting', () => {
+    setup(
+      makeAgent({
+        status: 'starting',
+        effectiveCapabilities: capabilities('supported'),
+      }),
+    );
+    expect(
+      fixture.nativeElement.querySelector('[aria-label="Stop generating"]'),
+    ).toBeNull();
+    expect(fixture.nativeElement.querySelector('textarea')).toBeNull();
   });
 
   it('shows the composer and emits Stop for a running steer-capable lane without continuation', () => {
