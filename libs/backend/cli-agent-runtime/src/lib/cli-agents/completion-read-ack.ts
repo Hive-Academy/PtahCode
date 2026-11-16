@@ -4,8 +4,15 @@ const HISTORY_SIZE = 256;
 const acknowledged = new Set<string>();
 const pendingCancellation = new Map<string, () => Promise<void>>();
 
-export function terminalCompletionKey(info: AgentProcessInfo): string | undefined {
-  if (info.status === 'running' || !info.completedAt) return undefined;
+export function terminalCompletionKey(
+  info: AgentProcessInfo,
+): string | undefined {
+  if (
+    info.status === 'running' ||
+    info.status === 'starting' ||
+    !info.completedAt
+  )
+    return undefined;
   return `${info.agentId}:${info.completedAt}`;
 }
 

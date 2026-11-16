@@ -22,7 +22,7 @@ describe('SessionHandoffCloser', () => {
     await expect(pending).resolves.toEqual({ kind: 'timeout' });
     jest.useRealTimers();
   });
-  it('keeps an absent reply pending until timeout', async () => {
+  it('returns a retryable timeout when only non-owning renderers reply absent', async () => {
     jest.useFakeTimers();
     try {
       const broadcaster = { broadcastMessage: jest.fn().mockResolvedValue(undefined) };
@@ -32,7 +32,7 @@ describe('SessionHandoffCloser', () => {
       const { requestId } = broadcaster.broadcastMessage.mock.calls[0][1] as { requestId: string };
       expect(closer.complete(requestId, 'absent')).toBe(true);
       jest.advanceTimersByTime(10);
-      await expect(pending).resolves.toEqual({ kind: 'absent' });
+      await expect(pending).resolves.toEqual({ kind: 'timeout' });
     } finally {
       jest.useRealTimers();
     }

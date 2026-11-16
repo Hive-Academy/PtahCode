@@ -215,6 +215,29 @@ describe('runAgentWait', () => {
     );
     expect(text.length).toBeLessThanOrEqual(WAIT_SUMMARY_MAX_CHARS);
   });
+  it('keeps a starting lane pending even if the manager labels its entry exited', async () => {
+    const text = await runAgentWait(
+      AgentWaitArgsSchema.parse({ agentIds: ['lane-1'], timeoutSec: 45 }),
+      deps(
+        {
+          mode: 'all',
+          timedOut: true,
+          cancelled: false,
+          waitedMs: 45_000,
+          entries: [
+            {
+              agentId: 'lane-1',
+              state: 'exited',
+              info: info('lane-1', { status: 'starting', exitCode: undefined }),
+            },
+          ],
+        },
+        { cappedFromTimeoutSec: 600 },
+      ),
+    );
+    expect(text).toContain('0 of 1 known lane(s) ended, 1 still running');
+    expect(text).toContain('lane is starting');
+  });
 
   it('does not report an HTTP cap when mode any ends early', async () => {
     const text = await runAgentWait(

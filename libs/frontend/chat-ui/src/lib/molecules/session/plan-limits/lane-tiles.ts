@@ -678,6 +678,7 @@ function laneFaceChips(
 // ------------------------------------------------------------- run usage
 
 const STATUS_WORDS: Readonly<Record<AgentStatus, string>> = {
+  starting: 'running',
   running: 'running',
   completed: 'completed',
   failed: 'failed',
@@ -690,7 +691,9 @@ function capitalise(text: string): string {
 }
 
 function laneRunChip(runs: readonly StatsLimitLaneRun[]): StatsChip {
-  const running = runs.filter((run) => run.status === 'running').length;
+  const running = runs.filter(
+    (run) => run.status === 'running' || run.status === 'starting',
+  ).length;
   if (running > 0) {
     return {
       tone: 'live',

@@ -2394,6 +2394,23 @@ describe('SessionMetadataStore', () => {
       });
     });
 
+    it('interrupts a legacy starting reference that has no process', async () => {
+      storage.__state.seed(METADATA_KEY, [
+        fatDetail([
+          {
+            ...fatRef('agent-a', 'cli-a'),
+            status: 'starting',
+            completedAt: undefined,
+          },
+        ]),
+      ]);
+      const [read] = await store.getCliSessionsForRestore('sess-1');
+      expect(read).toMatchObject({
+        status: 'stopped',
+        stopReason: 'host-restart',
+      });
+    });
+
     it('returns an empty list for a session with no CLI agents', async () => {
       await store.create('sess-1', WORKSPACE, 'parent');
       await expect(store.getCliSessionsForRestore('sess-1')).resolves.toEqual(

@@ -963,7 +963,7 @@ function isForeignRunningReference(ref: CliSessionReference): boolean {
   return (
     typeof ref === 'object' &&
     ref !== null &&
-    ref.status === 'running' &&
+    (ref.status === 'running' || ref.status === 'starting') &&
     ref.hostRunId !== currentHostRunId()
   );
 }
@@ -994,9 +994,9 @@ function withoutHostRunId(ref: CliSessionReference): CliSessionReference {
   return rest;
 }
 
-/** Only `running` references carry the stamp of the run that wrote them. */
+/** Live (`starting` or `running`) references carry the stamp of the run that wrote them. */
 function stampHostRun(ref: CliSessionReference): CliSessionReference {
-  return ref.status === 'running'
+  return ref.status === 'running' || ref.status === 'starting'
     ? { ...ref, hostRunId: currentHostRunId() }
     : withoutHostRunId(ref);
 }
@@ -2483,7 +2483,8 @@ export class SessionMetadataStore {
     // The first heartbeat is durable before this run's first `running`
     // reference. A failed first write rejects this call and leaves the lease
     // unarmed, so the caller's retry attempts the heartbeat again.
-    if (cliSession.status === 'running') await this.hostLease.start();
+    if (cliSession.status === 'running' || cliSession.status === 'starting')
+      await this.hostLease.start();
     return this.enqueueWrite(async () => {
       const metadata = await this.get(sessionId);
       if (!metadata) {

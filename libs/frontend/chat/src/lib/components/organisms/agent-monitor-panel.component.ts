@@ -109,6 +109,7 @@ function isTerminalSubagent(r: SubagentRecord): boolean {
 /** Map a raw lifecycle status onto the tile's status-dot bucket. */
 function statusDot(status: string): WorkflowTileVM['dot'] {
   switch (status) {
+    case 'starting':
     case 'running':
     case 'pending':
     case 'background':
@@ -418,13 +419,17 @@ function subagentToTile(r: SubagentRecord): WorkflowTileVM {
                   <!-- Status dot -->
                   <span
                     class="w-2 h-2 rounded-full shrink-0"
-                    [class.bg-info]="agent.status === 'running'"
+                    [class.bg-info]="
+                      agent.status === 'running' || agent.status === 'starting'
+                    "
                     [class.bg-success]="agent.status === 'completed'"
                     [class.bg-error]="
                       agent.status === 'failed' || agent.status === 'timeout'
                     "
                     [class.bg-warning]="agent.status === 'stopped'"
-                    [class.animate-pulse]="agent.status === 'running'"
+                    [class.animate-pulse]="
+                      agent.status === 'running' || agent.status === 'starting'
+                    "
                   ></span>
 
                   <!-- Agent name -->
@@ -761,7 +766,9 @@ export class AgentMonitorPanelComponent {
   });
 
   readonly effectiveHasRunning = computed(() =>
-    this.effectiveAgents().some((a) => a.status === 'running'),
+    this.effectiveAgents().some(
+      (a) => a.status === 'running' || a.status === 'starting',
+    ),
   );
 
   /**

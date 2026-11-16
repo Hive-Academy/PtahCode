@@ -57,6 +57,7 @@ import {
 } from '@ptah-extension/platform-core';
 import {
   SessionId,
+  isLiveAgentStatus,
   normalizeWorkspaceRoot,
   type AgentSessionOpenedPayload,
   type ChildSettingSource,
@@ -2063,7 +2064,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       .listTrackedAgents()
       .some(
         (agent) =>
-          agent.status === 'running' &&
+          isLiveAgentStatus(agent.status) &&
           !!agent.parentSessionId &&
           ids.has(agent.parentSessionId),
       );

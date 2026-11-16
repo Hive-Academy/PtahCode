@@ -252,6 +252,70 @@ describe('WorkspaceHarnessTarget — retired copy removal proofs (D-2)', () => {
     ]);
   });
 
+  it('routine command retirement releases tracked claims and removes untracked copies', async () => {
+    git(ws, 'init', '-q');
+    const tracked = '.cursor/commands/init-saas.md';
+    const untracked = '.cursor/commands/local.md';
+    const entries: ManagedEntries = {};
+    for (const relPath of [tracked, untracked]) {
+      const file = join(ws, ...relPath.split('/'));
+      mkdirSync(join(ws, '.cursor', 'commands'), { recursive: true });
+      writeFileSync(file, `${relPath}\n`);
+      const hash = await hashFile(file);
+      if (hash === null) throw new Error('fixture command did not hash');
+      entries[relPath] = managedEntry(
+        hash,
+        join(tempRoot, 'active', relPath),
+        'command',
+      );
+    }
+    git(ws, 'add', '--', tracked);
+    const target = makeTarget();
+    const result = await reconcileOnce(target, manifestWith(entries));
+    expect(readFileSync(join(ws, ...tracked.split('/')), 'utf-8')).toBe(
+      `${tracked}\n`,
+    );
+    expect(existsSync(join(ws, ...untracked.split('/')))).toBe(false);
+    expect(result.releasedTracked).toEqual([tracked]);
+    expect(result.removed).toEqual([untracked]);
+    const second = await target.plan(
+      EMPTY_DESIRED,
+      ws,
+      manifestWith({}),
+      undefined,
+      retired,
+    );
+    expect(second.removals).toEqual([]);
+  });
+
+  it.each([false, true])(
+    'routine command with unverifiable git keeps only a repository copy (repo=%s)',
+    async (inRepository) => {
+      if (inRepository) git(ws, 'init', '-q');
+      const file = join(ws, ...COMMAND.split('/'));
+      mkdirSync(join(ws, '.cursor', 'commands'), { recursive: true });
+      writeFileSync(file, 'command\n');
+      const hash = await hashFile(file);
+      if (hash === null) throw new Error('fixture command did not hash');
+      const probe: GitTrackingProbe = async () => 'unverifiable';
+      const result = await reconcileOnce(
+        makeTarget(probe),
+        manifestWith({
+          [COMMAND]: managedEntry(
+            hash,
+            join(tempRoot, 'active', 'retired-cmd.md'),
+            'command',
+          ),
+        }),
+      );
+      expect(existsSync(file)).toBe(inRepository);
+      expect(result.releasedTracked ?? []).toEqual(
+        inRepository ? [COMMAND] : [],
+      );
+      expect(result.removed).toEqual(inRepository ? [] : [COMMAND]);
+    },
+  );
+
   it('real git: keeps a git-tracked copy (exit 0) and disowns it', async () => {
     git(ws, 'init', '-q');
     const hash = await writeSkillCopy();

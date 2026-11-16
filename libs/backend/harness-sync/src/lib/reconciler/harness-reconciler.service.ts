@@ -323,12 +323,29 @@ export class HarnessReconcilerService {
             },
             workspaceRoot,
           );
-          // Only entries that actually went away leave the manifest; one that
-          // resisted deletion stays owned so a later pass retries it rather
-          // than reclassifying a Ptah file as the user's.
+          // Removed entries and released tracked commands leave the manifest.
+          // A failed deletion stays owned so a later pass can retry it.
           const remaining = { ...manifest.entries };
           for (const relPath of result.removed) delete remaining[relPath];
-          this.manifestStore.save(workspaceRoot, target.id, remaining);
+          for (const relPath of result.releasedTracked ?? []) {
+            delete remaining[relPath];
+          }
+          const saved = this.manifestStore.save(
+            workspaceRoot,
+            target.id,
+            remaining,
+          );
+          if (saved) {
+            for (const relPath of result.releasedTracked ?? []) {
+              this.logger.info(
+                '[harness-sync] Released tracked command from managed manifest',
+                {
+                  target: target.id,
+                  relPath,
+                },
+              );
+            }
+          }
 
           targetHealth.push({
             target: target.id,
@@ -689,6 +706,17 @@ export class HarnessReconcilerService {
         target.id,
         this.mergeEntries(plan.baseEntries, result),
       );
+      if (ownershipSaved) {
+        for (const relPath of result.releasedTracked ?? []) {
+          this.logger.info(
+            '[harness-sync] Released tracked command from managed manifest',
+            {
+              target: target.id,
+              relPath,
+            },
+          );
+        }
+      }
 
       const health = appliedTargetHealth(
         plan,
@@ -822,6 +850,9 @@ export class HarnessReconcilerService {
   ): ManagedEntries {
     const merged: ManagedEntries = { ...base, ...result.written };
     for (const relPath of result.removed) {
+      delete merged[relPath];
+    }
+    for (const relPath of result.releasedTracked ?? []) {
       delete merged[relPath];
     }
     for (const kept of result.keptRetired ?? []) {

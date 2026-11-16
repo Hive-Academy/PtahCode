@@ -14,19 +14,21 @@ import type {
   StatsLimitNote,
 } from './stats-limit-view-model.types';
 
-const STATUS_BADGES: Readonly<
-  Record<StatsLimitLaneRun['status'], StatsChip>
-> = {
-  running: { tone: 'live', text: 'Running' },
-  completed: { tone: 'neutral', text: 'Completed' },
-  failed: { tone: 'error', text: 'Failed' },
-  timeout: { tone: 'error', text: 'Timed out' },
-  stopped: { tone: 'neutral', text: 'Stopped' },
-};
+const STATUS_BADGES: Readonly<Record<StatsLimitLaneRun['status'], StatsChip>> =
+  {
+    starting: { tone: 'live', text: 'Running' },
+    running: { tone: 'live', text: 'Running' },
+    completed: { tone: 'neutral', text: 'Completed' },
+    failed: { tone: 'error', text: 'Failed' },
+    timeout: { tone: 'error', text: 'Timed out' },
+    stopped: { tone: 'neutral', text: 'Stopped' },
+  };
 
 /** The run's status as one badge; a quota failure names its cause. */
 export function runStatusBadge(run: StatsLimitLaneRun): StatsChip {
-  return run.status !== 'running' && run.failureKind === 'quota'
+  return run.status !== 'running' &&
+    run.status !== 'starting' &&
+    run.failureKind === 'quota'
     ? { tone: 'error', text: 'Quota failure' }
     : STATUS_BADGES[run.status];
 }

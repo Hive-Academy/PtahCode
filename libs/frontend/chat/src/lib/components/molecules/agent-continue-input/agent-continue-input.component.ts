@@ -12,7 +12,13 @@ import { laneGuardStopText } from '../agent-card/agent-card-header.component';
   imports: [LaneComposerComponent, LucideAngularModule, NgTemplateOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (visible() || (variant() === 'composer' && (agent().status === 'running' || terminalStatus()))) {
+    @if (
+      visible() ||
+      (variant() === 'composer' &&
+        (agent().status === 'running' ||
+          agent().status === 'starting' ||
+          terminalStatus()))
+    ) {
       <div class="flex flex-col gap-1 pb-2">
         @if (visible()) {
           <ptah-lane-composer
@@ -20,7 +26,9 @@ import { laneGuardStopText } from '../agent-card/agent-card-header.component';
             [laneLabel]="agent().displayName || agent().cli"
             [cli]="agent().cli"
             [variant]="variant() === 'composer' ? 'full' : 'compact'"
-            [stopped]="agent().status !== 'running'"
+            [stopped]="
+              agent().status !== 'running' && agent().status !== 'starting'
+            "
             [resumePath]="resumePath()"
           >
             @if (variant() === 'composer') {
@@ -66,10 +74,13 @@ export class AgentContinueInputComponent {
     const agent = this.agent();
     const status = agent.status === 'failed' ? 'Failed' : agent.status === 'timeout' ? 'Timed out' : agent.status === 'stopped' ? 'Stopped' : '';
     const reason = laneGuardStopText(agent.stopReason);
-    return agent.status === 'running' ? '' : [status, reason].filter(Boolean).join(' \u00b7 ');
+    return agent.status === 'running' || agent.status === 'starting'
+      ? ''
+      : [status, reason].filter(Boolean).join(' \u00b7 ');
   });
   protected readonly visible = computed(() => {
     const agent = this.agent();
+    if (agent.status === 'starting') return false;
     const messaging = agent.effectiveCapabilities?.messaging;
     return agent.supportsContinuation === true || !!agent.cliSessionId ||
       (agent.status === 'running' && (
@@ -78,9 +89,14 @@ export class AgentContinueInputComponent {
   });
   protected readonly resumePath = computed(() => {
     const agent = this.agent();
-    if (agent.status === 'running') return null;
-    if (agent.supportsContinuation === true && agent.continuationExpired !== true) return 'Continue warm session';
-    if (agent.cliSessionId) return `Resume CLI session ${agent.cliSessionId.slice(0, 8)}`;
+    if (agent.status === 'running' || agent.status === 'starting') return null;
+    if (
+      agent.supportsContinuation === true &&
+      agent.continuationExpired !== true
+    )
+      return 'Continue warm session';
+    if (agent.cliSessionId)
+      return `Resume CLI session ${agent.cliSessionId.slice(0, 8)}`;
     return 'Start fresh handoff';
   });
 }

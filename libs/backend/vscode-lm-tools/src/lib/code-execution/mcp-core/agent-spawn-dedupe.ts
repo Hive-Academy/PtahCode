@@ -8,9 +8,22 @@ type SpawnArgs = z.infer<typeof AgentSpawnArgsSchema>;
 const TTL_MS = 120_000;
 const MAX_ENTRIES = 200;
 const IN_FLIGHT_MAX_MS = 300_000;
-export const agentSpawnTiming = new AsyncLocalStorage<{
+/**
+ * Per-request spawn timing marks. The dispatcher allocates one record per
+ * `ptah_agent_spawn` call, the agent-namespace builder fills it, and the
+ * dispatcher logs it. A sub-step field is a number when that step ran and
+ * completed; it stays null when the step was skipped, unwired or failed.
+ * `namespaceResolutionMs` remains the total over all namespace steps.
+ */
+export type AgentSpawnTiming = {
   namespaceResolutionMs: number | null;
-}>();
+  skillsMs: number | null;
+  roleMs: number | null;
+  guidanceMs: number | null;
+  pluginPathsMs: number | null;
+};
+
+export const agentSpawnTiming = new AsyncLocalStorage<AgentSpawnTiming>();
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);

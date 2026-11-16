@@ -15,6 +15,16 @@ const tabs = (sessionIds: readonly (string | null)[]) =>
   }));
 
 describe('countRunningSessions for canvas tile sessions only', () => {
+  it('counts a session with only a starting CLI lane', () => {
+    expect(
+      countRunningSessions(
+        tabs(['starting']),
+        () => false,
+        [lane('starting', 'starting')],
+        [],
+      ),
+    ).toBe(1);
+  });
   it('ignores null, idle, and finished sessions', () => {
     expect(
       countRunningSessions(

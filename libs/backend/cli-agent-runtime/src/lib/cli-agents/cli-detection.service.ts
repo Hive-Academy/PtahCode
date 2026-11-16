@@ -88,6 +88,9 @@ export const SHELL_PATH_FIRST_SCAN_WAIT_MS = 1_000;
 export class CliDetectionService {
   private readonly adapters: Map<CliType, CliAdapter> = new Map();
   private detectionCache: Map<CliType, CliDetectionResult> | null = null;
+  private readonly lastCompleted = new Map<CliType, CliDetectionResult>();
+  private readonly staleClis = new Set<CliType>();
+  private readonly probesInFlight = new Map<CliType, Promise<CliDetectionResult>>();
   /** In-flight detection promise to prevent concurrent detection races */
   private detectionInFlight: Promise<CliDetectionResult[]> | null = null;
   /** Cache generation; invalidateCache() bumps it so older scans are not reused. */
@@ -293,6 +296,7 @@ export class CliDetectionService {
    * Internal detection implementation.
    */
   private async doDetectAll(generation: number): Promise<CliDetectionResult[]> {
+    const scanStarted = performance.now();
     this.logger.info('[CliDetection] Detecting installed CLI agents...');
     // The scan is already registered as in flight, so callers join it during
     // the (first scan only, bounded) PATH head start.
@@ -301,59 +305,124 @@ export class CliDetectionService {
     this.scannedWithPath = process.env['PATH'] ?? '';
     // Every adapter starts in one tick, so peer detection runs while one
     // binary probe hangs.
+    let slowestCli: CliType | null = null;
+    let slowestMs = -1;
     const entries = await Promise.all(
-      [...this.adapters].map(async ([name, adapter]): Promise<[CliType, CliDetectionResult]> => {
-        try {
-          const result: CliDetectionResult = {
-            ...(await adapter.detect()),
-            manifest: adapter.capabilities(),
-            roleDelivery: 'preamble',
-            roleChannel: adapter.roleChannel,
-          };
-          if (result.installed) {
-            this.logger.info(`[CliDetection] ${adapter.displayName} detected`, {
-              path: result.path,
-              version: result.version,
-            });
-          } else {
-            this.logger.debug(
-              `[CliDetection] ${adapter.displayName} not installed`,
-            );
-          }
-          return [name, result];
-        } catch (error: unknown) {
-          // degradation-audit: reported - failed adapter detection is captured and shown as unavailable.
-          const err = error instanceof Error ? error : new Error(String(error));
-          this.sentryService.captureException(err, {
-            errorSource: 'CliDetectionService.doDetectAll',
-          });
-          this.logger.error(
-            `[CliDetection] Error detecting ${adapter.displayName}`,
-            err,
-          );
-          return [name, {
-            cli: name,
-            installed: false,
-            messagingMode: bestMessagingCapability(adapter.capabilities()),
-            manifest: adapter.capabilities(),
-            roleDelivery: 'preamble',
-            roleChannel: adapter.roleChannel,
-          }];
+      [...this.adapters].map(async ([name]): Promise<[CliType, CliDetectionResult]> => {
+        const started = performance.now();
+        // A named detection of this generation already probed this adapter:
+        // reuse its result so the scan does not probe the binary again.
+        const known = this.staleClis.has(name)
+          ? undefined
+          : this.lastCompleted.get(name);
+        const result = known ?? (await this.probe(name, generation));
+        const durationMs = performance.now() - started;
+        if (durationMs > slowestMs) {
+          slowestMs = durationMs;
+          slowestCli = name;
         }
+        return [name, result];
       }),
     );
+    this.logger.info('[CliDetection] scan finished', {
+      totalMs: Math.round(performance.now() - scanStarted),
+      slowestCli,
+    });
 
     const results = new Map(entries);
     if (this.generation === generation) this.detectionCache = results;
     return Array.from(results.values());
   }
 
+  private probe(cli: CliType, generation: number): Promise<CliDetectionResult> {
+    const existing = this.probesInFlight.get(cli);
+    if (existing) return existing;
+    const adapter = this.adapters.get(cli);
+    if (!adapter) throw new Error(`No adapter registered for CLI: ${cli}`);
+    const started = performance.now();
+    let outcome: 'installed' | 'not-installed' | 'error' = 'error';
+    const probe = (async (): Promise<CliDetectionResult> => {
+      try {
+        const result: CliDetectionResult = {
+          ...(await adapter.detect()),
+          manifest: adapter.capabilities(),
+          roleDelivery: 'preamble',
+          roleChannel: adapter.roleChannel,
+        };
+        if (result.installed) {
+          outcome = 'installed';
+          this.logger.info(`[CliDetection] ${adapter.displayName} detected`, {
+            path: result.path,
+            version: result.version,
+          });
+        } else {
+          outcome = 'not-installed';
+          this.logger.debug(
+            `[CliDetection] ${adapter.displayName} not installed`,
+          );
+        }
+        return result;
+      } catch (error: unknown) {
+        // degradation-audit: reported - failed adapter detection is captured and shown as unavailable.
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.sentryService.captureException(err, {
+          errorSource: 'CliDetectionService.doDetectAll',
+        });
+        this.logger.error(
+          `[CliDetection] Error detecting ${adapter.displayName}`,
+          err,
+        );
+        return {
+          cli,
+          installed: false,
+          messagingMode: bestMessagingCapability(adapter.capabilities()),
+          manifest: adapter.capabilities(),
+          roleDelivery: 'preamble',
+          roleChannel: adapter.roleChannel,
+        };
+      }
+    })().then((result) => {
+      if (this.generation === generation && this.probesInFlight.get(cli) === probe) {
+        if (result.installed) this.lastCompleted.set(cli, result);
+        else this.lastCompleted.delete(cli);
+        this.staleClis.delete(cli);
+      }
+      return result;
+    }).finally(() => {
+      const durationMs = Math.round(performance.now() - started);
+      if (durationMs > 1000) this.logger.warn('[CliDetection] slow probe', {
+        cli, durationMs, outcome,
+      });
+      if (this.probesInFlight.get(cli) === probe) this.probesInFlight.delete(cli);
+    });
+    this.probesInFlight.set(cli, probe);
+    return probe;
+  }
+
   /**
    * Get detection result for a specific CLI
    */
   async getDetection(cli: CliType): Promise<CliDetectionResult | undefined> {
-    const all = await this.detectAll();
-    return all.find((r) => r.cli === cli);
+    const completed = this.lastCompleted.get(cli);
+    if (completed) {
+      if (this.staleClis.has(cli)) {
+        void this.probe(cli, this.generation).catch((error: unknown) => {
+          // degradation-audit: reported - stale detection is served immediately while a failed background probe is logged.
+          const cause = error instanceof Error ? error : new Error(String(error));
+          this.logger.error('[CliDetection] Background probe failed', cause);
+        });
+      }
+      return completed;
+    }
+    if (!this.adapters.has(cli)) return undefined;
+    return this.probe(cli, this.generation);
+  }
+
+  dropDetection(cli: CliType): void {
+    this.lastCompleted.delete(cli);
+    this.staleClis.delete(cli);
+    this.detectionCache = null;
+    this.probesInFlight.delete(cli);
   }
 
   /**
@@ -435,6 +504,8 @@ export class CliDetectionService {
    */
   invalidateCache(): void {
     this.detectionCache = null;
+    this.probesInFlight.clear();
+    for (const cli of this.lastCompleted.keys()) this.staleClis.add(cli);
     this.modelCache = null;
     this.modelInFlight = null;
     this.generation++;

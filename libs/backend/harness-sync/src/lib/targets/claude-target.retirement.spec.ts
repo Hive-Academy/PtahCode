@@ -20,6 +20,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -226,6 +227,176 @@ describe('ClaudeTarget — retired copy removal proofs (D-2)', () => {
     ]);
   });
 
+  it('releases two tracked routine commands, retires an untracked one, and leaves five desired commands', async () => {
+    git(ws, 'init', '-q');
+    const names = [
+      'init-saas',
+      'initialize-workspace',
+      'orchestrate',
+      'orchestrate-help',
+      'review-code',
+      'review-logic',
+      'review-security',
+    ];
+    const entries: ManagedEntries = {};
+    for (const name of names) {
+      const relPath = `.claude/commands/${name}.md`;
+      const file = join(ws, '.claude', 'commands', `${name}.md`);
+      mkdirSync(join(ws, '.claude', 'commands'), { recursive: true });
+      writeFileSync(file, `${name}\n`);
+      const hash = await hashFile(file);
+      if (hash === null) throw new Error('fixture command did not hash');
+      const source = join(tempRoot, 'active', `${name}.md`);
+      entries[relPath] = managedEntry(hash, source, 'command');
+      if (!['init-saas', 'initialize-workspace'].includes(name)) {
+        mkdirSync(join(tempRoot, 'active'), { recursive: true });
+        writeFileSync(source, `${name}\n`);
+      }
+    }
+    git(
+      ws,
+      'add',
+      '--',
+      '.claude/commands/init-saas.md',
+      '.claude/commands/initialize-workspace.md',
+    );
+    const manifests = new ManagedManifestStore();
+    manifests.save(ws, 'claude', entries);
+    const logger = {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    };
+    const reconciler = new HarnessReconcilerService(
+      logger as unknown as Logger,
+      new HarnessManifestBuilder(),
+      manifests,
+      createStaticSourceResolver({
+        layout: {
+          skillsRoot: join(tempRoot, 'active', 'skills'),
+          commandsRoot: join(tempRoot, 'active'),
+          agentsRoot: join(tempRoot, 'active', 'agents'),
+        },
+        overlayPluginPaths: [],
+        disabledSkillIds: [],
+        disabledPluginIds: [],
+        retired,
+      }),
+      [new ClaudeTarget(manifests)],
+    );
+    const released = [
+      '.claude/commands/init-saas.md',
+      '.claude/commands/initialize-workspace.md',
+    ];
+    const first = await reconciler.reconcile(ws, {
+      mode: 'full',
+      reason: 'test',
+    });
+    expect(first.targets[0]?.removed).toEqual([]);
+    expect(Object.keys(manifests.load(ws, 'claude').entries).sort()).toEqual(
+      names
+        .slice(2)
+        .map((name) => `.claude/commands/${name}.md`)
+        .sort(),
+    );
+    expect(logger.info).toHaveBeenCalledTimes(2);
+    for (const relPath of released) {
+      expect(logger.info).toHaveBeenCalledWith(
+        '[harness-sync] Released tracked command from managed manifest',
+        { target: 'claude', relPath },
+      );
+    }
+    const releasedContents = released.map((relPath) =>
+      readFileSync(join(ws, ...relPath.split('/')), 'utf-8'),
+    );
+    const releasedMtimes = released.map(
+      (relPath) =>
+        statSync(join(ws, ...relPath.split('/')), { bigint: true }).mtimeNs,
+    );
+    const second = await reconciler.reconcile(ws, {
+      mode: 'full',
+      reason: 'test',
+    });
+    expect(second.targets[0]?.removed).toEqual([]);
+    expect(logger.info).toHaveBeenCalledTimes(2);
+    released.forEach((relPath, index) => {
+      expect(readFileSync(join(ws, ...relPath.split('/')), 'utf-8')).toBe(
+        releasedContents[index],
+      );
+      expect(
+        statSync(join(ws, ...relPath.split('/')), { bigint: true }).mtimeNs,
+      ).toBe(releasedMtimes[index]);
+    });
+    for (const name of names)
+      expect(
+        readFileSync(join(ws, '.claude', 'commands', `${name}.md`), 'utf-8'),
+      ).toBe(`${name}\n`);
+  });
+
+  it('remove releases a tracked command claim and deletes an untracked managed command', async () => {
+    git(ws, 'init', '-q');
+    const tracked = '.claude/commands/tracked.md';
+    const untracked = '.claude/commands/untracked.md';
+    const commandsDir = join(ws, '.claude', 'commands');
+    mkdirSync(commandsDir, { recursive: true });
+    writeFileSync(join(commandsDir, 'tracked.md'), 'tracked\n');
+    writeFileSync(join(commandsDir, 'untracked.md'), 'untracked\n');
+    const trackedHash = await hashFile(join(commandsDir, 'tracked.md'));
+    const untrackedHash = await hashFile(join(commandsDir, 'untracked.md'));
+    if (trackedHash === null || untrackedHash === null)
+      throw new Error('fixture command did not hash');
+    git(ws, 'add', '--', tracked);
+    const manifests = new ManagedManifestStore();
+    manifests.save(ws, 'claude', {
+      [tracked]: managedEntry(
+        trackedHash,
+        join(tempRoot, 'tracked.md'),
+        'command',
+      ),
+      [untracked]: managedEntry(
+        untrackedHash,
+        join(tempRoot, 'untracked.md'),
+        'command',
+      ),
+    });
+    const logger = {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    };
+    const reconciler = new HarnessReconcilerService(
+      logger as unknown as Logger,
+      new HarnessManifestBuilder(),
+      manifests,
+      createStaticSourceResolver({
+        layout: {
+          skillsRoot: join(tempRoot, 'skills'),
+          commandsRoot: join(tempRoot, 'commands'),
+          agentsRoot: join(tempRoot, 'agents'),
+        },
+        overlayPluginPaths: [],
+        disabledSkillIds: [],
+        disabledPluginIds: [],
+        retired,
+      }),
+      [new ClaudeTarget(manifests)],
+    );
+    const health = await reconciler.remove(ws);
+    expect(readFileSync(join(commandsDir, 'tracked.md'), 'utf-8')).toBe(
+      'tracked\n',
+    );
+    expect(existsSync(join(commandsDir, 'untracked.md'))).toBe(false);
+    expect(manifests.load(ws, 'claude').entries).toEqual({});
+    expect(health.targets[0]?.removed).toEqual([untracked]);
+    expect(health.targets[0]?.writeFailed).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      '[harness-sync] Released tracked command from managed manifest',
+      { target: 'claude', relPath: tracked },
+    );
+  });
+
   it('real git: keeps a git-tracked copy intact and reports it kept git-tracked', async () => {
     git(ws, 'init', '-q');
     const hash = await writeSkillCopy();
@@ -298,7 +469,14 @@ describe('ClaudeTarget — retired copy removal proofs (D-2)', () => {
     const removedHash = await writeSkillCopy();
     const trackedRel = '.claude/skills/tracked-skill';
     const trackedHash = await writeSkillCopy(trackedRel, '# tracked\n');
+    const trackedCommand = '.claude/commands/init-saas.md';
+    const trackedCommandFile = join(ws, '.claude', 'commands', 'init-saas.md');
+    mkdirSync(join(ws, '.claude', 'commands'), { recursive: true });
+    writeFileSync(trackedCommandFile, 'run saas\n');
+    const commandHash = await hashFile(trackedCommandFile);
+    if (commandHash === null) throw new Error('fixture command did not hash');
     git(ws, 'add', '--', trackedRel);
+    git(ws, 'add', '--', trackedCommand);
     git(ws, 'commit', '-q', '-m', 'track one retired copy');
 
     const manifests = new ManagedManifestStore();
@@ -308,6 +486,11 @@ describe('ClaudeTarget — retired copy removal proofs (D-2)', () => {
         trackedHash,
         join(retiredRoot, 'skills', 'tracked-skill'),
         'skill',
+      ),
+      [trackedCommand]: managedEntry(
+        commandHash,
+        join(tempRoot, 'active', 'init-saas.md'),
+        'command',
       ),
     });
     const userLayer = join(tempRoot, 'user');
@@ -352,6 +535,11 @@ describe('ClaudeTarget — retired copy removal proofs (D-2)', () => {
     ]);
     expect(existsSync(skillDir())).toBe(false);
     expect(readFileSync(skillFile(trackedRel), 'utf-8')).toBe('# tracked\n');
+    expect(readFileSync(trackedCommandFile, 'utf-8')).toBe('run saas\n');
     expect(Object.keys(manifests.load(ws, 'claude').entries)).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      '[harness-sync] Released tracked command from managed manifest',
+      { target: 'claude', relPath: trackedCommand },
+    );
   });
 });

@@ -76,9 +76,9 @@ const DETECT_FAILED =
       aria-label="Orchestration policy"
       data-testid="settings-section-orchestration-policy"
     >
-      <!-- One row in both hosts: the chips clip at the end in a narrow box; the trigger names the whole order. -->
+      <!-- The policy groups wrap in a narrow box so the order strip can show whole chips. -->
       <div
-        class="flex items-center gap-2.5 text-xs text-base-content"
+        class="flex flex-wrap items-center gap-2.5 text-xs text-base-content"
         data-testid="orchestration-policy-bar"
       >
         <div class="flex shrink-0 items-center gap-1.5">
@@ -105,7 +105,7 @@ const DETECT_FAILED =
           />
         </div>
 
-        <div class="relative flex min-w-0 flex-1 items-center gap-1.5">
+        <div class="relative flex min-w-64 flex-1 items-center gap-1.5">
           <span
             class="shrink-0 whitespace-nowrap text-sm font-medium text-base-content-muted"
             aria-hidden="true"

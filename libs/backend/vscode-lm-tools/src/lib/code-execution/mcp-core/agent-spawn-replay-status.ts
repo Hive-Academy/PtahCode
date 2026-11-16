@@ -15,7 +15,10 @@ export async function isSpawnReplayValid(
     });
     const current = await Promise.race([status(agentId), timeout]);
     if (current === 'timeout') return true;
-    return !Array.isArray(current) && current?.status === 'running';
+    return (
+      !Array.isArray(current) &&
+      (current?.status === 'running' || current?.status === 'starting')
+    );
   } catch (error: unknown) {
     // degradation-audit: reported - a failed status lookup leaves lane state unknown; report and replay.
     warn(error);
