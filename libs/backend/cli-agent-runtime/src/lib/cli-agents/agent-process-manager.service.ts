@@ -483,13 +483,16 @@ export class AgentProcessManager {
     @inject(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { isOptional: true })
     private readonly usageReconciliationTrigger?: import('@ptah-extension/platform-core').UsageReconciliationTrigger,
   ) {
+    // Lane state and failure callbacks are adapted to the shared admission queue.
+    const hasOtherActiveLane = (waiting: TrackedAgent) =>
+      Array.from(this.agents.values()).some((agent) =>
+        agent !== waiting && !agent.info.waitingForMemory &&
+        (agent.info.status === 'running' || agent.info.status === 'starting'));
     this.memoryGate = new AgentSpawnMemoryGate(
       () => this.spawnEnvironment.freeMemory(),
       () => this.spawnEnvironment.minFreeMemoryGb(),
       () => this.spawnEnvironment.spawnQueueTimeoutMs(),
-      (waiting) => Array.from(this.agents.values()).some((agent) =>
-        agent !== waiting && !agent.info.waitingForMemory &&
-        (agent.info.status === 'running' || agent.info.status === 'starting')),
+      hasOtherActiveLane,
       (waiting, error) => this.failSpawn(
         { agentId: waiting.info.agentId, startedAt: waiting.info.startedAt }, error),
     );

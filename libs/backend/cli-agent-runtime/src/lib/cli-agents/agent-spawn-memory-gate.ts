@@ -1,97 +1,70 @@
 import type { TrackedAgent } from './tracked-agent';
+import { MemoryAdmissionTicket, SharedMemoryGate } from './shared-memory-gate';
 
-interface WaitingLane {
-  readonly tracked: TrackedAgent;
-  readonly resolve: () => void;
-  readonly reject: (error: Error) => void;
-  readonly timeout: NodeJS.Timeout;
+/** Lane-owned state changes used by the shared admission queue. */
+export class LaneMemoryAdmissionTicket implements MemoryAdmissionTicket {
+  constructor(
+    readonly tracked: TrackedAgent,
+    private readonly fail: (tracked: TrackedAgent, error: Error) => void,
+  ) {}
+
+  isPending(): boolean {
+    return this.tracked.info.status === 'starting';
+  }
+
+  queued(): void {
+    this.tracked.info.waitingForMemory = true;
+    (this.tracked as any)._enteredQueue = true;
+    clearTimeout(this.tracked.admissionTimer);
+    this.tracked.admissionTimer = undefined;
+  }
+
+  dequeued(): void {
+    this.tracked.info.waitingForMemory = false;
+  }
+
+  timedOut(error: Error): void {
+    this.fail(this.tracked, error);
+  }
 }
 
-/** FIFO admission gate. The manager owns records and terminal signals. */
+/** Lane API and settings adapter for the shared FIFO admission gate. */
 export class AgentSpawnMemoryGate {
-  private readonly queue: WaitingLane[] = [];
-  private poll?: NodeJS.Timeout;
-  private released?: TrackedAgent;
+  private readonly tickets = new WeakMap<TrackedAgent, LaneMemoryAdmissionTicket>();
+  private readonly gate: SharedMemoryGate<LaneMemoryAdmissionTicket>;
 
   constructor(
     private readonly freeMemory: () => number,
     private readonly minFreeMemoryGb: () => number,
-    private readonly timeoutMs: () => number,
+    timeoutMs: () => number,
     private readonly otherActiveLanes: (tracked: TrackedAgent) => boolean,
     private readonly fail: (tracked: TrackedAgent, error: Error) => void,
-  ) {}
-
-  wait(tracked: TrackedAgent, force = false): Promise<void> {
-    if (tracked.info.status !== 'starting') {
-      return Promise.reject(new Error('Lane stopped before memory admission'));
-    }
-    if (force || (this.queue.length === 0 &&
-        this.released?.info.status !== 'starting' && this.canStart(tracked))) {
-      return Promise.resolve();
-    }
-    tracked.info.waitingForMemory = true;
-    (tracked as any)._enteredQueue = true;
-    clearTimeout(tracked.admissionTimer);
-    tracked.admissionTimer = undefined;
-    return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        const index = this.queue.findIndex((entry) => entry.tracked === tracked);
-        if (index < 0) return;
-        this.queue.splice(index, 1);
-        const error = new Error('Lane waited for memory and timed out');
-        tracked.info.waitingForMemory = false;
-        this.fail(tracked, error);
-        reject(error);
-        this.wake();
-      }, this.timeoutMs());
-      timeout.unref?.();
-      this.queue.push({ tracked, resolve, reject, timeout });
-      this.ensurePoll();
-      this.wake();
+  ) {
+    this.gate = new SharedMemoryGate({
+      canStart: (ticket) => this.canStart(ticket.tracked),
+      timeoutMs,
+      stoppedBeforeAdmission: () => new Error('Lane stopped before memory admission'),
+      stoppedWhileWaiting: () => new Error('Lane stopped while waiting for memory'),
+      timeoutError: () => new Error('Lane waited for memory and timed out'),
     });
   }
 
-  wake(fromPoll = false): void {
-    for (let index = this.queue.length - 1; index >= 0; index--) {
-      const entry = this.queue[index];
-      if (entry.tracked.info.status === 'starting') continue;
-      this.queue.splice(index, 1);
-      clearTimeout(entry.timeout);
-      entry.tracked.info.waitingForMemory = false;
-      entry.reject(new Error('Lane stopped while waiting for memory'));
+  wait(tracked: TrackedAgent, force = false): Promise<void> {
+    let ticket = this.tickets.get(tracked);
+    if (!ticket) {
+      ticket = new LaneMemoryAdmissionTicket(tracked, this.fail);
+      this.tickets.set(tracked, ticket);
     }
-    if (this.released && (this.released.info.status === 'starting' || !fromPoll)) {
-      this.stopPollIfEmpty();
-      return;
-    }
-    this.released = undefined;
-    const head = this.queue[0];
-    if (head && this.canStart(head.tracked)) {
-      this.queue.shift();
-      clearTimeout(head.timeout);
-      head.tracked.info.waitingForMemory = false;
-      this.released = head.tracked;
-      head.resolve();
-    }
-    this.stopPollIfEmpty();
+    return this.gate.wait(ticket, force);
   }
 
-  private stopPollIfEmpty(): void {
-    if (this.queue.length === 0 && this.poll) {
-      clearInterval(this.poll);
-      this.poll = undefined;
-    }
+  wake(fromPoll = false): void {
+    this.gate.wake(fromPoll);
   }
 
   private canStart(tracked: TrackedAgent): boolean {
     const threshold = this.minFreeMemoryGb();
     return threshold === 0 || this.freeMemory() >= threshold * 1024 ** 3 ||
       !this.otherActiveLanes(tracked);
-  }
-
-  private ensurePoll(): void {
-    if (this.poll) return;
-    this.poll = setInterval(() => this.wake(true), 1000);
-    this.poll.unref?.();
   }
 }
