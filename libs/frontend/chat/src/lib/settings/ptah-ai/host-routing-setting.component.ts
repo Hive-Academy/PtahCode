@@ -4,6 +4,7 @@ import {
   OnInit,
   computed,
   inject,
+  output,
   signal,
 } from '@angular/core';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
@@ -14,7 +15,7 @@ import {
   settingNotSavedMessage,
 } from '../feedback/settings-save-feedback.service';
 import { parseDecisionModelStatus } from '../providers/decision-model-row.view';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahAlertComponent, PtahButtonDirective, PtahSettingRowComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
@@ -47,7 +48,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 @Component({
   selector: 'ptah-host-routing-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahAlertComponent, PtahSettingRowComponent, PtahSkeletonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -57,13 +58,8 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
       data-testid="host-routing-setting"
     >
       <div class="border-b border-base-content/10 pb-2">
-        <div class="flex items-center justify-between gap-3">
-          <label
-            id="host-routing-heading"
-            for="host-routing-toggle"
-            class="text-base font-semibold text-base-content"
-            >{{ label }}</label
-          >
+        <span id="host-routing-heading" hidden>{{ label }}</span>
+        <ptah-setting-row [label]="label" controlId="host-routing-toggle">
           @if (load() === 'ready') {
             <input
               id="host-routing-toggle"
@@ -78,7 +74,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
               data-testid="host-routing-toggle"
             />
           }
-        </div>
+        </ptah-setting-row>
         <p
           id="host-routing-help"
           class="mt-0.5 text-xs text-base-content-muted"
@@ -91,20 +87,14 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 
       @switch (load()) {
         @case ('loading') {
-          <p
-            class="text-xs text-base-content-muted"
-            role="status"
-            aria-live="polite"
-            data-testid="host-routing-loading"
-          >
+          <ptah-skeleton shape="line" />
+          <p class="text-xs text-base-content-muted" role="status" aria-live="polite" data-testid="host-routing-loading">
             Loading routing suggestions…
           </p>
         }
         @case ('error') {
-          <div role="alert" class="space-y-1.5">
-            <p data-testid="host-routing-load-error">
-              The setting could not be read.
-            </p>
+          <div class="space-y-1.5">
+            <ptah-alert tone="error" compact data-testid="host-routing-load-error">The setting could not be read.</ptah-alert>
             <button
               type="button"
               ptahButton
@@ -128,6 +118,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           }
         }
       }
+      <button type="button" ptahButton variant="ghost" (click)="openMatrix.emit()">See decision matrix</button>
     </section>
   `,
   styles: `
@@ -137,6 +128,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
   `,
 })
 export class HostRoutingSettingComponent implements OnInit {
+  readonly openMatrix = output<void>();
   private readonly rpc = inject(ClaudeRpcService);
   private readonly logger = inject(LoggingService);
   protected readonly feedback = inject(SettingsSaveFeedbackService);

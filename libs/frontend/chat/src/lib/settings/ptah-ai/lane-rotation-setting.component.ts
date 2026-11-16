@@ -14,7 +14,7 @@ import {
   settingNotConfirmedMessage,
   settingNotSavedMessage,
 } from '../feedback/settings-save-feedback.service';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSettingRowComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
@@ -40,7 +40,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 @Component({
   selector: 'ptah-lane-rotation-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahSettingRowComponent, PtahSkeletonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -50,13 +50,8 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
       data-testid="lane-rotation-setting"
     >
       <div class="border-b border-base-content/10 pb-2">
-        <div class="flex items-center justify-between gap-3">
-          <label
-            id="lane-rotation-heading"
-            for="lane-rotation-toggle"
-            class="text-base font-semibold text-base-content"
-            >{{ label }}</label
-          >
+        <span id="lane-rotation-heading" hidden>{{ label }}</span>
+        <ptah-setting-row [label]="label" controlId="lane-rotation-toggle">
           @if (load() === 'ready' && stored() !== null) {
             <input
               id="lane-rotation-toggle"
@@ -70,7 +65,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
               data-testid="lane-rotation-toggle"
             />
           }
-        </div>
+        </ptah-setting-row>
         <p
           id="lane-rotation-help"
           class="mt-0.5 text-xs text-base-content-muted"
@@ -102,6 +97,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 
       @switch (load()) {
         @case ('loading') {
+          <ptah-skeleton shape="line" />
           <p
             class="text-xs text-base-content-muted"
             role="status"

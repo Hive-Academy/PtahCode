@@ -335,9 +335,7 @@
     "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
-    "<dynamic>": 2,
-    "btn": 1,
-    "btn-sm": 1
+    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/advanced/codex-sandbox-setting.component.ts": {
     "<dynamic>": 2,

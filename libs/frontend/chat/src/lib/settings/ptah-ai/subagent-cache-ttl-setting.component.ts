@@ -17,7 +17,7 @@ import {
   type SettingsSaveResult,
 } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective, PtahSelectDirective } from '@ptah-extension/ui';
+import { PtahAlertComponent, PtahButtonDirective, PtahFieldComponent, PtahFormSectionComponent, PtahSelectDirective } from '@ptah-extension/ui';
 
 const ENV_VAR = 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL';
 const LABEL = 'Subagent prompt-cache TTL';
@@ -45,39 +45,21 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
 @Component({
   selector: 'ptah-subagent-cache-ttl-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahSelectDirective],
+  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahSelectDirective, PtahAlertComponent, PtahFieldComponent, PtahFormSectionComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section
-      data-glass-surface="content"
-      class="flex flex-col gap-[var(--ptah-gap-heading)] text-sm text-base-content"
+    <section data-glass-surface="content">
+    <ptah-form-section
+      heading="Subagent prompt cache"
+      description="How long the prompt cache of subagent requests stays valid."
       aria-labelledby="subagent-cache-ttl-heading"
       data-testid="subagent-cache-ttl-setting"
     >
-      <div
-        section-header
-        class="border-b border-base-content/10 pb-[var(--ptah-space-2)]"
-      >
-        <h3
-          id="subagent-cache-ttl-heading"
-          class="text-base font-semibold text-base-content"
-        >
-          Subagent prompt cache
-        </h3>
-        <p class="mt-[var(--ptah-gap-label)] text-xs text-base-content-muted">
-          How long the prompt cache of subagent requests stays valid.
-        </p>
-      </div>
-      <div class="flex min-h-12 flex-wrap items-center justify-between gap-[var(--ptah-space-3)]">
-        <label
-          for="subagent-cache-ttl"
-          class="text-sm font-medium text-base-content"
-          >Subagent prompt-cache TTL</label
-        >
+      <span id="subagent-cache-ttl-heading" hidden>Subagent prompt cache</span>
+      <ptah-field label="Subagent prompt-cache TTL" appearance="stacked">
         <select
           ptahSelect size="sm"
           id="subagent-cache-ttl"
-          class="w-full text-sm sm:w-80"
           [value]="shown() ?? ''"
           [ptahBusyDisabled]="saving() || needsRecheck() || feedback.saving()"
           [attr.aria-describedby]="
@@ -98,11 +80,10 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
             </option>
           }
         </select>
-      </div>
+      </ptah-field>
       @if (envNotice(); as notice) {
-        <p
+        <ptah-alert tone="info" compact
           id="subagent-cache-ttl-env"
-          class="rounded-md border border-info/30 bg-info/10 px-[var(--ptah-space-2)] py-[var(--ptah-space-1)] text-xs text-base-content"
           data-testid="subagent-cache-ttl-env"
         >
           @if (notice.invalid) {
@@ -112,7 +93,7 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
             <code class="font-mono">{{ envVar }}={{ notice.value }}</code> is
             set in your environment and takes precedence.
           }
-        </p>
+        </ptah-alert>
       }
       @if (saved() === null) {
         <p
@@ -134,6 +115,7 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
           Check saved setting again
         </button>
       }
+    </ptah-form-section>
     </section>
   `,
   styles: `
