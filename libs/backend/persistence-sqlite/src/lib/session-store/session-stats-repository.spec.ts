@@ -71,6 +71,28 @@ const contribution: SessionUsageContribution = {
 };
 
 describe('SessionStatsRepository', () => {
+  it('retries unresolved repository rows after seven days and clears the marker on a path change', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      await repository.recordUsage({ ...contribution, workspaceKey: '/work/a', worktreePath: '/work/a' });
+      const first = await repository.getUnresolvedRepositoryUsagePage(0);
+      expect(first).toHaveLength(1);
+      await repository.markRepositoryUsageUnresolved([first[0].rowId]);
+      expect(await repository.getUnresolvedRepositoryUsagePage(0)).toHaveLength(0);
+      store.raw.prepare('UPDATE session_usage_turns SET repository_backfill_attempted_at_ms = ?')
+        .run(Date.now() - 8 * 86_400_000);
+      expect(await repository.getUnresolvedRepositoryUsagePage(0)).toHaveLength(1);
+      await repository.markRepositoryUsageUnresolved([first[0].rowId]);
+      await repository.recordUsage({ ...contribution, workspaceKey: '/work/a', worktreePath: '/work/b', revision: 2 });
+      expect(await repository.getUnresolvedRepositoryUsagePage(0)).toEqual([
+        expect.objectContaining({ rowId: first[0].rowId, workspacePath: '/work/b' }),
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
   it('demotes replay-first Codex usage and updates its separate session aggregate', async () => {
     const store = openTestStore();
     try {

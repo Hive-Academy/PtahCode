@@ -11,6 +11,7 @@ export const REPOSITORY_IDENTITY_BACKFILL_TOKENS = {
 } as const;
 
 const PAGE_SIZE = 200;
+const TRANSIENT_FAILURE = Symbol('transient-repository-identity-failure');
 
 @injectable()
 export class RepositoryIdentityBackfillService {
@@ -24,11 +25,12 @@ export class RepositoryIdentityBackfillService {
     let updated = 0;
     let unresolved = 0;
     let cursor = 0;
-    const cache = new Map<string, { repositoryId: string; worktreePath: string } | null>();
+    const cache = new Map<string, { repositoryId: string; worktreePath: string } | null | typeof TRANSIENT_FAILURE>();
     while (true) {
       const page = await this.repository.getUnresolvedRepositoryUsagePage(cursor, PAGE_SIZE);
       if (page.length === 0) return { updated, unresolved };
       const resolved: { rowId: number; repositoryId: string; worktreePath: string }[] = [];
+      const failed: number[] = [];
       for (const row of page) {
         cursor = row.rowId;
         if (!row.workspacePath) { unresolved++; continue; }
@@ -38,15 +40,17 @@ export class RepositoryIdentityBackfillService {
             if (identity === null) this.logger.debug('[UsageBackfill] Repository identity unresolved');
             cache.set(row.workspacePath, identity);
           } catch (error: unknown) {
-            this.logger.debug('[UsageBackfill] Repository identity unresolved', { reason: error instanceof Error ? error.name : 'unknown' });
-            cache.set(row.workspacePath, null);
+            this.logger.debug('[UsageBackfill] Repository identity probe failed', { reason: error instanceof Error ? error.name : 'unknown' });
+            cache.set(row.workspacePath, TRANSIENT_FAILURE);
           }
         }
         const identity = cache.get(row.workspacePath);
+        if (identity === TRANSIENT_FAILURE) { unresolved++; continue; }
         if (identity) resolved.push({ rowId: row.rowId, ...identity });
-        else unresolved++;
+        else { unresolved++; failed.push(row.rowId); }
       }
       updated += await this.repository.setRepositoryUsageIdentity(resolved);
+      await this.repository.markRepositoryUsageUnresolved(failed);
       if (page.length < PAGE_SIZE) return { updated, unresolved };
       await new Promise<void>((resolve) => setImmediate(resolve));
     }

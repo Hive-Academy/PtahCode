@@ -44,6 +44,36 @@ describe('usage reconciliation', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
 
+  it('skips the after-pass hook on an unchanged follow-up scan', async () => {
+    const { service, collector } = fixture();
+    const hook = jest.fn().mockResolvedValue(undefined);
+    service.setAfterPass(hook);
+    service.start();
+    await flush();
+    expect(hook).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(15 * 60_000);
+    await flush();
+    expect(collector.collect).toHaveBeenCalledTimes(2);
+    expect(hook).toHaveBeenCalledTimes(1);
+    service.stop();
+  });
+
+  it('revisits live ledger rows on a quiet hourly pass', async () => {
+    const { service } = fixture();
+    const hook = jest.fn().mockResolvedValue(undefined);
+    service.setAfterPass(hook);
+    service.start();
+    await flush();
+    expect(hook).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(15 * 60_000);
+    await flush();
+    expect(hook).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(60 * 60_000);
+    await flush();
+    expect(hook).toHaveBeenCalledTimes(2);
+    service.stop();
+  });
+
   it('defers startup and scans once after a producer trigger debounce', async () => {
     const { service, collector, store } = fixture();
     expect(collector.collect).not.toHaveBeenCalled();
