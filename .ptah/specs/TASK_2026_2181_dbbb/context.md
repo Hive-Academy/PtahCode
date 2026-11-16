@@ -55,10 +55,10 @@ Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processe
 | B2.2: bounded CLI detection on spawn | TASK_2026_2181_dbbb | #1343 | merged |
 | B2.3a: `starting` status in all readers | TASK_2026_2181_dbbb | #1354 | merged |
 | B2.3b: synchronous admission and reply deadline | TASK_2026_2181_dbbb | #1367 | merged |
-| B2.4 to B2.6: status, wait and read polish, renderer, agent text | TASK_2026_2181_dbbb | #1375 | in review |
+| B2.4 to B2.6: status, wait and read polish, renderer, agent text | TASK_2026_2181_dbbb | #1375 | merged |
 | B3: completion signals for external MCP clients | TASK_2026_2181_dbbb | none | not started |
 | P2: Nx daemon and worktree cost measurement | none | none | not started |
-| P3: process tree stop on Windows | none | none | not started |
+| P3: process tree stop on Windows (batch 1: review runner and probes) | TASK_2026_2231_816c | #1378 | in review |
 | P4: memory-based concurrency limit for lanes and sessions | none | none | plan owed to the user before code |
 | P5: host load (task index rebuild storm, `provider:getPlanLimits`) | none | none | not started |
 

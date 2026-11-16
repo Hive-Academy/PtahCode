@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2231_816c
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Stop the full process tree on Windows (P3 batch 1)
 depends_on: []
