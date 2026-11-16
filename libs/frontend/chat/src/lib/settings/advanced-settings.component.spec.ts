@@ -196,11 +196,11 @@ describe('AdvancedSettingsComponent', () => {
 
   it('ends with a closed Fine-tuning disclosure whose deferred groups render the four upkeep groups (TASK_2026_658)', async () => {
     await render(false);
-    const details = element.querySelector<HTMLDetailsElement>(
+      const details = element.querySelector<HTMLElement>(
       '[data-testid="fine-tuning-details"]',
     );
     expect(details?.parentElement?.getAttribute('data-glass-surface')).toBe('content');
-    expect(details?.open).toBe(false);
+      expect(details?.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
     expect(
       element.querySelector('[data-testid="fine-tuning-summary"]')?.textContent,
     ).toContain('Fine-tuning');

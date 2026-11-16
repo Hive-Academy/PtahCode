@@ -26,238 +26,204 @@ import {
   ElementRef,
   Injector,
   afterNextRender,
-  effect,
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import {
-  LucideAngularModule,
-  Plug,
-  AlertCircle,
-} from 'lucide-angular';
+import { LucideAngularModule, Plug, AlertCircle } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type { McpExternalCallerAccess } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahCheckboxDirective,
+  PtahInputDirective,
+  PtahSelectDirective,
+  PtahFormSectionComponent,
+  PtahSettingRowComponent,
+  PtahFieldComponent,
+  PtahInlineConfirmComponent,
+  PtahAlertComponent,
+  PtahStatusComponent,
+} from '@ptah-extension/ui';
 
 export const COULD_NOT_SAVE_PORT = 'Could not save the MCP port.';
-export const COULD_NOT_UPDATE_NAMESPACES = 'Could not update MCP tool namespaces.';
-export const COULD_NOT_UPDATE_LOCALHOST = 'Could not update browser localhost setting.';
-export const COULD_NOT_UPDATE_EXTERNAL_CALLER_ACCESS = 'Could not update external MCP caller access.';
-export const COULD_NOT_LOAD_MCP_CONFIG = 'Could not load the MCP and browser settings.';
+export const COULD_NOT_UPDATE_NAMESPACES =
+  'Could not update MCP tool namespaces.';
+export const COULD_NOT_UPDATE_LOCALHOST =
+  'Could not update browser localhost setting.';
+export const COULD_NOT_UPDATE_EXTERNAL_CALLER_ACCESS =
+  'Could not update external MCP caller access.';
+export const COULD_NOT_LOAD_MCP_CONFIG =
+  'Could not load the MCP and browser settings.';
 
 @Component({
   selector: 'ptah-mcp-port-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, FormsModule, PtahButtonDirective, PtahCheckboxDirective, PtahInputDirective, PtahSelectDirective],
+  imports: [
+    SettingsBusyDisabledDirective,
+    LucideAngularModule,
+    FormsModule,
+    PtahButtonDirective,
+    PtahCheckboxDirective,
+    PtahInputDirective,
+    PtahSelectDirective,
+    PtahFormSectionComponent,
+    PtahSettingRowComponent,
+    PtahFieldComponent,
+    PtahInlineConfirmComponent,
+    PtahAlertComponent,
+    PtahStatusComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <section
-      class="border-b border-base-content/10 pb-7"
-      aria-labelledby="mcp-browser-heading"
-      data-glass-surface="content"
-    >
-      <div class="flex items-center gap-1.5 mb-2">
-        <lucide-angular [img]="PlugIcon" class="w-4 h-4 text-secondary shrink-0" aria-hidden="true" />
-        <h2 id="mcp-browser-heading" class="text-xs font-bold uppercase tracking-wider text-base-content">
-          MCP & Browser
-        </h2>
-      </div>
-      <p class="text-xs text-base-content-muted mb-3">
-        Configure Ptah's local MCP server port and tool namespaces for AI agents.
-      </p>
-
-      @if (loadState() === 'failed') {
-        <div
-          role="alert"
-          class="flex items-center gap-1.5 mb-3 rounded border border-error/40 p-2 text-xs text-base-content"
-          data-testid="mcp-config-load-error"
+    <section data-glass-surface="content" aria-labelledby="mcp-browser-heading">
+      <h2 id="mcp-browser-heading" class="sr-only">MCP &amp; Browser</h2>
+      <ptah-form-section
+        heading="MCP & Browser"
+        description="Configure Ptah's local MCP server port and tool namespaces for AI agents."
+        [level]="2"
+        [divider]="true"
+      >
+        @if (loadState() === 'failed') {
+          <ptah-alert
+            tone="error"
+            role="alert"
+            live="assertive"
+            data-testid="mcp-config-load-error"
+            >{{ loadErrorMessage }}
+            <button
+              alertAction
+              type="button"
+              ptahButton
+              variant="ghost"
+              size="xs"
+              (click)="loadConfig()"
+              data-testid="mcp-config-load-retry"
+            >
+              Retry
+            </button></ptah-alert
+          >
+        }
+        <ptah-field
+          label="MCP port"
+          appearance="stacked"
+          class="w-full max-w-sm"
+          hint="Default 51820. Range 1024 to 65535. Changes apply after the MCP server restarts."
+          size="sm"
+          [error]="validationError() ?? saveError()"
+          errorRole="alert"
+          errorTestId="mcp-port-validation-error"
         >
-          <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
-          <span class="flex-1">{{ loadErrorMessage }}</span>
-          <button type="button" ptahButton variant="ghost" size="xs" (click)="loadConfig()"
-            data-testid="mcp-config-load-retry">
-            Retry
+          <input
+            id="mcp-port-input"
+            type="number"
+            ptahInput
+            size="xs"
+            class="w-28"
+            [ngModel]="portValue()"
+            (ngModelChange)="onPortInput($event)"
+            [min]="1024"
+            [max]="65535"
+            placeholder="51820"
+            [disabled]="saving() || !loaded()"
+            aria-label="MCP server port"
+            data-testid="mcp-port-input"
+          />
+          <button
+            ptahFieldTrailing
+            type="button"
+            ptahButton
+            variant="secondary"
+            size="xs"
+            (click)="savePort()"
+            [busy]="saving()"
+            [disabled]="!loaded() || !isDirty() || validationError() !== null"
+            aria-label="Save MCP port"
+            data-testid="mcp-port-save-btn"
+          >
+            Save
           </button>
-        </div>
-      }
-
-      <!-- Port policy bar (P3, row A30) -->
-      <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
-        <label for="mcp-port-input" class="font-bold text-base-content whitespace-nowrap">
-          MCP port
-        </label>
-        <input
-          id="mcp-port-input"
-          type="number"
-          ptahInput size="xs" class="w-28 text-base-content"
-          [ngModel]="portValue()"
-          (ngModelChange)="onPortInput($event)"
-          [min]="1024"
-          [max]="65535"
-          placeholder="51820"
-          [disabled]="saving() || !loaded()"
-          aria-label="MCP server port"
-          data-testid="mcp-port-input"
-        />
-        <button
-          type="button"
-          ptahButton variant="primary" size="xs"
-          (click)="savePort()"
-          [busy]="saving()"
-          [disabled]="!loaded() || !isDirty() || validationError() !== null"
-          aria-label="Save MCP port"
-          data-testid="mcp-port-save-btn"
+        </ptah-field>
+        <ptah-field
+          label="External MCP callers"
+          appearance="stacked"
+          class="w-full max-w-sm"
+          size="sm"
         >
-          Save
-        </button>
-        <span class="text-xs text-base-content-muted whitespace-nowrap">
-          Default 51820 · Range 1024–65535 · Changes apply after the MCP server restarts.
-        </span>
-      </div>
-
-      <!-- Validation error, or the fixed save failure (which does not block a retry) -->
-      @if (validationError() ?? saveError(); as err) {
-        <div
-          role="alert"
-          class="flex items-center gap-1 mb-3 text-xs text-base-content"
-          data-testid="mcp-port-validation-error"
+          <select
+            id="mcp-external-caller-access"
+            ptahSelect
+            size="xs"
+            [ngModel]="externalCallerAccess()"
+            (ngModelChange)="onExternalCallerAccessChange($event)"
+            [ptahBusyDisabled]="saving() || !loaded()"
+            data-testid="mcp-external-caller-access"
+          >
+            <option value="read-only">Read-only (recommended)</option>
+            <option value="full">Full access</option>
+          </select>
+          <p
+            ptahFieldAfterError
+            data-testid="mcp-external-caller-access-hint"
+            [class.text-warning]="externalCallerAccess() === 'full'"
+            [class.text-base-content-muted]="
+              externalCallerAccess() === 'read-only'
+            "
+          >
+            External tools stay read-only until you select Full access. Full
+            access lets other local tools call privileged Ptah tools, including
+            execute_code, but cannot cross workspaces.
+          </p>
+        </ptah-field>
+        @for (ns of namespaceOptions; track ns.id) {
+          <ptah-setting-row [label]="ns.label" [hint]="ns.description">
+            <span meta
+              ><ptah-status status="online" [label]="ns.toolCount + ' tools'"
+            /></span>
+            <input
+              type="checkbox"
+              ptahToggle
+              [checked]="isNamespaceEnabled(ns.id)"
+              (change)="toggleNamespace(ns.id)"
+              [ptahBusyDisabled]="saving() || !loaded()"
+              [attr.aria-label]="'Toggle ' + ns.label + ' namespace'"
+              [attr.data-testid]="'settings-toggle-mcp-namespace-' + ns.id"
+            />
+          </ptah-setting-row>
+        }
+        <ptah-setting-row
+          label="Allow localhost"
+          hint="Allow browser tools to navigate to localhost URLs (dev servers, local APIs). Enables AI agents to access local network services."
         >
-          <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
-          <span>{{ err }}</span>
-        </div>
-      }
-
-      <!-- External MCP caller access -->
-      <div class="mb-3 text-xs">
-        <label for="mcp-external-caller-access" class="block font-bold text-base-content">
-          External MCP callers
-        </label>
-        <select
-          id="mcp-external-caller-access"
-          ptahSelect size="xs" class="mt-1 w-full max-w-xs text-base-content"
-          [ngModel]="externalCallerAccess()"
-          (ngModelChange)="onExternalCallerAccessChange($event)"
-          [ptahBusyDisabled]="saving() || !loaded()"
-          data-testid="mcp-external-caller-access"
-        >
-          <option value="read-only">Read-only (recommended)</option>
-          <option value="full">Full access</option>
-        </select>
-        <p
-          class="mt-1 text-xs"
-          [class.text-warning]="externalCallerAccess() === 'full'"
-          [class.text-base-content-muted]="externalCallerAccess() === 'read-only'"
-          data-testid="mcp-external-caller-access-hint"
-        >
-          External tools stay read-only until you select Full access. Full access lets other local tools call privileged Ptah tools, including execute_code, but cannot cross workspaces.
-        </p>
-      </div>
-
-      <!-- Namespaces & browser matrix (P4, rows A31-A32) -->
-      <div class="overflow-x-auto">
-        <table class="table table-xs">
-          <thead>
-            <tr>
-              <th class="w-10" scope="col">On</th>
-              <th scope="col">Namespace</th>
-              <th scope="col">Tools</th>
-              <th scope="col">Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (ns of namespaceOptions; track ns.id) {
-              <tr>
-                <td class="align-top">
-                  <input
-                    type="checkbox"
-                    ptahCheckbox size="xs"
-                    [checked]="isNamespaceEnabled(ns.id)"
-                    (change)="toggleNamespace(ns.id)"
-                    [ptahBusyDisabled]="saving() || !loaded()"
-                    [attr.aria-label]="'Toggle ' + ns.label + ' namespace'"
-                    [attr.data-testid]="'settings-toggle-mcp-namespace-' + ns.id"
-                  />
-                </td>
-                <td class="align-top font-medium text-xs text-base-content whitespace-nowrap">
-                  {{ ns.label }}
-                </td>
-                <td class="align-top">
-                  <span class="badge badge-outline badge-xs text-base-content">
-                    {{ ns.toolCount }}
-                  </span>
-                </td>
-                <td class="align-top text-xs text-base-content-muted">
-                  {{ ns.description }}
-                </td>
-              </tr>
-            }
-
-            <!-- Allow localhost row (A32, folded from browser-settings) -->
-            <tr>
-              <td class="align-top">
-                <input
-                  #allowLocalhostToggle
-                  type="checkbox"
-                  ptahCheckbox size="xs"
-                  [checked]="browserAllowLocalhost()"
-                  (change)="onAllowLocalhostToggle($event)"
-                  [disabled]="saving() || !loaded() || confirmingAllowLocalhost()"
-                  aria-label="Allow localhost access for browser tools"
-                  data-testid="settings-toggle-browser-allow-localhost"
-                />
-              </td>
-              <td class="align-top font-medium text-xs text-base-content whitespace-nowrap">
-                Allow localhost
-              </td>
-              <td class="align-top text-xs text-base-content-muted">
-                —
-              </td>
-              <td class="align-top text-xs text-base-content">
-                <p class="text-base-content-muted">
-                  Allow browser tools to navigate to localhost URLs (dev servers, local APIs). Enables AI agents to access local network services.
-                </p>
-                @if (confirmingAllowLocalhost()) {
-                  <div
-                    role="group"
-                    aria-label="Confirm allow localhost access"
-                    class="mt-2 space-y-2 rounded border border-base-300 p-2 text-left"
-                    data-testid="allow-localhost-confirm"
-                    (keydown.escape)="cancelEnableLocalhost($event)"
-                  >
-                    <p class="text-xs text-base-content">
-                      Enabling localhost access lets AI agents reach local network services, development servers, and local APIs on this machine.
-                    </p>
-                    <div class="flex gap-2">
-                      <button
-                        type="button"
-                        class="btn btn-outline btn-xs border-error text-base-content"
-                        [ptahBusyDisabled]="saving()"
-                        (click)="confirmEnableLocalhost()"
-                        data-testid="allow-localhost-confirm-btn"
-                      >
-                        Allow localhost
-                      </button>
-                      <button
-                        #allowLocalhostCancel
-                        type="button"
-                        ptahButton variant="ghost" size="xs"
-                        [disabled]="saving()"
-                        (click)="cancelEnableLocalhost()"
-                        data-testid="allow-localhost-cancel-btn"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                }
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+          <input
+            #allowLocalhostToggle
+            type="checkbox"
+            ptahToggle
+            [checked]="browserAllowLocalhost()"
+            (change)="onAllowLocalhostToggle($event)"
+            [disabled]="saving() || !loaded() || confirmingAllowLocalhost()"
+            aria-label="Allow localhost access for browser tools"
+            data-testid="settings-toggle-browser-allow-localhost"
+          />
+        </ptah-setting-row>
+        @if (confirmingAllowLocalhost()) {
+          <ptah-inline-confirm
+            ariaLabel="Confirm allow localhost access"
+            message="Enable localhost access?"
+            detail="AI agents can reach local network services, development servers, and local APIs on this machine."
+            confirmLabel="Allow localhost"
+            tone="danger"
+            [busy]="saving()"
+            confirmTestId="allow-localhost-confirm-btn"
+            cancelTestId="allow-localhost-cancel-btn"
+            data-testid="allow-localhost-confirm"
+            (confirm)="confirmEnableLocalhost()"
+            (cancelled)="cancelEnableLocalhost()"
+          />
+        }
+      </ptah-form-section>
     </section>
   `,
   styles: `
@@ -270,13 +236,9 @@ export class McpPortConfigComponent implements OnInit {
   private readonly rpcService = inject(ClaudeRpcService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly injector = inject(Injector);
-  private readonly allowLocalhostToggle = viewChild<ElementRef<HTMLInputElement>>('allowLocalhostToggle');
-  private readonly allowLocalhostCancel = viewChild<ElementRef<HTMLButtonElement>>('allowLocalhostCancel');
-
-  constructor() {
-    // P8: the opened confirm takes focus on Cancel, so Esc reaches it.
-    effect(() => this.allowLocalhostCancel()?.nativeElement.focus());
-  }
+  private readonly allowLocalhostToggle = viewChild<
+    ElementRef<HTMLInputElement>
+  >('allowLocalhostToggle');
 
   readonly PlugIcon = Plug;
   readonly AlertCircleIcon = AlertCircle;
@@ -298,7 +260,8 @@ export class McpPortConfigComponent implements OnInit {
 
   /** External MCP caller access. Read-only is the default when the setting is absent. */
   readonly externalCallerAccess = signal<McpExternalCallerAccess>('read-only');
-  readonly savedExternalCallerAccess = signal<McpExternalCallerAccess>('read-only');
+  readonly savedExternalCallerAccess =
+    signal<McpExternalCallerAccess>('read-only');
 
   /** Namespace toggle state */
   readonly disabledNamespaces = signal<string[]>([]);
@@ -551,7 +514,8 @@ export class McpPortConfigComponent implements OnInit {
   onAllowLocalhostToggle(event?: Event): void {
     if (this.saving() || !this.loaded()) {
       if (event?.target) {
-        (event.target as HTMLInputElement).checked = this.browserAllowLocalhost();
+        (event.target as HTMLInputElement).checked =
+          this.browserAllowLocalhost();
       }
       return;
     }
@@ -575,7 +539,9 @@ export class McpPortConfigComponent implements OnInit {
     if (!this.confirmingAllowLocalhost()) return;
     event?.stopPropagation();
     this.confirmingAllowLocalhost.set(false);
-    afterNextRender(() => this.allowLocalhostToggle()?.nativeElement.focus(), { injector: this.injector });
+    afterNextRender(() => this.allowLocalhostToggle()?.nativeElement.focus(), {
+      injector: this.injector,
+    });
   }
 
   async confirmEnableLocalhost(): Promise<void> {

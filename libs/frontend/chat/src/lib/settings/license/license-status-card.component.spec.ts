@@ -116,6 +116,13 @@ describe('LicenseStatusCardComponent', () => {
     return input as HTMLInputElement;
   }
 
+  it('F3: the empty membership key entry uses the floating label', async () => {
+    await render(status());
+    await openKeyPopover();
+    const field = element.querySelector('[data-testid="membership-key-popover"] [data-ptah-field]');
+    expect(field?.getAttribute('data-appearance')).toBe('floating');
+  });
+
   /** Types the given key into the popover and clicks Activate. */
   async function activate(key: string): Promise<void> {
     component.licenseKeyInput.set(key);
@@ -134,12 +141,12 @@ describe('LicenseStatusCardComponent', () => {
   it('shows the community card with Community and Active badges and one primary action', async () => {
     await render(status());
     expect(element.textContent).toContain('Membership & data');
-    expect(element.firstElementChild?.classList).toContain('border-base-content/10');
-    expect(element.firstElementChild?.classList).not.toContain('card');
-    expect(element.firstElementChild?.getAttribute('data-glass-surface')).toBe('content');
-    const badges = Array.from(element.querySelectorAll('.badge')).map(
-      (badge) => badge.textContent?.trim(),
-    );
+    const section = element.querySelector('ptah-form-section');
+    expect(section?.getAttribute('data-glass-surface')).toBe('content');
+    expect(element.querySelector('.card')).toBeNull();
+    const badges = Array.from(
+      element.querySelectorAll('[data-ptah-badge], ptah-status'),
+    ).map((badge) => badge.textContent?.trim());
     expect(badges).toContain('Community');
     expect(badges).toContain('Active');
     expect(badges).not.toContain('Builder');
@@ -178,7 +185,7 @@ describe('LicenseStatusCardComponent', () => {
   it('shows the key-not-active alert with verbatim copy and opens the popover from it', async () => {
     await render(status({ valid: false, reason: 'no_license' }));
     const alert = element.querySelector('[data-testid="membership-key-alert"]');
-    expect(alert?.getAttribute('role')).toBe('alert');
+    expect(alert?.querySelector('[role="alert"]')).not.toBeNull();
     expect(alert?.textContent).toContain('Membership Key Not Active');
     expect(alert?.textContent).toContain(
       "Ptah's local features remain available either way.",
@@ -245,7 +252,7 @@ describe('LicenseStatusCardComponent', () => {
     }
   });
 
-  it('lets Esc through without closing while the log-out write is in flight (FM-2)', async () => {
+  it('keeps the confirm open on Esc while the log-out write is in flight (FM-2)', async () => {
     rpc.call.mockReturnValue(new Promise(() => undefined));
     await render(premiumStatus);
     document.body.appendChild(element);
@@ -261,7 +268,8 @@ describe('LicenseStatusCardComponent', () => {
         ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       fixture.detectChanges();
       expect(element.querySelector('[data-testid="logout-confirm"]')).not.toBeNull();
-      expect(outer).toHaveBeenCalledTimes(1);
+      // The shared inline confirm always stops Esc at its own group.
+      expect(outer).not.toHaveBeenCalled();
     } finally {
       document.body.removeEventListener('keydown', outer);
       element.remove();

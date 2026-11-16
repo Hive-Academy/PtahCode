@@ -328,12 +328,6 @@
     "btn-square": 1,
     "btn-xs": 6
   },
-  "libs/frontend/chat/src/lib/settings/advanced-settings.component.ts": {
-    "<dynamic>": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
-  },
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
     "<dynamic>": 2,
     "btn": 1,
@@ -350,58 +344,10 @@
     "btn-sm": 1,
     "btn-warning": 1
   },
-  "libs/frontend/chat/src/lib/settings/license/license-status-card.component.ts": {
-    "badge": 4,
-    "badge-outline": 4,
-    "badge-sm": 4,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-editor.component.ts": {
-    "btn": 4,
-    "btn-outline": 4,
-    "btn-xs": 4
-  },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-notices.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-parity-section.component.ts": {
     "btn": 1,
     "btn-outline": 1,
     "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/settings/pro-features/agent-behaviour-section.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-sm": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-primary": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts": {
-    "skeleton": 3
-  },
-  "libs/frontend/chat/src/lib/settings/pro-features/mcp-port-config.component.ts": {
-    "badge": 1,
-    "badge-outline": 1,
-    "badge-xs": 1,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/settings/pro-features/vscode-lm-config.component.ts": {
-    "badge": 3,
-    "badge-outline": 3,
-    "badge-xs": 3
   },
   "libs/frontend/chat/src/lib/settings/providers/accounts/account-detail-view.component.ts": {
     "<dynamic>": 5,
