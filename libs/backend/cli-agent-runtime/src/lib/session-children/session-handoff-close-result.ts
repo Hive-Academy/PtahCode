@@ -24,7 +24,7 @@ const terminal = new Set(['unsent-input', 'queued-message', 'permission-prompt',
 export function handoffCloseAckResult(result: HandoffCloseResult): SessionHandoffAckResult {
   switch (result.kind) {
     case 'closed': return { status: 'closed', reason: 'predecessor closed' };
-    case 'absent': return { status: 'refused', reason: 'Predecessor tab was not found in any window; inspect the sessions list and close it manually if present.' };
+    case 'absent': return { status: 'already-closed', reason: 'Predecessor tab was not found; the goal of the acknowledgement (close the predecessor) is already achieved.' };
     case 'timeout': return { status: 'retryable-failure', reason: 'No renderer answered the predecessor close request before the timeout; retry after the window responds.' };
     case 'broadcast-failed': return { status: 'retryable-failure', reason: 'Could not broadcast the predecessor close request; retry after the window reconnects.' };
     case 'blocked': return { status: terminal.has(result.code) ? 'refused' : 'retryable-failure', reason: reasons[result.code] };
