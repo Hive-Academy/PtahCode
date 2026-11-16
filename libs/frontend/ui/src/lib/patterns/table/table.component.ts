@@ -14,7 +14,7 @@ import {
   host: {
     class: 'ptah-table block',
     'data-ptah-pattern': 'table',
-    '[attr.data-density]': 'density()',
+    '[attr.data-density]': 'density() ?? null',
   },
   template: `
     <div class="overflow-x-auto">
@@ -30,29 +30,29 @@ import {
   `,
   styles: [
     `
-      .ptah-table {
-        width: 100%;
-        color: var(--ptah-btn-secondary-fg);
-      }
-      .ptah-table-grid {
+      .ptah-table[data-density] .ptah-table-grid {
         width: 100%;
         border-collapse: collapse;
       }
-      .ptah-table-grid th,
-      .ptah-table-grid td {
-        height: 3.25rem;
+      .ptah-table[data-density] .ptah-table-grid thead th {
+        height: 2.25rem;
         border-bottom: var(--ptah-border-width) solid
           var(--ptah-card-border-faint);
       }
-      .ptah-table[data-density='compact'] .ptah-table-grid th,
-      .ptah-table[data-density='compact'] .ptah-table-grid td {
-        min-height: 2.75rem;
+      .ptah-table[data-density] .ptah-table-grid tbody th,
+      .ptah-table[data-density] .ptah-table-grid tbody td {
+        height: 3rem;
+        border-bottom: var(--ptah-border-width) solid
+          var(--ptah-card-border-faint);
+      }
+      .ptah-table[data-density='compact'] .ptah-table-grid tbody th,
+      .ptah-table[data-density='compact'] .ptah-table-grid tbody td {
         height: 2.75rem;
       }
-      .ptah-table-grid thead {
+      .ptah-table[data-density] .ptah-table-grid thead {
         background: var(--ptah-card-bg-subtle);
       }
-      .ptah-table-grid tbody tr:hover {
+      .ptah-table[data-density] .ptah-table-grid tbody tr:hover {
         background: var(--ptah-card-bg-subtle);
       }
       .ptah-table-control-cell {
@@ -91,7 +91,7 @@ import {
 export class PtahTableComponent {
   readonly label = input.required<string>();
   readonly size = input<'xs' | 'sm'>('xs');
-  readonly density = input<'default' | 'compact'>('default');
+  readonly density = input<'default' | 'compact'>();
 }
 
 @Directive({

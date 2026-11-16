@@ -64,7 +64,7 @@ export function ptahCellLabel(column: string, row: string): string {
   `,
   styles: [
     `
-      .ptah-table-row-title {
+      :host {
         display: inline-flex;
         flex-direction: column;
         gap: var(--ptah-gap-inline);

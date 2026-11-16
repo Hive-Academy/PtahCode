@@ -29,7 +29,7 @@ import {
 })
 class HostComponent {
   readonly size = signal<'xs' | 'sm'>('xs');
-  readonly density = signal<'default' | 'compact'>('default');
+  readonly density = signal<'default' | 'compact' | undefined>(undefined);
 }
 
 @Component({
@@ -98,10 +98,13 @@ describe('PtahTableComponent', () => {
     }
   });
 
-  it('defaults to standard density and accepts compact density', () => {
+  it('sets no density by default and accepts default and compact density', () => {
     const table = fixture.nativeElement.querySelector(
       'ptah-table',
     ) as HTMLElement;
+    expect(table.hasAttribute('data-density')).toBe(false);
+    fixture.componentInstance.density.set('default');
+    fixture.detectChanges();
     expect(table.getAttribute('data-density')).toBe('default');
     fixture.componentInstance.density.set('compact');
     fixture.detectChanges();
