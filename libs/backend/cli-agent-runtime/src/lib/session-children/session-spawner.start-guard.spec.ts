@@ -32,6 +32,137 @@ function listed(h: Harness) {
   return result.children;
 }
 
+describe('SessionSpawnerService memory admission', () => {
+  let freeMemory = 0;
+  beforeEach(() => { freeMemory = 0; });
+
+  function queuedHarness() {
+    const h = makeHarness({ memoryProbe: () => freeMemory, config: {
+      'agentOrchestration.minFreeMemoryGb': 1,
+      'agentOrchestration.spawnQueueTimeoutMs': 60_000,
+      'agentSessions.maxConcurrent': 1,
+    } });
+    return h;
+  }
+
+  it('returns the same queued child on a retried branch', async () => {
+    const h = queuedHarness();
+    const first = await h.spawner.start(h.request());
+    const retry = await h.spawner.start(h.request());
+    expect(retry).toMatchObject({ ok: true, alreadyExists: true, child: { status: 'queued' } });
+    if (!first.ok || !retry.ok) throw new Error('expected queued child');
+    expect(retry.child.childSessionId).toBe(first.child.childSessionId);
+    h.spawner.dispose();
+  });
+
+  it('does not start after stop wins the dequeue microtask race', async () => {
+    const h = queuedHarness();
+    const first = await h.spawner.start(h.request());
+    if (!first.ok) throw new Error('expected queued child');
+    freeMemory = 2 * 1024 ** 3;
+    jest.advanceTimersByTime(1000);
+    const stopped = h.spawner.stop({ callerSessionId: PARENT, childSessionId: first.child.childSessionId });
+    await stopped;
+    await flush();
+    expect(h.provisioner.create).not.toHaveBeenCalled();
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    expect(await h.spawner.start(h.request({ branch: 'feat/other' }))).toMatchObject({ ok: true });
+    h.spawner.dispose();
+  });
+
+  it('records a model refusal after memory admission', async () => {
+    const h = queuedHarness();
+    h.host.resolveChildModel.mockResolvedValueOnce({ accepted: false, code: 'invalid-model', message: 'missing model' });
+    const first = await h.spawner.start(h.request({ model: 'missing' }));
+    if (!first.ok) throw new Error('expected queued child');
+    freeMemory = 2 * 1024 ** 3;
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(listed(h)[0].status).toBe('failed');
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    h.spawner.dispose();
+  });
+
+  it('queues, holds the cap, and starts after memory becomes available', async () => {
+    const h = queuedHarness();
+    const start = await h.spawner.start(h.request());
+    expect(start.ok && start.child.status).toBe('queued');
+    if (!start.ok) throw new Error('expected queued child');
+    const created = jest.fn();
+    h.spawner.onQueuedStart(start.child.childSessionId, created);
+    expect(h.provisioner.create).not.toHaveBeenCalled();
+    expect(listed(h)[0].status).toBe('queued');
+    expect(await h.spawner.start(h.request({ branch: 'feat/other' }))).toMatchObject({ ok: false, refusal: 'cap-reached' });
+    freeMemory = 2 * 1024 ** 3;
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(h.provisioner.create).toHaveBeenCalledTimes(1);
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(listed(h)[0].status).not.toBe('queued');
+    h.spawner.dispose();
+  });
+
+  it('times out visibly, signals once, and releases its cap', async () => {
+    const h = queuedHarness();
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    expect(listed(h)[0].status).toBe('timed-out');
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    const next = await h.spawner.start(h.request({ branch: 'feat/other' }));
+    expect(next.ok && next.child.status).toBe('queued');
+    h.spawner.dispose();
+  });
+
+  it('records provisioning failure after admission and signals once', async () => {
+    const h = queuedHarness();
+    h.provisioner.create.mockRejectedValueOnce(new Error('disk full'));
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    freeMemory = 2 * 1024 ** 3;
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(listed(h)[0].status).toBe('failed');
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    h.spawner.dispose();
+  });
+
+  it('cancels a queued admission once, including a repeated stop', async () => {
+    const h = queuedHarness();
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    const query = { callerSessionId: PARENT, childSessionId: start.child.childSessionId };
+    expect(await h.spawner.stop(query)).toMatchObject({ ok: true, alreadyEnded: false });
+    expect(await h.spawner.stop(query)).toMatchObject({ ok: true, alreadyEnded: true });
+    await flush();
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+    h.spawner.dispose();
+  });
+
+  it('cancels a queued admission when its handoff predecessor ends', async () => {
+    const h = queuedHarness();
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    h.sessionEnd.notifyAll({ sessionId: PARENT, workspaceRoot: start.child.worktreePath, cause: 'normal' });
+    await flush();
+    expect(listed(h)[0].status).toBe('stopped');
+    expect(h.registry.get(start.child.childSessionId)?.endReason).toContain('parent session ended');
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+    h.spawner.dispose();
+  });
+
+  it('clears admission timers on service disposal', async () => {
+    const h = queuedHarness();
+    await h.spawner.start(h.request());
+    h.spawner.dispose();
+    await flush();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+});
+
 /** A `provisioner.create` that waits until the test releases it. */
 function holdProvisioner(h: Harness): () => void {
   let release: () => void = () => undefined;

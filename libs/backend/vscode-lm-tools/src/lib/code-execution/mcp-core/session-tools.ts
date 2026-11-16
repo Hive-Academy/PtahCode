@@ -65,7 +65,7 @@ const HELD_NOTE =
  * the host keeps starting the child, so a retry would start a second one.
  */
 export const SESSION_START_TIMEOUT_NOTE =
-  'On a timeout, call ptah_session_status first: a starting child on your ' +
+  'On a timeout, call ptah_session_status first: a queued or starting child on your ' +
   'branch is your start; do not start again.';
 
 /** Build the `ptah_session_start` tool definition. */
@@ -75,19 +75,17 @@ export function buildSessionStartTool(): MCPToolDefinition {
     description:
       'Start a child chat session on a new branch and worktree; attachToSessionId ' +
       '(same taskId and branch) shares one, kept on failure. phase and skills are ' +
-      'optional. It opens in ' +
-      "the user's tab and runs unattended: file edits and allowlisted Bash " +
-      'run without asking; other actions wait briefly in that tab, then are ' +
-      'denied. ' +
-      'Steer with ptah_session_send. The child reports with ptah_agent_report; ' +
-      'completion is pushed here after each turn. A task starting with "/" ' +
-      'runs as a slash command. Children cannot start sessions. Succession ' +
-      'sets handed-off status with succeededBy. The user owns merge, PR and ' +
-      'cleanup; branch and worktree remain. No permission, path or parent ' +
-      'argument: ' +
-      'you are the parent. Refusals include a code. Use a smaller model or ' +
-      'lower effort for coordination, Git or CI; use a strong model for unknown ' +
-      'causes, security or architecture. Omit both for defaults. ' +
+      'optional. Low memory queues the start; stop cancels ' +
+      "it. It opens in the user's tab and runs unattended: file edits " +
+      'and allowlisted Bash run without asking; other actions wait in that ' +
+      'tab, then are denied. Steer with ptah_session_send. The child reports with ' +
+      'ptah_agent_report; completion is pushed here after each turn. A task starting ' +
+      'with "/" is a slash command. Children cannot start sessions. Succession ' +
+      'sets handed-off status with succeededBy. The user owns merge, PR and cleanup; ' +
+      'branch and worktree remain. No permission, path or parent argument: you are ' +
+      'the parent. Refusals include a code. Use a small model or low effort ' +
+      'for coordination, Git or CI; a strong model for unknown causes, security ' +
+      'or design. ' +
       SESSION_START_TIMEOUT_NOTE +
       ' ' +
       HELD_NOTE,
@@ -148,10 +146,9 @@ export function buildSessionStopTool(): MCPToolDefinition {
   return {
     name: SESSION_STOP_TOOL_NAME,
     description:
-      'Stop one of your child sessions. On an id that already handed off it ' +
-      'refuses and names the successor unless followHandoff: true; the reply ' +
-      'names the session that was stopped. Its tab, its transcript, its ' +
-      'worktree and its branch remain; nothing is merged, pushed or removed. ' +
+      'Stop one of your child sessions (cancels queued admission if not yet started). ' +
+      'On a handed-off id it refuses and names the successor unless followHandoff: true. ' +
+      'Tab, transcript, worktree and branch remain. ' +
       HELD_NOTE,
     inputSchema: inputSchemaOf(SessionStopArgsSchema),
   };

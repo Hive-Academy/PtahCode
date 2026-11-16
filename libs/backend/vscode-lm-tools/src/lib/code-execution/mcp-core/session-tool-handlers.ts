@@ -19,6 +19,7 @@
  * no reply or log line here interpolates an argument value.
  */
 import type { z } from 'zod';
+import { formatQueuedChild, formatStartingChild, queuedStartText } from './session-queued-format';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   EFFORT_LEVELS,
@@ -244,22 +245,10 @@ function formatFinishedShort(child: SessionChildSnapshot): string {
   return `- ${child.label} (${child.childSessionId}): ${formatOutcome(outcomeOf(child))}`;
 }
 
-/**
- * A start still in progress (status `starting`): its id, branch and start
- * time, so a parent whose start call timed out finds its own start here.
- */
-function formatStarting(child: SessionChildSnapshot): string {
-  const lines = [
-    `- ${child.label} (${child.childSessionId}): starting`,
-    `  branch ${child.branch}; started ${child.startedAt}`,
-  ];
-  if (child.worktreePath) lines.push(`  worktree ${child.worktreePath}`);
-  if (child.taskId) lines.push(`  task ${child.taskId}`);
-  return lines.join('\n');
-}
-
 function formatChild(child: SessionChildSnapshot): string {
-  if (child.status === 'starting') return formatStarting(child);
+  if (child.status === 'queued')
+    return formatQueuedChild(child);
+  if (child.status === 'starting') return formatStartingChild(child);
   const sources = childSettingSources(child);
   const successor = child.outcome?.successorId ?? child.succeededBy;
   const lines = [
@@ -343,6 +332,7 @@ export function sessionStartReply(
 ): SessionToolReply {
   if (result.ok) {
     const child = result.child;
+    if (child.status === 'queued') return { isError: false, text: queuedStartText(child) };
     if (result.alreadyExists) {
       return {
         isError: false,
@@ -504,6 +494,11 @@ export function sessionStopReply(
     };
   }
   const child = outcome.child;
+  if (child.endReason?.startsWith('cancelled before start')) {
+    return { isError: false, text: outcome.alreadyEnded
+      ? `Session ${child.childSessionId} was already cancelled before start.`
+      : `Session ${child.childSessionId} cancelled before start. No worktree or tab was created.` };
+  }
   const followedSuffix = outcome.followed
     ? ` (followed the handoff from ${outcome.requestedSessionId})`
     : '';

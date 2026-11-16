@@ -1610,6 +1610,20 @@ describe('LaneCompletionNotifier.signalSessionChild', () => {
   });
 
   describe('envelope', () => {
+    it.each([
+      ['cancelled before start: parent session ended', 'unverified'],
+      ['memory wait timed out before start: waited for memory', 'failed'],
+      ['provisioning failed before start: disk full', 'failed'],
+    ] as const)('describes a child that never started: %s', (reason, verdict) => {
+      const envelope = buildSessionChildCompletionEnvelope(
+        subject({ neverStartedReason: reason }), settle({ status: 'failed' }), [],
+      );
+      expect(envelope.verdict).toBe(verdict);
+      expect(envelope.text).toContain(`did not start: ${reason}`);
+      expect(envelope.text).toContain('No worktree or child tab was created.');
+      expect(envelope.text).not.toContain('ptah_session_read');
+      expect(envelope.text).not.toContain('holds a slot');
+    });
     it('renders the full envelope (snapshot)', () => {
       const envelope = buildSessionChildCompletionEnvelope(
         subject({

@@ -224,6 +224,22 @@ export class SessionChildRegistry {
     return this.pending.delete(childSessionId);
   }
 
+  /** Preserve an admission that ended before provisioning for status/history. */
+  finishPending(childSessionId: string, status: SessionChildTerminalStatus, reason: string,
+    fallback?: SessionChildRecord): SessionChildRecord | undefined {
+    const current = this.records.get(childSessionId);
+    if (current) return this.markEnded(childSessionId, status, reason);
+    const pending = this.pending.get(childSessionId) ?? fallback;
+    if (!pending) return undefined;
+    this.pending.delete(childSessionId);
+    const ended: SessionChildRecord = { ...pending, waitingForMemory: false, terminalStatus: status,
+      endedAt: new Date().toISOString(), endReason: reason };
+    this.records.set(childSessionId, ended);
+    this.endedOrder.push(childSessionId);
+    this.pruneEnded();
+    return ended;
+  }
+
   /** Pending starts whose recorded parent tab id or SDK id is in `parentIds`. */
   pendingOf(
     parentIds: readonly (string | undefined)[],

@@ -41,6 +41,9 @@ import {
 import {
   HELD_COMPLETIONS_HEADING,
   handleSessionToolCall,
+  sessionStartReply,
+  sessionStatusReply,
+  sessionStopReply,
 } from './session-tool-handlers';
 import {
   DEFAULT_TOOL_RESULT_BUDGET_CHARS,
@@ -73,7 +76,7 @@ describe('session tool definitions', () => {
 
   it('tells a parent whose start timed out to check status before starting again', () => {
     expect(buildSessionStartTool().description).toContain(
-      'On a timeout, call ptah_session_status first: a starting child on ' +
+      'On a timeout, call ptah_session_status first: a queued or starting child on ' +
         'your branch is your start; do not start again.',
     );
   });
@@ -413,6 +416,24 @@ const CHILD: SessionChildSnapshot = {
   reportsDelivered: 0,
   reportsRefused: 0,
 };
+
+describe('queued child replies', () => {
+  const queued: SessionChildSnapshot = { ...CHILD, status: 'queued', waitingForMemory: true };
+
+  it('reports admission without claiming a tab or worktree exists', () => {
+    expect(sessionStartReply({ ok: true, child: queued }).text).toContain('Queued child session');
+    expect(sessionStatusReply({ ok: true, children: [queued] }).text).toContain('queued for memory');
+    expect(sessionStartReply({ ok: true, child: queued }).text).toContain('no worktree or tab yet');
+  });
+
+  it('reports queued cancellation and repeated stop', () => {
+    const child: SessionChildSnapshot = { ...queued, status: 'stopped',
+      endReason: 'cancelled before start' };
+    const result = { ok: true as const, child, requestedSessionId: child.childSessionId, followed: false };
+    expect(sessionStopReply({ ...result, alreadyEnded: false }).text).toContain('No worktree or tab was created');
+    expect(sessionStopReply({ ...result, alreadyEnded: true }).text).toContain('already cancelled');
+  });
+});
 
 const HELD: SessionChildCompletionEnvelope = {
   childSessionId: 'c-1',

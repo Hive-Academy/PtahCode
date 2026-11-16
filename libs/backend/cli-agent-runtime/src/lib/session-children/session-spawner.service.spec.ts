@@ -109,6 +109,7 @@ export function makeHarness(
     closer?: { close: jest.Mock };
     /** `null` builds the spawner with no recorder bound (VS Code). */
     recorder?: { recordAgentStartedSession: jest.Mock } | null;
+    memoryProbe?: () => number;
   } = {},
 ) {
   const logger = createMockLogger() as unknown as Logger;
@@ -310,6 +311,7 @@ export function makeHarness(
       sessionBudget,
       logger,
       ('router' in overrides ? overrides.router : null) as never,
+      options.memoryProbe ?? null,
     );
 
   const spawner = build();

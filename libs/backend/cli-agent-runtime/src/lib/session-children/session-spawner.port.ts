@@ -27,6 +27,7 @@ import type {
 
 export type SessionChildStatus =
   | 'starting'
+  | 'queued'
   | 'working'
   | 'awaiting-permission'
   | 'waiting'
@@ -95,6 +96,8 @@ export interface SessionChildSnapshot {
   /** Absolute deliverable paths, resolved at start. */
   readonly deliverables: readonly string[];
   readonly status: SessionChildStatus;
+  /** True while memory admission is waiting; no worktree or tab exists yet. */
+  readonly waitingForMemory?: boolean;
   readonly pendingPermission?: SessionChildPendingPermission;
   readonly subagentPtahTools: 'available' | 'unavailable';
   /** ISO timestamp, stamped after `git worktree add` returned. Fixed for the child's life. */
@@ -373,6 +376,8 @@ export interface SessionChildReadResult {
 /** The child as the completion notifier needs to see it. */
 export interface SessionChildCompletionSubject {
   readonly childSessionId: string;
+  /** Terminal admission before a child tab or worktree was created. */
+  readonly neverStartedReason?: string;
   readonly succeededBy?: string;
   /** Held messages the successor never received (read from the successor). */
   readonly undeliveredHeldMessages?: readonly {
@@ -447,6 +452,8 @@ export type SessionChildCompletionDelivery =
     };
 
 export interface ISessionSpawner {
+  /** Notify once when a queued admission actually creates a child worktree. */
+  onQueuedStart?(childSessionId: string, listener: (child: SessionChildSnapshot) => void): void;
   canStart(callerSessionId: string | undefined): SessionChildEligibility;
   start(request: SessionChildStartRequest): Promise<SessionChildStartResult>;
   /** Replace a live child with a successor in its existing worktree. */

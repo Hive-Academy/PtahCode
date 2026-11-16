@@ -18,6 +18,7 @@ const CHILD = {
 
 function fakeSpawner(): jest.Mocked<ISessionSpawner> {
   return {
+    onQueuedStart: jest.fn(),
     canStart: jest.fn().mockReturnValue({ ok: true }),
     start: jest.fn().mockResolvedValue({ ok: true, child: CHILD }),
     succeed: jest.fn().mockResolvedValue({ ok: true, successor: CHILD, adoptedLanes: [], tabOpened: true }),
@@ -168,6 +169,17 @@ describe('buildSessionNamespace', () => {
     });
     await h.session.start({ task: 't', branch: 'b' });
     expect(h.onWorktreeChanged).not.toHaveBeenCalled();
+
+    h.spawner.start.mockResolvedValueOnce({ ok: true, child: { ...CHILD, status: 'queued' } });
+    await h.session.start({ task: 't', branch: 'b' });
+    expect(h.onWorktreeChanged).not.toHaveBeenCalled();
+    expect(h.spawner.onQueuedStart).toHaveBeenCalledWith('c-1', expect.any(Function));
+    if (!h.spawner.onQueuedStart) throw new Error('queued listener unavailable');
+    const listener = jest.mocked(h.spawner.onQueuedStart).mock.calls[0][1];
+    listener({ ...CHILD, status: 'working' });
+    expect(h.onWorktreeChanged).toHaveBeenCalledWith({
+      action: 'created', worktreePath: CHILD.worktreePath, branch: CHILD.branch,
+    });
   });
 
   it('looks the spawner up on every call (lazy)', async () => {
