@@ -694,6 +694,32 @@ describe('TaskIndexService watcher debounce', () => {
     service.dispose();
   });
 
+  it('uses a full scan when the persisted excluded count has no loaded rows', async () => {
+    const fs = new FakeFs();
+    seedTwoValidOneExcluded(fs);
+    const { service, scanner, store } = buildServiceWithParts(fs);
+    await service.ensureStarted(ROOT);
+    expect((await service.list(ROOT)).excludedCount).toBe(1);
+    // A new process: the SQLite store has the persisted count but no rows.
+    const original = store.getMeta.bind(store);
+    const meta = jest.spyOn(store, 'getMeta').mockImplementation((root) => {
+      const persisted = original(root);
+      return persisted ? { ...persisted, excluded: [] } : null;
+    });
+    const full = jest.spyOn(scanner, 'scan');
+    const folders = jest.spyOn(scanner, 'scanFolders');
+    fs.setFile(carrier('TASK_2026_001'), validTask('TASK_2026_001').replace('backlog', 'in_review'));
+    await service.applyFolderChange(ROOT, 'TASK_2026_001');
+    meta.mockRestore();
+    expect(folders).not.toHaveBeenCalled();
+    expect(full).toHaveBeenCalledTimes(1);
+    const result = await service.list(ROOT);
+    expect(result.excludedCount).toBe(1);
+    expect(result.excluded.map((row) => row.folderName)).toEqual(['TASK_2026_003']);
+    expect(result.tasks.find((task) => task.id === 'TASK_2026_001')?.status).toBe('in_review');
+    service.dispose();
+  });
+
   it('returns folder counts without reading the store after the write', async () => {
     const fs = new FakeFs();
     seedTwoValidOneExcluded(fs);

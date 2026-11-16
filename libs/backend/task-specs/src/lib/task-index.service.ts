@@ -853,7 +853,16 @@ export class TaskIndexService implements ITaskIndexNotifier {
     let stored: TaskSpecSummary[] = [];
     const canScanFolders = !forceFull && reason !== 'reindex' && folderNames.length > 0 && folderNames.length <= MAX_FOLDER_REBUILD &&
       folderNames.every(isSingleTaskPathSegment) && this.store.isReady();
-    const priorMeta = canScanFolders ? this.safeGetMeta(root) : null;
+    const metaRead = canScanFolders ? this.safeGetMeta(root) : null;
+    // The SQLite store persists only the excluded COUNT. After a restart its
+    // in-memory excluded rows are empty, so a folder update would overwrite the
+    // count from an empty baseline. Use a full scan until the rows match it.
+    const priorMeta = metaRead !== null && metaRead.excluded.length === metaRead.excludedCount ? metaRead : null;
+    if (metaRead !== null && priorMeta === null) {
+      this.logger.debug('[task-specs] folder rebuild needs a full scan: excluded rows not loaded', {
+        excludedCount: metaRead.excludedCount,
+      });
+    }
     if (priorMeta !== null) {
       try {
         folderScan = await this.scanner.scanFolders(root, folderNames);
