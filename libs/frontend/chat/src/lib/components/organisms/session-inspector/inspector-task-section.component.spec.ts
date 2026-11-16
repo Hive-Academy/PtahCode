@@ -193,7 +193,7 @@ describe('InspectorTaskSectionComponent', () => {
     expect(
       root
         .querySelector('ptah-meter [role="progressbar"]')
-        ?.getAttribute('aria-valuetext'),
+        ?.getAttribute('aria-label'),
     ).toBe('3 of 7 tasks complete');
     expect(root.textContent).toContain('3/7 tasks');
   });
