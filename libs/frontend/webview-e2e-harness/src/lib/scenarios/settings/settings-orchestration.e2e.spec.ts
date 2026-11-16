@@ -11,6 +11,8 @@
  * starts from the BRIEF baseline and every RPC a scene asserts was sent by that scene's own clicks.
  */
 import type { Locator, Page } from '@playwright/test';
+import { expandMatrixDetail } from './settings-matrix-detail';
+
 import { test, expect } from '../../test-fixtures';
 import {
   bootSettings,
@@ -52,7 +54,7 @@ const MODALS: readonly ModalCase[] = [
     name: 'tier-mapping modal',
     testid: 'cli-tier-mapping-modal',
     opener: (page) =>
-      page.locator(`[data-testid="cli-matrix-tiers-${GLM_ID}"]`),
+      page.locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`),
   },
 ];
 
@@ -67,14 +69,10 @@ const rolesDetails = (page: Page): Locator =>
 
 async function open(page: Page, modal: ModalCase): Promise<Locator> {
   const opener = modal.opener(page);
-  if (modal.testid !== 'cli-tier-mapping-modal' || (await opener.isVisible()))
-    await opener.click();
-  else {
-    await page.locator(`[data-testid="cli-matrix-more-${GLM_ID}"]`).click();
-    await page
-      .locator(`[data-testid="cli-matrix-more-tiers-${GLM_ID}"]`)
-      .click();
-  }
+  if (modal.testid === 'cli-tier-mapping-modal') {
+    await expandMatrixDetail(page, GLM_ID);
+    await page.locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`).click();
+  } else await opener.click();
   const dialog = dialogOf(page, modal.testid);
   await expect(dialog).toHaveAttribute('open', '');
   // showModal() moves focus into the dialog.
@@ -210,9 +208,10 @@ for (const host of HOSTS) {
       page,
     }) => {
       // V36-7: Edit sits in the row's "More actions" popover; focus returns to that trigger.
-      const more = page.locator(`[data-testid="cli-matrix-more-${GLM_ID}"]`);
+      await expandMatrixDetail(page, GLM_ID);
+      const more = page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`);
       await more.click();
-      await page.locator(`[data-testid="cli-matrix-edit-${GLM_ID}"]`).click();
+      await page.locator(`#lane-detail-${GLM_ID} [role="menuitem"]:text-is("Edit")`).click();
       const dialog = dialogOf(page, 'add-cli-instance-modal');
       await expect(dialog).toHaveAttribute('open', '');
       await expect(
@@ -237,7 +236,8 @@ for (const host of HOSTS) {
       page,
     }) => {
       const state = getFixtureState(page);
-      const cell = page.locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]');
+      await expandMatrixDetail(page, 'codex');
+      const cell = page.locator('#lane-detail-codex [data-popover-kind="model"]');
       await cell.click();
       const popover = page.locator('[data-testid="cli-matrix-popover"]');
       const search = popover.locator('input[role="combobox"]');
@@ -272,7 +272,9 @@ for (const host of HOSTS) {
     }) => {
       const state = getFixtureState(page);
       const codexCard = page.locator('[data-testid="cli-provider-card-codex"]');
-      const codex = codexCard.getByRole('checkbox', { name: 'Codex enabled' });
+      await expandMatrixDetail(page, 'codex');
+      const codexModel = page.locator('#lane-detail-codex');
+      const codex = codexCard.getByRole('switch', { name: 'Codex enabled' });
       await expect(codex).toBeChecked();
       let before = state.calls.length;
       await codex.click();
@@ -282,10 +284,10 @@ for (const host of HOSTS) {
       await expect(codex).not.toBeChecked();
       // A turned-off card keeps its model visible but disables editing.
       await expect(
-        codexCard.locator('[data-popover-kind="model"]'),
+        codexModel.locator('[data-popover-kind="model"]'),
       ).toBeDisabled();
       await expect(
-        codexCard.locator('[data-popover-kind="effort"]'),
+        codexModel.locator('[data-popover-kind="effort"]'),
       ).toBeDisabled();
       await toastUndo(page).click();
       await expectCall(page, before, 'agent:setConfig', {
@@ -293,7 +295,7 @@ for (const host of HOSTS) {
       });
       await expect(codex).toBeChecked();
       await visibleEnabled(
-        codexCard.locator('[data-popover-kind="model"]'),
+        codexModel.locator('[data-popover-kind="model"]'),
       );
       // A Ptah CLI instance's on/off is its own `enabled` field.
       const glm = page.locator(`[data-testid="cli-matrix-toggle-${GLM_ID}"]`);
@@ -368,12 +370,13 @@ for (const host of HOSTS) {
       page,
     }) => {
       await page.setViewportSize({ width: 1024, height: 768 });
-      await page.locator(`[data-testid="cli-matrix-more-${GLM_ID}"]`).click();
-      const menu = page.locator('[data-testid="cli-matrix-more-menu"]');
+      await expandMatrixDetail(page, GLM_ID);
+      await page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`).click();
+      const menu = page.locator(`#lane-detail-${GLM_ID} [role="menu"]`);
       await expect(menu).toBeVisible();
       const panel = await menu.boundingBox();
       if (!panel) throw new Error('No More actions panel box');
-      // Wide box: Edit and Delete. Narrow box: Tiers and Test move in first (hidden, not removed, when wide).
+      // The detail menu has four items for an instance; viewport rules can hide two.
       const items = menu.locator('button:visible');
       expect([2, 4]).toContain(await items.count());
       for (const item of await items.all()) {
@@ -394,10 +397,10 @@ for (const host of HOSTS) {
       // A column: Delete sits under Edit, not beside it.
       const [edit, remove] = [
         await menu
-          .locator(`[data-testid="cli-matrix-edit-${GLM_ID}"]`)
+          .getByRole('menuitem', { name: 'Edit' })
           .boundingBox(),
         await menu
-          .locator(`[data-testid="cli-matrix-delete-${GLM_ID}"]`)
+          .getByRole('menuitem', { name: 'Delete' })
           .boundingBox(),
       ];
       expect(remove?.y ?? 0).toBeGreaterThan(edit?.y ?? 0);
@@ -495,7 +498,7 @@ for (const host of HOSTS) {
     });
 
 
-    test('Cursor key (Batch 36d.b): save, then remove; the row returns to the collapsed Uninstalled group and focus lands on its toggle', async ({
+    test('Cursor key (Batch 36d.b): save, then remove; the row moves within the table, the detail and popover stay open, and Esc returns focus to the credentials trigger', async ({
       page,
       fixtureServer,
     }) => {
@@ -505,36 +508,38 @@ for (const host of HOSTS) {
         host,
         cursorKeyStoreOverrides(page),
       );
-      const toggle = page.locator(
-        '[data-testid="cli-matrix-uninstalled-toggle"]',
+      const expander = page.locator(
+        '[data-testid="cli-provider-card-cursor"] button[aria-label="Details for Cursor"]',
       );
-      const uninstalled = page.locator(
-        '[data-testid="cli-matrix-uninstalled"]',
+      const detail = page.locator(
+        '#lane-detail-cursor',
       );
       const popover = page.locator('[data-testid="cursor-credential-popover"]');
       const key = popover.locator('[data-testid="cursor-credential-key"]');
-      // Save a key from the Uninstalled row: the row moves to the installed group.
-      await toggle.click();
-      await uninstalled
-        .locator('[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]')
+      // Save moves Cursor above uninstalled rows while its detail stays open.
+      await expandMatrixDetail(page, 'cursor');
+      await detail
+        .locator('[data-popover-kind="credentials"]')
         .click();
       await expect(key).toBeFocused();
       await key.fill('crsr_e2e_secret_value');
       await popover.locator('[data-testid="cursor-credential-save"]').click();
       await expect(toastMessage(page)).toHaveText('Key stored, not verified.');
       const installedTrigger = page.locator(
-        '[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]',
+        '#lane-detail-cursor [data-popover-kind="credentials"]',
       );
       await expect(installedTrigger).toBeVisible();
+      await expect(expander).toHaveAttribute('aria-expanded', 'true');
+      await expect(detail.locator('[data-testid="cursor-credential-popover"]')).toBeVisible();
+      await expect.poll(() => popover.evaluate((node) => node.contains(document.activeElement))).toBe(true);
       await expect(
         popover.locator('[data-testid="cursor-credential-status"]'),
       ).toHaveText('Set');
       await page.keyboard.press('Escape');
       await expect(popover).toHaveCount(0);
       await expect(installedTrigger).toBeFocused();
-      // Collapse the Uninstalled group, then remove the key from the installed row.
-      await toggle.click();
-      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      // Remove moves Cursor back below installed rows while its detail stays open.
+      await expect(expander).toHaveAttribute('aria-expanded', 'true');
       await installedTrigger.click();
       await popover.locator('[data-testid="cursor-credential-remove"]').click();
       await expect(
@@ -544,26 +549,26 @@ for (const host of HOSTS) {
         .locator('[data-testid="cursor-credential-remove-confirm-button"]')
         .click();
       await expect(toastMessage(page)).toHaveText('Stored key removed.');
-      // The row moved into the collapsed group; the open popover keeps it shown, with focus inside.
+      // The row now reports Not installed; the open popover keeps focus inside.
       await expect(
-        uninstalled.locator('[data-testid="cursor-credential-popover"]'),
+        detail.locator('[data-testid="cursor-credential-popover"]'),
       ).toBeVisible();
       await expect
         .poll(() =>
           popover.evaluate((node) => node.contains(document.activeElement)),
         )
         .toBe(true);
-      // Esc closes it: the group collapses again, the row leaves the DOM, and focus lands on the toggle, not body.
+      // Esc closes the popover and restores focus to the credentials trigger.
       await page.keyboard.press('Escape');
       await expect(popover).toHaveCount(0);
-      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-      await expect(
-        page.locator('[data-testid="cli-provider-card-cursor"]'),
-      ).toHaveCount(0);
-      await expect(toggle).toBeFocused();
-      // Esc on the toggle closes nothing else: the tab stays as it is.
+      await expect(expander).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.locator('[data-testid="cli-provider-card-cursor"]')).toBeVisible();
+      await expect(page.locator('[data-testid="cli-provider-card-cursor"]')).toContainText('Needs API key');
+      await expect(page.locator('[data-testid="cli-provider-card-cursor"]')).toHaveAttribute('data-state', 'muted');
+      await expect(installedTrigger).toBeFocused();
+      // A second Esc changes nothing: the table stays visible.
       await page.keyboard.press('Escape');
-      await expect(toggle).toBeFocused();
+      await expect(installedTrigger).toBeFocused();
       await expect(page.locator('[data-testid="cli-matrix"]')).toBeVisible();
     });
 
@@ -577,11 +582,9 @@ for (const host of HOSTS) {
         host,
         cursorKeyStoreOverrides(page, { failCursorSave: true }),
       );
-      await page
-        .locator('[data-testid="cli-matrix-uninstalled-toggle"]')
-        .click();
+      await expandMatrixDetail(page, 'cursor');
       const trigger = page.locator(
-        '[data-testid="cli-provider-card-cursor"] [data-popover-kind="credentials"]',
+        '#lane-detail-cursor [data-popover-kind="credentials"]',
       );
       await trigger.click();
       const popover = page.locator('[data-testid="cursor-credential-popover"]');

@@ -20,6 +20,7 @@ import {
   PtahInputDirective,
 } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import { savePreferredAgentOrder as saveSharedPreferredAgentOrder } from './preferred-agent-order-save';
 import { cliMatrixRows } from './cli-matrix-rows';
 import {
   LaneOrderListComponent,
@@ -533,25 +534,8 @@ export class AgentOrchestrationConfigComponent {
     movedId,
     direction,
   }: LaneOrderMove): Promise<void> {
-    const context = this.state.reviewContext();
-    if (!context || !this.canReorder()) return;
-    const previous = [
-      ...(this.state.orchestration().data?.preferredAgentOrder ?? []),
-    ];
-    await this.feedback.save({
-      label: 'preferred agent order',
-      scope: SAVE_SCOPE,
-      write: () =>
-        this.state.saveSettings(
-          { orchestration: { preferredAgentOrder: order } },
-          context,
-        ),
-      undo: () =>
-        this.state.saveSettings(
-          { orchestration: { preferredAgentOrder: previous } },
-          context,
-        ),
-    });
+    if (!this.canReorder()) return;
+    await saveSharedPreferredAgentOrder(this.state, this.feedback, order);
     // A popover closed while the save ran has no list: focus stays where Esc put it.
     this.orderList()?.settled(movedId, direction);
   }

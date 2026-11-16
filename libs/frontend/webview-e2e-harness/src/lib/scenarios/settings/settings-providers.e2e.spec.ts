@@ -9,6 +9,7 @@
  * Batch 28b, the compact searchable control):
  */
 import { test, expect } from '../../test-fixtures';
+import { expandMatrixDetail } from './settings-matrix-detail';
 import {
   bootSettings,
   getFixtureState,
@@ -60,6 +61,7 @@ for (const host of HOSTS) {
 
     if (host === 'electron') {
       test('Codex settings opens the OpenAI Codex Credentials drawer', async ({ page }) => {
+        await expandMatrixDetail(page, 'codex');
         await page.getByRole('button', { name: 'Codex settings' }).click();
         await expect(page.locator('[data-testid="connection-drawer-title"]')).toContainText('OpenAI Codex');
         await expect(page.getByRole('tab', { name: 'Credentials' })).toHaveAttribute('aria-selected', 'true');

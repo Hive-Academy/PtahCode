@@ -7,6 +7,7 @@ import {
 } from '@ptah-extension/ui';
 
 export type CliProviderInfoKind = 'info' | 'capabilities' | 'permission' | 'install';
+export type CliProviderOpenKind = 'info' | 'capabilities' | 'model' | 'effort' | 'permission' | 'credentials' | 'install';
 
 @Component({
   selector: 'ptah-cli-provider-card-popovers', standalone: true,
