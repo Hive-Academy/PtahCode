@@ -6,3 +6,5 @@ export * from './editable-section/editable-section.component';
 export * from './disclosure/disclosure.component';
 export * from './settings-layout/settings-layout.component';
 export * from './table/table.component';
+export * from './setting-row/setting-row.component';
+export * from './inline-confirm/inline-confirm.component';
