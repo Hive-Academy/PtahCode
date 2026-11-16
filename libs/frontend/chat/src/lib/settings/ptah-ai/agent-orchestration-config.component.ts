@@ -69,16 +69,42 @@ const DETECT_FAILED =
     PtahInputDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styles: `
+    @container (max-width: 28rem) {
+      .policy-order-label { display: none; }
+    }
+    @container (max-width: 34rem) {
+      .policy-bar { gap: var(--ptah-gap-inline); }
+      .policy-max-input { width: 3.5rem; }
+      .policy-order-group { min-width: 12.5rem; }
+      .policy-redetect {
+        width: var(--ptah-control-h-sm);
+        min-width: var(--ptah-control-h-sm);
+        padding-inline: 0 !important;
+      }
+      .policy-redetect-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+    }
+  `,
   template: `
     <div
-      class="mb-2"
+      class="mb-2 [container-type:inline-size]"
       role="group"
       aria-label="Orchestration policy"
       data-testid="settings-section-orchestration-policy"
     >
       <!-- The policy groups wrap in a narrow box so the order strip can show whole chips. -->
       <div
-        class="flex flex-wrap items-center gap-2.5 text-xs text-base-content"
+        class="policy-bar flex flex-wrap items-center gap-2.5 text-xs text-base-content"
         data-testid="orchestration-policy-bar"
       >
         <div class="flex shrink-0 items-center gap-1.5">
@@ -96,7 +122,7 @@ const DETECT_FAILED =
             max="100"
             step="1"
             inputmode="numeric"
-            [class]="'w-16 px-1.5 text-center font-mono text-xs ' + focusRing"
+            [class]="'policy-max-input w-16 px-1.5 text-center font-mono text-xs ' + focusRing"
             [value]="maxConcurrent() ?? ''"
             [disabled]="maxConcurrent() === null || !canWrite()"
             aria-label="Max concurrent agents (1 to 100)"
@@ -105,9 +131,9 @@ const DETECT_FAILED =
           />
         </div>
 
-        <div class="relative flex min-w-64 flex-1 items-center gap-1.5">
+        <div class="policy-order-group relative flex min-w-52 flex-1 items-center gap-1.5">
           <span
-            class="shrink-0 whitespace-nowrap text-sm font-medium text-base-content-muted"
+            class="policy-order-label shrink-0 whitespace-nowrap text-sm font-medium text-base-content-muted"
             aria-hidden="true"
             >Order:</span
           >
@@ -251,10 +277,11 @@ const DETECT_FAILED =
         <button
           type="button"
           ptahButton
-          class="shrink-0"
+          class="policy-redetect shrink-0"
           [busy]="detecting()"
           (click)="redetectClis()"
           aria-label="Re-detect CLI agents"
+          title="Re-detect CLI agents"
           data-testid="policy-redetect"
         >
           @if (detecting()) {
@@ -262,14 +289,14 @@ const DETECT_FAILED =
               class="loading loading-spinner loading-xs"
               aria-hidden="true"
             ></span>
-            Detecting…
+            <span class="policy-redetect-label">Detecting…</span>
           } @else {
             <lucide-angular
               [img]="RefreshIcon"
               class="h-3 w-3"
               aria-hidden="true"
             />
-            Re-detect CLIs
+            <span class="policy-redetect-label">Re-detect CLIs</span>
           }
         </button>
       </div>

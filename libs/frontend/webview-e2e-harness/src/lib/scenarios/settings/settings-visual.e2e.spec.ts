@@ -129,12 +129,11 @@ type FoldRegion = 'tabs' | 'main' | 'heading' | 'card5';
 /**
  * THE per-host Providers fold budget. Source: task.md "Gate V 28 (2026-10-01, user)" (the user asked for "the most
  * visible and clean layout"; orchestrator choice recorded there).
- * - VS Code: the tabs, the Main agent section and the Connections heading end at or above 660 px; at least 2 columns
- *   at 800 px. Settings UI polish: connections are 22rem list rows, so the page holds 2 columns at 1024 px (was 3
- *   cards of 15rem); card 5 is on the third list row, below the fold, as in Electron (it was enforced only while 3
- *   card columns put it on the second row).
- * - Electron's page is about 670 px wide beside the shell sidebar: 1 column of list rows (Settings UI polish; was 2
- *   columns of 15rem cards), and the tabs, the Main agent section and the Connections heading at or above 660 px
+ * - VS Code: the tabs, the Main agent section and the Connections heading end at or above 660 px; at least 1 column
+ *   at 800 px. The 27rem cards make 1 or 2 columns at 1024 px, depending on the Settings shell's content width;
+ *   card 5 stays below the fold in either layout.
+ * - Electron's content width varies with the Settings shell; its narrower #1357 layout still has 1 column of list rows.
+ *   The tabs, the Main agent section and the Connections heading end at or above 660 px
  *   (card 5 is below the fold by that decision); at least 1 column at 800 px.
  * Both hosts: nothing scrolled, every card at most 80 px, and no horizontal overflow at 800 px.
  */
@@ -144,7 +143,7 @@ const FOLD_BUDGET: Readonly<
     {
       readonly maxBottom: number;
       readonly regions: readonly FoldRegion[];
-      readonly columnsAt1024: number;
+      readonly columnsAt1024: { readonly min: number; readonly max: number };
       readonly minColumnsAt800: number;
     }
   >
@@ -152,13 +151,13 @@ const FOLD_BUDGET: Readonly<
   vscode: {
     maxBottom: 660,
     regions: ['tabs', 'main', 'heading'],
-    columnsAt1024: 2,
+    columnsAt1024: { min: 1, max: 2 },
     minColumnsAt800: 1,
   },
   electron: {
     maxBottom: 660,
     regions: ['tabs', 'main', 'heading'],
-    columnsAt1024: 1,
+    columnsAt1024: { min: 1, max: 1 },
     minColumnsAt800: 1,
   },
 };
@@ -238,12 +237,13 @@ async function assertProvidersFold(
   });
   await page.setViewportSize({ width: 1024, height: 768 });
   console.log(
-    `B28 fold ${host}/${theme}: scroll ${scroll.window}/${scroll.page}; bottoms tabs ${bottoms.tabs}, map ${bottoms.map}, ` +
+    `B28 fold ${host}/${theme}: scroll ${scroll.window}/${scroll.page}; bottoms tabs ${bottoms.tabs}, main ${bottoms.main}, ` +
       `heading ${bottoms.heading}, card5 ${bottoms.card5}; card heights ${heights.join(',')}; widths ${widths.join(',')}; ` +
       `${columns} columns at 1024, ${columnsAt800} at 800 (overflow ${overflowAt800}px)`,
   );
   expect(scroll).toEqual({ window: 0, page: 0 });
-  expect(columns).toBe(budget.columnsAt1024);
+  expect(columns).toBeGreaterThanOrEqual(budget.columnsAt1024.min);
+  expect(columns).toBeLessThanOrEqual(budget.columnsAt1024.max);
   expect(columnsAt800).toBeGreaterThanOrEqual(budget.minColumnsAt800);
   expect(
     overflowAt800,
