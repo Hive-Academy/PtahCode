@@ -255,7 +255,7 @@ export interface MachinesActionError {
       @if (readinessCounts(); as counts) {
         <span
           ptahDisclosureSummary
-          class="ml-1 text-xs font-normal"
+          class="text-xs font-normal"
           [class.text-base-content-muted]="counts.failed === 0"
           [class.text-state-need]="counts.failed > 0"
           data-testid="machine-readiness-result"
@@ -266,7 +266,7 @@ export interface MachinesActionError {
       } @else {
         <span
           ptahDisclosureSummary
-          class="ml-1 text-xs font-normal text-base-content-muted"
+          class="text-xs font-normal text-base-content-muted"
           >Checks this machine before sessions run</span
         >
       }

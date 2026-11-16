@@ -213,12 +213,11 @@ describe('PtahDisclosureComponent', () => {
     expect(body.querySelector('[data-testid="lazy"]')).toBeNull();
   });
 
-  it('creates lazy content after the first change detection when initially open', () => {
+  it('creates lazy content in the first change detection when initially open', () => {
     lazyCreations = 0;
     const fixture = TestBed.createComponent(HostComponent);
     fixture.componentInstance.initialOpen.set(true);
     fixture.componentInstance.includeLazy.set(true);
-    fixture.detectChanges();
     fixture.detectChanges();
     expect(
       fixture.nativeElement.querySelector('[data-testid="lazy"]'),

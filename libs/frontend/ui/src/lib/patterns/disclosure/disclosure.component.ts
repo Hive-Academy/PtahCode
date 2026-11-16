@@ -2,10 +2,9 @@ import {
   ChangeDetectionStrategy,
   Component,
   contentChild,
-  effect,
   input,
+  linkedSignal,
   model,
-  signal,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { PtahDisclosureLazyDirective } from './disclosure-lazy.directive';
@@ -83,20 +82,20 @@ export class PtahDisclosureComponent {
   readonly open = model(false);
   readonly keepAlive = input(true);
   protected readonly lazy = contentChild(PtahDisclosureLazyDirective);
-  protected readonly hasOpened = signal(false);
+
   readonly size = input<'md' | 'sm'>('md');
   /** Horizontal position of the trigger row. */
   readonly align = input<'start' | 'center'>('start');
   /** Set true to expose the body as a region landmark (use for a few major sections only). */
   readonly region = input(false);
 
+  /** True once the body was open; correct in the first pass. */
+  protected readonly hasOpened = linkedSignal<boolean, boolean>({
+    source: this.open,
+    computation: (open, previous) => open || (previous?.value ?? false),
+  });
+
   private readonly instanceId = ++nextDisclosureId;
   protected readonly buttonId = `ptah-disclosure-button-${this.instanceId}`;
   protected readonly bodyId = `ptah-disclosure-body-${this.instanceId}`;
-
-  constructor() {
-    effect(() => {
-      if (this.open()) this.hasOpened.set(true);
-    });
-  }
 }
