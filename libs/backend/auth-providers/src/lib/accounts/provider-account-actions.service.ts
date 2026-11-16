@@ -287,6 +287,69 @@ export class ProviderAccountActionsService implements ProviderAccountActionPort 
     } catch (error: unknown) { return this.refusal(error); }
   }
 
+  /** Explicit reveal only. No email enters the store, event stream, or logs. */
+  async revealEmail(profileId: string): Promise<
+    | { readonly ok: true; readonly email: string }
+    | { readonly ok: false; readonly code: Exclude<ProviderAccountResultCode, 'ok'> }
+  > {
+    if (this.disposalController.signal.aborted) return { ok: false, code: 'unavailable-storage' };
+    try {
+      this.reclaimAbandoned();
+      const profile = this.store.get(profileId);
+      if (profile.provider !== 'claude' || profile.state !== 'signed-in')
+        return { ok: false, code: 'identity-unproved' };
+      if (this.active.has(profileId)) return { ok: false, code: 'busy' };
+      const route = resolveProviderAccountRoute(profile.canonical_route);
+      const operationId = randomUUID();
+      const { authEpoch } = this.store.reserveStatus(profileId, profile.revision, route, operationId, this.ownerId);
+      const controller = new AbortController();
+      const operation: StatusOperation = { kind: 'status', controller };
+      this.active.set(profileId, operation);
+      const release = (): void => this.store.completeStatus(operationId, this.ownerId, authEpoch, profile.state, true);
+      let releaseNow = true;
+      const retain = (receipts?: readonly ClaudeChildCloseReceipt[]): void => {
+        releaseNow = false;
+        if (receipts?.length) this.releaseStatusOnClose(receipts, release);
+      };
+      try {
+        const prepared = await this.certifier.authContext({ route, signal: controller.signal });
+        if (!prepared.ok) {
+          if (!prepared.terminated) retain(prepared.closeReceipts);
+          return { ok: false, code: prepared.code };
+        }
+        const before = await this.certifier.checkCoverage(prepared.context, controller.signal);
+        if (!before.ok) {
+          if (!before.terminated) retain(before.closeReceipts);
+          return { ok: false, code: before.code };
+        }
+        const probe = await this.commands.revealEmail(prepared.context, controller.signal);
+        if (!probe.terminated) {
+          retain(probe.closeReceipt ? [probe.closeReceipt] : undefined);
+          return { ok: false, code: 'identity-unproved' };
+        }
+        // A reveal is read-only: it never settles the profile state. The next
+        // status refresh records a changed route.
+        if (probe.routeChanged) return { ok: false, code: 'route-changed' };
+        const after = await this.certifier.checkCoverage(prepared.context, controller.signal);
+        if (!after.ok) {
+          if (!after.terminated) retain(after.closeReceipts);
+          return { ok: false, code: after.code };
+        }
+        if (!probe.email || !probe.identityReference) return { ok: false, code: 'identity-unproved' };
+        if (probe.identityReference !== profile.identity_ref && probe.emailOnlyReference !== profile.identity_ref)
+          return { ok: false, code: 'identity-mismatch' };
+        return { ok: true, email: probe.email };
+      } finally {
+        if (this.active.get(profileId) === operation) this.active.delete(profileId);
+        // An unclosed child retains its reservation until the close receipt fires.
+        if (releaseNow) release();
+      }
+    } catch (error: unknown) {
+      const code = this.refusal(error).code;
+      return { ok: false, code: code === 'ok' ? 'identity-unproved' : code };
+    }
+  }
+
   async startSignIn(command: ClaudeAccountActionCommand): Promise<ProviderAccountSignInStart> {
     if (this.disposalController.signal.aborted) return accountActionResult('unavailable-storage');
     try {
@@ -471,8 +534,19 @@ export class ProviderAccountActionsService implements ProviderAccountActionPort 
     if (!probed.terminated || signal.aborted) return undefined;
     const after = await this.coverage(operation, context);
     if (after) return after;
-    const status = probed.status;
+    let status = probed.status;
     if (!status?.loggedIn) return undefined;
+    if (status.identityReference && !status.organizationPresent) {
+      const retry = await this.commands.status(context, signal);
+      operation.ledger.recordProbe(retry.terminated, retry.closeReceipt);
+      if (retry.routeChanged) return this.failure(operation, 'route-changed');
+      if (!retry.terminated || signal.aborted) return undefined;
+      const afterRetry = await this.coverage(operation, context);
+      if (afterRetry) return afterRetry;
+      // A retry that proves nothing keeps the first probe's proof.
+      if (retry.status && !retry.status.loggedIn) return undefined;
+      if (retry.status) status = retry.status;
+    }
     // Class O still signs in (D-S); its named runs refuse later.
     if (!status.configDirectoryMatches) return this.failure(operation, 'identity-mismatch');
     return { code: 'ok', state: 'signed-in', identityRef: status.identityReference };
@@ -555,9 +629,20 @@ export class ProviderAccountActionsService implements ProviderAccountActionPort 
     if (!probed.terminated) return unproved('identity-unproved');
     const after = await this.certifier.checkCoverage(prepared.context, signal);
     if (!after.ok) return refused(after);
-    const status = probed.status;
+    let status = probed.status;
     if (!status) return unobserved('unsupported-source', true);
     if (!status.loggedIn) return complete('ok', 'signed-out', true, null);
+    if (status.identityReference && !status.organizationPresent) {
+      const retry = await this.commands.status(prepared.context, signal);
+      if (retry.routeChanged) return retry.terminated ? unobserved('route-changed', true) :
+        retained('route-changed', retry.closeReceipt ? [retry.closeReceipt] : []);
+      if (!retry.terminated) return retained('identity-unproved', retry.closeReceipt ? [retry.closeReceipt] : []);
+      const afterRetry = await this.certifier.checkCoverage(prepared.context, signal);
+      if (!afterRetry.ok) return refused(afterRetry);
+      // A retry that proves nothing keeps the first probe's proof; a signed-out retry is proof.
+      if (retry.status && !retry.status.loggedIn) return complete('ok', 'signed-out', true, null);
+      if (retry.status) status = retry.status;
+    }
     if (!status.configDirectoryMatches) return unobserved('identity-mismatch', true);
     return complete('ok', 'signed-in', true, status.identityReference);
   }

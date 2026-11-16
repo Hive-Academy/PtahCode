@@ -101,6 +101,10 @@ export interface ProviderAccountRpcStateChange {
  * `ProviderAccountActionsService` satisfies it structurally.
  */
 export interface ProviderAccountRpcActions extends ProviderAccountActionPort {
+  revealEmail(profileId: string): Promise<
+    { readonly ok: true; readonly email: string } |
+    { readonly ok: false; readonly code: Exclude<ProviderAccountResultCode, 'ok'> }
+  >;
   startSignIn(
     command: Parameters<ProviderAccountActionPort['startSignIn']>[0],
   ): Promise<
@@ -251,6 +255,7 @@ export class ProviderAccountRpcHandlers {
     );
     this.on('provider:listAccounts', (p) => this.listAccounts(p));
     this.on('provider:getAccountStatus', (p) => this.getAccountStatus(p));
+    this.on('provider:revealAccountEmail', (p) => this.revealAccountEmail(p));
     this.on('provider:getAmbientClaudeStatus', (p) =>
       this.getAmbientClaudeStatus(p),
     );
@@ -379,6 +384,20 @@ export class ProviderAccountRpcHandlers {
         : { ok: true, account: sanitizeSummary(account), operation };
     } catch (error: unknown) {
       return this.refusalFrom('provider:getAccountStatus', error);
+    }
+  }
+
+  private async revealAccountEmail(
+    params: Params<'provider:revealAccountEmail'>,
+  ): Promise<Result<'provider:revealAccountEmail'>> {
+    try {
+      const account = this.findAccount(params.profileId);
+      if (!account) return refusal('missing-profile');
+      if (account.provider !== 'claude' || account.state !== 'signed-in') return refusal('identity-unproved');
+      const result = await this.actions.revealEmail(params.profileId);
+      return result.ok ? { ok: true, email: result.email } : refusal(result.code);
+    } catch (error: unknown) {
+      return refusal(resultCode(error));
     }
   }
 

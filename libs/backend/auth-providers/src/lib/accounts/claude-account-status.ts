@@ -18,6 +18,10 @@ export type ClaudeAccountStatus =
       readonly accountClass: ClaudeAccountClass;
       /** `null` when the status names no email (always class O). */
       readonly identityReference: string | null;
+      /** Opaque reference for the same email without an organization, for upgrading early sign-ins. */
+      readonly emailOnlyReference: string | null;
+      /** True when the status supplied a nonempty organization name. */
+      readonly organizationPresent: boolean;
       /** Status `configDirectory` equals the canonical directory after normalization. */
       readonly configDirectoryMatches: boolean;
     };
@@ -107,6 +111,8 @@ export function parseClaudeAccountStatus(
     loggedIn: true,
     accountClass: isPersonalClass(parsed) ? 'P' : 'O',
     identityReference: claudeIdentityReference(email, orgName),
+    emailOnlyReference: claudeIdentityReference(email, ''),
+    organizationPresent: typeof orgName === 'string' && orgName.length > 0,
     configDirectoryMatches:
       normalizeDirectory(parsed['configDirectory'], platform) === normalizeDirectory(canonicalDir, platform),
   };

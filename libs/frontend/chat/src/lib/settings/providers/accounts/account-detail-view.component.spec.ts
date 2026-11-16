@@ -1,7 +1,7 @@
 import { Clipboard } from '@angular/cdk/clipboard';
 import { Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import type { ProviderAccountActionKind } from '@ptah-extension/core';
+import { ClaudeRpcService, type ProviderAccountActionKind } from '@ptah-extension/core';
 import type {
   ProviderAccountOperation,
   ProviderAccountSignInFallback,
@@ -122,6 +122,7 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       providers: [
         { provide: Clipboard, useValue: { copy } },
         { provide: SettingsSaveFeedbackService, useValue: { announce } },
+        { provide: ClaudeRpcService, useValue: { call: jest.fn() } },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(Host);
