@@ -3,17 +3,23 @@ import {
   Component,
   Directive,
   input,
+  ViewEncapsulation,
 } from '@angular/core';
 
 @Component({
   selector: 'ptah-table',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block', 'data-ptah-pattern': 'table' },
+  encapsulation: ViewEncapsulation.None,
+  host: {
+    class: 'ptah-table block',
+    'data-ptah-pattern': 'table',
+    '[attr.data-density]': 'density()',
+  },
   template: `
     <div class="overflow-x-auto">
       <table
-        class="table"
+        class="table ptah-table-grid"
         [class.table-xs]="size() === 'xs'"
         [class.table-sm]="size() === 'sm'"
         [attr.aria-label]="label()"
@@ -22,10 +28,70 @@ import {
       </table>
     </div>
   `,
+  styles: [
+    `
+      .ptah-table {
+        width: 100%;
+        color: var(--ptah-btn-secondary-fg);
+      }
+      .ptah-table-grid {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .ptah-table-grid th,
+      .ptah-table-grid td {
+        height: 3.25rem;
+        border-bottom: var(--ptah-border-width) solid
+          var(--ptah-card-border-faint);
+      }
+      .ptah-table[data-density='compact'] .ptah-table-grid th,
+      .ptah-table[data-density='compact'] .ptah-table-grid td {
+        min-height: 2.75rem;
+        height: 2.75rem;
+      }
+      .ptah-table-grid thead {
+        background: var(--ptah-card-bg-subtle);
+      }
+      .ptah-table-grid tbody tr:hover {
+        background: var(--ptah-card-bg-subtle);
+      }
+      .ptah-table-control-cell {
+        white-space: nowrap;
+      }
+      .ptah-table-control-cell select,
+      .ptah-table-control-cell [ptahSelect],
+      .ptah-table-control-cell [ptahToggle] {
+        min-height: var(--ptah-control-h-sm);
+        height: var(--ptah-control-h-sm);
+        width: auto;
+        font-size: var(--ptah-text-hint-size);
+      }
+      .ptah-table-actions-cell {
+        text-align: end;
+        white-space: nowrap;
+      }
+      .ptah-table-actions-cell > * {
+        margin-inline-start: var(--ptah-gap-inline);
+      }
+      .ptah-table-row-state[data-state='muted'] td {
+        color: var(--ptah-section-description-color);
+      }
+      .ptah-table-row-state[data-state='selected'] {
+        background: var(--ptah-btn-selected-bg);
+      }
+      .ptah-table-row-state[data-state='disabled'] td {
+        color: var(--ptah-section-description-color);
+      }
+      .ptah-table-message-cell {
+        text-align: center;
+      }
+    `,
+  ],
 })
 export class PtahTableComponent {
   readonly label = input.required<string>();
   readonly size = input<'xs' | 'sm'>('xs');
+  readonly density = input<'default' | 'compact'>('default');
 }
 
 @Directive({
@@ -34,3 +100,6 @@ export class PtahTableComponent {
   host: { class: 'text-right tabular-nums' },
 })
 export class PtahNumericCellDirective {}
+
+export * from './table-cells';
+export * from './table-row-actions.component';
