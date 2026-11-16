@@ -107,6 +107,13 @@ describe('parseLaneEnvelope', () => {
     expect(envelope?.cli).toBe('ptah-session');
   });
 
+  it('accepts a camelCase attribute from a stored transcript', () => {
+    const envelope = parseLaneEnvelope(
+      '<agent-lane-completed agent-id="a-3" agent="Codex CLI" cli="codex" status="completed" verdict="delivered" report-delivery="0-sent" reportsFailed="1">\nbody\n</agent-lane-completed>',
+    );
+    expect(envelope).toMatchObject({ kind: 'completed', verdict: 'delivered', body: 'body' });
+  });
+
   it('unescapes attribute values', () => {
     const envelope = parseLaneEnvelope(
       '<agent-report agent-id="a" agent="R&amp;D &quot;lane&quot;" cli="codex">\nx\n</agent-report>',

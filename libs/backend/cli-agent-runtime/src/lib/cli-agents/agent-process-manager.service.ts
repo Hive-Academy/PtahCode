@@ -143,6 +143,7 @@ import { findBlockedLaneModel } from './lane-spawn-policy';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from './mcp-attachment-probe.port';
 import type { TrackedAgent } from './tracked-agent';
+import { startingAgent, SPAWN_ADMISSION_WATCHDOG_MS, type SpawnAdmission } from './agent-spawn-admission';
 import {
   observedModelFrom,
   requestedModelForLog,
@@ -531,37 +532,100 @@ export class AgentProcessManager {
 
   /**
    * Spawn a new CLI agent process.
-   * Only the cap check and the slot reservation are serialized
-   * ({@link reserveSpawnSlot}). CLI detection, working-directory validation,
-   * the harness preflight and the SDK launch all run OUTSIDE the mutex, so a
-   * slow spawn in one session cannot stall a spawn in another (TASK_2026_323
-   * B10).
+   * Synchronous admission installs the starting record before detection,
+   * validation, preflight, and the SDK launch yield to asynchronous work.
    */
   async spawn(request: SpawnAgentRequest): Promise<SpawnAgentResult> {
-    try {
-      await this.reserveSpawnSlot();
-    } catch (error: unknown) {
-      this.logger.info('[AgentProcessManager] spawn step timing', {
-        cli: request.cli ?? null, agentId: null, outcome: 'error',
-        ...new SpawnStepTiming().result(),
-      });
-      throw error;
+    const ticket = this.beginSpawn(request);
+    return this.executeSpawn(ticket, request);
+  }
+
+  beginSpawn(request: SpawnAgentRequest): SpawnAdmission {
+    const maxConcurrent = this.spawnEnvironment.maxConcurrentAgents();
+    if (this.getRunningCount() + this.spawning >= maxConcurrent) {
+      throw new Error(
+        `Maximum concurrent agent limit reached (${maxConcurrent}). ` +
+          `Stop a running agent before spawning a new one. ` +
+          `Running agents: ${this.getRunningAgentIds().join(', ')}`,
+      );
+    }
+    const agentId = AgentId.create();
+    const startedAt = new Date().toISOString();
+    const tracked = startingAgent({
+      agentId,
+      // The selected CLI is not known until asynchronous detection completes.
+      // This provisional value is replaced before the lane becomes running.
+      cli: request.cli ?? 'codex',
+      cliDetectionPending: !request.cli && !request.ptahCliId,
+      task: request.task,
+      workingDirectory: request.workingDirectory ?? this.spawnEnvironment.workspaceRoot(),
+      taskFolder: request.taskFolder,
+      deliverables: request.deliverables,
+      parentSessionId: request.parentSessionId,
+      status: 'starting',
+      startedAt,
+    });
+    tracked.provisionalCli = !request.cli && !request.ptahCliId;
+    tracked.admissionTimer = this.unrefTimer(setTimeout(() => {
+      this.failSpawn({ agentId, startedAt }, new Error('Lane did not start within 120 s'));
+    }, SPAWN_ADMISSION_WATCHDOG_MS));
+    this.agents.set(agentId, tracked);
+    return { agentId, startedAt };
+  }
+
+  markSpawnReplied(ticket: SpawnAdmission): boolean {
+    const tracked = this.agents.get(ticket.agentId);
+    if (tracked?.info.status === 'starting' && tracked.info.startedAt === ticket.startedAt) {
+      tracked.spawnReplied = true;
+      return true;
+    }
+    return false;
+  }
+
+  async executeSpawn(
+    ticket: SpawnAdmission,
+    request: SpawnAgentRequest,
+  ): Promise<SpawnAgentResult> {
+    const tracked = this.agents.get(ticket.agentId);
+    if (!tracked || tracked.info.startedAt !== ticket.startedAt) {
+      throw new Error(`Spawn admission not found: ${ticket.agentId}`);
     }
     try {
-      return await this.doSpawn(request);
-    } finally {
-      this.spawning--;
+      return await this.doSpawn(request, ticket);
+    } catch (error: unknown) {
+      this.failSpawn(ticket, error);
+      throw error;
     }
   }
 
+  failSpawn(ticket: SpawnAdmission, error: unknown): void {
+    const tracked = this.agents.get(ticket.agentId);
+    if (!tracked || tracked.info.status !== 'starting' ||
+        tracked.info.startedAt !== ticket.startedAt) return;
+    clearTimeout(tracked.admissionTimer);
+    this.mcpCredentials?.revokeSubject(ticket.agentId);
+    if (!tracked.spawnReplied) {
+      this.agents.delete(ticket.agentId);
+      return;
+    }
+    const completedAt = new Date().toISOString();
+    tracked.info = { ...tracked.info, status: 'failed', completedAt, lastActivityAt: completedAt };
+    tracked.stderrBuffer = error instanceof Error ? error.message : String(error);
+    tracked.hasExited = true;
+    this.signalLaneCompletion(tracked);
+    this.events.emit('agent:exited', tracked.info);
+    this.scheduleCleanup(ticket.agentId);
+  }
+
   /**
-   * Internal spawn implementation, wrapped by spawn() for concurrency tracking.
+   * Internal spawn implementation. Admission already installed a starting
+   * record, which reserves the slot for this pipeline.
    *
    * Runs UNLOCKED and does NOT re-check the concurrent limit — the caller
-   * already holds a reservation taken atomically in {@link reserveSpawnSlot}.
+   * already owns the reserved starting record from {@link beginSpawn}.
    * Re-checking here would double-count that reservation.
    */
-  private async doSpawn(request: SpawnAgentRequest): Promise<SpawnAgentResult> {
+  private async doSpawn(request: SpawnAgentRequest, ticket: SpawnAdmission): Promise<SpawnAgentResult> {
     const timing = new SpawnStepTiming();
     let timedCli: CliType | null = request.cli ?? null;
     let timedAgentId: string | null = null;
@@ -680,7 +744,7 @@ export class AgentProcessManager {
         permission: request.permission,
         network: request.network,
       },
-    }, timing, (id) => { timedAgentId = id; });
+    }, timing, (id) => { timedAgentId = id; }, ticket);
     outcome = 'ok';
     return result;
     } finally {
@@ -1020,6 +1084,7 @@ export class AgentProcessManager {
     options: SdkSpawnOptions,
     timing?: SpawnStepTiming,
     onAgentId?: (id: string) => void,
+    ticket?: SpawnAdmission,
   ): Promise<SpawnAgentResult> {
     const {
       runSdk,
@@ -1036,9 +1101,9 @@ export class AgentProcessManager {
       resumeDecision,
       originalTask,
     } = options;
-    const agentId = AgentId.create();
+    const agentId = ticket?.agentId ?? AgentId.create();
     onAgentId?.(agentId);
-    const startedAt = new Date().toISOString();
+    const startedAt = ticket?.startedAt ?? new Date().toISOString();
     const previous = previousResumeRecord(
       this.agents.values(),
       cli,
@@ -1151,6 +1216,9 @@ export class AgentProcessManager {
     let sdkHandle: SdkHandle;
     let issuedMcpToken: string | undefined;
     try {
+      if (ticket && this.agents.get(agentId)?.info.status !== 'starting') {
+        throw new Error(`Spawn stopped before launch: ${agentId}`);
+      }
       const laneMcpCapability = laneMcpTokenCapability(cli);
       const mcpToken =
         mcpPort && laneMcpCapability
@@ -1223,6 +1291,18 @@ export class AgentProcessManager {
         instructionFileStore: this.instructionFiles,
         ...(request.phase ? { phase: request.phase } : {}),
       });
+      if (ticket && this.agents.get(agentId)?.info.status !== 'starting') {
+        const cancelled = this.agents.get(agentId);
+        if (cancelled) {
+          cancelled.sdkHandle = sdkHandle;
+          cancelled.sdkAbortController = sdkHandle.abort;
+          await this.killProcess(cancelled);
+          cancelled.subprocessReleased = true;
+        } else {
+          sdkHandle.abort.abort();
+        }
+        throw new Error(`Spawn stopped before handle registration: ${agentId}`);
+      }
       timing?.mark('runSdkMs');
     } catch (error: unknown) {
       // A Node `spawn EINVAL` error carries the code `EINVAL`, so the wording
@@ -1286,6 +1366,7 @@ export class AgentProcessManager {
         modelSource: laneModel.source,
         selectedEffort: laneEffort.effort ?? 'none',
       },
+      ticket?.agentId,
     );
     timing?.mark('trackMs');
     return resumeDecision ? { ...spawned, resumeDecision } : spawned;
@@ -1336,6 +1417,7 @@ export class AgentProcessManager {
        * URL agree.
        */
       agentId?: AgentId;
+      admission?: SpawnAdmission;
       roleStamp?: AgentRoleStamp;
       /** The gate's outcome from {@link prepareSdkHandleSpawn}, reported on the result. */
       resumeDecision?: AgentResumeOutcome;
@@ -1350,14 +1432,18 @@ export class AgentProcessManager {
       phase?: SpawnAgentRequest['phase'];
     },
   ): Promise<SpawnAgentResult> {
-    await this.reserveSpawnSlot();
+    if (!meta.admission) await this.reserveSpawnSlot();
     try {
       await this.spawnEnvironment.validateWorkingDirectory(
         meta.workingDirectory,
       );
 
-      const agentId = meta.agentId ?? AgentId.create();
-      const startedAt = new Date().toISOString();
+      const agentId = meta.admission?.agentId ?? meta.agentId ?? AgentId.create();
+      const startedAt = meta.admission?.startedAt ?? new Date().toISOString();
+      if (meta.admission && this.agents.get(agentId)?.info.status !== 'starting') {
+        sdkHandle.abort.abort();
+        throw new Error(`Spawn stopped before handle registration: ${agentId}`);
+      }
       const previous = previousResumeRecord(
         this.agents.values(),
         meta.cli,
@@ -1438,12 +1524,14 @@ export class AgentProcessManager {
         meta.timeout,
         () => sdkHandle.getSessionId?.(),
         { mcpPort: meta.mcpPort, expectsMcp: meta.expectsMcp },
+        undefined,
+        meta.admission?.agentId,
       );
       return meta.resumeDecision
         ? { ...spawned, resumeDecision: meta.resumeDecision }
         : spawned;
     } finally {
-      this.spawning--;
+      if (!meta.admission) this.spawning--;
     }
   }
 
@@ -1468,6 +1556,7 @@ export class AgentProcessManager {
     captureSessionId?: () => string | undefined,
     mcp?: { readonly mcpPort?: number; readonly expectsMcp?: boolean },
     modelLog?: LaneModelLogState,
+    admittedAgentId?: AgentId,
   ): SpawnAgentResult {
     const agentId = info.agentId;
     const handleReference = snapshotLaneAccountReference(
@@ -1524,7 +1613,7 @@ export class AgentProcessManager {
       modelScope,
     };
     this.rememberLaneOwner(trackedInfo);
-    const tracked: TrackedAgent = {
+    let tracked: TrackedAgent = {
       modelLog,
       info: trackedInfo,
       process: null,
@@ -1547,6 +1636,18 @@ export class AgentProcessManager {
       turnSegmentStart: 0,
       turnStartedAt: info.startedAt,
     };
+
+    if (admittedAgentId) {
+      const admitted = this.agents.get(admittedAgentId);
+      if (!admitted || admitted.info.status !== 'starting') {
+        sdkHandle.abort.abort();
+        throw new Error(`Spawn stopped before handle registration: ${agentId}`);
+      }
+      clearTimeout(admitted.admissionTimer);
+      Object.assign(admitted, tracked);
+      admitted.provisionalCli = false;
+      tracked = admitted;
+    }
 
     const previousBudget = info.cliSessionId
       ? previousResumeRecord(this.agents.values(), info.cli, info.cliSessionId)
@@ -1982,7 +2083,7 @@ export class AgentProcessManager {
     for (const ref of refs) {
       const agentId = String(ref.agentId);
       if (!agentId || this.agents.has(agentId)) continue;
-      if (ref.status === 'running') {
+      if (ref.status === 'running' || ref.status === 'starting') {
         // The store returns `running` only for a live host run. This run's own
         // lanes are already in memory; a foreign live lane belongs to its host.
         this.foreignLiveAgentIds.add(agentId);
@@ -2252,7 +2353,7 @@ export class AgentProcessManager {
         )
       ) {
         unseen.set(id, 'other_workspace');
-      } else if (tracked.info.status === 'running') {
+      } else if (tracked.info.status === 'running' || tracked.info.status === 'starting') {
         pending.add(id);
       } else {
         ended.set(id, { ...tracked.info });
@@ -2314,7 +2415,7 @@ export class AgentProcessManager {
       const info = { ...current.info };
       return {
         agentId,
-        state: info.status === 'running' ? 'running' : 'exited',
+        state: info.status === 'running' || info.status === 'starting' ? 'running' : 'exited',
         info,
       };
     });
@@ -2567,7 +2668,7 @@ export class AgentProcessManager {
     const adopted: string[] = [];
     for (const tracked of this.agents.values()) {
       const parent = tracked.info.parentSessionId;
-      if (tracked.info.status !== 'running' || !parent || !from.has(parent)) {
+      if ((tracked.info.status !== 'running' && tracked.info.status !== 'starting') || !parent || !from.has(parent)) {
         continue;
       }
       this.pendingAdoptions.set(tracked.info.agentId, {
@@ -2708,6 +2809,12 @@ export class AgentProcessManager {
       );
     }
 
+    if (tracked.info.status === 'starting') {
+      throw new AgentMessageError(
+        'not_running',
+        `Agent ${agentId} is still starting. Wait for it to become running before sending a message.`,
+      );
+    }
     if (
       tracked.info.status !== 'running' &&
       !AgentProcessManager.canStartNewTurn(tracked)
@@ -2859,7 +2966,7 @@ export class AgentProcessManager {
       );
     }
 
-    if (tracked.info.status === 'running') {
+    if (tracked.info.status === 'running' || tracked.info.status === 'starting') {
       throw new AgentContinueError(
         'busy',
         `Agent ${agentId} is busy (status: ${tracked.info.status})`,
@@ -3014,6 +3121,22 @@ export class AgentProcessManager {
       );
     }
 
+    if (tracked.info.status === 'starting') {
+      clearTimeout(tracked.admissionTimer);
+      this.mcpCredentials?.revokeSubject(agentId);
+      const completedAt = new Date().toISOString();
+      tracked.info = { ...tracked.info, status: 'stopped', completedAt, lastActivityAt: completedAt };
+      tracked.hasExited = true;
+      if (tracked.spawnReplied) {
+        this.signalLaneCompletion(tracked);
+        this.events.emit('agent:exited', tracked.info);
+        this.scheduleCleanup(agentId);
+      } else {
+        this.agents.delete(agentId);
+      }
+      return tracked.info;
+    }
+
     if (tracked.info.status !== 'running') {
       await this.releaseSubprocess(agentId, tracked, 'stopped');
       return tracked.info;
@@ -3088,11 +3211,13 @@ export class AgentProcessManager {
     const entries = Array.from(this.agents.entries());
     this.logger.info('[AgentProcessManager] Disposing all agents...', {
       agents: entries.length,
-      running: entries.filter(([, t]) => t.info.status === 'running').length,
+      running: entries.filter(([, t]) => t.info.status === 'running' || t.info.status === 'starting').length,
     });
 
     const releases = entries.map(([id, tracked]) =>
-      this.releaseSubprocess(id, tracked, 'disposed'),
+      tracked.info.status === 'starting'
+        ? this.stop(id)
+        : this.releaseSubprocess(id, tracked, 'disposed'),
     );
     await Promise.race([
       Promise.allSettled(releases),
@@ -3102,6 +3227,7 @@ export class AgentProcessManager {
     ]);
 
     for (const [agentId, tracked] of this.agents) {
+      clearTimeout(tracked.admissionTimer);
       if (tracked.cleanupHandle) {
         clearTimeout(tracked.cleanupHandle);
       }
@@ -3362,7 +3488,7 @@ export class AgentProcessManager {
   async releaseIdleForResume(agentId: string): Promise<void> {
     const tracked = this.agents.get(agentId);
     if (!tracked || tracked.subprocessReleased || tracked.restored) return;
-    if (tracked.info.status === 'running')
+    if (tracked.info.status === 'running' || tracked.info.status === 'starting')
       throw new AgentContinueError('busy', 'The lane is still running.');
     await this.releaseTracked(agentId, 'idle');
   }
@@ -3914,7 +4040,7 @@ export class AgentProcessManager {
       // whose chat parent is gone still lands its usage. Keyed by the same
       // agent id and completion stamp the notifier's duplicate guard uses,
       // so a repeated terminal call converges to the same rows.
-      recordLaneUsageOutcome(
+      if (!tracked.provisionalCli) recordLaneUsageOutcome(
         this.usageSink,
         this.logger,
         info,
@@ -4087,13 +4213,13 @@ export class AgentProcessManager {
 
   private getRunningCount(): number {
     return Array.from(this.agents.values()).filter(
-      (t) => t.info.status === 'running',
+      (t) => t.info.status === 'running' || t.info.status === 'starting',
     ).length;
   }
 
   private getRunningAgentIds(): string[] {
     return Array.from(this.agents.entries())
-      .filter(([, t]) => t.info.status === 'running')
+      .filter(([, t]) => t.info.status === 'running' || t.info.status === 'starting')
       .map(([id]) => id);
   }
 

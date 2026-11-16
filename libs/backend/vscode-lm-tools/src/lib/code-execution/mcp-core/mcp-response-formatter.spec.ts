@@ -1918,6 +1918,19 @@ describe('mcp-response-formatter › agent namespace', () => {
     );
   });
 
+  it('tells the caller how to follow a starting lane', () => {
+    const result: SpawnAgentResult = {
+      agentId: 'a-starting' as AgentId,
+      cli: 'codex',
+      status: 'starting',
+      startedAt: '2026-10-03T12:00:00.000Z',
+    };
+    const output = formatAgentSpawn(result);
+    expect(output).toContain('**Status:** starting');
+    expect(output).toContain('ptah_agent_status');
+    expect(output).toContain('completion signal');
+  });
+
   it('formatAgentList renders the messaging capability for a system CLI', () => {
     const agents = [
       { cli: 'cursor', installed: true, messagingMode: 'interrupt' },

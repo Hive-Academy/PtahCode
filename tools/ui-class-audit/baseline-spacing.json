@@ -408,11 +408,6 @@
     "mb-2": 1,
     "px-1.5": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts": {
-    "gap-2": 1,
-    "mt-0.5": 1,
-    "pb-2": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "gap-1": 1,
     "gap-2": 1,
@@ -587,16 +582,5 @@
     "pr-9": 1,
     "px-1": 1,
     "space-y-2": 2
-  },
-  "libs/frontend/chat/src/lib/settings/settings.component.html": {
-    "gap-3": 1,
-    "lg:px-8": 1,
-    "mb-2": 1,
-    "md:px-6": 1,
-    "mx-auto": 1,
-    "pb-2": 1,
-    "px-3": 1,
-    "py-3": 1,
-    "space-y-8": 5
   }
 }

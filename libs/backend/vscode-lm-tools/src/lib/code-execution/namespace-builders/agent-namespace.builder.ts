@@ -47,6 +47,7 @@ import {
   type CliDetectionService,
   type LaneLimitLookupService,
   type SdkHandle,
+  type SpawnAdmission,
   type VerifiedLaneSender,
 } from '@ptah-extension/cli-agent-runtime';
 import type {
@@ -421,9 +422,10 @@ export function buildAgentNamespace(
   const resolveCallerParentId = (rawCallerId: string) =>
     resolveSessionId?.(rawCallerId) ?? rawCallerId;
 
-  return {
-    resolveCallerParentId,
-    spawn: async (request: UntypedSpawnRequest) => {
+  const executeNamespaceSpawn = async (
+    request: UntypedSpawnRequest,
+    admission?: SpawnAdmission,
+  ) => {
       const timing = agentSpawnTiming.getStore();
       const resolutionStartedAt = performance.now();
       try {
@@ -559,7 +561,7 @@ export function buildAgentNamespace(
           // therefore after the MCP URL baked into that handle — so the URL could
           // never name the record. Reserving here and passing the same value to
           // both is what lets the child's `/agent/{id}` segment be true.
-          const agentId = agentProcessManager.reserveAgentId();
+          const agentId = admission?.agentId ?? agentProcessManager.reserveAgentId();
 
           // A Ptah CLI lane's task string goes to the SDK verbatim and never
           // passes through `buildTaskPrompt`, so the completion contract is
@@ -639,6 +641,7 @@ export function buildAgentNamespace(
                 ? { originalTask: prepared.originalTask }
                 : {}),
               agentId,
+              ...(admission ? { admission } : {}),
               ...(request.phase ? { phase: request.phase } : {}),
               ...(roleDefinition
                 ? {
@@ -731,9 +734,14 @@ export function buildAgentNamespace(
             performance.now() - resolutionStartedAt,
           );
         return {
-          ...markParentless(await agentProcessManager.spawn(enrichedRequest)),
+          ...markParentless(await (admission
+            ? agentProcessManager.executeSpawn(admission, enrichedRequest)
+            : agentProcessManager.spawn(enrichedRequest))),
           ...(resolvedSkills.length && { skillDelivery: 'inline' as const }),
         };
+      } catch (error: unknown) {
+        if (admission) agentProcessManager.failSpawn(admission, error);
+        throw error;
       } finally {
         if (timing && timing.namespaceResolutionMs === null) {
           timing.namespaceResolutionMs = Math.round(
@@ -741,7 +749,26 @@ export function buildAgentNamespace(
           );
         }
       }
+    };
+
+  return {
+    resolveCallerParentId,
+    spawn: (request) => executeNamespaceSpawn(request),
+    beginSpawn: (request) => {
+      const { accountSelection: _accountSelection, ...safeRequest } = request;
+      const rawSessionId = isMcpRequestInFlight()
+        ? getCallerSessionId()?.trim() || undefined
+        : request.parentSessionId?.trim() || undefined;
+      return agentProcessManager.beginSpawn({
+        ...safeRequest,
+        cli: request.ptahCliId ? 'ptah-cli' : request.cli,
+        workingDirectory: request.workingDirectory ?? getWorkspaceRoot(),
+        parentSessionId: rawSessionId ? resolveCallerParentId(rawSessionId) : undefined,
+      });
     },
+    executeSpawn: (ticket, request) => executeNamespaceSpawn(request, ticket),
+    markSpawnReplied: (ticket) => agentProcessManager.markSpawnReplied(ticket),
+    failSpawn: (ticket, error) => agentProcessManager.failSpawn(ticket, error),
 
     status: async (agentId?) => {
       return agentProcessManager.getStatus(agentId);
@@ -996,7 +1023,8 @@ export function buildAgentNamespace(
       if (entry?.state === 'running') {
         throw new Error(
           `waitFor timed out after ${timeoutMs}ms for agent ${agentId}: it is ` +
-            'still running. Call waitFor again to keep waiting.',
+            `still ${entry.info?.status === 'starting' ? 'starting' : 'running'}. ` +
+            'Call waitFor again to keep waiting.',
         );
       }
       // `not_found` or `other_workspace`: `getStatus` throws the established

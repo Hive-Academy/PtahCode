@@ -21,6 +21,7 @@ import type {
   LaneLimitResult,
   AgentWaitMode,
   AgentWaitResult,
+  SpawnAdmission,
 } from '@ptah-extension/cli-agent-runtime';
 import type {
   Approximation,
@@ -322,6 +323,10 @@ export interface AgentNamespace {
    * @returns Spawn result with agentId
    */
   spawn: (request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
+  beginSpawn: (request: SpawnAgentRequest) => SpawnAdmission;
+  executeSpawn: (ticket: SpawnAdmission, request: SpawnAgentRequest) => Promise<SpawnAgentResult>;
+  markSpawnReplied: (ticket: SpawnAdmission) => boolean;
+  failSpawn: (ticket: SpawnAdmission, error: unknown) => void;
 
   /**
    * Optional plan-limit enrichment for agent tool transports.
