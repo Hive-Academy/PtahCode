@@ -57,3 +57,11 @@ Detail table: progress-vs-meter.md. Result: meter fits 12, meter needs a variant
 - local-tts-panel:260, local-stt-panel:225, system-prompt-drawer:210, inspector-task-section:150, task-list:508, turn-summary-tests:58, compact-session-activity:832, messaging-gateway-tab:190, review-run-detail:43, memory-indexing-banner:97 and :103, db-health-panel:258: meter fits (use `barRole="progressbar"` for task progress, `indeterminate` for unknown total, hidden label row).
 - declarative-dashboard dashboard-progress:29: meter needs a variant (native progress track look). Keep native `<progress>` until then.
 Recommendation: no new progress component. Migrate sites to ptah-meter. Two download states show 0% when the total is unknown: use `indeterminate`.
+
+## Progress to meter migration (parent decision: no new component)
+Three PRs by lib: feat/ui-meter-chat (chat, chat-ui: inspector-task-section, turn-summary-tests, compact-session-activity), feat/ui-meter-memory (memory-indexing-banner x2, db-health-panel), feat/ui-meter-pages (task-list, review-run-detail, messaging-gateway-tab).
+Excluded (settings child migrates them in its tab PRs; the parent relays this list):
+- libs/frontend/chat/src/lib/settings/ptah-ai/local-tts-panel.component.ts:260 (TTS download; unknown total uses `indeterminate`, hidden label "TTS model download")
+- libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts:225 (STT download; same rule)
+- libs/frontend/chat/src/lib/settings/pro-features/system-prompt-drawer.component.ts:210 (indeterminate, label "Prompt generation progress")
+Left unchanged, needs a native-progress-track variant: libs/frontend/declarative-dashboard/src/lib/components/dashboard-progress.component.ts:29.
