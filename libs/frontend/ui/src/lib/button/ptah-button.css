@@ -266,7 +266,7 @@
   color: var(--ptah-btn-ghost-fg);
 }
 
-.btn[data-ptah-button].btn-ghost[data-tone]:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+.btn[data-ptah-button].btn-ghost:is([data-tone='danger'], [data-tone='muted-danger']):is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
   color: var(--ptah-state-err);
   background-color: var(--ptah-btn-ghost-danger-bg-hover);
 }
@@ -289,6 +289,44 @@
   background-color: var(--ptah-btn-danger-bg-active);
   border-color: var(--ptah-btn-danger-bg-active);
   color: var(--ptah-btn-danger-fg);
+}
+
+/* Warning tone for filled primary and outline actions. */
+.btn[data-ptah-button].btn-primary[data-tone='warning']:is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-warning-bg);
+  border-color: var(--ptah-btn-warning-bg);
+  color: var(--ptah-btn-warning-fg);
+  box-shadow: var(--ptah-elevation-0);
+}
+
+.btn[data-ptah-button].btn-primary[data-tone='warning']:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-warning-bg-hover);
+  border-color: var(--ptah-btn-warning-bg-hover);
+  color: var(--ptah-btn-warning-fg);
+}
+
+.btn[data-ptah-button].btn-primary[data-tone='warning']:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-warning-bg-active);
+  border-color: var(--ptah-btn-warning-bg-active);
+  color: var(--ptah-btn-warning-fg);
+}
+
+.btn[data-ptah-button].btn-outline[data-tone='warning']:is(.btn, #ptah-button) {
+  background-color: transparent;
+  border-color: var(--ptah-state-warn);
+  color: var(--ptah-state-warn);
+}
+
+.btn[data-ptah-button].btn-outline[data-tone='warning']:is(:hover, [data-state='hover']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-warning-bg);
+  border-color: var(--ptah-btn-warning-bg);
+  color: var(--ptah-btn-warning-fg);
+}
+
+.btn[data-ptah-button].btn-outline[data-tone='warning']:is(:active, [data-state='active']):not(:disabled, [disabled], [aria-disabled='true']):is(.btn, #ptah-button) {
+  background-color: var(--ptah-btn-warning-bg);
+  border-color: var(--ptah-btn-warning-bg);
+  color: var(--ptah-btn-warning-fg);
 }
 
 /* Variant 5: link (inline text action) */
@@ -385,6 +423,16 @@
 
 .btn[data-ptah-button].btn-error[aria-busy='true']:is(.btn, #ptah-button)::before {
   border-color: var(--ptah-btn-danger-fg);
+  border-inline-end-color: transparent;
+}
+
+.btn[data-ptah-button].btn-outline[data-tone='warning'][aria-busy='true']:is(.btn, #ptah-button)::before {
+  border-color: var(--ptah-state-warn);
+  border-inline-end-color: transparent;
+}
+
+.btn[data-ptah-button].btn-primary[data-tone='warning'][aria-busy='true']:is(.btn, #ptah-button)::before {
+  border-color: var(--ptah-btn-warning-fg);
   border-inline-end-color: transparent;
 }
 

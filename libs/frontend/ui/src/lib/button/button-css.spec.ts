@@ -9,10 +9,23 @@ const rules = css
   .map((chunk) => chunk.split('{')[0].trim());
 
 describe('ptah-button.css owner input rules', () => {
-  it('scopes every tone rule to the ghost variant, so other variants ignore tone', () => {
-    const toneRules = rules.filter((selector) => selector.includes('[data-tone'));
+  it('scopes danger tone rules to the ghost variant, so other variants ignore them', () => {
+    const toneRules = rules.filter(
+      (selector) =>
+        selector.includes('[data-tone') && !selector.includes("[data-tone='warning']"),
+    );
     expect(toneRules.length).toBeGreaterThan(0);
     toneRules.forEach((selector) => expect(selector).toContain('.btn-ghost'));
+  });
+
+  it('scopes warning tone rules to the filled primary and outline variants', () => {
+    const warningRules = rules.filter((selector) =>
+      selector.includes("[data-tone='warning']"),
+    );
+    expect(warningRules.length).toBeGreaterThan(0);
+    warningRules.forEach((selector) =>
+      expect(/\.btn-(primary|outline)\[data-tone='warning'\]/.test(selector)).toBe(true),
+    );
   });
 
   it('keeps the disabled look on a selected host', () => {
@@ -39,7 +52,24 @@ describe('ptah-button.css owner input rules', () => {
       selector.includes('[data-selected]'),
     );
     selectedRules.forEach((selector) => expect(selector).not.toContain('btn-outline'));
-    const toneRules = rules.filter((selector) => selector.includes('[data-tone'));
+    const toneRules = rules.filter(
+      (selector) =>
+        selector.includes('[data-tone') && !selector.includes("[data-tone='warning']"),
+    );
     toneRules.forEach((selector) => expect(selector).not.toContain('btn-outline'));
+  });
+
+  it('limits the ghost hover tint to danger tones, so warning keeps its own ink', () => {
+    const ghostToneHover = rules.filter(
+      (selector) =>
+        selector.includes('.btn-ghost') &&
+        selector.includes('[data-tone') &&
+        selector.includes(':hover'),
+    );
+    expect(ghostToneHover.length).toBeGreaterThan(0);
+    ghostToneHover.forEach((selector) => {
+      expect(selector).toContain("[data-tone='danger']");
+      expect(selector).not.toContain("[data-tone='warning']");
+    });
   });
 });

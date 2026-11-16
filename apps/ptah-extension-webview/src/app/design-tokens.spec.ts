@@ -180,7 +180,7 @@ describe('Ptah design tokens in the application', () => {
     // DaisyUI sets these on each theme (see `themes` in tailwind.config.js).
     const fromTheme = new Set([
       ...['--rounded-btn', '--rounded-box', '--rounded-badge'],
-      ...['--p', '--pc', '--su', '--wa', '--er', '--erc', '--in'],
+      ...['--p', '--pc', '--su', '--wa', '--wac', '--er', '--erc', '--in'],
       ...['--b1', '--b2', '--b3', '--bc'],
     ]);
     const missing = [...tokenCss.matchAll(/var\((--[a-z0-9-]+)\)/g)]

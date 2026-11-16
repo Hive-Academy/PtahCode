@@ -140,6 +140,19 @@
     var(--ptah-btn-danger-shade)
   );
   --ptah-btn-danger-fg: oklch(var(--erc));
+  --ptah-btn-warning-bg: oklch(var(--wa));
+  --ptah-btn-warning-shade: oklch(var(--bc));
+  --ptah-btn-warning-bg-hover: color-mix(
+    in oklch,
+    oklch(var(--wa)) 90%,
+    var(--ptah-btn-warning-shade)
+  );
+  --ptah-btn-warning-bg-active: color-mix(
+    in oklch,
+    oklch(var(--wa)) 82%,
+    var(--ptah-btn-warning-shade)
+  );
+  --ptah-btn-warning-fg: oklch(var(--wac));
   --ptah-btn-link-fg: var(--ptah-link, oklch(var(--p)));
   --ptah-btn-link-fg-hover: color-mix(
     in oklch,
