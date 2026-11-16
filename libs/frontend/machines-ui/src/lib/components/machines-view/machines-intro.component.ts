@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, output } from '@angular/core';
 import { LucideAngularModule, Plus } from 'lucide-angular';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahDisclosureComponent } from '@ptah-extension/ui';
 
 /** The worker's Phase 1 checks, named for the empty state's "What is checked?". */
 const CHECKED_ITEMS: readonly string[] = [
@@ -21,7 +21,7 @@ const CHECKED_ITEMS: readonly string[] = [
 @Component({
   selector: 'ptah-machines-intro',
   standalone: true,
-  imports: [PtahButtonDirective, LucideAngularModule],
+  imports: [PtahButtonDirective, PtahDisclosureComponent, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -46,18 +46,13 @@ const CHECKED_ITEMS: readonly string[] = [
         <lucide-angular [img]="PlusIcon" class="h-4 w-4" aria-hidden="true" />
         Add machine
       </button>
-      <details class="text-left text-xs text-base-content-muted">
-        <summary
-          class="cursor-pointer text-center underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-        >
-          What is checked?
-        </summary>
+      <ptah-disclosure label="What is checked?" size="sm" align="center" class="text-left text-xs text-base-content-muted">
         <ol class="mt-2 list-decimal pl-5" data-testid="machines-checked">
           @for (item of checkedItems; track item) {
             <li>{{ item }}</li>
           }
         </ol>
-      </details>
+      </ptah-disclosure>
     </div>
   `,
 })
