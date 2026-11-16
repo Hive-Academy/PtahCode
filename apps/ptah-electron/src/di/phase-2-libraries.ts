@@ -553,7 +553,7 @@ export function registerPhase2Libraries(
     container.register(REVIEW_CONTEXT_TOKENS.COMMAND_RUNNER, {
       useFactory: (provider) => {
         const environment = provider.resolve<ReviewStageEnvironment>(REVIEW_CORE_TOKENS.ENVIRONMENT);
-        return new ReviewCommandRunner((repo) => environment.resolve(repo));
+        return new ReviewCommandRunner((repo) => environment.resolve(repo), logger);
       },
     });
     container.register(REVIEW_LANE_TOKENS.GATEWAY, {
