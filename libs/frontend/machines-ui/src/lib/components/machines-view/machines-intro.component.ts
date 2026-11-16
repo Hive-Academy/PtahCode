@@ -46,7 +46,7 @@ const CHECKED_ITEMS: readonly string[] = [
         <lucide-angular [img]="PlusIcon" class="h-4 w-4" aria-hidden="true" />
         Add machine
       </button>
-      <ptah-disclosure label="What is checked?" size="sm" class="text-left text-xs text-base-content-muted">
+      <ptah-disclosure label="What is checked?" size="sm" align="center" class="text-left text-xs text-base-content-muted">
         <ol class="mt-2 list-decimal pl-5" data-testid="machines-checked">
           @for (item of checkedItems; track item) {
             <li>{{ item }}</li>
