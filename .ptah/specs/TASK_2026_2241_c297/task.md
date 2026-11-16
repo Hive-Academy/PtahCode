@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2241_c297
-status: in_progress
+status: in_review
 type: RESEARCH
 title: Measure task index rebuilds and plan limits snapshots
 depends_on: []
