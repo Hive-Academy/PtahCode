@@ -106,7 +106,9 @@ describe('HostRoutingSettingComponent', () => {
   it('reads the default (no stored value) as on when a decision model is configured', async () => {
     await create();
     expect(
-      (fixture.nativeElement as HTMLElement).querySelector('section')?.getAttribute('data-glass-surface'),
+      (fixture.nativeElement as HTMLElement)
+        .querySelector('section')
+        ?.getAttribute('data-glass-surface'),
     ).toBe('content');
     expect(host.call).toHaveBeenCalledWith(
       'settings:get',
@@ -328,6 +330,9 @@ describe('HostRoutingSettingComponent', () => {
     expect(byTestId('host-routing-load-error')?.textContent?.trim()).toBe(
       'The setting could not be read.',
     );
+    expect(
+      byTestId('host-routing-load-error')?.querySelector('[role="alert"]'),
+    ).not.toBeNull();
     host.readFails = false;
     byTestId<HTMLButtonElement>('host-routing-retry')?.click();
     await settle();

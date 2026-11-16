@@ -59,83 +59,97 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section data-glass-surface="content">
-    <ptah-form-section
-      heading="Lane guards"
-      description="Stop background lanes that are stuck in a loop."
-      data-glass-surface="content"
-      aria-labelledby="lane-guards-heading"
-      data-testid="settings-section-lane-guards"
-    >
-      <span id="lane-guards-heading" hidden>Lane guards</span>
-
-      @switch (load()) {
-        @case ('loading') {
-          <p role="status" aria-live="polite" data-testid="lane-guards-loading">
-            Loading lane guards…
-          </p>
-        }
-        @case ('error') {
-          <div role="alert" class="space-y-1.5">
-            <p data-testid="lane-guards-load-error">
-              The lane guard settings could not be read. Your saved settings
-              have not changed.
-            </p>
-            <button
-              type="button"
-              ptahButton
-              (click)="reload()"
-              data-testid="lane-guards-retry"
+    <section>
+      <ptah-form-section
+        heading="Lane guards"
+        description="Stop background lanes that are stuck in a loop."
+        data-glass-surface="content"
+        data-testid="settings-section-lane-guards"
+      >
+        @switch (load()) {
+          @case ('loading') {
+            <p
+              role="status"
+              aria-live="polite"
+              data-testid="lane-guards-loading"
             >
-              Retry lane guards
-            </button>
-          </div>
-        }
-        @default {
-          <p
-            id="lane-guards-intro"
-            class="text-xs text-base-content-muted"
-            data-testid="lane-guards-intro"
-          >
-            This guard stops a lane when it repeats the same call this many times.
-            Lanes also have a weighted token budget and a duration limit.
-            A lane gets an early warning when it reaches the budget warning ratio, or when one more turn of its largest size would cross the limit.
-            The first turn that crosses the token limit is a grace turn: the lane is warned again, and its next turn stops it.
-            A lane stopped by its budget does not resume; start a fresh lane for the remaining work.
-          </p>
-          @for (field of fields; track field.key) {
+              Loading lane guards…
+            </p>
+          }
+          @case ('error') {
+            <div role="alert" class="space-y-1.5">
+              <p data-testid="lane-guards-load-error">
+                The lane guard settings could not be read. Your saved settings
+                have not changed.
+              </p>
+              <button
+                type="button"
+                ptahButton
+                (click)="reload()"
+                data-testid="lane-guards-retry"
+              >
+                Retry lane guards
+              </button>
+            </div>
+          }
+          @default {
+            <p
+              id="lane-guards-intro"
+              class="text-xs text-base-content-muted"
+              data-testid="lane-guards-intro"
+            >
+              This guard stops a lane when it repeats the same call this many
+              times. Lanes also have a weighted token budget and a duration
+              limit. A lane gets an early warning when it reaches the budget
+              warning ratio, or when one more turn of its largest size would
+              cross the limit. The first turn that crosses the token limit is a
+              grace turn: the lane is warned again, and its next turn stops it.
+              A lane stopped by its budget does not resume; start a fresh lane
+              for the remaining work.
+            </p>
+            @for (field of fields; track field.key) {
               <ptah-field
                 appearance="stacked"
+                class="lane-guards-number-field"
                 [label]="field.label"
                 [hint]="field.help + ' Range: ' + field.min + ' or greater.'"
                 [error]="fieldMessage(field.key)"
                 errorRole="alert"
                 [errorTestId]="field.testId + '-error'"
-                >
-                  <input
-                    type="text"
-                    inputmode="numeric"
-                    [id]="field.testId"
-                    ptahInput
-                    size="sm"
-                    class="join-item min-w-0 flex-1 text-right tabular-nums"
-                    [invalid]="!!fieldMessage(field.key)"
-                    [value]="drafts()[field.key]"
-                    [ptahBusyDisabled]="busy() || feedback.saving()"
-                    (input)="edit(field.key, $event)"
-                    (change)="commit(field.key)"
-                    [attr.data-testid]="field.testId"
-                  />
-                  <span ptahFieldTrailing aria-hidden="true">calls</span>
+              >
+                <input
+                  type="text"
+                  inputmode="numeric"
+                  [id]="field.testId"
+                  ptahInput
+                  size="sm"
+                  class="min-w-0 flex-1 text-right tabular-nums"
+                  [invalid]="!!fieldMessage(field.key)"
+                  [value]="drafts()[field.key]"
+                  [ptahBusyDisabled]="busy() || feedback.saving()"
+                  (input)="edit(field.key, $event)"
+                  (change)="commit(field.key)"
+                  [attr.data-testid]="field.testId"
+                />
+                <span ptahFieldTrailing aria-hidden="true">calls</span>
+                @if (fieldMessage(field.key)) {
+                  <span
+                    ptahFieldBeforeHint
+                    class="text-xs text-base-content-muted"
+                    >{{ field.help }} Range: {{ field.min }} or greater.</span
+                  >
+                }
               </ptah-field>
+            }
           }
         }
-      }
-
-    </ptah-form-section>
+      </ptah-form-section>
     </section>
   `,
   styles: `
+    .lane-guards-number-field {
+      max-inline-size: 22rem;
+    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }

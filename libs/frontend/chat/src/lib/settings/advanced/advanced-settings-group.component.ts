@@ -20,7 +20,13 @@ import {
   type AdvancedSettingValidation,
 } from '@ptah-extension/shared';
 import { NgTemplateOutlet } from '@angular/common';
-import { PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahSettingRowComponent, PtahToggleDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+  PtahSettingRowComponent,
+  PtahToggleDirective,
+} from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
@@ -74,7 +80,15 @@ function formatValue(
 @Component({
   selector: 'ptah-advanced-settings-group',
   standalone: true,
-  imports: [NgTemplateOutlet, PtahButtonDirective, PtahFieldComponent, PtahSettingRowComponent, PtahInputDirective, PtahToggleDirective, SettingsBusyDisabledDirective],
+  imports: [
+    NgTemplateOutlet,
+    PtahButtonDirective,
+    PtahFieldComponent,
+    PtahSettingRowComponent,
+    PtahInputDirective,
+    PtahToggleDirective,
+    SettingsBusyDisabledDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (group(); as group) {
@@ -148,7 +162,9 @@ function formatValue(
             </div>
           }
           @default {
-            <div class="settings-grid grid grid-cols-1 items-start gap-x-4 gap-y-[var(--ptah-gap-section)]">
+            <div
+              class="settings-grid grid grid-cols-1 items-start gap-x-4 gap-y-[var(--ptah-gap-section)]"
+            >
               @for (setting of settings(); track setting.key) {
                 <div
                   class="flex min-w-0 flex-col gap-1"
@@ -157,46 +173,50 @@ function formatValue(
                   "
                 >
                   @if (setting.kind === 'boolean') {
-                    <ptah-setting-row [label]="setting.label" [controlId]="'advanced-setting-' + setting.key">
-                    <span class="flex items-center gap-1.5 text-sm font-medium text-base-content"
-                      >{{ setting.label }}
+                    <ptah-setting-row
+                      [label]="setting.label"
+                      [controlId]="'advanced-setting-' + setting.key"
+                    >
                       @if (setting.apply === 'restart') {
-                        <span [class]="restartBadge" aria-hidden="true"
+                        <span status [class]="restartBadge" aria-hidden="true"
                           >Restart</span
                         >
                       }
-                    </span>
-                    <label
-                      class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2"
-                    >
-                      <input
-                        type="checkbox"
-                        ptahToggle size="sm"
-                        [id]="'advanced-setting-' + setting.key"
-                        [checked]="booleanValue(setting)"
-                        [ptahBusyDisabled]="busy()"
-                        (change)="toggle(setting, $event)"
-                        [attr.aria-label]="setting.label"
-                        [attr.aria-invalid]="errors()[setting.key] ? 'true' : null"
-                        [attr.aria-describedby]="describedBy(setting)"
-                        [attr.data-testid]="'advanced-setting-' + setting.key"
-                      />
-                      <span
-                        class="text-sm"
-                        [attr.data-testid]="
-                          'advanced-setting-' + setting.key + '-state'
-                        "
-                        >{{
-                          booleanValue(setting) ? 'Enabled' : 'Disabled'
-                        }}</span
+                      <div
+                        class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2"
                       >
-                    </label>
+                        <input
+                          type="checkbox"
+                          ptahToggle
+                          size="sm"
+                          [id]="'advanced-setting-' + setting.key"
+                          [checked]="booleanValue(setting)"
+                          [ptahBusyDisabled]="busy()"
+                          (change)="toggle(setting, $event)"
+                          [attr.aria-invalid]="
+                            errors()[setting.key] ? 'true' : null
+                          "
+                          [attr.aria-label]="setting.label"
+                          [attr.aria-describedby]="describedBy(setting)"
+                          [attr.data-testid]="'advanced-setting-' + setting.key"
+                        />
+                        <span
+                          class="text-sm"
+                          [attr.data-testid]="
+                            'advanced-setting-' + setting.key + '-state'
+                          "
+                          >{{
+                            booleanValue(setting) ? 'Enabled' : 'Disabled'
+                          }}</span
+                        >
+                      </div>
                     </ptah-setting-row>
                   } @else {
                     <ptah-field [label]="setting.label" appearance="stacked">
                       <input
                         type="text"
-                        ptahInput size="sm"
+                        ptahInput
+                        size="sm"
                         [id]="'advanced-setting-' + setting.key"
                         [attr.inputmode]="
                           setting.integer ? 'numeric' : 'decimal'
@@ -220,7 +240,12 @@ function formatValue(
                         >
                       }
                       @if (setting.apply === 'restart') {
-                        <span ptahFieldAfterError [class]="restartBadge" aria-hidden="true">Restart</span>
+                        <span
+                          ptahFieldAfterError
+                          [class]="restartBadge"
+                          aria-hidden="true"
+                          >Restart</span
+                        >
                       }
                     </ptah-field>
                   }
@@ -271,10 +296,14 @@ function formatValue(
     }
     /* Columns follow the group's own width, so a narrow drawer gets one column. */
     @container (min-width: 36rem) {
-      .settings-grid { grid-template-columns: repeat(2, minmax(0, 22rem)); }
+      .settings-grid {
+        grid-template-columns: repeat(2, minmax(0, 22rem));
+      }
     }
     @container (min-width: 56rem) {
-      .settings-grid { grid-template-columns: repeat(3, minmax(0, 22rem)); }
+      .settings-grid {
+        grid-template-columns: repeat(3, minmax(0, 22rem));
+      }
     }
   `,
 })

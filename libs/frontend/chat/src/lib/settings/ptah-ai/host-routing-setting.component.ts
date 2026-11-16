@@ -15,7 +15,12 @@ import {
   settingNotSavedMessage,
 } from '../feedback/settings-save-feedback.service';
 import { parseDecisionModelStatus } from '../providers/decision-model-row.view';
-import { PtahAlertComponent, PtahButtonDirective, PtahSettingRowComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
+import {
+  PtahAlertComponent,
+  PtahButtonDirective,
+  PtahSettingRowComponent,
+  PtahSkeletonComponent,
+} from '@ptah-extension/ui';
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
@@ -48,7 +53,13 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 @Component({
   selector: 'ptah-host-routing-setting',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahAlertComponent, PtahSettingRowComponent, PtahSkeletonComponent],
+  imports: [
+    SettingsBusyDisabledDirective,
+    PtahButtonDirective,
+    PtahAlertComponent,
+    PtahSettingRowComponent,
+    PtahSkeletonComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -87,14 +98,25 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
 
       @switch (load()) {
         @case ('loading') {
-          <ptah-skeleton shape="line" />
-          <p class="text-xs text-base-content-muted" role="status" aria-live="polite" data-testid="host-routing-loading">
+          <ptah-skeleton shape="lines" />
+          <p
+            class="text-xs text-base-content-muted"
+            role="status"
+            aria-live="polite"
+            data-testid="host-routing-loading"
+          >
             Loading routing suggestions…
           </p>
         }
         @case ('error') {
           <div class="space-y-1.5">
-            <ptah-alert tone="error" compact data-testid="host-routing-load-error">The setting could not be read.</ptah-alert>
+            <ptah-alert
+              tone="error"
+              live="assertive"
+              [compact]="true"
+              data-testid="host-routing-load-error"
+              >The setting could not be read.</ptah-alert
+            >
             <button
               type="button"
               ptahButton
@@ -118,7 +140,14 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           }
         }
       }
-      <button type="button" ptahButton variant="ghost" (click)="openMatrix.emit()">See decision matrix</button>
+      <button
+        type="button"
+        ptahButton
+        variant="ghost"
+        (click)="openMatrix.emit()"
+      >
+        See decision matrix
+      </button>
     </section>
   `,
   styles: `

@@ -72,16 +72,24 @@ describe('LaneGuardsSettingsComponent', () => {
     await create();
     const row = input('lane-guards-repeat').closest('ptah-field');
     expect(row).not.toBeNull();
-    expect(row?.querySelector('.ptah-field[data-appearance]')?.getAttribute('data-appearance')).toBe('stacked');
+    expect(
+      row
+        ?.querySelector('.ptah-field[data-appearance]')
+        ?.getAttribute('data-appearance'),
+    ).toBe('stacked');
     const field = input('lane-guards-repeat');
     expect(field.classList.contains('input')).toBe(true);
     expect(field.classList.contains('input-sm')).toBe(true);
-    expect(field.classList.contains('join-item')).toBe(true);
+    expect(field.classList.contains('join-item')).toBe(false);
     expect(field.getAttribute('data-ptah-control')).toBe('input');
     expect(field.hasAttribute('aria-invalid')).toBe(false);
-    expect(row?.querySelector('label')?.getAttribute('for')).toBe('lane-guards-repeat');
+    expect(row?.querySelector('label')?.getAttribute('for')).toBe(
+      'lane-guards-repeat',
+    );
     expect(row?.querySelector('p[role="alert"]')).toBeNull();
-    expect(row?.querySelector('.ptah-field__message')?.textContent).toContain('Range: 2 or greater.');
+    expect(row?.querySelector('.ptah-field__message')?.textContent).toContain(
+      'Range: 2 or greater.',
+    );
   });
 
   it('preserves invalid threshold row DOM', async () => {
@@ -90,15 +98,24 @@ describe('LaneGuardsSettingsComponent', () => {
     const row = input('lane-guards-repeat').closest('ptah-field');
     expect(row).not.toBeNull();
     const field = input('lane-guards-repeat');
-    expect(field.classList.contains('join-item')).toBe(true);
+    expect(field.classList.contains('join-item')).toBe(false);
     expect(field.getAttribute('data-ptah-control')).toBe('input');
     expect(field.getAttribute('aria-invalid')).toBe('true');
-    for (const id of (field.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)) {
+    for (const id of (field.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/)
+      .filter(Boolean)) {
       expect(row?.querySelector(`[id="${id}"]`)).not.toBeNull();
     }
-    expect(field.getAttribute('aria-describedby')).toBeTruthy();
+    const descriptionId = (field.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/)
+      .find((id) => id.startsWith('ptah-field-description-'));
+    expect(descriptionId).toBeDefined();
     expect(
-      row?.querySelector('[data-testid="lane-guards-repeat-error"]')?.textContent,
+      row?.querySelector(`[id="${descriptionId}"]`)?.textContent,
+    ).toContain('Enter a whole number from 2.');
+    expect(
+      row?.querySelector('[data-testid="lane-guards-repeat-error"]')
+        ?.textContent,
     ).toContain('Enter a whole number from 2.');
   });
 
@@ -106,7 +123,7 @@ describe('LaneGuardsSettingsComponent', () => {
     await create();
     expect(
       (fixture.nativeElement as HTMLElement)
-        .querySelector('section')
+        .querySelector('ptah-form-section')
         ?.getAttribute('data-glass-surface'),
     ).toBe('content');
     expect(call).toHaveBeenCalledWith('agent:getConfig', undefined, {
@@ -118,7 +135,7 @@ describe('LaneGuardsSettingsComponent', () => {
     expect(host().querySelectorAll('input')).toHaveLength(1);
     expect(input('lane-guards-repeat').className).toContain('input-sm');
     expect(input('lane-guards-repeat').className).toContain('flex-1');
-    expect(input('lane-guards-repeat').className).toContain('join-item');
+    expect(input('lane-guards-repeat').className).not.toContain('join-item');
     const intro = byTestId('lane-guards-intro')?.textContent ?? '';
     expect(intro).toContain(
       'Lanes also have a weighted token budget and a duration limit.',

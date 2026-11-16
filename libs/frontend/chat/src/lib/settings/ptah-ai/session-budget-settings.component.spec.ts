@@ -70,18 +70,30 @@ describe('SessionBudgetSettingsComponent', () => {
 
   it('connects each checkbox to its row label and resolves every description', async () => {
     await create();
-    for (const checkbox of host().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
+    for (const checkbox of host().querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    )) {
       expect(checkbox.id).toBeTruthy();
-      expect(host().querySelector(`label[for="${checkbox.id}"]`)).not.toBeNull();
+      expect(
+        host().querySelector(`label[for="${checkbox.id}"]`),
+      ).not.toBeNull();
     }
-    for (const control of host().querySelectorAll<HTMLElement>('[aria-describedby]')) {
-      for (const id of (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)) {
+    for (const control of host().querySelectorAll<HTMLElement>(
+      '[aria-describedby]',
+    )) {
+      for (const id of (control.getAttribute('aria-describedby') ?? '')
+        .split(/\s+/)
+        .filter(Boolean)) {
         expect(host().querySelector(`[id="${id}"]`)).not.toBeNull();
       }
     }
     await enter('tokens', 'bad');
-    for (const control of host().querySelectorAll<HTMLElement>('[aria-describedby]')) {
-      for (const id of (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)) {
+    for (const control of host().querySelectorAll<HTMLElement>(
+      '[aria-describedby]',
+    )) {
+      for (const id of (control.getAttribute('aria-describedby') ?? '')
+        .split(/\s+/)
+        .filter(Boolean)) {
         expect(host().querySelector(`[id="${id}"]`)).not.toBeNull();
       }
     }
@@ -153,7 +165,9 @@ describe('SessionBudgetSettingsComponent', () => {
       expect(row?.querySelector('label')?.getAttribute('for')).toBe(control.id);
       expect(control.getAttribute('data-ptah-control')).toBe('input');
       expect(control.closest('ptah-field')).not.toBeNull();
-      expect(row?.querySelector('[aria-hidden="true"]')?.textContent?.trim()).toBeTruthy();
+      expect(
+        row?.querySelector('[aria-hidden="true"]')?.textContent?.trim(),
+      ).toBeTruthy();
     }
   });
 
@@ -171,17 +185,27 @@ describe('SessionBudgetSettingsComponent', () => {
 
   it('explains the measures and the compaction count gate', async () => {
     await create();
-    expect(byTestId('session-budget-token-measure-resolved')?.textContent).toContain('Weighted session tokens');
-    expect(host().textContent).toContain('cached reads at 10% and output at 5x');
-    expect(host().textContent).toContain('every token of every request, including cache reads');
-    expect(host().textContent).toContain('50% or more of the auto-compact window');
+    expect(
+      byTestId('session-budget-token-measure-resolved')?.textContent,
+    ).toContain('Weighted session tokens');
+    expect(host().textContent).toContain(
+      'cached reads at 10% and output at 5x',
+    );
+    expect(host().textContent).toContain(
+      'every token of every request, including cache reads',
+    );
+    expect(host().textContent).toContain(
+      '50% or more of the auto-compact window',
+    );
   });
 
   it('keeps weighted for a stored budget with no stored measure', async () => {
     delete stored['sessionBudget.tokenMeasure'];
     stored['sessionBudget.tokens'] = 30_000_000;
     await create();
-    expect(byTestId<HTMLSelectElement>('session-budget-token-measure')?.value).toBe('weighted');
+    expect(
+      byTestId<HTMLSelectElement>('session-budget-token-measure')?.value,
+    ).toBe('weighted');
     expect(byTestId('session-budget-token-measure-recommendation')).toBeNull();
   });
 
@@ -189,25 +213,41 @@ describe('SessionBudgetSettingsComponent', () => {
     stored['sessionBudget.tokenMeasure'] = 'raw';
     stored['sessionBudget.tokens'] = 30_000_000;
     await create();
-    expect(byTestId<HTMLSelectElement>('session-budget-token-measure')?.value).toBe('raw');
-    expect(byTestId('session-budget-token-measure-resolved')?.textContent).toContain('Raw session tokens');
-    expect(byTestId('session-budget-token-measure-recommendation')).not.toBeNull();
+    expect(
+      byTestId<HTMLSelectElement>('session-budget-token-measure')?.value,
+    ).toBe('raw');
+    expect(
+      byTestId('session-budget-token-measure-resolved')?.textContent,
+    ).toContain('Raw session tokens');
+    expect(
+      byTestId('session-budget-token-measure-recommendation'),
+    ).not.toBeNull();
     byTestId<HTMLButtonElement>('session-budget-token-measure-switch')?.click();
     await settle();
-    expect(writes()).toEqual([{ key: 'sessionBudget.tokenMeasure', value: 'weighted' }]);
+    expect(writes()).toEqual([
+      { key: 'sessionBudget.tokenMeasure', value: 'weighted' },
+    ]);
     expect(stored['sessionBudget.tokens']).toBe(30_000_000);
     expect(byTestId('session-budget-token-measure-recommendation')).toBeNull();
   });
 
   it('saves the selected raw measure and lets the recommendation be dismissed', async () => {
     await create();
-    const select = byTestId<HTMLSelectElement>('session-budget-token-measure') as HTMLSelectElement;
+    const select = byTestId<HTMLSelectElement>(
+      'session-budget-token-measure',
+    ) as HTMLSelectElement;
     select.value = 'raw';
     select.dispatchEvent(new Event('change'));
     await settle();
-    expect(writes()).toEqual([{ key: 'sessionBudget.tokenMeasure', value: 'raw' }]);
-    expect(byTestId('session-budget-token-measure-recommendation')).not.toBeNull();
-    byTestId('session-budget-token-measure-recommendation')?.querySelectorAll('button')[1]?.click();
+    expect(writes()).toEqual([
+      { key: 'sessionBudget.tokenMeasure', value: 'raw' },
+    ]);
+    expect(
+      byTestId('session-budget-token-measure-recommendation'),
+    ).not.toBeNull();
+    byTestId('session-budget-token-measure-recommendation')
+      ?.querySelectorAll('button')[1]
+      ?.click();
     fixture.detectChanges();
     expect(byTestId('session-budget-token-measure-recommendation')).toBeNull();
   });
@@ -216,20 +256,26 @@ describe('SessionBudgetSettingsComponent', () => {
     await create();
     await enter('tokens', 'bad');
     expect(field('tokens').getAttribute('aria-invalid')).toBe('true');
-    expect(byTestId('session-budget-tokens-error')?.textContent).toContain('Enter a number.');
+    expect(byTestId('session-budget-tokens-error')?.textContent).toContain(
+      'Enter a number.',
+    );
   });
 
   it('keeps the stored-value notice associated with the input', async () => {
     stored['sessionBudget.tokens'] = 5;
     await create();
-    expect(field('tokens').getAttribute('aria-describedby')).toContain('session-budget-tokens-stored');
+    expect(field('tokens').getAttribute('aria-describedby')).toContain(
+      'session-budget-tokens-stored',
+    );
     expect(byTestId('session-budget-tokens-stored')).not.toBeNull();
   });
 
   it('omits the readable note when none is available', async () => {
     await create();
     const row = field('usd').closest('ptah-field');
-    expect(row?.querySelector('span.whitespace-nowrap.text-xs:not([aria-hidden])')).toBeNull();
+    expect(
+      row?.querySelector('span.whitespace-nowrap.text-xs:not([aria-hidden])'),
+    ).toBeNull();
   });
 
   describe('load', () => {
@@ -237,7 +283,7 @@ describe('SessionBudgetSettingsComponent', () => {
       await create();
       expect(
         (fixture.nativeElement as HTMLElement)
-          .querySelector('section')
+          .querySelector('ptah-form-section')
           ?.getAttribute('data-glass-surface'),
       ).toBe('content');
       const read = mockRpcCall.mock.calls
@@ -491,8 +537,13 @@ describe('SessionBudgetSettingsComponent', () => {
       stored['sessionBudget.tightenWindowTokens'] = 400_000;
       await create();
       expect(
-        host().querySelector('#session-budget-tightenWindowTokens-help')
-          ?.textContent,
+        host().querySelector(
+          '#' +
+            field('tightenWindowTokens')
+              .getAttribute('aria-describedby')
+              ?.split(' ')
+              .find((id) => id.startsWith('ptah-field-description-')),
+        )?.textContent,
       ).toMatch(/advisory only until set/i);
       await enter('tightenWindowTokens', '');
       expect(writes()).toEqual([
@@ -608,9 +659,11 @@ describe('SessionBudgetSettingsComponent', () => {
       await create();
       const box = field('autoHandoffAtLimit');
       expect(box.checked).toBe(true);
-      expect(box.getAttribute('aria-label')).toBe(
-        'Hand off automatically at 100%',
-      );
+      expect(
+        host()
+          .querySelector('label[for="session-budget-autoHandoffAtLimit"]')
+          ?.textContent?.trim(),
+      ).toBe('Hand off automatically at 100%');
       expect(
         byTestId('settings-section-session-budget')?.textContent,
       ).toContain('once per session');

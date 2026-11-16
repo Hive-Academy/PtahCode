@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   Plug,
   Layers,
+  TableProperties,
   SlidersHorizontal,
   AudioLines,
   Wrench,
@@ -32,7 +33,10 @@ import {
 // Two declarations on purpose: each component import must hold only the `@defer`-only class, or
 // Angular keeps the whole tab (Providers with its named-accounts UI and agents routing, Context Management) in the eager chunk.
 import { ProvidersSettingsComponent } from './providers/providers-settings.component';
-import type { ProvidersSettingsDrawerRequest, ProvidersSettingsFocusTarget } from './providers/providers-settings.component';
+import type {
+  ProvidersSettingsDrawerRequest,
+  ProvidersSettingsFocusTarget,
+} from './providers/providers-settings.component';
 import { ProvidersModelsLoader } from './providers/providers-models-loader.service';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
 import { SettingsToastComponent } from './feedback/settings-toast.component';
@@ -126,11 +130,11 @@ const isAgentsRoutingSection = (
     MotionStageDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
-  PtahSettingsLayoutComponent,
-  PtahDescriptionListComponent,
-  PtahStatusComponent,
-  PtahStatePanelComponent,
-  PtahSkeletonComponent,
+    PtahSettingsLayoutComponent,
+    PtahDescriptionListComponent,
+    PtahStatusComponent,
+    PtahStatePanelComponent,
+    PtahSkeletonComponent,
   ],
   // Page-scoped: the toast timer dies with the page; one models loader for every tab.
   providers: [
@@ -163,25 +167,56 @@ export class SettingsComponent implements OnInit {
   readonly settingsTabs = [
     { id: 'claude-auth', label: 'Providers', icon: Plug },
     { id: 'orchestration', label: 'Context Management', icon: Layers },
-    ...(this.vscodeService.isElectron ? [{ id: 'matrix', label: 'Decision matrix', icon: Layers, parent: 'orchestration' }] as const : []),
+    ...(this.vscodeService.isElectron
+      ? ([
+          {
+            id: 'matrix',
+            label: 'Decision matrix',
+            icon: TableProperties,
+            parent: 'orchestration',
+          },
+        ] as const)
+      : []),
     { id: 'pro-features', label: 'Advanced', icon: SlidersHorizontal },
     { id: 'tools', label: 'Search & Voice', icon: AudioLines },
   ] as const;
   readonly activeSettingsTab = signal<
-    'providers' | 'claude-auth' | 'orchestration' | 'matrix' | 'pro-features' | 'tools'
+    | 'providers'
+    | 'claude-auth'
+    | 'orchestration'
+    | 'matrix'
+    | 'pro-features'
+    | 'tools'
   >('claude-auth');
-  readonly selectedSettingsTab = computed(() => this.activeSettingsTab() === 'providers' ? 'claude-auth' : this.activeSettingsTab());
-  readonly activeTabTitle = computed(() => this.settingsTabs.find(tab => tab.id === this.selectedSettingsTab())?.label ?? 'Providers');
-  readonly activeTabDescription = computed(() => ({
-    providers: 'Choose which models and CLI agents do the work, and in which order lanes run.',
-    'claude-auth': 'Choose which models and CLI agents do the work, and in which order lanes run.',
-    orchestration: 'Limits that keep chats and lanes inside your budget and plan limits.',
-    matrix: 'The routing model uses these ratings to suggest a lane.',
-    'pro-features': 'Membership, agent behaviour, the MCP server, tools and setup.',
-    tools: 'Web search providers, voice engines and workspace checks.',
-  })[this.selectedSettingsTab()]);
+  readonly selectedSettingsTab = computed(() =>
+    this.activeSettingsTab() === 'providers'
+      ? 'claude-auth'
+      : this.activeSettingsTab(),
+  );
+  readonly activeTabTitle = computed(
+    () =>
+      this.settingsTabs.find((tab) => tab.id === this.selectedSettingsTab())
+        ?.label ?? 'Providers',
+  );
+  readonly activeTabDescription = computed(
+    () =>
+      ({
+        providers:
+          'Choose which models and CLI agents do the work, and in which order lanes run.',
+        'claude-auth':
+          'Choose which models and CLI agents do the work, and in which order lanes run.',
+        orchestration:
+          'Limits that keep chats and lanes inside your budget and plan limits.',
+        matrix: 'The routing model uses these ratings to suggest a lane.',
+        'pro-features':
+          'Membership, agent behaviour, the MCP server, tools and setup.',
+        tools: 'Web search providers, voice engines and workspace checks.',
+      })[this.selectedSettingsTab()],
+  );
   readonly contextRows = computed(() => [
-    ...(this.workspaceName() ? [{ key: 'workspace', term: 'Workspace', value: this.workspaceName() }] : []),
+    ...(this.workspaceName()
+      ? [{ key: 'workspace', term: 'Workspace', value: this.workspaceName() }]
+      : []),
     { key: 'app', term: 'App', value: this.appLabel },
   ]);
   readonly settingsTabIndex = computed(() =>
@@ -198,11 +233,17 @@ export class SettingsComponent implements OnInit {
    * which opens the setup wizard for that provider.
    */
   readonly requestedProviderId = signal<string | undefined>(undefined);
-  readonly requestedDrawer = signal<ProvidersSettingsDrawerRequest | null>(null);
+  readonly requestedDrawer = signal<ProvidersSettingsDrawerRequest | null>(
+    null,
+  );
 
   openCodexSettings(): void {
     this.setActiveTab('providers');
-    this.requestedDrawer.set(this.isElectron ? { providerId: 'openai-codex', tab: 'credentials' } : null);
+    this.requestedDrawer.set(
+      this.isElectron
+        ? { providerId: 'openai-codex', tab: 'credentials' }
+        : null,
+    );
   }
 
   readonly isElectron = this.vscodeService.isElectron;
@@ -268,7 +309,12 @@ export class SettingsComponent implements OnInit {
       this.setActiveTab('providers');
       this.providersTarget.set(isProvidersSection(section) ? section : null);
       this.agentsRoutingTarget.set(null);
-    } else if (this.isElectron && (section === 'capability-matrix' || section === 'decision-matrix' || section === 'matrix')) {
+    } else if (
+      this.isElectron &&
+      (section === 'capability-matrix' ||
+        section === 'decision-matrix' ||
+        section === 'matrix')
+    ) {
       this.setActiveTab('matrix');
       this.providersTarget.set(null);
       this.agentsRoutingTarget.set(null);
@@ -288,7 +334,12 @@ export class SettingsComponent implements OnInit {
    */
   setActiveTab(
     tab:
-      'providers' | 'claude-auth' | 'orchestration' | 'matrix' | 'pro-features' | 'tools',
+      | 'providers'
+      | 'claude-auth'
+      | 'orchestration'
+      | 'matrix'
+      | 'pro-features'
+      | 'tools',
   ): void {
     const next = tab === 'providers' ? 'claude-auth' : tab;
     if (next !== 'claude-auth') this.requestedDrawer.set(null);
