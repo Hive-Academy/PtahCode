@@ -604,6 +604,7 @@ describe('ProvidersSettingsComponent', () => {
     state.activeProviderId.set(null); state.connections.set(ready([])); await render();
     expect(element.textContent).toContain('Choose a provider to start the main agent.');
     expect(element.textContent).toContain('No connections configured.');
+    expect(element.querySelector('ptah-state-panel[state="empty"]')).not.toBeNull();
   });
   it('renders each resolvedModel arm of the route (Main Agent node)', async () => {
     const model = () => element.querySelector('[data-testid="routing-main-model"]')?.textContent?.trim();
@@ -779,6 +780,7 @@ describe('ProvidersSettingsComponent', () => {
       expect(region?.querySelector('[data-read-error="scopes"]')?.textContent).toContain('Setting sources could not be loaded.');
       const connections = element.querySelector('section[aria-labelledby="providers-connections-heading"]');
       expect(connections?.querySelector('[data-read-error="connections"]')).not.toBeNull();
+      expect(connections?.querySelector('ptah-alert[data-read-error="connections"]')).not.toBeNull();
       button('Retry setting sources').click(); await render();
       expect(state.refreshScopes).toHaveBeenCalledTimes(1);
       expect(state.refreshConnections).not.toHaveBeenCalled();

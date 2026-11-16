@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal, untracked } from '@angular/core';
 import { LucideAngularModule, Search, Waypoints } from 'lucide-angular';
 import type { ProvidersConnection } from '@ptah-extension/core';
-import { NativeModalComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
+import { NativeModalComponent, PtahAlertComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahListRowComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
 import { getAnthropicProvider } from '@ptah-extension/shared';
 import { connectionAvatarTone, connectionInitials } from './provider-connection-card.state';
 
@@ -23,7 +23,7 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
 @Component({
   selector: 'ptah-provider-catalog-modal',
   standalone: true,
-  imports: [LucideAngularModule, NativeModalComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective],
+  imports: [LucideAngularModule, NativeModalComponent, PtahAlertComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahListRowComponent, PtahSkeletonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-native-modal [isOpen]="open()" ariaLabelledby="provider-catalog-title" size="md" (closed)="closed.emit()">
@@ -42,15 +42,14 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
       <div class="-mx-3 max-h-[50vh] space-y-3 overflow-y-auto pt-3 text-xs" data-testid="provider-catalog-body">
         @switch (status()) {
           @case ('error') {
-            <div role="alert" class="space-y-2 px-2" data-testid="provider-catalog-error">
+            <ptah-alert role="alert" tone="error" [compact]="true" live="assertive" data-testid="provider-catalog-error">
               <p class="text-base-content">Custom providers could not be loaded. Your saved settings have not changed.</p>
-              <button type="button" ptahButton (click)="retryRequested.emit()">Retry</button>
-            </div>
+              <button alertAction type="button" ptahButton variant="ghost" (click)="retryRequested.emit()">Retry</button>
+            </ptah-alert>
           }
           @case ('loading') {
-            <div class="space-y-2 px-2" aria-busy="true" data-testid="provider-catalog-loading">
-              <span class="skeleton block h-8 w-full"></span>
-              <span class="skeleton block h-8 w-full"></span>
+            <div aria-busy="true" data-testid="provider-catalog-loading">
+              <ptah-skeleton [lines]="2" size="sm" />
             </div>
           }
           @default {
@@ -58,23 +57,19 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
               Available in catalog ({{ providers().length }} unconfigured)
             </span>
             @if (rows().length) {
-              <ul class="space-y-1" aria-label="Providers in the catalog">
+              <ul aria-label="Providers in the catalog">
                 @for (row of rows(); track row.id) {
-                  <li class="flex items-center justify-between gap-2 rounded p-2.5 hover:bg-base-200" [attr.data-provider]="row.id">
-                    <div class="flex min-w-0 items-center gap-2">
-                      <span [class]="row.avatar" aria-hidden="true">{{ row.initials }}</span>
-                      <div class="min-w-0">
-                        <span class="block break-words text-sm font-semibold text-base-content">{{ row.name }}</span>
-                        <span class="block break-words text-xs text-base-content-muted">{{ row.detail }}</span>
-                      </div>
-                    </div>
-                    <div class="flex shrink-0 items-center gap-1.5">
+                  <li [attr.data-provider]="row.id">
+                    <div ptahListRow [title]="row.name" [meta]="row.detail">
+                      <span leading [class]="row.avatar" aria-hidden="true">{{ row.initials }}</span>
+                    <div trailing class="flex shrink-0 items-center gap-1.5">
                       @if (row.signIn) {
                         <button type="button" ptahButton variant="ghost"
                           [attr.aria-label]="'Sign in to ' + row.name" (click)="signInRequested.emit(row.id)">Sign in</button>
                       }
                       <button type="button" ptahButton [disabled]="!canSetUp()"
                         [attr.aria-label]="'Connect ' + row.name" (click)="providerChosen.emit(row.id)">Connect</button>
+                    </div>
                     </div>
                   </li>
                 }
