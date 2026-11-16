@@ -56,7 +56,9 @@ Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processe
 | B2.3a: `starting` status in all readers | TASK_2026_2181_dbbb | #1354 | merged |
 | B2.3b: synchronous admission and reply deadline | TASK_2026_2181_dbbb | #1367 | in review |
 | B2.4 to B2.6: status, wait and read polish, renderer, agent text | TASK_2026_2181_dbbb | none | not started |
-| B3: completion signals for external MCP clients | TASK_2026_2181_dbbb | none | not started |
+| B3 PR 1: external owner key and completion outbox (runtime) | TASK_2026_2181_dbbb | see branch `feat/external-completion-outbox` | in review |
+| B3 PR 2: HTTP binding and piggyback on the next tool result | TASK_2026_2181_dbbb | none | not started |
+| B3 PR 3: stdio owner, `ptah_agent_wait` envelope, agent text | TASK_2026_2181_dbbb | none | not started |
 | P2: Nx daemon and worktree cost measurement | none | none | not started |
 | P3: process tree stop on Windows | none | none | not started |
 | P4: memory-based concurrency limit for lanes and sessions | none | none | plan owed to the user before code |
