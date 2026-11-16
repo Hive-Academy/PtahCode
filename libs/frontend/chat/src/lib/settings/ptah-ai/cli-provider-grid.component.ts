@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, output, viewChild } from '@angular/core';
 import type { CliLaneDefaults, CliType } from '@ptah-extension/shared';
 import { LanesTableComponent, type LaneTableRow } from './lanes-table.component';
 
@@ -19,6 +19,8 @@ import { LanesTableComponent, type LaneTableRow } from './lanes-table.component'
     (defaultResetRequested)="defaultResetRequested.emit($event)" />`,
 })
 export class CliProviderGridComponent {
+  private readonly table = viewChild(LanesTableComponent);
+  closeGuide(rowId: string): void { this.table()?.closeGuide(rowId); }
   readonly rows = input.required<readonly LaneTableRow[]>();
   readonly defaults = input<CliLaneDefaults>();
   readonly busy = input(false);

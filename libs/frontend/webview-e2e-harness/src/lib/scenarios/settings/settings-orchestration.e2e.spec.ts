@@ -54,7 +54,7 @@ const MODALS: readonly ModalCase[] = [
     name: 'tier-mapping modal',
     testid: 'cli-tier-mapping-modal',
     opener: (page) =>
-      page.locator(`[data-testid="cli-matrix-tiers-${GLM_ID}"]`),
+      page.locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`),
   },
 ];
 
@@ -209,9 +209,9 @@ for (const host of HOSTS) {
     }) => {
       // V36-7: Edit sits in the row's "More actions" popover; focus returns to that trigger.
       await expandMatrixDetail(page, GLM_ID);
-      const more = page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`);
+      const more = page.locator(`[data-testid="cli-matrix-row-${GLM_ID}"] ptah-table-row-actions button[aria-haspopup="menu"]`);
       await more.click();
-      await page.locator(`#lane-detail-${GLM_ID} [role="menuitem"]:text-is("Edit")`).click();
+      await page.locator(`[data-testid="cli-matrix-row-${GLM_ID}"] [role="menuitem"]:text-is("Edit")`).click();
       const dialog = dialogOf(page, 'add-cli-instance-modal');
       await expect(dialog).toHaveAttribute('open', '');
       await expect(
@@ -236,7 +236,8 @@ for (const host of HOSTS) {
       page,
     }) => {
       const state = getFixtureState(page);
-      const cell = page.locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]');
+      await expandMatrixDetail(page, 'codex');
+      const cell = page.locator('#lane-detail-codex [data-popover-kind="model"]');
       await cell.click();
       const popover = page.locator('[data-testid="cli-matrix-popover"]');
       const search = popover.locator('input[role="combobox"]');
@@ -271,6 +272,8 @@ for (const host of HOSTS) {
     }) => {
       const state = getFixtureState(page);
       const codexCard = page.locator('[data-testid="cli-provider-card-codex"]');
+      await expandMatrixDetail(page, 'codex');
+      const codexModel = page.locator('#lane-detail-codex');
       const codex = codexCard.getByRole('checkbox', { name: 'Codex enabled' });
       await expect(codex).toBeChecked();
       let before = state.calls.length;
@@ -281,10 +284,10 @@ for (const host of HOSTS) {
       await expect(codex).not.toBeChecked();
       // A turned-off card keeps its model visible but disables editing.
       await expect(
-        codexCard.locator('[data-popover-kind="model"]'),
+        codexModel.locator('[data-popover-kind="model"]'),
       ).toBeDisabled();
       await expect(
-        codexCard.locator('[data-popover-kind="effort"]'),
+        codexModel.locator('[data-popover-kind="effort"]'),
       ).toBeDisabled();
       await toastUndo(page).click();
       await expectCall(page, before, 'agent:setConfig', {
@@ -292,7 +295,7 @@ for (const host of HOSTS) {
       });
       await expect(codex).toBeChecked();
       await visibleEnabled(
-        codexCard.locator('[data-popover-kind="model"]'),
+        codexModel.locator('[data-popover-kind="model"]'),
       );
       // A Ptah CLI instance's on/off is its own `enabled` field.
       const glm = page.locator(`[data-testid="cli-matrix-toggle-${GLM_ID}"]`);
@@ -368,14 +371,14 @@ for (const host of HOSTS) {
     }) => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await expandMatrixDetail(page, GLM_ID);
-      await page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`).click();
-      const menu = page.locator(`#lane-detail-${GLM_ID} [role="menu"]`);
+      await page.locator(`[data-testid="cli-matrix-row-${GLM_ID}"] ptah-table-row-actions button[aria-haspopup="menu"]`).click();
+      const menu = page.locator(`[data-testid="cli-matrix-row-${GLM_ID}"] [role="menu"]`);
       await expect(menu).toBeVisible();
       const panel = await menu.boundingBox();
       if (!panel) throw new Error('No More actions panel box');
-      // Wide box: Edit and Delete. Narrow box: Tiers and Test move in first (hidden, not removed, when wide).
+      // The row menu includes Details, Test, All capabilities, Tiers, Edit, and Delete.
       const items = menu.locator('button:visible');
-      expect([2, 4]).toContain(await items.count());
+      expect(await items.count()).toBe(6);
       for (const item of await items.all()) {
         const box = await item.boundingBox();
         if (!box) throw new Error('No More actions item box');

@@ -8,6 +8,7 @@ import {
   inject,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { LucideAngularModule, Terminal } from 'lucide-angular';
 import { ProvidersSettingsStateService } from '@ptah-extension/core';
@@ -227,6 +228,7 @@ const SAVE_SCOPE = 'global';
     :host-context([data-glass='on']) [data-testid='settings-cli-matrix'] { padding: 1.25rem; }`,
 })
 export class CliOrchestrationMatrixComponent {
+  private readonly providerGrid = viewChild(CliProviderGridComponent);
   readonly codexSettingsRequested = output<void>();
   protected readonly TerminalIcon = Terminal;
   protected readonly CLI_INSTALL_GUIDES = CLI_INSTALL_GUIDES;
@@ -344,6 +346,7 @@ export class CliOrchestrationMatrixComponent {
   protected readonly addOpen = signal(false);
   protected readonly editTarget = signal<CliInstanceEditTarget | null>(null);
   protected readonly tierTarget = signal<CliTierMappingTarget | null>(null);
+  private tiersOpener: HTMLElement | null = null;
   /** Which Add button opened the form: the empty-state one disappears once an instance exists (Minor 2). */
   private addOrigin: 'header' | 'empty' = 'header';
 
@@ -395,6 +398,7 @@ export class CliOrchestrationMatrixComponent {
   }
 
   protected openTiers(row: InstanceCliMatrixRow): void {
+    this.tiersOpener = this.element.nativeElement.ownerDocument.activeElement as HTMLElement | null;
     this.tierTarget.set({
       id: row.id,
       name: row.name,
@@ -407,11 +411,16 @@ export class CliOrchestrationMatrixComponent {
   protected closeTiers(): void {
     const id = this.tierTarget()?.id;
     this.tierTarget.set(null);
-    if (id)
+    const opener = this.tiersOpener;
+    this.tiersOpener = null;
+    if (opener?.isConnected) {
+      afterNextRender(() => opener.focus(), { injector: this.injector });
+    } else if (id) {
       this.focusAfterRender(
-        `[data-testid="cli-matrix-row-${id}"] ptah-table-row-expander button`,
         `[data-testid="cli-matrix-tiers-${id}"]`,
+        `[data-testid="cli-matrix-row-${id}"] ptah-table-row-expander button`,
       );
+    }
   }
   /** The instance whose Test ran last, for a test that failed before it produced a result. */
   private readonly lastTestedId = signal<string | null>(null);
@@ -437,6 +446,7 @@ export class CliOrchestrationMatrixComponent {
       );
       return;
     }
+    this.providerGrid()?.closeGuide(rowId);
     this.focusAfterRender(`[data-testid="cli-provider-card-${rowId}"] input[type="checkbox"]`);
   }
 

@@ -1,4 +1,7 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { ProvidersSettingsStateService } from '@ptah-extension/core';
+import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import type { SystemCliMatrixRow } from './cli-matrix-rows';
 import { LanesTableDetailComponent } from './lanes-table-detail.component';
 
@@ -41,6 +44,21 @@ describe('LanesTableDetailComponent', () => {
   it('shows Credentials only with a credential action', () => {
     expect(mount().host.querySelector('[data-popover-kind="credentials"]')).toBeNull();
     expect(mount(row('cursor')).host.querySelector('[data-popover-kind="credentials"]')).not.toBeNull();
+  });
+
+  it('focuses the Cursor key when Credentials opens', async () => {
+    TestBed.configureTestingModule({ providers: [
+      { provide: ProvidersSettingsStateService, useValue: {
+        orchestration: signal({ status: 'ready', data: { cursorApiKeyStored: false, cursorApiKeyEnvSet: false }, error: null }),
+        commit: signal({ status: 'idle' }),
+      } },
+      SettingsSaveFeedbackService,
+    ] });
+    const { fixture, host } = mount(row('cursor'));
+    fixture.componentRef.setInput('openKind', 'credentials');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(host.querySelector('[data-testid="cursor-credential-key"]')).toBe(document.activeElement);
   });
 
   it('shows Install guide only when uninstalled', () => {

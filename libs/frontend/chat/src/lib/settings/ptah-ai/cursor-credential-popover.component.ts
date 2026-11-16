@@ -240,6 +240,10 @@ export class CursorCredentialPopoverComponent implements OnDestroy {
   private readonly injector = inject(Injector);
   private destroyed = false;
 
+  constructor() {
+    this.focusAfterRender('cursor-credential-key');
+  }
+
   readonly closed = output<void>();
 
   /** The typed key: held only here, never in service state. */

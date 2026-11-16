@@ -595,6 +595,11 @@ export class LanesTableComponent {
   readonly defaultResetRequested = output<LaneTableRow>();
   protected readonly detailRowId = signal<string | null>(null);
   protected readonly infoOpen = signal<{ readonly rowId: string; readonly kind: CliProviderInfoKind | 'credentials' } | null>(null);
+  closeGuide(rowId: string): void {
+    if (this.infoOpen()?.rowId === rowId && this.infoOpen()?.kind === 'install') {
+      this.infoOpen.set(null);
+    }
+  }
   protected detailExpanded(row: LaneTableRow, expanded: boolean): void {
     this.detailRowId.set(expanded ? row.id : null);
     if (!expanded) this.infoOpen.set(null);

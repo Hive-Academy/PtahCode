@@ -391,7 +391,8 @@ async function captureMatrixPopovers(
   };
   const popover = '[data-testid="cli-matrix-popover"]';
   // Model: the cell opens the popover with its search focused and the list open (interactions/orchestration-2).
-  await page.locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]').click();
+  await expandMatrixDetail(page, 'codex');
+  await page.locator('#lane-detail-codex [data-popover-kind="model"]').click();
   const search = page.locator(`${popover} input[role="combobox"]`);
   await expect(search).toBeEnabled();
   await expect(search).toBeFocused();
@@ -620,7 +621,7 @@ async function assertOrchestrationFold(
   });
   const providerGrid = matrix.locator('[data-testid="cli-provider-grid"]').first();
   await expect(providerGrid).toBeVisible();
-  expect(await providerGrid.evaluate((grid) => getComputedStyle(grid).display)).toBe('grid');
+  expect(await providerGrid.evaluate((grid) => getComputedStyle(grid).display)).toBe('block');
   const consumers = page.locator('[data-testid="consumer-table"]');
   await expect(consumers).toHaveClass(/\bgrid\b/);
   await expect(consumers).toHaveClass(/\bgap-2\b/);
@@ -1391,8 +1392,9 @@ for (const host of ['vscode', 'electron'] as const) {
         antigravity: 'v1.2.14',
       };
       for (const [cli, label] of Object.entries(expected)) {
+        await expandMatrixDetail(page, cli);
         const version = page.locator(
-          `[data-testid="cli-provider-card-${cli}"] [data-testid="cli-matrix-version"]`,
+          `#lane-detail-${cli} [data-testid="cli-provider-facts"] [data-ptah-description-row]:has(dt:text-is("Version")) span`,
         );
         await expect(version).toHaveText(label);
         await expect(version).toHaveAttribute('title', LIVE_VERSIONS[cli]);
@@ -1411,7 +1413,7 @@ for (const host of ['vscode', 'electron'] as const) {
       }
       // 52.2: the Antigravity model cell shows the id once, on at most two lines, with the name in its title.
       const model = page.locator(
-        '[data-testid="cli-provider-card-antigravity"] [data-popover-kind="model"]',
+        '#lane-detail-antigravity [data-popover-kind="model"]',
       );
       await expect(model).toHaveText(
         'claude-sonnet-4-6',

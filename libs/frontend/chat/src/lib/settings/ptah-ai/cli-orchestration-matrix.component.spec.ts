@@ -339,7 +339,12 @@ describe('CliOrchestrationMatrixComponent', () => {
   it('opens the install guide and invokes Re-detect', async () => {
     button(card('pi'), 'Install guide')?.click(); fixture.detectChanges();
     expect(q('#lane-detail-pi ptah-cli-provider-card-popovers')?.textContent).toContain('Re-detect');
+    state.onRedetect = () => state.orchestration.update(section => ({ ...section, data: {
+      ...ORCHESTRATION,
+      detectedClis: ORCHESTRATION.detectedClis.map(cli => cli.cli === 'pi' ? detected('pi', true) : cli),
+    } }));
     button(q('#lane-detail-pi'), 'Re-detect')?.click(); await flush();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    expect(q('#lane-detail-pi ptah-cli-provider-card-popovers')).toBeNull();
   });
 });
