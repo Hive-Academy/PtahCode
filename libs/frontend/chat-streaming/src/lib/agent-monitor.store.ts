@@ -53,6 +53,7 @@ import type {
   CliAdapterManifest,
 } from '@ptah-extension/shared';
 import {
+  isLiveAgentStatus,
   calculateMessageCost,
   computeSubagentCacheState,
   findModelPricing,
@@ -1163,7 +1164,7 @@ export class AgentMonitorStore implements OnDestroy {
     () => {
       if (!this.isSidebar) return false;
       for (const a of this._agents()) {
-        if (a.status === 'running') return true;
+        if (isLiveAgentStatus(a.status)) return true;
       }
       return false;
     },
@@ -1351,7 +1352,7 @@ export class AgentMonitorStore implements OnDestroy {
   readonly hasRunningAgents = computed(
     () => {
       for (const a of this._agents()) {
-        if (a.status === 'running') return true;
+        if (isLiveAgentStatus(a.status)) return true;
       }
       return false;
     },
@@ -1365,7 +1366,7 @@ export class AgentMonitorStore implements OnDestroy {
   /** Whether the active tab's session has running agents (session-scoped).
    * Primitive equality suppresses false notifications when the boolean doesn't change. */
   readonly hasActiveTabRunningAgents = computed(
-    () => this.activeTabAgents().some((a) => a.status === 'running'),
+    () => this.activeTabAgents().some((a) => isLiveAgentStatus(a.status)),
     { equal: (a, b) => a === b },
   );
 
@@ -1932,7 +1933,7 @@ export class AgentMonitorStore implements OnDestroy {
   private evictOldCompletedAgents(
     list: readonly MonitoredAgent[],
   ): MonitoredAgent[] {
-    const completedAgents = list.filter((a) => a.status !== 'running');
+    const completedAgents = list.filter((a) => !isLiveAgentStatus(a.status));
 
     if (completedAgents.length <= MAX_COMPLETED_AGENTS) return [...list];
     const sortedCompleted = [...completedAgents].sort(
@@ -2072,7 +2073,7 @@ export class AgentMonitorStore implements OnDestroy {
         (a) =>
           a.cli === info.cli &&
           a.cliSessionId === info.cliSessionId &&
-          a.status !== 'running' &&
+          !isLiveAgentStatus(a.status) &&
           (a.parentSessionId === undefined ||
             parentSessionId === undefined ||
             a.parentSessionId === parentSessionId),
@@ -2107,7 +2108,7 @@ export class AgentMonitorStore implements OnDestroy {
       let next: MonitoredAgent[] = list.filter((a) => {
         if (parentSessionId === undefined) return true;
         if (a.parentSessionId !== parentSessionId) return true;
-        if (a.status === 'running') return true;
+        if (isLiveAgentStatus(a.status)) return true;
         rebuilt.set(a.agentId, a);
         return false;
       });
@@ -2294,7 +2295,8 @@ export class AgentMonitorStore implements OnDestroy {
     this.clearHistoryCandidates(sessionId);
     this.updateAgents((list) => {
       const next = list.filter(
-        (a) => !(a.parentSessionId === sessionId && a.status !== 'running'),
+        (a) =>
+          !(a.parentSessionId === sessionId && !isLiveAgentStatus(a.status)),
       );
       return next.length === list.length ? list : next;
     });
@@ -2485,7 +2487,9 @@ export class AgentMonitorStore implements OnDestroy {
   }
 
   clearCompleted(): void {
-    this.updateAgents((list) => list.filter((a) => a.status === 'running'));
+    this.updateAgents((list) =>
+      list.filter((a) => isLiveAgentStatus(a.status)),
+    );
     if (this._agents().length === 0) {
       this._userExplicitlyClosed = false;
     }
@@ -2499,7 +2503,8 @@ export class AgentMonitorStore implements OnDestroy {
   clearCompletedInSession(sessionId: string): void {
     this.updateAgents((list) => {
       const next = list.filter(
-        (a) => !(a.parentSessionId === sessionId && a.status !== 'running'),
+        (a) =>
+          !(a.parentSessionId === sessionId && !isLiveAgentStatus(a.status)),
       );
       return next.length === list.length ? list : next;
     });

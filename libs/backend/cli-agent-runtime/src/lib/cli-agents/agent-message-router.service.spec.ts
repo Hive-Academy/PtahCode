@@ -97,6 +97,24 @@ const AGENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
 describe('AgentMessageRouter', () => {
   let logger: jest.Mocked<Logger>;
 
+  it('refuses to select a delivery for a starting lane', async () => {
+    const router = new AgentMessageRouter(
+      createLogger(),
+      createDetection({ steer: true, interrupt: true, continuation: true }),
+    );
+    const tracked = createRecord({
+      info: { ...createRecord().info, status: 'starting' },
+    });
+    const dispatcher = createDispatcher();
+    const outcome = await router.route(AGENT_ID, tracked, 'hello', dispatcher);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported',
+      reasonCode: 'continuation-unavailable',
+    });
+    expect(dispatcher.continueConversation).not.toHaveBeenCalled();
+    expect(tracked.pendingMessages).toHaveLength(0);
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     logger = createLogger();

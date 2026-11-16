@@ -186,7 +186,8 @@ export class AgentMessageDispatcher {
 
   private async settleIfFinished(agentId: AgentId): Promise<void> {
     const info = this.deps.manager.findAgentInfo(agentId);
-    if (info && info.status !== 'running') await this.deps.settleTurn(info);
+    if (info && info.status !== 'running' && info.status !== 'starting')
+      await this.deps.settleTurn(info);
   }
 
   private outcome(attempt: DispatchAttempt, mode: AgentMessageOutcome['mode'], envelope: AgentMessageEnvelope, detail?: string): AgentMessageOutcome {

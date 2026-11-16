@@ -109,7 +109,7 @@ import {
   RpcResult,
   VSCodeService,
 } from '@ptah-extension/core';
-import { SessionId } from '@ptah-extension/shared';
+import { SessionId, isLiveAgentStatus } from '@ptah-extension/shared';
 import type {
   ChatSessionSummary,
   SubagentRecord,
@@ -724,7 +724,7 @@ export class ChatViewComponent implements OnDestroy {
       const agents = this.sessionAgents();
       if (agents.length === 0) return null;
       if (agents.some((a) => a.permissionQueue.length > 0)) return 'warning';
-      if (agents.some((a) => a.status === 'running')) return 'info';
+      if (agents.some((a) => isLiveAgentStatus(a.status))) return 'info';
       return 'neutral';
     },
   );
@@ -1638,7 +1638,7 @@ export class ChatViewComponent implements OnDestroy {
       if (this.dockEnabled) return;
       const key = this.panelKey();
       const agents = this.sessionAgents();
-      const hasRunning = agents.some((a) => a.status === 'running');
+      const hasRunning = agents.some((a) => isLiveAgentStatus(a.status));
       const hasPendingPermission = agents.some(
         (a) => a.permissionQueue.length > 0,
       );

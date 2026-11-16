@@ -694,6 +694,29 @@ describe('persistCliSessionReference — bulk output stays out of the blob', () 
     );
   });
 
+  it('does not persist a starting lane as finished', () => {
+    const readOutput = jest.fn().mockReturnValue(buildOutput());
+    const { container, addCliSession, saveAgentOutput } = harness(readOutput);
+    persistCliSessionReference(
+      container,
+      Object.assign(Object.create(null) as Logger, createMockLogger()),
+      '[test]',
+      buildInfo({
+        agentId: AGENT_ID,
+        parentSessionId: PARENT_SESSION,
+        cliSessionId: 'cli-sess-1',
+        status: 'starting',
+      }),
+      undefined,
+    );
+    expect(readOutput).not.toHaveBeenCalled();
+    expect(saveAgentOutput).not.toHaveBeenCalled();
+    expect(addCliSession).toHaveBeenCalledWith(
+      PARENT_SESSION,
+      expect.objectContaining({ status: 'starting' }),
+    );
+  });
+
   it('keeps stdout, segments and streamEvents off the reference and stores them per agent on exit', async () => {
     const readOutput = jest.fn().mockReturnValue(buildOutput());
     const { container, addCliSession, saveAgentOutput } = harness(readOutput);

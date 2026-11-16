@@ -427,7 +427,7 @@ export class LaneCompletionNotifier {
       readonly deliveryId?: string;
     }
   > {
-    if (info.status === 'running') {
+    if (info.status === 'running' || info.status === 'starting') {
       // Not a modelled refusal: a caller that reaches here has a bug, and the
       // orchestrator must never be told a running lane finished.
       this.logger.warn(

@@ -11,6 +11,17 @@ const caps: EffectiveLaneCapabilities = {
 };
 
 describe('planAgentDelivery', () => {
+  it('refuses a starting lane until it has a handle', () => {
+    const preview = planAgentDelivery({
+      agentId,
+      info: { ...info, status: 'starting' },
+      delivery: 'queue',
+      effectiveCapabilities: caps,
+      hasLiveHandle: false,
+    });
+    expect(preview).toMatchObject({ mode: 'unsupported', supported: false });
+    expect(preview.reason).toMatch(/lane is starting/i);
+  });
   it('queues a running turn without interrupting', () => {
     expect(planAgentDelivery({ agentId, info, delivery: 'queue', effectiveCapabilities: caps, hasLiveHandle: true }).mode)
       .toBe('queue-next-turn');

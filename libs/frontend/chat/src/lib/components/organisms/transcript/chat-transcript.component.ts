@@ -717,11 +717,18 @@ export class ChatTranscriptComponent {
   );
 
   /** Keep the rendered rows stable while this tab is inactive. */
-  private readonly liveLaneIds = computed(() => new Set(
-    (this.laneMonitor?.agents?.() ?? [])
-      .filter(agent => agent.status === 'running')
-      .map(agent => agent.agentId),
-  ), { equal: (a, b) => a.size === b.size && [...a].every(id => b.has(id)) });
+  private readonly liveLaneIds = computed(
+    () =>
+      new Set(
+        (this.laneMonitor?.agents?.() ?? [])
+          .filter(
+            (agent) =>
+              agent.status === 'running' || agent.status === 'starting',
+          )
+          .map((agent) => agent.agentId),
+      ),
+    { equal: (a, b) => a.size === b.size && [...a].every((id) => b.has(id)) },
+  );
 
   protected readonly laneSlots = linkedSignal({
     source: () => ({

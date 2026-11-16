@@ -1396,6 +1396,23 @@ describe('SessionSpawnerService — settle and completion push', () => {
     });
   });
 
+  it('keeps a child waiting when its only CLI lane is starting', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.phases.set(child.childSessionId, 'idle');
+    h.lanes.push({
+      agentId: 'lane-starting',
+      status: 'starting',
+      parentSessionId: child.childSessionId,
+    } as AgentProcessInfo);
+    h.turnEnded(child.childSessionId);
+    await flush();
+    expect(h.notifier.signalSessionChild).not.toHaveBeenCalled();
+    expect(h.spawner.status({ callerSessionId: PARENT })).toMatchObject({
+      children: [{ status: 'waiting' }],
+    });
+  });
+
   it('pushes failed for a failed turn', async () => {
     const h = makeHarness();
     const child = await h.startChild();

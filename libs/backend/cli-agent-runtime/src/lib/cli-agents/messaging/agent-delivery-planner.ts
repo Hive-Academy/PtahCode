@@ -17,6 +17,8 @@ export function planAgentDelivery(input: AgentDeliveryPlanInput): AgentMessagePr
   const refuse = (reason: string): AgentMessagePreview => ({ ...base, mode: 'unsupported', supported: false, usesResume: false, reason });
   // Stable code: `agent:continue` maps `not_found` to its typed RPC error.
   if (!info) return refuse('not_found');
+  if (info.status === 'starting')
+    return refuse('The lane is starting; try again when its handle is ready.');
   const running = info.status === 'running';
   const cold = !hasLiveHandle;
   if (cold) {

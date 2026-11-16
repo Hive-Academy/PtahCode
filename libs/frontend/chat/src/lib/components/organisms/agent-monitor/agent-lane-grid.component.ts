@@ -126,7 +126,10 @@ export class AgentLaneGridComponent {
         );
         const runningIds = new Set(
           agents
-            .filter((agent) => agent.status === 'running')
+            .filter(
+              (agent) =>
+                agent.status === 'running' || agent.status === 'starting',
+            )
             .map((agent) => agent.agentId),
         );
         const selection = reconcileLanes(
