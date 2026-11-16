@@ -62,9 +62,13 @@ export class AutoHandoffSourceCloserService {
       let outcome: 'closed' | 'absent' | 'blocked' = 'blocked';
       let blockerCode: HandoffCloseBlockerCode | undefined;
       try {
-        const lookup =
-          this.tabManager.findTabByIdAcrossWorkspaces(predecessorTabId);
-        if (!lookup) {
+        const lookup = this.tabManager.findTabByIdAcrossWorkspaces(predecessorTabId);
+        const tab = lookup?.tab ??
+          this.tabManager.findTabBySessionId(predecessorTabId) ??
+          (predecessorSdkId
+            ? this.tabManager.findTabBySessionId(predecessorSdkId)
+            : null);
+        if (!tab) {
           outcome = 'absent';
           if (predecessorStopped === true) {
             // This renderer owns no tab, but may still hold the ended session's live sidebar state.
@@ -73,11 +77,11 @@ export class AutoHandoffSourceCloserService {
           }
         } else if (
           predecessorSdkId === null
-            ? lookup.tab.claudeSessionId == null
-            : lookup.tab.claudeSessionId === predecessorSdkId
+            ? tab.claudeSessionId == null
+            : tab.claudeSessionId === predecessorSdkId
         ) {
           const blocker = this.closeBlocker(
-            lookup.tab,
+            tab,
             predecessorStopped === true,
           );
           if (blocker) {
@@ -85,11 +89,11 @@ export class AutoHandoffSourceCloserService {
             this.logger.info(
               LOG_CONTEXT,
               `the handed-off source tab stays open: ${blocker}`,
-              { tabId: predecessorTabId },
+              { tabId: tab.id },
             );
           } else {
             outcome = (await this.tabManager.closeHandoffPredecessor(
-              predecessorTabId,
+              tab.id,
               predecessorSdkId,
               predecessorStopped === true,
             ))
