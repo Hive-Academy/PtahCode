@@ -92,6 +92,7 @@ const BUDGET_CONFIG: SessionBudgetConfig = {
   tightenPercent: 50,
   handoffPercent: 80,
   handoffAfterCompactions: 3,
+  tokenMeasure: 'raw',
   tightenWindowTokens: null,
 };
 

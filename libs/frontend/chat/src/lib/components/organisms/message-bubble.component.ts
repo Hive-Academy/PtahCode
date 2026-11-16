@@ -152,6 +152,15 @@ export class MessageBubbleComponent {
   private readonly chatStore = inject(ChatStore);
 
   readonly message = input.required<ExecutionChatMessage>();
+  protected readonly interruptedLabel = computed(() => {
+    switch (this.message().stopCause) {
+      case 'user-stop': return 'Stopped by you';
+      case 'parent-steer': return 'Stopped by parent session';
+      case 'runtime-cap': return 'Runtime cap reached';
+      case 'host-stop': return 'Stopped by host';
+      default: return null;
+    }
+  });
   /** Lane hosts route permissions to their owning session. Main chat keeps its store path. */
   readonly permissionLookup = input<
     ((id: string) => PermissionRequest | null) | undefined

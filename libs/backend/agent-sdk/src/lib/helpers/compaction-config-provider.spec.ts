@@ -146,17 +146,17 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
     expect(() => provider.getIdleCompactionConfig()).not.toThrow();
     expect(provider.getIdleCompactionConfig()).toEqual({
       enabled: true,
-      minTokens: 200_000,
+      minTokens: 150_000,
     });
     values['compaction.idleCompactionMinTokens'] = 100_000.5;
-    expect(provider.getIdleCompactionConfig().minTokens).toBe(200_000);
+    expect(provider.getIdleCompactionConfig().minTokens).toBe(150_000);
   });
 
   it('uses the shared defaults when settings are unset or null', () => {
     const { provider, warn } = makeProvider({});
     expect(provider.getIdleCompactionConfig()).toEqual({
       enabled: true,
-      minTokens: 200_000,
+      minTokens: 150_000,
     });
     const withNulls = makeProvider({
       'compaction.idleCompactionEnabled': null,
@@ -164,14 +164,14 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
     });
     expect(withNulls.provider.getIdleCompactionConfig()).toEqual({
       enabled: true,
-      minTokens: 200_000,
+      minTokens: 150_000,
     });
     expect(
       FILE_BASED_SETTINGS_DEFAULTS['compaction.idleCompactionEnabled'],
     ).toBe(true);
     expect(
       FILE_BASED_SETTINGS_DEFAULTS['compaction.idleCompactionMinTokens'],
-    ).toBe(200_000);
+    ).toBe(150_000);
     expect(warn).not.toHaveBeenCalled();
     expect(withNulls.warn).not.toHaveBeenCalled();
   });
@@ -192,6 +192,8 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
       enabled: true,
       minTokens: 5_000_000,
     });
+    values['compaction.idleCompactionMinTokens'] = 200_000;
+    expect(provider.getIdleCompactionConfig().minTokens).toBe(200_000);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -215,10 +217,10 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
       const { provider, warn } = makeProvider({
         'compaction.idleCompactionMinTokens': value,
       });
-      expect(provider.getIdleCompactionConfig().minTokens).toBe(200_000);
+      expect(provider.getIdleCompactionConfig().minTokens).toBe(150_000);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('Invalid compaction.idleCompactionMinTokens'),
-        expect.objectContaining({ defaultValue: 200_000 }),
+        expect.objectContaining({ defaultValue: 150_000 }),
       );
     },
   );

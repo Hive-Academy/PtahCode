@@ -18,9 +18,13 @@ export type SessionBudgetStage =
 /** The unit the user budgets in (`sessionBudget.unit`). */
 export type SessionBudgetUnit = 'tokens' | 'cost';
 
+/** How token usage is measured when the budget unit is `tokens`. */
+export type SessionBudgetTokenMeasure = 'weighted' | 'raw';
+
 /**
  * What `used` actually measures.
- * - `tokens`: the displayed session token count.
+ * - `tokens`: the raw session token count.
+ * - `weighted-tokens`: the weighted session token count.
  * - `cost`: the session's full USD total.
  * - `cost-lower-bound`: the priced part of a partially priced session (render
  *   as `≥ $x`).
@@ -28,7 +32,7 @@ export type SessionBudgetUnit = 'tokens' | 'cost';
  *   against `fallbackWeightedTokens` instead of the USD limit.
  */
 export type SessionBudgetMeasure =
-  'tokens' | 'cost' | 'cost-lower-bound' | 'weighted-fallback';
+  'tokens' | 'weighted-tokens' | 'cost' | 'cost-lower-bound' | 'weighted-fallback';
 
 /**
  * Why a per-session auto-compact window was not applied as requested.
@@ -101,6 +105,7 @@ export interface SessionBudgetState {
 export interface SessionBudgetConfig {
   readonly enabled: boolean;
   readonly unit: SessionBudgetUnit;
+  readonly tokenMeasure: SessionBudgetTokenMeasure;
   /** Token limit for unit `tokens`. */
   readonly tokens: number;
   /** USD limit for unit `cost`. */
@@ -137,11 +142,13 @@ export interface SessionBudgetBooleanSetting {
   readonly default: boolean;
 }
 
-export interface SessionBudgetEnumSetting {
+export interface SessionBudgetEnumSetting<
+  T extends SessionBudgetUnit | SessionBudgetTokenMeasure = SessionBudgetUnit,
+> {
   readonly key: string;
   readonly kind: 'enum';
-  readonly values: readonly SessionBudgetUnit[];
-  readonly default: SessionBudgetUnit;
+  readonly values: readonly T[];
+  readonly default: T;
 }
 
 /**
@@ -161,6 +168,12 @@ export const SESSION_BUDGET_SETTINGS = {
     kind: 'enum',
     values: ['tokens', 'cost'],
     default: 'tokens',
+  },
+  tokenMeasure: {
+    key: 'sessionBudget.tokenMeasure',
+    kind: 'enum',
+    values: ['weighted', 'raw'],
+    default: 'weighted',
   },
   tokens: {
     key: 'sessionBudget.tokens',
@@ -235,8 +248,8 @@ export const SESSION_BUDGET_SETTINGS = {
     K in keyof SessionBudgetConfig
   ]: SessionBudgetConfig[K] extends boolean
     ? SessionBudgetBooleanSetting
-    : SessionBudgetConfig[K] extends SessionBudgetUnit
-      ? SessionBudgetEnumSetting
+    : SessionBudgetConfig[K] extends SessionBudgetUnit | SessionBudgetTokenMeasure
+      ? SessionBudgetEnumSetting<SessionBudgetConfig[K]>
       : SessionBudgetNumberSetting;
 };
 

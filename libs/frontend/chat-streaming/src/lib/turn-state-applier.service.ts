@@ -146,7 +146,7 @@ export class TurnStateApplier {
       const consumed = new Map<string, ReadonlySet<string>>();
       for (const { tab } of targets) {
         if (isInterrupted) {
-          this.finalization.finalizeCurrentMessage(tab.id, true, true);
+          this.finalization.finalizeCurrentMessage(tab.id, true, true, event.stopCause);
         } else {
           this.finalization.finalizeCurrentMessage(tab.id, isAborted);
         }

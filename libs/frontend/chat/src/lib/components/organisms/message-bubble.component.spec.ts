@@ -98,22 +98,27 @@ describe('MessageBubbleComponent — branch/rewind action buttons', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('.cs-user-bubble markdown')?.getAttribute('dir')).toBe('auto');
   });
 
-  it('shows Interrupted after a partial assistant reply', () => {
+  it.each([
+    ['user-stop', 'Stopped by you'],
+    ['parent-steer', 'Stopped by parent session'],
+    ['runtime-cap', 'Runtime cap reached'],
+    ['host-stop', 'Stopped by host'],
+  ] as const)('shows %s after a partial assistant reply', (stopCause, label) => {
     setMessage(createExecutionChatMessage({
-      id: 'partial', role: 'assistant', rawContent: 'Partial reply', isInterrupted: true,
+      id: 'partial', role: 'assistant', rawContent: 'Partial reply', isInterrupted: true, stopCause,
     }));
     const root = fixture.nativeElement as HTMLElement;
     expect(root.textContent).toContain('Partial reply');
-    expect(root.querySelector('[data-testid="chat-turn-interrupted"]')?.textContent).toContain('Interrupted');
+    expect(root.querySelector('[data-testid="chat-turn-interrupted"]')?.textContent).toContain(label);
   });
 
-  it('shows only the interruption label for an empty assistant placeholder', () => {
+  it.each([undefined, 'internal-abort'] as const)('hides an unknown interruption label while retaining partial content (%s)', (stopCause) => {
     setMessage(createExecutionChatMessage({
-      id: 'empty-interrupted', role: 'assistant', isInterrupted: true,
+      id: 'empty-interrupted', role: 'assistant', rawContent: 'Partial reply', isInterrupted: true, stopCause,
     }));
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('[data-testid="chat-turn-interrupted"]')?.textContent).toContain('Interrupted');
-    expect(root.querySelector('[data-testid="streaming-empty-cursor"]')).toBeNull();
+    expect(root.querySelector('[data-testid="chat-turn-interrupted"]')).toBeNull();
+    expect(root.textContent).toContain('Partial reply');
   });
 
   it('does not mark a normally completed reply', () => {

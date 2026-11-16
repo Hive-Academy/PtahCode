@@ -8,7 +8,7 @@ export const IDLE_CACHE_TTL_MS = 3_600_000;
 export const IDLE_FIRE_FRACTION = 0.9;
 export const IDLE_FIRE_LATENESS_MS = 60_000;
 export const IDLE_MIN_TOKENS_FLOOR = 100_000;
-export const IDLE_MIN_TOKENS_DEFAULT = 200_000;
+export const IDLE_POST_BOUNDARY_GROWTH_TOKENS = 50_000;
 export const IDLE_CLAIM_TIMEOUT_MS = 120_000;
 export const IDLE_ANCHOR_SKEW_MS = 5_000;
 export const IDLE_POSTCOMPACT_GRACE_MS = 30_000;
@@ -134,6 +134,10 @@ export type IdleSkipReason =
   | 'not-1h'
   | 'lapsed'
   | 'below-min-tokens'
+  | 'at-sdk-window'
+  | 'min-at-sdk-window'
+  | 'post-boundary-baseline-unknown'
+  | 'below-post-boundary-growth'
   | 'no-reading'
   | 'activity-since-arm'
   | 'prompt-prefix-changed'
@@ -191,6 +195,8 @@ export interface IdleSessionState {
     readonly turnId: string;
     readonly totalTokens: number;
   } | null;
+  readonly compactBoundaryObserved?: boolean;
+  readonly postBoundaryBaseline?: number | null;
   readonly activitySinceTurnEnd: boolean;
   readonly prefixChangedSinceTurnEnd: boolean;
   readonly rateLimit: IdleRateLimitStatus | null;

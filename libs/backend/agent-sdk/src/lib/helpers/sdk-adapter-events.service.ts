@@ -2,6 +2,7 @@ import { injectable, inject } from 'tsyringe';
 import EventEmitter from 'eventemitter3';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { SDK_TOKENS } from '../di/tokens';
+import type { TurnStopCause } from '@ptah-extension/shared';
 import type { CompactionCoordinator } from './compaction/compaction-coordinator';
 import type { CompactionStateChange } from './compaction/compaction-state.types';
 import type {
@@ -50,6 +51,7 @@ export interface SdkAdapterTurnEndedEvent {
 }
 
 export interface SdkAdapterTurnFailedEvent {
+  readonly stopCause?: TurnStopCause;
   readonly sessionId: string;
   readonly cwd: string;
   readonly lastAssistantMessage: string | null;
@@ -123,6 +125,45 @@ export type SdkAdapterEventName = keyof SdkAdapterEventMap;
 
 @injectable()
 export class SdkAdapterEvents {
+  private readonly pendingStopCauses = new Map<string, { cause: TurnStopCause }>();
+  private readonly currentStopCauses = new Map<string, { cause: TurnStopCause }>();
+
+  recordStopCause(ids: readonly string[], cause: TurnStopCause): void {
+    const entry = { cause };
+    for (const id of ids) {
+      this.pendingStopCauses.set(id, entry);
+      this.currentStopCauses.set(id, entry);
+    }
+  }
+
+  peekStopCause(id: string): TurnStopCause | undefined {
+    const entry = this.currentStopCauses.get(id);
+    if (!entry) return undefined;
+    for (const [key, value] of this.currentStopCauses) {
+      if (value === entry) this.currentStopCauses.delete(key);
+    }
+    return entry.cause;
+  }
+
+  takeStopCause(id: string): TurnStopCause | undefined {
+    const entry = this.pendingStopCauses.get(id);
+    if (!entry) return undefined;
+    for (const [key, value] of this.pendingStopCauses) {
+      if (value === entry) this.pendingStopCauses.delete(key);
+    }
+    return entry.cause;
+  }
+
+  clearStopCause(id: string): void {
+    const entry = this.currentStopCauses.get(id) ?? this.pendingStopCauses.get(id);
+    if (!entry) return;
+    for (const [key, value] of this.currentStopCauses) {
+      if (value === entry) this.currentStopCauses.delete(key);
+    }
+    for (const [key, value] of this.pendingStopCauses) {
+      if (value === entry) this.pendingStopCauses.delete(key);
+    }
+  }
   private readonly emitter = new EventEmitter<SdkAdapterEventMap>();
 
   constructor(

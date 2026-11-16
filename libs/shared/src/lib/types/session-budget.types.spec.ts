@@ -24,6 +24,7 @@ describe('SESSION_BUDGET_SETTINGS', () => {
     const fields: Array<keyof SessionBudgetConfig> = [
       'enabled',
       'unit',
+      'tokenMeasure',
       'tokens',
       'usd',
       'fallbackWeightedTokens',
@@ -52,6 +53,12 @@ describe('SESSION_BUDGET_SETTINGS', () => {
     expect(SESSION_BUDGET_SETTINGS.handoffAfterCompactions.default).toBe(3);
     expect(SESSION_BUDGET_SETTINGS.tightenWindowTokens.default).toBeNull();
     expect(SESSION_BUDGET_SETTINGS.unit.default).toBe('tokens');
+    expect(SESSION_BUDGET_SETTINGS.tokenMeasure).toEqual({
+      key: 'sessionBudget.tokenMeasure',
+      kind: 'enum',
+      values: ['weighted', 'raw'],
+      default: 'weighted',
+    });
     expect(SESSION_BUDGET_SETTINGS.enabled.default).toBe(true);
     expect(SESSION_BUDGET_SETTINGS.autoHandoffAtLimit.default).toBe(true);
   });

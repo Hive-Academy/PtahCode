@@ -40,7 +40,7 @@ function snapshot(
 function config(
   overrides: Partial<SessionBudgetConfig> = {},
 ): SessionBudgetConfig {
-  return { ...SESSION_BUDGET_DEFAULT_CONFIG, ...overrides };
+  return { ...SESSION_BUDGET_DEFAULT_CONFIG, tokenMeasure: 'raw', ...overrides };
 }
 
 const COST = config({ unit: 'cost' });
@@ -56,6 +56,12 @@ describe('measureSessionBudget — unit tokens', () => {
       used: 12_345,
       limit: 50_000_000,
       lowerBound: false,
+    });
+  });
+
+  it('weights token kinds when selected and keeps partial coverage', () => {
+    expect(measureSessionBudget(snapshot({ tokens: { input: 10, output: 2, cacheRead: 100, cacheCreation: 4 }, coverage: 'partial' }), config({ tokenMeasure: 'weighted' }), opts)).toEqual({
+      measure: 'weighted-tokens', used: 35, limit: 50_000_000, lowerBound: true,
     });
   });
 
@@ -201,6 +207,8 @@ describe('sessionBudgetPercentBand — boundaries', () => {
 describe('nextSessionBudgetStage', () => {
   const base = {
     compactions: 0,
+    postCompactionContextTokens: null,
+    effectiveAutoCompactWindowTokens: null,
     handoffAfterCompactions: 3,
     previous: null,
     resetStage: false,
@@ -210,12 +218,11 @@ describe('nextSessionBudgetStage', () => {
     expect(
       nextSessionBudgetStage({ ...base, band: 'normal', compactions: 2 }),
     ).toBe('normal');
-    expect(
-      nextSessionBudgetStage({ ...base, band: 'normal', compactions: 3 }),
-    ).toBe('handoff');
+    expect(nextSessionBudgetStage({ ...base, band: 'normal', compactions: 3 })).toBe('normal');
+    expect(nextSessionBudgetStage({ ...base, band: 'normal', compactions: 3, postCompactionContextTokens: 100_000, effectiveAutoCompactWindowTokens: 200_000 })).toBe('handoff');
     expect(
       nextSessionBudgetStage({ ...base, band: 'unknown', compactions: 3 }),
-    ).toBe('handoff');
+    ).toBe('unknown');
     expect(
       nextSessionBudgetStage({ ...base, band: 'limit', compactions: 3 }),
     ).toBe('limit');
@@ -401,6 +408,6 @@ describe('evaluateSessionBudget', () => {
   it('the compaction count raises a low figure to handoff', () => {
     expect(
       evaluate(snapshot({ tokenCount: 1 }), null, { compactions: 3 }).stage,
-    ).toBe('handoff');
+    ).toBe('normal');
   });
 });

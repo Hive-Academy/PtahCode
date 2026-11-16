@@ -23,6 +23,7 @@ import type {
   EffortLevel,
   FlagEffortLevel,
   SessionBudgetWindow,
+  TurnStopCause,
 } from '@ptah-extension/shared';
 
 import { SdkError } from '../../errors';
@@ -37,6 +38,7 @@ import {
 } from './permission-mode-map';
 import type { SessionEndCallbackRegistry } from '../session-end-callback-registry';
 import type { SessionEndCause } from '../session-end-callback-registry';
+import type { SdkAdapterEvents } from '../sdk-adapter-events.service';
 import type { CompactionConfig } from '../compaction-config-provider';
 import {
   autoCompactModelClass,
@@ -84,8 +86,9 @@ export class SessionControl {
     private readonly getCompactionConfig:
       (() => CompactionConfig) | null = null,
     private readonly onTurnTerminal:
-      ((sessionId: SessionId) => void) | null = null,
+      ((sessionId: SessionId, preserveStopCause?: boolean) => void) | null = null,
     private readonly revokeMcpSubject: ((tabId: string) => void) | null = null,
+    private readonly adapterEvents: SdkAdapterEvents | null = null,
   ) {}
 
   /**
@@ -103,7 +106,7 @@ export class SessionControl {
    * @param sessionId - Session whose current turn should be interrupted
    * @returns true if interrupt was called, false if session/query not found
    */
-  async interruptCurrentTurn(sessionId: SessionId): Promise<boolean> {
+  async interruptCurrentTurn(sessionId: SessionId, cause?: TurnStopCause): Promise<boolean> {
     const rec = this.registry.find(sessionId as string);
 
     if (!rec?.query) {
@@ -119,6 +122,11 @@ export class SessionControl {
     const wasTurnInFlight = rec.turnInFlight;
     const interruptedId = rec.currentTurnClientMessageId;
     const resultCountBefore = rec.resultCount ?? 0;
+    if (cause && wasTurnInFlight) {
+      this.adapterEvents?.recordStopCause(
+        [rec.tabId, ...(rec.realSessionId ? [rec.realSessionId] : [])], cause,
+      );
+    }
 
     try {
       let timedOut = false;
@@ -135,6 +143,7 @@ export class SessionControl {
       // the pump's turn claim. Release it here or the session's next follow-up
       // is held forever (TASK_2026_294).
       if (timedOut) {
+        this.adapterEvents?.clearStopCause(rec.tabId);
         // No turn identifier exists on SDK hooks. Retire this query rather than
         // allowing late A hooks to acquire operation ownership during turn B.
         this.retireInterruptedRecord(rec);
@@ -158,7 +167,7 @@ export class SessionControl {
           rec.retirementWake?.();
         }
         if (this.onTurnTerminal) {
-          this.onTurnTerminal(sessionId);
+          this.onTurnTerminal(sessionId, Boolean(cause));
         } else {
           this.registry.markTurnEnded(sessionId as string);
         }
@@ -174,6 +183,7 @@ export class SessionControl {
       }
       return !timedOut;
     } catch (err) {
+      this.adapterEvents?.clearStopCause(rec.tabId);
       // degradation-audit: optional-capability - false is this method's
       // reported "interrupt did not take", the same value the 3s timeout
       // returns, and the turn claim is released above so the session lives on.
@@ -316,6 +326,9 @@ export class SessionControl {
     this.logger.info(`[SessionLifecycle] Ending session: ${sessionId}`);
     const registrySessionId = rec.realSessionId ?? rec.tabId;
     const workspaceRoot = rec.config.projectPath ?? '';
+    // A parallel turn interrupt records its cause before its first await.
+    // Keep that cause through teardown for the stream and failure hook.
+    const preserveTurnStopCause = cause === 'parent-stop' && rec.turnInFlight;
 
     /**
      * Abort + deregister, at most once.
@@ -343,6 +356,14 @@ export class SessionControl {
       const ownsTab = this.registry.find(rec.tabId) === rec;
       rec.abortController.abort();
       this.registry.remove(rec);
+      if (!preserveTurnStopCause || !ownsTab) {
+        this.adapterEvents?.clearStopCause(rec.tabId);
+      }
+      if (cause === 'user-stop' && ownsTab) {
+        this.adapterEvents?.recordStopCause(
+          [rec.tabId, ...(rec.realSessionId ? [rec.realSessionId] : [])], 'user-stop',
+        );
+      }
       if (ownsTab) this.revokeMcpSubject?.(rec.tabId);
     };
 

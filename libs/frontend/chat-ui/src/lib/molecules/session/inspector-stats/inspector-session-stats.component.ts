@@ -142,12 +142,12 @@ let nextSessionId = 0;
           } @else {
             <p class="text-[10.5px] text-base-content-muted">all agents</p>
           }
-          @if (s.budget?.measure === 'tokens' && s.budget?.percent !== null) {
+          @if ((s.budget?.measure === 'tokens' || s.budget?.measure === 'weighted-tokens') && s.budget?.percent !== null) {
             <ptah-meter
               class="mt-auto shrink-0"
               [value]="clampPercent(s.budget!.percent!)"
               [max]="100"
-              label="Session token budget"
+              [label]="s.budget?.measure === 'weighted-tokens' ? 'Weighted session tokens' : 'Raw session tokens'"
               size="xs"
               [tone]="budgetTone(s.budget!.stage)"
               [animate]="false"

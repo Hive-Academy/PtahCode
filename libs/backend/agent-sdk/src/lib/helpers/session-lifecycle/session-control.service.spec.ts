@@ -28,6 +28,7 @@ import type {
 } from '@ptah-extension/shared';
 
 import { SessionControl } from './session-control.service';
+import { SdkAdapterEvents } from '../sdk-adapter-events.service';
 import { SessionRegistry } from './session-registry.service';
 import { SdkQueryOptionsBuilder } from '../sdk-query-options-builder';
 import type { IModelResolver } from '../../auth-env.port';
@@ -61,6 +62,7 @@ interface Harness {
   markAllInterrupted: jest.Mock;
   notifyAll: jest.Mock;
   logger: Logger;
+  events: SdkAdapterEvents;
 }
 
 function makeHarness(
@@ -69,6 +71,7 @@ function makeHarness(
   revokeMcpSubject: ((tabId: string) => void) | null = null,
 ): Harness {
   const logger = makeLogger();
+  const events = new SdkAdapterEvents(logger);
   const registry = new SessionRegistry(logger);
 
   const cleanupPendingPermissions = jest.fn();
@@ -102,6 +105,7 @@ function makeHarness(
     getCompactionConfig,
     onTurnTerminal,
     revokeMcpSubject,
+    events,
   );
 
   return {
@@ -111,6 +115,7 @@ function makeHarness(
     markAllInterrupted,
     notifyAll,
     logger,
+    events,
   };
 }
 
@@ -148,6 +153,33 @@ function makeCredentialBuilder() {
 }
 
 describe('SessionControl end causes', () => {
+  it('keeps user-stop for both consumers after session end and clears an earlier cause', async () => {
+    const h = makeHarness();
+    h.registry.register(KEY, makeConfig(), new AbortController());
+    h.events.recordStopCause([KEY], 'parent-steer');
+
+    await h.control.endSession(KEY_ID, 'user-stop');
+
+    expect(h.events.peekStopCause(KEY)).toBe('user-stop');
+    expect(h.events.takeStopCause(KEY)).toBe('user-stop');
+    expect(h.events.peekStopCause(KEY)).toBeUndefined();
+    expect(h.events.takeStopCause(KEY)).toBeUndefined();
+  });
+
+  it('keeps a parallel host stop for both consumers after parent session end', async () => {
+    const h = makeHarness();
+    const rec = h.registry.register(KEY, makeConfig(), new AbortController());
+    rec.turnInFlight = true;
+    rec.query = { interrupt: jest.fn().mockResolvedValue(undefined) } as never;
+
+    await Promise.all([
+      h.control.interruptCurrentTurn(KEY_ID, 'host-stop'),
+      h.control.endSession(KEY_ID, 'parent-stop'),
+    ]);
+
+    expect(h.events.peekStopCause(KEY)).toBe('host-stop');
+    expect(h.events.takeStopCause(KEY)).toBe('host-stop');
+  });
   it.each([
     [undefined, 'unknown'],
     ['user-stop', 'user-stop'],
@@ -361,7 +393,7 @@ describe('SessionControl.interruptCurrentTurn', () => {
 
     await expect(h.control.interruptCurrentTurn(KEY_ID)).resolves.toBe(true);
 
-    expect(terminal).toHaveBeenCalledWith(KEY_ID);
+    expect(terminal).toHaveBeenCalledWith(KEY_ID, false);
   });
 
   it('leaves the next prompt untouched when the result lands during interrupt await', async () => {

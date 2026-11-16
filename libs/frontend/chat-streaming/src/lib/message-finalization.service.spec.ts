@@ -281,10 +281,24 @@ describe('MessageFinalizationService', () => {
       tabsSignal.set([makeTab({ streamingState: makeStreamingState({ currentMessageId: 'msg-1' }) })]);
       activeTabIdSignal.set('tab-1');
 
-      service.finalizeCurrentMessage(undefined, true, true);
+      service.finalizeCurrentMessage(undefined, true, true, 'user-stop');
 
       const messages = tabManager.applyFinalizedTurn.mock.calls[0][1];
       expect(messages[0].isInterrupted).toBe(true);
+      expect(messages[0].stopCause).toBe('user-stop');
+    });
+
+    it('keeps a queued steer interruption untagged while retaining partial content', () => {
+      treeBuilder.buildTree.mockReturnValue([makeNode({ id: 'root', content: 'Partial' })]);
+      tabsSignal.set([makeTab({ streamingState: makeStreamingState({ currentMessageId: 'msg-1' }) })]);
+      activeTabIdSignal.set('tab-1');
+
+      service.finalizeCurrentMessage(undefined, true, true);
+
+      const message = tabManager.applyFinalizedTurn.mock.calls[0][1][0];
+      expect(message.isInterrupted).toBe(true);
+      expect(message.stopCause).toBeUndefined();
+      expect(message.streamingState).not.toBeNull();
     });
 
     it('inserts a placeholder before a queued follow-up when no assistant content arrived', () => {
@@ -295,12 +309,23 @@ describe('MessageFinalizationService', () => {
       tabsSignal.set([makeTab({ messages, streamingState: makeStreamingState() })]);
       activeTabIdSignal.set('tab-1');
 
-      service.finalizeCurrentMessage(undefined, true, true);
+      service.finalizeCurrentMessage(undefined, true, true, 'user-stop');
 
       const finalized = tabManager.applyFinalizedTurn.mock.calls[0][1];
       expect(finalized.map((message) => message.role)).toEqual(['user', 'assistant', 'user']);
       expect(finalized[1].isInterrupted).toBe(true);
       expect(finalized[1].streamingState).toBeNull();
+    });
+
+    it.each([undefined, 'internal-abort'] as const)('does not add a synthetic row for an unlabelled abort (%s)', (stopCause) => {
+      const prompt = { id: 'prompt', role: 'user' } as ExecutionChatMessage;
+      tabsSignal.set([makeTab({ messages: [prompt], streamingState: makeStreamingState() })]);
+      activeTabIdSignal.set('tab-1');
+
+      service.finalizeCurrentMessage(undefined, true, true, stopCause);
+
+      expect(tabManager.applyFinalizedTurn).not.toHaveBeenCalled();
+      expect(tabManager.clearStreamingForLoaded).toHaveBeenCalledWith('tab-1');
     });
 
     it('keeps the interrupted turn stats when the turn built no tree', () => {
@@ -313,7 +338,7 @@ describe('MessageFinalizationService', () => {
       })]);
       activeTabIdSignal.set('tab-1');
 
-      service.finalizeCurrentMessage(undefined, true, true);
+      service.finalizeCurrentMessage(undefined, true, true, 'user-stop');
 
       const marker = tabManager.applyFinalizedTurn.mock.calls[0][1][1];
       expect(marker.isInterrupted).toBe(true);

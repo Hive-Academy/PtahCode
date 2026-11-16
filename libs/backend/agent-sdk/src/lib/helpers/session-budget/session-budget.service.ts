@@ -274,14 +274,20 @@ export class SessionBudgetService {
    * One main-loop `compact_boundary` (F8). Counts toward the
    * `handoffAfterCompactions` trigger; in memory only.
    */
-  recordCompaction(sessionId: string): void {
+  recordCompaction(
+    sessionId: string,
+    completion?: {
+      readonly postCompactionContextTokens: number | null;
+      readonly effectiveAutoCompactWindowTokens: number | null;
+    },
+  ): void {
     const entry = this.trackedEntry(sessionId, 'live');
     if (!entry) return;
     entry.compactions += 1;
     if (!entry.snapshot || !entry.figure) return;
     const config = this.configSource.getConfig();
     if (!config.enabled) return;
-    this.applyEvaluation(entry, config, true);
+    this.applyEvaluation(entry, config, true, completion);
   }
 
   /**
@@ -380,6 +386,10 @@ export class SessionBudgetService {
     entry: BudgetEntry,
     config: SessionBudgetConfig,
     runActions: boolean,
+    completion?: {
+      readonly postCompactionContextTokens: number | null;
+      readonly effectiveAutoCompactWindowTokens: number | null;
+    },
   ): SessionBudgetState | undefined {
     const snapshot = entry.snapshot;
     if (!snapshot) return undefined;
@@ -396,6 +406,9 @@ export class SessionBudgetService {
       compactions: entry.compactions,
       resetStage: configChanged,
       resetMeasure: configChanged,
+      postCompactionContextTokens: completion?.postCompactionContextTokens ?? null,
+      effectiveAutoCompactWindowTokens:
+        completion?.effectiveAutoCompactWindowTokens ?? null,
     });
     entry.figure = figure;
     entry.configKey = key;

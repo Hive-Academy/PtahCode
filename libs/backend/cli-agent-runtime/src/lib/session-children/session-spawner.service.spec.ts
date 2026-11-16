@@ -1806,6 +1806,7 @@ describe('SessionSpawnerService.send', () => {
       delivered: true,
       effect: 'interrupted-and-started',
     });
+    expect(h.adapter.interruptCurrentTurn).toHaveBeenCalledWith(child.childSessionId, 'parent-steer');
   });
 
   it.each([
@@ -2070,6 +2071,24 @@ describe('SessionSpawnerService.stop', () => {
 });
 
 describe('SessionSpawnerService.stop - hard stop verification (D13)', () => {
+  it('starts the host turn interrupt before session end and retains its cause for consumers', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    let recordedCause: string | undefined;
+    let sessionEndStarted = false;
+    h.adapter.interruptCurrentTurn.mockImplementation(async (_id: string, cause: string) => {
+      recordedCause = cause;
+      return true;
+    });
+    h.adapter.interruptSession.mockImplementation(async () => {
+      sessionEndStarted = true;
+    });
+
+    await h.spawner.stop({ callerSessionId: PARENT, childSessionId: child.childSessionId });
+
+    expect(sessionEndStarted).toBe(true);
+    expect(recordedCause).toBe('host-stop');
+  });
   it('hard-ends the session when the soft interrupt leaves it active', async () => {
     const h = makeHarness();
     const child = await h.startChild();

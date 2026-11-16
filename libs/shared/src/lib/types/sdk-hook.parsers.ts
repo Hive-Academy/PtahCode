@@ -194,6 +194,11 @@ export function parseSdkTurnFailedPayload(
   if (!isNullableWireString(payload['errorDetails'])) return null;
   if (!isNullableTerminalReason(payload['terminalReason'])) return null;
   if (!isWireTimestamp(payload['timestamp'])) return null;
+  const stopCause = payload['stopCause'];
+  if (stopCause !== undefined &&
+      stopCause !== 'user-stop' && stopCause !== 'parent-steer' &&
+      stopCause !== 'runtime-cap' && stopCause !== 'host-stop' &&
+      stopCause !== 'internal-abort') return null;
   return {
     sessionId: payload['sessionId'],
     cwd: payload['cwd'],
@@ -201,6 +206,7 @@ export function parseSdkTurnFailedPayload(
     error: payload['error'],
     errorDetails: payload['errorDetails'],
     terminalReason: payload['terminalReason'],
+    ...(stopCause !== undefined ? { stopCause } : {}),
     timestamp: payload['timestamp'],
   };
 }

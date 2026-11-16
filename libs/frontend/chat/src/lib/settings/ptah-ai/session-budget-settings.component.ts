@@ -21,6 +21,7 @@ import {
   type SessionBudgetConfig,
   type SessionBudgetNumberSetting,
   type SessionBudgetUnit,
+  type SessionBudgetTokenMeasure,
 } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
@@ -53,19 +54,25 @@ const RPC_TIMEOUT_PREFIX = 'RPC timeout';
 /** A read-back value that can be written back (Undo); anything else offers no Undo. */
 function isBudgetValue(
   value: unknown,
-): value is number | null | boolean | SessionBudgetUnit {
+): value is number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure {
   return (
     value === null ||
     typeof value === 'number' ||
     typeof value === 'boolean' ||
     value === 'tokens' ||
-    value === 'cost'
+    value === 'cost' ||
+    value === 'weighted' ||
+    value === 'raw'
   );
 }
 
 const UNIT_LABELS: Readonly<Record<SessionBudgetUnit, string>> = {
   tokens: 'Tokens',
   cost: 'Cost (USD)',
+};
+const TOKEN_MEASURE_LABELS: Readonly<Record<SessionBudgetTokenMeasure, string>> = {
+  weighted: 'Weighted session tokens',
+  raw: 'Raw session tokens',
 };
 
 interface NumberField {
@@ -103,7 +110,7 @@ const NUMBER_FIELDS: readonly NumberField[] = [
   {
     key: 'handoffAfterCompactions',
     label: 'Handoff after compactions',
-    help: 'Offers a handoff after this many compactions.',
+    help: 'Offers a handoff after this many compactions, only if the compaction leaves the context at 50% or more of the auto-compact window.',
   },
   {
     key: 'tightenWindowTokens',
@@ -126,6 +133,7 @@ const BOOLEAN_HELP: Readonly<Record<BooleanKey, string>> = {
 const LABELS: Readonly<Record<BudgetKey, string>> = {
   ...BOOLEAN_LABELS,
   unit: 'Budget unit',
+  tokenMeasure: 'Token measure',
   ...(Object.fromEntries(
     NUMBER_FIELDS.map((field) => [field.key, field.label]),
   ) as Record<NumberKey, string>),
@@ -284,6 +292,42 @@ function storedNumberIsValid(
               }
             </div>
 
+            <div class="flex min-w-0 flex-col gap-1">
+              <label for="session-budget-token-measure" class="text-sm font-medium text-base-content">Token measure</label>
+              <select
+                ptahSelect size="sm"
+                id="session-budget-token-measure"
+                class="w-full text-sm"
+                [value]="tokenMeasureValue()"
+                [ptahBusyDisabled]="busy()"
+                aria-describedby="session-budget-token-measure-help session-budget-token-measure-resolved"
+                (change)="selectTokenMeasure($event)"
+                data-testid="session-budget-token-measure"
+              >
+                @for (measure of tokenMeasures; track measure) {
+                  <option [value]="measure" [selected]="measure === tokenMeasureValue()">
+                    {{ tokenMeasureLabels[measure] }}
+                  </option>
+                }
+              </select>
+              <p id="session-budget-token-measure-help" class="text-xs text-base-content-muted">
+                Weighted counts cached reads at 10% and output at 5x. Raw counts every token of every request, including cache reads.
+              </p>
+              <p id="session-budget-token-measure-resolved" class="text-xs text-base-content-muted" data-testid="session-budget-token-measure-resolved">
+                Current measure: {{ tokenMeasureLabels[tokenMeasureValue()] }}.
+              </p>
+              @if (tokenMeasureValue() === 'raw' && !recommendationDismissed()) {
+                <div class="rounded-md border border-info/30 bg-info/10 px-2 py-1 text-xs" data-testid="session-budget-token-measure-recommendation">
+                  <p>Weighted session tokens are recommended for a session budget. Switching keeps your saved token budget number unchanged.</p>
+                  <button type="button" ptahButton variant="ghost" size="xs" [ptahBusyDisabled]="busy()" (click)="selectWeighted()" data-testid="session-budget-token-measure-switch">Switch to weighted</button>
+                  <button type="button" ptahButton variant="ghost" size="xs" (click)="dismissRecommendation()">Dismiss</button>
+                </div>
+              }
+              @if (errors()['tokenMeasure']; as message) {
+                <p role="alert" class="text-xs text-error">{{ message }}</p>
+              }
+            </div>
+
             @for (field of numberFields; track field.key) {
               <div ptahSettingsField class="flex min-w-0 flex-col gap-1"
                 [fieldId]="'session-budget-' + field.key"
@@ -375,6 +419,9 @@ export class SessionBudgetSettingsComponent implements OnInit {
   protected readonly booleanHelp = BOOLEAN_HELP;
   protected readonly units = SESSION_BUDGET_SETTINGS.unit.values;
   protected readonly unitLabels = UNIT_LABELS;
+  protected readonly tokenMeasures = SESSION_BUDGET_SETTINGS.tokenMeasure.values;
+  protected readonly tokenMeasureLabels = TOKEN_MEASURE_LABELS;
+  private readonly recommendationDismissed = signal(false);
 
   protected readonly load = signal<'loading' | 'error' | 'ready'>('loading');
   /** Read-back values by field, as stored (possibly out of bounds when the file was edited by hand). */
@@ -396,6 +443,14 @@ export class SessionBudgetSettingsComponent implements OnInit {
       this.units.find((unit) => unit === value) ?? this.settings.unit.default
     );
   });
+  protected readonly tokenMeasureValue = computed<SessionBudgetTokenMeasure>(() => {
+    const saved = this.saved();
+    const value = saved['tokenMeasure'];
+    if (value === 'weighted' || value === 'raw') return value;
+    return saved['tokens'] !== undefined || saved['unit'] !== undefined
+      ? 'raw'
+      : 'weighted';
+  });
 
   ngOnInit(): void {
     void this.reload();
@@ -404,6 +459,7 @@ export class SessionBudgetSettingsComponent implements OnInit {
   /** Reads every `sessionBudget.*` key; any failed read shows the load error with Retry. */
   async reload(): Promise<void> {
     this.load.set('loading');
+    this.recommendationDismissed.set(false);
     try {
       const results = await Promise.all(
         BUDGET_KEYS.map((key) =>
@@ -551,6 +607,24 @@ export class SessionBudgetSettingsComponent implements OnInit {
     await this.write('unit', next);
   }
 
+  async selectTokenMeasure(event: Event): Promise<void> {
+    const input = event.target as HTMLSelectElement;
+    const next = this.tokenMeasures.find((measure) => measure === input.value);
+    input.value = this.tokenMeasureValue();
+    if (this.busy() || next === undefined || next === this.tokenMeasureValue()) return;
+    await this.write('tokenMeasure', next);
+  }
+
+  async selectWeighted(): Promise<void> {
+    if (!this.busy() && this.tokenMeasureValue() === 'raw') {
+      await this.write('tokenMeasure', 'weighted');
+    }
+  }
+
+  dismissRecommendation(): void {
+    this.recommendationDismissed.set(true);
+  }
+
   /** Bounds plus, for the percent pair, the shared tighten < handoff rule against the other field's effective value. */
   private validate(key: NumberKey, text: string): string | null {
     const parsed = parseNumber(this.settings[key], text);
@@ -592,7 +666,7 @@ export class SessionBudgetSettingsComponent implements OnInit {
    */
   private async write(
     key: BudgetKey,
-    value: number | null | boolean | SessionBudgetUnit,
+    value: number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure,
   ): Promise<boolean> {
     const previous = this.saved()[key];
     let confirmed = false;
@@ -611,7 +685,7 @@ export class SessionBudgetSettingsComponent implements OnInit {
   /** One `settings:set`; a failure leaves the saved value and returns the sentence the toast shows. */
   private async writeOnce(
     key: BudgetKey,
-    value: number | null | boolean | SessionBudgetUnit,
+    value: number | null | boolean | SessionBudgetUnit | SessionBudgetTokenMeasure,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     const label = this.labels[key];
     this.savingKey.set(key);

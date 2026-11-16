@@ -138,6 +138,41 @@ describe('SessionBudgetSettingsComponent', () => {
     }
   });
 
+  it('explains the measures and the compaction count gate', async () => {
+    await create();
+    expect(byTestId('session-budget-token-measure-resolved')?.textContent).toContain('Weighted session tokens');
+    expect(host().textContent).toContain('cached reads at 10% and output at 5x');
+    expect(host().textContent).toContain('every token of every request, including cache reads');
+    expect(host().textContent).toContain('50% or more of the auto-compact window');
+  });
+
+  it('resolves a legacy stored budget to raw and switches measure without changing its number', async () => {
+    delete stored['sessionBudget.tokenMeasure'];
+    stored['sessionBudget.tokens'] = 30_000_000;
+    await create();
+    expect(byTestId<HTMLSelectElement>('session-budget-token-measure')?.value).toBe('raw');
+    expect(byTestId('session-budget-token-measure-resolved')?.textContent).toContain('Raw session tokens');
+    expect(byTestId('session-budget-token-measure-recommendation')).not.toBeNull();
+    byTestId<HTMLButtonElement>('session-budget-token-measure-switch')?.click();
+    await settle();
+    expect(writes()).toEqual([{ key: 'sessionBudget.tokenMeasure', value: 'weighted' }]);
+    expect(stored['sessionBudget.tokens']).toBe(30_000_000);
+    expect(byTestId('session-budget-token-measure-recommendation')).toBeNull();
+  });
+
+  it('saves the selected raw measure and lets the recommendation be dismissed', async () => {
+    await create();
+    const select = byTestId<HTMLSelectElement>('session-budget-token-measure') as HTMLSelectElement;
+    select.value = 'raw';
+    select.dispatchEvent(new Event('change'));
+    await settle();
+    expect(writes()).toEqual([{ key: 'sessionBudget.tokenMeasure', value: 'raw' }]);
+    expect(byTestId('session-budget-token-measure-recommendation')).not.toBeNull();
+    byTestId('session-budget-token-measure-recommendation')?.querySelectorAll('button')[1]?.click();
+    fixture.detectChanges();
+    expect(byTestId('session-budget-token-measure-recommendation')).toBeNull();
+  });
+
   it('marks invalid numeric input and keeps its error', async () => {
     await create();
     await enter('tokens', 'bad');

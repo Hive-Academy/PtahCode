@@ -21,6 +21,7 @@ import {
   type SessionBudgetEnumSetting,
   type SessionBudgetNumberSetting,
   type SessionBudgetUnit,
+  type SessionBudgetTokenMeasure,
 } from '@ptah-extension/shared';
 
 type SettingReader = (key: string) => unknown;
@@ -35,6 +36,7 @@ export const SESSION_BUDGET_DEFAULT_CONFIG: SessionBudgetConfig = {
   enabled: SESSION_BUDGET_SETTINGS.enabled.default,
   autoHandoffAtLimit: SESSION_BUDGET_SETTINGS.autoHandoffAtLimit.default,
   unit: SESSION_BUDGET_SETTINGS.unit.default,
+  tokenMeasure: SESSION_BUDGET_SETTINGS.tokenMeasure.default,
   tokens: SESSION_BUDGET_SETTINGS.tokens.default,
   usd: SESSION_BUDGET_SETTINGS.usd.default,
   fallbackWeightedTokens:
@@ -104,6 +106,10 @@ export class SessionBudgetConfigProvider {
   }
 
   private readConfig(read: SettingReader): SessionBudgetConfig {
+    const storedBudget =
+      read(SESSION_BUDGET_SETTINGS.tokens.key) !== undefined ||
+      read(SESSION_BUDGET_SETTINGS.unit.key) !== undefined;
+    const tokenMeasure = this.readTokenMeasure(read, storedBudget);
     let tightenPercent = this.readNumber(
       read,
       SESSION_BUDGET_SETTINGS.tightenPercent,
@@ -130,6 +136,7 @@ export class SessionBudgetConfigProvider {
         SESSION_BUDGET_SETTINGS.autoHandoffAtLimit,
       ),
       unit: this.readEnum(read, SESSION_BUDGET_SETTINGS.unit),
+      tokenMeasure,
       tokens: this.devBudgetTokens ?? this.readNumber(read, SESSION_BUDGET_SETTINGS.tokens),
       usd: this.readNumber(read, SESSION_BUDGET_SETTINGS.usd),
       fallbackWeightedTokens: this.readNumber(
@@ -170,6 +177,19 @@ export class SessionBudgetConfigProvider {
     if (match !== undefined) return match;
     this.warnInvalid(setting.key, raw, `one of ${setting.values.join(', ')}`);
     return setting.default;
+  }
+
+  private readTokenMeasure(
+    read: SettingReader,
+    storedBudget: boolean,
+  ): SessionBudgetTokenMeasure {
+    const setting = SESSION_BUDGET_SETTINGS.tokenMeasure;
+    const fallback = storedBudget ? 'raw' : 'weighted';
+    const raw = read(setting.key);
+    if (raw === undefined) return fallback;
+    if (raw === 'weighted' || raw === 'raw') return raw;
+    this.warnInvalid(setting.key, raw, "'weighted' or 'raw'");
+    return fallback;
   }
 
   private readNumber(

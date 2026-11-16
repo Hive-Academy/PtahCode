@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal, type Signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, signal, type Signal } from '@angular/core';
 import type { SessionStatus } from '@ptah-extension/chat-types';
 import { QueuedFollowUpStore } from '@ptah-extension/chat-state';
 import type {
@@ -69,6 +69,9 @@ export class SessionBudgetActionsService {
   private readonly handoffSkill = inject(SessionHandoffSkillService);
   private readonly followUpStore = inject(QueuedFollowUpStore);
   private readonly followUps = inject(FollowUpQueueService);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly deferred = signal<{ tabId: string; sessionId: string } | null>(null);
+  private deferralTimer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly view = signal<SessionBudgetView>(NO_VIEW);
 
@@ -122,19 +125,76 @@ export class SessionBudgetActionsService {
   readonly autoHandoffQueued = computed(() => {
     const sessionId = this.budget()?.sessionId;
     const entry = sessionId ? this.autoHandoff.entry(sessionId) : null;
-    if (entry?.state !== 'fired' || !entry.queued) return false;
+    if (!entry || (entry.state !== 'pending' && entry.state !== 'delivered') || !entry.queued) return false;
     return this.followUpStore.isPending(entry.queued.clientMessageId);
   });
 
   /** True once the wrap-up prompt was sent (or auto-queued) for the shown session. */
   readonly wrapUpSent = computed(() => {
     const sessionId = this.budget()?.sessionId;
+    const entry = sessionId ? this.autoHandoff.entry(sessionId) : null;
+    const autoSent = entry?.state === 'pending' && entry.attempts === 0 && entry.statusError
+      ? false
+      : ['pending', 'delivered', 'recorded', 'completed'].includes(entry?.state ?? '');
     return (
       (!!sessionId && this.wrapUpSessions().has(sessionId)) ||
       this.autoHandoffQueued() ||
-      (!!sessionId && this.autoHandoff.entry(sessionId)?.state === 'fired')
+      autoSent
     );
   });
+
+  readonly handoffLabel = computed(() => {
+    const entry = this.autoHandoff.entry(this.budget()?.sessionId ?? '');
+    if (entry?.state === 'failed') return 'Handoff failed';
+    if (entry?.state === 'completed') return 'Handoff completed';
+    if (entry?.state === 'recorded') return 'Handoff recorded';
+    if (entry?.statusError) return 'Wrap-up requested · Status unavailable';
+    return this.wrapUpSent() || this.deferred() ? 'Wrap-up requested' : null;
+  });
+
+  constructor() {
+    effect(() => {
+      const intent = this.deferred();
+      if (!intent) return;
+      const compacting = this.chatStore.isCompactingForTab(intent.tabId);
+      if (!this.stillTargets(intent.tabId, intent.sessionId)) {
+        this.setWrapUpSent(intent.sessionId, false);
+        this.clearDeferred();
+      } else if (!compacting) {
+        this.clearDeferred();
+        this.setWrapUpSent(intent.sessionId, false);
+        void this.requestWrapUp();
+      }
+    });
+    this.destroyRef.onDestroy(() => this.clearDeferred());
+  }
+
+  retryHandoff(): Promise<void> {
+    const sessionId = this.budget()?.sessionId;
+    if (sessionId) this.autoHandoff.retry(sessionId);
+    if (sessionId) this.setWrapUpSent(sessionId, false);
+    return this.requestWrapUp();
+  }
+
+  private clearDeferred(): void {
+    if (this.deferralTimer) clearTimeout(this.deferralTimer);
+    this.deferralTimer = null;
+    this.deferred.set(null);
+  }
+
+  private deferManual(tabId: string, sessionId: string): void {
+    if (this.deferred()?.tabId === tabId && this.deferred()?.sessionId === sessionId) return;
+    this.clearDeferred();
+    this.setWrapUpSent(sessionId, true);
+    this.deferred.set({ tabId, sessionId });
+    this.deferralTimer = setTimeout(() => {
+      if (!this.chatStore.isCompactingForTab(tabId)) return;
+      this.clearDeferred();
+      this.setWrapUpSent(sessionId, false);
+      this.autoHandoff.claim(sessionId);
+      this.autoHandoff.transition(sessionId, 'failed');
+    }, 600_000);
+  }
 
   /** Binds this service to the view's resolved tab and session. */
   connect(view: SessionBudgetView): void {
@@ -206,13 +266,26 @@ export class SessionBudgetActionsService {
     const budget = this.budget();
     const sessionId = budget?.sessionId;
     if (!tabId || !sessionId || this.wrapUpSent()) return;
+    if (this.chatStore.isCompactingForTab(tabId)) {
+      this.deferManual(tabId, sessionId);
+      return;
+    }
+    const autoEntry = this.autoHandoff.entry(sessionId);
+    const recoverableClaim = autoEntry?.state === 'pending' && autoEntry.attempts === 0 && autoEntry.statusError;
+    if (autoEntry && !recoverableClaim && !this.autoHandoff.isManuallyWrappedUp(sessionId)) return;
     this.setWrapUpSent(sessionId, true);
+    if (recoverableClaim) this.autoHandoff.release(sessionId);
     try {
       const probe = await this.handoffSkill.probe();
       // The probe is asynchronous: the view may show another tab or session
       // now. Never send into those.
       if (!this.stillTargets(tabId, sessionId)) {
         this.setWrapUpSent(sessionId, false);
+        return;
+      }
+      if (this.chatStore.isCompactingForTab(tabId)) {
+        this.setWrapUpSent(sessionId, false);
+        this.deferManual(tabId, sessionId);
         return;
       }
       const prompt =

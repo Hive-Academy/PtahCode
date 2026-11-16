@@ -8,6 +8,7 @@ import 'reflect-metadata';
 jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   CLI_AGENT_RUNTIME_TOKENS: {
     SESSION_HANDOFF_CHAIN: Symbol.for('SessionHandoffChain'),
+    SESSION_HANDOFF: Symbol.for('SessionHandoff'),
   },
 }));
 
@@ -20,6 +21,7 @@ import {
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import {
   CLI_AGENT_RUNTIME_TOKENS,
+  type ISessionHandoff,
   type ISessionHandoffChain,
 } from '@ptah-extension/cli-agent-runtime';
 import type { SessionHandoffChainResult } from '@ptah-extension/shared';
@@ -34,11 +36,13 @@ const SESSION_A = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
 const SESSION_B = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000002';
 const SESSION_C = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000003';
 const METHOD = 'session:handoffChain';
+const STATUS_METHOD = 'session:handoffStatus';
 
 interface Fakes {
   logger: MockLogger;
   rpcHandler: MockRpcHandler;
   chain: jest.Mocked<ISessionHandoffChain>;
+  handoff: jest.Mocked<ISessionHandoff>;
   metadataStore: { get: jest.Mock };
 }
 
@@ -51,13 +55,18 @@ function makeFakes(): Fakes {
       read: jest.fn().mockResolvedValue([]),
       onLinkWritten: jest.fn().mockReturnValue(() => undefined),
     },
+    handoff: {
+      handoff: jest.fn(),
+      acknowledge: jest.fn(),
+      status: jest.fn().mockResolvedValue({ state: 'absent', successorSessionId: null }),
+    },
     metadataStore: { get: jest.fn().mockResolvedValue(null) },
   };
 }
 
 function build(
   fakes: Fakes,
-  opts: { withChain?: boolean; withMetadata?: boolean } = {},
+  opts: { withChain?: boolean; withMetadata?: boolean; withHandoff?: boolean } = {},
 ): void {
   const child = container.createChildContainer();
   child.registerInstance(TOKENS.LOGGER, fakes.logger);
@@ -73,6 +82,9 @@ function build(
       SDK_TOKENS.SDK_SESSION_METADATA_STORE,
       fakes.metadataStore,
     );
+  }
+  if (opts.withHandoff ?? true) {
+    child.registerInstance(CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF, fakes.handoff);
   }
   child.register(SessionHandoffChainRpcHandlers, {
     useClass: SessionHandoffChainRpcHandlers,
@@ -105,7 +117,7 @@ function metadata(name: string) {
 
 describe('SessionHandoffChainRpcHandlers', () => {
   it('owns exactly session:handoffChain', () => {
-    expect([...SessionHandoffChainRpcHandlers.METHODS]).toEqual([METHOD]);
+    expect([...SessionHandoffChainRpcHandlers.METHODS]).toEqual([METHOD, STATUS_METHOD]);
   });
 
   it.each([
@@ -223,5 +235,75 @@ describe('SessionHandoffChainRpcHandlers', () => {
 
     expect(fakes.chain.read).toHaveBeenCalledWith(SESSION_B, undefined);
     expect(result.sessions.map((s) => s.label)).toEqual([null, null]);
+  });
+});
+
+describe('session:handoffStatus', () => {
+  function callStatus(fakes: Fakes, params: Record<string, unknown>) {
+    return fakes.rpcHandler.handleMessage({
+      method: STATUS_METHOD,
+      params,
+      correlationId: 'corr-handoff-status',
+    });
+  }
+
+  it.each([
+    ['absent', null],
+    ['starting', null],
+    ['recorded', SESSION_B],
+    ['closePending', SESSION_B],
+    ['closeCompleted', SESSION_B],
+    ['unavailable', null],
+  ] as const)('passes through %s with the session workspace', async (state, successorSessionId) => {
+    const fakes = makeFakes();
+    fakes.metadataStore.get.mockResolvedValue(metadata('Plan'));
+    fakes.handoff.status.mockResolvedValue({ state, successorSessionId });
+    build(fakes);
+
+    const response = await callStatus(fakes, { sessionId: SESSION_A, tabId: 'tab-a' });
+
+    expect(response.success).toBe(true);
+    expect(response.data).toEqual({ state, successorSessionId });
+    expect(fakes.handoff.status).toHaveBeenCalledWith({
+      sessionId: SESSION_A,
+      tabId: 'tab-a',
+      workspaceRoot: WORKSPACE,
+    });
+  });
+
+  it.each([
+    {},
+    { sessionId: '', tabId: 'tab-a' },
+    { sessionId: SESSION_A, tabId: '' },
+    { sessionId: SESSION_A },
+  ])('rejects invalid params with INVALID_PARAMS', async (params) => {
+    const fakes = makeFakes();
+    build(fakes);
+    const response = await callStatus(fakes, params);
+    expect(response.success).toBe(false);
+    expect(response.errorCode).toBe('INVALID_PARAMS');
+    expect(fakes.handoff.status).not.toHaveBeenCalled();
+  });
+
+  it('returns unavailable without a session workspace', async () => {
+    const fakes = makeFakes();
+    build(fakes);
+    const response = await callStatus(fakes, { sessionId: SESSION_A, tabId: 'tab-a' });
+    expect(response.data).toEqual({ state: 'unavailable', successorSessionId: null });
+    expect(fakes.handoff.status).not.toHaveBeenCalled();
+  });
+
+  it('returns unavailable and logs when status throws', async () => {
+    const fakes = makeFakes();
+    fakes.metadataStore.get.mockResolvedValue(metadata('Plan'));
+    const failure = new Error('storage failed');
+    fakes.handoff.status.mockRejectedValue(failure);
+    build(fakes);
+    const response = await callStatus(fakes, { sessionId: SESSION_A, tabId: 'tab-a' });
+    expect(response.data).toEqual({ state: 'unavailable', successorSessionId: null });
+    expect(fakes.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('status read failed'),
+      failure,
+    );
   });
 });

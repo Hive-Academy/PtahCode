@@ -57,6 +57,7 @@ describe('SessionBudgetActionsService', () => {
       liveBudgetStage?: 'handoff' | 'limit' | null;
     }>({ sessionBudget: budget, status: 'loaded' });
     const tabId = signal<string | null>('tab-abc');
+    const compacting = signal(false);
     // Default: the workspace has no `session-handoff` skill.
     const rpcCallMock = jest.fn().mockResolvedValue(commandsResult());
     const withdrawMock = jest.fn().mockResolvedValue(true);
@@ -71,7 +72,7 @@ describe('SessionBudgetActionsService', () => {
         },
         {
           provide: ChatStore,
-          useValue: { sendOrQueueMessage: sendOrQueueMessageMock },
+          useValue: { sendOrQueueMessage: sendOrQueueMessageMock, isCompactingForTab: () => compacting() },
         },
         { provide: ClaudeRpcService, useValue: { call: rpcCallMock } },
         {
@@ -93,6 +94,7 @@ describe('SessionBudgetActionsService', () => {
       service,
       tab,
       tabId,
+      compacting,
       sendOrQueueMessageMock,
       showErrorMock,
       rpcCallMock,
@@ -105,6 +107,18 @@ describe('SessionBudgetActionsService', () => {
   afterEach(() => {
     TestBed.resetTestingModule();
     jest.clearAllMocks();
+  });
+
+  it('clears a dropped manual compaction intent when the target changes', async () => {
+    const { service, tabId, compacting, autoHandoff, sendOrQueueMessageMock } = setup();
+    compacting.set(true);
+    await service.sendWrapUp();
+    expect(autoHandoff.isManuallyWrappedUp(SESSION)).toBe(true);
+    tabId.set(null);
+    TestBed.tick();
+    expect(autoHandoff.isManuallyWrappedUp(SESSION)).toBe(false);
+    expect(service.wrapUpSent()).toBe(false);
+    expect(sendOrQueueMessageMock).not.toHaveBeenCalled();
   });
 
   describe('display stage', () => {
@@ -183,7 +197,7 @@ describe('SessionBudgetActionsService', () => {
 
       await service.cancelAutoHandoff();
 
-      expect(autoHandoff.entry(SESSION)?.state).toBe('fired');
+      expect(autoHandoff.entry(SESSION)?.state).toBe('delivered');
       expect(service.autoHandoffQueued()).toBe(true);
     });
   });

@@ -228,6 +228,26 @@ export class SessionHandoffAckStore {
     );
   }
 
+  /** Read the authoritative record only when every candidate storage is readable. */
+  async statusForPredecessor(
+    tabId: string,
+    sdkSessionId: string,
+    workspaceRoot: string,
+  ): Promise<Pick<HandoffAckRecord, 'state' | 'successorSdkId'> | undefined> {
+    return this.serialized(async () => {
+      const record = (
+        await this.locate((entry) => entry.predecessorTabId === tabId, true)
+      )?.record;
+      if (
+        !record ||
+        record.predecessorSdkId !== sdkSessionId ||
+        record.workspaceRoot !== workspaceRoot
+      )
+        return undefined;
+      return { state: record.state, successorSdkId: record.successorSdkId };
+    });
+  }
+
   async findBySuccessor(id: string): Promise<HandoffAckRecord | undefined> {
     return this.serialized(async () => {
       const predecessors = new Set<string>();

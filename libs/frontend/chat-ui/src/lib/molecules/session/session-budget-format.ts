@@ -28,7 +28,7 @@ export function formatBudgetUsd(limit: number): string {
 export function tokensBudgetSuffix(
   budget: SessionBudgetState | null,
 ): string | null {
-  return budget?.measure === 'tokens'
+  return budget?.measure === 'tokens' || budget?.measure === 'weighted-tokens'
     ? `/ ${formatTokens(budget.limit)}`
     : null;
 }
@@ -71,7 +71,7 @@ export function budgetTooltip(
   if (!budget || budget.percent === null) return null;
   let used: string;
   let limit: string;
-  if (budget.measure === 'tokens') {
+  if (budget.measure === 'tokens' || budget.measure === 'weighted-tokens') {
     used = figures.tokensLabel;
     limit = formatTokens(budget.limit);
   } else if (budget.measure === 'weighted-fallback') {
@@ -83,7 +83,8 @@ export function budgetTooltip(
     used = `${budget.measure === 'cost-lower-bound' ? '≥ ' : ''}${formatCost(cost)}`;
     limit = formatBudgetUsd(budget.limit);
   }
-  return `Session budget: ${Math.floor(budget.percent)}% used (${used} of ${limit}). At 50% Ptah lowers auto-compact; at 80% you can ask the agent to wrap up and hand off.`;
+  const label = budget.measure === 'tokens' ? 'Raw session tokens' : budget.measure === 'weighted-tokens' ? 'Weighted session tokens' : 'Session budget';
+  return `${label}: ${Math.floor(budget.percent)}% used (${used} of ${limit}). At 50% Ptah lowers auto-compact; at 80% you can ask the agent to wrap up and hand off.`;
 }
 
 /** COST chip tooltip: the budget line unless the budget is counted in tokens. */
@@ -91,7 +92,7 @@ export function costTooltip(
   budget: SessionBudgetState | null,
   budgetLine: string | null,
 ): string | null {
-  return budget?.measure === 'tokens' ? null : budgetLine;
+  return budget?.measure === 'tokens' || budget?.measure === 'weighted-tokens' ? null : budgetLine;
 }
 
 /** TOKENS chip tooltip: the token breakdown, plus the budget line for `tokens`. */
@@ -100,6 +101,6 @@ export function tokensTooltip(
   budgetLine: string | null,
   breakdown: string,
 ): string {
-  const line = budget?.measure === 'tokens' ? budgetLine : null;
+  const line = budget?.measure === 'tokens' || budget?.measure === 'weighted-tokens' ? budgetLine : null;
   return line ? `${breakdown}\n\n${line}` : breakdown;
 }

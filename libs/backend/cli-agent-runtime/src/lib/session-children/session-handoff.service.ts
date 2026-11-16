@@ -68,6 +68,8 @@ import type {
   SessionHandoffResult,
   SessionHandoffAckRequest,
   SessionHandoffAckResult,
+  SessionHandoffStatusRequest,
+  SessionHandoffStatusResult,
   HandoffPredecessorCloser,
 } from './session-handoff.port';
 
@@ -252,6 +254,27 @@ export class SessionHandoffService
     request: SessionHandoffAckRequest,
   ): Promise<SessionHandoffAckResult> {
     return this.acknowledgeOnce(request);
+  }
+
+  async status(
+    request: SessionHandoffStatusRequest,
+  ): Promise<SessionHandoffStatusResult> {
+    if (!request.tabId || !request.sessionId || !request.workspaceRoot)
+      return { state: 'unavailable', successorSessionId: null };
+    try {
+      if (!this.ackStore) throw new Error('handoff acknowledgement storage unavailable');
+      const record = await this.ackStore.statusForPredecessor(
+        request.tabId,
+        request.sessionId,
+        request.workspaceRoot,
+      );
+      return record
+        ? { state: record.state, successorSessionId: record.successorSdkId }
+        : { state: 'absent', successorSessionId: null };
+    } catch (error: unknown) {
+      this.reportError('handoff status lookup failed', error);
+      return { state: 'unavailable', successorSessionId: null };
+    }
   }
 
   private async acknowledgeOnce(

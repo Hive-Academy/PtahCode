@@ -15,6 +15,13 @@ function asLogger(mock: MockLogger): Logger {
 }
 
 describe('SdkAdapterEvents', () => {
+  it('clears the remaining hook cause after the stream consumes its copy', () => {
+    const events = new SdkAdapterEvents(asLogger(createMockLogger()));
+    events.recordStopCause(['tab', 'sdk'], 'host-stop');
+    expect(events.peekStopCause('sdk')).toBe('host-stop');
+    events.clearStopCause('tab');
+    expect(events.takeStopCause('sdk')).toBeUndefined();
+  });
   function make(): { events: SdkAdapterEvents; logger: MockLogger } {
     const logger = createMockLogger();
     const events = new SdkAdapterEvents(asLogger(logger));

@@ -176,6 +176,7 @@ export class MessageFinalizationService {
     tabId?: string,
     isAborted = false,
     isInterrupted = false,
+    stopCause?: ExecutionChatMessage['stopCause'],
   ): void {
     this.batchedUpdate.flushSync();
     const targetTabId = tabId ?? this.tabManager.activeTabId();
@@ -202,6 +203,7 @@ export class MessageFinalizationService {
                 duration: stats.duration,
               }
             : undefined,
+          stopCause,
         );
       }
       return;
@@ -257,6 +259,7 @@ export class MessageFinalizationService {
           pendingStats
             ? { tokens: finalTokens, cost: finalCost, duration: finalDuration }
             : undefined,
+          stopCause,
         );
         return;
       }
@@ -311,7 +314,7 @@ export class MessageFinalizationService {
             id: tree.id,
             role: 'assistant',
             streamingState: tree,
-            ...(isLast && isInterrupted ? { isInterrupted: true } : {}),
+            ...(isLast && isInterrupted ? { isInterrupted: true, stopCause } : {}),
             sessionId: targetTab?.claudeSessionId ?? undefined,
             ...(startTimestamp !== undefined
               ? { timestamp: startTimestamp }
@@ -336,6 +339,7 @@ export class MessageFinalizationService {
           pendingStats
             ? { tokens: finalTokens, cost: finalCost, duration: finalDuration }
             : undefined,
+          stopCause,
         );
         return;
       }
@@ -370,6 +374,7 @@ export class MessageFinalizationService {
     tabId: string,
     messages: readonly ExecutionChatMessage[],
     stats?: Pick<ExecutionChatMessage, 'tokens' | 'cost' | 'duration'>,
+    stopCause?: ExecutionChatMessage['stopCause'],
   ): void {
     const queued = this.queuedPrompts.queuedAtTail(tabId, messages);
     let insertAt = messages.length;
@@ -377,14 +382,19 @@ export class MessageFinalizationService {
       insertAt--;
     }
     const previous = messages[insertAt - 1];
+    if ((!stopCause || stopCause === 'internal-abort') && previous?.role !== 'assistant') {
+      this.tabManager.clearStreamingForLoaded(tabId);
+      return;
+    }
     if (previous?.role === 'assistant' && previous.isInterrupted && !stats) return;
     const marker =
       previous?.role === 'assistant'
-        ? { ...previous, isInterrupted: true, ...(stats ?? {}) }
+        ? { ...previous, isInterrupted: true, stopCause, ...(stats ?? {}) }
         : createExecutionChatMessage({
             id: `interrupted-${tabId}-${previous?.id ?? 'empty'}`,
             role: 'assistant',
             isInterrupted: true,
+            stopCause,
             ...(stats ?? {}),
           });
     this.tabManager.applyFinalizedTurn(tabId, [

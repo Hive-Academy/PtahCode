@@ -384,6 +384,46 @@ function addLink(
 }
 
 describe('SessionHandoffService', () => {
+  it('returns unavailable when identity cannot be resolved', async () => {
+    const h = makeHarness();
+    await expect(h.service.status({ tabId: CALLER, sessionId: '', workspaceRoot: root }))
+      .resolves.toEqual({ state: 'unavailable', successorSessionId: null });
+  });
+  it('returns read-only status and hides mismatched identities', async () => {
+    const h = makeHarness();
+    await h.ackStore.record({
+      predecessorTabId: CALLER,
+      predecessorSdkId: CALLER_SDK,
+      successorTabId: CALLER_NEW_TAB,
+      successorSdkId: 'sdk-successor',
+      workspaceRoot: root,
+      handoffPath,
+      state: 'closePending',
+    });
+    const query = { tabId: CALLER, sessionId: CALLER_SDK, workspaceRoot: root };
+    await expect(h.service.status(query)).resolves.toEqual({
+      state: 'closePending', successorSessionId: 'sdk-successor',
+    });
+    await expect(h.service.status({ ...query, sessionId: 'wrong' }))
+      .resolves.toEqual({ state: 'absent', successorSessionId: null });
+  });
+
+  it('logs a storage read failure and returns unavailable', async () => {
+    const failure = new Error('storage read failed');
+    const storage: IStateStorage = {
+      get: () => { throw failure; },
+      update: jest.fn(async () => undefined),
+      keys: () => [],
+    };
+    const h = makeHarness(storage);
+    await expect(h.service.status({
+      tabId: CALLER, sessionId: CALLER_SDK, workspaceRoot: root,
+    })).resolves.toEqual({ state: 'unavailable', successorSessionId: null });
+    expect(h.stopLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining('handoff status lookup failed'), failure,
+    );
+    expect(storage.update).not.toHaveBeenCalled();
+  });
   it('retries a closePending acknowledgement when a newer handoff document is unreadable', async () => {
     const fixture = scopedAckStorage();
     const h = makeHarness(fixture.storage);

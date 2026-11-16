@@ -1,8 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import type { QueuedFollowUpRef } from '@ptah-extension/chat-state';
 
-/** `fired`: the automatic hand-off ran for the session; `cancelled`: the user cancelled it. */
-export type AutoHandoffState = 'fired' | 'cancelled';
+export type AutoHandoffState = 'pending' | 'delivered' | 'recorded' | 'completed' | 'failed' | 'cancelled';
 
 /** One session's automatic hand-off, as far as it got. */
 export interface AutoHandoffEntry {
@@ -12,6 +11,9 @@ export interface AutoHandoffEntry {
    * `null` before the send and when it was sent straight away.
    */
   readonly queued: QueuedFollowUpRef | null;
+  readonly attempts: number;
+  readonly clientMessageId: string | null;
+  readonly statusError: boolean;
 }
 
 /**
@@ -48,16 +50,39 @@ export class SessionAutoHandoffService {
    * already claimed (fired or cancelled), so the caller must not send.
    */
   claim(sessionId: string): boolean {
-    if (this._entries().has(sessionId)) return false;
-    this.set(sessionId, { state: 'fired', queued: null });
+    const current = this.entry(sessionId);
+    if (current) return current.state === 'pending' && current.queued === null && current.attempts > 0;
+    this.set(sessionId, { state: 'pending', queued: null, attempts: 0, clientMessageId: null, statusError: false });
     return true;
   }
 
   /** Record the queued follow-up a fired session's command became. */
   recordQueued(sessionId: string, queued: QueuedFollowUpRef | null): void {
     const current = this.entry(sessionId);
-    if (current?.state !== 'fired') return;
-    this.set(sessionId, { ...current, queued });
+    if (current?.state !== 'pending') return;
+    this.set(sessionId, { ...current, queued, clientMessageId: queued?.clientMessageId ?? current.clientMessageId, attempts: current.attempts + 1 });
+  }
+
+  transition(sessionId: string, state: AutoHandoffState, statusError = false): void {
+    const current = this.entry(sessionId);
+    if (!current || current.state === 'cancelled') return;
+    this.set(sessionId, { ...current, state, statusError });
+  }
+
+  retry(sessionId: string): void {
+    const current = this.entry(sessionId);
+    if (current?.state !== 'failed') return;
+    this._entries.update((entries) => {
+      const next = new Map(entries);
+      next.delete(sessionId);
+      return next;
+    });
+  }
+
+  releaseForResend(sessionId: string): void {
+    const current = this.entry(sessionId);
+    if (current?.state !== 'delivered') return;
+    this.set(sessionId, { ...current, state: 'pending', queued: null });
   }
 
   /** The user cancelled it: it never fires again for the session. */
@@ -66,6 +91,9 @@ export class SessionAutoHandoffService {
     this.set(sessionId, {
       state: 'cancelled',
       queued: current?.queued ?? null,
+      attempts: current?.attempts ?? 0,
+      clientMessageId: current?.clientMessageId ?? null,
+      statusError: false,
     });
   }
 
@@ -76,7 +104,7 @@ export class SessionAutoHandoffService {
   revertCancel(sessionId: string): void {
     const current = this.entry(sessionId);
     if (current?.state !== 'cancelled') return;
-    this.set(sessionId, { state: 'fired', queued: current.queued });
+    this.set(sessionId, { ...current, state: 'delivered' });
   }
 
   /**
@@ -86,7 +114,7 @@ export class SessionAutoHandoffService {
    * command, so it must not fire again.
    */
   release(sessionId: string): void {
-    if (this.entry(sessionId)?.state !== 'fired') return;
+    if (this.entry(sessionId)?.state !== 'pending') return;
     this._entries.update((entries) => {
       const next = new Map(entries);
       next.delete(sessionId);

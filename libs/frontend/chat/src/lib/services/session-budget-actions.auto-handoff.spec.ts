@@ -47,7 +47,7 @@ describe('SessionBudgetActionsService automatic hand-off', () => {
     TestBed.configureTestingModule({ providers: [
       SessionBudgetActionsService, SessionAutoHandoffService, QueuedFollowUpStore,
       { provide: FollowUpQueueService, useValue: { withdraw } },
-      { provide: ChatStore, useValue: { sendOrQueueMessage: jest.fn() } },
+      { provide: ChatStore, useValue: { sendOrQueueMessage: jest.fn(), isCompactingForTab: () => false } },
       { provide: SessionHandoffSkillService, useValue: { probe: jest.fn() } },
       { provide: ActionBannerService, useValue: { showError: jest.fn() } },
     ] });
@@ -82,6 +82,20 @@ describe('SessionBudgetActionsService automatic hand-off', () => {
     expect(service.wrapUpSent()).toBe(true);
   });
 
+  it('allows manual wrap-up after an unsent unavailable automatic claim', async () => {
+    expect(autoHandoff.claim(SESSION)).toBe(true);
+    autoHandoff.transition(SESSION, 'pending', true);
+    expect(service.wrapUpSent()).toBe(false);
+    const send = TestBed.inject(ChatStore).sendOrQueueMessage as jest.Mock;
+    send.mockResolvedValue({ success: true });
+    const probe = TestBed.inject(SessionHandoffSkillService).probe as jest.Mock;
+    probe.mockResolvedValue('available');
+    await service.sendWrapUp();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(autoHandoff.entry(SESSION)).toBeNull();
+    expect(autoHandoff.isManuallyWrappedUp(SESSION)).toBe(true);
+  });
+
   it('Cancel withdraws only the automatic item without restoring it', async () => {
     seed();
     const user = queue('user-1', COMMAND);
@@ -107,7 +121,7 @@ describe('SessionBudgetActionsService automatic hand-off', () => {
     seed();
     withdraw.mockResolvedValueOnce(false);
     await service.cancelAutoHandoff();
-    expect(autoHandoff.entry(SESSION)?.state).toBe('fired');
+    expect(autoHandoff.entry(SESSION)?.state).toBe('delivered');
     expect(service.autoHandoffQueued()).toBe(true);
     expect(service.wrapUpSent()).toBe(true);
   });

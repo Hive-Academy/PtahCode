@@ -1,4 +1,4 @@
-import type { ProviderAccountSelection, PhaseDispatchV1, PhaseSkillV1 } from '@ptah-extension/shared';
+import type { ProviderAccountSelection, PhaseDispatchV1, PhaseSkillV1, TurnStopCause } from '@ptah-extension/shared';
 import { namedAccountRefusal } from './helpers/session-lifecycle/session-query-executor.service';
 import * as path from 'path';
 import * as os from 'os';
@@ -63,6 +63,9 @@ import type {
   SessionStatsPrefix,
 } from './session-stats/session-stats-owner.service';
 import type { SessionBudgetService } from './helpers/session-budget/session-budget.service';
+import type { CompactionConfigProvider } from './helpers/compaction-config-provider';
+import { resolveAutoCompactControl } from './helpers/auto-compact-control';
+import { isCompactBoundary } from './types/sdk-types/claude-sdk.types';
 import {
   ModelInfo,
   type ForkSessionResult,
@@ -237,6 +240,10 @@ export class SdkAgentAdapter implements IAgentAdapter {
     ExecuteQueryResult['sdkQuery'],
     StreamTap
   >();
+  private readonly pendingBudgetCompactions = new Map<
+    string,
+    { postCompactionContextTokens: number | null; effectiveAutoCompactWindowTokens: number | null }
+  >();
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -300,6 +307,10 @@ export class SdkAgentAdapter implements IAgentAdapter {
       SessionBudgetService,
       'observe' | 'observeLive' | 'recordCompaction' | 'release' | 'clearAll'
     >,
+    @inject(SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER, { isOptional: true })
+    private readonly compactionConfigProvider: {
+      getConfig(): Pick<ReturnType<CompactionConfigProvider['getConfig']>, 'enabled' | 'contextTokenThreshold' | 'envWindow'>;
+    } | null = null,
   ) {
     this.callbacks = new SdkAdapterCallbackRegistry();
     this.statsOwner.setLiveSessionIdsProvider(() =>
@@ -849,6 +860,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
     // Backend disposal ends every session; nothing may outlive it.
     this.statsOwner.clearAll();
     this.stopEvictionRelease();
+    this.pendingBudgetCompactions.clear();
     this.sessionBudget.clearAll();
     this.initialized = false;
     this.runtimeState.reset();
@@ -1176,11 +1188,11 @@ export class SdkAgentAdapter implements IAgentAdapter {
       onCompactBoundary: this.recordBudgetCompaction,
       tabId: config?.tabId,
       activityWatchdog,
-      ...this.rememberStreamTap(sdkQuery, {
+      ...this.rememberStreamTap(sdkQuery, trackingId, {
         onMessage,
         onStreamEnd,
         beforeLiveStatsDispose,
-      }),
+      }, capacityRoute?.kind === 'native'),
     }), toolProfileApplied ? { toolProfileApplied: true as const } : {});
   }
 
@@ -1188,6 +1200,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
     this.flushPendingUserActivityFor(sessionId);
     const statsLeases = this.captureStatsLeases(sessionId);
     const budgetKeys = this.sessionKeys(sessionId);
+    for (const key of budgetKeys) this.clearPendingBudgetCompaction(key);
     this.sessionLifecycle
       .endSession(sessionId, cause)
       .then(() => {
@@ -1236,6 +1249,7 @@ export class SdkAgentAdapter implements IAgentAdapter {
    */
   private releaseBudget(keys: readonly string[]): void {
     for (const key of keys) {
+      this.clearPendingBudgetCompaction(key);
       this.sessionBudget.release(key);
       this.phaseBySession.delete(key);
     }
@@ -1297,10 +1311,36 @@ export class SdkAgentAdapter implements IAgentAdapter {
   /** Remember `tap` for `sdkQuery` (see {@link streamTaps}) and return it. */
   private rememberStreamTap(
     sdkQuery: ExecuteQueryResult['sdkQuery'],
+    ownerId: SessionId,
     tap: StreamTap,
+    nativeAnthropic: boolean,
   ): StreamTap {
-    this.streamTaps.set(sdkQuery, tap);
-    return tap;
+    const observed: StreamTap = {
+      ...tap,
+      onMessage: (message) => {
+        if (isCompactBoundary(message)) {
+          const post = message.compact_metadata.post_tokens;
+          const config = this.compactionConfigProvider?.getConfig();
+          const sample = {
+            postCompactionContextTokens:
+              typeof post === 'number' && Number.isFinite(post) && post >= 0 ? post : null,
+            effectiveAutoCompactWindowTokens: config
+              ? resolveAutoCompactControl({
+                  enabled: config.enabled,
+                  windowTokens: config.contextTokenThreshold,
+                  envWindow: config.envWindow,
+                  modelClass: nativeAnthropic ? 'claude' : 'proxied',
+                }).effectiveWindow
+              : null,
+          };
+          this.pendingBudgetCompactions.set(ownerId as string, sample);
+          this.pendingBudgetCompactions.set(message.session_id, sample);
+        }
+        return tap.onMessage?.(message);
+      },
+    };
+    this.streamTaps.set(sdkQuery, observed);
+    return observed;
   }
 
   /**
@@ -1646,11 +1686,11 @@ export class SdkAgentAdapter implements IAgentAdapter {
       onCompactBoundary: this.recordBudgetCompaction,
       tabId: config?.tabId,
       activityWatchdog,
-      ...this.rememberStreamTap(sdkQuery, {
+      ...this.rememberStreamTap(sdkQuery, sessionId, {
         onMessage,
         onStreamEnd,
         beforeLiveStatsDispose,
-      }),
+      }, capacityRoute?.kind === 'native'),
     }), toolProfileApplied ? { toolProfileApplied: true as const } : {});
   }
 
@@ -2137,19 +2177,19 @@ export class SdkAgentAdapter implements IAgentAdapter {
       onCompactBoundary: this.recordBudgetCompaction,
       tabId: config.tabId,
       activityWatchdog,
-      ...this.rememberStreamTap(sdkQuery, {
+      ...this.rememberStreamTap(sdkQuery, sessionId, {
         onMessage,
         onStreamEnd,
         beforeLiveStatsDispose,
-      }),
+      }, capacityRoute?.kind === 'native'),
     });
   }
 
-  async interruptCurrentTurn(sessionId: SessionId): Promise<boolean> {
+  async interruptCurrentTurn(sessionId: SessionId, cause?: TurnStopCause): Promise<boolean> {
     this.logger.info(
       `[SdkAgentAdapter] Interrupting current turn: ${sessionId}`,
     );
-    return this.sessionLifecycle.interruptCurrentTurn(sessionId);
+    return this.sessionLifecycle.interruptCurrentTurn(sessionId, cause);
   }
 
   /**
@@ -2434,7 +2474,14 @@ export class SdkAgentAdapter implements IAgentAdapter {
    */
   private readonly recordBudgetCompaction = (sessionId: SessionId): void => {
     try {
-      this.sessionBudget.recordCompaction(sessionId as string);
+      const keys = this.sessionKeys(sessionId);
+      const sample = keys.map((key) => this.pendingBudgetCompactions.get(key))
+        .find((entry) => entry !== undefined) ?? {
+        postCompactionContextTokens: null,
+        effectiveAutoCompactWindowTokens: null,
+      };
+      for (const key of keys) this.clearPendingBudgetCompaction(key);
+      this.sessionBudget.recordCompaction(sessionId as string, sample);
     } catch (error: unknown) {
       this.logger.warn(
         `[SdkAgentAdapter] Session budget could not record a compaction for ${sessionId}`,
@@ -2442,6 +2489,14 @@ export class SdkAgentAdapter implements IAgentAdapter {
       );
     }
   };
+
+  private clearPendingBudgetCompaction(key: string): void {
+    const sample = this.pendingBudgetCompactions.get(key);
+    if (!sample) return;
+    for (const [alias, entry] of this.pendingBudgetCompactions) {
+      if (entry === sample) this.pendingBudgetCompactions.delete(alias);
+    }
+  }
 
   /**
    * Release the streaming pump's turn claim on the SDK `result` message, so a

@@ -64,6 +64,7 @@ describe('SessionBudgetConfigProvider.getConfig', () => {
       enabled: true,
       autoHandoffAtLimit: true,
       unit: 'tokens',
+      tokenMeasure: 'weighted',
       tokens: 50_000_000,
       usd: 30,
       fallbackWeightedTokens: 9_000_000,
@@ -74,6 +75,25 @@ describe('SessionBudgetConfigProvider.getConfig', () => {
     });
     expect(provider.getConfig()).toEqual(SESSION_BUDGET_DEFAULT_CONFIG);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('preserves raw measure for stored token limits or units without writing', () => {
+    for (const key of [SESSION_BUDGET_SETTINGS.tokens.key, SESSION_BUDGET_SETTINGS.unit.key]) {
+      const { provider, get } = makeProvider({ [key]: key.endsWith('tokens') ? 30_000_000 : 'tokens' });
+      expect(provider.getConfig().tokenMeasure).toBe('raw');
+      expect(get).toHaveBeenCalled();
+    }
+  });
+
+  it('warns on invalid measure and falls back according to stored budget', () => {
+    for (const stored of [false, true]) {
+      const { provider, warn } = makeProvider({
+        [SESSION_BUDGET_SETTINGS.tokenMeasure.key]: 'invalid',
+        ...(stored ? { [SESSION_BUDGET_SETTINGS.tokens.key]: 30_000_000 } : {}),
+      });
+      expect(provider.getConfig().tokenMeasure).toBe(stored ? 'raw' : 'weighted');
+      expect(warn).toHaveBeenCalledTimes(1);
+    }
   });
 
   describe.each(NUMERIC_FIELDS)('bounds of %s', (field) => {

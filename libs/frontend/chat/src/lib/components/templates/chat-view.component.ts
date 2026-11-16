@@ -1211,6 +1211,8 @@ export class ChatViewComponent implements OnDestroy {
   protected readonly budgetDisplayStage = this._budgetActions.displayStage;
   protected readonly budgetDismissedStage = this._budgetActions.dismissedStage;
   protected readonly budgetWrapUpSent = this._budgetActions.wrapUpSent;
+  protected readonly budgetHandoffLabel = this._budgetActions.handoffLabel;
+  protected onBudgetRetryHandoff(): Promise<void> { return this._budgetActions.retryHandoff(); }
   protected readonly budgetAutoHandoffQueued =
     this._budgetActions.autoHandoffQueued;
 

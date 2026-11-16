@@ -277,6 +277,7 @@ export function isTerminalTurnPhase(phase: SessionTurnPhase): boolean {
  * every "is the agent busy" signal. Also returned by `session:status`.
  */
 export interface SessionTurnState {
+  readonly stopCause?: import('../sdk-hook.types').TurnStopCause;
   /** Current lifecycle phase of the turn */
   readonly phase: SessionTurnPhase;
   /** Monotonic per session. Consumers ignore an event whose revision is <= the last applied. */

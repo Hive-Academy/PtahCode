@@ -463,7 +463,7 @@ export class ChatFollowUpQueueService {
     return removed;
   }
 
-  /** `chat:queued-steer`: Codex `turn/steer`; `UNSUPPORTED` elsewhere. */
+  /** Explicit `chat:queued-steer` (Send now) only. Queue state delivery never calls this method. */
   async steer(
     sessionId: string,
     tabId: string,

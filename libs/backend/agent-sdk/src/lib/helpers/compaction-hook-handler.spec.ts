@@ -1231,6 +1231,8 @@ describe('CompactionHookHandler — idle compaction rekey', () => {
         anchorAt: now,
         ttl: '1h',
       });
+      // The first reading after a boundary establishes the new baseline.
+      idle.turnContext('old-id', 'turn-2', 150_000);
       idle.turnContext('old-id', 'turn-2', 250_000);
       expect(scheduler.actions).toHaveLength(1);
       idle.input('old-id');

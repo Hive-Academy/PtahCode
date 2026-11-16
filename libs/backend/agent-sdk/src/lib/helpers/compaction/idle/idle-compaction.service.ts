@@ -33,6 +33,7 @@ import type { SdkAdapterEvents } from '../../sdk-adapter-events.service';
 import type { SessionTurnStateRegistry } from '../../session-turn-state.registry';
 import type { SessionStatsOwnerService } from '../../../session-stats/session-stats-owner.service';
 import type { CompactionCoordinator } from '../compaction-coordinator';
+import { resolveAutoCompactControl } from '../../auto-compact-control';
 import { evaluateFireGate, isIdleFirePhase } from './idle-fire-gate';
 import {
   IdleSendVetoedError,
@@ -69,6 +70,8 @@ export class IdleCompactionService implements IdleCompactionSignals {
       // degradation-audit: optional-capability - logging failure must not stop compaction.
     }
   }
+  private lastInactiveConfig: string | null = null;
+  private readonly nativeAnthropicSessions = new Set<string>();
   private readonly signals$ = new Subject<KeyedSignal>();
   private readonly aliases = new Map<string, string>();
   private readonly keys = new Map<string, Set<string>>();
@@ -191,6 +194,8 @@ export class IdleCompactionService implements IdleCompactionSignals {
         latest = step.state;
         if (step.signal.type === 'session-bound') {
           nativeAnthropic = step.signal.nativeAnthropic === true;
+          if (nativeAnthropic) this.nativeAnthropicSessions.add(step.state.sessionId);
+          else this.nativeAnthropicSessions.delete(step.state.sessionId);
         }
         if (latest.attempt?.kind === 'pending') pending = latest.attempt;
         this.projectCache(step, nativeAnthropic);
@@ -201,7 +206,14 @@ export class IdleCompactionService implements IdleCompactionSignals {
             fireAt: step.state.attempt.fireAt,
           });
         }
+        if (step.signal.type === 'rekey') {
+          if (nativeAnthropic) {
+            this.nativeAnthropicSessions.delete(step.signal.sessionId);
+            this.nativeAnthropicSessions.add(step.state.sessionId);
+          }
+        }
         if (step.signal.type === 'session-released') {
+          this.nativeAnthropicSessions.delete(step.state.sessionId);
           this.safeInfo('[IdleCompactionService] released', { sessionId: step.state.sessionId });
         }
         this.runEffects(step);
@@ -383,6 +395,20 @@ export class IdleCompactionService implements IdleCompactionSignals {
   ): Observable<never> {
     const current = state();
     const pending = getPending();
+    const config = this.config.getConfig();
+    const idleConfig = this.config.getIdleCompactionConfig();
+    const effectiveSdkWindow = resolveAutoCompactControl({
+      enabled: config.enabled, windowTokens: config.contextTokenThreshold,
+      envWindow: config.envWindow, modelClass: this.nativeAnthropicSessions.has(current.sessionId) ? 'claude' : 'proxied',
+    }).effectiveWindow;
+    const inactiveKey = effectiveSdkWindow !== null && idleConfig.minTokens >= effectiveSdkWindow
+      ? `${idleConfig.minTokens}:${effectiveSdkWindow}` : null;
+    if (inactiveKey !== this.lastInactiveConfig) {
+      this.lastInactiveConfig = inactiveKey;
+      if (inactiveKey !== null) this.safeInfo('[IdleCompactionService] idle gate inactive', {
+        reason: 'min-at-sdk-window', minTokens: idleConfig.minTokens, effectiveSdkWindow,
+      });
+    }
     let refusal: IdleSkipReason | null;
     try {
       refusal =
@@ -394,7 +420,8 @@ export class IdleCompactionService implements IdleCompactionSignals {
                 idleCompactionEnabled:
                   this.config.getIdleCompactionConfig().enabled,
                 autoCompactEnabled: this.config.getConfig().enabled,
-                minTokens: this.config.getIdleCompactionConfig().minTokens,
+                minTokens: idleConfig.minTokens,
+                effectiveSdkWindow,
               },
               coordinatorState: (id) => this.coordinator.getState(id),
               coordinatorClaim: (id) => this.coordinator.getIdleClaim(id),
@@ -405,7 +432,8 @@ export class IdleCompactionService implements IdleCompactionSignals {
       safeWarn(this.logger, 'lookup-failed', current.sessionId, undefined, error);
     }
     if (refusal) {
-      this.safeInfo('[IdleCompactionService] fire skipped', { sessionId: current.sessionId, reason: refusal });
+      if (refusal !== 'min-at-sdk-window')
+        this.safeInfo('[IdleCompactionService] fire skipped', { sessionId: current.sessionId, reason: refusal });
       this.enqueue({
         type: 'fire-skipped',
         sessionId: current.sessionId,
@@ -588,5 +616,6 @@ export class IdleCompactionService implements IdleCompactionSignals {
     this.keys.clear();
     this.currentIds.clear();
     this.notices.clear();
+    this.nativeAnthropicSessions.clear();
   }
 }
