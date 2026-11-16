@@ -51,10 +51,6 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
         width: 100%;
         border-collapse: collapse;
       }
-      /* CLI matrix: account for 1-6px overflow from theme/host variations */
-      [data-testid='cli-provider-grid'] {
-        width: 98%;
-      }
       .ptah-table-collapsible[hidden],
       .ptah-table-detail-row[hidden],
       .ptah-table-row-expander[hidden] {
@@ -106,7 +102,6 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
       .ptah-table-control-cell [ptahToggle] {
         min-height: var(--ptah-control-h-sm);
         height: var(--ptah-control-h-sm);
-        min-width: 2rem;
         font-size: var(--ptah-text-hint-size);
       }
       .ptah-table-actions-cell {
