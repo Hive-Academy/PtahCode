@@ -153,7 +153,7 @@ const FOLD_BUDGET: Readonly<
     maxBottom: 660,
     regions: ['tabs', 'main', 'heading'],
     columnsAt1024: 2,
-    minColumnsAt800: 2,
+    minColumnsAt800: 1,
   },
   electron: {
     maxBottom: 660,
