@@ -1,5 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { PtahInputDirective } from '../form-controls/input.directive';
 import { PtahFieldComponent } from './field.component';
 import { PtahFieldControlDirective } from './field-control.directive';
 import { PtahFieldTriggerDirective } from './field.component';
@@ -193,5 +194,91 @@ describe('compact field and trigger', () => {
     const compactFloated = css.indexOf("[data-size='sm'][data-appearance='floating']:is(:focus-within");
     expect(compactResting).toBeGreaterThan(-1);
     expect(compactResting).toBeLessThan(compactFloated);
+  });
+});
+
+@Component({
+  standalone: true,
+  imports: [PtahFieldComponent, PtahInputDirective],
+  template: `<ptah-field label="Name" hint="Helpful text" error="Required">
+    <input ptahInput aria-describedby="consumer-help" />
+  </ptah-field>`,
+})
+class DefaultHost {}
+
+@Component({
+  standalone: true,
+  imports: [PtahFieldComponent, PtahInputDirective],
+  template: `<ptah-field
+    label="Name"
+    hint="Helpful text"
+    [error]="error()"
+    [errorRole]="role()"
+    errorTestId="name-error"
+  >
+    <input ptahInput aria-describedby="consumer-help" />
+    <span ptahFieldBeforeHint data-testid="before-hint">Before hint</span>
+    <span ptahFieldAfterError data-testid="after-error">After error</span>
+  </ptah-field>`,
+})
+class ProjectedHost {
+  readonly error = signal<string | null>('Required');
+  readonly role = signal<'alert' | 'status' | null>('alert');
+}
+
+describe('PtahFieldComponent projection and error metadata', () => {
+  it('keeps the default element order and attributes without the new API', () => {
+    const fixture = TestBed.createComponent(DefaultHost);
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement.querySelector('[data-ptah-field]') as HTMLElement;
+    const box = root.querySelector('.ptah-field__box') as HTMLElement;
+    const message = root.querySelector('.ptah-field__message') as HTMLParagraphElement;
+    const control = root.querySelector('input') as HTMLInputElement;
+    const label = root.querySelector('label') as HTMLLabelElement;
+
+    expect([...root.children].map((element) => element.className)).toEqual([
+      'ptah-field__box',
+      'ptah-field__footer',
+    ]);
+    expect(box.contains(control)).toBe(true);
+    expect(label.htmlFor).toBe(control.id);
+    expect(message.id).toMatch(/^ptah-field-description-\d+$/);
+    expect(message.getAttribute('data-error')).toBe('true');
+    expect(message.hasAttribute('role')).toBe(false);
+    expect(message.hasAttribute('data-testid')).toBe(false);
+    expect(message.textContent?.trim()).toBe('Required');
+    expect(control.getAttribute('aria-describedby')).toBe(`consumer-help ${message.id}`);
+  });
+
+  it('projects content on each side of the message and sets error attributes', () => {
+    const fixture = TestBed.createComponent(ProjectedHost);
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement.querySelector('[data-ptah-field]') as HTMLElement;
+    const message = root.querySelector('.ptah-field__message') as HTMLParagraphElement;
+    const control = root.querySelector('input') as HTMLInputElement;
+    expect([...root.children].map((element) => element.className)).toEqual([
+      'ptah-field__box',
+      '',
+      'ptah-field__footer',
+      '',
+    ]);
+    expect(root.children[1].getAttribute('data-testid')).toBe('before-hint');
+    expect(root.children[3].getAttribute('data-testid')).toBe('after-error');
+    expect(message.getAttribute('role')).toBe('alert');
+    expect(message.getAttribute('data-testid')).toBe('name-error');
+    expect(control.getAttribute('aria-describedby')).toBe(`consumer-help ${message.id}`);
+
+    fixture.componentInstance.role.set('status');
+    fixture.detectChanges();
+    expect(message.getAttribute('role')).toBe('status');
+
+    fixture.componentInstance.error.set(null);
+    fixture.detectChanges();
+    expect(message.textContent?.trim()).toBe('Helpful text');
+    expect(message.hasAttribute('role')).toBe(false);
+    expect(message.hasAttribute('data-testid')).toBe(false);
+    expect(control.getAttribute('aria-describedby')).toBe(`consumer-help ${message.id}`);
   });
 });
