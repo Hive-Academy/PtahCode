@@ -17,7 +17,8 @@ const EXECUTABLE: ClaudeCertifiedExecutable = Object.freeze({
   version: '2.1.310', fingerprint: Object.freeze({ size: 1, mtimeMs: 1 }),
 });
 const SIGNED_IN: ClaudeAmbientStatusProbeOutcome = {
-  status: { loggedIn: true, accountClass: 'P', identityReference: 'ref', configDirectoryMatches: true },
+  status: { loggedIn: true, accountClass: 'P', identityReference: 'ref', emailOnlyReference: 'email-ref',
+    organizationPresent: true, configDirectoryMatches: true },
   terminated: true, timedOut: false,
 };
 const SIGNED_OUT: ClaudeAmbientStatusProbeOutcome = { status: { loggedIn: false }, terminated: true, timedOut: false };

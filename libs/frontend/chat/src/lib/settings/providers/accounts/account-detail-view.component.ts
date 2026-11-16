@@ -42,6 +42,7 @@ import {
 import { AlertTriangle, Copy, Lock, LucideAngularModule } from 'lucide-angular';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
+import { AccountEmailRevealComponent } from './account-email-reveal.component';
 import {
   ACCOUNT_COPY,
   ATTENTION_STATES,
@@ -106,6 +107,7 @@ const REMOVE_CONSEQUENCE =
   selector: 'ptah-account-detail-view',
   standalone: true,
   imports: [
+    AccountEmailRevealComponent,
     NativeModalComponent,
     LucideAngularModule,
     PtahBadgeDirective,
@@ -189,6 +191,9 @@ const REMOVE_CONSEQUENCE =
         divider
         data-testid="account-detail-sign-in-section"
       >
+        @if (account().state === 'signed-in') {
+          <ptah-account-email-reveal [profileId]="account().profileId" />
+        }
         <ptah-form-actions label="Sign-in actions">
           @switch (account().state) {
             @case ('signed-in') {

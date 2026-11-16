@@ -3869,6 +3869,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'provider:renameAccount': true,
   'provider:removeAccount': true,
   'provider:getAccountStatus': true,
+  'provider:revealAccountEmail': true,
   'provider:startAccountSignIn': true,
   'provider:cancelAccountSignIn': true,
   'provider:signOutAccount': true,

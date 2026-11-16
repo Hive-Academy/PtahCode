@@ -155,6 +155,8 @@ describe('parseClaudeAccountStatus', () => {
         loggedIn: true,
         accountClass: 'O',
         identityReference: null,
+        emailOnlyReference: null,
+        organizationPresent: false,
         configDirectoryMatches: true,
       });
     });
@@ -178,6 +180,16 @@ describe('parseClaudeAccountStatus', () => {
     it('uses an empty organization when orgName is null', () => {
       expect(parse(signedIn({ orgName: null }))).toMatchObject({
         identityReference: claudeIdentityReference(EMAIL, null),
+        emailOnlyReference: claudeIdentityReference(EMAIL, ''),
+        organizationPresent: false,
+      });
+    });
+
+    it('exposes only an opaque email-only reference when the organization arrives later', () => {
+      expect(parse(signedIn())).toMatchObject({
+        identityReference: claudeIdentityReference(EMAIL, ORG_NAME),
+        emailOnlyReference: claudeIdentityReference(EMAIL, ''),
+        organizationPresent: true,
       });
     });
 
@@ -223,8 +235,10 @@ describe('parseClaudeAccountStatus', () => {
       expect(Object.keys(output ?? {}).sort()).toEqual([
         'accountClass',
         'configDirectoryMatches',
+        'emailOnlyReference',
         'identityReference',
         'loggedIn',
+        'organizationPresent',
       ]);
     }
   });

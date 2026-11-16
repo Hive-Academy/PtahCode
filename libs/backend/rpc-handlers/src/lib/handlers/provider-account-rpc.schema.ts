@@ -95,6 +95,8 @@ export const ProviderGetAccountStatusSchema = z
   .object({ provider: ProviderSchema, profileId: OpaqueIdSchema })
   .strict();
 
+export const ProviderRevealAccountEmailSchema = z.object({ profileId: OpaqueIdSchema }).strict();
+
 export const ProviderStartAccountSignInSchema = z
   .object(profileWriteShape)
   .strict();
@@ -159,6 +161,7 @@ export const PROVIDER_ACCOUNT_RPC_SCHEMAS: {
   'provider:renameAccount': ProviderRenameAccountSchema,
   'provider:removeAccount': ProviderRemoveAccountSchema,
   'provider:getAccountStatus': ProviderGetAccountStatusSchema,
+  'provider:revealAccountEmail': ProviderRevealAccountEmailSchema,
   'provider:startAccountSignIn': ProviderStartAccountSignInSchema,
   'provider:cancelAccountSignIn': ProviderCancelAccountSignInSchema,
   'provider:signOutAccount': ProviderSignOutAccountSchema,

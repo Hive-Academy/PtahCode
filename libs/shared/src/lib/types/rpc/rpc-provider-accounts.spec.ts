@@ -102,6 +102,7 @@ const SAMPLE_PARAMS: { [M in ProviderAccountRpcMethodName]: ParamsOf<M> } = {
     requestId: REQUEST_ID,
   },
   'provider:getAccountStatus': { provider: 'claude', profileId: PROFILE_ID },
+  'provider:revealAccountEmail': { profileId: PROFILE_ID },
   'provider:startAccountSignIn': {
     provider: 'claude',
     workspaceRoot: WORKSPACE,
@@ -179,6 +180,7 @@ describe('provider account RPC contracts', () => {
         'provider:renameAccount',
         'provider:removeAccount',
         'provider:getAccountStatus',
+        'provider:revealAccountEmail',
         'provider:startAccountSignIn',
         'provider:cancelAccountSignIn',
         'provider:signOutAccount',
@@ -234,6 +236,7 @@ describe('provider account RPC contracts', () => {
       const reads = new Set([
         'provider:listAccounts',
         'provider:getAccountStatus',
+        'provider:revealAccountEmail',
         'provider:getAmbientClaudeStatus',
       ]);
       for (const [method, params] of Object.entries(SAMPLE_PARAMS)) {
