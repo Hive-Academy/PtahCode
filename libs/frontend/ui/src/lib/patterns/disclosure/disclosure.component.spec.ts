@@ -1,10 +1,28 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { PtahDisclosureComponent } from './disclosure.component';
+import { PtahDisclosureLazyDirective } from './disclosure-lazy.directive';
+
+let lazyCreations = 0;
 
 @Component({
   standalone: true,
-  imports: [PtahDisclosureComponent],
+  selector: 'ptah-test-lazy-content',
+  template: '<span data-testid="lazy">Lazy body</span>',
+})
+class LazyContentComponent {
+  constructor() {
+    lazyCreations++;
+  }
+}
+
+@Component({
+  standalone: true,
+  imports: [
+    PtahDisclosureComponent,
+    PtahDisclosureLazyDirective,
+    LazyContentComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-disclosure
@@ -13,10 +31,17 @@ import { PtahDisclosureComponent } from './disclosure.component';
       [size]="size()"
       [align]="align()"
       [region]="region()"
+      [description]="description()"
+      [keepAlive]="keepAlive()"
       (openChange)="changes.push($event)"
     >
+      <span ptahDisclosureLead data-testid="lead">★</span>
+      <span ptahDisclosureSummary data-testid="summary">Ready</span>
       <span ptahDisclosureMeta data-testid="meta">2 items</span>
       <p data-testid="content">Projected body</p>
+      @if (includeLazy()) {
+        <ng-template ptahDisclosureLazy><ptah-test-lazy-content /></ng-template>
+      }
     </ptah-disclosure>
   `,
 })
@@ -25,6 +50,9 @@ class HostComponent {
   readonly size = signal<'md' | 'sm'>('md');
   readonly align = signal<'start' | 'center'>('start');
   readonly region = signal(false);
+  readonly description = signal<string | null>(null);
+  readonly keepAlive = signal(true);
+  readonly includeLazy = signal(false);
   readonly changes: boolean[] = [];
 }
 
@@ -117,5 +145,84 @@ describe('PtahDisclosureComponent', () => {
     const meta = host.querySelector('[data-testid="meta"]') as HTMLElement;
     expect(meta.textContent).toBe('2 items');
     expect(meta.parentElement).toBe(button.parentElement);
+  });
+
+  it('renders a truncated muted description and projects lead and summary inside the button', () => {
+    const { fixture, button } = render();
+    fixture.componentInstance.description.set('Secondary detail');
+    fixture.detectChanges();
+    const description = Array.from(button.querySelectorAll('span')).find(
+      (span) => span.textContent === 'Secondary detail',
+    );
+    expect(description?.classList.contains('truncate')).toBe(true);
+    expect(description?.classList.contains('min-w-0')).toBe(true);
+    expect(description?.classList.contains('font-normal')).toBe(true);
+    expect(description?.classList.contains('text-base-content-muted')).toBe(
+      true,
+    );
+    expect(button.querySelector('[data-testid="lead"]')?.textContent).toBe('★');
+    expect(button.querySelector('[data-testid="summary"]')?.textContent).toBe(
+      'Ready',
+    );
+  });
+
+  it('mounts lazy content on first open and retains it when keepAlive is true', () => {
+    lazyCreations = 0;
+    const { fixture, button, body } = render();
+    fixture.componentInstance.includeLazy.set(true);
+    fixture.detectChanges();
+    expect(body.querySelector('[data-testid="lazy"]')).toBeNull();
+    expect(lazyCreations).toBe(0);
+    button.click();
+    fixture.detectChanges();
+    expect(body.querySelector('[data-testid="lazy"]')?.textContent).toBe(
+      'Lazy body',
+    );
+    expect(lazyCreations).toBe(1);
+    button.click();
+    fixture.detectChanges();
+    expect(body.hidden).toBe(true);
+    expect(body.querySelector('[data-testid="lazy"]')).not.toBeNull();
+    expect(lazyCreations).toBe(1);
+  });
+
+  it('destroys lazy content on close and creates it again on reopen with keepAlive false', () => {
+    lazyCreations = 0;
+    const { fixture, button, body } = render();
+    fixture.componentInstance.keepAlive.set(false);
+    fixture.componentInstance.includeLazy.set(true);
+    fixture.detectChanges();
+    expect(body.querySelector('[data-testid="lazy"]')).toBeNull();
+    button.click();
+    fixture.detectChanges();
+    expect(lazyCreations).toBe(1);
+    button.click();
+    fixture.detectChanges();
+    expect(body.querySelector('[data-testid="lazy"]')).toBeNull();
+    button.click();
+    fixture.detectChanges();
+    expect(lazyCreations).toBe(2);
+    expect(body.querySelector('[data-testid="lazy"]')).not.toBeNull();
+  });
+
+  it('keeps default body projection without a lazy template', () => {
+    const { body } = render();
+    expect(body.querySelector('[data-testid="content"]')?.textContent).toBe(
+      'Projected body',
+    );
+    expect(body.querySelector('[data-testid="lazy"]')).toBeNull();
+  });
+
+  it('creates lazy content after the first change detection when initially open', () => {
+    lazyCreations = 0;
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.componentInstance.initialOpen.set(true);
+    fixture.componentInstance.includeLazy.set(true);
+    fixture.detectChanges();
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('[data-testid="lazy"]'),
+    ).not.toBeNull();
+    expect(lazyCreations).toBe(1);
   });
 });
