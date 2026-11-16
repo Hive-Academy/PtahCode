@@ -20,7 +20,13 @@ import {
   type AdvancedSettingValidation,
 } from '@ptah-extension/shared';
 import { NgTemplateOutlet } from '@angular/common';
-import { PtahButtonDirective, PtahInputDirective, PtahToggleDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+  PtahSettingRowComponent,
+  PtahToggleDirective,
+} from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
@@ -74,7 +80,15 @@ function formatValue(
 @Component({
   selector: 'ptah-advanced-settings-group',
   standalone: true,
-  imports: [NgTemplateOutlet, PtahButtonDirective, PtahInputDirective, PtahToggleDirective, SettingsBusyDisabledDirective],
+  imports: [
+    NgTemplateOutlet,
+    PtahButtonDirective,
+    PtahFieldComponent,
+    PtahSettingRowComponent,
+    PtahInputDirective,
+    PtahToggleDirective,
+    SettingsBusyDisabledDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (group(); as group) {
@@ -148,7 +162,9 @@ function formatValue(
             </div>
           }
           @default {
-            <div class="settings-grid grid grid-cols-1 items-start gap-x-4 gap-y-5">
+            <div
+              class="settings-grid grid grid-cols-1 items-start gap-x-4 gap-y-[var(--ptah-gap-section)]"
+            >
               @for (setting of settings(); track setting.key) {
                 <div
                   class="flex min-w-0 flex-col gap-1"
@@ -157,59 +173,55 @@ function formatValue(
                   "
                 >
                   @if (setting.kind === 'boolean') {
-                    <span class="flex items-center gap-1.5 text-sm font-medium text-base-content"
-                      >{{ setting.label }}
-                      @if (setting.apply === 'restart') {
-                        <span [class]="restartBadge" aria-hidden="true"
-                          >Restart</span
-                        >
-                      }
-                    </span>
-                    <label
-                      class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2"
+                    <ptah-setting-row
+                      [label]="setting.label"
+                      [controlId]="'advanced-setting-' + setting.key"
                     >
-                      <input
-                        type="checkbox"
-                        ptahToggle size="sm"
-                        [id]="'advanced-setting-' + setting.key"
-                        [checked]="booleanValue(setting)"
-                        [ptahBusyDisabled]="busy()"
-                        (change)="toggle(setting, $event)"
-                        [attr.aria-label]="setting.label"
-                        [attr.aria-invalid]="errors()[setting.key] ? 'true' : null"
-                        [attr.aria-describedby]="describedBy(setting)"
-                        [attr.data-testid]="'advanced-setting-' + setting.key"
-                      />
-                      <span
-                        class="text-sm"
-                        [attr.data-testid]="
-                          'advanced-setting-' + setting.key + '-state'
-                        "
-                        >{{
-                          booleanValue(setting) ? 'Enabled' : 'Disabled'
-                        }}</span
-                      >
-                    </label>
-                  } @else {
-                    <label
-                      [for]="'advanced-setting-' + setting.key"
-                      class="flex items-center gap-1.5 text-sm font-medium text-base-content"
-                      >{{ setting.label }}
                       @if (setting.apply === 'restart') {
-                        <span [class]="restartBadge" aria-hidden="true"
+                        <span status [class]="restartBadge" aria-hidden="true"
                           >Restart</span
                         >
                       }
-                    </label>
-                    <div class="join flex w-full">
+                      <div
+                        class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2"
+                      >
+                        <input
+                          type="checkbox"
+                          ptahToggle
+                          size="sm"
+                          [id]="'advanced-setting-' + setting.key"
+                          [checked]="booleanValue(setting)"
+                          [ptahBusyDisabled]="busy()"
+                          (change)="toggle(setting, $event)"
+                          [attr.aria-invalid]="
+                            errors()[setting.key] ? 'true' : null
+                          "
+                          [attr.aria-label]="setting.label"
+                          [attr.aria-describedby]="describedBy(setting)"
+                          [attr.data-testid]="'advanced-setting-' + setting.key"
+                        />
+                        <span
+                          class="text-sm"
+                          [attr.data-testid]="
+                            'advanced-setting-' + setting.key + '-state'
+                          "
+                          >{{
+                            booleanValue(setting) ? 'Enabled' : 'Disabled'
+                          }}</span
+                        >
+                      </div>
+                    </ptah-setting-row>
+                  } @else {
+                    <ptah-field [label]="setting.label" appearance="stacked">
                       <input
                         type="text"
-                        ptahInput size="sm"
+                        ptahInput
+                        size="sm"
                         [id]="'advanced-setting-' + setting.key"
                         [attr.inputmode]="
                           setting.integer ? 'numeric' : 'decimal'
                         "
-                        class="join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
+                        class="min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
                         [invalid]="!!errors()[setting.key]"
                         [value]="numberText(setting)"
                         [attr.aria-describedby]="describedBy(setting)"
@@ -221,12 +233,21 @@ function formatValue(
                       />
                       @if (setting.unit) {
                         <span
-                          class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted"
+                          ptahFieldTrailing
+                          class="shrink-0 whitespace-nowrap px-3 text-xs text-base-content-muted"
                           aria-hidden="true"
                           >{{ setting.unit }}</span
                         >
                       }
-                    </div>
+                      @if (setting.apply === 'restart') {
+                        <span
+                          ptahFieldAfterError
+                          [class]="restartBadge"
+                          aria-hidden="true"
+                          >Restart</span
+                        >
+                      }
+                    </ptah-field>
                   }
                   <p
                     [id]="'advanced-setting-' + setting.key + '-help'"
@@ -275,10 +296,14 @@ function formatValue(
     }
     /* Columns follow the group's own width, so a narrow drawer gets one column. */
     @container (min-width: 36rem) {
-      .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .settings-grid {
+        grid-template-columns: repeat(2, minmax(0, 22rem));
+      }
     }
     @container (min-width: 56rem) {
-      .settings-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .settings-grid {
+        grid-template-columns: repeat(3, minmax(0, 22rem));
+      }
     }
   `,
 })

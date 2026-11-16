@@ -3,6 +3,7 @@ import {
   Component,
   OnInit,
   inject,
+  output,
 } from '@angular/core';
 import {
   ProvidersSettingsStateService,
@@ -13,7 +14,6 @@ import { SessionBudgetSettingsComponent } from './session-budget-settings.compon
 import { LaneGuardsSettingsComponent } from './lane-guards-settings.component';
 import { HostRoutingSettingComponent } from './host-routing-setting.component';
 import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
-import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
 import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-group.component';
 
 /**
@@ -22,9 +22,9 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
  * reads it.
  *
  * Order: the subagent prompt-cache TTL, the session budget, Lane guards, then Electron-only routing
- * suggestions, executor rotation and the capability matrix, then the advanced groups (context budgets,
+ * suggestions and executor rotation, then the advanced groups (context budgets,
  * background query limits; TASK_2026_658) in one
- * viewport-deferred chunk. The CLI matrix and the
+ * viewport-deferred chunk. The decision matrix has its own child page. The CLI matrix and the
  * background model roles moved to the Providers tab (`AgentsRoutingSettingsComponent`), with their deep links.
  *
  * No inline commit panel: the TTL, this tab's only `commit()` writer, reports through the page toast
@@ -40,7 +40,6 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
     LaneGuardsSettingsComponent,
     HostRoutingSettingComponent,
     LaneRotationSettingComponent,
-    CapabilityMatrixSettingComponent,
     AdvancedSettingsGroupComponent,
   ],
   template: `
@@ -73,9 +72,8 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
 
       <!-- Routing suggestions (TASK_2026_857): Electron only, because only the Electron host runs the coordinator. -->
       @if (isElectron) {
-        <ptah-host-routing-setting />
+        <ptah-host-routing-setting (openMatrix)="openMatrix.emit()" />
         <ptah-lane-rotation-setting />
-        <ptah-capability-matrix-setting />
       }
 
       <!-- Advanced orchestration values (TASK_2026_658): one chunk, loaded when scrolled into view, below the session
@@ -93,6 +91,7 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
   `,
 })
 export class OrchestrationSettingsComponent implements OnInit {
+  readonly openMatrix = output<void>();
   private readonly state = inject(ProvidersSettingsStateService);
   protected readonly isElectron = inject(VSCodeService).isElectron === true;
 

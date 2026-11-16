@@ -277,6 +277,17 @@ describe('SettingsComponent deep-link', () => {
     expect(page.providersTarget()).toBeNull();
   });
 
+  it.each(['capability-matrix', 'decision-matrix', 'matrix'] as const)(
+    'routes the old %s section deep link to the Decision matrix child page',
+    async (section) => {
+      vscodeServiceStub.isElectron = true;
+      const page = await landWith({ tab: 'orchestration', section });
+      expect(page.activeSettingsTab()).toBe('matrix');
+      expect(page.selectedSettingsTab()).toBe('matrix');
+      expect(page.providersTarget()).toBeNull();
+    },
+  );
+
   it('opens the requested tab with no focus when there is no section', async () => {
     const page = await landWith({ tab: 'pro-features' });
     expect(page.activeSettingsTab()).toBe('pro-features');
@@ -708,7 +719,9 @@ describe('SettingsComponent header', () => {
         element.querySelectorAll<HTMLButtonElement>(
           '[data-testid="settings-layout-tablist"] button',
         ),
-      )[2].click();
+      )
+        .find((button) => button.textContent?.includes('Advanced'))
+        ?.click();
       renderedFixture.detectChanges();
       element
         .querySelector<HTMLButtonElement>(

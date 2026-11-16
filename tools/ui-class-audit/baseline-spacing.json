@@ -16,11 +16,10 @@
   },
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
     "gap-1": 1,
-    "gap-1.5": 2,
+    "gap-1.5": 1,
     "gap-2": 1,
     "gap-3": 1,
     "gap-x-4": 1,
-    "gap-y-5": 1,
     "mt-0.5": 1,
     "mt-1": 1,
     "pb-7": 1,
@@ -476,23 +475,17 @@
     "space-y-2": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/host-routing-setting.component.ts": {
-    "gap-3": 2,
+    "gap-3": 1,
     "mt-0.5": 1,
     "pb-2": 1,
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-guards-settings.component.ts": {
-    "gap-1": 1,
-    "gap-3": 1,
-    "gap-y-5": 1,
-    "mt-0.5": 1,
-    "pb-2": 1,
-    "px-3": 1,
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts": {
     "gap-2": 2,
-    "gap-3": 2,
+    "gap-3": 1,
     "mt-0.5": 1,
     "mt-1": 1,
     "mt-2": 2,
@@ -545,17 +538,9 @@
     "space-y-3": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
-    "gap-1": 3,
-    "gap-2": 1,
-    "gap-3": 1,
-    "gap-x-4": 1,
-    "gap-y-5": 1,
-    "mt-0.5": 1,
-    "pb-2": 1,
-    "px-2": 2,
-    "px-3": 1,
-    "py-1": 1,
-    "space-y-1.5": 1
+    "gap-1": 1,
+    "px-2": 1,
+    "py-1": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
     "gap-1": 1,

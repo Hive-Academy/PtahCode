@@ -96,14 +96,27 @@
     <!-- ============================================ -->
     <!-- Tab 2: Context Management (tab id remains orchestration) -->
     <!-- ============================================ -->
-    <!-- Tabs 2, 3 and 4 are deferred into their own chunks (the eager route is at its bundle budget);
+    <!-- Context Management, Advanced and Search & Voice are deferred into their own chunks (the eager route is at its bundle budget);
          the aria-busy placeholder keeps the harness waitForSettled waiting until they load.
          It owns no deep-link section: the CLI matrix and the background roles moved to Providers. -->
     @if (activeSettingsTab() === 'orchestration') {
       <div class="ptah-motion-panel" animate.leave="ptah-motion-leave">
       @defer (on immediate) {
         <div class="ptah-motion-panel" animate.enter="ptah-motion-enter">
-        <ptah-orchestration-settings />
+        <ptah-orchestration-settings (openMatrix)="setActiveTab('matrix')" />
+        </div>
+      } @placeholder {
+        <div aria-busy="true"><ptah-skeleton shape="block" /></div>
+      }
+      </div>
+    }
+
+    <!-- Child page of Context Management: Decision matrix (Electron only) -->
+    @if (activeSettingsTab() === 'matrix' && isElectron) {
+      <div class="ptah-motion-panel" animate.leave="ptah-motion-leave">
+      @defer (on immediate) {
+        <div class="ptah-motion-panel" animate.enter="ptah-motion-enter">
+        <ptah-decision-matrix-page (back)="setActiveTab('orchestration')" />
         </div>
       } @placeholder {
         <div aria-busy="true"><ptah-skeleton shape="block" /></div>
