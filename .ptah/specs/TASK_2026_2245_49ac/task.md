@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2245_49ac
-status: in_progress
+status: in_review
 type: REFACTORING
 title: Rebuild only changed task folders in the task index
 depends_on: []
