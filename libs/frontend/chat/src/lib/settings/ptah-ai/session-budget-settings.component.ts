@@ -6,10 +6,12 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { VSCodeService, rpcCall } from '@ptah-extension/core';
+import { LoggingService, VSCodeService, rpcCall } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
-  SettingsFieldComponent,
+  PtahFieldComponent,
+  PtahFormSectionComponent,
+  PtahSettingRowComponent,
   PtahButtonDirective,
   PtahToggleDirective,
   PtahSelectDirective,
@@ -183,26 +185,18 @@ function storedNumberIsValid(
 @Component({
   selector: 'ptah-session-budget-settings',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, SettingsFieldComponent, PtahButtonDirective, PtahToggleDirective, PtahSelectDirective, PtahInputDirective],
+  imports: [SettingsBusyDisabledDirective, PtahFieldComponent, PtahFormSectionComponent, PtahSettingRowComponent, PtahButtonDirective, PtahToggleDirective, PtahSelectDirective, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section
+    <section data-glass-surface="content">
+    <ptah-form-section
+      heading="Session budget"
+      description="Set per-chat limits and when Ptah should intervene."
       data-glass-surface="content"
-      class="flex flex-col gap-3 text-sm text-base-content"
       aria-labelledby="session-budget-heading"
       data-testid="settings-section-session-budget"
     >
-      <div section-header class="border-b border-base-content/10 pb-2">
-        <h3
-          id="session-budget-heading"
-          class="text-base font-semibold text-base-content"
-        >
-          Session budget
-        </h3>
-        <p class="mt-0.5 text-xs text-base-content-muted">
-          Set per-chat limits and when Ptah should intervene.
-        </p>
-      </div>
+      <span id="session-budget-heading" hidden>Session budget</span>
 
       @switch (load()) {
         @case ('loading') {
@@ -215,7 +209,7 @@ function storedNumberIsValid(
           </p>
         }
         @case ('error') {
-          <div role="alert" class="space-y-1.5">
+          <div role="alert">
             <p data-testid="session-budget-load-error">
               The session budget settings could not be read. Your saved settings
               have not changed.
@@ -231,36 +225,27 @@ function storedNumberIsValid(
           </div>
         }
         @default {
-          <div class="grid gap-x-4 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
             @for (key of booleanKeys; track key) {
-              <div class="flex min-w-0 flex-col gap-1">
-                <span class="text-sm font-medium text-base-content">{{
-                  labels[key]
-                }}</span>
+              <ptah-setting-row [label]="labels[key]" [hint]="booleanHelp[key]" [controlId]="'session-budget-' + key">
                 <label
-                  class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2"
                 >
                   <input
                     type="checkbox"
                     ptahToggle size="sm"
+                    [id]="'session-budget-' + key"
                     [checked]="booleanValue(key)"
                     [ptahBusyDisabled]="busy()"
                     (change)="toggle(key, $event)"
                     [attr.aria-label]="labels[key]"
-                    [attr.aria-describedby]="'session-budget-' + key + '-help'"
+                    [attr.aria-describedby]="'session-budget-' + key + '-hint'"
                     [attr.data-testid]="'session-budget-' + key"
                   />
-                  <span class="text-sm">Enabled</span>
+                  <span class="ms-[var(--ptah-gap-label)] text-sm">Enabled</span>
                 </label>
-                <p
-                  [id]="'session-budget-' + key + '-help'"
-                  class="text-xs text-base-content-muted"
-                >
-                  {{ booleanHelp[key] }}
-                </p>
-              </div>
+              </ptah-setting-row>
             }
 
+            <div class="session-budget-fields">
             <div class="flex min-w-0 flex-col gap-1">
               <label for="session-budget-unit" class="text-sm font-medium text-base-content">{{
                 labels.unit
@@ -329,13 +314,13 @@ function storedNumberIsValid(
             </div>
 
             @for (field of numberFields; track field.key) {
-              <div ptahSettingsField class="flex min-w-0 flex-col gap-1"
-                [fieldId]="'session-budget-' + field.key"
+              <ptah-field
+                appearance="stacked"
+                class="session-budget-number-field"
                 [label]="field.label"
                 [hint]="field.help + ' Range: ' + range(field.key) + '.'"
                 [error]="errors()[field.key] ?? null"
                 [errorTestId]="'session-budget-' + field.key + '-error'">
-                <ng-container ngProjectAs="[settingsFieldControl]"><div class="join flex w-full">
                   <input
                     ptahInput size="sm"
                     type="text"
@@ -343,7 +328,7 @@ function storedNumberIsValid(
                     [attr.inputmode]="
                       settings[field.key].integer ? 'numeric' : 'decimal'
                     "
-                    class="join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
+                    class="join-item min-w-0 flex-1 text-right tabular-nums"
                     [invalid]="!!errors()[field.key]"
                     [value]="numberText(field.key)"
                     [attr.placeholder]="
@@ -353,9 +338,6 @@ function storedNumberIsValid(
                       'session-budget-' +
                       field.key +
                       '-help' +
-                      (errors()[field.key]
-                        ? ' session-budget-' + field.key + '-error'
-                        : '') +
                       (storedNotice(field.key)
                         ? ' session-budget-' + field.key + '-stored'
                         : '')
@@ -367,20 +349,15 @@ function storedNumberIsValid(
                     (blur)="blurred(field.key)"
                     [attr.data-testid]="'session-budget-' + field.key"
                   />
-                  <span
-                    class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted"
-                    aria-hidden="true"
-                    >{{ unitSuffix(field.key) }}</span
-                  >
-                </div></ng-container>
+                  <span ptahFieldTrailing aria-hidden="true">{{ unitSuffix(field.key) }}</span>
                 @if (humanReadable(field.key); as readable) {
-                  <ng-container ngProjectAs="[settingsFieldBeforeHint]"><span
+                  <span ptahFieldBeforeHint
                     class="whitespace-nowrap text-xs text-base-content-muted"
                     >{{ readable }}</span
-                  ></ng-container>
+                  >
                 }
                 @if (storedNotice(field.key); as notice) {
-                  <ng-container ngProjectAs="[settingsFieldAfterError]"><p
+                  <p ptahFieldAfterError
                     [id]="'session-budget-' + field.key + '-stored'"
                     class="rounded-md border border-info/30 bg-info/10 px-2 py-1"
                     [attr.data-testid]="
@@ -388,17 +365,34 @@ function storedNumberIsValid(
                     "
                   >
                     {{ notice }}
-                  </p></ng-container>
+                  </p>
                 }
-              </div>
+              </ptah-field>
+              <p [id]="'session-budget-' + field.key + '-help'" hidden>{{ field.help }}</p>
             }
-          </div>
+            </div>
         }
       }
 
+    </ptah-form-section>
     </section>
   `,
   styles: `
+    :host { display: block; container-type: inline-size; }
+    .session-budget-fields {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      column-gap: var(--ptah-space-4);
+      row-gap: calc(var(--ptah-gap-field) + var(--ptah-space-1));
+      align-items: start;
+    }
+    .session-budget-number-field { min-width: 0; max-inline-size: 22rem; }
+    @container (min-width: 36rem) {
+      .session-budget-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @container (min-width: 56rem) {
+      .session-budget-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
@@ -406,6 +400,7 @@ function storedNumberIsValid(
 })
 export class SessionBudgetSettingsComponent implements OnInit {
   private readonly vscode = inject(VSCodeService);
+  private readonly logger = inject(LoggingService);
   private readonly tabManager = inject(TabManagerService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
@@ -483,7 +478,7 @@ export class SessionBudgetSettingsComponent implements OnInit {
       this.errors.set({});
       this.load.set('ready');
     } catch (error: unknown) {
-      console.warn('[SessionBudgetSettings] settings:get failed', error);
+      this.logger.warn('SessionBudgetSettings', 'settings:get failed', error);
       this.load.set('error');
     }
   }
@@ -704,7 +699,7 @@ export class SessionBudgetSettingsComponent implements OnInit {
         (result.error?.startsWith(RPC_TIMEOUT_PREFIX) ?? false);
     } catch (error: unknown) {
       // Reported in the toast below, like a refused write.
-      console.warn('[SessionBudgetSettings] settings:set failed', error);
+      this.logger.warn('SessionBudgetSettings', 'settings:set failed', error);
     } finally {
       this.savingKey.set(null);
     }

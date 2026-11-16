@@ -534,10 +534,6 @@
     "toggle-success": 1,
     "toggle-xs": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/lane-guards-settings.component.ts": {
-    "btn": 1,
-    "btn-sm": 1
-  },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts": {
     "<dynamic>": 1,
     "toggle": 1,
@@ -546,10 +542,6 @@
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
     "<dynamic>": 9
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
-    "btn": 1,
-    "btn-sm": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
     "<dynamic>": 1

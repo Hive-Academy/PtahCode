@@ -70,10 +70,9 @@ describe('LaneGuardsSettingsComponent', () => {
 
   it('preserves threshold row DOM', async () => {
     await create();
-    const row = input('lane-guards-repeat').closest(
-      '.flex.min-w-0.flex-col.gap-1',
-    );
+    const row = input('lane-guards-repeat').closest('ptah-field');
     expect(row).not.toBeNull();
+    expect(row?.querySelector('.ptah-field[data-appearance]')?.getAttribute('data-appearance')).toBe('stacked');
     const field = input('lane-guards-repeat');
     expect(field.classList.contains('input')).toBe(true);
     expect(field.classList.contains('input-sm')).toBe(true);
@@ -82,22 +81,22 @@ describe('LaneGuardsSettingsComponent', () => {
     expect(field.hasAttribute('aria-invalid')).toBe(false);
     expect(row?.querySelector('label')?.getAttribute('for')).toBe('lane-guards-repeat');
     expect(row?.querySelector('p[role="alert"]')).toBeNull();
+    expect(row?.querySelector('.ptah-field__message')?.textContent).toContain('Range: 2 or greater.');
   });
 
   it('preserves invalid threshold row DOM', async () => {
     await create();
     await enter('lane-guards-repeat', '1');
-    const row = input('lane-guards-repeat').closest(
-      '.flex.min-w-0.flex-col.gap-1',
-    );
+    const row = input('lane-guards-repeat').closest('ptah-field');
     expect(row).not.toBeNull();
     const field = input('lane-guards-repeat');
     expect(field.classList.contains('join-item')).toBe(true);
     expect(field.getAttribute('data-ptah-control')).toBe('input');
     expect(field.getAttribute('aria-invalid')).toBe('true');
-    expect(field.getAttribute('aria-describedby')).toBe(
-      'lane-guards-repeat-help lane-guards-repeat-error',
-    );
+    for (const id of (field.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)) {
+      expect(row?.querySelector(`[id="${id}"]`)).not.toBeNull();
+    }
+    expect(field.getAttribute('aria-describedby')).toBeTruthy();
     expect(
       row?.querySelector('[data-testid="lane-guards-repeat-error"]')?.textContent,
     ).toContain('Enter a whole number from 2.');

@@ -11,7 +11,8 @@ import type { AgentOrchestrationConfig } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
-  SettingsFieldComponent,
+  PtahFieldComponent,
+  PtahFormSectionComponent,
   PtahButtonDirective,
   PtahInputDirective,
 } from '@ptah-extension/ui';
@@ -51,26 +52,22 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
   standalone: true,
   imports: [
     SettingsBusyDisabledDirective,
-    SettingsFieldComponent,
+    PtahFieldComponent,
+    PtahFormSectionComponent,
     PtahButtonDirective,
     PtahInputDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section
+    <section data-glass-surface="content">
+    <ptah-form-section
+      heading="Lane guards"
+      description="Stop background lanes that are stuck in a loop."
       data-glass-surface="content"
-      class="flex flex-col gap-3 text-sm text-base-content"
       aria-labelledby="lane-guards-heading"
       data-testid="settings-section-lane-guards"
     >
-      <div section-header class="border-b border-base-content/10 pb-2">
-        <h3 id="lane-guards-heading" class="text-base font-semibold text-base-content">
-          Lane guards
-        </h3>
-        <p class="mt-0.5 text-xs text-base-content-muted">
-          Stop background lanes that are stuck in a loop.
-        </p>
-      </div>
+      <span id="lane-guards-heading" hidden>Lane guards</span>
 
       @switch (load()) {
         @case ('loading') {
@@ -106,43 +103,36 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
             The first turn that crosses the token limit is a grace turn: the lane is warned again, and its next turn stops it.
             A lane stopped by its budget does not resume; start a fresh lane for the remaining work.
           </p>
-          <div class="grid max-w-sm gap-y-5">
-            @for (field of fields; track field.key) {
-              <div ptahSettingsField class="flex min-w-0 flex-col gap-1"
-                [fieldId]="field.testId"
+          @for (field of fields; track field.key) {
+              <ptah-field
+                appearance="stacked"
                 [label]="field.label"
                 [hint]="field.help + ' Range: ' + field.min + ' or greater.'"
                 [error]="fieldMessage(field.key)"
-                [errorRole]="'alert'"
-                [errorTestId]="field.testId + '-error'">
-                <ng-container ngProjectAs="[settingsFieldControl]"><div class="join flex w-full">
+                errorRole="alert"
+                [errorTestId]="field.testId + '-error'"
+                >
                   <input
                     type="text"
                     inputmode="numeric"
                     [id]="field.testId"
                     ptahInput
                     size="sm"
-                    class="join-item min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
+                    class="join-item min-w-0 flex-1 text-right tabular-nums"
                     [invalid]="!!fieldMessage(field.key)"
                     [value]="drafts()[field.key]"
-                    [attr.aria-describedby]="describedBy(field)"
                     [ptahBusyDisabled]="busy() || feedback.saving()"
                     (input)="edit(field.key, $event)"
                     (change)="commit(field.key)"
                     [attr.data-testid]="field.testId"
                   />
-                  <span
-                    class="btn btn-sm join-item shrink-0 cursor-default whitespace-nowrap border-base-content/10 px-3 text-xs font-normal text-base-content-muted"
-                    aria-hidden="true"
-                    >calls</span
-                  >
-                </div></ng-container>
-              </div>
-            }
-          </div>
+                  <span ptahFieldTrailing aria-hidden="true">calls</span>
+              </ptah-field>
+          }
         }
       }
 
+    </ptah-form-section>
     </section>
   `,
   styles: `
@@ -183,13 +173,6 @@ export class LaneGuardsSettingsComponent implements OnInit {
 
   protected fieldMessage(key: LaneGuardKey): string | null {
     return this.fieldErrors()[key] ?? this.rejected()[key] ?? null;
-  }
-
-  protected describedBy(field: (typeof LANE_GUARD_FIELDS)[number]): string {
-    const help = `${field.testId}-help`;
-    return this.fieldMessage(field.key)
-      ? `${help} ${field.testId}-error`
-      : help;
   }
 
   protected edit(key: LaneGuardKey, event: Event): void {

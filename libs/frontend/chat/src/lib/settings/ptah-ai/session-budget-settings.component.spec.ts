@@ -68,6 +68,25 @@ describe('SessionBudgetSettingsComponent', () => {
     await settle();
   }
 
+  it('connects each checkbox to its row label and resolves every description', async () => {
+    await create();
+    for (const checkbox of host().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
+      expect(checkbox.id).toBeTruthy();
+      expect(host().querySelector(`label[for="${checkbox.id}"]`)).not.toBeNull();
+    }
+    for (const control of host().querySelectorAll<HTMLElement>('[aria-describedby]')) {
+      for (const id of (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)) {
+        expect(host().querySelector(`[id="${id}"]`)).not.toBeNull();
+      }
+    }
+    await enter('tokens', 'bad');
+    for (const control of host().querySelectorAll<HTMLElement>('[aria-describedby]')) {
+      for (const id of (control.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)) {
+        expect(host().querySelector(`[id="${id}"]`)).not.toBeNull();
+      }
+    }
+  });
+
   /** Types into a number field, then commits it (blur / Enter fire `change`). */
   async function enter(key: Key, text: string): Promise<void> {
     const input = field(key);
@@ -129,12 +148,24 @@ describe('SessionBudgetSettingsComponent', () => {
     await create();
     for (const key of NUMBER_KEYS) {
       const control = field(key);
-      const row = control.closest('.flex.min-w-0.flex-col.gap-1');
+      const row = control.closest('ptah-field');
       expect(row).not.toBeNull();
       expect(row?.querySelector('label')?.getAttribute('for')).toBe(control.id);
       expect(control.getAttribute('data-ptah-control')).toBe('input');
-      expect(control.closest('.join')).not.toBeNull();
+      expect(control.closest('ptah-field')).not.toBeNull();
       expect(row?.querySelector('[aria-hidden="true"]')?.textContent?.trim()).toBeTruthy();
+    }
+  });
+
+  it('uses stacked labels in a container based field grid', async () => {
+    await create();
+    const grid = host().querySelector('.session-budget-fields');
+    expect(grid).not.toBeNull();
+    const fields = host().querySelectorAll('.ptah-field[data-appearance]');
+    expect(fields).toHaveLength(NUMBER_KEYS.length);
+    for (const field of fields) {
+      expect(field.getAttribute('data-appearance')).toBe('stacked');
+      expect(field.closest('.session-budget-fields')).toBe(grid);
     }
   });
 
@@ -197,7 +228,7 @@ describe('SessionBudgetSettingsComponent', () => {
 
   it('omits the readable note when none is available', async () => {
     await create();
-    const row = field('usd').closest('.flex.min-w-0.flex-col.gap-1');
+    const row = field('usd').closest('ptah-field');
     expect(row?.querySelector('span.whitespace-nowrap.text-xs:not([aria-hidden])')).toBeNull();
   });
 
@@ -540,9 +571,8 @@ describe('SessionBudgetSettingsComponent', () => {
         expect(toast()?.message).toContain('Could not save');
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn).toHaveBeenCalledWith(
-          expect.stringContaining(
-            '[SessionBudgetSettings] settings:set failed',
-          ),
+          expect.stringContaining('SessionBudgetSettings:'),
+          'settings:set failed',
           new Error('timeout'),
         );
       } finally {
