@@ -8,6 +8,7 @@
  * root registrar.
  */
 import 'reflect-metadata';
+import { ampleFreeMemory } from '../__fixtures__/memory-probe';
 // One factory for every spec that imports this file. `realpath` stays an
 // identity so attach checks do not depend on a real worktree. `access` stays
 // real unless a suite sets `sessionSpawnerFsAccess.current` (succession and
@@ -311,7 +312,7 @@ export function makeHarness(
       sessionBudget,
       logger,
       ('router' in overrides ? overrides.router : null) as never,
-      options.memoryProbe ?? null,
+      options.memoryProbe ?? ampleFreeMemory,
     );
 
   const spawner = build();
