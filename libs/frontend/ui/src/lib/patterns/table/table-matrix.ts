@@ -6,6 +6,7 @@ import {
   Directive,
   input,
 } from '@angular/core';
+import { PtahMeterTone } from '../../charts/chart.types';
 import { PtahMeterComponent } from '../../charts/meter.component';
 
 /**
@@ -88,6 +89,7 @@ export class PtahTableBarCellDirective {}
         [label]="label()"
         [hideLabel]="true"
         [valueText]="'' + score()"
+        [tone]="tone()"
       />
     } @else {
       <span class="ptah-table-score-unrated">{{ unratedText() }}</span>
@@ -102,6 +104,8 @@ export class PtahTableBarCellDirective {}
 export class PtahTableScoreComponent {
   readonly label = input.required<string>();
   readonly score = input<number | null | undefined>();
+  /** Fixed tone. High is good for a score, so it never uses the usage rule `auto`. */
+  readonly tone = input<Exclude<PtahMeterTone, 'auto'>>('gold');
   readonly stale = input(false, { transform: booleanAttribute });
   readonly unratedText = input('Unrated');
   readonly staleText = input('Stale');
@@ -142,25 +146,33 @@ export class PtahTableCellButtonDirective {
 
 /**
  * Status cell for loading, empty and error rows. Put it in a row of its own.
- * It spans all columns. Error uses `role="alert"`. Loading uses `role="status"`
- * with `aria-busy`.
+ * The `td` stays a table cell and spans all columns. An inner element carries
+ * the live role: error uses `role="alert"`, the others use `role="status"`.
+ * Loading adds `aria-busy`.
  *
  * ```html
  * <tr><td ptahStatusCell="loading" [columns]="4">Loading lanes</td></tr>
  * ```
  */
-@Directive({
+@Component({
+  // eslint-disable-next-line @angular-eslint/component-selector -- attribute on td keeps the cell role
   selector: 'td[ptahStatusCell]',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'ptah-table-message-cell',
     '[attr.data-status]': 'ptahStatusCell()',
     '[attr.colspan]': 'columns()',
-    '[attr.role]': 'ptahStatusCell() === "error" ? "alert" : "status"',
-    '[attr.aria-busy]': 'ptahStatusCell() === "loading" ? "true" : null',
   },
+  template: `<div
+    class="ptah-table-status-live"
+    [attr.role]="ptahStatusCell() === 'error' ? 'alert' : 'status'"
+    [attr.aria-busy]="ptahStatusCell() === 'loading' ? 'true' : null"
+  >
+    <ng-content />
+  </div>`,
 })
-export class PtahTableStatusCellDirective {
+export class PtahTableStatusCellComponent {
   readonly ptahStatusCell = input.required<'loading' | 'empty' | 'error'>();
   readonly columns = input.required<number>();
 }

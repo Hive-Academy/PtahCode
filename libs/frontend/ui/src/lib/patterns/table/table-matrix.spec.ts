@@ -7,7 +7,7 @@ import {
   PtahTableGroupRowDirective,
   PtahTableScoreComponent,
   PtahTableGroupTitleComponent,
-  PtahTableStatusCellDirective,
+  PtahTableStatusCellComponent,
   PtahTableStickyHeaderDirective,
   PtahTableBarCellDirective,
 } from './table-matrix';
@@ -20,7 +20,7 @@ import {
     PtahTableGroupRowDirective,
     PtahTableScoreComponent,
     PtahTableGroupTitleComponent,
-    PtahTableStatusCellDirective,
+    PtahTableStatusCellComponent,
     PtahTableStickyHeaderDirective,
     PtahTableBarCellDirective,
   ],
@@ -146,6 +146,19 @@ describe('table matrix helpers', () => {
     expect(th.classList.contains('ptah-table-sticky-header')).toBe(true);
   });
 
+  it('keeps a fixed tone for high scores, never warn or error', () => {
+    const f = TestBed.createComponent(PtahTableScoreComponent);
+    f.componentRef.setInput('label', 'Q');
+    for (const v of [95, 100]) {
+      f.componentRef.setInput('score', v);
+      f.detectChanges();
+      const html = (f.nativeElement as HTMLElement).innerHTML;
+      expect(html).not.toContain('bg-state-err');
+      expect(html).not.toContain('bg-state-need');
+      expect(html).toContain('bg-[var(--ptah-gold)]');
+    }
+  });
+
   it('mirrors popover state on the cell button', () => {
     const b = render().querySelector('button') as HTMLButtonElement;
     expect(b.getAttribute('aria-haspopup')).toBe('dialog');
@@ -157,9 +170,15 @@ describe('table matrix helpers', () => {
     const cells = Array.from(
       render().querySelectorAll<HTMLElement>('td[data-status]'),
     );
-    expect(cells[0].getAttribute('role')).toBe('alert');
+    expect(cells[0].getAttribute('role')).toBeNull();
+    expect(cells[0].tagName).toBe('TD');
+    expect(cells[0].querySelector('[role="alert"]')?.textContent).toContain(
+      'Failed',
+    );
     expect(cells[0].getAttribute('colspan')).toBe('4');
-    expect(cells[1].getAttribute('role')).toBe('status');
-    expect(cells[1].getAttribute('aria-busy')).toBe('true');
+    expect(cells[1].querySelector('[role="status"]')).not.toBeNull();
+    expect(
+      cells[1].querySelector('[role="status"]')?.getAttribute('aria-busy'),
+    ).toBe('true');
   });
 });

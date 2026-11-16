@@ -136,6 +136,14 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
         inset-inline-start: 0;
         z-index: 1;
         background: var(--ptah-table-sticky-bg, var(--surface-1));
+        border-inline-end: 1px solid var(--ptah-card-border);
+      }
+      .ptah-table[data-density]
+        .ptah-table-grid
+        tbody
+        tr:hover
+        > .ptah-table-sticky-header {
+        background: var(--ptah-card-bg-subtle);
       }
       .ptah-table-score {
         display: flex;
@@ -149,6 +157,15 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
       }
       .ptah-table-cell-button {
         cursor: pointer;
+        background: transparent;
+        border: 0;
+        padding: 0;
+        color: inherit;
+        font: inherit;
+      }
+      .ptah-table-cell-button:focus-visible {
+        outline: var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);
+        outline-offset: var(--ptah-focus-ring-offset);
       }
     `,
   ],
