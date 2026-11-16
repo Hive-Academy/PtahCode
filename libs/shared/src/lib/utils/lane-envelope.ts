@@ -43,7 +43,7 @@ const TAG_KIND: Readonly<Record<string, LaneEnvelopeKind>> = {
 };
 
 const ENVELOPE_PATTERN =
-  /^\s*<(agent-report|agent-lane-completed)((?:\s+[a-z-]+="[^"]*")*)\s*>\n?([\s\S]*?)\n?<\/\1>\s*$/;
+  /^\s*<(agent-report|agent-lane-completed)((?:\s+[a-zA-Z-]+="[^"]*")*)\s*>\n?([\s\S]*?)\n?<\/\1>\s*$/;
 
 // The SDK safety trailer is one paragraph: a blank line after it starts other
 // text, which must stay visible, so the whole message is then not an envelope.
@@ -62,7 +62,9 @@ const CROSS_SESSION_TAG_PATTERN = /<cross-session-message(?:\s[^>]*)?>/g;
 /** The `cli` value of a cross-session message: the sender is a Claude session. */
 const CROSS_SESSION_CLI = 'claude';
 
-const ATTRIBUTE_PATTERN = /([a-z-]+)="([^"]*)"/g;
+// Mixed case is accepted: stored transcripts carry a camelCase `reportsFailed`
+// attribute, and one unknown attribute must not turn the card into raw tags.
+const ATTRIBUTE_PATTERN = /([a-zA-Z-]+)="([^"]*)"/g;
 
 /** The `cli` attribute of an envelope from a child chat session. */
 const SESSION_CHILD_CLI = 'ptah-session';
