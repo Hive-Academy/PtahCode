@@ -196,6 +196,8 @@ export interface HarnessApplyResult {
   written: ManagedEntries;
   /** Relative paths successfully removed. */
   removed: string[];
+  /** Routine claims released while the git-tracked command stayed on disk. */
+  releasedTracked?: string[];
   writeFailed: HarnessWriteFailure[];
   /**
    * Paths this APPLY kept although the plan scheduled a write: the copy was

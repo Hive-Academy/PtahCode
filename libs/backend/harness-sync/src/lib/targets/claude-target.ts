@@ -20,7 +20,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs';
 import type { Stats } from 'fs';
 import { rm, unlink } from 'fs/promises';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import type {
   HarnessFacetMatrix,
   HarnessTargetHealth,
@@ -90,6 +90,16 @@ const LEGACY_COMMANDS_MANIFEST = '.ptah-managed.json';
 /** Workspace-relative POSIX path -> absolute path. */
 function toAbsolute(workspaceRoot: string, relPath: string): string {
   return join(workspaceRoot, ...relPath.split('/'));
+}
+
+function hasGitMarker(workspaceRoot: string): boolean {
+  let current = workspaceRoot;
+  while (true) {
+    if (existsSync(join(current, '.git'))) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
 }
 
 /** `{ws}/.mcp.json` — read by Claude Code, the `claude` binary and ptah-cli. */
@@ -399,6 +409,19 @@ export class ClaudeTarget implements IHarnessTarget {
           result,
         });
         continue;
+      }
+      if (removal.kind === 'command') {
+        const tracking = await this.probeGitTracking(
+          workspaceRoot,
+          removal.relPath,
+        );
+        if (
+          tracking === 'tracked' ||
+          (tracking === 'unverifiable' && hasGitMarker(workspaceRoot))
+        ) {
+          (result.releasedTracked ??= []).push(removal.relPath);
+          continue;
+        }
       }
       const absolute = toAbsolute(workspaceRoot, removal.relPath);
       try {
