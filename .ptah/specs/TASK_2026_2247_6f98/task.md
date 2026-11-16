@@ -1,11 +1,11 @@
 ---
 id: TASK_2026_2247_6f98
-status: in_progress
+status: in_review
 type: REFACTORING
 title: Let writer triggers join the task index watcher debounce
 depends_on: []
 created: "2026-11-16T23:07:33.000Z"
-updated: "2026-11-16T23:07:33.000Z"
+updated: "2026-11-17T00:00:00.000Z"
 description: "P5 PR 4: applyFolderChange joins the watcher debounce so a burst of writes gives one rebuild."
 executor: codex
 estimate: S
