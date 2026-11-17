@@ -27,14 +27,21 @@ const strictDetection = z.looseObject({
   manifest: manifest.optional(),
 }) satisfies z.ZodType<CliDetectionResult>;
 
+/**
+ * A malformed optional field becomes undefined so its lane row stays visible.
+ * parseDetectedClis still reports the field source through strictDetection.
+ */
+const salvaged = <T extends z.ZodType>(field: T) =>
+  field.optional().or(z.unknown().transform(() => undefined));
+
 const detection = strictDetection.extend({
-  path: z.string().optional().catch(undefined), version: z.string().optional().catch(undefined),
-  codexSource: z.enum(['installed', 'bundled']).optional().catch(undefined), codexReason: z.string().optional().catch(undefined),
-  ptahCliId: z.string().optional().catch(undefined), ptahCliName: z.string().optional().catch(undefined),
-  providerName: z.string().optional().catch(undefined), providerId: z.string().optional().catch(undefined),
-  family: z.string().optional().catch(undefined), preferredRank: z.number().optional().catch(undefined), disabled: z.boolean().optional().catch(undefined),
-  roleDelivery: z.enum(['preamble', 'native']).optional().catch(undefined), roleChannel: roleChannel.optional().catch(undefined),
-  manifest: manifest.optional().catch(undefined),
+  path: salvaged(z.string()), version: salvaged(z.string()),
+  codexSource: salvaged(z.enum(['installed', 'bundled'])), codexReason: salvaged(z.string()),
+  ptahCliId: salvaged(z.string()), ptahCliName: salvaged(z.string()),
+  providerName: salvaged(z.string()), providerId: salvaged(z.string()),
+  family: salvaged(z.string()), preferredRank: salvaged(z.number()), disabled: salvaged(z.boolean()),
+  roleDelivery: salvaged(z.enum(['preamble', 'native'])), roleChannel: salvaged(roleChannel),
+  manifest: salvaged(manifest),
 }) satisfies z.ZodType<CliDetectionResult>;
 
 const cliSummary = z.looseObject({
