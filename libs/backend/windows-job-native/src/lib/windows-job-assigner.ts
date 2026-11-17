@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import type { IWindowsJobAssigner, WindowsJobHandle } from '@ptah-extension/platform-core';
 
 interface NativeBinding {
@@ -6,11 +5,11 @@ interface NativeBinding {
   closeJob(handle: object): void;
 }
 
-type BindingLoader = () => unknown;
-
-function defaultLoader(): unknown {
-  return require(join(__dirname, '../../build/Release/windows_job.node'));
-}
+/**
+ * Loads the native binding. The caller supplies it, because the binary path
+ * depends on the host layout (packed resources or the lib build output).
+ */
+export type BindingLoader = () => unknown;
 
 function isBinding(value: unknown): value is NativeBinding {
   return typeof value === 'object' && value !== null &&
@@ -20,7 +19,7 @@ function isBinding(value: unknown): value is NativeBinding {
 
 export class NativeWindowsJobAssigner implements IWindowsJobAssigner {
   constructor(
-    private readonly loader: BindingLoader = defaultLoader,
+    private readonly loader: BindingLoader,
     private readonly platform: () => NodeJS.Platform = () => process.platform,
   ) {}
 
