@@ -62,6 +62,9 @@
       "@ptah-extension/tool-output-reducers": [
         "../../libs/backend/tool-output-reducers/src/index.ts"
       ],
+      "@ptah-extension/windows-job-native": [
+        "../../libs/backend/windows-job-native/src/index.ts"
+      ],
       "@ptah-extension/workspace-intelligence": [
         "../../libs/backend/workspace-intelligence/src/index.ts"
       ],

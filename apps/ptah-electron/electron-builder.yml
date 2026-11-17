@@ -162,6 +162,9 @@ mac:
 # distributed as NSIS: CI (publish-electron.yml) builds `--win --dir` and then
 # `--win appx --prepackaged`, and the CLI target overrides this list.
 win:
+  extraResources:
+    - from: '../../../libs/backend/windows-job-native/build/Release/windows_job.node'
+      to: 'windows-job/windows_job.node'
   target:
     - nsis
   files:

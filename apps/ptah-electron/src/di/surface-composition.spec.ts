@@ -138,6 +138,7 @@ describe('Electron session driver lock composition', () => {
           : KernelSessionDriverLock,
       );
       expect(c.resolve(PLATFORM_TOKENS.SESSION_DRIVER_LOCK)).toBe(lock);
+      expect(c.resolve(PLATFORM_TOKENS.WINDOWS_JOB_ASSIGNER)).toBeDefined();
       await lock.dispose();
     } finally {
       c.resolve<IOutputChannel>(PLATFORM_TOKENS.OUTPUT_CHANNEL).dispose();

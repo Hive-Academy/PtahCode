@@ -47,6 +47,52 @@ const {
 
 const RELEASE_DIR = path.join(ROOT, 'dist', 'release');
 
+/** Verify the external resource is an x64 PE DLL outside app.asar. */
+function verifyWindowsJobBinary(releaseDir = RELEASE_DIR, platform = process.platform, arch = process.arch) {
+  if (platform !== 'win32' || arch !== 'x64') return;
+  const packages = [];
+  findWindowsPackages(releaseDir, packages);
+  if (packages.length === 0) {
+    throw new Error(`No win-unpacked package found under ${releaseDir}`);
+  }
+  for (const packageDir of packages) {
+    verifyWindowsJobFile(releaseDir, packageDir);
+  }
+}
+
+/** Find package roots without entering app resources or dependency trees. */
+function findWindowsPackages(dir, found) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.name === 'win-unpacked') {
+      found.push(full);
+    } else if (entry.name !== 'node_modules' && entry.name !== 'resources' &&
+        entry.name !== 'app.asar.unpacked') {
+      findWindowsPackages(full, found);
+    }
+  }
+}
+
+function verifyWindowsJobFile(releaseDir, packageDir) {
+  const binary = path.join(packageDir, 'resources', 'windows-job', 'windows_job.node');
+  if (!fs.existsSync(binary)) {
+    throw new Error(`Packed Windows job binary missing outside app.asar: ${binary}`);
+  }
+  const contents = fs.readFileSync(binary);
+  if (contents.length < 0x40 || contents.toString('ascii', 0, 2) !== 'MZ') {
+    throw new Error(`Packed Windows job binary is not a PE file: ${binary}`);
+  }
+  const peOffset = contents.readUInt32LE(0x3c);
+  if (peOffset + 24 > contents.length ||
+      contents.toString('ascii', peOffset, peOffset + 4) !== 'PE\0\0' ||
+      contents.readUInt16LE(peOffset + 4) !== 0x8664 ||
+      (contents.readUInt16LE(peOffset + 22) & 0x2000) === 0) {
+    throw new Error(`Packed Windows job binary is not a valid x64 PE DLL: ${binary}`);
+  }
+  console.log(`[verify] OK  ${path.relative(releaseDir, binary)} (x64 PE DLL outside app.asar)`);
+}
+
 function sha256(file) {
   return crypto
     .createHash('sha256')
@@ -276,6 +322,8 @@ async function main() {
     );
   }
 
+  verifyWindowsJobBinary();
+
   const failures = [];
   for (const file of packed) {
     const failure = validatePackedAddon(
@@ -322,6 +370,7 @@ function handleFailure(err) {
 if (require.main === module) main().catch(handleFailure);
 
 module.exports = {
+  verifyWindowsJobBinary,
   getPrebuildTarget,
   resolveBetterSqliteRuntimeAddon,
   findPackedFiles,
