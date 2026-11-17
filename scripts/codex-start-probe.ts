@@ -6,7 +6,7 @@
  * the thread config; report its startup status and whether new rollout files hold the secret.
  */
 import 'reflect-metadata';
-import { ChildProcess, spawn } from 'node:child_process';
+import { ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -105,7 +105,17 @@ function processHandle(child: ChildProcess, whenSpawned: Promise<number | null>)
     get pid() { return child.pid; },
     get killed() { return child.killed; },
     get exitCode() { return child.exitCode; },
-    kill: (signal) => child.kill(signal),
+    kill: (signal) => {
+      if (child.exitCode !== null || child.signalCode !== null) return false;
+      if (process.platform === 'win32' && child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
+        const root = process.env['SystemRoot'] ?? process.env['windir'];
+        const command = root ? join(root, 'System32', 'taskkill.exe') : 'taskkill';
+        const result = spawnSync(command, ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, encoding: 'utf8', timeout: 3000 });
+        if (result.error || (result.status !== 0 && result.status !== 128 && !/not found|no running instance of the task/i.test(`${result.stdout}\n${result.stderr}`)))
+          process.stderr.write(`taskkill failed: ${result.error?.message ?? result.stderr ?? result.status}\n`);
+      }
+      return child.exitCode === null && child.signalCode === null ? child.kill(signal) : false;
+    },
     on: (event, listener) => { child.on(event, listener); },
     once: (event, listener) => { child.once(event, listener); },
     off: (event, listener) => { child.off(event, listener); },

@@ -16,6 +16,7 @@
  */
 
 import spawn from 'cross-spawn';
+import { killProcessTree } from '@ptah-extension/platform-core';
 import type { IPlatformCommands } from '@ptah-extension/rpc-handlers';
 import type {
   AuthCommandRequest,
@@ -143,7 +144,21 @@ export class CliPlatformCommands
       };
 
       const timer = setTimeout(() => {
-        child.kill();
+        if (!settled && child.exitCode === null && child.signalCode === null) {
+          if (process.platform === 'win32' && child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
+            const report = (error: unknown): void => {
+              const failure = error instanceof Error ? error : new Error(String(error));
+              process.stderr.write(`[ptah] Auth command tree stop failed: ${failure.message}\n`);
+            };
+            void killProcessTree(child.pid, 'SIGTERM', report)
+              .catch((error: unknown) => report(error))
+              .finally(() => {
+                if (child.exitCode === null && child.signalCode === null) child.kill();
+              });
+          } else {
+            child.kill();
+          }
+        }
         settle({
           success: false,
           exitCode: null,

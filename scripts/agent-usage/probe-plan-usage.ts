@@ -9,7 +9,7 @@
  * production App Server account-usage service and process-launch shape.
  */
 import 'reflect-metadata';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -173,7 +173,16 @@ async function codexShape(): Promise<{
         if (complete) return;
         complete = true;
         clearTimeout(timeout);
-        child.kill();
+        if (child.exitCode === null && child.signalCode === null) {
+          if (process.platform === 'win32' && child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
+            const root = process.env['SystemRoot'] ?? process.env['windir'];
+            const command = root ? join(root, 'System32', 'taskkill.exe') : 'taskkill';
+            const result = spawnSync(command, ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, encoding: 'utf8', timeout: 3000 });
+            if (result.error || (result.status !== 0 && result.status !== 128 && !/not found|no running instance of the task/i.test(`${result.stdout}\n${result.stderr}`)))
+              process.stderr.write(`taskkill failed: ${result.error?.message ?? result.stderr ?? result.status}\n`);
+          }
+          if (child.exitCode === null && child.signalCode === null) child.kill();
+        }
         action();
       };
       const timeout = setTimeout(
