@@ -27,6 +27,9 @@
       "options": {
         "command": "tsc --noEmit --project libs/backend/windows-job-native/tsconfig.lib.json"
       }
+    },
+    "test": {
+      "cache": false
     }
   }
 }

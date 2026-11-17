@@ -75,23 +75,8 @@ static napi_value create_job_for_pid(napi_env env, napi_callback_info info) {
     CloseHandle(job);
     return win32_error(env, "SetInformationJobObject", error);
   }
-  process_handle = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, pid);
-  if (process_handle == NULL) {
-    error = GetLastError();
-    CloseHandle(job);
-    return win32_error(env, "OpenProcess", error);
-  }
-  if (!AssignProcessToJobObject(job, process_handle)) {
-    error = GetLastError();
-    CloseHandle(process_handle);
-    CloseHandle(job);
-    return win32_error(env, "AssignProcessToJobObject", error);
-  }
-  if (!CloseHandle(process_handle)) {
-    error = GetLastError();
-    CloseHandle(job);
-    return win32_error(env, "CloseHandle(process)", error);
-  }
+  /* Create and tag the JavaScript owner before the assignment. A failure
+   * here closes an empty job, so no process is in a job without an owner. */
   handle = (job_handle*)malloc(sizeof(*handle));
   if (handle == NULL) {
     CloseHandle(job);
@@ -103,9 +88,27 @@ static napi_value create_job_for_pid(napi_env env, napi_callback_info info) {
     return api_error(env, "napi_create_external failed");
   }
   if (napi_type_tag_object(env, result, &job_type_tag) != napi_ok) {
-    /* The finalizer of the external owns the handle and closes it. */
+    handle->job = NULL;
+    CloseHandle(job);
     return api_error(env, "napi_type_tag_object failed");
   }
+  process_handle = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, pid);
+  if (process_handle == NULL) {
+    error = GetLastError();
+    handle->job = NULL;
+    CloseHandle(job);
+    return win32_error(env, "OpenProcess", error);
+  }
+  if (!AssignProcessToJobObject(job, process_handle)) {
+    error = GetLastError();
+    CloseHandle(process_handle);
+    handle->job = NULL;
+    CloseHandle(job);
+    return win32_error(env, "AssignProcessToJobObject", error);
+  }
+  /* The process is in the job. A failed close of the query handle is not an
+   * assignment failure, so the caller still gets the owner of the job. */
+  CloseHandle(process_handle);
   return result;
 }
 
