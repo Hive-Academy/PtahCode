@@ -17,6 +17,15 @@ test('Windows taskkill is not started without an absolute system root', () => {
   }
 });
 
+test('Windows taskkill uses windir when SystemRoot is empty or relative', () => {
+  for (const SystemRoot of ['', 'Windows']) {
+    const calls = [];
+    const outcome = killTree(42, 'SIGTERM', { platform: 'win32', env: { SystemRoot, windir: 'D:/Win' }, spawnSync: (...args) => { calls.push(args); return { status: 0 }; } });
+    assert.equal(outcome.ok, true);
+    assert.equal(calls[0][0], path.win32.join('D:/Win', 'System32', 'taskkill.exe'));
+  }
+});
+
 test('Windows taskkill arguments, timeout and success cases', () => {
   const calls = [];
   const deps = { platform: 'win32', env: WINDOWS_ENV, spawnSync: (...args) => {

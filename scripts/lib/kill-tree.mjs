@@ -27,7 +27,7 @@ export function killTree(target, signal = 'SIGTERM', dependencies = {}) {
   if ((dependencies.platform ?? process.platform) === 'win32') {
     // Never start a bare `taskkill`: the Windows search path can find a file in the current directory.
     const env = dependencies.env ?? process.env;
-    const root = env.SystemRoot ?? env.windir;
+    const root = [env.SystemRoot, env.windir].find((value) => typeof value === 'string' && path.win32.isAbsolute(value));
     if (!root || !path.win32.isAbsolute(root)) {
       const error = new Error(`taskkill skipped for PID ${pid}: SystemRoot is not an absolute path`);
       report(error.message, dependencies);
