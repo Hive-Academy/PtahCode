@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import * as crypto from 'node:crypto';
 import {
   INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
@@ -9,6 +10,8 @@ import {
   type McpCredentialLogger,
 } from './mcp-caller-token-registry';
 import { isToolPermitted } from '../mcp-core/mcp-caller-policy';
+import { HttpConnectionOwners } from './http-connection-owners';
+import { externalOwnerKeySchema } from '@ptah-extension/cli-agent-runtime';
 
 const STORE_KEY = 'ptah.mcp.callerCredentialHashes';
 
@@ -75,6 +78,55 @@ function hashOf(token: string): string {
 }
 
 describe('McpCallerTokenRegistry', () => {
+  it('recognizes only live internal-query exclusive owners', () => {
+    let now = 100;
+    const registry = new McpCallerTokenRegistry({ logger: logger(), now: () => now });
+    const internal = registry.issue({ kind: 'internal-query', workspaceRoot: '/ws', capability: 'privileged' }, 'query', 50);
+    const authorized = registry.authorize({ token: internal, workspaceRoot: '/ws' });
+    if (!authorized.ok || !authorized.externalOwner) throw new Error('Expected internal-query owner');
+    const owner = authorized.externalOwner;
+    expect(registry.isExclusiveOwnerActive(owner)).toBe(true);
+    expect(registry.isExclusiveOwnerActive({ ...owner, principal: 'f'.repeat(32) })).toBe(false);
+    expect(registry.isExclusiveOwnerActive({ ...owner, exclusive: false })).toBe(false);
+    const workspace = registry.issue({ kind: 'workspace', workspaceRoot: '/ws', capability: 'privileged' }, 'workspace', 50);
+    const workspaceAuth = registry.authorize({ token: workspace, workspaceRoot: '/ws' });
+    if (!workspaceAuth.ok || !workspaceAuth.externalOwner) throw new Error('Expected workspace owner');
+    expect(registry.isExclusiveOwnerActive({ ...workspaceAuth.externalOwner, exclusive: true })).toBe(false);
+    registry.revokeSubject('query');
+    expect(registry.isExclusiveOwnerActive(owner)).toBe(false);
+    const expiring = registry.issue({ kind: 'internal-query', workspaceRoot: '/ws', capability: 'privileged' }, 'expiring', 50);
+    const expiringAuth = registry.authorize({ token: expiring, workspaceRoot: '/ws' });
+    if (!expiringAuth.ok || !expiringAuth.externalOwner) throw new Error('Expected expiring owner');
+    now = 150;
+    expect(registry.isExclusiveOwnerActive(expiringAuth.externalOwner)).toBe(false);
+  });
+  it('reports each revoked internal-query owner and no other binding kind', () => {
+    const revoked: unknown[] = [];
+    const registry = new McpCallerTokenRegistry({ logger: logger(), onExclusiveOwnerRevoked: owner => revoked.push(owner) });
+    const owners = ['a', 'b'].map(subject => {
+      const token = registry.issue({ kind: 'internal-query', workspaceRoot: '/ws', capability: 'privileged' }, subject, 50_000);
+      const auth = registry.authorize({ token, workspaceRoot: '/ws' });
+      if (!auth.ok || !auth.externalOwner) throw new Error('Expected internal-query owner');
+      return auth.externalOwner;
+    });
+    registry.issue({ kind: 'workspace', workspaceRoot: '/ws', capability: 'privileged' }, 'workspace', 50_000);
+    registry.revokeSubject('a');
+    expect(revoked).toEqual([owners[0]]);
+    registry.revokeEphemeral();
+    expect(revoked).toEqual(owners);
+  });
+  it('uses a recorder-compatible principal for an authorized persistent token and connection', async () => {
+    const registry = new McpCallerTokenRegistry({ state: new MemoryState(), logger: logger() });
+    const token = await registry.issuePersistent({ configPath: '/ws/.mcp.json', kind: 'workspace', workspaceRoot: '/ws', setting: 'read-only' });
+    const authorized = registry.authorize({ token, workspaceRoot: '/ws' });
+    if (!authorized.ok || !authorized.externalOwner) throw new Error('Expected authorized workspace owner');
+    expect(externalOwnerKeySchema.safeParse(authorized.externalOwner).success).toBe(true);
+    const connections = new HttpConnectionOwners();
+    const id = connections.issue(authorized.externalOwner);
+    const resolved = connections.resolve(authorized.externalOwner, id);
+    expect(externalOwnerKeySchema.safeParse(resolved).success).toBe(true);
+    expect(resolved?.exclusive).toBe(true);
+  });
   it('stores a hash, not the raw token, and authorizes by digest', async () => {
     const state = new MemoryState();
     const registry = new McpCallerTokenRegistry({ state, logger: logger() });

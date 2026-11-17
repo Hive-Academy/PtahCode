@@ -54,7 +54,7 @@ import {
   OUTCOME_ROUTING_SOURCES,
   OUTCOME_TASK_KINDS,
 } from '@ptah-extension/shared';
-import type { Logger } from '@ptah-extension/vscode-core';
+import { Logger } from '@ptah-extension/vscode-core';
 import type { PtahAPI } from '../types';
 import { runWithMcpRequestContext } from '../mcp-core/mcp-request-context';
 import {
@@ -1700,6 +1700,43 @@ describe('buildAgentNamespace — spawn boundary', () => {
     namespace.beginSpawn({ task: 't', cli: 'codex', externalOwner });
     expect(mocks.processManager.spawn.mock.calls[0][0]).not.toHaveProperty('externalOwner');
     expect(mocks.processManager.beginSpawn.mock.calls[0][0]).not.toHaveProperty('externalOwner');
+  });
+
+  it('stamps only the authenticated request owner on both spawn paths', async () => {
+    const { deps, mocks } = makeDeps();
+    const forged = { transport: 'http' as const, principal: 'a'.repeat(32), exclusive: true };
+    const authenticated = { ...forged, principal: 'b'.repeat(32) };
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a' } as SpawnAgentResult);
+    const namespace = buildAgentNamespace(deps);
+    await runWithMcpRequestContext({ externalOwner: authenticated }, async () => {
+      await namespace.spawn({ task: 't', cli: 'codex', externalOwner: forged });
+      namespace.beginSpawn({ task: 't', cli: 'codex', externalOwner: forged });
+    });
+    expect(mocks.processManager.spawn.mock.calls[0][0].externalOwner).toEqual(authenticated);
+    expect(mocks.processManager.beginSpawn.mock.calls[0][0].externalOwner).toEqual(authenticated);
+  });
+
+  it('records a settled lane under the authenticated owner through the process-manager seam', async () => {
+    const runtime = jest.requireActual<typeof import('@ptah-extension/cli-agent-runtime')>('@ptah-extension/cli-agent-runtime');
+    const logger = Object.assign(Object.create(Logger.prototype) as Logger, { error: jest.fn(), info: jest.fn(), warn: jest.fn(), debug: jest.fn() });
+    const outbox = new runtime.ExternalCompletionOutbox(logger);
+    const recorder = new runtime.ExternalCompletionRecorder(logger, outbox);
+    const forged = { transport: 'http' as const, principal: 'a'.repeat(32), exclusive: true };
+    const authenticated = { ...forged, principal: 'b'.repeat(32) };
+    const { deps, mocks } = makeDeps();
+    mocks.processManager.spawn.mockImplementation(async (request: SpawnAgentRequest) => {
+      recorder.recordFromSignal(
+        { agentId: 'settled', completedAt: '2026-11-17T00:00:00Z' } as AgentProcessInfo,
+        request.externalOwner,
+        { delivered: false, reason: 'no-parent-recorded', completion: { parentSignal: '<agent-lane-completed>settled</agent-lane-completed>', verdict: 'delivered', phaseKind: null, executorId: 'codex', deliverableCheck: [], toolProfileAdapter: null } },
+      );
+      return { agentId: 'settled' } as SpawnAgentResult;
+    });
+    await runWithMcpRequestContext({ externalOwner: authenticated }, () =>
+      buildAgentNamespace(deps).spawn({ task: 't', cli: 'codex', externalOwner: forged }));
+    expect(outbox.pendingCount(authenticated)).toBe(1);
+    expect(outbox.pendingCount(forged)).toBe(0);
+    expect(outbox.findForLane(authenticated, 'settled')?.body).toContain('<agent-lane-completed>');
   });
 
   it.each([
