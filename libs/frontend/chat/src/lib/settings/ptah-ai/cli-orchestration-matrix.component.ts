@@ -8,6 +8,7 @@ import {
   inject,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { LucideAngularModule, Terminal } from 'lucide-angular';
 import { ProvidersSettingsStateService } from '@ptah-extension/core';
@@ -18,7 +19,6 @@ import {
   CLI_TEST_NOT_STARTED,
   cliMatrixRows,
   cliTestFailedText,
-  type CliMatrixCellField,
   type CliMatrixRow,
   type InstanceCliMatrixRow,
   type SystemCliMatrixRow,
@@ -34,28 +34,14 @@ import {
 import { AgentOrchestrationConfigComponent } from './agent-orchestration-config.component';
 import { PtahCliInstancesComponent } from './ptah-cli-instances.component';
 import { CliLaneDefaultsStore } from './cli-lane-defaults.store';
-import { CliProviderGridComponent, type CliProviderOpenCell } from './cli-provider-grid.component';
-import type { CliProviderOpenKind } from './cli-provider-card.component';
+import { CliProviderGridComponent } from './cli-provider-grid.component';
+import type { LaneTableRow } from './lanes-table.component';
 import { CliSharedDefaultsComponent } from './cli-shared-defaults.component';
+import { savePreferredAgentOrder } from './preferred-agent-order-save';
 import {
   PtahButtonDirective,
 } from '@ptah-extension/ui';
 
-/** Which popover of which row is open; one at a time. */
-type OpenCell = {
-  readonly rowId: string;
-  readonly kind: CliMatrixCellField | CliProviderOpenKind | 'more';
-};
-const PROVIDER_OPEN_KINDS: ReadonlySet<OpenCell['kind']> = new Set<CliProviderOpenKind>([
-  'info', 'capabilities', 'model', 'effort', 'permission', 'credentials', 'install',
-]);
-function isProviderOpenCell(cell: OpenCell): cell is CliProviderOpenCell {
-  return PROVIDER_OPEN_KINDS.has(cell.kind);
-}
-interface MatrixGroup {
-  readonly id: 'installed' | 'uninstalled';
-  readonly rows: readonly SystemCliMatrixRow[];
-}
 
 /**
  * #77: install copy per system CLI. Codex and Copilot keep the old "No CLI agents found" commands; the other four are
@@ -171,40 +157,32 @@ const SAVE_SCOPE = 'global';
       <p class="text-xs text-base-content-muted">These are CLI capabilities. Permission and network defaults are editable. A running lane may offer fewer actions.</p>
 
       <ptah-agent-orchestration-config />
+      <button type="button" ptahButton variant="ghost" data-testid="lanes-order-edit"
+        [attr.aria-pressed]="orderMode()" (click)="orderMode.set(!orderMode())">
+        {{ orderMode() ? 'Done editing order' : 'Edit lane order' }}
+      </button>
 
       <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]" data-testid="cli-matrix" tabindex="-1" [attr.aria-busy]="loading()">
-        <ptah-cli-provider-grid [rows]="groups()[0].rows"
-          [sharedOpenCell]="providerOpenCell()"
-          [defaults]="state.orchestration().data?.cliLaneDefaults"
-          [busy]="busy()" [canWrite]="canWrite()" [testing]="testing()" [testingId]="testingId()"
-          [testTexts]="systemTestTexts()" [guides]="CLI_INSTALL_GUIDES"
+        <ptah-cli-provider-grid
+          [rows]="tableRows()" [defaults]="state.orchestration().data?.cliLaneDefaults"
+          [busy]="busy()" [canWrite]="canWrite()" [loading]="loading()"
+          [testingRows]="testingRows()" [testResults]="tableTestResults()"
+          [orderMode]="orderMode()" [guides]="CLI_INSTALL_GUIDES"
+          [error]="laneReadError()"
           (toggled)="toggle($event.row, $event.event)"
-          (defaultSelected)="saveLaneDefault($event.row, $event.choice)"
-          (defaultResetRequested)="resetLaneDefault($event)"
-          (testRequested)="test($event)" (redetectRequested)="redetectFromGuide($event)"
-          (popoverToggled)="toggleProviderPopover($event)" (popoverDismissed)="closeProviderPopover()"
-          (codexSettingsRequested)="codexSettingsRequested.emit()" />
-        @if (groups().length > 1) {
-          <button type="button" ptahButton variant="ghost" class="self-start before:inline-block before:w-3 before:transition-transform before:content-['›'] aria-expanded:before:rotate-90"
-            data-testid="cli-matrix-uninstalled-toggle" [attr.aria-expanded]="uninstalledShown()"
-            (click)="toggleUninstalled()">Uninstalled CLI agents ({{ groups()[1].rows.length }})</button>
-          @if (uninstalledShown()) {
-            <div data-testid="cli-matrix-uninstalled">
-              <ptah-cli-provider-grid [rows]="groups()[1].rows"
-                [sharedOpenCell]="providerOpenCell()"
-                [defaults]="state.orchestration().data?.cliLaneDefaults"
-                [busy]="busy()" [canWrite]="canWrite()" [testing]="testing()" [testingId]="testingId()"
-                [testTexts]="systemTestTexts()" [guides]="CLI_INSTALL_GUIDES"
-                (toggled)="toggle($event.row, $event.event)"
-                (defaultSelected)="saveLaneDefault($event.row, $event.choice)"
-                (defaultResetRequested)="resetLaneDefault($event)"
-                (testRequested)="test($event)" (redetectRequested)="redetectFromGuide($event)"
-                (popoverToggled)="toggleProviderPopover($event)" (popoverDismissed)="closeProviderPopover()"
-                (codexSettingsRequested)="codexSettingsRequested.emit()" />
-            </div>
-          }
-        }
-        @if (!loading() && groups()[0].rows.length === 0) {
+          (moved)="moveLane($event.row, $event.direction)"
+          (test)="test($event.id)"
+          (edit)="editLane($event)"
+          (delete)="deleteLane($event)"
+          (capabilities)="showCapabilities($event)"
+          (installGuide)="showInstallGuide($event)"
+          (signIn)="signInLane($event)"
+          (retry)="retryLanes()" (redetect)="redetectFromGuide($event)"
+          (codexSettings)="codexSettingsRequested.emit()"
+          (tiers)="editTiers($event)"
+          (defaultSelected)="selectTableDefault($event.row, $event.choice)"
+          (defaultResetRequested)="resetTableDefault($event)" />
+        @if (!loading() && tableRows().length === 0) {
           <p data-testid="cli-matrix-empty">No CLI agent is installed. Install one from the list below, then Re-detect.</p>
         }
         @if (loading()) {
@@ -223,26 +201,13 @@ const SAVE_SCOPE = 'global';
 
       <!-- The Ptah CLI instances: their own sub-section under a hairline, with Add and one card per instance. -->
       <ptah-cli-instances
-        [rows]="instances()"
-        [empty]="noInstances()"
+        [rows]="[]"
+        [empty]="!loading() && instances().length === 0"
         [busy]="busy()"
         [canWrite]="canWrite()"
         [testing]="testing()"
         [testingId]="testingId()"
-        [confirmDeleteId]="confirmDelete()"
-        [openCell]="openCell()"
         (addRequested)="openAdd($event)"
-        (toggled)="toggle($event.row, $event.event)"
-        (cellToggled)="toggleCell($event.rowId, $event.kind)"
-        (cellOpened)="focusOpened()"
-        (moreOpened)="focusFirstIn('cli-matrix-more-menu')"
-        (closed)="close()"
-        (tiersRequested)="openTiers($event)"
-        (testRequested)="test($event)"
-        (editRequested)="openEdit($event)"
-        (deleteAsked)="askDelete($event)"
-        (deleteCancelled)="cancelDelete($event)"
-        (deleteConfirmed)="remove($event)"
       />
     </div>
 
@@ -263,6 +228,7 @@ const SAVE_SCOPE = 'global';
     :host-context([data-glass='on']) [data-testid='settings-cli-matrix'] { padding: 1.25rem; }`,
 })
 export class CliOrchestrationMatrixComponent {
+  private readonly providerGrid = viewChild(CliProviderGridComponent);
   readonly codexSettingsRequested = output<void>();
   protected readonly TerminalIcon = Terminal;
   protected readonly CLI_INSTALL_GUIDES = CLI_INSTALL_GUIDES;
@@ -295,20 +261,74 @@ export class CliOrchestrationMatrixComponent {
       (row): row is InstanceCliMatrixRow => row.kind === 'instance',
     ),
   );
+  protected readonly tableRows = computed((): readonly LaneTableRow[] =>
+    [...this.rows().installed, ...this.rows().uninstalled].map((row, index) => ({
+      ...row,
+      order: row.kind === 'system' && !row.installed ? undefined : index + 1,
+    })),
+  );
+  protected readonly laneReadError = computed(() =>
+    this.state.orchestration().status === 'error' ||
+    this.state.cliAgents().status === 'error'
+      ? 'Could not load lanes.'
+      : null,
+  );
+  protected async retryLanes(): Promise<void> {
+    await Promise.all([this.state.refreshOrchestration(), this.state.refreshCliAgents()]);
+  }
+  protected readonly orderMode = signal(false);
+  protected readonly testingRows = computed((): Readonly<Record<string, boolean>> => {
+    const id = this.testingId();
+    return id ? { [id]: true } : {};
+  });
+  protected readonly tableTestResults = computed((): Readonly<Record<string, string>> => {
+    const result: Record<string, string> = { ...this.systemTestTexts() };
+    for (const row of this.instances()) {
+      if (row.lastTest) result[row.id] = row.lastTest.success
+        ? (row.lastTest.latencyMs === null ? 'Test passed.' : `Test passed in ${row.lastTest.latencyMs}ms.`)
+        : cliTestFailedText(row.lastTest.reason);
+    }
+    return result;
+  });
+  protected async moveLane(row: LaneTableRow, direction: -1 | 1): Promise<void> {
+    if (!this.state.reviewContext() || this.busy()) return;
+    const installed = this.rows().installed.map(item => item.id);
+    const index = installed.indexOf(row.id);
+    const next = index + direction;
+    if (index < 0 || next < 0 || next >= installed.length) return;
+    [installed[index], installed[next]] = [installed[next], installed[index]];
+    await savePreferredAgentOrder(this.state, this.feedback, installed);
+  }
+  protected editLane(row: LaneTableRow): void {
+    if (row.kind === 'instance') this.openEdit(row);
+    else if (row.cli === 'codex') this.codexSettingsRequested.emit();
+  }
+  protected async deleteLane(row: LaneTableRow): Promise<void> {
+    if (row.kind === 'instance') await this.remove(row);
+  }
+  protected showCapabilities(row: LaneTableRow): void {
+    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="capabilities"]`);
+  }
+  protected showInstallGuide(row: LaneTableRow): void {
+    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="install"]`);
+  }
+  protected signInLane(row: LaneTableRow): void {
+    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="credentials"]`);
+  }
+  protected editTiers(row: LaneTableRow): void {
+    if (row.kind === 'instance') this.openTiers(row);
+  }
+  protected async selectTableDefault(
+    row: LaneTableRow, choice: NonNullable<CliLaneDefaults[SystemCliType]>,
+  ): Promise<void> {
+    if (row.kind === 'system') await this.saveLaneDefault(row, choice);
+  }
+  protected async resetTableDefault(row: LaneTableRow): Promise<void> {
+    if (row.kind === 'system') await this.resetLaneDefault(row);
+  }
   protected readonly ptahManifest = computed(() =>
     this.state.orchestration().data?.detectedClis.find(cli => cli.ptahCliId)?.manifest,
   );
-  /** The installed system CLIs (always, for its empty state), then the Uninstalled group when it has rows (#71). */
-  protected readonly groups = computed((): readonly MatrixGroup[] => {
-    const { installed, uninstalled } = this.rows();
-    const system = installed.filter(
-      (row): row is SystemCliMatrixRow => row.kind === 'system',
-    );
-    const groups: MatrixGroup[] = [{ id: 'installed', rows: system }];
-    if (uninstalled.length)
-      groups.push({ id: 'uninstalled', rows: uninstalled });
-    return groups;
-  });
   /** Neither source has data yet (the container shows each section's own loading or error line). */
   protected readonly loading = computed(
     () => !this.state.orchestration().data && !this.state.cliAgents().data,
@@ -321,50 +341,22 @@ export class CliOrchestrationMatrixComponent {
       this.state.reviewContext() !== null,
   );
 
-  private readonly openState = signal<OpenCell | null>(null);
-  protected readonly providerOpenCell = computed((): CliProviderOpenCell | null => {
-    const open = this.openState();
-    return open && isProviderOpenCell(open) ? open : null;
-  });
-  /** The open popover, for the instance cards. */
-  protected readonly openCell = this.openState.asReadonly();
-  /** Decision 1: the Uninstalled group starts collapsed. */
-  private readonly uninstalledOpen = signal(false);
-  /** Expanded by the user, or holding the open popover (a Cursor key removal moves its row into this group). */
-  protected readonly uninstalledShown = computed(() => {
-    const open = this.openState();
-    return (
-      this.uninstalledOpen() ||
-      (!!open && this.rows().uninstalled.some((row) => row.id === open.rowId))
-    );
-  });
-  protected readonly confirmDelete = signal<string | null>(null);
   protected readonly testingId = signal<string | null>(null);
   /** Batch 32 modals: the add/edit form (with the instance it edits, or `null` to create) and the tier mapping. */
   protected readonly addOpen = signal(false);
   protected readonly editTarget = signal<CliInstanceEditTarget | null>(null);
   protected readonly tierTarget = signal<CliTierMappingTarget | null>(null);
-  protected readonly noInstances = computed(
-    () =>
-      this.state.cliAgents().status === 'ready' &&
-      !this.state.cliAgents().data?.length,
-  );
+  private tiersOpener: HTMLElement | null = null;
   /** Which Add button opened the form: the empty-state one disappears once an instance exists (Minor 2). */
   private addOrigin: 'header' | 'empty' = 'header';
 
-  protected toggleUninstalled(): void {
-    this.uninstalledOpen.set(!this.uninstalledShown());
-  }
-
   protected openAdd(origin: 'header' | 'empty'): void {
-    this.close();
     this.addOrigin = origin;
     this.editTarget.set(null);
     this.addOpen.set(true);
   }
 
   protected openEdit(row: InstanceCliMatrixRow): void {
-    this.close();
     this.editTarget.set({
       id: row.id,
       name: row.name,
@@ -399,14 +391,14 @@ export class CliOrchestrationMatrixComponent {
     }
     if (this.addOrigin === 'empty')
       this.focusAfterRender(
+        `[data-testid="cli-matrix-row-${created.id}"] ptah-table-row-expander button`,
         `[data-testid="cli-matrix-tiers-${created.id}"]`,
-        `[data-testid="cli-matrix-more-${created.id}"]`,
       );
     void this.test(created.id);
   }
 
   protected openTiers(row: InstanceCliMatrixRow): void {
-    this.close();
+    this.tiersOpener = this.element.nativeElement.ownerDocument.activeElement as HTMLElement | null;
     this.tierTarget.set({
       id: row.id,
       name: row.name,
@@ -419,11 +411,16 @@ export class CliOrchestrationMatrixComponent {
   protected closeTiers(): void {
     const id = this.tierTarget()?.id;
     this.tierTarget.set(null);
-    if (id)
+    const opener = this.tiersOpener;
+    this.tiersOpener = null;
+    if (opener?.isConnected) {
+      afterNextRender(() => opener.focus(), { injector: this.injector });
+    } else if (id) {
       this.focusAfterRender(
         `[data-testid="cli-matrix-tiers-${id}"]`,
-        `[data-testid="cli-matrix-more-${id}"]`,
+        `[data-testid="cli-matrix-row-${id}"] ptah-table-row-expander button`,
       );
+    }
   }
   /** The instance whose Test ran last, for a test that failed before it produced a result. */
   private readonly lastTestedId = signal<string | null>(null);
@@ -431,34 +428,6 @@ export class CliOrchestrationMatrixComponent {
     () =>
       this.testingId() !== null || this.state.cliTest().status === 'loading',
   );
-
-  protected isOpen(rowId: string, kind: OpenCell['kind']): boolean {
-    const open = this.openState();
-    return open?.rowId === rowId && open.kind === kind;
-  }
-
-  protected toggleCell(rowId: string, kind: OpenCell['kind']): void {
-    this.openState.set(this.isOpen(rowId, kind) ? null : { rowId, kind });
-  }
-
-  protected close(): void {
-    this.openState.set(null);
-  }
-
-  protected toggleProviderPopover(cell: CliProviderOpenCell): void {
-    if (this.isOpen(cell.rowId, cell.kind)) this.closeProviderPopover();
-    else this.openState.set(cell);
-  }
-
-  protected closeProviderPopover(): void {
-    const open = this.providerOpenCell();
-    if (!open) return;
-    const movedIntoCollapsedGroup = !this.uninstalledOpen() && this.rows().uninstalled.some(row => row.id === open.rowId);
-    this.close();
-    this.focusAfterRender(movedIntoCollapsedGroup
-      ? '[data-testid="cli-matrix-uninstalled-toggle"]'
-      : `[data-testid="cli-provider-card-${open.rowId}"] [data-popover-kind="${open.kind}"]`);
-  }
 
   /**
    * The install guide's Re-detect: the same re-read as the policy bar's Re-detect CLIs. A CLI that is found
@@ -477,49 +446,8 @@ export class CliOrchestrationMatrixComponent {
       );
       return;
     }
-    this.close();
+    this.providerGrid()?.closeGuide(rowId);
     this.focusAfterRender(`[data-testid="cli-provider-card-${rowId}"] input[type="checkbox"]`);
-  }
-
-  /**
-   * M3: a saved or removed Cursor key moves its row between groups, which re-creates the popover with focus on `body`;
-   * closing returns focus to the row's Credentials trigger wherever the row now is. A removed key moves the row into
-   * the Uninstalled group, which collapses again on close unless the user expanded it: focus then goes to that group's
-   * disclosure button, never `body` (re-check N-2).
-   */
-  /** The "More actions" Delete: the inline confirm replaces the actions, so focus moves to its Cancel. */
-  protected askDelete(rowId: string): void {
-    this.close();
-    this.confirmDelete.set(rowId);
-    this.focusAfterRender(
-      `[data-testid="cli-matrix-delete-confirm-${rowId}"] [data-cancel-delete]`,
-    );
-  }
-
-  protected cancelDelete(rowId: string): void {
-    this.confirmDelete.set(null);
-    this.focusAfterRender(`[data-testid="cli-matrix-more-${rowId}"]`);
-  }
-
-  /** The panel takes focus when positioned; then its first control does (the model search opens its list). */
-  protected focusOpened(): void {
-    this.element.nativeElement
-      .querySelector<HTMLElement>(
-        '[data-testid="cli-matrix-popover"] input:not([disabled]), [data-testid="cli-matrix-popover"] button[aria-pressed="true"]',
-      )
-      ?.focus();
-  }
-
-  protected focusFirstIn(testid: string): void {
-    const buttons = this.element.nativeElement.querySelectorAll<HTMLElement>(
-      `[data-testid="${testid}"] button:not([disabled])`,
-    );
-    for (const button of buttons) {
-      if (getComputedStyle(button).display !== 'none') {
-        button.focus();
-        return;
-      }
-    }
   }
 
   /**
@@ -636,7 +564,7 @@ export class CliOrchestrationMatrixComponent {
   protected async remove(row: InstanceCliMatrixRow): Promise<void> {
     const context = this.state.reviewContext();
     if (!context || this.busy()) return;
-    const result = await this.feedback.save({
+    await this.feedback.save({
       label: `removal of ${row.name}`,
       scope: SAVE_SCOPE,
       write: () =>
@@ -646,8 +574,6 @@ export class CliOrchestrationMatrixComponent {
         ),
       undo: null,
     });
-    // M2: this save's own result, never an earlier commit.
-    if (result === 'saved') this.confirmDelete.set(null);
   }
 
   /** Focuses the first selector present and shown after the next render; later ones are fallbacks. */
@@ -658,7 +584,9 @@ export class CliOrchestrationMatrixComponent {
         for (const selector of selectors) {
           const target = root.querySelector<HTMLElement>(selector);
           // The narrow layout hides inline Tiers and Test (they move into More).
-          if (target && getComputedStyle(target).display !== 'none') {
+          if (target && !target.closest('[hidden], [aria-hidden="true"]') &&
+              getComputedStyle(target).display !== 'none' &&
+              getComputedStyle(target).visibility !== 'hidden') {
             target.focus();
             return;
           }

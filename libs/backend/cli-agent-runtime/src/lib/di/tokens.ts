@@ -1,6 +1,8 @@
 import { AGENT_MESSAGE_DISPATCH_JOURNAL } from '../cli-agents/messaging/agent-message-dispatch-journal.port';
 
 export const CLI_AGENT_RUNTIME_TOKENS = {
+  EXTERNAL_COMPLETION_OUTBOX: Symbol.for('ExternalCompletionOutbox'),
+  EXTERNAL_COMPLETION_RECORDER: Symbol.for('ExternalCompletionRecorder'),
   PARENT_DELIVERY_EVENT_SINK: Symbol.for('ParentDeliveryEventSink'),
   AGENT_MESSAGE_COORDINATOR: Symbol.for('AgentMessageCoordinator'),
   /** Durable lane message envelopes (`AgentMessageEnvelopeStore`). */
@@ -50,6 +52,7 @@ export const CLI_AGENT_RUNTIME_TOKENS = {
    */
   CHILD_CHAT_SESSION_HOST: Symbol.for('ChildChatSessionHost'),
   CHILD_SETTING_ROUTER: Symbol.for('ChildSettingRouter'),
+  CHILD_MEMORY_PROBE: Symbol.for('ChildMemoryProbe'),
   /**
    * `ISessionHandoff` (TASK_2026_655): a session hands its work to a new
    * top-level session with `ptah_session_handoff`. Registered by this lib's

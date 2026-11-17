@@ -9,6 +9,30 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { ChildProcess } from 'node:child_process';
+import { PassThrough } from 'node:stream';
+import spawn from 'cross-spawn';
+
+jest.mock('cross-spawn', () => jest.fn(jest.requireActual('cross-spawn')));
+import { killProcessTree } from '@ptah-extension/platform-core';
+
+jest.mock('@ptah-extension/platform-core', () => {
+  const actual = jest.requireActual<typeof import('@ptah-extension/platform-core')>(
+    '@ptah-extension/platform-core',
+  );
+  return {
+    ...actual,
+    // The default query starts PowerShell. Real children in this suite must not do that.
+    defaultOrphanCleanupDependencies: {
+      ...actual.defaultOrphanCleanupDependencies,
+      query: jest.fn(async () => []),
+      kill: jest.fn(async () => undefined),
+    },
+    killProcessTree: jest.fn((...args: Parameters<typeof killProcessTree>) =>
+      actual.killProcessTree(...args),
+    ),
+  };
+});
 
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
 import type {
@@ -278,6 +302,213 @@ describe('CliPlatformCommands', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('timed out');
+    });
+
+    it('requests a Windows tree stop and reports a launch failure', async () => {
+      const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 45, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      const reaper = jest.mocked(killProcessTree).mockImplementation(async (_pid, _signal, onError) => {
+        onError?.(new Error('ENOENT'));
+      });
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const orphanQuery = jest.fn(async () => []);
+      try {
+        const cmds = new CliPlatformCommands({ authCommandTimeoutMs: 5, processQuery: orphanQuery });
+        const result = await cmds.runAuthCommand({
+          provider: 'openai-codex', name: 'Codex Login',
+          command: 'fake-login',
+        });
+        expect(result.error).toContain('timed out');
+        expect(reaper).toHaveBeenCalledWith(expect.any(Number), 'SIGTERM', expect.any(Function));
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(stderrSpy.mock.calls.some((call) => String(call[0]).includes('tree stop failed'))).toBe(true);
+        expect(fakeChild.kill).toHaveBeenCalledTimes(1);
+        fakeChild.emit('close', null);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(orphanQuery).not.toHaveBeenCalled();
+      } finally {
+        if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
+        reaper.mockImplementation((...args) => jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args));
+      }
+    });
+
+    it('waits for Windows tree termination before the root fallback', async () => {
+      const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      let finishTree: (() => void) | undefined;
+      const reaper = jest.mocked(killProcessTree).mockImplementation(() => new Promise<void>((resolve) => { finishTree = resolve; }));
+      try {
+        const cmds = new CliPlatformCommands({ authCommandTimeoutMs: 5 });
+        const result = await cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        expect(result.error).toContain('timed out');
+        expect(reaper).toHaveBeenCalledWith(42, 'SIGTERM', expect.any(Function));
+        expect(fakeChild.kill).not.toHaveBeenCalled();
+        finishTree?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(fakeChild.kill).toHaveBeenCalledTimes(1);
+        const exitedChild = Object.assign(new ChildProcess(), {
+          pid: 43, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+          stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+        });
+        jest.mocked(spawn).mockImplementationOnce(() => exitedChild);
+        const second = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        await second;
+        exitedChild.exitCode = 0;
+        finishTree?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(exitedChild.kill).not.toHaveBeenCalled();
+        const completedChild = Object.assign(new ChildProcess(), {
+          pid: 44, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+          stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+        });
+        jest.mocked(spawn).mockImplementationOnce(() => completedChild);
+        const count = reaper.mock.calls.length;
+        const completed = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        completedChild.exitCode = 0;
+        completedChild.emit('close', 0);
+        await completed;
+        expect(reaper).toHaveBeenCalledTimes(count);
+      } finally {
+        if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
+        reaper.mockImplementation((...args) => jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args));
+      }
+    });
+
+    it('cleans linked descendants once after a successful Windows close', async () => {
+      const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      const query = jest.fn(async () => [
+        { ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_000).toISOString() },
+        { ProcessId: 44, ParentProcessId: 1, CreationDate: new Date(10_000).toISOString() },
+      ]);
+      const kill = jest.fn(async (_pid: number) => undefined);
+      try {
+        const cmds = new CliPlatformCommands({ processQuery: query, killOrphan: kill, now: () => 10_000 });
+        const result = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        fakeChild.exitCode = 0;
+        fakeChild.emit('close', 0);
+        fakeChild.emit('close', 0);
+        expect((await result).success).toBe(true);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(query).toHaveBeenCalledTimes(2);
+        expect(kill).toHaveBeenCalledTimes(1);
+        expect(kill).toHaveBeenCalledWith(43);
+      } finally {
+        if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
+      }
+    });
+
+    it('starts the orphan cleanup on exit when a held pipe delays close', async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      let now = 10_000;
+      const query = jest.fn(async () => [
+        { ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_050).toISOString() },
+      ]);
+      const kill = jest.fn(async (_pid: number) => undefined);
+      try {
+        const cmds = new CliPlatformCommands({ processQuery: query, killOrphan: kill, now: () => now });
+        const result = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        now = 10_100;
+        fakeChild.emit('exit', 0);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(kill).toHaveBeenCalledWith(43);
+        const queriesBeforeClose = query.mock.calls.length;
+        fakeChild.exitCode = 0;
+        fakeChild.emit('close', 0);
+        expect((await result).success).toBe(true);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(query).toHaveBeenCalledTimes(queriesBeforeClose);
+      } finally {
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      }
+    });
+
+    it('excludes a reused PID child created after exit but before close', async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      let now = 10_000;
+      const query = jest.fn(async () => [
+        { ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_150).toISOString() },
+      ]);
+      const kill = jest.fn(async (_pid: number) => undefined);
+      try {
+        const cmds = new CliPlatformCommands({ processQuery: query, killOrphan: kill, now: () => now });
+        const result = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        now = 10_100;
+        fakeChild.emit('exit', 0);
+        now = 10_200;
+        fakeChild.exitCode = 0;
+        fakeChild.emit('close', 0);
+        expect((await result).success).toBe(true);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(query).toHaveBeenCalledTimes(1);
+        expect(kill).not.toHaveBeenCalled();
+      } finally {
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      }
+    });
+
+    it.each([
+      { name: 'crash', platform: 'win32', code: 12, queryFails: false, killFails: false, queries: 2, kills: 1, reports: 0 },
+      { name: 'query failure', platform: 'win32', code: 0, queryFails: true, killFails: false, queries: 1, kills: 0, reports: 1 },
+      { name: 'kill failure', platform: 'win32', code: 0, queryFails: false, killFails: true, queries: 2, kills: 1, reports: 1 },
+      { name: 'non-Windows', platform: 'linux', code: 0, queryFails: false, killFails: false, queries: 0, kills: 0, reports: 0 },
+    ] as const)('auth command close: $name', async ({ platform, code, queryFails, killFails, queries, kills, reports }) => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      const queryError = new Error('query failed');
+      const killError = new Error('kill failed');
+      const query = jest.fn(async () => {
+        if (queryFails) throw queryError;
+        return [{ ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_000).toISOString() }];
+      });
+      const kill = jest.fn(async (_pid: number) => { if (killFails) throw killError; });
+      try {
+        const cmds = new CliPlatformCommands({ processQuery: query, killOrphan: kill, now: () => 10_000 });
+        const result = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        fakeChild.exitCode = code;
+        fakeChild.emit('close', code);
+        fakeChild.emit('close', code);
+        expect((await result).success).toBe(code === 0);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(query).toHaveBeenCalledTimes(queries);
+        expect(kill).toHaveBeenCalledTimes(kills);
+        const failures = stderrSpy.mock.calls.filter((call) => String(call[0]).includes('orphan cleanup failed'));
+        expect(failures).toHaveLength(reports);
+        if (reports) expect(String(failures[0][0])).toContain(queryFails ? queryError.message : killError.message);
+      } finally {
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      }
     });
 
     it('runs and reports normally when no push sink is configured', async () => {

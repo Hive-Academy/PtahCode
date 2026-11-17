@@ -16,7 +16,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { McpToolProfile } from '@ptah-extension/shared';
+import type { McpToolProfile, ExternalOwnerKey } from '@ptah-extension/shared';
 import type {
   McpCallerBinding,
   McpCallerCapability,
@@ -51,6 +51,8 @@ export interface McpRequestContext {
   readonly callerBinding?: McpCallerBinding;
   /** Privilege copied from the binding. Absent means privileged. */
   readonly callerCapability?: McpCallerCapability;
+  /** Authenticated HTTP connection owner, stamped by the transport. */
+  readonly externalOwner?: ExternalOwnerKey;
   /**
    * Aborted when the caller stops waiting for this call (the HTTP connection
    * closed before the reply). Copied from the transport-owned
@@ -107,6 +109,10 @@ export function getCallerAgentId(): string | undefined {
 /** Credential binding of the in-flight call, if the HTTP gate stamped one. */
 export function getCallerBinding(): McpCallerBinding | undefined {
   return storage.getStore()?.callerBinding;
+}
+
+export function getAuthenticatedExternalOwner(): ExternalOwnerKey | undefined {
+  return storage.getStore()?.externalOwner;
 }
 
 /**

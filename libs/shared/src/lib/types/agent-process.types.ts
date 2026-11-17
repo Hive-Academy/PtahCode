@@ -207,7 +207,16 @@ export interface LaneSpawnPolicyRefusal {
   readonly reason: string;
 }
 
+/** Authenticated external MCP caller identity, separate from a Ptah session. */
+export interface ExternalOwnerKey {
+  readonly transport: 'http' | 'stdio';
+  readonly principal: string;
+  readonly exclusive: boolean;
+}
+
 export interface AgentProcessInfo {
+  /** Admission is waiting for enough free memory. */
+  waitingForMemory?: boolean;
   /** CLI is a placeholder until detection resolves. */
   readonly cliDetectionPending?: boolean;
   /** Ptah MCP attachment warning, when the lane could not use its report tool. */
@@ -436,6 +445,7 @@ export interface SpawnAgentRequest {
   readonly resumePolicy?: EffectiveLanePolicy;
   /** Parent Ptah Claude SDK session ID. Injected by MCP server, NOT set by callers. */
   readonly parentSessionId?: string;
+  readonly externalOwner?: ExternalOwnerKey;
   /** Parent chat level captured by the MCP entry, never supplied by a lane caller. */
   readonly parentLevel?: LanePermissionMode;
   /** Project-specific guidance (enhanced prompts). Injected by MCP server, NOT set by callers. */
@@ -503,6 +513,7 @@ export interface AgentOutput {
 }
 
 export interface SpawnAgentResult {
+  readonly waitingForMemory?: boolean;
   /** CLI is a placeholder until detection resolves. */
   readonly cliDetectionPending?: boolean;
   /** Resolved skill text was included in the spawn prompt. */

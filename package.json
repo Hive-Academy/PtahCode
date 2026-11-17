@@ -36,6 +36,7 @@
     "test:e2e": "jest --config=e2e/jest.config.js --testPathPattern=e2e",
     "clean": "nx reset && rm -rf dist node_modules/.cache",
     "clean:cache": "nx daemon --stop && rm -rf .nx/cache .nx/workspace-data dist/apps/ptah-electron dist/apps/ptah-extension-webview",
+    "clean:stale-nx": "node scripts/perf/clean-stale-nx.mjs",
     "graph": "nx graph",
     "affected": "nx affected",
     "affected:build": "nx affected -t build",

@@ -48,7 +48,7 @@ describe('killProcessTree', () => {
       'C:\\Windows\\System32\\taskkill.exe',
       ['/pid', '4242', '/T', '/F'],
       // A GUI parent (Electron main) would otherwise flash a console window.
-      { windowsHide: true },
+      { windowsHide: true, timeout: 3_000 },
       expect.any(Function),
     );
   });
@@ -66,9 +66,43 @@ describe('killProcessTree', () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       'taskkill',
       ['/pid', '4242', '/T', '/F'],
-      { windowsHide: true },
+      { windowsHide: true, timeout: 3_000 },
       expect.any(Function),
     );
+  });
+
+  it('reports taskkill exit code and stderr', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    mockExecFile.mockImplementationOnce((...args: unknown[]) => {
+      const done = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+      done(Object.assign(new Error('failed'), { code: 5 }), '', 'Access denied');
+    });
+    const onError = jest.fn();
+    await killProcessTree(4242, 'SIGTERM', onError);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('exit code 5): Access denied') }));
+  });
+
+  it('reports taskkill errors when a mock supplies no output arguments', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    mockExecFile.mockImplementationOnce((...args: unknown[]) => {
+      const done = args.at(-1) as (error: Error) => void;
+      done(new Error('failed without output'));
+    });
+    const onError = jest.fn();
+    await killProcessTree(4242, 'SIGTERM', onError);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('failed without output') }));
+  });
+
+  it('accepts a taskkill process-not-found result', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    mockExecFile.mockImplementationOnce((...args: unknown[]) => {
+      const done = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+      done(Object.assign(new Error('failed'), { code: 128 }), '', 'Der Prozess "4242" wurde nicht gefunden.');
+    });
+    const onError = jest.fn();
+    await killProcessTree(4242, 'SIGTERM', onError);
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('escalates a live POSIX process group after the grace period', async () => {
@@ -86,6 +120,36 @@ describe('killProcessTree', () => {
     expect(kill).toHaveBeenCalledWith(-8080, 'SIGTERM');
     expect(kill).toHaveBeenCalledWith(-8080, 0);
     expect(kill).toHaveBeenCalledWith(-8080, 'SIGKILL');
+  });
+
+  it('never signals a reused bare PID in group-only mode', async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const kill = jest.spyOn(process, 'kill').mockImplementation((pid) => {
+      if (pid < 0) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+      return true;
+    });
+    const reaped = killProcessTree(8084, 'SIGTERM', undefined, { groupOnly: true });
+    await jest.advanceTimersByTimeAsync(100);
+    await reaped;
+    expect(kill).not.toHaveBeenCalledWith(8084, 'SIGTERM');
+    expect(kill).not.toHaveBeenCalledWith(8084, 'SIGKILL');
+  });
+
+  it('does not fall back to a bare PID if the group vanishes at escalation', async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const kill = jest.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === -8087 && signal === 'SIGKILL')
+        throw Object.assign(new Error('group gone'), { code: 'ESRCH' });
+      return true;
+    });
+    const reaped = killProcessTree(8087, 'SIGTERM', undefined, { groupOnly: true });
+    await jest.advanceTimersByTimeAsync(PROCESS_TREE_KILL_GRACE_MS);
+    await reaped;
+    expect(kill).toHaveBeenCalledWith(-8087, 0);
+    expect(kill).toHaveBeenCalledWith(-8087, 'SIGKILL');
+    expect(kill).not.toHaveBeenCalledWith(8087, 'SIGKILL');
   });
 
   it('does not escalate when the POSIX process exits on SIGTERM', async () => {

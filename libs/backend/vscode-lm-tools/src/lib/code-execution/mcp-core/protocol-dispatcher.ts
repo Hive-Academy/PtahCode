@@ -50,6 +50,7 @@ import {
   acknowledgeTerminalRead,
 } from '@ptah-extension/cli-agent-runtime';
 import { AgentSpawnArgsSchema } from './agent-spawn-args.schema';
+import { httpSpawnOwnerScope } from './http-spawn-owner-scope';
 import {
   AgentSpawnDedupe,
   agentSpawnTiming,
@@ -76,6 +77,7 @@ import {
   buildAgentWaitTool,
   runAgentWait,
 } from './agent-wait.tool';
+import { markWaitResponse } from './completion-delivery';
 import {
   RUN_CHECK_TOOL_NAME,
   buildRunCheckTool,
@@ -447,6 +449,7 @@ export async function handleMCPRequest(
             callerAgentId: caller.agentId,
             callerToolProfile: resolveMcpToolProfile(request),
             callerBinding: request._callerBinding,
+            externalOwner: request._externalOwner,
             callerCapability: requestCapability(request),
             signal: request._abortSignal,
           },
@@ -1233,14 +1236,7 @@ async function handleIndividualTool(
             const root = knownWorkspaceFolders(deps)[0] ?? process.cwd();
             const callerAgentId = getCallerAgentId();
             const binding = request._callerBinding;
-            const identity = binding?.agentId ?? binding?.sessionId;
-            const scope = JSON.stringify([
-              callerSessionId ?? root,
-              callerAgentId ?? null,
-              !callerSessionId && !callerAgentId && identity
-                ? [binding?.kind, identity]
-                : null,
-            ]);
+            const scope = httpSpawnOwnerScope(root, callerSessionId, callerAgentId, binding, request._externalOwner);
             let agentSpawnDedupe = agentSpawnDedupes.get(ptahAPI);
             if (!agentSpawnDedupe) {
               agentSpawnDedupe = new AgentSpawnDedupe();
@@ -1264,6 +1260,7 @@ async function handleIndividualTool(
                   modelTier,
                   resumeSessionId: spawnArgs.resume_session_id,
                   parentSessionId: callerSessionId,
+                  externalOwner: request._externalOwner,
                   role: spawnArgs.role,
                   phase: spawnArgs.phase,
                   skills: spawnArgs.skills,
@@ -1274,6 +1271,7 @@ async function handleIndividualTool(
                   permission: spawnArgs.permission,
                   network: spawnArgs.network,
                 };
+                const force = spawnArgs.force;
                 const admitted = typeof ptahAPI.agent.beginSpawn === 'function';
                 const ticket = admitted ? ptahAPI.agent.beginSpawn(spawnRequest) : undefined;
                 const pipeline = async () => {
@@ -1302,8 +1300,8 @@ async function handleIndividualTool(
                   try {
                     return await agentSpawnTiming.run(namespaceTiming, () =>
                       ticket
-                        ? ptahAPI.agent.executeSpawn(ticket, spawnRequest)
-                        : ptahAPI.agent.spawn(spawnRequest),
+                        ? ptahAPI.agent.executeSpawn(ticket, spawnRequest, force)
+                        : ptahAPI.agent.spawn(spawnRequest, force),
                     );
                   } finally {
                     spawnedAt = performance.now();
@@ -1326,6 +1324,7 @@ async function handleIndividualTool(
                     cliDetectionPending: !spawnRequest.cli && !ptahCliId,
                     status: 'starting' as const,
                     startedAt: admission.startedAt,
+                    ...(admission.waitingForMemory && { waitingForMemory: true }),
                   }),
                 );
               },
@@ -1358,7 +1357,9 @@ async function handleIndividualTool(
                   'To start another identical lane on purpose, pass force: true or a distinct idempotencyKey.' +
                   (callerSessionId
                     ? ''
-                    : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
+                    : request._externalOwner?.exclusive
+                    ? '\nExternal completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.'
+                    : '\nNo parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
                 deps,
               );
             }
@@ -1469,7 +1470,9 @@ async function handleIndividualTool(
             replyWithLimits +
               (callerSessionId
                 ? ''
-                : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
+                : request._externalOwner?.exclusive
+                    ? '\nExternal completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.'
+                    : '\nNo parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
             deps,
           );
         } finally {
@@ -1811,6 +1814,7 @@ async function handleIndividualTool(
           requestedTimeoutSec,
           HTTP_MAX_AGENT_WAIT_SEC,
         );
+        const terminalIds: string[] = [];
         const text = await runAgentWait(
           { ...parsed.data, timeoutSec },
           {
@@ -1823,6 +1827,9 @@ async function handleIndividualTool(
               );
               for (const entry of result.entries) {
                 if (entry.state !== 'exited') continue;
+                if (entry.info.completedAt && request._externalOwner?.exclusive && !request._callerSessionId?.trim()) {
+                  terminalIds.push(`${entry.agentId}:${entry.info.completedAt}`);
+                }
                 try {
                   const raw = request._callerSessionId;
                   const reader = raw
@@ -1847,7 +1854,7 @@ async function handleIndividualTool(
               : {}),
           },
         );
-        return await createToolSuccessResponse(request, text, deps);
+        return markWaitResponse(await createToolSuccessResponse(request, text, deps), terminalIds);
       }
 
       case RUN_CHECK_TOOL_NAME: {

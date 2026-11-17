@@ -21,6 +21,7 @@
  */
 
 import 'reflect-metadata';
+import { prepareCompletion } from './completion-delivery';
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -29,8 +30,13 @@ import { z } from 'zod';
 import {
   reconcilePendingCompletionRead,
   wasTerminalReadAcknowledged,
+  AgentProcessManager,
+  CliDetectionService,
+  ExternalCompletionOutbox,
+  ExternalCompletionRecorder,
 } from '@ptah-extension/cli-agent-runtime';
-import type { Logger } from '@ptah-extension/vscode-core';
+import { Logger } from '@ptah-extension/vscode-core';
+import type { AgentProcessInfo, SpawnAgentRequest } from '@ptah-extension/shared';
 import {
   countTokens,
   countTokensPiecewise,
@@ -77,6 +83,7 @@ import type {
   SymbolIndexEntry,
 } from '../types';
 import { buildCodeNamespace } from '../namespace-builders/code-namespace.builder';
+import { buildAgentNamespace } from '../namespace-builders/agent-namespace.builder';
 import { buildSessionOrganizationNamespace } from '../namespace-builders/session-organization-namespace.builder';
 import { buildSessionNamespace } from '../namespace-builders/session-namespace.builder';
 import type {
@@ -362,6 +369,24 @@ describe('terminal lane read acknowledgment', () => {
     );
     expect(resolveCallerParentId).toHaveBeenCalledWith('wait-tab-alias');
     expect(wasTerminalReadAcknowledged(key)).toBe(true);
+  });
+
+  it('does not tombstone an HTTP completion when wait has an internal caller session', async () => {
+    const owner = { transport: 'http' as const, principal: 'a'.repeat(32), exclusive: true };
+    const box = new ExternalCompletionOutbox(Object.assign(Object.create(Logger.prototype), { info: jest.fn() }) as Logger);
+    const waitForAgents = jest.fn().mockResolvedValue({
+      mode: 'all', timedOut: false, cancelled: false, waitedMs: 0,
+      entries: [{ agentId: agent.agentId, state: 'exited', info: agent }],
+    });
+    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({ agent: { waitForAgents, read: jest.fn().mockResolvedValue({ stdout: '', stderr: '' }) } }) });
+    const response = await handleMCPRequest(makeRequest({
+      method: 'tools/call', _callerSessionId: 'internal-parent', _externalOwner: owner,
+      params: { name: 'ptah_agent_wait', arguments: { agentIds: [agent.agentId], timeoutSec: 0 } },
+    }), deps);
+    const prepared = prepareCompletion(response, 'tools/call', owner, box, 'http');
+    prepared.success();
+    box.record({ completionId: `${agent.agentId}:${agent.completedAt}`, agentId: agent.agentId, owner, body: 'late', completedAt: agent.completedAt ?? '', recordedAt: Date.now() });
+    expect(box.pendingCount(owner)).toBe(1);
   });
 
   it.each(['status', 'resolver', 'cancellation'] as const)(
@@ -4378,6 +4403,42 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
     startedAt: '2026-09-13T00:00:00Z',
   };
 
+  it('records a dispatcher spawn under the authenticated owner through the builder and recorder', async () => {
+    const logger = Object.assign(Object.create(Logger.prototype) as Logger, { error: jest.fn(), info: jest.fn(), warn: jest.fn() });
+    const outbox = new ExternalCompletionOutbox(logger);
+    const recorder = new ExternalCompletionRecorder(logger, outbox);
+    const authenticated = { transport: 'http' as const, principal: 'b'.repeat(32), exclusive: true };
+    const forged = { ...authenticated, principal: 'a'.repeat(32) };
+    let sequence = 0;
+    const manager = Object.assign(Object.create(AgentProcessManager.prototype) as AgentProcessManager, {
+      spawn: jest.fn(async (request: SpawnAgentRequest) => {
+        const agentId = `lane-${++sequence}`;
+        recorder.recordFromSignal(
+          { agentId, completedAt: '2026-11-17T00:00:00Z' } as AgentProcessInfo,
+          request.externalOwner,
+          { delivered: false, reason: 'no-parent-recorded', completion: { parentSignal: `<agent-lane-completed>${agentId}</agent-lane-completed>`, verdict: 'delivered', phaseKind: null, executorId: 'codex', deliverableCheck: [], toolProfileAdapter: null } },
+        );
+        return { agentId, cli: 'codex' as const, status: 'running' as const, startedAt: '2026-11-17T00:00:00Z' };
+      }),
+    });
+    const detection = Object.create(CliDetectionService.prototype) as CliDetectionService;
+    const namespace = buildAgentNamespace({ agentProcessManager: manager, cliDetectionService: detection, getWorkspaceRoot: () => '/ws', logger });
+    const deps = spawnDeps(jest.fn(namespace.spawn));
+    const rejected = await handleMCPRequest({ ...spawnRequest({ task: 'forged lane', cli: 'codex', externalOwner: forged }), _externalOwner: authenticated }, deps);
+    expect(JSON.stringify(rejected.result)).toContain('Unrecognized key');
+    expect(outbox.pendingCount(authenticated)).toBe(0);
+    const result = await handleMCPRequest({ ...spawnRequest({ task: 'authenticated lane', cli: 'codex' }), _externalOwner: authenticated }, deps);
+    expect(manager.spawn).toHaveBeenCalledTimes(1);
+    expect(result.error).toBeUndefined();
+    expect(outbox.pendingCount(authenticated)).toBe(1);
+    expect(outbox.pendingCount(forged)).toBe(0);
+    const code = `return await ptah.agent.spawn({ task: 'code path lane', cli: 'codex', externalOwner: { transport: 'http', principal: '${forged.principal}', exclusive: true } })`;
+    await handleMCPRequest({ ...makeRequest({ id: 'code-owner', method: 'tools/call', params: { name: 'execute_code', arguments: { code } } }), _externalOwner: authenticated }, deps);
+    expect(manager.spawn).toHaveBeenCalledTimes(2);
+    expect(outbox.pendingCount(authenticated)).toBe(2);
+    expect(outbox.pendingCount(forged)).toBe(0);
+  });
+
   it('replays simultaneous and later identical requests with one lane ID', async () => {
     const spawn = jest.fn().mockResolvedValue(spawned);
     const deps = spawnDeps(spawn);
@@ -4395,6 +4456,20 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
     );
     // The request has no parent session, so the replay keeps the warning.
     expect(agentToolResult(later).text).toContain('No parent session');
+  });
+
+  it('deduplicates within an HTTP owner while separating identical spawns across owners', async () => {
+    const spawn = jest.fn()
+      .mockResolvedValueOnce({ ...spawned, agentId: 'first-owner' })
+      .mockResolvedValueOnce({ ...spawned, agentId: 'second-owner' });
+    const deps = spawnDeps(spawn);
+    const args = { task: 'owner-isolated retry task', cli: 'codex' };
+    const first = { ...spawnRequest(args), _externalOwner: { transport: 'http' as const, principal: 'a'.repeat(32), exclusive: true } };
+    const second = { ...spawnRequest(args), _externalOwner: { transport: 'http' as const, principal: 'b'.repeat(32), exclusive: true } };
+    await handleMCPRequest(first, deps);
+    await handleMCPRequest(second, deps);
+    await handleMCPRequest(first, deps);
+    expect(spawn).toHaveBeenCalledTimes(2);
   });
 
   it('replays a running lane but spawns again after that lane fails', async () => {
@@ -4762,6 +4837,7 @@ describe('protocol-handlers › ptah_agent_spawn shared schema', () => {
         cli: 'codex',
         role: 'reviewer',
       }),
+      undefined,
     );
     const { text, isError } = agentToolResult(res);
     expect(isError).toBeUndefined();

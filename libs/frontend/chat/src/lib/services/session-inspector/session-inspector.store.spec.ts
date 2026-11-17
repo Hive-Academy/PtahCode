@@ -10,6 +10,7 @@ import {
   type SessionStatsEntry,
 } from '@ptah-extension/shared';
 import { SessionAgentRosterService } from '../session-agents/session-agent-roster.service';
+import type { SessionAgent } from '../session-agents/session-agent-roster';
 import { SessionInspectorStore } from './session-inspector.store';
 
 function stats(overrides: Partial<SessionStatsEntry> = {}): SessionStatsEntry {
@@ -47,10 +48,12 @@ function tab(overrides: Partial<TabState> = {}): TabState {
 describe('SessionInspectorStore', () => {
   const revision = signal(0);
   const tabs = new Map<string, TabState>();
+  let roster: readonly SessionAgent[];
   let store: SessionInspectorStore;
 
   beforeEach(() => {
     tabs.clear();
+    roster = [];
     revision.set(0);
     TestBed.configureTestingModule({
       providers: [
@@ -69,7 +72,7 @@ describe('SessionInspectorStore', () => {
         {
           provide: SessionAgentRosterService,
           useValue: {
-            roster: () => [],
+            roster: () => roster,
             requestsForTab: () => ({ permissions: [], questions: [] }),
           },
         },
@@ -86,6 +89,37 @@ describe('SessionInspectorStore', () => {
     tabs.set(current.id, current);
     revision.update((value) => value + 1);
   }
+
+  function agent(status: SessionAgent['status'], key: string): SessionAgent {
+    return {
+      key, kind: 'subagent', name: key, cliId: null, agentType: null,
+      status, startedAt: 1, endedAt: status === 'done' ? 2 : null,
+      activity: null, openRequestIds: [],
+    };
+  }
+
+  it.each(['streaming', 'awaiting-background'] as const)(
+    'counts a starting agent as live while the session is %s', (status) => {
+      roster = [agent('starting', 'sub:starting')];
+      const current = tab({ status });
+      put(current);
+      expect(store.modelFor(current.id)().orchestrator.state).toEqual({
+        kind: 'waiting', agents: 1,
+      });
+    },
+  );
+
+  it('groups a starting agent as active before a done agent', () => {
+    roster = [agent('done', 'sub:done'), agent('starting', 'sub:starting')];
+    const current = tab();
+    put(current);
+    const agents = store.modelFor(current.id)().agents;
+    expect(agents.status).toBe('ready');
+    expect(agents.data?.active).toBe(1);
+    expect(agents.data?.rows.map((row) => row.agent.key)).toEqual([
+      'sub:starting', 'sub:done',
+    ]);
+  });
 
   it('reports unavailable tokens when the host omits tokenCount', () => {
     const current = tab({ sessionStats: stats() });

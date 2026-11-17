@@ -84,7 +84,7 @@ export interface PtahUiAgentsInput {
 }
 
 export type PtahUiAgentStatus =
-  'pending' | 'running' | 'completed' | 'failed' | 'stopped';
+  'pending' | 'starting' | 'running' | 'completed' | 'failed' | 'stopped';
 
 export interface PtahUiAgentContext {
   readonly tokens: number;
@@ -130,7 +130,7 @@ const UNAVAILABLE = 'unavailable';
 
 const STATUS_MAP: Readonly<Record<string, PtahUiAgentStatus>> = {
   pending: 'pending',
-  starting: 'running',
+  starting: 'starting',
   running: 'running',
   streaming: 'running',
   resumed: 'running',
@@ -485,7 +485,7 @@ function aggregate(rows: readonly PtahUiAgentRow[]): PtahUiAgentsScalars {
   let tokens: number | null = 0;
   let cost: number | null = 0;
   for (const row of rows) {
-    if (row.status === 'running') running += 1;
+    if (row.status === 'starting' || row.status === 'running') running += 1;
     else if (row.status === 'completed') completed += 1;
     else if (row.status === 'failed') failed += 1;
     tokens =
@@ -496,7 +496,7 @@ function aggregate(rows: readonly PtahUiAgentRow[]): PtahUiAgentsScalars {
 }
 
 function isTerminal(status: PtahUiAgentStatus): boolean {
-  return status !== 'pending' && status !== 'running';
+  return status !== 'pending' && status !== 'starting' && status !== 'running';
 }
 
 function amountOrNull(value: number | null | undefined): number | null {

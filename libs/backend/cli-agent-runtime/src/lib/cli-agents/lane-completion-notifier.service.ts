@@ -90,6 +90,7 @@ import type {
   SessionChildCompletionEnvelope,
   SessionChildCompletionRefusalReason,
   SessionChildCompletionSubject,
+  SessionChildRollbackStep,
   SessionChildSettle,
 } from '../session-children/session-spawner.port';
 
@@ -266,7 +267,8 @@ export function buildSessionChildCompletionEnvelope(
   settle: SessionChildSettle,
   deliverables: readonly LaneDeliverableCheck[],
 ): SessionChildCompletionEnvelope {
-  const verdict = sessionChildVerdictOf(settle.status, deliverables);
+  const verdict = subject.neverStartedReason?.startsWith('cancelled before start')
+    ? 'unverified' : sessionChildVerdictOf(settle.status, deliverables);
   const startedMs = Date.parse(subject.startedAt);
   const completedMs = Date.parse(settle.completedAt);
   const durationMs =
@@ -284,11 +286,15 @@ export function buildSessionChildCompletionEnvelope(
   ].join(' ');
 
   const lines: string[] = [
-    `Child session ${subject.label} settled: ${settle.status} after ` +
-      `${formatDuration(durationMs)} (settled turn ${settle.turn}).`,
+    subject.neverStartedReason
+      ? `Child session ${subject.label} did not start: ${subject.neverStartedReason}.`
+      : `Child session ${subject.label} settled: ${settle.status} after ` +
+        `${formatDuration(durationMs)} (settled turn ${settle.turn}).`,
     `Task: ${headline(subject.task) || '(no task headline)'}`,
     `Branch: ${subject.branch}`,
-    `Worktree: ${subject.worktreePath}`,
+    subject.neverStartedReason
+      ? rollbackResourceLine(subject.rollback, subject.worktreePath, subject.branch)
+      : `Worktree: ${subject.worktreePath}`,
   ];
   if (settle.status === 'handed-off' && subject.succeededBy) {
     lines.push(
@@ -313,7 +319,9 @@ export function buildSessionChildCompletionEnvelope(
   lines.push(`Reports sent by this child so far: ${subject.reportsDelivered}.`);
   const recap = subject.lastRecap?.trim();
   if (recap) lines.push(`Last message: ${recap}`);
-  lines.push(sessionChildNextAction(verdict));
+  lines.push(subject.neverStartedReason
+    ? 'Next: review the reason and start a new child if the task still needs work; this admission holds no slot.'
+    : sessionChildNextAction(verdict));
 
   const text = `<agent-lane-completed ${attrs}>\n${lines.join(
     '\n',
@@ -333,6 +341,25 @@ export function buildSessionChildCompletionEnvelope(
       toolProfileApplied: subject.toolProfileApplied,
     }),
   };
+}
+
+function rollbackResourceLine(
+  rollback: readonly SessionChildRollbackStep[] | undefined,
+  worktreePath: string,
+  branch: string,
+): string {
+  const failed = rollback?.filter((step) => !step.ok) ?? [];
+  if (!failed.length) return 'No worktree or child tab was created.';
+  const resources = failed.map(({ step }) => {
+    switch (step) {
+      case 'remove-worktree': return `worktree ${worktreePath}`;
+      case 'delete-branch': return `branch ${branch}`;
+      case 'remove-link': return 'child tab or link';
+      case 'release-mcp-root': return 'Ptah tool access for the worktree';
+      case 'release-policy': return 'child permission policy';
+    }
+  });
+  return `Rollback incomplete; may remain: ${resources.join(', ')}.`;
 }
 
 export interface LaneCompletionContext {

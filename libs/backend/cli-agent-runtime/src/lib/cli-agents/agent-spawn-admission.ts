@@ -4,9 +4,20 @@ import type { TrackedAgent } from './tracked-agent';
 export interface SpawnAdmission {
   readonly agentId: AgentId;
   readonly startedAt: string;
+  waitingForMemory?: boolean;
 }
 
 export const SPAWN_ADMISSION_WATCHDOG_MS = 120_000;
+
+/** Arm the admission watchdog before preparation and again after memory release. */
+export function armSpawnAdmissionWatchdog(
+  tracked: TrackedAgent,
+  fail: () => void,
+): void {
+  if (tracked.info.status !== 'starting' || tracked.admissionTimer) return;
+  tracked.admissionTimer = setTimeout(fail, SPAWN_ADMISSION_WATCHDOG_MS);
+  tracked.admissionTimer.unref?.();
+}
 
 /** A handleless record that is addressable while detection and preflight run. */
 export function startingAgent(info: AgentProcessInfo): TrackedAgent {

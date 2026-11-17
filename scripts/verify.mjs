@@ -22,8 +22,8 @@
 // tests run with 1 Nx task and 2 Jest workers (jest.preset.js). Mixed runs
 // finish lint/typecheck first, then tests, under the same lock slot.
 
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -42,6 +42,8 @@ import {
   slotCount,
 } from './verify-lock.mjs';
 import { planPhases } from './verify-args.mjs';
+import { isLinkedWorktree, nxChildEnv } from './verify-nx-env.mjs';
+import { observeExit, stopWithFallback } from './lib/kill-tree.mjs';
 
 const require = createRequire(import.meta.url);
 const log = (message) =>
@@ -128,22 +130,6 @@ function spawnCommand(command, args, env) {
   });
 }
 
-// child.kill() ends only the direct child. Nx and Jest workers below it would
-// keep running after the lock is released, so stop the whole tree or group.
-function killTree(child, signal) {
-  if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
-      stdio: 'ignore',
-    });
-  } else {
-    try {
-      process.kill(-child.pid, signal);
-    } catch {
-      // The group is already gone.
-    }
-  }
-}
-
 function printStatus() {
   console.log(`lock dir: ${lockPaths().dir}`);
   console.log(
@@ -197,15 +183,34 @@ async function main() {
   const runs = Array.isArray(run) ? run : [run];
   const task = values.task ?? runs.map((phase) => phase.task).join(' then ');
   const worktree = process.cwd();
+  const { env: runEnv, daemonDisabled } = values.exec
+    ? { env: process.env, daemonDisabled: false }
+    : nxChildEnv(
+        process.env,
+        // Anchor on this script's checkout, not on cwd, so a run from a
+        // subdirectory still finds the root `.git` entry.
+        isLinkedWorktree(
+          path.resolve(import.meta.dirname, '..', '.git'),
+          (entry) => statSync(entry, { throwIfNoEntry: false }),
+        ),
+      );
 
   let child = null;
   let interrupted = null;
+  let settleInterruptedPhase = null;
+  let interruptionTimer = null;
   const onSignal = (signal) => {
     interrupted = signal;
     if (child) {
       // The child usually got the same Ctrl-C from the console. Stop the
       // whole tree anyway for kill/SIGTERM, then release after it exits.
-      killTree(child, signal);
+      const result = stopWithFallback(child, signal);
+      if (!result.ok)
+        log(`the tree stop failed for PID ${child.pid}. Descendants can still run after the lock release. Examine them with "node scripts/verify.mjs --status" and "npm run clean:stale-nx".`);
+      if (!result.ok && settleInterruptedPhase && !interruptionTimer) {
+        interruptionTimer = setTimeout(() => settleInterruptedPhase?.(1), 5_000);
+        interruptionTimer.unref();
+      }
     } else {
       log(`${signal} while waiting. Leaving the queue.`);
       process.exit(130);
@@ -223,6 +228,8 @@ async function main() {
     const waited = Math.round((Date.now() - waitStart) / 1000);
     log(`lock slot ${lock.slot} acquired after ${waited}s: ${task}`);
   }
+  if (daemonDisabled)
+    log('linked worktree: running Nx with NX_DAEMON=false');
 
   const runStart = Date.now();
   // Every phase runs even when an earlier one failed, so one verify reports
@@ -231,10 +238,12 @@ async function main() {
   for (const phase of runs) {
     log(`starting ${phase.task}`);
     const phaseCode = await new Promise((resolve) => {
+      settleInterruptedPhase = resolve;
       child = spawnCommand(phase.command, phase.args, {
-        ...process.env,
+        ...runEnv,
         [TOKEN_ENV]: lock.entry.token,
       });
+      observeExit(child);
       if (!lock.reentrant && child.pid)
         recordChild(lock.entry, child.pid, lock.slot);
       child.on('error', (error) => {
@@ -245,10 +254,17 @@ async function main() {
         resolve(exitCode ?? (signal ? 1 : 0)),
       );
     });
-    if (process.platform !== 'win32' && child.pid) {
-      // Descendants that outlived the direct child must not overlap the next
-      // holder. On Windows the kill-on-close job object covers the same case.
-      killTree(child, 'SIGTERM');
+    if (interruptionTimer) clearTimeout(interruptionTimer);
+    interruptionTimer = null;
+    settleInterruptedPhase = null;
+    // A phase leader may exit while descendants still hold its POSIX group.
+    if (process.platform !== 'win32' && child?.pid) {
+      try {
+        process.kill(-child.pid, 0);
+        process.kill(-child.pid, 'SIGTERM');
+      } catch (error) {
+        if (error?.code !== 'ESRCH') log(`process group cleanup failed: ${error}`);
+      }
     }
     child = null;
     if (!code) code = phaseCode;

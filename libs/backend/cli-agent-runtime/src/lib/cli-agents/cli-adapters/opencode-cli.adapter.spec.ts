@@ -209,6 +209,32 @@ describe('OpencodeCliAdapter', () => {
   });
 
   describe('listModels()', () => {
+    it('tree-kills the model probe once on timeout', async () => {
+      // The worker has not forwarded exit; the fake child deliberately emits no exit event.
+      jest.useFakeTimers();
+      const realPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      try {
+        mockResolveCliPath.mockResolvedValue('/usr/local/bin/opencode');
+        const models = adapter.listModels();
+        await jest.advanceTimersByTimeAsync(8000);
+        expect(await models).toEqual([]);
+        expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
+        expect(mockKillProcessTree).toHaveBeenCalledWith(
+          FAKE_PID,
+          'SIGTERM',
+          undefined,
+          { groupOnly: process.platform !== 'win32' },
+        );
+        expect(mockSpawnCli.mock.calls.at(-1)?.[2]?.windowsJobPolicy ?? 'no-job').toBe('no-job');
+        expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/opencode', ['models'],
+          expect.objectContaining({ detached: true }));
+        expect(currentChild?.kill).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        jest.useRealTimers();
+      }
+    });
     it('parses `opencode models` stdout into provider/model ids', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/opencode');
       const models = adapter.listModels();
@@ -622,12 +648,14 @@ describe('OpencodeCliAdapter', () => {
 
     it('passes --standalone before the prompt when run --help lists it', async () => {
       const args = await runArgs({ ...baseOptions, mcpPort: 51820 });
+      expect(mockSpawnCli.mock.calls.at(-1)?.[2]).toEqual(expect.objectContaining({ windowsJobPolicy: 'job' }));
 
       expect(mockHelpProbe).toHaveBeenCalledWith(
         'opencode',
         ['run', '--help'],
         {
           spawner: undefined,
+          detached: true,
         },
       );
       expect(args).toContain('--standalone');
@@ -879,11 +907,29 @@ describe('OpencodeCliAdapter', () => {
       currentChild?.stdout.write(JSON.stringify({
         type: 'text', sessionID: 'ses_foreign', part: { id: 'part_1', text: 'foreign' },
       }) + '\n');
+      await Promise.resolve();
       currentChild?.emitClose(0);
       expect(await handle.done).toBe(1);
-      expect(currentChild?.kill).toHaveBeenCalled();
+      await Promise.resolve();
+      expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
+      expect(mockKillProcessTree).toHaveBeenCalledWith(
+        FAKE_PID,
+        'SIGTERM',
+        undefined,
+        { groupOnly: process.platform !== 'win32' },
+      );
+      expect(currentChild?.kill).not.toHaveBeenCalled();
       expect(segments.some((s) => s.type === 'error' && s.content.includes('session-mismatch'))).toBe(true);
       expect(segments.some((s) => s.type === 'text')).toBe(false);
+    });
+
+    it('does not terminate a closed child for a trailing session mismatch', async () => {
+      const handle = await adapter.runSdk({ ...baseOptions, resumeSessionId: 'ses_expected' });
+      currentChild?.stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_foreign' }));
+      currentChild?.emitClose(0);
+      expect(await handle.done).toBe(1);
+      await Promise.resolve();
+      expect(mockKillProcessTree).not.toHaveBeenCalled();
     });
 
     it('emits only the appended delta for repeated text on the same part id', async () => {

@@ -173,7 +173,7 @@ const CODEX_EXHAUSTED = codexLane({
 type AgentStub = Pick<AgentNamespace, 'spawn' | 'list' | 'limits'>;
 
 interface Harness {
-  readonly spawn: jest.Mock<Promise<SpawnAgentResult>, [SpawnAgentRequest]>;
+  readonly spawn: jest.Mock<Promise<SpawnAgentResult>, [SpawnAgentRequest, boolean | undefined]>;
   readonly list: jest.Mock<Promise<CliDetectionResult[]>, []>;
   readonly limits: jest.Mock<
     Promise<readonly AgentLimit[] | undefined>,
@@ -183,7 +183,7 @@ interface Harness {
 }
 
 function harness(outcome: SpawnAgentResult | Error): Harness {
-  const spawn = jest.fn<Promise<SpawnAgentResult>, [SpawnAgentRequest]>(
+  const spawn = jest.fn<Promise<SpawnAgentResult>, [SpawnAgentRequest, boolean | undefined]>(
     async () => {
       if (outcome instanceof Error) throw outcome;
       return outcome;
@@ -428,11 +428,12 @@ describe.each([
       const owner = caller?.trim() || undefined;
       expect(h.spawn).toHaveBeenCalledWith(
         expect.objectContaining({ parentSessionId: owner }),
+        undefined,
       );
       const sentence =
         _name === 'protocol'
-          ? 'No parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'
-          : 'No parent session: completion signals and reports will not be pushed. Use agent_wait / agent_status / agent_read.';
+          ? 'No parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'
+          : 'External completion: check the next tool result for a Completion ID block, or call agent_wait to wait. Use agent_status / agent_read.';
       expect(result.text.includes(sentence)).toBe(!owner);
       if (!owner) {
         expect(logger.warn).toHaveBeenCalledWith(

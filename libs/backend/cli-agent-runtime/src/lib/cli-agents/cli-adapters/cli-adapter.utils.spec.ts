@@ -56,6 +56,7 @@ import { SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
 import { transformAgentBody } from '@ptah-extension/harness-sync';
 
 import {
+  defaultOrphanCleanupDependencies,
   killProcessTree,
   PROCESS_TREE_KILL_GRACE_MS as KILL_GRACE_PERIOD,
 } from '@ptah-extension/platform-core';
@@ -951,6 +952,106 @@ describe('spawnCli', () => {
     setPlatform(realPlatform);
   });
 
+  it('forwards job policy and defaults to no-job on the spawner path', () => {
+    const { spawner, requests } = createFakeSpawner();
+    spawnCli('node', [], { spawner, windowsJobPolicy: 'job' });
+    spawnCli('node', [], { spawner });
+    expect(requests.map((request) => request.windowsJobPolicy)).toEqual(['job', 'no-job']);
+    expect(mockCrossSpawn).not.toHaveBeenCalled();
+  });
+
+  it.each(['omitted', 'no-job', 'switch-off'] as const)('does not assign for %s', (mode) => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const assignToNewJob = jest.fn();
+    const settingEnabled = jest.fn(() => mode !== 'switch-off');
+    const previous = process.env['PTAH_WINDOWS_JOBS'];
+    delete process.env['PTAH_WINDOWS_JOBS'];
+    try {
+      spawnCli('node', [], {
+        windowsJobPolicy: mode === 'omitted' ? undefined : mode === 'no-job' ? 'no-job' : 'job',
+        windowsJob: { assigner: { assignToNewJob }, settingEnabled, logger: { debug: jest.fn(), error: jest.fn() } },
+      });
+      expect(assignToNewJob).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env['PTAH_WINDOWS_JOBS'];
+      else process.env['PTAH_WINDOWS_JOBS'] = previous;
+    }
+  });
+
+  it.each(['exit', 'stop'] as const)('assigns once and closes once on %s', (mode) => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const close = jest.fn();
+    const assignToNewJob = jest.fn(() => ({ close }));
+    const logger = { debug: jest.fn(), error: jest.fn() };
+    const handle = spawnCli('node', [], { windowsJobPolicy: 'job',
+      windowsJob: { assigner: { assignToNewJob }, settingEnabled: () => true, logger } });
+    expect(assignToNewJob).toHaveBeenCalledWith(child.pid);
+    expect(assignToNewJob).toHaveBeenCalledTimes(1);
+    expect(mockCrossSpawn).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(`[WindowsJob] assigned pid=${child.pid} root=process`);
+    expect(close).not.toHaveBeenCalled();
+    if (mode === 'stop') handle.kill();
+    child.emit('exit', 0);
+    handle.kill();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps one usable child when the setting reader throws', () => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const failure = new Error('setting failed');
+    const assignToNewJob = jest.fn();
+    const logger = { debug: jest.fn(), error: jest.fn() };
+    const handle = spawnCli('node', [], { windowsJobPolicy: 'job', windowsJob: {
+      assigner: { assignToNewJob }, settingEnabled: () => { throw failure; }, logger,
+    } });
+    expect(handle.pid).toBe(child.pid);
+    expect(mockCrossSpawn).toHaveBeenCalledTimes(1);
+    expect(assignToNewJob).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('snapshot cleanup active'), failure);
+  });
+
+  it('logs a close failure once with root context', () => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const failure = new Error('close failed');
+    const close = jest.fn(() => { throw failure; });
+    const logger = { debug: jest.fn(), error: jest.fn() };
+    const handle = spawnCli('node', [], { windowsJobPolicy: 'job', windowsJob: {
+      assigner: { assignToNewJob: () => ({ close }) }, settingEnabled: () => true, logger,
+    } });
+    child.emit('exit', 0);
+    handle.kill();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(`[WindowsJob] close failed pid=${child.pid} root=process`, failure);
+  });
+
+  it.each([false, true])('keeps snapshot cleanup after assignment (failure=%s)', async (fails) => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const error = new Error('native failure');
+    const assignToNewJob = jest.fn(() => { if (fails) throw error; return { close: jest.fn() }; });
+    const logger = { debug: jest.fn(), error: jest.fn() };
+    const query = jest.spyOn(defaultOrphanCleanupDependencies, 'query').mockResolvedValue([]);
+    try {
+      spawnCli('node', [], { windowsJobPolicy: 'job', cleanupOrphanDescendants: true,
+        windowsJob: { assigner: { assignToNewJob }, settingEnabled: () => true, logger } });
+      child.emit('exit', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalled();
+      expect(mockCrossSpawn).toHaveBeenCalledTimes(1);
+      if (fails) expect(logger.error).toHaveBeenCalledWith(
+        `[WindowsJob] assignment failed pid=${child.pid} root=process; snapshot cleanup active`, error);
+    } finally { query.mockRestore(); }
+  });
+
   it('spawns inline through cross-spawn when no spawner is supplied', () => {
     // The no-regression assertion. Without an injected spawner nothing about
     // the launch changed: same `cross-spawn` call, same options.
@@ -974,6 +1075,34 @@ describe('spawnCli', () => {
     expect(handle.stdout).toBe(child.stdout);
   });
 
+  it('cleans only descendants created before an inline Windows child exits', async () => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    let now = 10_000;
+    const nowSpy = jest.spyOn(defaultOrphanCleanupDependencies, 'now').mockImplementation(() => now);
+    const query = jest.spyOn(defaultOrphanCleanupDependencies, 'query').mockImplementation(async () => [
+      { ProcessId: 43, ParentProcessId: child.pid, CreationDate: new Date(10_050).toISOString() },
+      { ProcessId: 44, ParentProcessId: child.pid, CreationDate: new Date(10_150).toISOString() },
+    ]);
+    const kill = jest.spyOn(defaultOrphanCleanupDependencies, 'kill').mockImplementation(async () => undefined);
+    try {
+      spawnCli('opencode.cmd', ['run'], { cleanupOrphanDescendants: true });
+      now = 10_100;
+      child.emit('exit', 0);
+      now = 10_200;
+      child.emit('close', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(kill).toHaveBeenCalledTimes(1);
+      expect(kill).toHaveBeenCalledWith(43);
+    } finally {
+      nowSpy.mockRestore();
+      query.mockRestore();
+      kill.mockRestore();
+    }
+  });
+
   it('delegates to the injected spawner instead of cross-spawn', () => {
     const { spawner, requests } = createFakeSpawner();
 
@@ -991,6 +1120,7 @@ describe('spawnCli', () => {
     // The clean-env defaults still apply, and the caller's env wins over them.
     expect(requests[0].env['NO_COLOR']).toBe('1');
     expect(requests[0].env['OPENCODE_CONFIG_CONTENT']).toBe('{}');
+    expect(requests[0].cleanupOrphanDescendants).toBe(false);
   });
 
   it('forwards needsConsole and detached to the spawner on POSIX', () => {
@@ -1010,6 +1140,16 @@ describe('spawnCli', () => {
     spawnCli('opencode.cmd', [], { detached: true, spawner });
 
     expect(requests[0].detached).toBe(false);
+  });
+
+  it('forwards the explicit runtime orphan cleanup opt-in on Windows', () => {
+    setPlatform('win32');
+    const { spawner, requests } = createFakeSpawner();
+    spawnCli('opencode.cmd', ['run'], {
+      detached: true, cleanupOrphanDescendants: true, spawner,
+    });
+    expect(requests[0].detached).toBe(false);
+    expect(requests[0].cleanupOrphanDescendants).toBe(true);
   });
 });
 
@@ -1059,7 +1199,7 @@ describe('probeCliVersion', () => {
       expect(mockExecFile).toHaveBeenCalledWith(
         expect.stringContaining('taskkill'),
         ['/pid', '8675', '/T', '/F'],
-        { windowsHide: true },
+        { windowsHide: true, timeout: 3_000 },
         expect.any(Function),
       );
     } finally {
@@ -1160,7 +1300,7 @@ describe('probeCliVersion', () => {
       expect(mockExecFile).toHaveBeenCalledWith(
         expect.stringContaining('taskkill'),
         ['/pid', '8675', '/T', '/F'],
-        { windowsHide: true },
+        { windowsHide: true, timeout: 3_000 },
         expect.any(Function),
       );
     } finally {

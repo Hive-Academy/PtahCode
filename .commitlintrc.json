@@ -42,6 +42,7 @@
         "platform-cli",
         "platform-electron",
         "platform-vscode",
+        "windows-job-native",
         "agent-sdk",
         "agent-generation",
         "auth-providers",

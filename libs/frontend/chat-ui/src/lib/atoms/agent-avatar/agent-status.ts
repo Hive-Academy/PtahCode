@@ -22,6 +22,7 @@ export function cliLaneStatusWord(
   if (openRequests > 0) return 'waiting';
   switch (status) {
     case 'starting':
+      return 'starting';
     case 'running':
       return 'running';
     case 'completed':

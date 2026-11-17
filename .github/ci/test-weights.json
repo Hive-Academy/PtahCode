@@ -59,6 +59,7 @@
     "@ptah-extension/voice-providers": 0.713,
     "@ptah-extension/vscode-core": 11.983,
     "@ptah-extension/vscode-lm-tools": 183.243,
+    "@ptah-extension/windows-job-native": 5,
     "@ptah-extension/workspace-indexing": 14.928,
     "@ptah-extension/workspace-intelligence": 52.273,
     "mcp-bench": 83.428,

@@ -1,3 +1,4 @@
+import type { CliWindowsJobDependencies } from './cli-windows-job';
 /**
  * opencode CLI Adapter (`opencode`)
  *
@@ -189,6 +190,7 @@ interface OpencodeTurnState {
 
 /** Everything one `opencode run` spawn needs; see `runTurn`. */
 interface OpencodeTurnLaunch {
+  readonly windowsJobPolicy: 'job' | 'no-job';
   readonly turnNumber: number;
   readonly runId?: string;
   readonly requestedModelId?: string;
@@ -316,7 +318,7 @@ export class OpencodeCliAdapter implements CliAdapter {
    *   synchronous `CreateProcessW` that cost 300-900 ms of event-loop lag per
    *   rival-CLI launch (TASK_2026_367).
    */
-  constructor(private readonly spawner?: IProcessSpawner, private readonly logger?: Pick<Logger, 'error'>) {}
+  constructor(private readonly spawner?: IProcessSpawner, private readonly logger?: Pick<Logger, 'error'>, private readonly windowsJob?: CliWindowsJobDependencies) {}
 
   /** `run --help` probe result per binary; see `supportsStandalone`. */
   private readonly standaloneSupport = new Map<
@@ -429,7 +431,8 @@ export class OpencodeCliAdapter implements CliAdapter {
     return new Promise((resolve) => {
       let stdout = '';
       let settled = false;
-      const child = spawnCli(binary, args, { spawner: this.spawner });
+      let childClosed = false;
+      const child = spawnCli(binary, args, { spawner: this.spawner, detached: true });
 
       const finish = (outcome: {
         stdout: string;
@@ -444,7 +447,13 @@ export class OpencodeCliAdapter implements CliAdapter {
       };
 
       const timer = setTimeout(() => {
-        child.kill();
+        void child.whenSpawned.then((pid) => {
+          if (pid && !childClosed && !child.killed) {
+            void killProcessTree(pid, 'SIGTERM', undefined, {
+              groupOnly: process.platform !== 'win32',
+            });
+          }
+        });
         finish({ stdout: '', exitCode: null, timedOut: true, errored: false });
       }, timeoutMs);
 
@@ -453,6 +462,7 @@ export class OpencodeCliAdapter implements CliAdapter {
         stdout += data;
       });
       child.on('close', (code) => {
+        childClosed = true;
         finish({
           stdout: stdout.trim(),
           exitCode: code,
@@ -771,6 +781,7 @@ export class OpencodeCliAdapter implements CliAdapter {
       args.push(prompt);
       assertCommandLineWithinLimit(spawnDescriptor.command, args);
       return this.runTurn({
+        windowsJobPolicy: standalone === true ? 'job' : 'no-job',
         turnNumber: ++turnSequence,
         runId: options.agentId,
         requestedModelId: options.model,
@@ -855,6 +866,9 @@ export class OpencodeCliAdapter implements CliAdapter {
       cwd: launch.workingDirectory,
       env: launch.env,
       detached: true,
+      cleanupOrphanDescendants: true,
+      windowsJobPolicy: launch.windowsJobPolicy,
+      windowsJob: this.windowsJob,
       spawner: this.spawner,
     });
     launch.onSpawned(child);
@@ -887,6 +901,7 @@ export class OpencodeCliAdapter implements CliAdapter {
     let boundSessionId = launch.expectedSessionId;
     let firstSessionEvent = true;
     let sessionMismatch = false;
+    let childClosed = false;
     const parseLine = (line: string): void =>
       this.handleLine(line, emitOutput, emitSegment, state, (event) => {
         if (event.type === 'error') {
@@ -907,7 +922,13 @@ export class OpencodeCliAdapter implements CliAdapter {
           if (launch.expectedSessionId && event.sessionID !== launch.expectedSessionId) {
             sessionMismatch = true;
             emitSegment({ type: 'error', content: 'session-mismatch: OpenCode resumed a different session' });
-            child.kill();
+            void child.whenSpawned.then((pid) => {
+              if (pid && !childClosed && !child.killed) {
+                void killProcessTree(pid, 'SIGTERM', undefined, {
+                  groupOnly: process.platform !== 'win32',
+                });
+              }
+            });
             return false;
           }
           boundSessionId = event.sessionID;
@@ -951,6 +972,7 @@ export class OpencodeCliAdapter implements CliAdapter {
 
     return new Promise<number>((resolve) => {
       child.on('close', (code, exitSignal) => {
+        childClosed = true;
         signal.removeEventListener('abort', onAbort);
         launch.onExited(child);
         if (lineBuf.trim()) {

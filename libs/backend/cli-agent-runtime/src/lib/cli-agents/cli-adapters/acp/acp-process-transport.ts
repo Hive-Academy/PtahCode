@@ -459,6 +459,8 @@ export const spawnAcpProcess: AcpTransportFactory = (
             cwd: options.cwd,
             env: options.env,
             detached: true,
+            cleanupOrphanDescendants: true,
+            windowsJobPolicy: 'no-job',
             spawner: options.spawner,
           },
         ),

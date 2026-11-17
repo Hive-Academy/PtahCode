@@ -31,7 +31,9 @@ const NO_IDS: readonly string[] = [];
 
 /** Agent statuses that keep their turn live (work still in flight). */
 const LIVE_AGENT_STATUSES: ReadonlySet<AgentStatusWord | null> =
-  new Set<AgentStatusWord | null>(['running', 'waiting', 'queued']);
+  new Set<AgentStatusWord | null>([
+    'starting', 'running', 'waiting', 'queued',
+  ]);
 
 function sameIds(a: readonly unknown[], b: readonly unknown[]): boolean {
   if (a === b) return true;
@@ -262,7 +264,7 @@ export function streamingTurnIdsOf(
 
 /**
  * Turn ids that are live: the turn is still streaming, or one of its
- * turn-scoped agents is still running, waiting or queued.
+ * turn-scoped agents is still starting, running, waiting or queued.
  */
 export function liveTurnIdsOf(
   streamingTurnIds: ReadonlySet<string>,

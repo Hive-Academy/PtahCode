@@ -156,5 +156,14 @@ describe('turn CLI lanes', () => {
     expect(liveTurnIdsOf(new Set(), turnAgents).size).toBe(0);
     expect(liveTurnIdsOf(new Set(['turn']), new Map([['turn', [cli]]])).has('turn')).toBe(true);
     expect(liveTurnIdsOf(new Set(), new Map([['turn', [{ ...cli, key: 'sub:call', kind: 'subagent' }]]])).has('turn')).toBe(true);
+    expect(liveTurnIdsOf(
+      new Set(),
+      new Map([['turn', [{
+        ...cli,
+        key: 'sub:starting',
+        kind: 'subagent',
+        status: 'starting',
+      }]]]),
+    ).has('turn')).toBe(true);
   });
 });

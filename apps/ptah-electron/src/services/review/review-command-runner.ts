@@ -5,6 +5,13 @@ import { promisify } from 'node:util';
 import { StringDecoder } from 'node:string_decoder';
 import { z } from 'zod';
 import { RepoIdentitySchema, type RepoIdentity } from '@ptah-extension/review-contracts';
+import {
+  killProcessTree,
+  queryWindowsProcesses,
+  WindowsOrphanDescendants,
+  type ProcessQuery,
+} from '@ptah-extension/platform-core';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type { IReviewCommandRunner, ReviewCommandResult, ReviewRoots } from '@ptah-extension/review-core';
 
 const MAX_OUTPUT_BYTES = 1_000_000;
@@ -45,7 +52,19 @@ export class ReviewCommandScopeError extends Error {
 }
 
 export class ReviewCommandRunner implements IReviewCommandRunner {
-  constructor(private readonly roots: (repo: RepoIdentity) => Promise<ReviewRoots>) {}
+  constructor(
+    private readonly roots: (repo: RepoIdentity) => Promise<ReviewRoots>,
+    private readonly logger: Pick<Logger, 'error'>,
+    private readonly killTree: typeof killProcessTree = killProcessTree,
+    private readonly processQuery: ProcessQuery = () => queryWindowsProcesses(
+      async (file, queryArgs, queryTimeout) =>
+        (await execFileAsync(file, queryArgs, {
+          timeout: queryTimeout,
+          windowsHide: true,
+          maxBuffer: 8_000_000,
+        })).stdout),
+    private readonly now: () => number = Date.now,
+  ) {}
 
   /** Bootstrap probe: the resolver supplies the active workspace root before claim roots are trusted. */
   static async inspectCheckout(cwd: string): Promise<{ topLevel: string; origin: string }> {
@@ -104,30 +123,66 @@ export class ReviewCommandRunner implements IReviewCommandRunner {
       const maxOutputBytes = input.command === 'git' && input.args.length === 3 &&
         input.args[0] === 'ls-files' && input.args[1] === '-s' && input.args[2] === '-z'
         ? MAX_INDEX_OUTPUT_BYTES : MAX_OUTPUT_BYTES;
+      const rootStartedAtMs = this.now();
       const child = spawn(input.command, input.args, { cwd: directory, shell: false, windowsHide: true,
+        detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe'] });
+      const reportKillError = (error: unknown): void => {
+        this.logger.error('Review command tree termination failed',
+          error instanceof Error ? error : new Error(String(error)));
+      };
+      let rootExitedAtMs: number | undefined;
       let stdout = '';
       let stderr = '';
       const stdoutDecoder = new StringDecoder('utf8');
       const stderrDecoder = new StringDecoder('utf8');
       let timedOut = false;
       let finished = false;
-      const abort = (): void => { timedOut = true; child.kill(); };
+      let exited = false;
+      let stopRequested = false;
+      const stop = (): void => {
+        if (finished) return;
+        if (exited && process.platform === 'win32' && !child.pid) {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          return;
+        }
+        if (!child.pid) return;
+        if (stopRequested) return;
+        stopRequested = true;
+        const orphan = process.platform === 'win32' && exited && rootExitedAtMs !== undefined
+          ? new WindowsOrphanDescendants(child.pid, rootStartedAtMs,
+            rootExitedAtMs, this.processQuery,
+            (pid) => this.killTree(pid, 'SIGTERM', reportKillError), reportKillError)
+          : undefined;
+        const stopChain = orphan ? orphan.stop()
+          : this.killTree(child.pid, 'SIGTERM', reportKillError,
+            { groupOnly: process.platform !== 'win32' });
+        void stopChain.catch(reportKillError).finally(() => {
+          if (process.platform === 'win32') {
+            child.stdout.destroy();
+            child.stderr.destroy();
+          }
+        });
+      };
+      const abort = (): void => { timedOut = true; stop(); };
       signal?.addEventListener('abort', abort, { once: true });
       if (signal?.aborted) abort();
       const timer = setTimeout(() => {
-        if (child.exitCode !== null) return;
         timedOut = true;
-        child.kill();
+        stop();
       }, input.timeoutMs);
-      child.once('exit', () => clearTimeout(timer));
+      child.once('exit', () => {
+        exited = true;
+        rootExitedAtMs = this.now();
+      });
       const append = (target: 'stdout' | 'stderr', chunk: Buffer): void => {
         const value = (target === 'stdout' ? stdoutDecoder : stderrDecoder).write(chunk);
         if (target === 'stdout') stdout = (stdout + value).slice(0, maxOutputBytes);
         else stderr = (stderr + value).slice(0, maxOutputBytes);
         if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) >= maxOutputBytes || Buffer.byteLength(value) > maxOutputBytes) {
           timedOut = true;
-          child.kill();
+          stop();
         }
       };
       child.stdout.on('data', (chunk: Buffer) => append('stdout', chunk));

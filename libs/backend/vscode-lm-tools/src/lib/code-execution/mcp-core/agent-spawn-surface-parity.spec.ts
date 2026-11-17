@@ -26,6 +26,9 @@ import {
   type ProtocolHandlerDependencies,
 } from './protocol-dispatcher';
 import type { Logger } from '@ptah-extension/vscode-core';
+import { ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
+import type { ExternalOwnerKey } from '@ptah-extension/shared';
+import { prepareCompletion } from './completion-delivery';
 import type { MCPRequest, MCPResponse, PtahAPI } from '../types';
 
 function quietLogger(): Logger {
@@ -257,6 +260,22 @@ describe('agent spawn surface parity', () => {
     expect(http.spawn).not.toHaveBeenCalled();
     expect(stdio.spawn).not.toHaveBeenCalled();
   });
+});
+
+it('uses the same completion ID block on HTTP and stdio surfaces', () => {
+  const logger = quietLogger();
+  const box = new ExternalCompletionOutbox(logger);
+  const completedAt = '2026-11-17T10:20:30.000Z';
+  const completionId = `lane:${completedAt}`;
+  const httpOwner: ExternalOwnerKey = { transport: 'http', principal: 'a'.repeat(32), exclusive: true };
+  const stdioOwner: ExternalOwnerKey = { ...httpOwner, transport: 'stdio' };
+  for (const owner of [httpOwner, stdioOwner]) {
+    box.record({ completionId, agentId: 'lane', owner, body: 'body', completedAt, recordedAt: Date.now() });
+    const response: MCPResponse = { jsonrpc: '2.0', id: 1, result: { content: [] } };
+    const prepared = prepareCompletion(response, 'tools/call', owner, box, owner.transport);
+    expect(JSON.stringify(prepared.response)).toContain(JSON.stringify(`Completion ID: ${completionId}\nbody`));
+    prepared.success();
+  }
 });
 
 // ---------------------------------------------------------------------------

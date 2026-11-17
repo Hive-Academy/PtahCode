@@ -19,6 +19,11 @@ export type {
 export { FileType, PlatformType } from './types/platform.types';
 export type { IFileSystemProvider } from './interfaces/file-system-provider.interface';
 export type {
+  WindowsJobPolicy,
+  WindowsJobHandle,
+  IWindowsJobAssigner,
+} from './interfaces/windows-job-assigner.interface';
+export type {
   IHostAttentionNotifications,
   SafeHostAttentionNotice,
 } from './interfaces/host-attention-notifications.interface';
@@ -372,6 +377,8 @@ export {
   PROCESS_TREE_KILL_GRACE_MS,
   killProcessTree,
 } from './utils/process-tree-reaper';
+export { WindowsOrphanDescendants, queryWindowsProcesses, type ProcessQuery } from './utils/windows-orphan-descendants';
+export { defaultOrphanCleanupDependencies, scheduleWindowsOrphanCleanup, type OrphanCleanupDependencies } from './utils/windows-orphan-cleanup';
 export {
   createExecutableEditorDefinitions,
   detectEditorTargets,
@@ -483,3 +490,5 @@ export type {
   ControlReleaseResult,
 } from './session-driver-lock/control-endpoint';
 export { resolveWorkspaceSkillPath, SkillPathRefusalError } from './lib/resolve-workspace-skill-path';
+
+export { shouldUseWindowsJob, WINDOWS_JOB_SETTING_KEY, WINDOWS_JOB_ENV_KEY } from './utils/windows-job-gate';

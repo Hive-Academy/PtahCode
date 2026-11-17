@@ -9,6 +9,8 @@
  */
 
 export const PLATFORM_TOKENS = {
+  /** IWindowsJobAssigner - owned Windows process job. */
+  WINDOWS_JOB_ASSIGNER: Symbol.for('PlatformWindowsJobAssigner'),
   /** IFileSystemProvider — file read/write/watch/search */
   FILE_SYSTEM_PROVIDER: Symbol.for('PlatformFileSystemProvider'),
 

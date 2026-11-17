@@ -8,6 +8,14 @@ const rules = css
   .filter((chunk) => chunk.includes('{'))
   .map((chunk) => chunk.split('{')[0].trim());
 
+describe('ptah-button.css host motion', () => {
+  it('turns off the DaisyUI button-pop animation, so a host never scales past its box', () => {
+    const base = css.split('.btn[data-ptah-button]:is(.btn, #ptah-button) {')[1]?.split('}')[0] ?? '';
+    expect(base).toMatch(/transform:\s*none;/);
+    expect(base).toMatch(/animation:\s*none;/);
+  });
+});
+
 describe('ptah-button.css owner input rules', () => {
   it('scopes danger tone rules to the ghost variant, so other variants ignore them', () => {
     const toneRules = rules.filter(

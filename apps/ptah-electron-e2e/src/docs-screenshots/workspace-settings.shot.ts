@@ -51,7 +51,7 @@ test.describe('docs screenshots — workspace, settings, setup', () => {
     });
     const cliMatrix = page.getByTestId('cli-matrix');
     await expect(cliMatrix).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
-    await expect(cliMatrix.locator('tbody:not([data-testid="cli-matrix-uninstalled"]) [data-testid^="cli-matrix-row-"]').first()).toBeVisible({ timeout: 60_000 });
+    await expect(cliMatrix.locator('[data-testid^="cli-provider-card-"], [data-testid^="cli-matrix-row-"]').first()).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId('policy-redetect')).toContainText('Re-detect CLIs', { timeout: 60_000 });
     await shoot(page, 'settings-overview');
 

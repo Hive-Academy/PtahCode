@@ -8,6 +8,7 @@ import {
   buildAgentMessageAckTool,
   buildAgentListTool,
   buildAgentReadTool,
+  buildAgentStatusTool,
   buildAgentReportTool,
   buildAgentSpawnTool,
   buildAstAnalyzeTool,
@@ -26,6 +27,7 @@ import {
   buildTaskListTool,
   DESCRIPTION_LANGUAGE_NAMES,
 } from './tool-description.builder';
+
 import {
   SYMBOL_INDEX_DEFAULT_LIMIT,
   SYMBOL_INDEX_MAX_LIMIT,
@@ -37,6 +39,28 @@ import {
   type LanguageCapability,
 } from '@ptah-extension/workspace-intelligence';
 import type { MCPToolDefinition } from '../types';
+import { buildAgentWaitTool } from './agent-wait.tool';
+
+describe('external completion wording', () => {
+  it('names the wait tool for each transport and explains the completion block', () => {
+    const http = buildAgentSpawnTool({ transport: 'http' }).description;
+    const stdio = buildAgentSpawnTool({ transport: 'stdio' }).description;
+    expect(http).toContain('call ptah_agent_wait to block');
+    expect(stdio).toContain('call agent_wait to block');
+    expect(http).toContain('Exclusive external owners receive queued Completion ID blocks on later tool results');
+    expect(stdio).not.toContain('turn is pushed into this session');
+    expect(buildAgentWaitTool({ transport: 'http' }).description).toContain('Full output: ptah_agent_read.');
+    expect(buildAgentWaitTool({ transport: 'stdio' }).description).toContain('Full output: agent_read.');
+  });
+});
+
+describe('agent lane descriptions', () => {
+  it('explains starting and the delayed CLI session', () => {
+    expect(buildAgentSpawnTool().description).toContain('reply "starting"');
+    expect(buildAgentStatusTool().description).toContain('starting/running/completed');
+    expect(buildAgentReadTool().description).toContain('starting or running');
+  });
+});
 
 /** The description budget the execute_code guard applies (the only size assertion). */
 const DESCRIPTION_CHAR_BUDGET = 1_000;

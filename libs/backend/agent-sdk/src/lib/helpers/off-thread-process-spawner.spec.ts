@@ -1,10 +1,20 @@
 import 'reflect-metadata';
 
+jest.mock('node:child_process', () => {
+  const actual = jest.requireActual<typeof import('node:child_process')>('node:child_process');
+  const mocked = { ...actual, spawn: jest.fn(actual.spawn) };
+  Object.defineProperty(mocked, 'execFile', { get: () => actual.execFile, enumerable: true });
+  return mocked;
+});
+
 import { createHash } from 'node:crypto';
+import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { EventEmitter } from 'node:events';
+import { runInNewContext } from 'node:vm';
 
 import crossSpawn from 'cross-spawn';
 
@@ -34,6 +44,8 @@ import {
   POOL_IDLE_TTL_MS,
   POOL_MAX_IDLE,
 } from './spawn-worker-pool';
+
+const actualChildProcess = jest.requireActual('node:child_process') as typeof childProcess;
 import type { SpawnOptions } from '../types/sdk-types/claude-sdk.types';
 
 /**
@@ -182,6 +194,9 @@ describe('OffThreadProcessSpawner', () => {
       asLogger(logger),
       reporter as unknown as DegradationReporter,
     );
+    spawner.setOrphanCleanupDependencies({
+      query: async () => [], kill: async () => undefined, now: Date.now,
+    });
   });
 
   afterEach(async () => {
@@ -310,6 +325,177 @@ describe('OffThreadProcessSpawner', () => {
   });
 
   describe('termination', () => {
+    function finishTestChild(pid: number | null): void {
+      if (pid === null) return;
+      try { process.kill(pid, 'SIGKILL'); }
+      catch (error: unknown) {
+        // degradation-audit: optional-capability - the worker may already have
+        // reaped its test child; ESRCH is the intended cleanup outcome.
+        if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ESRCH') throw error;
+      }
+    }
+    it.each(['win32', 'linux'] as const)('worker source stops on %s and reports taskkill failures', (platform) => {
+      const child = Object.assign(new EventEmitter(), {
+        pid: 4242,
+        stdin: null,
+        stdout: null,
+        stderr: null,
+        kill: jest.fn(),
+      });
+      const spawn = jest.fn(() => child);
+      const execFile = jest.fn((_file: string, _args: string[], _options: object,
+        callback: (error: Error & { code: number }, stdout: string, stderr: string) => void) => {
+        callback(Object.assign(new Error('denied'), { code: 5 }), '', 'access denied');
+      });
+      const messages: Array<Record<string, unknown>> = [];
+      let onMessage: ((message: Record<string, unknown>) => void) | undefined;
+      runInNewContext(OFF_THREAD_SPAWNER_WORKER_SOURCE, {
+        process: { platform, env: { SystemRoot: 'C:\\Windows' } },
+        Buffer,
+        require: (id: string): unknown => id === 'node:worker_threads'
+          ? { parentPort: { on: (_event: string, listener: typeof onMessage) => { onMessage = listener; },
+              postMessage: (message: Record<string, unknown>) => messages.push(message) } }
+          : id === 'node:child_process' ? { spawn, execFile } : jest.requireActual(id),
+      });
+      onMessage?.({ type: 'spawn', id: 1, command: 'cli', args: [], env: {}, stdioMode: 'ignore' });
+      onMessage?.({ type: 'kill', id: 1, signal: 'SIGTERM' });
+      if (platform === 'win32') {
+        expect(execFile).toHaveBeenCalledWith('C:\\Windows\\System32\\taskkill.exe',
+          ['/PID', '4242', '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
+        expect(messages).toContainEqual(expect.objectContaining({ type: 'error', code: 'TREE_KILL_FAILED' }));
+        expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+        messages.length = 0;
+        child.kill.mockClear();
+        execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+          callback(Object.assign(new Error('not found'), { code: 128 }), '', '');
+        });
+        onMessage?.({ type: 'kill', id: 1, signal: 'SIGTERM' });
+        execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+          callback(Object.assign(new Error('not found'), { code: 5 }), 'no running instance of the task', '');
+        });
+        onMessage?.({ type: 'kill', id: 1, signal: 'SIGTERM' });
+        expect(messages).not.toContainEqual(expect.objectContaining({ code: 'TREE_KILL_FAILED' }));
+        expect(child.kill).not.toHaveBeenCalled();
+        for (const failureMode of ['callback', 'throw'] as const) {
+          messages.length = 0;
+          child.kill.mockImplementationOnce(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); });
+          execFile.mockImplementationOnce((_file, _args, _options, callback) => {
+            if (failureMode === 'throw') throw new Error('taskkill launch failed');
+            callback(Object.assign(new Error('denied'), { code: 5 }), '', 'access denied');
+          });
+          onMessage?.({ type: 'kill', id: 1, signal: 'SIGTERM' });
+          expect(messages).toEqual([expect.objectContaining({ code: 'TREE_KILL_FAILED' })]);
+        }
+        child.emit('exit', 0, null);
+        const calls = execFile.mock.calls.length;
+        onMessage?.({ type: 'kill', id: 1, signal: 'SIGTERM' });
+        expect(execFile).toHaveBeenCalledTimes(calls);
+      } else {
+        expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+        expect(execFile).not.toHaveBeenCalled();
+      }
+    });
+    it.each(['worker', 'inline'] as const)('requests a Windows tree stop on %s and logs failure', async (transport) => {
+      if (transport === 'inline') process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+      const child = spawner.spawnProcess({ command: process.execPath, args: ['-e', IDLE_SCRIPT], env: process.env });
+      const pid = await child.whenSpawned;
+      expect(pid).not.toBeNull();
+      const original = Object.getOwnPropertyDescriptor(process, 'platform');
+      const failure = Object.assign(new Error('taskkill failed'), { code: 5 });
+      const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+        const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+        callback(failure, '', 'access denied');
+        return new EventEmitter() as childProcess.ChildProcess;
+      });
+      const hostKill = transport === 'worker' ? jest.spyOn(process, 'kill') : undefined;
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        child.kill('SIGTERM');
+        expect(execFile).toHaveBeenCalledWith(expect.stringContaining('taskkill'),
+          ['/PID', String(pid), '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('tree kill failed'),
+          expect.objectContaining({ cause: failure }));
+        if (hostKill) expect(hostKill).not.toHaveBeenCalled();
+        else expect(child.killed).toBe(true);
+      } finally {
+        hostKill?.mockRestore();
+        execFile.mockRestore();
+        if (original) Object.defineProperty(process, 'platform', original);
+        finishTestChild(pid);
+      }
+    });
+    it.each(['worker', 'inline'] as const)('starts taskkill in the kill tick on %s', async (transport) => {
+      if (transport === 'inline') process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+      const child = spawner.spawnProcess({ command: process.execPath, args: ['-e', IDLE_SCRIPT], env: process.env });
+      const pid = await child.whenSpawned;
+      const original = Object.getOwnPropertyDescriptor(process, 'platform');
+      const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+        const done = args.at(-1) as (error: Error | null, stdout: string, stderr: string) => void;
+        done(null, '', '');
+        return new EventEmitter() as childProcess.ChildProcess;
+      });
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        child.kill('SIGTERM');
+        expect(child.killed).toBe(true);
+        expect(execFile).toHaveBeenCalledWith(expect.stringContaining('taskkill'),
+          ['/PID', String(pid), '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
+      } finally {
+        execFile.mockRestore();
+        if (original) Object.defineProperty(process, 'platform', original);
+        finishTestChild(pid);
+      }
+    });
+    it('returns false without a tree stop after an inline child exits', async () => {
+      process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+      const child = spawner.spawnProcess({ command: process.execPath, args: ['-e', ''], env: process.env });
+      await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      const execFile = jest.spyOn(actualChildProcess, 'execFile');
+      const original = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        expect(child.kill('SIGTERM')).toBe(false);
+        expect(execFile).not.toHaveBeenCalled();
+      } finally {
+        execFile.mockRestore();
+        if (original) Object.defineProperty(process, 'platform', original);
+      }
+    });
+    it('logs a worker tree-kill failure without failing the process handle', async () => {
+      const realPost = Worker.prototype.postMessage;
+      let emitMessage: ((message: Record<string, unknown>) => void) | undefined;
+      let leaseId: unknown;
+      const postSpy = jest.spyOn(Worker.prototype, 'postMessage').mockImplementation(function (
+        this: Worker, message: unknown, transfer?: Parameters<Worker['postMessage']>[1],
+      ) {
+        const record = message as Record<string, unknown>;
+        if (record?.['type'] === 'spawn') {
+          emitMessage = (next) => this.emit('message', next);
+          leaseId = record['id'];
+          setImmediate(() => this.emit('message', { id: leaseId, type: 'spawned', pid: 4242 }));
+          return;
+        }
+        realPost.call(this, message, transfer);
+      });
+      try {
+        const child = spawner.spawnProcess({ command: process.execPath, args: ['-e', ''], env: process.env });
+        await child.whenSpawned;
+        const onError = jest.fn();
+        const onExit = jest.fn();
+        child.on('error', onError);
+        child.on('exit', onExit);
+        emitMessage?.({ id: leaseId, type: 'error', code: 'TREE_KILL_FAILED', message: 'denied' });
+        expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Worker process tree kill failed'),
+          expect.objectContaining({ message: 'denied' }));
+        expect(onError).not.toHaveBeenCalled();
+        expect(onExit).not.toHaveBeenCalled();
+        emitMessage?.({ id: leaseId, type: 'exit', code: 0, signal: null });
+        emitMessage?.({ id: leaseId, type: 'stdout-end' });
+        emitMessage?.({ id: leaseId, type: 'stderr-end' });
+      } finally {
+        postSpy.mockRestore();
+      }
+    });
     it('kill("SIGTERM") sets killed and emits exit', async () => {
       const child = spawner.spawn(spawnOptions(['-e', IDLE_SCRIPT]));
       const output = readAll(child);
@@ -840,6 +1026,74 @@ describe('OffThreadProcessSpawner', () => {
       }
     });
 
+    it('kills the root from the host when the worker is lost and taskkill fails', async () => {
+      const handle = spawner.spawnProcess({ command: process.execPath, args: ['-e', IDLE_SCRIPT], env: process.env });
+      const failed = new Promise<void>((resolve) => handle.once('error', () => resolve()));
+      const pid = await handle.whenSpawned;
+      expect(pid).not.toBeNull();
+      const original = Object.getOwnPropertyDescriptor(process, 'platform');
+      const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+        const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+        callback(Object.assign(new Error('taskkill failed'), { code: 5 }), '', 'access denied');
+        return new EventEmitter() as childProcess.ChildProcess;
+      });
+      const hostKill = jest.spyOn(process, 'kill').mockImplementation(() => true);
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        const [crashed] = spawnWorkers();
+        await crashed.terminate();
+        await failed;
+        expect(execFile).toHaveBeenCalledWith(expect.stringContaining('taskkill'),
+          ['/PID', String(pid), '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
+        expect(hostKill).toHaveBeenCalledWith(pid, 'SIGTERM');
+      } finally {
+        hostKill.mockRestore();
+        execFile.mockRestore();
+        if (original) Object.defineProperty(process, 'platform', original);
+        if (pid !== null) {
+          try { process.kill(pid, 'SIGKILL'); }
+          catch (error: unknown) {
+            // ESRCH: the test child is already gone.
+            void error;
+          }
+        }
+      }
+    });
+
+    it('does not signal the PID from the host when taskkill timed out after a lost worker', async () => {
+      const handle = spawner.spawnProcess({ command: process.execPath, args: ['-e', IDLE_SCRIPT], env: process.env });
+      const failed = new Promise<void>((resolve) => handle.once('error', () => resolve()));
+      const pid = await handle.whenSpawned;
+      expect(pid).not.toBeNull();
+      const original = Object.getOwnPropertyDescriptor(process, 'platform');
+      const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+        const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+        callback(Object.assign(new Error('taskkill failed'), { killed: true }), '', '');
+        return new EventEmitter() as childProcess.ChildProcess;
+      });
+      const hostKill = jest.spyOn(process, 'kill').mockImplementation(() => true);
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        const [crashed] = spawnWorkers();
+        await crashed.terminate();
+        await failed;
+        expect(execFile).toHaveBeenCalledWith(expect.stringContaining('taskkill'),
+          ['/PID', String(pid), '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
+        expect(hostKill).not.toHaveBeenCalled();
+      } finally {
+        hostKill.mockRestore();
+        execFile.mockRestore();
+        if (original) Object.defineProperty(process, 'platform', original);
+        if (pid !== null) {
+          try { process.kill(pid, 'SIGKILL'); }
+          catch (error: unknown) {
+            // ESRCH: the test child is already gone.
+            void error;
+          }
+        }
+      }
+    });
+
     it('parks at most 4 idle workers, unref’d, and terminates the rest', async () => {
       const unrefSpy = jest.spyOn(Worker.prototype, 'unref');
       const terminateSpy = jest.spyOn(Worker.prototype, 'terminate');
@@ -1159,7 +1413,7 @@ describe('OffThreadProcessSpawner', () => {
      * Intercept every `spawn` message and answer it as a worker whose child
      * started with `pid` and exited 0 — without creating any child.
      */
-    function fakeWorkerSpawns(pid: number): Array<Record<string, unknown>> {
+    function fakeWorkerSpawns(pid: number, code = 0, duplicate = false, startedAt?: number, lost = false): Array<Record<string, unknown>> {
       const seen: Array<Record<string, unknown>> = [];
       postSpy = jest
         .spyOn(Worker.prototype, 'postMessage')
@@ -1176,10 +1430,15 @@ describe('OffThreadProcessSpawner', () => {
           seen.push(record);
           const id = record['id'];
           setImmediate(() => {
-            this.emit('message', { id, type: 'spawned', pid });
+            if (lost) {
+              this.emit('exit', 1);
+              return;
+            }
+            this.emit('message', { id, type: 'spawned', pid, startedAt: startedAt ?? 10_000 });
             this.emit('message', { id, type: 'stdout-end' });
             this.emit('message', { id, type: 'stderr-end' });
-            this.emit('message', { id, type: 'exit', code: 0, signal: null });
+            this.emit('message', { id, type: 'exit', code, signal: null });
+            if (duplicate) this.emit('message', { id, type: 'exit', code, signal: null });
           });
         });
       return seen;
@@ -1223,6 +1482,102 @@ describe('OffThreadProcessSpawner', () => {
       );
       // `windowsHide` stays an explicit key (windows-hide-spawn.guard.spec.ts).
       expect(Object.keys(messages[0] ?? {})).toContain('windowsHide');
+    });
+
+    it('cleans linked descendants after a worker root exits without touching unrelated PIDs', async () => {
+      setPlatform('win32');
+      const query = jest.fn(async () => [
+        { ProcessId: 5001, ParentProcessId: 4242, CreationDate: new Date(10_000).toISOString() },
+        { ProcessId: 5002, ParentProcessId: 1, CreationDate: new Date(10_000).toISOString() },
+      ]);
+      const kill = jest.fn(async (_pid: number) => undefined);
+      spawner.setOrphanCleanupDependencies({ query, kill, now: () => 10_000 });
+      fakeWorkerSpawns(4242);
+      const child = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, cleanupOrphanDescendants: true });
+      await waitForCloseCode(child);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(kill).toHaveBeenCalledWith(5001);
+      expect(kill).not.toHaveBeenCalledWith(4242);
+      expect(kill).not.toHaveBeenCalledWith(5002);
+    });
+
+    it.each([
+      { name: 'crash', platform: 'win32', detached: false, code: 17, queryFails: false, killFails: false, expectedQueries: 2, expectedKills: 1 },
+      { name: 'query failure', platform: 'win32', detached: false, code: 0, queryFails: true, killFails: false, expectedQueries: 1, expectedKills: 0 },
+      { name: 'kill failure', platform: 'win32', detached: false, code: 0, queryFails: false, killFails: true, expectedQueries: 2, expectedKills: 1 },
+      { name: 'non-Windows', platform: 'linux', detached: false, code: 0, queryFails: false, killFails: false, expectedQueries: 0, expectedKills: 0 },
+      { name: 'detached rival CLI', platform: 'win32', detached: true, code: 0, queryFails: false, killFails: false, expectedQueries: 0, expectedKills: 0 },
+    ] as const)('worker exit: $name', async ({ platform, detached, code, queryFails, killFails, expectedQueries, expectedKills }) => {
+      setPlatform(platform);
+      const queryError = new Error('query failed');
+      const killError = new Error('kill failed');
+      const query = jest.fn(async () => {
+        if (queryFails) throw queryError;
+        return [{ ProcessId: 5001, ParentProcessId: 4242, CreationDate: new Date(10_000).toISOString() }];
+      });
+      const kill = jest.fn(async (_pid: number) => { if (killFails) throw killError; });
+      spawner.setOrphanCleanupDependencies({ query, kill, now: () => 10_000 });
+      fakeWorkerSpawns(4242, code, true);
+      const child = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, detached, cleanupOrphanDescendants: true });
+      await waitForCloseCode(child);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(expectedQueries);
+      expect(kill).toHaveBeenCalledTimes(expectedKills);
+      if (queryFails) expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Orphan cleanup failed'), queryError);
+      if (killFails) expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Orphan cleanup failed'), killError);
+    });
+
+    it('keeps the live-root stop after a host-initiated worker kill', async () => {
+      setPlatform('win32');
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: () => 10_000 });
+      const treeStop = jest.spyOn(actualChildProcess, 'execFile').mockImplementationOnce(((...args: unknown[]) => {
+        const callback = args[3];
+        if (typeof callback === 'function') callback(null, '', '');
+        return new childProcess.ChildProcess();
+      }) as typeof childProcess.execFile);
+      try {
+        fakeWorkerSpawns(4242);
+        const child = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, cleanupOrphanDescendants: true });
+        child.kill('SIGTERM');
+        await waitForCloseCode(child);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(treeStop).toHaveBeenCalledWith(expect.any(String), ['/PID', '4242', '/T', '/F'], expect.any(Object), expect.any(Function));
+        expect(query).not.toHaveBeenCalled();
+      } finally {
+        treeStop.mockRestore();
+      }
+    });
+
+    it('does not query for a generic or unconfirmed worker root', async () => {
+      setPlatform('win32');
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: () => 10_000 });
+      fakeWorkerSpawns(4242);
+      await waitForCloseCode(spawner.spawnProcess({ command: 'fake', args: [], env: process.env }));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).not.toHaveBeenCalled();
+
+      fakeWorkerSpawns(4243, 0, false, Number.NaN);
+      await waitForCloseCode(spawner.spawnProcess({
+        command: 'fake', args: [], env: process.env, cleanupOrphanDescendants: true,
+      }));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).not.toHaveBeenCalled();
+    });
+
+    it('does not query after a worker is lost before spawn confirmation', async () => {
+      setPlatform('win32');
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: () => 10_000 });
+      fakeWorkerSpawns(4242, 0, false, undefined, true);
+      const child = spawner.spawnProcess({
+        command: 'fake', args: [], env: process.env, cleanupOrphanDescendants: true,
+      });
+      await waitForCloseCode(child);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).not.toHaveBeenCalled();
     });
 
     it('needsConsole is unchanged and a plain request still pipes', async () => {
@@ -1403,7 +1758,254 @@ describe('OffThreadProcessSpawner', () => {
     );
   });
 
+  describe('Windows job gate and inline lifetime', () => {
+    const request = { command: 'fake', args: [], env: process.env, ignoreStdio: true as const,
+      cleanupOrphanDescendants: true, windowsJobPolicy: 'job' as const };
+    let platform: PropertyDescriptor | undefined;
+    let arch: PropertyDescriptor | undefined;
+    beforeEach(() => {
+      platform = Object.getOwnPropertyDescriptor(process, 'platform');
+      arch = Object.getOwnPropertyDescriptor(process, 'arch');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
+      process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+    });
+    afterEach(() => {
+      if (platform) Object.defineProperty(process, 'platform', platform);
+      if (arch) Object.defineProperty(process, 'arch', arch);
+      jest.mocked(childProcess.spawn).mockImplementation(actualChildProcess.spawn);
+      delete process.env['PTAH_WINDOWS_JOBS'];
+    });
+    function fakeChild(): childProcess.ChildProcess {
+      return Object.assign(new childProcess.ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      });
+    }
+    it('does not assign while disabled or when policy is omitted or no-job', () => {
+      const assign = jest.fn(() => ({ close: jest.fn() }));
+      spawner.configureWindowsJobs({ assignToNewJob: assign }, 'C:/windows_job.node', () => false);
+      for (const policy of ['job', 'no-job', undefined] as const) {
+        jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild());
+        spawner.spawnProcess({ ...request, windowsJobPolicy: policy });
+      }
+      expect(assign).not.toHaveBeenCalled();
+    });
+    it('keeps the spawn usable when the setting reader throws', () => {
+      const failure = new Error('setting failed');
+      const assign = jest.fn();
+      spawner.configureWindowsJobs({ assignToNewJob: assign }, 'C:/windows_job.node', () => { throw failure; });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild());
+      expect(spawner.spawnProcess(request).pid).toBe(42);
+      expect(assign).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith('[WindowsJob] setting read failed; switch off', failure);
+    });
+    it.each([
+      { platform: 'linux', arch: 'x64', policy: 'job' },
+      { platform: 'win32', arch: 'arm64', policy: 'job' },
+      { platform: 'win32', arch: 'x64', policy: 'no-job' },
+      { platform: 'win32', arch: 'x64', policy: undefined },
+    ] as const)('skips the setting reader for $platform $arch $policy', (mode) => {
+      Object.defineProperty(process, 'platform', { value: mode.platform, configurable: true });
+      Object.defineProperty(process, 'arch', { value: mode.arch, configurable: true });
+      const setting = jest.fn(() => true);
+      spawner.configureWindowsJobs({ assignToNewJob: jest.fn() }, 'C:/windows_job.node', setting);
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild());
+      spawner.spawnProcess({ ...request, windowsJobPolicy: mode.policy });
+      expect(setting).not.toHaveBeenCalled();
+    });
+    it('assigns once and closes on exit while snapshot cleanup still runs', async () => {
+      const close = jest.fn();
+      const assign = jest.fn(() => ({ close }));
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: Date.now });
+      spawner.configureWindowsJobs({ assignToNewJob: assign }, 'C:/windows_job.node', () => true);
+      const child = fakeChild();
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+      spawner.spawnProcess(request);
+      expect(assign).toHaveBeenCalledTimes(1);
+      child.emit('exit', 0, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(query).toHaveBeenCalled();
+    });
+    it.each(['success', 'not-found', 'failure', 'timeout', 'throw'] as const)(
+      'starts taskkill before closing the job and closes after %s', (outcome) => {
+        const close = jest.fn();
+        spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },
+          'C:/windows_job.node', () => true);
+        const child = fakeChild();
+        const kill = jest.spyOn(child, 'kill').mockReturnValue(true);
+        jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+        let complete: ((error: Error | null, stdout: string, stderr: string) => void) | undefined;
+        const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+          expect(close).not.toHaveBeenCalled();
+          if (outcome === 'throw') throw new Error('launch failed');
+          complete = args.at(-1) as NonNullable<typeof complete>;
+          return new childProcess.ChildProcess();
+        });
+        try {
+          const handle = spawner.spawnProcess(request);
+          expect(handle.kill()).toBe(true);
+          expect(execFile).toHaveBeenCalledTimes(1);
+          if (outcome !== 'throw') {
+            expect(close).not.toHaveBeenCalled();
+            const error = outcome === 'success' ? null : Object.assign(new Error(outcome), {
+              code: outcome === 'not-found' ? 128 : 5, killed: outcome === 'timeout',
+            });
+            expect(complete).toBeDefined();
+            complete?.(error, '', outcome === 'not-found' ? 'not found' : '');
+          }
+          expect(close).toHaveBeenCalledTimes(1);
+          expect(kill).toHaveBeenCalledTimes(outcome === 'success' || outcome === 'not-found' ? 0 : 1);
+          child.emit('exit', null, 'SIGTERM');
+          child.emit('close', null, 'SIGTERM');
+          expect(close).toHaveBeenCalledTimes(1);
+        } finally {
+          execFile.mockRestore();
+        }
+      },
+    );
+    it.each(['failed-spawn', 'exit-and-close'] as const)('finishes inline tracking once for %s', (outcome) => {
+      const close = jest.fn();
+      spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },
+        'C:/windows_job.node', () => true);
+      const child = fakeChild();
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+      const finished = jest.spyOn(spawner['inline'], 'delete');
+      spawner.spawnProcess(request);
+      expect(spawner['inline'].size).toBe(1);
+      if (outcome === 'failed-spawn') child.emit('error', Object.assign(new Error('missing executable'), { code: 'ENOENT' }));
+      else child.emit('exit', 0, null);
+      child.emit('close', null, null);
+      expect(spawner['inline'].size).toBe(0);
+      expect(finished).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+    it('closes the assigned handle on spawner stop', async () => {
+      const close = jest.fn();
+      spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },
+        'C:/windows_job.node', () => true);
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild());
+      spawner.spawnProcess(request);
+      await spawner.dispose();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+    it('logs the real assignment error and keeps the process usable', async () => {
+      const failure = new Error('native failed');
+      const assign = jest.fn(() => { throw failure; });
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: Date.now });
+      spawner.configureWindowsJobs({ assignToNewJob: assign }, 'C:/windows_job.node', () => true);
+      const child = fakeChild();
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+      const handle = spawner.spawnProcess(request);
+      expect(handle.pid).toBe(42);
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('snapshot cleanup active'), failure);
+      child.emit('exit', 0, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalled();
+    });
+  });
+
+  it('sends the binary path and job policy only while the worker gate is open', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    const arch = Object.getOwnPropertyDescriptor(process, 'arch');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
+    const post = jest.spyOn(Worker.prototype, 'postMessage');
+    let enabled = false;
+    spawner.configureWindowsJobs({ assignToNewJob: jest.fn(() => ({ close: jest.fn() })) },
+      'C:/windows_job.node', () => enabled);
+    const request = { command: process.execPath, args: ['-e', ''], env: process.env,
+      windowsJobPolicy: 'job' as const };
+    try {
+      const off = spawner.spawnProcess(request);
+      await new Promise((resolve) => off.once('exit', resolve));
+      const first = post.mock.calls.find((call) => (call[0] as { type?: string }).type === 'spawn');
+      expect(first?.[0]).not.toHaveProperty('windowsJobBinaryPath');
+      enabled = true;
+      const on = spawner.spawnProcess(request);
+      await new Promise((resolve) => on.once('exit', resolve));
+      const sends = post.mock.calls.filter((call) => (call[0] as { type?: string }).type === 'spawn');
+      expect(sends[1]?.[0]).toMatchObject({ windowsJobPolicy: 'job', windowsJobBinaryPath: 'C:/windows_job.node' });
+    } finally {
+      post.mockRestore();
+      if (platform) Object.defineProperty(process, 'platform', platform);
+      if (arch) Object.defineProperty(process, 'arch', arch);
+    }
+  });
+
   describe('PTAH_SDK_INLINE_SPAWN escape hatch', () => {
+    it.each([
+      { name: 'clean', platform: 'win32', detached: false, code: 0, queryFails: false, killFails: false, queries: 2, kills: 1 },
+      { name: 'crash', platform: 'win32', detached: false, code: 19, queryFails: false, killFails: false, queries: 2, kills: 1 },
+      { name: 'query failure', platform: 'win32', detached: false, code: 0, queryFails: true, killFails: false, queries: 1, kills: 0 },
+      { name: 'kill failure', platform: 'win32', detached: false, code: 0, queryFails: false, killFails: true, queries: 2, kills: 1 },
+      { name: 'non-Windows', platform: 'linux', detached: false, code: 0, queryFails: false, killFails: false, queries: 0, kills: 0 },
+      { name: 'detached', platform: 'win32', detached: true, code: 0, queryFails: false, killFails: false, queries: 0, kills: 0 },
+    ] as const)('inline root exit: $name', async ({ platform, detached, code, queryFails, killFails, queries, kills }) => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+      const fakeChild = Object.assign(new childProcess.ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild);
+      const queryError = new Error('query failed');
+      const killError = new Error('kill failed');
+      const query = jest.fn(async () => {
+        if (queryFails) throw queryError;
+        return [{ ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_000).toISOString() }];
+      });
+      const kill = jest.fn(async (_pid: number) => { if (killFails) throw killError; });
+      spawner.setOrphanCleanupDependencies({ query, kill, now: () => 10_000 });
+      try {
+        const handle = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, detached, cleanupOrphanDescendants: true });
+        fakeChild.exitCode = code;
+        fakeChild.emit('exit', code, null);
+        fakeChild.emit('exit', code, null);
+        fakeChild.emit('close', code, null);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(handle.pid).toBe(42);
+        expect(query).toHaveBeenCalledTimes(queries);
+        expect(kill).toHaveBeenCalledTimes(kills);
+        if (queryFails) expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Orphan cleanup failed'), queryError);
+        if (killFails) expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Orphan cleanup failed'), killError);
+      } finally {
+        jest.mocked(childProcess.spawn).mockImplementation(actualChildProcess.spawn);
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      }
+    });
+    it('inline root exit after a host kill: live-root stop only, no orphan query', async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+      const fakeChild = Object.assign(new childProcess.ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild);
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: () => 10_000 });
+      const treeStop = jest.spyOn(actualChildProcess, 'execFile').mockImplementationOnce(((...args: unknown[]) => {
+        const callback = args[3];
+        if (typeof callback === 'function') callback(null, '', '');
+        return new childProcess.ChildProcess();
+      }) as typeof childProcess.execFile);
+      try {
+        const handle = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, cleanupOrphanDescendants: true });
+        expect(handle.kill('SIGTERM')).toBe(true);
+        fakeChild.exitCode = 1;
+        fakeChild.emit('exit', 1, null);
+        fakeChild.emit('close', 1, null);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(treeStop).toHaveBeenCalledWith(expect.any(String), ['/PID', '42', '/T', '/F'], expect.any(Object), expect.any(Function));
+        expect(query).not.toHaveBeenCalled();
+      } finally {
+        treeStop.mockRestore();
+        jest.mocked(childProcess.spawn).mockImplementation(actualChildProcess.spawn);
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      }
+    });
     it('spawns inline, warns once, and still round-trips stdio', async () => {
       process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
 

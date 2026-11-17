@@ -8,6 +8,7 @@
  */
 
 import 'reflect-metadata';
+import { laneTestFreeMemory } from '../__fixtures__/memory-probe';
 import { homedir } from 'node:os';
 
 // ---- Mock vscode before any imports that use it ----
@@ -474,6 +475,7 @@ function createManager(deps: {
     deps.mcpServerStatus,
     deps.callerWorkspaceResolver ?? null,
   );
+  jest.spyOn(spawnEnvironment, 'freeMemory').mockImplementation(laneTestFreeMemory);
   const outputBuffer = new AgentOutputBuffer(deps.logger);
   const laneCompletion = {
     signal: jest.fn(async () => ({
@@ -601,6 +603,43 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   });
 
   describe('spawn() with SDK adapter', () => {
+    it('queues a replied lane and releases it when memory becomes available', async () => {
+      setupVscodeConfig({ maxConcurrentAgents: 3 });
+      process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '10';
+      try {
+        const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+        await manager.spawn(request);
+        process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '1';
+        const ticket = manager.beginSpawn(request);
+        manager.markSpawnReplied(ticket);
+        const pending = manager.executeSpawn(ticket, request);
+        await Promise.resolve();
+        expect(manager.findAgentInfo(ticket.agentId)).toMatchObject({ status: 'starting', waitingForMemory: true });
+        process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '10';
+        await jest.advanceTimersByTimeAsync(1000);
+        await expect(pending).resolves.toMatchObject({ status: 'running' });
+      } finally {
+        delete process.env['PTAH_VERIFY_FAKE_FREE_GB'];
+      }
+    });
+
+    it('stops a queued replied lane with one completion signal', async () => {
+      setupVscodeConfig({ maxConcurrentAgents: 3 });
+      process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '10';
+      try {
+        const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+        await manager.spawn(request);
+        process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '1';
+        const ticket = manager.beginSpawn(request);
+        manager.markSpawnReplied(ticket);
+        const pending = manager.executeSpawn(ticket, request);
+        await manager.stop(ticket.agentId);
+        await expect(pending).rejects.toThrow('stopped');
+        expect(laneCompletion.signal).toHaveBeenCalledTimes(1);
+      } finally {
+        delete process.env['PTAH_VERIFY_FAKE_FREE_GB'];
+      }
+    });
     it('discards a pre-reply refusal without an exit event', () => {
       const ticket = manager.beginSpawn({ task: 'blocked', cli: 'codex' });
       const exited = jest.fn();
@@ -617,6 +656,9 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       if (replied) manager.markSpawnReplied(ticket);
       const exited = jest.fn();
       manager.events.on('agent:exited', exited);
+      sdkAdapter.runSdk.mockImplementationOnce(() => new Promise<SdkHandle>(() => undefined));
+      void manager.executeSpawn(ticket, request).catch(() => undefined);
+      await jest.advanceTimersByTimeAsync(1);
       await jest.advanceTimersByTimeAsync(120_000);
       expect(manager.findAgentInfo(ticket.agentId)?.status).toBe(replied ? 'failed' : undefined);
       expect(exited).toHaveBeenCalledTimes(replied ? 1 : 0);
@@ -663,6 +705,42 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(result.status).toBe('running');
       expect(manager.findAgentInfo(ticket.agentId)?.status).toBe('running');
       expect(laneCompletion.signal).not.toHaveBeenCalled();
+    });
+
+    it('pauses the admission watchdog in the memory queue and starts the budget at release', async () => {
+      setupVscodeConfig({ 'agentBudget.maxDurationMin': 10 });
+      const environment = Reflect.get(manager, 'spawnEnvironment') as {
+        freeMemory: () => number; minFreeMemoryGb: () => number;
+      };
+      jest.spyOn(environment, 'freeMemory').mockReturnValue(0);
+      jest.spyOn(environment, 'minFreeMemoryGb').mockReturnValue(3);
+      const request = { task: 'work', cli: 'codex' as const, workingDirectory: '/workspace/root' };
+      const blocker = manager.beginSpawn(request);
+      const ticket = manager.beginSpawn(request);
+      const tracked = (Reflect.get(manager, 'agents') as Map<string, {
+        admissionTimer?: NodeJS.Timeout; info: AgentProcessInfo;
+      }>).get(ticket.agentId);
+      const blockerTracked = (Reflect.get(manager, 'agents') as Map<string, {
+        admissionTimer?: NodeJS.Timeout;
+      }>).get(blocker.agentId);
+      clearTimeout(blockerTracked?.admissionTimer);
+      if (blockerTracked) blockerTracked.admissionTimer = undefined;
+      expect(tracked?.admissionTimer).toBeDefined();
+      sdkAdapter.runSdk.mockImplementationOnce(async () => {
+        expect(tracked?.admissionTimer).toBeDefined();
+        return sdkControls.handle;
+      });
+      const execution = manager.executeSpawn(ticket, request);
+      expect(tracked?.info.waitingForMemory).toBe(true);
+      expect(tracked?.admissionTimer).toBeUndefined();
+      jest.advanceTimersByTime(180_000);
+      expect(tracked?.info.status).toBe('starting');
+      await manager.stop(blocker.agentId);
+      const releasedAt = Date.now();
+      const spawned = await execution;
+      const budget = (manager.getStatus(spawned.agentId) as AgentProcessInfo).agentBudget;
+      expect(budget?.startedAtMs).toBe(releasedAt);
+      expect(budget?.startedAtMs).toBeGreaterThan(Date.parse(ticket.startedAt));
     });
 
     it('fails a late launch once and releases the admitted slot', async () => {
@@ -1433,6 +1511,15 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(result).toMatchObject(expected);
       expect(manager.getStatus(result.agentId)).toMatchObject(expected);
       expect(spawnedInfos[0]).toMatchObject(expected);
+    });
+
+    it('keeps the authenticated external owner on a direct SDK lane record', async () => {
+      const externalOwner = { transport: 'stdio' as const, principal: 'a'.repeat(32), exclusive: true };
+      const result = await manager.spawnFromSdkHandle(createMockSdkHandle().handle, {
+        task: 'Review', cli: 'ptah-cli', workingDirectory: '/workspace/root',
+        ptahCliId: 'ptah-cli-1', expectsMcp: false, externalOwner,
+      });
+      expect(manager['agents'].get(result.agentId)?.externalOwner).toEqual(externalOwner);
     });
 
     it('accepts role fields on spawnFromSdkHandle only as one complete stamp', () => {

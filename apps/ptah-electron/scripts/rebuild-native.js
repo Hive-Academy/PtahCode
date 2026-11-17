@@ -160,12 +160,41 @@ async function main() {
   // sqlite-vec is a SQLite loadable extension (.dll/.so/.dylib), NOT a Node
   // addon, so it needs no rebuild.
 
+  buildWindowsJob();
+
   console.log('\n✅ Native module rebuild complete.');
+}
+
+function buildWindowsJob() {
+  if (process.platform === 'win32' && process.arch === 'x64') {
+    const nativeDir = path.join(ROOT, 'libs', 'backend', 'windows-job-native');
+    const nodeGyp = path.join(ROOT, 'node_modules', 'node-gyp', 'bin', 'node-gyp.js');
+    const env = { ...process.env };
+    delete env._CL_;
+    try {
+      execFileSync(process.execPath, [nodeGyp, 'rebuild', '--directory', nativeDir, '--arch=x64'], {
+        cwd: ROOT,
+        stdio: 'inherit',
+        env,
+      });
+    } catch (error) {
+      throw new Error('Windows job source build failed', { cause: error });
+    }
+    const jobBinary = path.join(nativeDir, 'build', 'Release', 'windows_job.node');
+    if (!fs.existsSync(jobBinary)) {
+      throw new Error('Windows job source build did not produce windows_job.node');
+    }
+    console.log(`[ok] Windows job source build: ${path.relative(ROOT, jobBinary)}`);
+  }
 }
 
 function handleFailure(err) {
   const message = err instanceof Error ? err.message : String(err);
   if (IS_POSTINSTALL) {
+    if (message.startsWith('Windows job source build')) {
+      console.warn(`[warn] Windows job source build skipped during postinstall: ${message}`);
+      process.exit(0);
+    }
     // Never break `npm install` for contributors without a build toolchain;
     // the explicit pre-pack invocation (npm_lifecycle_event !== postinstall)
     // is the gate that enforces a correct binary before shipping.

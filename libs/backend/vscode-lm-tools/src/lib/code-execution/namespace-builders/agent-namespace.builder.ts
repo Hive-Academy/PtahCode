@@ -34,6 +34,7 @@ import {
   getCallerAgentId,
   getCallerBinding,
   getCallerSessionId,
+  getAuthenticatedExternalOwner,
   isMcpRequestInFlight,
 } from '../mcp-core/mcp-request-context';
 import {
@@ -366,7 +367,7 @@ function assertOutcomeField(
  * Build the agent namespace for ptah.agent.*
  */
 const NO_PARENT_NOTICE =
-  'No parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.';
+  'External completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.';
 
 const resolvedSkillsSchema = z.array(
   z
@@ -425,6 +426,7 @@ export function buildAgentNamespace(
   const executeNamespaceSpawn = async (
     request: UntypedSpawnRequest,
     admission?: SpawnAdmission,
+    force?: boolean,
   ) => {
       const timing = agentSpawnTiming.getStore();
       const resolutionStartedAt = performance.now();
@@ -502,7 +504,9 @@ export function buildAgentNamespace(
           return {
             ...spawned,
             parentSessionId: undefined,
-            notice: NO_PARENT_NOTICE,
+            notice: getAuthenticatedExternalOwner()?.exclusive
+              ? NO_PARENT_NOTICE
+              : 'No parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.',
           };
         };
         let roleDefinition: AgentRoleDefinition | undefined;
@@ -618,6 +622,7 @@ export function buildAgentNamespace(
               taskFolder: request.taskFolder,
               deliverables: request.deliverables,
               parentSessionId: activeSessionId,
+              externalOwner: getAuthenticatedExternalOwner(),
               ptahCliName: result.agentName,
               ptahCliId: request.ptahCliId,
               potentialCapabilities: result.potentialCapabilities,
@@ -708,8 +713,11 @@ export function buildAgentNamespace(
         // raw accountSelection is replaced by the parsed one from the check
         // above: only a selection on a `claude` lane gets this far (ambient,
         // omitted, or named on a fresh spawn), and it is forwarded as typed.
+        // A caller-supplied externalOwner is dropped: only the authenticated
+        // transport binding may set it, never the request body.
         const {
           parentSessionId: _rawParentSessionId,
+          externalOwner: _rawExternalOwner,
           parentLevel: _rawParentLevel,
           resumePolicy: _rawResumePolicy,
           roleDefinition: _callerRoleDefinition,
@@ -724,6 +732,7 @@ export function buildAgentNamespace(
           ...(accountSelection && { accountSelection }),
           ...(workingDirectory && { workingDirectory }),
           ...(activeSessionId && { parentSessionId: activeSessionId }),
+          ...(getAuthenticatedExternalOwner() && { externalOwner: getAuthenticatedExternalOwner() }),
           ...(parentLevel && { parentLevel }),
           ...(roleDefinition && { roleDefinition }),
           ...(projectGuidance && { projectGuidance }),
@@ -735,8 +744,12 @@ export function buildAgentNamespace(
           );
         return {
           ...markParentless(await (admission
-            ? agentProcessManager.executeSpawn(admission, enrichedRequest)
-            : agentProcessManager.spawn(enrichedRequest))),
+            ? (force === undefined
+                ? agentProcessManager.executeSpawn(admission, enrichedRequest)
+                : agentProcessManager.executeSpawn(admission, enrichedRequest, force))
+            : (force === undefined
+                ? agentProcessManager.spawn(enrichedRequest)
+                : agentProcessManager.spawn(enrichedRequest, force)))),
           ...(resolvedSkills.length && { skillDelivery: 'inline' as const }),
         };
       } catch (error: unknown) {
@@ -753,9 +766,9 @@ export function buildAgentNamespace(
 
   return {
     resolveCallerParentId,
-    spawn: (request) => executeNamespaceSpawn(request),
+    spawn: (request, force?: boolean) => executeNamespaceSpawn(request, undefined, force),
     beginSpawn: (request) => {
-      const { accountSelection: _accountSelection, ...safeRequest } = request;
+      const { accountSelection: _accountSelection, externalOwner: _rawExternalOwner, ...safeRequest } = request;
       const rawSessionId = isMcpRequestInFlight()
         ? getCallerSessionId()?.trim() || undefined
         : request.parentSessionId?.trim() || undefined;
@@ -764,9 +777,10 @@ export function buildAgentNamespace(
         cli: request.ptahCliId ? 'ptah-cli' : request.cli,
         workingDirectory: request.workingDirectory ?? getWorkspaceRoot(),
         parentSessionId: rawSessionId ? resolveCallerParentId(rawSessionId) : undefined,
+        ...(getAuthenticatedExternalOwner() && { externalOwner: getAuthenticatedExternalOwner() }),
       });
     },
-    executeSpawn: (ticket, request) => executeNamespaceSpawn(request, ticket),
+    executeSpawn: (ticket, request, force?: boolean) => executeNamespaceSpawn(request, ticket, force),
     markSpawnReplied: (ticket) => agentProcessManager.markSpawnReplied(ticket),
     failSpawn: (ticket, error) => agentProcessManager.failSpawn(ticket, error),
 

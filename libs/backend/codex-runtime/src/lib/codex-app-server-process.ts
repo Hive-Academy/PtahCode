@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import { CodexStderrTail, redactCodexDiagnostics } from './codex-stderr-tail';
 import { normalizeCodexHomeKey } from './codex-home-path';
-import type { ProcessSpawnRequest, SpawnedProcessHandle } from '@ptah-extension/platform-core';
+import { killProcessTree, type ProcessSpawnRequest, type SpawnedProcessHandle } from '@ptah-extension/platform-core';
+import { childHasExited, cleanupAfterFailedTreeKill, recordRootExit, startOrphanCleanupForRoot, type OrphanCleanupOptions } from './codex-orphan-cleanup';
 import type {
   CodexRuntimeLogger,
   CodexExecutableSource,
@@ -54,16 +55,6 @@ export interface CodexAppServerHandlers {
     frame: ServerRequest,
     signal: AbortSignal,
   ) => Promise<unknown>;
-}
-
-/**
- * A signal death leaves exitCode null. The off-thread handle also reports
- * signalCode and exitObserved, which the shared handle type does not declare.
- */
-function childHasExited(child: SpawnedProcessHandle): boolean {
-  if (child.exitCode !== null) return true;
-  if ('signalCode' in child && child.signalCode != null) return true;
-  return 'exitObserved' in child && child.exitObserved === true;
 }
 
 /** One child and one handshake. Construct a new instance for a new generation. */
@@ -145,6 +136,8 @@ export class CodexAppServerProcess {
   private finishClose?: () => void;
   private closing = false;
   private closed = false;
+  private exitObserved = false;
+  private orphanCleanupStarted = false;
   private ready = false;
   private initializeResponseReceived = false;
   private readonly bufferedNotifications: Notification[] = [];
@@ -167,6 +160,7 @@ export class CodexAppServerProcess {
     private readonly handlers: CodexAppServerHandlers,
     private readonly logger?: CodexRuntimeLogger,
     private readonly wrapSpawnRequest?: (request: ProcessSpawnRequest) => ProcessSpawnRequest,
+    private readonly orphanCleanup: OrphanCleanupOptions = {},
   ) {}
 
   start(signal?: AbortSignal): Promise<void> {
@@ -186,11 +180,12 @@ export class CodexAppServerProcess {
           (process.platform === 'win32' && !canonical.toLowerCase().endsWith('.exe')))
         throw new Error('Codex executable is not a canonical native file');
       accessSync(canonical, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
-      const spawnStartedAt = Date.now();
+      const spawnStartedAt = (this.orphanCleanup.now ?? Date.now)();
       this.spawnStartedAt = spawnStartedAt;
       const spawnRequest: ProcessSpawnRequest = {
         command: this.executable.path,
         args: ['app-server'],
+        windowsJobPolicy: 'job',
         cwd: this.profile.cwd,
         env: {
           // Match the evidence harness's names; retain host home/temp paths because
@@ -214,6 +209,7 @@ export class CodexAppServerProcess {
         },
       };
       this.child = this.spawner.spawnProcess(this.wrapSpawnRequest?.(spawnRequest) ?? spawnRequest);
+      this.orphanCleanupStarted = false;
       this.child.on('close', this.onClose);
       this.child.on('exit', this.onExit);
       // This capture-free listener outlives cleanup: late child errors must not
@@ -242,7 +238,7 @@ export class CodexAppServerProcess {
           CODEX_INITIALIZE_TIMEOUT_MS,
         ),
       );
-      const startupDurationMs = Date.now() - spawnStartedAt;
+      const startupDurationMs = (this.orphanCleanup.now ?? Date.now)() - spawnStartedAt;
       try {
         if (
           normalizeCodexHomeKey(initialized.codexHome, process.platform) !==
@@ -574,6 +570,12 @@ export class CodexAppServerProcess {
     this.fail('Codex process aborted');
   };
   private readonly onExit = (): void => {
+    if (this.exitObserved) return;
+    this.exitObserved = true;
+    const child = this.child;
+    // Query when the root exits by itself. After a host tree kill, query only
+    // when the tree kill reports failure.
+    this.cleanupOrphans(child);
     this.fail('Codex process exited');
   };
   private readonly onClose = (): void => {
@@ -617,7 +619,7 @@ export class CodexAppServerProcess {
           : {}),
         ...(initializeTimeout && spawnStartedAt !== undefined
           ? {
-              elapsedMs: Date.now() - spawnStartedAt,
+              elapsedMs: (this.orphanCleanup.now ?? Date.now)() - spawnStartedAt,
               timeoutMs: CODEX_INITIALIZE_TIMEOUT_MS,
             }
           : {}),
@@ -675,10 +677,20 @@ export class CodexAppServerProcess {
         this.killTimer = undefined;
         // Do not let a missing close event retain the runtime indefinitely.
         if (!this.closed) {
-          try {
-            this.child?.kill('SIGKILL');
-          } catch {
-            this.failure ??= new Error('Codex process kill failed');
+          const child = this.child;
+          if (child?.pid && process.platform === 'win32' &&
+              !this.exitObserved && !childHasExited(child)) {
+            child.off('exit', this.onExit);
+            this.stopWindowsTree(child.pid);
+          } else if (child && (process.platform !== 'win32' ||
+              (!this.exitObserved && !childHasExited(child)))) {
+            try {
+              child?.kill('SIGKILL');
+            } catch (failure: unknown) {
+              const error = failure instanceof Error ? failure : new Error(String(failure));
+              this.failure ??= error;
+              this.logger?.error('Codex process kill failed', error);
+            }
           }
         }
         this.cleanup();
@@ -695,6 +707,33 @@ export class CodexAppServerProcess {
 
   dispose(): Promise<void> {
     return this.close();
+  }
+
+  private stopWindowsTree(pid: number): void {
+    const rootExit = this.child && recordRootExit(this.child, this.orphanCleanup.now ?? Date.now);
+    void killProcessTree(pid, 'SIGKILL', (failure: unknown) => {
+      const error = failure instanceof Error ? failure : new Error(String(failure));
+      this.failure ??= error;
+      this.logger?.error('Codex process tree kill failed', error);
+      const child = this.child;
+      if (!child) return;
+      cleanupAfterFailedTreeKill(child, this.exitObserved, () => this.cleanupOrphans(child, rootExit?.at));
+      if (this.exitObserved || childHasExited(child)) return;
+      try {
+        child.kill('SIGKILL');
+      } catch (killFailure: unknown) {
+        const killError = killFailure instanceof Error ? killFailure : new Error(String(killFailure));
+        this.logger?.error('Codex process fallback kill failed', killError);
+      }
+    });
+  }
+
+  private cleanupOrphans(child: SpawnedProcessHandle | undefined, exitedAt?: number): void {
+    if (this.orphanCleanupStarted) return;
+    this.orphanCleanupStarted = startOrphanCleanupForRoot(
+      child, this.spawnStartedAt, this.orphanCleanup,
+      (error) => this.logger?.error('Codex orphan descendant cleanup failed', error), exitedAt,
+    );
   }
 
   private cleanup(): void {

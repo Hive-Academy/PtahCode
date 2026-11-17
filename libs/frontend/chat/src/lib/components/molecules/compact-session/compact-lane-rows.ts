@@ -44,7 +44,8 @@ export function parseLaneKey(
 
 /**
  * Compact rows keep their five states: `failed` reads `error`, `queued` reads
- * `waiting`. The shared mapper reads a status outside its type as `stopped`;
+ * `waiting`, and `starting` reads `running`. The shared mapper reads a status
+ * outside its type as `stopped`;
  * compact rows have always shown such a status as `running` (`pending` /
  * `paused` as `waiting`, `timeout` as `error`), so only a real `stopped` /
  * `killed` stays `stopped`.
@@ -54,6 +55,8 @@ function toCompactLaneStatus(
   status: string,
 ): CompactLaneStatus {
   switch (word) {
+    case 'starting':
+      return 'running';
     case 'failed':
       return 'error';
     case 'queued':

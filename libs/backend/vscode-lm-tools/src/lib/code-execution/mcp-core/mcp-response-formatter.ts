@@ -1870,7 +1870,10 @@ export function formatAgentSpawn(
             : []),
           ...(roleLine ? [roleLine] : []),
           `**Status:** ${result.status}`,
-          ...(result.status === 'starting'
+          ...(result.waitingForMemory
+            ? ['**Waiting for memory:** This lane is queued. It starts when enough system memory is free (setting agentOrchestration.minFreeMemoryGb) or when no other lane runs.']
+            : []),
+          ...(result.status === 'starting' && !result.waitingForMemory
             ? ['Wait for the completion signal; ptah_agent_status shows when this lane starts running.']
             : []),
           ...formatLanePolicyLines(result),
@@ -1940,6 +1943,9 @@ export function formatAgentStatus(
       const lines = [
         `**CLI:** ${a.cliDetectionPending ? 'Detection pending' : cliLabel}`,
         `**Status:** ${a.status}`,
+        ...(a.waitingForMemory
+          ? ['**Waiting for Memory:** This lane is queued. It starts when enough system memory is free (setting agentOrchestration.minFreeMemoryGb) or when no other lane runs.']
+          : []),
         ...formatLanePolicyLines(a),
         `**Task:** ${task}`,
         `**Started:** ${a.startedAt}`,

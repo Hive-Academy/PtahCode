@@ -237,7 +237,7 @@ describe('AgentToolDispatcher — agent_spawn schema', () => {
     });
 
     expect(toolResult(response).isError).toBeUndefined();
-    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ cli }));
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ cli }), undefined);
   });
 
   it('accepts cli: antigravity specifically', async () => {
@@ -251,6 +251,7 @@ describe('AgentToolDispatcher — agent_spawn schema', () => {
     expect(toolResult(response).isError).toBeUndefined();
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({ cli: 'antigravity', task: 'Do the thing' }),
+      undefined,
     );
   });
 
@@ -304,6 +305,7 @@ describe('AgentToolDispatcher — agent_spawn role', () => {
 
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({ task: 'Review', role: 'reviewer' }),
+      undefined,
     );
   });
 
@@ -521,6 +523,7 @@ describe('AgentToolDispatcher — agent_list roles', () => {
 
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'reviewer' }),
+      undefined,
     );
   });
 

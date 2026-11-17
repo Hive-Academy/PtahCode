@@ -9,7 +9,7 @@ import {
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
 import type { SessionStatus, TabState } from '@ptah-extension/chat-types';
-import { sessionContextCue } from '@ptah-extension/chat-ui';
+import { isRunningAgentWord, sessionContextCue } from '@ptah-extension/chat-ui';
 import {
   contextFillPercent,
   sessionTokenTotal,
@@ -44,7 +44,7 @@ const BUSY_STATUSES: ReadonlySet<SessionStatus> = new Set([
  */
 function rowBucket(agent: SessionAgent): 0 | 1 | 2 | 3 {
   if (agent.openRequestIds.length > 0 || agent.status === 'waiting') return 0;
-  if (agent.status === 'running' || agent.status === 'queued') return 1;
+  if (isRunningAgentWord(agent.status) || agent.status === 'queued') return 1;
   if (agent.status === 'failed' && agent.kind !== 'orchestrator') return 3;
   return 2;
 }
@@ -257,7 +257,7 @@ export class SessionInspectorStore {
       const finished = agentRows.filter((row) => isFinished(row.agent)).length;
       const liveAgents = agentRows.filter(
         (row) =>
-          row.agent.status === 'running' ||
+          isRunningAgentWord(row.agent.status) ||
           row.agent.status === 'waiting' ||
           row.agent.status === 'queued',
       ).length;

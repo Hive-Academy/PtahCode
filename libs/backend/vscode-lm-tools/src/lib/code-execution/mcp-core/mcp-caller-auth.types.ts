@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import type { ExternalOwnerKey } from '@ptah-extension/shared';
 import type {
   McpCallerBinding,
   McpCallerCapability,
@@ -50,6 +51,7 @@ export type McpRequestAuth =
       readonly ok: true;
       readonly binding: McpCallerBinding;
       readonly legacy: boolean;
+      readonly externalOwner?: ExternalOwnerKey;
     }
   | { readonly ok: false; readonly failure: McpAuthFailure };
 

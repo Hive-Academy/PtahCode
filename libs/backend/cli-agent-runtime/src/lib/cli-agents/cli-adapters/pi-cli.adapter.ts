@@ -1,3 +1,4 @@
+import type { CliWindowsJobDependencies } from './cli-windows-job';
 /**
  * Pi CLI Adapter (`pi`) — RPC mode (mid-run steering + continuation)
  *
@@ -216,7 +217,7 @@ export class PiCliAdapter implements CliAdapter {
    *   synchronous `CreateProcessW` that cost 300-900 ms of event-loop lag per
    *   rival-CLI launch (TASK_2026_367).
    */
-  constructor(private readonly spawner?: IProcessSpawner) {}
+  constructor(private readonly spawner?: IProcessSpawner, private readonly windowsJob?: CliWindowsJobDependencies) {}
 
   async detect(): Promise<CliDetectionResult> {
     try {
@@ -461,6 +462,9 @@ export class PiCliAdapter implements CliAdapter {
         {
           cwd: options.workingDirectory,
           detached: true,
+          cleanupOrphanDescendants: true,
+          windowsJobPolicy: 'job',
+          windowsJob: this.windowsJob,
           spawner: this.spawner,
         },
       );

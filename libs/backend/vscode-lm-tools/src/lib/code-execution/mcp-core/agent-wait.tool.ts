@@ -79,14 +79,14 @@ export function buildAgentWaitTool(
   return {
     name: AGENT_WAIT_TOOL_NAME,
     description:
-      'Block until spawned agent lanes end, instead of polling ptah_agent_status. ' +
-      'mode "all" (default) returns when every lane has ended; "any" when the first one has. ' +
+      'Block until spawned agent lanes end; do not poll ptah_agent_status. ' +
+      'mode "all" (default) waits for every lane; "any" for the first. ' +
       `timeoutSec (0-${MAX_WAIT_TIMEOUT_SEC}, default ${DEFAULT_AGENT_WAIT_TIMEOUT_SEC}) bounds the wait; ` +
-      'on timeout the reply is a PARTIAL result (not an error) and the call is safe to repeat. ' +
+      'a timeout returns a PARTIAL result (not an error); repeat is safe.' +
       httpCap +
-      'Per lane it reports status, exit code, duration, why it stopped, the declared deliverables ' +
-      `checked on disk and last output, in at most ${WAIT_SUMMARY_MAX_CHARS} chars. ` +
-      'Read the full output with ptah_agent_read.',
+      ' Exclusive external owners may get queued Completion ID blocks on later results; wait blocks. ' +
+      `Per lane: status (or starting), exit code, duration, stop reason, deliverables on disk, last output (max ${WAIT_SUMMARY_MAX_CHARS} chars). ` +
+      `Full output: ${transport === 'stdio' ? 'agent_read' : 'ptah_agent_read'}.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -264,10 +264,11 @@ async function describeEntry(
     };
   }
   const { info } = entry;
-  const exit = info.exitCode === undefined ? '' : `, exit ${info.exitCode}`;
+  const exit = info.status === 'starting' || info.exitCode === undefined ? '' : `, exit ${info.exitCode}`;
+  const duration = info.status === 'starting' ? '' : `, ${formatDuration(durationOf(info, now))}`;
   const head =
-    `[${entry.agentId}] ${info.displayName ?? info.cli}: ${info.status}${exit}, ` +
-    `${formatDuration(durationOf(info, now))}, ${stopReasonOf(info)}`;
+    `[${entry.agentId}] ${info.displayName ?? info.cli}: ${info.status}${exit}${duration}, ` +
+    stopReasonOf(info);
   const [details, lastLines] = await Promise.all([
     deliverableLines(info, statFile),
     entry.state === 'exited' && info.status !== 'starting'

@@ -38,6 +38,10 @@
   outline: none;
   filter: none;
   transform: none;
+  /* DaisyUI .btn plays button-pop (scale up to 1.02) when a button renders. An
+     animated value wins over transform: none, so a full-width host grew past its
+     box and made its container scroll sideways for a moment. */
+  animation: none;
   transition-property: background-color, border-color, color, opacity, box-shadow;
   transition-duration: var(--ptah-duration-fast);
   transition-timing-function: var(--ptah-ease-standard);

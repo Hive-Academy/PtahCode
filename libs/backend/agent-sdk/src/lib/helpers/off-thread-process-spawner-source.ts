@@ -42,7 +42,7 @@
  *                 | { type: 'stdin-end', id }
  *                 | { type: 'kill', id, signal }
  *                 | { type: 'pause', id } | { type: 'resume', id }
- *   worker -> host: { type: 'spawned', id, pid }
+ *   worker -> host: { type: 'spawned', id, pid, startedAt }
  *                 | { type: 'stdout', id, chunk: Uint8Array }
  *                 | { type: 'stderr', id, text }
  *                 | { type: 'stderr-chunk', id, chunk: Uint8Array }
@@ -117,11 +117,15 @@ if (!parentPort) {
 // The child this worker serves now. Replaced wholesale by every 'spawn'
 // message, so a reused worker carries nothing over from the previous child.
 let current = null;
+if (typeof process.on === 'function') process.on('exit', function () { if (current) closeJob(current); });
 
 function createState(message) {
   return {
     id: message.id,
     child: null,
+    job: null,
+    jobBinding: null,
+    exited: false,
     stdoutEnded: false,
     stderrEnded: false,
     streamStderr: message.stderrMode === 'stream',
@@ -129,6 +133,15 @@ function createState(message) {
     pendingEnd: false,
     pendingKill: null,
   };
+}
+
+function closeJob(state) {
+  if (!state.job) return;
+  const handle = state.job;
+  state.job = null;
+  try { state.jobBinding.closeJob(handle); } catch (err) {
+    send(state, { type: 'job-close-error', message: String(err) });
+  }
 }
 
 function send(state, message, transfer) {
@@ -183,11 +196,47 @@ function endStdin(state) {
 }
 
 function killChild(state, signal) {
-  if (!state.child) return;
+  if (!state.child || state.exited) return;
+  if (process.platform === 'win32' && state.child.pid) {
+    const systemRoot = process.env.SystemRoot || process.env.windir;
+    const taskkill = systemRoot ? systemRoot + '\\System32\\taskkill.exe' : 'taskkill';
+    try {
+      require('node:child_process').execFile(taskkill,
+        ['/PID', String(state.child.pid), '/T', '/F'],
+        { windowsHide: true, timeout: 3000 }, function (err, stdout, stderr) {
+          try {
+            if (!err) return;
+            if (err.code === 128 || /not found|no running instance of the task/i.test(String(stdout) + String(stderr))) return;
+            if (!state.exited) {
+              try { state.child.kill(signal || 'SIGTERM'); }
+              catch (killErr) {
+                if (!killErr || killErr.code !== 'ESRCH') send(state, flattenError(killErr));
+              }
+            }
+            send(state, { type: 'error', code: 'TREE_KILL_FAILED',
+              message: 'taskkill failed: ' + (String(stderr).trim() || err.message) });
+          } finally {
+            closeJob(state);
+          }
+        });
+    } catch (err) {
+      closeJob(state);
+      if (!state.exited) {
+        try { state.child.kill(signal || 'SIGTERM'); }
+        catch (killErr) {
+          if (!killErr || killErr.code !== 'ESRCH') send(state, flattenError(killErr));
+        }
+      }
+      send(state, { type: 'error', code: 'TREE_KILL_FAILED',
+        message: 'taskkill failed: ' + String(err) });
+    }
+    return;
+  }
+  closeJob(state);
   try {
     state.child.kill(signal || 'SIGTERM');
   } catch (err) {
-    // ESRCH: the host's direct process.kill already reaped it.
+    if (!err || err.code !== 'ESRCH') send(state, flattenError(err));
   }
 }
 
@@ -256,7 +305,9 @@ function startChild(state, message) {
     return;
   }
   let child;
+  let startedAt;
   try {
+    startedAt = Date.now();
     child = spawn(message.command, message.args, {
       cwd: message.cwd,
       env: message.env,
@@ -272,10 +323,24 @@ function startChild(state, message) {
     return;
   }
   state.child = child;
+  let job;
+  if (message.windowsJobPolicy === 'job' && message.windowsJobBinaryPath && child.pid) {
+    try {
+      const binding = require(message.windowsJobBinaryPath);
+      if (!binding || typeof binding.createJobForPid !== 'function' || typeof binding.closeJob !== 'function') throw new Error('Windows job native binary has an invalid binding shape');
+      state.jobBinding = binding;
+      state.job = binding.createJobForPid(child.pid);
+      job = { ok: true };
+    } catch (err) {
+      job = { ok: false, message: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined };
+    }
+  }
 
   send(state, {
     type: 'spawned',
     pid: child.pid === undefined ? null : child.pid,
+    startedAt: startedAt,
+    job: job,
   });
 
   child.on('error', function (err) {
@@ -285,6 +350,8 @@ function startChild(state, message) {
   });
 
   child.on('exit', function (code, signal) {
+    state.exited = true;
+    closeJob(state);
     send(state, { type: 'exit', code: code, signal: signal });
   });
 
@@ -351,6 +418,7 @@ function startChild(state, message) {
 parentPort.on('message', function (message) {
   if (!message || typeof message !== 'object') return;
   if (message.type === 'spawn') {
+    if (current) closeJob(current);
     current = createState(message);
     startChild(current, message);
     return;

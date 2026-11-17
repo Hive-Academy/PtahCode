@@ -69,7 +69,7 @@ describe('ClaudeCliPathResolver process cleanup', () => {
       expect(mockExecFile).toHaveBeenCalledWith(
         expect.stringContaining('taskkill'),
         ['/pid', '6161', '/T', '/F'],
-        { windowsHide: true },
+        { windowsHide: true, timeout: 3_000 },
         expect.any(Function),
       );
     } finally {
