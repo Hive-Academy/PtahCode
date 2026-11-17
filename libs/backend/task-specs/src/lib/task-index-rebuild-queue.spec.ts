@@ -19,6 +19,23 @@ describe('TaskIndexRebuildQueue', () => {
     queue.dispose();
   });
 
+  it('preserves a forced full scan when a later folder job supersedes it', async () => {
+    const queue = new TaskIndexRebuildQueue();
+    let release!: () => void;
+    const active = queue.enqueue('a', () => new Promise<RebuildResult>((resolve) => {
+      release = () => resolve(result);
+    }));
+    const full = queue.enqueue('a', async () => result, [], true);
+    const folder = queue.enqueue('a', async (folders, forceFull) => {
+      expect(folders).toEqual(['changed']);
+      expect(forceFull).toBe(true);
+      return result;
+    }, ['changed']);
+    release();
+    await Promise.all([active, full, folder]);
+    queue.dispose();
+  });
+
   it('rejects only a new root when 64 roots are waiting', async () => {
     const queue = new TaskIndexRebuildQueue();
     let release!: () => void;

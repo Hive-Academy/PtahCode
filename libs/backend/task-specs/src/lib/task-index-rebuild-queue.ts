@@ -8,7 +8,8 @@ interface Job {
   root: string;
   queuedAt: number;
   folders: Set<string>;
-  run: (folders: string[]) => Promise<RebuildResult>;
+  forceFull: boolean;
+  run: (folders: string[], forceFull: boolean) => Promise<RebuildResult>;
   resolve: (value: RebuildResult) => void;
   reject: (error: Error) => void;
 }
@@ -22,10 +23,10 @@ export class TaskIndexRebuildQueue {
 
   constructor(private readonly onStart?: (waitedMs: number, depth: number) => void) {}
 
-  enqueue(root: string, run: (folders: string[]) => Promise<RebuildResult>, folders: string[] = []): Promise<RebuildResult> {
+  enqueue(root: string, run: (folders: string[], forceFull: boolean) => Promise<RebuildResult>, folders: string[] = [], forceFull = false): Promise<RebuildResult> {
     if (this.disposed) return Promise.reject(new Error('Task index rebuild queue disposed'));
     return new Promise<RebuildResult>((resolve, reject) => {
-      const job: Job = { root, queuedAt: performance.now(), folders: new Set(folders), run, resolve, reject };
+      const job: Job = { root, queuedAt: performance.now(), folders: new Set(folders), forceFull, run, resolve, reject };
       if (this.active.has(root)) {
         const previous = this.trailing.get(root);
         if (previous) this.mergeSuperseded(previous, job);
@@ -45,6 +46,7 @@ export class TaskIndexRebuildQueue {
 
   private mergeSuperseded(previous: Job, replacement: Job): void {
     for (const folder of previous.folders) replacement.folders.add(folder);
+    replacement.forceFull ||= previous.forceFull;
     const resolve = replacement.resolve;
     const reject = replacement.reject;
     replacement.resolve = (value) => { resolve(value); previous.resolve(value); };
@@ -57,7 +59,7 @@ export class TaskIndexRebuildQueue {
       this.waiting.delete(root);
       this.active.add(root);
       this.onStart?.(performance.now() - job.queuedAt, this.waiting.size);
-      void job.run([...job.folders]).then(job.resolve, (error: unknown) => job.reject(
+      void job.run([...job.folders], job.forceFull).then(job.resolve, (error: unknown) => job.reject(
         error instanceof Error ? error : new Error(String(error)),
       )).finally(() => {
         this.active.delete(root);

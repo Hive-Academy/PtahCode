@@ -119,6 +119,38 @@ function excludedRows(n: number): ExcludedTaskFolder[] {
 // ── shared contract exercised against any ITaskIndexStore ────────────────────
 
 function runContract(makeStore: () => ITaskIndexStore): void {
+  it('rejects folder changes before a full scan has written metadata', () => {
+    const store = makeStore();
+    expect(() => store.applyFolderChanges(ROOT, [], [], [{ folderName: 'TASK_2026_001', reason: 'no_carrier' }]))
+      .toThrow('Folder changes require a written full scan');
+    expect(store.getMeta(ROOT)).toBeNull();
+    expect(store.listByWorkspace(ROOT)).toEqual([]);
+  });
+  it('applies upserts and deletions without changing full-scan metadata', () => {
+    const store = makeStore();
+    store.replaceWorkspace(ROOT, SEED, excludedRows(2));
+    const meta = store.getMeta(ROOT);
+    store.applyFolderChanges(ROOT, [task({ id: 'TASK_2026_001', status: 'in_review' }),
+      task({ id: 'TASK_2026_099' })], ['TASK_2026_002']);
+    const rows = store.listByWorkspace(ROOT);
+    expect(rows.map((row) => row.id).sort()).toEqual(['TASK_2026_001', 'TASK_2026_003', 'TASK_2026_099']);
+    expect(rows.find((row) => row.id === 'TASK_2026_001')?.status).toBe('in_review');
+    expect(store.getMeta(ROOT)).toEqual(meta);
+  });
+  it('updates excluded folders when a scanned folder becomes excluded, valid, or deleted', () => {
+    const store = makeStore();
+    store.replaceWorkspace(ROOT, SEED, [{ folderName: 'TASK_2026_900', reason: 'no_carrier' }]);
+    const fullScanAt = store.getMeta(ROOT)?.lastFullScanAt;
+    store.applyFolderChanges(ROOT, [], ['TASK_2026_001'], [{ folderName: 'TASK_2026_001', reason: 'no_carrier' }]);
+    expect(store.getMeta(ROOT)?.excluded.map((row) => row.folderName)).toEqual(['TASK_2026_900', 'TASK_2026_001']);
+    expect(store.getMeta(ROOT)?.excludedCount).toBe(2);
+    store.applyFolderChanges(ROOT, [task({ id: 'TASK_2026_001' }), task({ id: 'TASK_2026_900' })], []);
+    expect(store.getMeta(ROOT)?.excluded).toEqual([]);
+    store.applyFolderChanges(ROOT, [], ['TASK_2026_001'], [{ folderName: 'TASK_2026_001', reason: 'no_carrier' }]);
+    store.applyFolderChanges(ROOT, [], ['TASK_2026_001']);
+    expect(store.getMeta(ROOT)?.excludedCount).toBe(0);
+    expect(store.getMeta(ROOT)?.lastFullScanAt).toBe(fullScanAt);
+  });
   it('replaceWorkspace inserts rows + records excluded count', () => {
     const store = makeStore();
     store.replaceWorkspace(ROOT, SEED, excludedRows(85));
