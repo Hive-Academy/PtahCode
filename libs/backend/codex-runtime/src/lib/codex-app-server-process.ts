@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import { CodexStderrTail, redactCodexDiagnostics } from './codex-stderr-tail';
 import { normalizeCodexHomeKey } from './codex-home-path';
-import type { ProcessSpawnRequest, SpawnedProcessHandle } from '@ptah-extension/platform-core';
+import { killProcessTree, type ProcessSpawnRequest, type SpawnedProcessHandle } from '@ptah-extension/platform-core';
 import type {
   CodexRuntimeLogger,
   CodexExecutableSource,
@@ -145,6 +145,7 @@ export class CodexAppServerProcess {
   private finishClose?: () => void;
   private closing = false;
   private closed = false;
+  private exitObserved = false;
   private ready = false;
   private initializeResponseReceived = false;
   private readonly bufferedNotifications: Notification[] = [];
@@ -574,6 +575,7 @@ export class CodexAppServerProcess {
     this.fail('Codex process aborted');
   };
   private readonly onExit = (): void => {
+    this.exitObserved = true;
     this.fail('Codex process exited');
   };
   private readonly onClose = (): void => {
@@ -675,10 +677,19 @@ export class CodexAppServerProcess {
         this.killTimer = undefined;
         // Do not let a missing close event retain the runtime indefinitely.
         if (!this.closed) {
-          try {
-            this.child?.kill('SIGKILL');
-          } catch {
-            this.failure ??= new Error('Codex process kill failed');
+          const child = this.child;
+          if (child?.pid && process.platform === 'win32' &&
+              !this.exitObserved && !childHasExited(child)) {
+            this.stopWindowsTree(child.pid);
+          } else if (child && (process.platform !== 'win32' ||
+              (!this.exitObserved && !childHasExited(child)))) {
+            try {
+              child?.kill('SIGKILL');
+            } catch (failure: unknown) {
+              const error = failure instanceof Error ? failure : new Error(String(failure));
+              this.failure ??= error;
+              this.logger?.error('Codex process kill failed', error);
+            }
           }
         }
         this.cleanup();
@@ -695,6 +706,22 @@ export class CodexAppServerProcess {
 
   dispose(): Promise<void> {
     return this.close();
+  }
+
+  private stopWindowsTree(pid: number): void {
+    void killProcessTree(pid, 'SIGKILL', (failure: unknown) => {
+      const error = failure instanceof Error ? failure : new Error(String(failure));
+      this.failure ??= error;
+      this.logger?.error('Codex process tree kill failed', error);
+      const child = this.child;
+      if (this.exitObserved || !child || childHasExited(child)) return;
+      try {
+        child.kill('SIGKILL');
+      } catch (killFailure: unknown) {
+        const killError = killFailure instanceof Error ? killFailure : new Error(String(killFailure));
+        this.logger?.error('Codex process fallback kill failed', killError);
+      }
+    });
   }
 
   private cleanup(): void {

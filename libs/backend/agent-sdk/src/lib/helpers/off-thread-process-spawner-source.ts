@@ -122,6 +122,7 @@ function createState(message) {
   return {
     id: message.id,
     child: null,
+    exited: false,
     stdoutEnded: false,
     stderrEnded: false,
     streamStderr: message.stderrMode === 'stream',
@@ -183,11 +184,41 @@ function endStdin(state) {
 }
 
 function killChild(state, signal) {
-  if (!state.child) return;
+  if (!state.child || state.exited) return;
+  if (process.platform === 'win32' && state.child.pid) {
+    const systemRoot = process.env.SystemRoot || process.env.windir;
+    const taskkill = systemRoot ? systemRoot + '\\System32\\taskkill.exe' : 'taskkill';
+    try {
+      require('node:child_process').execFile(taskkill,
+        ['/PID', String(state.child.pid), '/T', '/F'],
+        { windowsHide: true, timeout: 3000 }, function (err, stdout, stderr) {
+          if (!err) return;
+          if (err.code === 128 || /not found|no running instance of the task/i.test(String(stdout) + String(stderr))) return;
+          if (!state.exited) {
+            try { state.child.kill(signal || 'SIGTERM'); }
+            catch (killErr) {
+              if (!killErr || killErr.code !== 'ESRCH') send(state, flattenError(killErr));
+            }
+          }
+          send(state, { type: 'error', code: 'TREE_KILL_FAILED',
+            message: 'taskkill failed: ' + (String(stderr).trim() || err.message) });
+        });
+    } catch (err) {
+      if (!state.exited) {
+        try { state.child.kill(signal || 'SIGTERM'); }
+        catch (killErr) {
+          if (!killErr || killErr.code !== 'ESRCH') send(state, flattenError(killErr));
+        }
+      }
+      send(state, { type: 'error', code: 'TREE_KILL_FAILED',
+        message: 'taskkill failed: ' + String(err) });
+    }
+    return;
+  }
   try {
     state.child.kill(signal || 'SIGTERM');
   } catch (err) {
-    // ESRCH: the host's direct process.kill already reaped it.
+    if (!err || err.code !== 'ESRCH') send(state, flattenError(err));
   }
 }
 
@@ -285,6 +316,7 @@ function startChild(state, message) {
   });
 
   child.on('exit', function (code, signal) {
+    state.exited = true;
     send(state, { type: 'exit', code: code, signal: signal });
   });
 
