@@ -63,6 +63,13 @@ export interface TaskScanResult {
   timing?: { enumerateMs: number; readMs: number; parseValidateMs: number; carriers: number };
 }
 
+export interface TaskFolderScanResult {
+  tasks: ScannedTask[];
+  deletedFolders: string[];
+  excluded: ExcludedTaskFolder[];
+  timing: { enumerateMs: number; readMs: number; parseValidateMs: number; carriers: number };
+}
+
 type FolderScanResult =
   | { task: ScannedTask; excluded?: never }
   | { task?: never; excluded: ExcludedTaskFolder }
@@ -96,6 +103,38 @@ export class TaskScannerService {
     @inject(TOKENS.LOGGER)
     private readonly logger: Logger,
   ) {}
+
+  /** Scan only selected folders, using the full directory's names for reference validation. */
+  async scanFolders(workspaceRoot: string, names: readonly string[]): Promise<TaskFolderScanResult> {
+    const started = performance.now();
+    const specsDir = path.join(normalizeWorkspaceRoot(workspaceRoot), '.ptah', 'specs');
+    const entries = await this.fs.readDirectory(specsDir);
+    const knownFolders = new Set(entries.filter((entry) =>
+      entry.type === FileType.Directory && !entry.name.startsWith('.')).map((entry) => entry.name));
+    const enumerateMs = performance.now() - started;
+    let parseValidateMs = 0;
+    const readsStarted = performance.now();
+    const tasks: ScannedTask[] = [];
+    const excluded: ExcludedTaskFolder[] = [];
+    const deletedFolders: string[] = [];
+    for (const name of names) {
+      if (!knownFolders.has(name)) {
+        deletedFolders.push(name);
+        continue;
+      }
+      const result = await this.scanFolder(specsDir, name, knownFolders,
+        (duration) => { parseValidateMs += duration; });
+      if (result.task) tasks.push(result.task);
+      else {
+        deletedFolders.push(name);
+        if (result.excluded) excluded.push(result.excluded);
+      }
+    }
+    return { tasks, deletedFolders, excluded, timing: {
+      enumerateMs, readMs: Math.max(0, performance.now() - readsStarted - parseValidateMs),
+      parseValidateMs, carriers: names.length,
+    } };
+  }
 
   async scan(workspaceRoot: string): Promise<TaskScanResult> {
     const started = performance.now();
@@ -213,8 +252,8 @@ export class TaskScannerService {
    * everything the cross-file pass says about a field just because the parser
    * said something about that field is how a real warning disappears.
    */
-  private mergeCrossFileIssues(tasks: ScannedTask[]): void {
-    const crossFile = deriveCrossFileIssues(tasks);
+  mergeCrossFileIssues(tasks: ScannedTask[], graph: readonly TaskSpecSummary[] = tasks): void {
+    const crossFile = deriveCrossFileIssues(graph);
 
     for (const task of tasks) {
       const derived = crossFile.get(task.id);

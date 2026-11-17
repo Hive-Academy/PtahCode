@@ -106,6 +106,8 @@ export interface ITaskIndexStore {
   upsertMany(workspaceRoot: string, tasks: readonly TaskSpecSummary[]): void;
   /** Delete a single folder's row (folder removed or became excluded). */
   deleteByFolder(workspaceRoot: string, folderName: string): void;
+  /** Apply a folder batch atomically without changing full-scan metadata. */
+  applyFolderChanges(workspaceRoot: string, tasks: readonly TaskSpecSummary[], deletedFolders: readonly string[], excluded?: readonly ExcludedTaskFolder[]): void;
   /** Read a workspace's rows, newest-first, with optional status/type filter. */
   listByWorkspace(
     workspaceRoot: string,
@@ -308,6 +310,22 @@ export class SqliteTaskIndexStore implements ITaskIndexStore {
       .run(workspaceRoot, folderName);
   }
 
+  applyFolderChanges(workspaceRoot: string, tasks: readonly TaskSpecSummary[], deletedFolders: readonly string[], excluded: readonly ExcludedTaskFolder[] = []): void {
+    if (!this.getMeta(workspaceRoot)) throw new Error('Folder changes require a written full scan');
+    const now = Date.now();
+    const ins = this.db.prepare(this.insertSql());
+    const del = this.db.prepare('DELETE FROM task_specs WHERE workspace_root = ? AND folder_name = ?');
+    const touched = new Set([...tasks.map((task) => task.folderName), ...deletedFolders]);
+    const nextExcluded = [...(this.excludedRows.get(workspaceRoot) ?? []).filter((row) => !touched.has(row.folderName)), ...excluded];
+    const count = this.db.prepare('UPDATE task_specs_scan_meta SET excluded_count = ? WHERE workspace_root = ?');
+    this.db.transaction(() => {
+      for (const name of deletedFolders) del.run(workspaceRoot, name);
+      for (const task of tasks) ins.run(...this.insertParams(workspaceRoot, task, now));
+      count.run(nextExcluded.length, workspaceRoot);
+    })();
+    this.excludedRows.set(workspaceRoot, cloneExcluded(nextExcluded));
+  }
+
   listByWorkspace(
     workspaceRoot: string,
     filters?: TaskIndexFilters,
@@ -508,6 +526,18 @@ export class InMemoryTaskIndexStore implements ITaskIndexStore {
 
   deleteByFolder(workspaceRoot: string, folderName: string): void {
     this.rows.get(workspaceRoot)?.delete(folderName);
+  }
+
+  applyFolderChanges(workspaceRoot: string, tasks: readonly TaskSpecSummary[], deletedFolders: readonly string[], excluded: readonly ExcludedTaskFolder[] = []): void {
+    const meta = this.meta.get(workspaceRoot);
+    if (!meta) throw new Error('Folder changes require a written full scan');
+    const folder = new Map(this.rows.get(workspaceRoot));
+    for (const name of deletedFolders) folder.delete(name);
+    for (const task of tasks) folder.set(task.folderName, cloneSummary(task));
+    this.rows.set(workspaceRoot, folder);
+    const touched = new Set([...tasks.map((task) => task.folderName), ...deletedFolders]);
+    const nextExcluded = [...meta.excluded.filter((row) => !touched.has(row.folderName)), ...excluded];
+    this.meta.set(workspaceRoot, { ...meta, excluded: cloneExcluded(nextExcluded), excludedCount: nextExcluded.length });
   }
 
   listByWorkspace(
