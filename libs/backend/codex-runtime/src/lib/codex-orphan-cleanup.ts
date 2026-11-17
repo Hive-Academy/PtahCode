@@ -16,16 +16,24 @@ export function cleanupAfterFailedTreeKill(
   else child.once('exit', cleanup);
 }
 
+/** Records the root exit time. A delayed cleanup must not use its own start time as the cutoff. */
+export function recordRootExit(child: SpawnedProcessHandle, now: () => number): { at?: number } {
+  const exit: { at?: number } = {};
+  child.once('exit', () => { exit.at = now(); });
+  return exit;
+}
+
 export function startOrphanCleanupForRoot(
   child: SpawnedProcessHandle | undefined,
   startedAt: number | undefined,
   options: OrphanCleanupOptions,
   report: (error: Error) => void,
+  exitedAt?: number,
 ): boolean {
   const pid = child?.pid;
   if (process.platform !== 'win32' || !pid || !Number.isSafeInteger(pid) ||
       pid <= 0 || startedAt === undefined) return false;
-  startOrphanCleanup(pid, startedAt, options, report);
+  startOrphanCleanup(pid, startedAt, options, report, exitedAt);
   return true;
 }
 
@@ -57,9 +65,10 @@ export function startOrphanCleanup(
   startedAt: number,
   options: OrphanCleanupOptions,
   report: (error: Error) => void,
+  exitedAt?: number,
 ): void {
   const orphan = new WindowsOrphanDescendants(pid, startedAt,
-    (options.now ?? Date.now)(), options.query ?? queryOrphanProcesses,
+    exitedAt ?? (options.now ?? Date.now)(), options.query ?? queryOrphanProcesses,
     options.kill ?? killOrphanDescendant, report);
   void Promise.resolve().then(() => orphan.stop()).catch((error: unknown) => {
     // degradation-audit: reported - Unexpected cleanup failures are logged after the exit handler returns.

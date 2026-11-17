@@ -3,7 +3,7 @@ import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import { CodexStderrTail, redactCodexDiagnostics } from './codex-stderr-tail';
 import { normalizeCodexHomeKey } from './codex-home-path';
 import { killProcessTree, type ProcessSpawnRequest, type SpawnedProcessHandle } from '@ptah-extension/platform-core';
-import { childHasExited, cleanupAfterFailedTreeKill, startOrphanCleanupForRoot, type OrphanCleanupOptions } from './codex-orphan-cleanup';
+import { childHasExited, cleanupAfterFailedTreeKill, recordRootExit, startOrphanCleanupForRoot, type OrphanCleanupOptions } from './codex-orphan-cleanup';
 import type {
   CodexRuntimeLogger,
   CodexExecutableSource,
@@ -709,13 +709,14 @@ export class CodexAppServerProcess {
   }
 
   private stopWindowsTree(pid: number): void {
+    const rootExit = this.child && recordRootExit(this.child, this.orphanCleanup.now ?? Date.now);
     void killProcessTree(pid, 'SIGKILL', (failure: unknown) => {
       const error = failure instanceof Error ? failure : new Error(String(failure));
       this.failure ??= error;
       this.logger?.error('Codex process tree kill failed', error);
       const child = this.child;
       if (!child) return;
-      cleanupAfterFailedTreeKill(child, this.exitObserved, () => this.cleanupOrphans(child));
+      cleanupAfterFailedTreeKill(child, this.exitObserved, () => this.cleanupOrphans(child, rootExit?.at));
       if (this.exitObserved || childHasExited(child)) return;
       try {
         child.kill('SIGKILL');
@@ -726,11 +727,11 @@ export class CodexAppServerProcess {
     });
   }
 
-  private cleanupOrphans(child: SpawnedProcessHandle | undefined): void {
+  private cleanupOrphans(child: SpawnedProcessHandle | undefined, exitedAt?: number): void {
     if (this.orphanCleanupStarted) return;
     this.orphanCleanupStarted = startOrphanCleanupForRoot(
       child, this.spawnStartedAt, this.orphanCleanup,
-      (error) => this.logger?.error('Codex orphan descendant cleanup failed', error),
+      (error) => this.logger?.error('Codex orphan descendant cleanup failed', error), exitedAt,
     );
   }
 

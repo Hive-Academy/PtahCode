@@ -334,6 +334,28 @@ describe('CodexAppServerProcess', () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 
+  it('uses the root exit time, not the delayed cleanup time, as the cutoff', async () => {
+    const query = jest.fn<ReturnType<ProcessQuery>, []>(async () => [
+      { ProcessId: 51, ParentProcessId: 42, CreationDate: '/Date(1500)/' },
+      { ProcessId: 61, ParentProcessId: 42, CreationDate: '/Date(3000)/' },
+    ]);
+    const kill = jest.fn(async (_pid: number) => undefined);
+    let clock = 1000;
+    useWindowsExecutableFixture({ query, kill, now: () => clock });
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    await start();
+    const closing = runtime.close();
+    jest.advanceTimersByTime(1000);
+    clock = 2000;
+    child.exitCode = 1;
+    child.emit('exit', 1, null);
+    clock = 5000;
+    jest.mocked(killProcessTree).mock.calls[0][2]?.(new Error('taskkill failed'));
+    await closing;
+    await flush();
+    expect(kill.mock.calls).toEqual([[51]]);
+  });
+
   it.each([undefined, 0])('skips orphan query when the root PID is %s', async (pid) => {
     const query = jest.fn<ReturnType<ProcessQuery>, []>(async () => []);
     useWindowsExecutableFixture({ query, now: () => 1000 });
