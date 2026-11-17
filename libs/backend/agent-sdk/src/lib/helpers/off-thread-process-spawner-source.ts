@@ -42,7 +42,7 @@
  *                 | { type: 'stdin-end', id }
  *                 | { type: 'kill', id, signal }
  *                 | { type: 'pause', id } | { type: 'resume', id }
- *   worker -> host: { type: 'spawned', id, pid }
+ *   worker -> host: { type: 'spawned', id, pid, startedAt }
  *                 | { type: 'stdout', id, chunk: Uint8Array }
  *                 | { type: 'stderr', id, text }
  *                 | { type: 'stderr-chunk', id, chunk: Uint8Array }
@@ -287,7 +287,9 @@ function startChild(state, message) {
     return;
   }
   let child;
+  let startedAt;
   try {
+    startedAt = Date.now();
     child = spawn(message.command, message.args, {
       cwd: message.cwd,
       env: message.env,
@@ -307,6 +309,7 @@ function startChild(state, message) {
   send(state, {
     type: 'spawned',
     pid: child.pid === undefined ? null : child.pid,
+    startedAt: startedAt,
   });
 
   child.on('error', function (err) {

@@ -19,11 +19,23 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { killProcessTree } from '@ptah-extension/platform-core';
 
-jest.mock('@ptah-extension/platform-core', () => ({
-  ...jest.requireActual('@ptah-extension/platform-core'),
-  killProcessTree: jest.fn((...args: Parameters<typeof killProcessTree>) =>
-    jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args)),
-}));
+jest.mock('@ptah-extension/platform-core', () => {
+  const actual = jest.requireActual<typeof import('@ptah-extension/platform-core')>(
+    '@ptah-extension/platform-core',
+  );
+  return {
+    ...actual,
+    // The default query starts PowerShell. Real children in this suite must not do that.
+    defaultOrphanCleanupDependencies: {
+      ...actual.defaultOrphanCleanupDependencies,
+      query: jest.fn(async () => []),
+      kill: jest.fn(async () => undefined),
+    },
+    killProcessTree: jest.fn((...args: Parameters<typeof killProcessTree>) =>
+      actual.killProcessTree(...args),
+    ),
+  };
+});
 
 import type {
   WorkspaceChangeBatch,
@@ -154,7 +166,142 @@ describe('CliWorkspaceWatcher without a host bundle', () => {
   });
 });
 
-describe('CliWorkspaceWatchHostProcess stderr', () => {
+describe('CliWorkspaceWatchHostProcess lifecycle and stderr', () => {
+  it.each([
+    { name: 'crash', platform: 'win32', code: 13, queryFails: false, killFails: false, queries: 2, kills: 1, errors: 0 },
+    { name: 'query failure', platform: 'win32', code: 0, queryFails: true, killFails: false, queries: 1, kills: 0, errors: 1 },
+    { name: 'kill failure', platform: 'win32', code: 0, queryFails: false, killFails: true, queries: 2, kills: 1, errors: 1 },
+    { name: 'non-Windows', platform: 'linux', code: 0, queryFails: false, killFails: false, queries: 0, kills: 0, errors: 0 },
+  ] as const)('watch host spontaneous exit: $name', async ({ platform, code, queryFails, killFails, queries, kills, errors }) => {
+    const script = path.join(makeTempRoot(), 'fake.cjs');
+    fs.writeFileSync(script, '');
+    const fakeChild = Object.assign(new nodeChildProcess.ChildProcess(), {
+      pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      channel: null, stderr: null, unref: jest.fn(), kill: jest.fn(() => true),
+    });
+    const fork = jest.spyOn(nodeChildProcess, 'fork').mockReturnValue(fakeChild);
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    const queryError = new Error('query failed');
+    const killError = new Error('kill failed');
+    const query = jest.fn(async () => {
+      if (queryFails) throw queryError;
+      return [{ ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_000).toISOString() }];
+    });
+    const kill = jest.fn(async (_pid: number) => { if (killFails) throw killError; });
+    const diagnostics: WorkspaceWatcherDiagnostic[] = [];
+    try {
+      const host = new CliWorkspaceWatchHostProcess(script, (d) => diagnostics.push(d), query, kill, () => 10_000);
+      fakeChild.exitCode = code;
+      fakeChild.emit('close', code);
+      fakeChild.emit('close', code);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(queries);
+      expect(kill).toHaveBeenCalledTimes(kills);
+      expect(diagnostics).toHaveLength(errors);
+      if (errors) expect(diagnostics[0].detail?.['error']).toBe(queryFails ? queryError : killError);
+      host.kill();
+      expect(fakeChild.kill).not.toHaveBeenCalled();
+    } finally {
+      if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      fork.mockRestore();
+    }
+  });
+  it('cleans only linked descendants after a duplicate Windows close', async () => {
+    const script = path.join(makeTempRoot(), 'fake.cjs');
+    fs.writeFileSync(script, '');
+    const fakeChild = Object.assign(new nodeChildProcess.ChildProcess(), {
+      pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      channel: null, stderr: null, unref: jest.fn(), kill: jest.fn(() => true),
+    });
+    const fork = jest.spyOn(nodeChildProcess, 'fork').mockReturnValue(fakeChild);
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const query = jest.fn(async () => [
+      { ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_000).toISOString() },
+      { ProcessId: 44, ParentProcessId: 1, CreationDate: new Date(10_000).toISOString() },
+    ]);
+    const kill = jest.fn(async (_pid: number) => undefined);
+    try {
+      const host = new CliWorkspaceWatchHostProcess(script, undefined, query, kill, () => 10_000);
+      fakeChild.exitCode = 0;
+      fakeChild.emit('close', 0);
+      fakeChild.emit('close', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(kill).toHaveBeenCalledTimes(1);
+      expect(kill).toHaveBeenCalledWith(43);
+      host.kill();
+      expect(fakeChild.kill).not.toHaveBeenCalled();
+    } finally {
+      if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
+      fork.mockRestore();
+    }
+  });
+  it('starts the orphan cleanup on host exit when a held pipe delays close', async () => {
+    const script = path.join(makeTempRoot(), 'fake.cjs');
+    fs.writeFileSync(script, '');
+    const fakeChild = Object.assign(new nodeChildProcess.ChildProcess(), {
+      pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      channel: null, stderr: null, unref: jest.fn(), kill: jest.fn(() => true),
+    });
+    const fork = jest.spyOn(nodeChildProcess, 'fork').mockReturnValue(fakeChild);
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    let now = 10_000;
+    const query = jest.fn(async () => [
+      { ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_050).toISOString() },
+    ]);
+    const kill = jest.fn(async (_pid: number) => undefined);
+    try {
+      const host = new CliWorkspaceWatchHostProcess(script, undefined, query, kill, () => now);
+      now = 10_100;
+      fakeChild.emit('exit', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(kill).toHaveBeenCalledWith(43);
+      const queriesBeforeClose = query.mock.calls.length;
+      fakeChild.exitCode = 0;
+      fakeChild.emit('close', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(queriesBeforeClose);
+      host.kill();
+    } finally {
+      if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      fork.mockRestore();
+    }
+  });
+
+  it('excludes a reused PID child created after host exit but before close', async () => {
+    const script = path.join(makeTempRoot(), 'fake.cjs');
+    fs.writeFileSync(script, '');
+    const fakeChild = Object.assign(new nodeChildProcess.ChildProcess(), {
+      pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      channel: null, stderr: null, unref: jest.fn(), kill: jest.fn(() => true),
+    });
+    const fork = jest.spyOn(nodeChildProcess, 'fork').mockReturnValue(fakeChild);
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    let now = 10_000;
+    const query = jest.fn(async () => [
+      { ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_150).toISOString() },
+    ]);
+    const kill = jest.fn(async (_pid: number) => undefined);
+    try {
+      const host = new CliWorkspaceWatchHostProcess(script, undefined, query, kill, () => now);
+      now = 10_100;
+      fakeChild.emit('exit', 0);
+      now = 10_200;
+      fakeChild.exitCode = 0;
+      fakeChild.emit('close', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(kill).not.toHaveBeenCalled();
+      host.kill();
+    } finally {
+      if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      fork.mockRestore();
+    }
+  });
   it('waits for the Windows tree stop before killing the root', async () => {
     const script = path.join(makeTempRoot(), 'waiting.cjs');
     fs.writeFileSync(script, '');
@@ -164,12 +311,14 @@ describe('CliWorkspaceWatchHostProcess stderr', () => {
       kill: jest.fn(() => true),
     });
     const fork = jest.spyOn(nodeChildProcess, 'fork').mockReturnValue(fakeChild);
-    const originalPlatform = process.platform;
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     let finishTree: (() => void) | undefined;
     const reaper = jest.mocked(killProcessTree).mockImplementation(() => new Promise<void>((resolve) => { finishTree = resolve; }));
+    const orphanQuery = jest.fn(async () => []);
     try {
-      const host = new CliWorkspaceWatchHostProcess(script);
+      const host = new CliWorkspaceWatchHostProcess(script, undefined,
+        orphanQuery, async () => undefined, () => 10_000);
       const exited = new Promise<void>((resolve) => host.on('exit', () => resolve()));
       const rootKill = fakeChild.kill;
       host.kill();
@@ -181,11 +330,13 @@ describe('CliWorkspaceWatchHostProcess stderr', () => {
       fakeChild.exitCode = 0;
       fakeChild.emit('close', 0);
       await exited;
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(orphanQuery).not.toHaveBeenCalled();
       const count = reaper.mock.calls.length;
       host.kill();
       expect(reaper).toHaveBeenCalledTimes(count);
     } finally {
-      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
       fork.mockRestore();
       reaper.mockImplementation((...args) => jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args));
     }
@@ -200,7 +351,7 @@ describe('CliWorkspaceWatchHostProcess stderr', () => {
     });
     const fork = jest.spyOn(nodeChildProcess, 'fork').mockReturnValue(fakeChild);
     const diagnostics: WorkspaceWatcherDiagnostic[] = [];
-    const originalPlatform = process.platform;
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
     const reaper = jest.mocked(killProcessTree).mockImplementation(async (_pid, _signal, onError) => {
       onError?.(new Error('ENOENT'));
     });
@@ -218,7 +369,7 @@ describe('CliWorkspaceWatchHostProcess stderr', () => {
       expect(diagnostics).toHaveLength(1);
       expect((diagnostics[0].detail?.['error'] as Error).message).toContain('ENOENT');
     } finally {
-      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
       fork.mockRestore();
       reaper.mockImplementation((...args) => jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args));
     }
@@ -231,7 +382,7 @@ describe('CliWorkspaceWatchHostProcess stderr', () => {
       channel: null, stderr: null, unref: jest.fn(), kill: jest.fn(() => true),
     });
     const fork = jest.spyOn(nodeChildProcess, 'fork').mockReturnValue(fakeChild);
-    const originalPlatform = process.platform;
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     const reaper = jest.mocked(killProcessTree).mockImplementation(async (_pid, _signal, onError) => {
       onError?.(new Error('failed reaper'));
@@ -242,7 +393,7 @@ describe('CliWorkspaceWatchHostProcess stderr', () => {
       await new Promise((resolve) => setImmediate(resolve));
       expect(fakeChild.kill).toHaveBeenCalledTimes(1);
     } finally {
-      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
       fork.mockRestore();
       reaper.mockImplementation((...args) => jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args));
     }

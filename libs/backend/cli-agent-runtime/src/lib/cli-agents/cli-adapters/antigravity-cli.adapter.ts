@@ -863,6 +863,7 @@ export class AntigravityCliAdapter implements CliAdapter {
           env: Object.keys(spawnEnv).length > 0 ? spawnEnv : undefined,
           needsConsole: true,
           detached: true,
+          cleanupOrphanDescendants: true,
           spawner: this.spawner,
         },
       );

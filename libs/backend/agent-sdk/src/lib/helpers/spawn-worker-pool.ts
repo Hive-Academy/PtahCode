@@ -88,7 +88,7 @@ export type WorkerErrorMessage = {
 
 /** Every worker message carries the id of the lease that produced it. */
 export type WorkerMessage = { readonly id: number } & (
-  | { type: 'spawned'; pid: number | null }
+  | { type: 'spawned'; pid: number | null; startedAt: number }
   | { type: 'stdout'; chunk: Uint8Array }
   | { type: 'stderr'; text: string }
   | { type: 'stderr-chunk'; chunk: Uint8Array }
