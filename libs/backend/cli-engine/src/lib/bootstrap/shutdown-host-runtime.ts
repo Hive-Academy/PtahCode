@@ -33,6 +33,7 @@
  */
 
 import type { DependencyContainer } from 'tsyringe';
+import { RepositoryIdentityBackfillService } from '@ptah-extension/usage-analytics';
 import { LANE_OUTCOME_TOKENS } from '@ptah-extension/lane-outcomes';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 
@@ -61,7 +62,7 @@ const WORKSPACE_WATCHER_TOKEN = Symbol.for('PlatformWorkspaceWatcher');
 type ContainerLike = Pick<DependencyContainer, 'resolve' | 'isRegistered'>;
 
 /** The teardown verbs the subsystems expose; only the return type differs. */
-type TeardownVerb = 'disposeAll' | 'dispose';
+type TeardownVerb = 'disposeAll' | 'dispose' | 'stop';
 type DisposableSubsystem = Record<TeardownVerb, () => void | Promise<void>>;
 
 /**
@@ -78,7 +79,7 @@ type DisposableSubsystem = Record<TeardownVerb, () => void | Promise<void>>;
  */
 async function disposeSubsystem(
   container: ContainerLike,
-  token: symbol,
+  token: symbol | typeof RepositoryIdentityBackfillService,
   label: string,
   verb: TeardownVerb = 'disposeAll',
 ): Promise<void> {
@@ -89,7 +90,11 @@ async function disposeSubsystem(
     ) {
       return;
     }
-    await container.resolve<DisposableSubsystem>(token)[verb]();
+    if (typeof token !== 'symbol') {
+      container.resolve(RepositoryIdentityBackfillService).stop();
+    } else {
+      await container.resolve<DisposableSubsystem>(token)[verb]();
+    }
   } catch (error: unknown) {
     // Reported on stderr rather than through the logger: this also runs from
     // signal handlers, mid-teardown, where the logger lives in the very
@@ -165,8 +170,8 @@ export async function shutdownWorkspaceWatcher(
 }
 
 /**
- * The whole host-runtime teardown: agent subprocesses, proxies, lane outcome
- * drain, then the workspace watcher.
+ * The whole host-runtime teardown: backfill, agent subprocesses, proxies,
+ * lane outcome and usage drains, then the workspace watcher.
  *
  * Never throws, and never short-circuits — if the agent half rejects, its
  * rejection is absorbed by {@link disposeSubsystem} and the proxy half still
@@ -175,6 +180,9 @@ export async function shutdownWorkspaceWatcher(
 export async function shutdownHostRuntime(
   container: ContainerLike | undefined,
 ): Promise<void> {
+  if (container) {
+    await disposeSubsystem(container, RepositoryIdentityBackfillService, 'repository identity backfill', 'stop');
+  }
   await shutdownAgentProcesses(container);
   await shutdownPtahCliProxies(container);
   await shutdownLaneOutcomes(container);

@@ -46,16 +46,17 @@ import { UsageReconciliationService, USAGE_RECONCILIATION_TOKENS, registerUsageA
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 
 describe('CLI usage reconciliation composition', () => {
-  it('registers the real producer token and starts after lane outcomes', () => {
+  it('registers the producer token and starts only backfill after lane outcomes', () => {
     const source = fs.readFileSync(path.join(__dirname, 'container.ts'), 'utf8');
     expect(source).toContain('PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER');
-    expect(source.indexOf('startCliLaneOutcomes(container, logger)')).toBeLessThan(source.indexOf('usageReconciliationService.start()'));
-    expect(source).toContain('usageReconciliationService.setAfterPass');
+    expect(source.indexOf('startCliLaneOutcomes(container, logger)')).toBeLessThan(source.indexOf('container.resolve(RepositoryIdentityBackfillService).start()'));
+    expect(source).not.toContain('usageReconciliationService.setAfterPass');
+    expect(source).not.toContain('usageReconciliationService.start()');
     expect(source).toContain('container.resolve(UsageReconciliationService).stop()');
     expect(source).not.toMatch(/from ['"](?:electron|vscode)['"]/);
   });
 
-  it('resolves one singleton through the producer token and stops event processing', async () => {
+  it('resolves one singleton through the producer token and never scans on enqueue', async () => {
     jest.useFakeTimers();
     try {
       const c = rootContainer.createChildContainer();
@@ -69,17 +70,16 @@ describe('CLI usage reconciliation composition', () => {
       c.register(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER, { useToken: UsageReconciliationService });
       const service = c.resolve(UsageReconciliationService);
       expect(c.resolve(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER)).toBe(service);
-      service.start();
-      service.start();
       await jest.advanceTimersByTimeAsync(0);
-      expect(listClaudeRoots).toHaveBeenCalledTimes(1);
+      expect(listClaudeRoots).toHaveBeenCalledTimes(0);
       c.resolve<UsageReconciliationService>(PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER).enqueue({ kind: 'session-closed', sessionId: 's1', providerId: 'claude', occurredAtMs: 1 });
       await jest.advanceTimersByTimeAsync(2000);
-      expect(listClaudeRoots).toHaveBeenCalledTimes(2);
+      expect(listClaudeRoots).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(0);
       service.stop();
       service.enqueue({ kind: 'session-closed', sessionId: 's1', providerId: 'claude', occurredAtMs: 2 });
       await jest.advanceTimersByTimeAsync(2000);
-      expect(listClaudeRoots).toHaveBeenCalledTimes(2);
+      expect(listClaudeRoots).not.toHaveBeenCalled();
     } finally {
       jest.useRealTimers();
     }
