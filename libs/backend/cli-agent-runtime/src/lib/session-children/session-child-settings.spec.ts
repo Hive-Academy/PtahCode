@@ -26,6 +26,8 @@ describe('readSessionChildSettings', () => {
       handoffGraceMinutes: 15,
       maxSuccessions: 8,
       permissionDenyWindowMs: 60_000,
+      minFreeMemoryGb: 3,
+      spawnQueueTimeoutMs: 300_000,
       bashAllowlist: DEFAULT_SESSION_CHILD_BASH_ALLOWLIST,
     });
   });

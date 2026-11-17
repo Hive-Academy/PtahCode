@@ -8,6 +8,7 @@
  */
 
 import 'reflect-metadata';
+import { laneTestFreeMemory } from '../__fixtures__/memory-probe';
 import { homedir } from 'node:os';
 
 // ---- Mock vscode before any imports that use it ----
@@ -474,6 +475,7 @@ function createManager(deps: {
     deps.mcpServerStatus,
     deps.callerWorkspaceResolver ?? null,
   );
+  jest.spyOn(spawnEnvironment, 'freeMemory').mockImplementation(laneTestFreeMemory);
   const outputBuffer = new AgentOutputBuffer(deps.logger);
   const laneCompletion = {
     signal: jest.fn(async () => ({

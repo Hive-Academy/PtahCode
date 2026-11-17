@@ -99,11 +99,14 @@ interface WorkspaceState {
   specsDirExists: boolean;
   pending: Set<string>;
   pendingUnknown: boolean;
+  writerFolders: Set<string>;
+  writerWaiters: Array<{ resolve: () => void; reject: (error: unknown) => void }>;
   timer: ReturnType<typeof setTimeout> | null;
   running: Promise<RebuildResult> | null;
   trailing: Promise<RebuildResult> | null;
   trailingFolders: Set<string>;
   trailingForceFull: boolean;
+  trailingEmit: boolean;
   trailingReason: TaskIndexChangeEvent['reason'];
   trailingCount: number;
   flushRetries: Map<string, number>;
@@ -151,6 +154,7 @@ const GENERATED_ROOT_FILES: readonly string[] = [
 @injectable()
 export class TaskIndexService implements ITaskIndexNotifier {
   private readonly states = new Map<string, WorkspaceState>();
+  private readonly activeFlushes = new Set<Promise<void>>();
   private readonly rootRebuildCounts = new Map<string, number>();
   private readonly triggerRebuildCounts = new Map<string, number>();
   private readonly _onDidChangeIndex: IEvent<TaskIndexChangeEvent>;
@@ -233,11 +237,14 @@ export class TaskIndexService implements ITaskIndexNotifier {
       specsDirExists: false,
       pending: new Set<string>(),
       pendingUnknown: false,
+      writerFolders: new Set<string>(),
+      writerWaiters: [],
       timer: null,
       running: null,
       trailing: null,
       trailingFolders: new Set<string>(),
       trailingForceFull: false,
+      trailingEmit: false,
       trailingReason: 'watcher',
       trailingCount: 0,
       flushRetries: new Map(),
@@ -372,7 +379,19 @@ export class TaskIndexService implements ITaskIndexNotifier {
   ): Promise<void> {
     const root = normalizeWorkspaceRoot(workspaceRoot);
     await this.ensureStarted(root);
-    await this.scheduleRebuild(root, [folderName], 'write');
+    const state = this.states.get(root);
+    if (!state) {
+      await this.scheduleRebuild(root, [folderName], 'write');
+      return;
+    }
+    return new Promise<void>((resolve, reject) => {
+      const now = Date.now();
+      state.pending.add(folderName);
+      state.writerFolders.add(folderName);
+      state.writerWaiters.push({ resolve, reject });
+      if (state.firstEventAt === null) state.firstEventAt = now;
+      this.armFlush(root, state, this.nextDebounceDelay(state, now));
+    });
   }
 
   /** Read the derived index for a workspace (list/board RPCs). */
@@ -608,14 +627,35 @@ export class TaskIndexService implements ITaskIndexNotifier {
 
   /** Tear down all watchers + pending timers (container disposal). */
   dispose(): void {
-    this.rebuildQueue.dispose();
-    for (const state of this.states.values()) {
+    const pendingWrites: Promise<void>[] = [];
+    for (const [root, state] of this.states) {
       state.flushRetries.clear();
       if (state.timer) clearTimeout(state.timer);
+      const folders = [...state.writerFolders];
+      const waiters = state.writerWaiters.splice(0);
+      state.writerFolders.clear();
+      if (waiters.length > 0) {
+        pendingWrites.push(this.scheduleRebuild(root, folders, 'write', false).then(
+          (result) => {
+            try {
+              this.assertIndexPersisted(result);
+              waiters.forEach(({ resolve }) => resolve());
+            } catch (error: unknown) {
+              waiters.forEach(({ reject }) => reject(error));
+            }
+          },
+          (error: unknown) => waiters.forEach(({ reject }) => reject(error)),
+        ));
+      }
       for (const sub of state.subscriptions) sub.dispose();
       state.watcher?.dispose();
     }
     this.states.clear();
+    if (pendingWrites.length > 0 || this.activeFlushes.size > 0) {
+      void Promise.allSettled([...pendingWrites, ...this.activeFlushes]).then(() => this.rebuildQueue.dispose());
+    } else {
+      this.rebuildQueue.dispose();
+    }
   }
 
   // ── internals ──────────────────────────────────────────────────────────────
@@ -648,6 +688,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
     const folderName = this.extractFolder(root, rawPath);
     const state = this.states.get(root);
     if (!state) return;
+    const now = Date.now();
     if (!folderName) {
       const norm = rawPath.replace(/\\/g, '/').toLowerCase();
       const specs = `${root.replace(/\\/g, '/').toLowerCase()}/.ptah/specs`;
@@ -659,12 +700,16 @@ export class TaskIndexService implements ITaskIndexNotifier {
       state.pending.add(folderName);
       if (state.running) state.eventsDuringRebuild.add(folderName);
     }
-    if (state.firstEventAt === null) state.firstEventAt = Date.now();
+    if (state.firstEventAt === null) state.firstEventAt = now;
     const leaf = path.basename(rawPath);
     const kind = leaf === CARRIER_FILE ? 'carrier' : leaf.endsWith('.md') ? 'markdown' : 'other';
     const category = `${eventKind}:${kind}`;
     state.eventClasses.set(category, (state.eventClasses.get(category) ?? 0) + 1);
-    this.armFlush(root, state, Math.min(DEBOUNCE_MS, Math.max(0, MAX_WAIT_MS - (Date.now() - state.firstEventAt))));
+    this.armFlush(root, state, this.nextDebounceDelay(state, now));
+  }
+
+  private nextDebounceDelay(state: WorkspaceState, now: number): number {
+    return Math.min(DEBOUNCE_MS, Math.max(0, MAX_WAIT_MS - (now - (state.firstEventAt ?? now))));
   }
 
   private armFlush(
@@ -678,7 +723,9 @@ export class TaskIndexService implements ITaskIndexNotifier {
     if (isRetry && state.timer) return;
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
-      void this.flush(root);
+      const active = this.flush(root);
+      this.activeFlushes.add(active);
+      void active.finally(() => this.activeFlushes.delete(active));
     }, delayMs);
   }
 
@@ -709,11 +756,14 @@ export class TaskIndexService implements ITaskIndexNotifier {
     const unknown = state.pendingUnknown;
     state.pendingUnknown = false;
     state.pending.clear();
+    const writerFolders = new Set(state.writerFolders);
+    state.writerFolders.clear();
+    const waiters = state.writerWaiters.splice(0);
     state.firstEventAt = null;
     const eventClasses = Object.fromEntries(state.eventClasses);
     state.eventClasses.clear();
     if (folderNames.length > 0) this.logger.debug('[task-specs] watcher batch', {
-      folders: folderNames.length, activeRoots: this.states.size, eventClasses,
+      folders: folderNames.length, writers: writerFolders.size, activeRoots: this.states.size, eventClasses,
     });
     try {
       if (state.running) await state.running.catch(() => undefined);
@@ -721,7 +771,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
     for (const name of folderNames) {
       try {
         const current = await this.fingerprintFolder(root, name);
-        if (!state.fingerprints.has(name) || current !== state.fingerprints.get(name)) changed.push(name);
+        if (writerFolders.has(name) || !state.fingerprints.has(name) || current !== state.fingerprints.get(name)) changed.push(name);
       } catch (error: unknown) {
         this.logger.debug('[task-specs] watcher carrier comparison unavailable', {
           error: error instanceof Error ? error.message : String(error),
@@ -729,17 +779,19 @@ export class TaskIndexService implements ITaskIndexNotifier {
         changed.push(name);
       }
     }
+      const reason = writerFolders.size > 0 ? 'write' : 'watcher';
       const result = unknown || folderNames.length > MAX_FOLDER_REBUILD
-        ? await this.scheduleRebuild(root, [], 'watcher', true, true)
-        : changed.length > 0 ? await this.scheduleRebuild(root, changed, 'watcher') : null;
-      if (result && !result.indexWritten && this.store.isReady()) {
-        throw new Error('task index write not persisted');
-      }
+        ? await this.scheduleRebuild(root, [], reason, true, true)
+        : changed.length > 0 ? await this.scheduleRebuild(root, changed, reason) : null;
+      if (result) this.assertIndexPersisted(result);
+      for (const { resolve } of waiters) resolve();
       const suppressed = folderNames.length - changed.length;
       if (suppressed > 0) this.logger.info('[task-specs] watcher echoes suppressed', { suppressed });
       for (const name of folderNames) state.flushRetries.delete(name);
       if (unknown) state.flushRetries.delete(UNKNOWN_FLUSH_RETRY);
     } catch (error: unknown) {
+      for (const { reject } of waiters) reject(error);
+      for (const name of writerFolders) state.writerFolders.add(name);
       if (unknown) state.pendingUnknown = true;
       let nextDelay = Number.POSITIVE_INFINITY;
       for (const name of folderNames) {
@@ -758,7 +810,13 @@ export class TaskIndexService implements ITaskIndexNotifier {
         error: error instanceof Error ? error.name : 'Unknown error',
         retryInMs: retry ? nextDelay : null,
       });
-      if (retry) this.armFlush(root, state, nextDelay, true);
+      if (retry && this.states.get(root) === state) this.armFlush(root, state, nextDelay, true);
+    }
+  }
+
+  private assertIndexPersisted(result: RebuildResult): void {
+    if (!result.indexWritten && this.store.isReady()) {
+      throw new Error('task index write not persisted');
     }
   }
 
@@ -774,6 +832,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
     if (state.running) {
       for (const folder of folders) state.trailingFolders.add(folder);
       state.trailingForceFull ||= forceFull;
+      state.trailingEmit ||= emit;
       if (reason === 'reindex' || (reason === 'write' && state.trailingReason === 'watcher')) {
         state.trailingReason = reason;
       }
@@ -785,12 +844,14 @@ export class TaskIndexService implements ITaskIndexNotifier {
           const nextFolders = [...state.trailingFolders];
           const nextReason = state.trailingReason;
           const nextForceFull = state.trailingForceFull;
+          const nextEmit = state.trailingEmit;
           const count = state.trailingCount;
           state.trailingFolders.clear();
           state.trailingCount = 0;
           state.trailingReason = 'watcher';
           state.trailingForceFull = false;
-          const next = this.rebuildQueue.enqueue(root, (queuedFolders, queuedForceFull) => this.rebuild(root, queuedFolders, nextReason, true, this.now() - queuedAt, count, queuedForceFull), nextFolders, nextForceFull);
+          state.trailingEmit = false;
+          const next = this.rebuildQueue.enqueue(root, (queuedFolders, queuedForceFull) => this.rebuild(root, queuedFolders, nextReason, nextEmit, this.now() - queuedAt, count, queuedForceFull), nextFolders, nextForceFull);
           state.running = next;
           state.trailing = null;
           void next.then(() => { if (state.running === next && !state.trailing) state.running = null; },

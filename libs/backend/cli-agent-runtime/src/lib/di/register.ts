@@ -1,3 +1,4 @@
+import { freemem } from 'node:os';
 import {
   type DependencyContainer,
   Lifecycle,
@@ -415,6 +416,10 @@ export function registerCliAgentRuntimeServices(
   // consumer resolves it; its optional `CHILD_CHAT_SESSION_HOST` is bound by
   // `registerChatServices`, which every host runs before that happens.
   container.registerSingleton(ChildWorktreeProvisioner);
+  // The real free-memory reading; specs bind a fixed probe instead.
+  container.register(CLI_AGENT_RUNTIME_TOKENS.CHILD_MEMORY_PROBE, {
+    useValue: freemem,
+  });
   container.register(
     CLI_AGENT_RUNTIME_TOKENS.SESSION_SPAWNER,
     { useClass: SessionSpawnerService },
