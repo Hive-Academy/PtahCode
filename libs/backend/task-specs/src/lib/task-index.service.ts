@@ -729,8 +729,12 @@ export class TaskIndexService implements ITaskIndexNotifier {
         changed.push(name);
       }
     }
-      if (unknown || folderNames.length > MAX_FOLDER_REBUILD) await this.scheduleRebuild(root, [], 'watcher', true, true);
-      else if (changed.length > 0) await this.scheduleRebuild(root, changed, 'watcher');
+      const result = unknown || folderNames.length > MAX_FOLDER_REBUILD
+        ? await this.scheduleRebuild(root, [], 'watcher', true, true)
+        : changed.length > 0 ? await this.scheduleRebuild(root, changed, 'watcher') : null;
+      if (result && !result.indexWritten && this.store.isReady()) {
+        throw new Error('task index write not persisted');
+      }
       const suppressed = folderNames.length - changed.length;
       if (suppressed > 0) this.logger.info('[task-specs] watcher echoes suppressed', { suppressed });
       for (const name of folderNames) state.flushRetries.delete(name);
@@ -1022,7 +1026,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
 
   private async captureFingerprints(root: string, state: WorkspaceState, touched: string[]): Promise<void> {
     try {
-      const full = state.fingerprints.size === 0 || touched.length === 0;
+      const full = touched.length === 0;
       const entries = full ? await this.fs.readDirectory(path.join(root, '.ptah', 'specs')) : [];
       const names = entries.filter((entry) => entry.type === FileType.Directory &&
         isSingleTaskPathSegment(entry.name)).map((entry) => entry.name);

@@ -568,6 +568,56 @@ describe('TaskIndexService specs README (self-write suppression)', () => {
 });
 
 describe('TaskIndexService watcher debounce', () => {
+  it('retries a ready-store watcher write after folder and full writes fail', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, store, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const folderWrite = jest.spyOn(store, 'applyFolderChanges').mockImplementationOnce(() => {
+        throw new Error('folder write failed');
+      });
+      const fullWrite = jest.spyOn(store, 'replaceWorkspace').mockImplementationOnce(() => {
+        throw new Error('full write failed');
+      });
+      const scan = jest.spyOn(scanner, 'scanFolders');
+      const name = 'TASK_2026_004';
+      fs.setFile(carrier(name), validTask(name));
+      fs.fireCreate(carrier(name));
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect(folderWrite).toHaveBeenCalledTimes(1);
+      expect(fullWrite).toHaveBeenCalledTimes(1);
+      expect((await service.list(ROOT)).tasks.map((task) => task.id)).not.toContain(name);
+      jest.advanceTimersByTime(1000);
+      await flush(); await flush();
+      expect(scan).toHaveBeenCalledTimes(2);
+      expect((await service.list(ROOT)).tasks.map((task) => task.id)).toContain(name);
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not suppress an unscanned watcher folder after a folder write', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      const { service } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const a = 'TASK_2026_001';
+      const b = 'TASK_2026_002';
+      fs.setFile(carrier(a), validTask(a));
+      fs.setFile(carrier(b), validTask(b));
+      fs.fireCreate(carrier(a));
+      fs.fireCreate(carrier(b));
+      await service.applyFolderChange(ROOT, a);
+      jest.advanceTimersByTime(300);
+      await flush(); await flush();
+      expect((await service.list(ROOT)).tasks.map((task) => task.id)).toEqual([a, b]);
+      service.dispose();
+    } finally { jest.useRealTimers(); }
+  });
+
   it('uses folder mode for a watcher status change with graph links', async () => {
     jest.useFakeTimers({ doNotFake: ['setImmediate'] });
     try {
