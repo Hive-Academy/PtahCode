@@ -81,7 +81,7 @@ If there are no scores, the section shows **No capability matrix yet**.
 | **Subagent handoff size** | `150,000` tokens | 1,000–2,000,000 | When a subagent context reaches this size, PtahCode stops it and gives the main chat a handoff to continue the work |
 | **Suggest a new session at** | `300,000` tokens | 1,000–5,000,000 | When a chat context reaches this size, PtahCode suggests a new session |
 | **Subagent stop size** | `3,000,000` weighted tokens | 1,000–100,000,000 | PtahCode stops a subagent when its weighted token total reaches this size |
-| **Compact idle chats** | On | — | Before the prompt cache of a long chat expires, PtahCode compacts the chat, so that your next message costs less |
+| **Compact idle chats** | Off | — | When enabled, before the prompt cache of a long chat expires, PtahCode compacts the chat, so that your next message costs less |
 | **Compact idle chats from** | `200,000` tokens | 100,000–5,000,000 | PtahCode compacts an idle chat when it reaches this size |
 
 The setting keys start with `compaction.`, for example `compaction.toolOutputBudgetTokens`.

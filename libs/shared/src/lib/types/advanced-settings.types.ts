@@ -194,7 +194,7 @@ export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
     kind: 'boolean',
     label: 'Compact idle chats',
     help: "Before a long chat's prompt cache expires, Ptah compacts it so your next message costs less.",
-    default: true,
+    default: false,
     apply: 'live',
   },
   {

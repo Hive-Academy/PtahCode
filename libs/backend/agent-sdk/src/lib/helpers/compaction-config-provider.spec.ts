@@ -11,7 +11,10 @@ import { FILE_BASED_SETTINGS_DEFAULTS } from '@ptah-extension/platform-core';
 import type { ConfigManager, Logger } from '@ptah-extension/vscode-core';
 import { CompactionConfigProvider } from './compaction-config-provider';
 
-function makeProvider(values: Record<string, unknown>, devIdleMinTokens?: number): {
+function makeProvider(
+  values: Record<string, unknown>,
+  devIdleMinTokens?: number,
+): {
   provider: CompactionConfigProvider;
   warn: jest.Mock;
 } {
@@ -25,7 +28,10 @@ function makeProvider(values: Record<string, unknown>, devIdleMinTokens?: number
   const config = {
     get: jest.fn((key: string) => values[key]),
   } as unknown as ConfigManager;
-  return { provider: new CompactionConfigProvider(config, logger, devIdleMinTokens), warn };
+  return {
+    provider: new CompactionConfigProvider(config, logger, devIdleMinTokens),
+    warn,
+  };
 }
 
 const ENV_KEY = 'CLAUDE_CODE_AUTO_COMPACT_WINDOW';
@@ -43,14 +49,22 @@ afterEach(() => {
 
 describe('CompactionConfigProvider.getConfig', () => {
   it('keeps defaults for null and out-of-range budget values', () => {
-    const { provider, warn } = makeProvider({ 'agentBudget.maxDurationMin': 1_000_000,
-      'agentBudget.warnRatio': null, 'agentBudget.stopWeightedTokens': 2_000 });
-    expect(provider.getAgentBudgetSettings()).toMatchObject({ maxDurationMin: 90,
-      warnRatio: 0.85, stopWeightedTokens: 2_000 });
+    const { provider, warn } = makeProvider({
+      'agentBudget.maxDurationMin': 1_000_000,
+      'agentBudget.warnRatio': null,
+      'agentBudget.stopWeightedTokens': 2_000,
+    });
+    expect(provider.getAgentBudgetSettings()).toMatchObject({
+      maxDurationMin: 90,
+      warnRatio: 0.85,
+      stopWeightedTokens: 2_000,
+    });
     expect(warn).toHaveBeenCalledTimes(1);
   });
   it('uses the injected development idle minimum', () => {
-    expect(makeProvider({}, 1_000).provider.getIdleCompactionConfig().minTokens).toBe(1_000);
+    expect(
+      makeProvider({}, 1_000).provider.getIdleCompactionConfig().minTokens,
+    ).toBe(1_000);
   });
 
   it('unset threshold → null, with no warning', () => {
@@ -145,7 +159,7 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
     values['compaction.idleCompactionMinTokens'] = 99_999;
     expect(() => provider.getIdleCompactionConfig()).not.toThrow();
     expect(provider.getIdleCompactionConfig()).toEqual({
-      enabled: true,
+      enabled: false,
       minTokens: 150_000,
     });
     values['compaction.idleCompactionMinTokens'] = 100_000.5;
@@ -155,7 +169,7 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
   it('uses the shared defaults when settings are unset or null', () => {
     const { provider, warn } = makeProvider({});
     expect(provider.getIdleCompactionConfig()).toEqual({
-      enabled: true,
+      enabled: false,
       minTokens: 150_000,
     });
     const withNulls = makeProvider({
@@ -163,18 +177,32 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
       'compaction.idleCompactionMinTokens': null,
     });
     expect(withNulls.provider.getIdleCompactionConfig()).toEqual({
-      enabled: true,
+      enabled: false,
       minTokens: 150_000,
     });
     expect(
       FILE_BASED_SETTINGS_DEFAULTS['compaction.idleCompactionEnabled'],
-    ).toBe(true);
+    ).toBe(false);
     expect(
       FILE_BASED_SETTINGS_DEFAULTS['compaction.idleCompactionMinTokens'],
     ).toBe(150_000);
     expect(warn).not.toHaveBeenCalled();
     expect(withNulls.warn).not.toHaveBeenCalled();
   });
+
+  it.each([true, false])(
+    'preserves an explicit enabled setting of %s',
+    (enabled) => {
+      const { provider, warn } = makeProvider({
+        'compaction.idleCompactionEnabled': enabled,
+      });
+      expect(provider.getIdleCompactionConfig()).toEqual({
+        enabled,
+        minTokens: 150_000,
+      });
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
 
   it('reads valid settings on every call, including the minimum', () => {
     const values: Record<string, unknown> = {
@@ -203,10 +231,10 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
       const { provider, warn } = makeProvider({
         'compaction.idleCompactionEnabled': value,
       });
-      expect(provider.getIdleCompactionConfig().enabled).toBe(true);
+      expect(provider.getIdleCompactionConfig().enabled).toBe(false);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('Invalid compaction.idleCompactionEnabled'),
-        expect.objectContaining({ defaultValue: true }),
+        expect.objectContaining({ defaultValue: false }),
       );
     },
   );
@@ -246,7 +274,7 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
     ).toBe('boolean');
     const { provider, warn } = makeProvider({});
     expect(provider.getConfig().toolOutputBudgetTokens).toBe(2500);
-    expect(provider.getIdleCompactionConfig().enabled).toBe(true);
+    expect(provider.getIdleCompactionConfig().enabled).toBe(false);
     expect(warn).not.toHaveBeenCalled();
   });
 });
