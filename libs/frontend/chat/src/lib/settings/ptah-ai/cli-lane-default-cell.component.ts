@@ -66,8 +66,12 @@ let nextTitleId = 0;
     :host([data-layout='card']) {
       width: 100%;
     }
+    /* fit-content, not max-content: a long "Unavailable — reason" line wraps in a narrow table column
+       instead of setting the column's minimum width. white-space: normal overrides the table control
+       cell's nowrap, which otherwise lets the line run into the next columns (TASK_2026_2256, 1440). */
     :host([data-layout='compact']) {
-      width: max-content;
+      width: fit-content;
+      white-space: normal;
     }
     :host([data-layout='card']) {
       display: contents;

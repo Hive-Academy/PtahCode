@@ -85,9 +85,15 @@ export type LaneTableRow = CliMatrixRow & {
       #table
       label="Lanes"
       density="compact"
-      [collapseBelow]="900"
+      [collapseBelow]="950"
       data-testid="cli-provider-grid"
     >
+      <!-- Column widths of the prototype (rev 2). The last col is the details expander. -->
+      @if (table.collapsed()) {
+        <colgroup data-testid="lanes-colgroup-collapsed"><col class="w-[10%]" /><col class="w-[34%]" /><col class="w-[31%]" /><col class="w-[15%]" /><col class="w-[10%]" /></colgroup>
+      } @else {
+        <colgroup data-testid="lanes-colgroup"><col class="w-[6%]" /><col class="w-[20%]" /><col class="w-[12%]" /><col class="w-[14%]" /><col class="w-[11%]" /><col class="w-[17%]" /><col class="w-[13%]" /><col class="w-[7%]" /><col /></colgroup>
+      }
       <thead>
         <tr>
           <th scope="col">Order</th>
