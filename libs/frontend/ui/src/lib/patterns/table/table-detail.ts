@@ -12,7 +12,13 @@ import {
 import { PtahIconButtonDirective } from '../../button/icon-button.directive';
 
 export interface PtahTableContext {
+  /** `collapseBelow` is set and the host is narrower. Drives `ptahCollapsible`. */
   collapsed: Signal<boolean>;
+  /** Expanders and detail rows show: collapsed, a column hidden, or `wideDetail`. */
+  detailEnabled: Signal<boolean>;
+  /** The detail layout uses the list mode: collapsed, or every optional column hidden. */
+  narrow: Signal<boolean>;
+  isColumnHidden(id: string): boolean;
   announce(message: string): void;
 }
 
@@ -39,7 +45,7 @@ export class PtahCollapsibleCellDirective {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'ptah-table-row-expander',
-    '[hidden]': 'context !== null && !context.collapsed()',
+    '[hidden]': 'context !== null && !context.detailEnabled()',
   },
   template: `<button
     ptahIconButton
@@ -75,7 +81,7 @@ export class PtahRowExpanderComponent {
   standalone: true,
   host: {
     class: 'ptah-table-detail-row',
-    '[hidden]': '!open() || (context !== null && !context.collapsed())',
+    '[hidden]': '!open() || (context !== null && !context.detailEnabled())',
   },
 })
 export class PtahDetailRowDirective {
@@ -89,7 +95,8 @@ export class PtahDetailRowDirective {
 /**
  * Detail cell of a `tr[ptahDetailRow]`. Set `colspan` to the number of cells that stay
  * visible when the table is collapsed (row header, priority cells, expander). A larger
- * value adds phantom columns and can cause sideways scroll.
+ * value adds phantom columns and can cause sideways scroll. In columns mode, bind
+ * `[colspan]="table.visibleColumnCount()"`.
  */
 @Directive({
   selector: 'td[ptahDetailCell]',
