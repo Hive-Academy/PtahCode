@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_2256_159f
-status: backlog
+status: in_review
 type: FEATURE
-title: "Settings wide layout: fluid content, all lane columns, in-card loading"
+title: 'Settings wide layout: fluid content, all lane columns, in-card loading'
 depends_on: []
-created: "2026-11-17T19:58:50.363Z"
-updated: "2026-11-17T19:58:50.363Z"
-description: "PR B of the settings fix program: fluid settings content, lanes table columns on wide panels, loading states in cards."
+created: '2026-11-17T19:58:50.363Z'
+updated: '2026-11-17T21:25:59.917Z'
+description: >-
+  PR B of the settings fix program: fluid settings content, lanes table columns
+  on wide panels, loading states in cards.
 estimate: M
 relates_to:
   - TASK_2026_1177_9109

@@ -52,3 +52,17 @@ CLI shared defaults (PR D).
 - The worktree has a `node_modules` junction to the main checkout (for Jest). It is untracked
   and is not committed.
 - PR A (lane data fix) is not open. Screenshots use real CLI detection in an isolated profile.
+
+## Parent addition (sidebar and form layout) — scope decision
+
+- Decision: include both defects in PR #1408 as two more commits
+  (`feat(ui,chat): settings sidebar matches the prototype` and
+  `feat(ui,chat): settings form fields fill the content column`).
+  Reason: the sidebar change is in the shared settings-layout navigation classes, tokens and the
+  Settings nav slots; the form change is a shared field grid plus about 5 to 7 form templates.
+  Both stay reviewable. If the form diff grows past about 10 files, report to the parent instead.
+- Reference: prototype `rev-2.html` in the feat-settings-redesign worktree
+  (`docs/design-system/settings/` is not on origin/main).
+- Layout only: no control type or label change (child G owns `ptah-select` and floating labels).
+- Evidence: Electron design-preview capture, 1824x1100 and 600x1100 dark, before and after,
+  in `screens/sidebar-forms/{before,after}/`.
