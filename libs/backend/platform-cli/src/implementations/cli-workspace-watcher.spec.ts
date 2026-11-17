@@ -238,6 +238,37 @@ describe('CliWorkspaceWatchHostProcess lifecycle and stderr', () => {
       fork.mockRestore();
     }
   });
+  it('excludes a reused PID child created after host exit but before close', async () => {
+    const script = path.join(makeTempRoot(), 'fake.cjs');
+    fs.writeFileSync(script, '');
+    const fakeChild = Object.assign(new nodeChildProcess.ChildProcess(), {
+      pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      channel: null, stderr: null, unref: jest.fn(), kill: jest.fn(() => true),
+    });
+    const fork = jest.spyOn(nodeChildProcess, 'fork').mockReturnValue(fakeChild);
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    let now = 10_000;
+    const query = jest.fn(async () => [
+      { ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_150).toISOString() },
+    ]);
+    const kill = jest.fn(async (_pid: number) => undefined);
+    try {
+      const host = new CliWorkspaceWatchHostProcess(script, undefined, query, kill, () => now);
+      now = 10_100;
+      fakeChild.emit('exit', 0);
+      now = 10_200;
+      fakeChild.exitCode = 0;
+      fakeChild.emit('close', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(kill).not.toHaveBeenCalled();
+      host.kill();
+    } finally {
+      if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      fork.mockRestore();
+    }
+  });
   it('waits for the Windows tree stop before killing the root', async () => {
     const script = path.join(makeTempRoot(), 'waiting.cjs');
     fs.writeFileSync(script, '');

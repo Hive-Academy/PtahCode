@@ -89,6 +89,7 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
   private treeKillRequested = false;
   private stderrTail = '';
   private readonly rootStartedAt: number;
+  private rootExitedAt: number | undefined;
 
   /** Throws when the bundle is missing or the fork itself fails. */
   constructor(hostPath: string, private readonly onDiagnostic?: (diagnostic: WorkspaceWatcherDiagnostic) => void,
@@ -121,6 +122,7 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
     }
     // 'close', not 'exit': it follows the end of stderr, so the tail read on
     // failure holds everything the host wrote before it died.
+    this.child.once('exit', () => { this.rootExitedAt = this.now(); });
     this.child.on('close', (code) => this.notifyExit(code));
     // A spawn or IPC failure. The host is unusable either way: end it, and
     // report the exit ourselves when the spawn failed and no 'exit' will come.
@@ -189,7 +191,7 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
     if (this.exited) return;
     this.exited = true;
     const pid = this.child.pid;
-    const exitedAt = this.now();
+    const exitedAt = this.rootExitedAt ?? this.now();
     if (!this.treeKillRequested) {
       scheduleWindowsOrphanCleanup(pid, this.rootStartedAt, false,
         (error) => this.reportOrphanError(error),

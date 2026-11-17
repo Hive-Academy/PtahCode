@@ -152,6 +152,8 @@ export class CliPlatformCommands
 
       let settled = false;
       let rootExitObserved = false;
+      let rootExitedAt: number | undefined;
+      child.once('exit', () => { rootExitedAt = this.now(); });
       let treeKillRequested = false;
       const settle = (result: AuthCommandResult): void => {
         if (settled) return;
@@ -204,7 +206,7 @@ export class CliPlatformCommands
         if (!rootExitObserved) {
           rootExitObserved = true;
           const pid = child.pid;
-          const exitedAt = this.now();
+          const exitedAt = rootExitedAt ?? this.now();
           if (!treeKillRequested) {
             scheduleWindowsOrphanCleanup(pid, rootStartedAt, false,
               (error) => this.reportOrphanError(error),

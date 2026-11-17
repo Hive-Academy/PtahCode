@@ -56,6 +56,7 @@ import { SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
 import { transformAgentBody } from '@ptah-extension/harness-sync';
 
 import {
+  defaultOrphanCleanupDependencies,
   killProcessTree,
   PROCESS_TREE_KILL_GRACE_MS as KILL_GRACE_PERIOD,
 } from '@ptah-extension/platform-core';
@@ -972,6 +973,34 @@ describe('spawnCli', () => {
     expect(options.cwd).toBe('/work');
     expect(options.stdio).toEqual(['pipe', 'pipe', 'pipe']);
     expect(handle.stdout).toBe(child.stdout);
+  });
+
+  it('cleans only descendants created before an inline Windows child exits', async () => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    let now = 10_000;
+    const nowSpy = jest.spyOn(defaultOrphanCleanupDependencies, 'now').mockImplementation(() => now);
+    const query = jest.spyOn(defaultOrphanCleanupDependencies, 'query').mockImplementation(async () => [
+      { ProcessId: 43, ParentProcessId: child.pid, CreationDate: new Date(10_050).toISOString() },
+      { ProcessId: 44, ParentProcessId: child.pid, CreationDate: new Date(10_150).toISOString() },
+    ]);
+    const kill = jest.spyOn(defaultOrphanCleanupDependencies, 'kill').mockImplementation(async () => undefined);
+    try {
+      spawnCli('opencode.cmd', ['run'], { cleanupOrphanDescendants: true });
+      now = 10_100;
+      child.emit('exit', 0);
+      now = 10_200;
+      child.emit('close', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(kill).toHaveBeenCalledTimes(1);
+      expect(kill).toHaveBeenCalledWith(43);
+    } finally {
+      nowSpy.mockRestore();
+      query.mockRestore();
+      kill.mockRestore();
+    }
   });
 
   it('delegates to the injected spawner instead of cross-spawn', () => {

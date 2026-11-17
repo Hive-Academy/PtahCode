@@ -10,7 +10,7 @@ import whichLib from 'which';
 import { readFile } from 'fs/promises';
 import * as path from 'path';
 import type { ChildProcess } from 'child_process';
-import { killProcessTree } from '@ptah-extension/platform-core';
+import { defaultOrphanCleanupDependencies, killProcessTree, scheduleWindowsOrphanCleanup } from '@ptah-extension/platform-core';
 import type {
   IProcessSpawner,
   ProcessErrorListener,
@@ -335,15 +335,20 @@ export function spawnCli(
     });
   }
 
-  return new ChildProcessHandle(
-    crossSpawn(binary, args, {
-      cwd: options.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env,
-      detached,
-      windowsHide: !(options.needsConsole && process.platform === 'win32'),
-    }),
-  );
+  const startedAt = options.cleanupOrphanDescendants === true && process.platform === 'win32'
+    ? defaultOrphanCleanupDependencies.now() : undefined;
+  const child = crossSpawn(binary, args, {
+    cwd: options.cwd,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env,
+    detached,
+    windowsHide: !(options.needsConsole && process.platform === 'win32'),
+  });
+  if (startedAt !== undefined) {
+    child.once('exit', () => scheduleWindowsOrphanCleanup(child.pid, startedAt, detached,
+      (error) => { process.emitWarning(error); }, defaultOrphanCleanupDependencies));
+  }
+  return new ChildProcessHandle(child);
 }
 
 /**
