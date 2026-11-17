@@ -1,4 +1,5 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import {
   defaultOrphanCleanupDependencies,
@@ -6,12 +7,13 @@ import {
 } from './windows-orphan-cleanup';
 
 const runFile = promisify(execFile);
+const marker = 'ptah-live-' + randomUUID();
 const leafScript = 'setInterval(() => {}, 1000)';
 const middleScript = [
   "const { spawn } = require('node:child_process');",
   "const grandchild = spawn(process.execPath, ['-e', " +
     JSON.stringify(leafScript) +
-    "], { detached: true, stdio: 'ignore', windowsHide: true });",
+    ", process.argv[1]], { detached: true, stdio: 'ignore', windowsHide: true });",
   'process.stdout.write(JSON.stringify({ child: process.pid, ' +
     "grandchild: grandchild.pid }) + '\\n');",
   'setInterval(() => {}, 1000);',
@@ -20,7 +22,7 @@ const rootScript = [
   "const { spawn } = require('node:child_process');",
   "const child = spawn(process.execPath, ['-e', " +
     JSON.stringify(middleScript) +
-    '], {',
+    ', process.argv[1]], {',
   "  detached: true, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,",
   '});',
   "process.stdout.write(JSON.stringify({ child: child.pid }) + '\\n');",
@@ -116,6 +118,34 @@ async function dispose(pids: Set<number>): Promise<void> {
   } finally {
     pids.clear();
   }
+  try {
+    const { stdout } = await runFile(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*${marker}*' } | ForEach-Object { $_.ProcessId }`,
+      ],
+      { windowsHide: true },
+    );
+    for (const line of stdout.split(/\r?\n/)) {
+      const pid = Number(line.trim());
+      if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue;
+      try {
+        await runFile('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          windowsHide: true,
+        });
+      } catch (error) {
+        if (alive(pid))
+          errors.push(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+      }
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error : new Error(String(error)));
+  }
   if (errors.length)
     throw new AggregateError(errors, 'Failed to kill live test processes');
 }
@@ -130,14 +160,14 @@ async function dispose(pids: Set<number>): Promise<void> {
 
   it('kills detached descendants and leaves an unrelated process alive', async () => {
     const startedAt = Date.now();
-    const root = spawn(process.execPath, ['-e', rootScript], {
+    const root = spawn(process.execPath, ['-e', rootScript, marker], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
     if (root.pid === undefined) throw new Error('Root did not start');
     pids.add(root.pid);
     // The unrelated process starts inside the cleanup time window; ancestry alone excludes it.
-    const unrelated = spawn(process.execPath, ['-e', leafScript], {
+    const unrelated = spawn(process.execPath, ['-e', leafScript, marker], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,

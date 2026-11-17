@@ -67,3 +67,21 @@ Check results:
 - `npx eslint libs/backend/cli-agent-runtime/src/lib/cli-agents/cli-adapters/cli-adapter.live-windows.spec.ts libs/backend/platform-core/src/utils/windows-orphan-cleanup.live-windows.spec.ts`: pass, exit 0.
 - `tasklist /FI "IMAGENAME eq node.exe"`: no matching tasks. No test Node process remained.
 
+
+## PR review round 1
+
+The two live Windows specs now create one UUID marker each. The root passes it to the middle process, and the middle passes it to the grandchild. The shared spec also marks the unrelated process. After the recorded PID cleanup, each `dispose` queries marked Node command lines and kills every marked PID except the Jest process. Query errors join the collected errors. The recorded PID loop and its PID reuse comment remain.
+
+Check results:
+
+- `npx prettier --write` on both specs: pass.
+- CLI Jest run 1: pass, 4 tests, 25.981 s.
+- CLI Jest run 2: pass, 4 tests, 20.576 s.
+- Platform-core Jest run 1: pass, 1 test, 7.088 s.
+- Platform-core Jest run 2: pass, 1 test, 5.479 s.
+- `npx tsc --noEmit --project libs/backend/cli-agent-runtime/tsconfig.spec.json`: pass, exit 0.
+- `npx tsc --noEmit --project libs/backend/platform-core/tsconfig.spec.json`: pass, exit 0.
+- `npx eslint` on both specs: pass, exit 0.
+- Forced startup failure proof: I temporarily made the shared spec middle script exit after spawning the grandchild and before printing its PID. The Jest run failed at the unchanged 30 s test deadline, as expected. The run took 35.008 s. I restored the original file bytes in a `finally` block. A `Get-CimInstance Win32_Process` query for `ptah-live-` in Node command lines returned zero processes after the failed run.
+
+No production files changed. No new defect was found.

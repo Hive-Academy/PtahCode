@@ -1,15 +1,17 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { spawnCli } from './cli-adapter.utils';
 
 const runFile = promisify(execFile);
+const marker = 'ptah-live-' + randomUUID();
 const leafScript = 'setInterval(() => {}, 1000)';
 const middleScript = [
   "const { spawn } = require('node:child_process');",
   "const detached = process.argv[1] === 'true';",
   "const grandchild = spawn(process.execPath, ['-e', " +
     JSON.stringify(leafScript) +
-    '], {',
+    ', process.argv[2]], {',
   '  detached, stdio: "ignore", windowsHide: true,',
   '});',
   'process.stdout.write(JSON.stringify({ child: process.pid, ' +
@@ -21,7 +23,7 @@ const rootScript = [
   "const detached = process.argv[1] === 'true';",
   "const child = spawn(process.execPath, ['-e', " +
     JSON.stringify(middleScript) +
-    ', String(detached)], {',
+    ', String(detached), process.argv[2]], {',
   '  detached, stdio: ["ignore", "pipe", "ignore"], windowsHide: true,',
   '});',
   "process.stdout.write(JSON.stringify({ child: child.pid }) + '\\n');",
@@ -89,6 +91,34 @@ async function dispose(pids: Set<number>): Promise<void> {
   } finally {
     pids.clear();
   }
+  try {
+    const { stdout } = await runFile(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*${marker}*' } | ForEach-Object { $_.ProcessId }`,
+      ],
+      { windowsHide: true },
+    );
+    for (const line of stdout.split(/\r?\n/)) {
+      const pid = Number(line.trim());
+      if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue;
+      try {
+        await runFile('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          windowsHide: true,
+        });
+      } catch (error) {
+        if (alive(pid))
+          errors.push(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+      }
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error : new Error(String(error)));
+  }
   if (errors.length)
     throw new AggregateError(errors, 'Failed to kill live test processes');
 }
@@ -105,7 +135,7 @@ async function treeFor(
 }> {
   const root = spawnCli(
     process.execPath,
-    ['-e', rootScript, String(descendantsDetached)],
+    ['-e', rootScript, String(descendantsDetached), marker],
     {
       detached: true,
       cleanupOrphanDescendants,
