@@ -1758,6 +1758,183 @@ describe('OffThreadProcessSpawner', () => {
     );
   });
 
+  describe('Windows job gate and inline lifetime', () => {
+    const request = { command: 'fake', args: [], env: process.env, ignoreStdio: true as const,
+      cleanupOrphanDescendants: true, windowsJobPolicy: 'job' as const };
+    let platform: PropertyDescriptor | undefined;
+    let arch: PropertyDescriptor | undefined;
+    beforeEach(() => {
+      platform = Object.getOwnPropertyDescriptor(process, 'platform');
+      arch = Object.getOwnPropertyDescriptor(process, 'arch');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
+      process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+    });
+    afterEach(() => {
+      if (platform) Object.defineProperty(process, 'platform', platform);
+      if (arch) Object.defineProperty(process, 'arch', arch);
+      jest.mocked(childProcess.spawn).mockImplementation(actualChildProcess.spawn);
+      delete process.env['PTAH_WINDOWS_JOBS'];
+    });
+    function fakeChild(): childProcess.ChildProcess {
+      return Object.assign(new childProcess.ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      });
+    }
+    it('does not assign while disabled or when policy is omitted or no-job', () => {
+      const assign = jest.fn(() => ({ close: jest.fn() }));
+      spawner.configureWindowsJobs({ assignToNewJob: assign }, 'C:/windows_job.node', () => false);
+      for (const policy of ['job', 'no-job', undefined] as const) {
+        jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild());
+        spawner.spawnProcess({ ...request, windowsJobPolicy: policy });
+      }
+      expect(assign).not.toHaveBeenCalled();
+    });
+    it('keeps the spawn usable when the setting reader throws', () => {
+      const failure = new Error('setting failed');
+      const assign = jest.fn();
+      spawner.configureWindowsJobs({ assignToNewJob: assign }, 'C:/windows_job.node', () => { throw failure; });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild());
+      expect(spawner.spawnProcess(request).pid).toBe(42);
+      expect(assign).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith('[WindowsJob] setting read failed; switch off', failure);
+    });
+    it.each([
+      { platform: 'linux', arch: 'x64', policy: 'job' },
+      { platform: 'win32', arch: 'arm64', policy: 'job' },
+      { platform: 'win32', arch: 'x64', policy: 'no-job' },
+      { platform: 'win32', arch: 'x64', policy: undefined },
+    ] as const)('skips the setting reader for $platform $arch $policy', (mode) => {
+      Object.defineProperty(process, 'platform', { value: mode.platform, configurable: true });
+      Object.defineProperty(process, 'arch', { value: mode.arch, configurable: true });
+      const setting = jest.fn(() => true);
+      spawner.configureWindowsJobs({ assignToNewJob: jest.fn() }, 'C:/windows_job.node', setting);
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild());
+      spawner.spawnProcess({ ...request, windowsJobPolicy: mode.policy });
+      expect(setting).not.toHaveBeenCalled();
+    });
+    it('assigns once and closes on exit while snapshot cleanup still runs', async () => {
+      const close = jest.fn();
+      const assign = jest.fn(() => ({ close }));
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: Date.now });
+      spawner.configureWindowsJobs({ assignToNewJob: assign }, 'C:/windows_job.node', () => true);
+      const child = fakeChild();
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+      spawner.spawnProcess(request);
+      expect(assign).toHaveBeenCalledTimes(1);
+      child.emit('exit', 0, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(query).toHaveBeenCalled();
+    });
+    it.each(['success', 'not-found', 'failure', 'timeout', 'throw'] as const)(
+      'starts taskkill before closing the job and closes after %s', (outcome) => {
+        const close = jest.fn();
+        spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },
+          'C:/windows_job.node', () => true);
+        const child = fakeChild();
+        const kill = jest.spyOn(child, 'kill').mockReturnValue(true);
+        jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+        let complete: ((error: Error | null, stdout: string, stderr: string) => void) | undefined;
+        const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+          expect(close).not.toHaveBeenCalled();
+          if (outcome === 'throw') throw new Error('launch failed');
+          complete = args.at(-1) as NonNullable<typeof complete>;
+          return new childProcess.ChildProcess();
+        });
+        try {
+          const handle = spawner.spawnProcess(request);
+          expect(handle.kill()).toBe(true);
+          expect(execFile).toHaveBeenCalledTimes(1);
+          if (outcome !== 'throw') {
+            expect(close).not.toHaveBeenCalled();
+            const error = outcome === 'success' ? null : Object.assign(new Error(outcome), {
+              code: outcome === 'not-found' ? 128 : 5, killed: outcome === 'timeout',
+            });
+            expect(complete).toBeDefined();
+            complete?.(error, '', outcome === 'not-found' ? 'not found' : '');
+          }
+          expect(close).toHaveBeenCalledTimes(1);
+          expect(kill).toHaveBeenCalledTimes(outcome === 'success' || outcome === 'not-found' ? 0 : 1);
+          child.emit('exit', null, 'SIGTERM');
+          child.emit('close', null, 'SIGTERM');
+          expect(close).toHaveBeenCalledTimes(1);
+        } finally {
+          execFile.mockRestore();
+        }
+      },
+    );
+    it.each(['failed-spawn', 'exit-and-close'] as const)('finishes inline tracking once for %s', (outcome) => {
+      const close = jest.fn();
+      spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },
+        'C:/windows_job.node', () => true);
+      const child = fakeChild();
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+      const finished = jest.spyOn(spawner['inline'], 'delete');
+      spawner.spawnProcess(request);
+      expect(spawner['inline'].size).toBe(1);
+      if (outcome === 'failed-spawn') child.emit('error', Object.assign(new Error('missing executable'), { code: 'ENOENT' }));
+      else child.emit('exit', 0, null);
+      child.emit('close', null, null);
+      expect(spawner['inline'].size).toBe(0);
+      expect(finished).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+    it('closes the assigned handle on spawner stop', async () => {
+      const close = jest.fn();
+      spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },
+        'C:/windows_job.node', () => true);
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild());
+      spawner.spawnProcess(request);
+      await spawner.dispose();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+    it('logs the real assignment error and keeps the process usable', async () => {
+      const failure = new Error('native failed');
+      const assign = jest.fn(() => { throw failure; });
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: Date.now });
+      spawner.configureWindowsJobs({ assignToNewJob: assign }, 'C:/windows_job.node', () => true);
+      const child = fakeChild();
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+      const handle = spawner.spawnProcess(request);
+      expect(handle.pid).toBe(42);
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('snapshot cleanup active'), failure);
+      child.emit('exit', 0, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalled();
+    });
+  });
+
+  it('sends the binary path and job policy only while the worker gate is open', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    const arch = Object.getOwnPropertyDescriptor(process, 'arch');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
+    const post = jest.spyOn(Worker.prototype, 'postMessage');
+    let enabled = false;
+    spawner.configureWindowsJobs({ assignToNewJob: jest.fn(() => ({ close: jest.fn() })) },
+      'C:/windows_job.node', () => enabled);
+    const request = { command: process.execPath, args: ['-e', ''], env: process.env,
+      windowsJobPolicy: 'job' as const };
+    try {
+      const off = spawner.spawnProcess(request);
+      await new Promise((resolve) => off.once('exit', resolve));
+      const first = post.mock.calls.find((call) => (call[0] as { type?: string }).type === 'spawn');
+      expect(first?.[0]).not.toHaveProperty('windowsJobBinaryPath');
+      enabled = true;
+      const on = spawner.spawnProcess(request);
+      await new Promise((resolve) => on.once('exit', resolve));
+      const sends = post.mock.calls.filter((call) => (call[0] as { type?: string }).type === 'spawn');
+      expect(sends[1]?.[0]).toMatchObject({ windowsJobPolicy: 'job', windowsJobBinaryPath: 'C:/windows_job.node' });
+    } finally {
+      post.mockRestore();
+      if (platform) Object.defineProperty(process, 'platform', platform);
+      if (arch) Object.defineProperty(process, 'arch', arch);
+    }
+  });
+
   describe('PTAH_SDK_INLINE_SPAWN escape hatch', () => {
     it.each([
       { name: 'clean', platform: 'win32', detached: false, code: 0, queryFails: false, killFails: false, queries: 2, kills: 1 },

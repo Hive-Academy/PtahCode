@@ -44,6 +44,7 @@ import { ReviewLaneFiles } from '../services/review/review-lane-files';
 import { REVIEW_SYNC_TOKENS, ReviewSyncScheduleService, type ReviewSyncHooks } from '../services/review/review-sync-schedule.service';
 import {
   ElectronEditorLauncher,
+  resolveElectronWindowsJobBinaryPath,
   createAgentModelSettingsGetter,
 } from '@ptah-extension/platform-electron';
 import { SessionId, type IAgentAdapter } from '@ptah-extension/shared';
@@ -292,6 +293,12 @@ export function registerPhase2Libraries(
   registerSdkServices(container, logger, {
     // Unpackaged builds only (`npm run dev`); packaged apps ignore PTAH_DEV_* overrides.
     devHost: !app.isPackaged,
+    windowsJobs: {
+      assigner: container.resolve(PLATFORM_TOKENS.WINDOWS_JOB_ASSIGNER),
+      binaryPath: resolveElectronWindowsJobBinaryPath({ appPath: app.getAppPath() }),
+      setting: () => container.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+        .getConfiguration<boolean>('ptah', 'agentOrchestration.windowsJobs') === true,
+    },
   });
   registerElectronCodexReadinessAndLogin(container, logger);
   container.register(PLATFORM_TOKENS.EDITOR_LAUNCHER, {

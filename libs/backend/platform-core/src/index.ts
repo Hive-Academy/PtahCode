@@ -490,3 +490,5 @@ export type {
   ControlReleaseResult,
 } from './session-driver-lock/control-endpoint';
 export { resolveWorkspaceSkillPath, SkillPathRefusalError } from './lib/resolve-workspace-skill-path';
+
+export { shouldUseWindowsJob, WINDOWS_JOB_SETTING_KEY, WINDOWS_JOB_ENV_KEY } from './utils/windows-job-gate';

@@ -135,6 +135,7 @@ export const FILE_BASED_SETTINGS_KEYS = new Set<string>([
   // Per-request timeout of a System One decision-model call, in ms
   // (`DECISION_MODEL_TIMEOUT_SETTING_KEY`); clamped by lane-routing on read.
   'agentOrchestration.decisionModelTimeoutMs',
+  'agentOrchestration.windowsJobs',
   'agentOrchestration.hostRouting',
   // Lane rotation inside the closeness band. Default true keeps today's
   // cyclic pick. A flip joins ROUTING_KEYS so a cached routing notice refreshes.
@@ -374,6 +375,7 @@ export const FILE_BASED_SETTINGS_DEFAULTS: Record<string, unknown> = {
   'agentOrchestration.decisionModel': null,
   // `null`: the built-in per-locality decision request timeout applies.
   'agentOrchestration.decisionModelTimeoutMs': null,
+  'agentOrchestration.windowsJobs': false,
   'agentOrchestration.hostRouting': true,
   // Missing or non-boolean reads stay "on" in the routing reader (R1).
   'agentOrchestration.laneRotation': true,

@@ -49,3 +49,4 @@ Existing live baselines: `npx jest --config libs/backend/windows-job-native/jest
 | Optional assigner | Optional; no-op binding in every host | `platform-electron/src/registration.ts:110`; `agent-sdk/src/lib/di/register.ts:555-559` | Yes |
 | Run snapshot with job | Both; skip on success | Existing scans at `off-thread-process-spawner.ts:509-513,740-749`; approved fallback | Yes |
 | Keep auth and watcher outside jobs | `no-job`; job | `implementation-plan.md:25-26`; approved root policy | Yes |
+| Close jobs for detached roots | Close on root exit; retain detached descendants | Accepted `job` policy for Pi, Copilot and standalone OpenCode. Snapshot cleanup skips detached roots, but job close stops their descendants when the switch is on. | Yes |

@@ -952,6 +952,106 @@ describe('spawnCli', () => {
     setPlatform(realPlatform);
   });
 
+  it('forwards job policy and defaults to no-job on the spawner path', () => {
+    const { spawner, requests } = createFakeSpawner();
+    spawnCli('node', [], { spawner, windowsJobPolicy: 'job' });
+    spawnCli('node', [], { spawner });
+    expect(requests.map((request) => request.windowsJobPolicy)).toEqual(['job', 'no-job']);
+    expect(mockCrossSpawn).not.toHaveBeenCalled();
+  });
+
+  it.each(['omitted', 'no-job', 'switch-off'] as const)('does not assign for %s', (mode) => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const assignToNewJob = jest.fn();
+    const settingEnabled = jest.fn(() => mode !== 'switch-off');
+    const previous = process.env['PTAH_WINDOWS_JOBS'];
+    delete process.env['PTAH_WINDOWS_JOBS'];
+    try {
+      spawnCli('node', [], {
+        windowsJobPolicy: mode === 'omitted' ? undefined : mode === 'no-job' ? 'no-job' : 'job',
+        windowsJob: { assigner: { assignToNewJob }, settingEnabled, logger: { debug: jest.fn(), error: jest.fn() } },
+      });
+      expect(assignToNewJob).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env['PTAH_WINDOWS_JOBS'];
+      else process.env['PTAH_WINDOWS_JOBS'] = previous;
+    }
+  });
+
+  it.each(['exit', 'stop'] as const)('assigns once and closes once on %s', (mode) => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const close = jest.fn();
+    const assignToNewJob = jest.fn(() => ({ close }));
+    const logger = { debug: jest.fn(), error: jest.fn() };
+    const handle = spawnCli('node', [], { windowsJobPolicy: 'job',
+      windowsJob: { assigner: { assignToNewJob }, settingEnabled: () => true, logger } });
+    expect(assignToNewJob).toHaveBeenCalledWith(child.pid);
+    expect(assignToNewJob).toHaveBeenCalledTimes(1);
+    expect(mockCrossSpawn).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(`[WindowsJob] assigned pid=${child.pid} root=process`);
+    expect(close).not.toHaveBeenCalled();
+    if (mode === 'stop') handle.kill();
+    child.emit('exit', 0);
+    handle.kill();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps one usable child when the setting reader throws', () => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const failure = new Error('setting failed');
+    const assignToNewJob = jest.fn();
+    const logger = { debug: jest.fn(), error: jest.fn() };
+    const handle = spawnCli('node', [], { windowsJobPolicy: 'job', windowsJob: {
+      assigner: { assignToNewJob }, settingEnabled: () => { throw failure; }, logger,
+    } });
+    expect(handle.pid).toBe(child.pid);
+    expect(mockCrossSpawn).toHaveBeenCalledTimes(1);
+    expect(assignToNewJob).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('snapshot cleanup active'), failure);
+  });
+
+  it('logs a close failure once with root context', () => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const failure = new Error('close failed');
+    const close = jest.fn(() => { throw failure; });
+    const logger = { debug: jest.fn(), error: jest.fn() };
+    const handle = spawnCli('node', [], { windowsJobPolicy: 'job', windowsJob: {
+      assigner: { assignToNewJob: () => ({ close }) }, settingEnabled: () => true, logger,
+    } });
+    child.emit('exit', 0);
+    handle.kill();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(`[WindowsJob] close failed pid=${child.pid} root=process`, failure);
+  });
+
+  it.each([false, true])('keeps snapshot cleanup after assignment (failure=%s)', async (fails) => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    const error = new Error('native failure');
+    const assignToNewJob = jest.fn(() => { if (fails) throw error; return { close: jest.fn() }; });
+    const logger = { debug: jest.fn(), error: jest.fn() };
+    const query = jest.spyOn(defaultOrphanCleanupDependencies, 'query').mockResolvedValue([]);
+    try {
+      spawnCli('node', [], { windowsJobPolicy: 'job', cleanupOrphanDescendants: true,
+        windowsJob: { assigner: { assignToNewJob }, settingEnabled: () => true, logger } });
+      child.emit('exit', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalled();
+      expect(mockCrossSpawn).toHaveBeenCalledTimes(1);
+      if (fails) expect(logger.error).toHaveBeenCalledWith(
+        `[WindowsJob] assignment failed pid=${child.pid} root=process; snapshot cleanup active`, error);
+    } finally { query.mockRestore(); }
+  });
+
   it('spawns inline through cross-spawn when no spawner is supplied', () => {
     // The no-regression assertion. Without an injected spawner nothing about
     // the launch changed: same `cross-spawn` call, same options.

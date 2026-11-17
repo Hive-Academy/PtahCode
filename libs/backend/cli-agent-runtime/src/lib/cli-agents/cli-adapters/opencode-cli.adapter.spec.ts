@@ -226,6 +226,7 @@ describe('OpencodeCliAdapter', () => {
           undefined,
           { groupOnly: process.platform !== 'win32' },
         );
+        expect(mockSpawnCli.mock.calls.at(-1)?.[2]?.windowsJobPolicy ?? 'no-job').toBe('no-job');
         expect(mockSpawnCli).toHaveBeenCalledWith('/usr/local/bin/opencode', ['models'],
           expect.objectContaining({ detached: true }));
         expect(currentChild?.kill).not.toHaveBeenCalled();
@@ -647,6 +648,7 @@ describe('OpencodeCliAdapter', () => {
 
     it('passes --standalone before the prompt when run --help lists it', async () => {
       const args = await runArgs({ ...baseOptions, mcpPort: 51820 });
+      expect(mockSpawnCli.mock.calls.at(-1)?.[2]).toEqual(expect.objectContaining({ windowsJobPolicy: 'job' }));
 
       expect(mockHelpProbe).toHaveBeenCalledWith(
         'opencode',

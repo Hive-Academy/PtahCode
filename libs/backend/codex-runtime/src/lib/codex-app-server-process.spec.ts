@@ -258,6 +258,10 @@ describe('CodexAppServerProcess', () => {
     useWindowsExecutableFixture({ query, kill, now });
     Object.defineProperty(process, 'platform', { value: 'win32' });
     await start();
+    expect(spawner.spawnProcess).toHaveBeenCalledTimes(1);
+    expect(spawner.spawnProcess).toHaveBeenCalledWith(
+      expect.objectContaining({ windowsJobPolicy: 'job' }),
+    );
     child.exitCode = code;
     child.emit('exit', code, null);
     expect(query).not.toHaveBeenCalled();
@@ -746,6 +750,7 @@ describe('CodexAppServerProcess', () => {
     expect(spawner.spawnProcess).toHaveBeenCalledWith({
       command: executable.path,
       args: ['app-server'],
+      windowsJobPolicy: 'job',
       cwd: '/work',
       env: expect.objectContaining({ CODEX_HOME: profile.normalizedHome }),
     });
