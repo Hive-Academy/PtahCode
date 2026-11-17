@@ -7,6 +7,9 @@ Authoritative shape and naming rules for the PtahCode monorepo. One page, on pur
 Every library CLAUDE.md may link here instead of restating. If a rule here
 conflicts with a library-level CLAUDE.md, THIS file wins.
 
+Visual design rules are in `docs/design-system/README.md`. A pull request that changes a
+Settings page must pass the screenshot gate in `docs/design-system/settings/visual-gate.md`.
+
 ---
 
 ## 2. Library folder shape
@@ -78,16 +81,16 @@ container.register(Symbol('FooService'), ...);     // unique per call — never 
 
 ## 6. Naming suffixes
 
-| Suffix      | Semantics                                                            |
-| ----------- | -------------------------------------------------------------------- |
-| `*Service`  | Injectable, has a DI token, holds state or orchestrates              |
-| `*Manager`  | Wrapper over a stateful external resource (OS, process, file)        |
-| `*Store`    | Pure storage (read / write / list) — no orchestration                |
-| `*Registry` | In-memory map with registration semantics                            |
-| `*Adapter`  | Implements a foreign contract behind a local one                     |
-| `*Provider` | Concrete implementation of a platform interface (`IXxxProvider`)     |
-| `*Handler`  | RPC handler or event handler                                         |
-| `*Factory`  | Constructs non-DI instances                                          |
+| Suffix      | Semantics                                                        |
+| ----------- | ---------------------------------------------------------------- |
+| `*Service`  | Injectable, has a DI token, holds state or orchestrates          |
+| `*Manager`  | Wrapper over a stateful external resource (OS, process, file)    |
+| `*Store`    | Pure storage (read / write / list) — no orchestration            |
+| `*Registry` | In-memory map with registration semantics                        |
+| `*Adapter`  | Implements a foreign contract behind a local one                 |
+| `*Provider` | Concrete implementation of a platform interface (`IXxxProvider`) |
+| `*Handler`  | RPC handler or event handler                                     |
+| `*Factory`  | Constructs non-DI instances                                      |
 
 ## 7. Error types
 
