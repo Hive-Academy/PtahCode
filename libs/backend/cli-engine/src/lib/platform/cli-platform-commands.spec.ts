@@ -9,6 +9,18 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { ChildProcess } from 'node:child_process';
+import { PassThrough } from 'node:stream';
+import spawn from 'cross-spawn';
+
+jest.mock('cross-spawn', () => jest.fn(jest.requireActual('cross-spawn')));
+import { killProcessTree } from '@ptah-extension/platform-core';
+
+jest.mock('@ptah-extension/platform-core', () => ({
+  ...jest.requireActual('@ptah-extension/platform-core'),
+  killProcessTree: jest.fn((...args: Parameters<typeof killProcessTree>) =>
+    jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args)),
+}));
 
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
 import type {
@@ -278,6 +290,81 @@ describe('CliPlatformCommands', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('timed out');
+    });
+
+    it('requests a Windows tree stop and reports a launch failure', async () => {
+      const originalPlatform = process.platform;
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 45, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      const reaper = jest.mocked(killProcessTree).mockImplementation(async (_pid, _signal, onError) => {
+        onError?.(new Error('ENOENT'));
+      });
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        const cmds = new CliPlatformCommands({ authCommandTimeoutMs: 5 });
+        const result = await cmds.runAuthCommand({
+          provider: 'openai-codex', name: 'Codex Login',
+          command: 'fake-login',
+        });
+        expect(result.error).toContain('timed out');
+        expect(reaper).toHaveBeenCalledWith(expect.any(Number), 'SIGTERM', expect.any(Function));
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(stderrSpy.mock.calls.some((call) => String(call[0]).includes('tree stop failed'))).toBe(true);
+        expect(fakeChild.kill).toHaveBeenCalledTimes(1);
+      } finally {
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+        reaper.mockImplementation((...args) => jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args));
+      }
+    });
+
+    it('waits for Windows tree termination before the root fallback', async () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      let finishTree: (() => void) | undefined;
+      const reaper = jest.mocked(killProcessTree).mockImplementation(() => new Promise<void>((resolve) => { finishTree = resolve; }));
+      try {
+        const cmds = new CliPlatformCommands({ authCommandTimeoutMs: 5 });
+        const result = await cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        expect(result.error).toContain('timed out');
+        expect(reaper).toHaveBeenCalledWith(42, 'SIGTERM', expect.any(Function));
+        expect(fakeChild.kill).not.toHaveBeenCalled();
+        finishTree?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(fakeChild.kill).toHaveBeenCalledTimes(1);
+        const exitedChild = Object.assign(new ChildProcess(), {
+          pid: 43, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+          stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+        });
+        jest.mocked(spawn).mockImplementationOnce(() => exitedChild);
+        const second = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        await second;
+        exitedChild.exitCode = 0;
+        finishTree?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(exitedChild.kill).not.toHaveBeenCalled();
+        const completedChild = Object.assign(new ChildProcess(), {
+          pid: 44, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+          stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+        });
+        jest.mocked(spawn).mockImplementationOnce(() => completedChild);
+        const count = reaper.mock.calls.length;
+        const completed = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        completedChild.exitCode = 0;
+        completedChild.emit('close', 0);
+        await completed;
+        expect(reaper).toHaveBeenCalledTimes(count);
+      } finally {
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+        reaper.mockImplementation((...args) => jest.requireActual<typeof import('@ptah-extension/platform-core')>('@ptah-extension/platform-core').killProcessTree(...args));
+      }
     });
 
     it('runs and reports normally when no push sink is configured', async () => {

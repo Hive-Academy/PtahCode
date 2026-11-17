@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { killTree } from '../lib/kill-tree.mjs';
 
 const HOUR = 3_600_000;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -218,7 +219,11 @@ export function main(args = process.argv.slice(2), io = {}, deps = {}) {
       const live = listProcesses();
       return normalize(root) === normalize(mainRoot) || normalize(root) === normalize(current) || active.includes(normalize(root)) && !registered.map(normalize).includes(normalize(root)) || holders.some((h) => normalize(h.worktree) === normalize(root) && (live.some((p) => p.pid === h.pid || p.pid === h.childPid)));
     },
-    stop: (pid) => process.platform === 'win32' ? run('taskkill', ['/PID', String(pid), '/T', '/F']) : process.kill(pid, 'SIGTERM'),
+    stop: (pid) => {
+      if (process.platform !== 'win32') return process.kill(pid, 'SIGTERM');
+      const result = killTree(pid);
+      if (!result.ok) throw result.error;
+    },
   }));
   const unattributable = processList.filter((p) => p.attribution === 'not attributable').map((p) => ({ pid: p.pid, reason: 'not attributable' }));
   const result = { apply: options.apply, rows, unattributable, total: { count: rows.length, mib: +(rows.reduce((n, r) => n + r.sizeBytes, 0) / 1048576).toFixed(2) }, failures };

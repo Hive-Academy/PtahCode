@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { killTree } from '../lib/kill-tree.mjs';
 import { parseArgs, classify, validateDirectory, applyRows, exitStatus, main, readLocks, isExactDaemon } from './clean-stale-nx.mjs';
 
 const base = path.resolve('fixture');
@@ -163,4 +164,18 @@ test('already removed directory succeeds; removal failure is nonzero', () => {
     assert.equal(exitStatus(failures), 1);
     assert.equal(fs.existsSync(target), true);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('a taskkill failure is recorded as an apply failure', () => {
+  const failure = killTree(42, 'SIGTERM', {
+    platform: 'win32', env: { SystemRoot: 'C:/Windows' }, spawnSync: () => ({ status: 5, stderr: 'access denied' }),
+    stderr: { write: () => true },
+  });
+  assert.equal(failure.ok, false);
+  const failures = applyRows([{ kind: 'process', pid: 42, path: root('gone') }], {
+    worktreesRoot, processes: () => [daemon(root('gone'), 42)],
+    stop: () => { throw failure.error; },
+  });
+  assert.equal(exitStatus(failures), 1);
+  assert.match(failures.join(' '), /access denied/);
 });

@@ -34,6 +34,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+  killProcessTree,
   WorkspaceWatchSupervisor,
   type IDisposable,
   type IWorkspaceWatcher,
@@ -43,6 +44,7 @@ import {
   type WorkspaceWatchHostProcess,
   type WorkspaceWatchOptions,
   type WorkspaceWatchSupervisorOptions,
+  type WorkspaceWatcherDiagnostic,
 } from '@ptah-extension/platform-core';
 
 /** The bundle the CLI build writes next to `main.mjs` and `tui.mjs`. */
@@ -84,7 +86,7 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
   private stderrTail = '';
 
   /** Throws when the bundle is missing or the fork itself fails. */
-  constructor(hostPath: string) {
+  constructor(hostPath: string, private readonly onDiagnostic?: (diagnostic: WorkspaceWatcherDiagnostic) => void) {
     if (!fs.existsSync(hostPath)) {
       throw new Error(`watch host bundle not found: ${hostPath}`);
     }
@@ -144,8 +146,25 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
   }
 
   kill(): void {
-    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
+    if (this.exited || this.child.exitCode !== null || this.child.signalCode !== null) return;
+    const pid = this.child.pid;
+    if (process.platform === 'win32' && pid !== undefined && Number.isSafeInteger(pid) && pid > 0) {
+      void killProcessTree(pid, 'SIGTERM', (error) => this.reportStopError(error instanceof Error ? error : new Error(String(error))))
+        .catch((error: unknown) => this.reportStopError(error instanceof Error ? error : new Error(String(error))))
+        .finally(() => {
+          if (!this.exited && this.child.exitCode === null && this.child.signalCode === null) this.child.kill();
+        });
+      return;
+    }
     this.child.kill();
+  }
+
+  private reportStopError(error: Error): void {
+    try {
+      this.onDiagnostic?.({ level: 'error', message: '[WorkspaceWatcher] tree stop failed', detail: { error } });
+    } catch {
+      // degradation-audit: optional-capability - a throwing diagnostic sink must not interrupt watch-host cleanup.
+    }
   }
 
   private notifyExit(code: number | null): void {
@@ -157,10 +176,10 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
 
 /** Forks {@link CliWorkspaceWatchHostProcess} hosts of one bundle. */
 export class CliWorkspaceWatchHostForker implements WorkspaceWatchHostForker {
-  constructor(private readonly hostPath: string) {}
+  constructor(private readonly hostPath: string, private readonly onDiagnostic?: (diagnostic: WorkspaceWatcherDiagnostic) => void) {}
 
   fork(): WorkspaceWatchHostProcess {
-    return new CliWorkspaceWatchHostProcess(this.hostPath);
+    return new CliWorkspaceWatchHostProcess(this.hostPath, this.onDiagnostic);
   }
 }
 
@@ -172,7 +191,7 @@ export class CliWorkspaceWatcher implements IWorkspaceWatcher {
     this.supervisor = new WorkspaceWatchSupervisor({
       ...supervisorOptions,
       clock: supervisorOptions.clock ?? UNREFERENCED_CLOCK,
-      host: new CliWorkspaceWatchHostForker(hostPath),
+      host: new CliWorkspaceWatchHostForker(hostPath, supervisorOptions.onDiagnostic),
     });
   }
 
