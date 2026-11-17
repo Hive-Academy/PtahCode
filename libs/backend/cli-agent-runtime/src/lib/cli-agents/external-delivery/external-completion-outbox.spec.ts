@@ -59,6 +59,30 @@ describe('ExternalCompletionOutbox', () => {
     expect(logs).toEqual(['[ExternalCompletionOutbox] Dropped 1 retired owner keys']);
   });
 
+  it('keeps an active completion when retired markers overflow before a late completion', () => {
+    const active = { ...owner, principal: derivePrincipal('active') };
+    const box = new ExternalCompletionOutbox(logger, { maxTotal: 1, now: () => now });
+    box.setHttpOwnerIsActive(candidate => candidate.principal === active.principal);
+    box.discardOwner(owner);
+    box.discardOwner({ ...owner, principal: derivePrincipal('another retired connection') });
+    box.record(entry('active', active));
+    now++;
+    box.record(entry('late', owner));
+    expect(box.claim(active, { maxEntries: 1, maxBytes: 100 }).entries.map(item => item.agentId)).toEqual(['active']);
+    expect(box.pendingCount(owner)).toBe(0);
+  });
+
+  it('does not let a shared HTTP completion evict an exclusive completion', () => {
+    const box = new ExternalCompletionOutbox(logger, { maxTotal: 1, now: () => now });
+    box.record(entry('exclusive'));
+    now++;
+    box.record(entry('shared', { ...owner, exclusive: false }));
+    expect(box.claim(owner, { maxEntries: 1, maxBytes: 100 }).entries.map(item => item.agentId)).toEqual(['exclusive']);
+    expect(box.pendingCount({ ...owner, exclusive: false })).toBe(0);
+    box.record(entry('stdio-shared', { ...other, exclusive: false }));
+    expect(box.findForLane({ ...other, exclusive: false }, 'stdio-shared')).toBeDefined();
+  });
+
   it('bounds total entries across owners and acknowledges only the matching claim', () => {
     const box = new ExternalCompletionOutbox(logger, { maxTotal: 2, now: () => now });
     box.record(entry('a')); now++;
@@ -125,12 +149,12 @@ describe('ExternalCompletionOutbox', () => {
 
   it('keeps explicit lane reads private, including forged transport', () => {
     const box = new ExternalCompletionOutbox(logger, { now: () => now });
-    box.record(entry('a', { ...owner, exclusive: false }));
+    box.record(entry('a', { ...other, exclusive: false }));
     expect(box.findForLane(other, 'a')).toBeUndefined();
     expect(box.findForLane(owner, 'missing')).toBeUndefined();
-    expect(box.findForLane({ ...owner, exclusive: false }, 'a')?.agentId).toBe('a');
+    expect(box.findForLane({ ...other, exclusive: false }, 'a')?.agentId).toBe('a');
     expect(box.acknowledgeCompletion(other, 'a:time')).toBe(false);
-    expect(box.acknowledgeCompletion({ ...owner, exclusive: false }, 'a:time')).toBe(true);
+    expect(box.acknowledgeCompletion({ ...other, exclusive: false }, 'a:time')).toBe(true);
   });
 
   it('truncates oversized bodies with a read instruction', () => {

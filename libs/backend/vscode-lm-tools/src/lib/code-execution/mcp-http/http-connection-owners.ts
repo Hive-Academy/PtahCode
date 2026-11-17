@@ -56,6 +56,15 @@ export class HttpConnectionOwners {
     return { transport: 'http', principal: derivePrincipal(`${owner.principal}:${parsed.data}`), exclusive: true };
   }
 
+  isActive(owner: ExternalOwnerKey): boolean {
+    this.prune();
+    if (owner.transport !== 'http' || !owner.exclusive) return false;
+    for (const [id, record] of this.records) {
+      if (derivePrincipal(`${record.tokenPrincipal}:${id}`) === owner.principal) return true;
+    }
+    return false;
+  }
+
   get size(): number {
     this.prune();
     return this.records.size;

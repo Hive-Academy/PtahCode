@@ -215,6 +215,7 @@ export async function startHttpServer(
   const server = http.createServer((req, res) => {
     handleHttpRequest(req, res, onMCPRequest, logger, config.authenticate, config.completionOutbox, connectionOwners);
   });
+  config.completionOutbox?.setHttpOwnerIsActive(owner => server.listening && connectionOwners.isActive(owner));
 
   const candidates = getMcpPortCandidates(configuredPort);
   const failures: UnavailablePort[] = [];

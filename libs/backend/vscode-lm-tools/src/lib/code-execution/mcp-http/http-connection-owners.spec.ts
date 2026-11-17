@@ -7,7 +7,10 @@ describe('HTTP connection owners', () => {
   it('accepts only a server-issued header for its credential', () => {
     const owners = new HttpConnectionOwners();
     const id = owners.issue(owner);
-    expect(owners.resolve(owner, id)).toMatchObject({ exclusive: true });
+    const exclusive = owners.resolve(owner, id);
+    expect(exclusive).toMatchObject({ exclusive: true });
+    if (!exclusive) throw new Error('Expected an exclusive owner');
+    expect(owners.isActive(exclusive)).toBe(true);
     expect(owners.resolve(owner, undefined)).toEqual(owner);
     expect(owners.resolve(owner, 'f'.repeat(64))).toEqual(owner);
     expect(owners.resolve({ ...owner, principal: 'b'.repeat(32) }, id)).toEqual({ ...owner, principal: 'b'.repeat(32) });
@@ -18,9 +21,12 @@ describe('HTTP connection owners', () => {
     let now = 0;
     const owners = new HttpConnectionOwners(() => now);
     const first = owners.issue(owner);
+    const exclusive = owners.resolve(owner, first);
+    if (!exclusive) throw new Error('Expected an exclusive owner');
     for (let i = 0; i < 256; i++) owners.issue(owner);
     expect(owners.size).toBe(256);
     expect(owners.resolve(owner, first)).toEqual(owner);
+    expect(owners.isActive(exclusive)).toBe(false);
     now = 24 * 60 * 60 * 1000;
     expect(owners.size).toBe(0);
   });

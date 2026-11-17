@@ -39,6 +39,7 @@ export class ExternalCompletionOutbox {
   private readonly claims = new Map<string, HeldClaim>();
   private readonly held = new Map<string, ExternalCompletionEntry>();
   private readonly retiredOwners = new Map<string, number>();
+  private isActiveHttpOwner?: (owner: ExternalOwnerKey) => boolean;
   private readonly maxPerOwner: number;
   private readonly maxTotal: number;
   private readonly maxAgeMs: number;
@@ -99,8 +100,18 @@ export class ExternalCompletionOutbox {
     return true;
   }
 
+  /** The HTTP server owns the bounded connection registry used to validate late completions. */
+  setHttpOwnerIsActive(isActive: (owner: ExternalOwnerKey) => boolean): void {
+    this.isActiveHttpOwner = isActive;
+  }
+
   record(entry: ExternalCompletionEntry): void {
     this.prune();
+    if (entry.owner.transport === 'http' && !entry.owner.exclusive) return;
+    if (entry.owner.transport === 'http' && this.isActiveHttpOwner && !this.isActiveHttpOwner(entry.owner)) {
+      this.logger.info('[ExternalCompletionOutbox] Discarded 1 completion for a retired connection');
+      return;
+    }
     if (this.retiredOwners.has(ownerKeyId(entry.owner))) {
       this.logger.info('[ExternalCompletionOutbox] Discarded 1 completion for a retired connection');
       return;
