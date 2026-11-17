@@ -66,7 +66,7 @@ Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processe
 | P4a: extract shared memory gate | TASK_2026_2181_dbbb | #1382 | merged |
 | P4b: session memory queue admission | TASK_2026_2181_dbbb | #1388 | in review |
 | P5: host load (PR 1: measure task index rebuilds and plan limits load) | TASK_2026_2241_c297 | #1380 | merged |
-| P5: host load (PR 2: rebuild only changed task folders) | TASK_2026_2245_49ac | pending | in progress |
+| P5: host load (PR 2: rebuild only changed task folders) | TASK_2026_2245_49ac | #1385 | in review |
 | P5: host load (PR 3: 30 s cache for plan limits snapshots) | TASK_2026_2246_6c85 | #1384 | in review |
 | P5: host load (PR 4: writer joins the watcher debounce) | none | none | not started (starts when PR 2 is in review) |
 
