@@ -5,7 +5,8 @@ Design of record: the HTML prototype `prototype/settings-prototype.html` (rev 2 
 `891e3f63-0b0a-4961-9521-1a7111230c85` is superseded) and its screenshots in `prototype/screens/`
 (rev 2: `rev2-*.jpg`, `rev2b-*.jpg`).
 `settings-design-spec.md` gives the component mapping. Phase B starts only after the user approves
-the prototype. Each tab PR compares its Electron screenshots with `prototype/screens/<tab>-*.jpg`.
+the prototype. Each tab PR compares its Electron screenshots with the screens of its tab in the
+screen index of `README.md` (the file names start with the revision, for example `rev2b-`).
 
 ## Rules for every PR
 
@@ -45,6 +46,8 @@ inline-size` + `@container`), not the viewport: 1 column narrow, 2 medium, 3 wid
 - Visual gate before each tab PR push: Electron screenshots at 1440, 1168, 1024 and 784 px, dark
   and light, FULL PAGE (scroll to the end of the tab). Look at each shot for overlap, clipped text
   and column count before the report. Add a spec assertion for F1 where a layout spec can hold it.
+  [visual-gate.md](visual-gate.md) is the authoritative list for the pull request body. It also
+  requires 1920 and 2560 px in the dark theme.
 
 ## Parent rules for Phase B (2026-11-16)
 

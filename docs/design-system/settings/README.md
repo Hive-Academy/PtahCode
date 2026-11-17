@@ -12,12 +12,18 @@ rev 2 has no screen for these pages.
 
 The files were copied from the design task `TASK_2026_2196_0f09` (branch
 `feat/settings-redesign`, folder `.ptah/specs/TASK_2026_2196_0f09/`). That folder is not
-tracked in git. Each copy was compared byte by byte with its source. Two changes were made
+tracked in git. Each copy was compared byte by byte with its source. These changes were made
 after the copy:
 
 - In `settings-apply-plan.md` a local absolute path was replaced with
   `<main-checkout>\node_modules`.
 - Prettier padded the table columns of the two Markdown files. The text did not change.
+- In `settings-design-spec.md` the `States` row of the data table spec was joined to the
+  `Responsive` row (a missing line break in the source). It is now a separate row.
+- In `settings-apply-plan.md` the screen pattern `prototype/screens/<tab>-*.jpg` matched no
+  rev 2 file. The plan now refers to the screen index below.
+- In `settings-apply-plan.md` the visual gate item now refers to `visual-gate.md`, which adds
+  the 1920 and 2560 px dark screenshots.
 
 The HTML prototype and the screens are unchanged copies.
 
@@ -25,6 +31,11 @@ The design spec and the apply plan refer to files that are not in this folder (`
 `component-catalog.md`, `settings-inventory.md`, `responsive-review/`, `stitch/`, earlier lane
 screens). These files stay in the design task only. `prototype/rev-2.html` in the spec is
 identical to `prototype/settings-prototype.html` here.
+
+The spec and the apply plan require each pull request to keep every `id`, `data-testid` and
+`aria-label` of `settings-inventory.md` section 6. That inventory is not tracked. Until it is,
+take the full hook set from the current settings source in `libs/frontend/chat/src/lib/settings/`
+and its specs. The apply plan lists the hooks at risk for each pull request.
 
 ## Files
 
