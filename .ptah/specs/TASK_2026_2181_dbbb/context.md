@@ -64,7 +64,7 @@ Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processe
 | P2: Nx daemon and worktree cost (PR 3: dry-run cleanup command for stale Nx data) | TASK_2026_2242_f87b | #1383 | merged |
 | P3: process tree stop on Windows (batch 1: review runner and probes) | TASK_2026_2231_816c | #1378 | merged |
 | P4a: extract shared memory gate | TASK_2026_2181_dbbb | #1382 | merged |
-| P4b: session memory queue admission | TASK_2026_2181_dbbb | pending | not started (waits for P4a merge) |
+| P4b: session memory queue admission | TASK_2026_2181_dbbb | #1388 | in review |
 | P5: host load (PR 1: measure task index rebuilds and plan limits load) | TASK_2026_2241_c297 | #1380 | merged |
 | P5: host load (PR 2: rebuild only changed task folders) | TASK_2026_2245_49ac | pending | in progress |
 | P5: host load (PR 3: 30 s cache for plan limits snapshots) | TASK_2026_2246_6c85 | #1384 | in review |
