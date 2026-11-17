@@ -4,6 +4,7 @@ import type {
   AuthVerifyDraftConnectionParams,
   KimiCodeCredentialSource,
   PtahCliConfig,
+  PtahCliSummary,
   RpcMethodParams,
   RpcMethodResult,
   ScopedSettingEntry,
@@ -119,7 +120,7 @@ export type ProvidersOrchestration = Pick<
   | 'cursorApiKeyConfigured'
   | 'cursorApiKeyStored'
   | 'cursorApiKeyEnvSet'
->;
+> & { readonly missingFields?: readonly string[] };
 export type ProvidersDetectedClis = RpcMethodResult<'agent:detectClis'>['clis'];
 /** Result of the last Ptah CLI connection test. `reason` is fixed copy for a known registry failure, else null. */
 export interface ProvidersCliTest {
@@ -242,3 +243,6 @@ export interface SaveOperation {
   readonly stage?: SaveStage;
 }
 export type SaveOutcome = 'saved' | 'unsaved' | 'unconfirmed' | 'conflict';
+
+/** List-compatible summaries with boundary validation failures for the lanes matrix. */
+export type ProvidersCliAgents = PtahCliSummary[] & { readonly missingFields?: readonly string[] };

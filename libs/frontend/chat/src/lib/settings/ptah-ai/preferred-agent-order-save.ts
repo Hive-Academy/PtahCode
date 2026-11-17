@@ -9,7 +9,8 @@ export async function savePreferredAgentOrder(
 ): Promise<void> {
   const context = state.reviewContext();
   if (!context) return;
-  const previous = [...(state.orchestration().data?.preferredAgentOrder ?? [])];
+  const saved = state.orchestration().data?.preferredAgentOrder;
+  const previous = Array.isArray(saved) ? [...saved] : [];
   await feedback.save({
     label: 'preferred agent order',
     scope: 'global',

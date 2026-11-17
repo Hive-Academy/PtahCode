@@ -116,7 +116,7 @@ const PROTOTYPE: CliMatrixSources = {
 
 describe('cliMatrixRows', () => {
   it('is empty while nothing has loaded', () => {
-    expect(cliMatrixRows(EMPTY)).toEqual({ installed: [], uninstalled: [] });
+    expect(cliMatrixRows(EMPTY)).toEqual({ installed: [], uninstalled: [], missing: [] });
   });
 
   it('shows the selected Codex executable and safe bundled reason', () => {
@@ -587,5 +587,44 @@ describe('Batch 52: live CLI values', () => {
       label: 'Model unavailable',
       title: 'Model unavailable',
     });
+  });
+});
+
+
+describe('partial orchestration arrays', () => {
+  it.each([undefined, null, {}, 'codex'])('keeps instance rows for detectedClis=%p', value => {
+    const malformed = { ...PROTOTYPE_ORCHESTRATION };
+    Object.defineProperty(malformed, 'detectedClis', { value });
+    const rows = cliMatrixRows({ ...PROTOTYPE, orchestration: malformed });
+    expect(rows.installed.map(row => row.id)).toContain('glm-1');
+    expect(rows.missing).toContain('detectedClis');
+  });
+  it.each(['disabledClis', 'preferredAgentOrder'] as const)('guards %s and keeps system rows', field => {
+    const malformed = { ...PROTOTYPE_ORCHESTRATION };
+    Object.defineProperty(malformed, field, { value: {} });
+    const rows = cliMatrixRows({ ...PROTOTYPE, orchestration: malformed });
+    expect(rows.installed.map(row => row.id)).toContain('codex');
+    expect(rows.missing).toContain(field);
+  });
+  it('includes boundary validation failures without duplicate fields', () => {
+    const rows = cliMatrixRows({ ...PROTOTYPE, orchestration: { ...PROTOTYPE_ORCHESTRATION, missingFields: ['detectedClis', 'codexModel'] } });
+    expect(rows.missing).toEqual(['detectedClis', 'codexModel']);
+  });
+});
+
+describe('partial CLI summaries', () => {
+  it('keeps system rows when the summary source is not an array', () => {
+    const sources = { ...PROTOTYPE };
+    Object.defineProperty(sources, 'cliAgents', { value: {} });
+    const rows = cliMatrixRows(sources);
+    expect(ids(rows.installed)).toContain('codex');
+    expect(ids(rows.installed)).not.toContain('glm-1');
+    expect(rows.missing).toEqual(['cliAgents']);
+  });
+  it('keeps system and retained instance rows when the boundary reports rejected summaries', () => {
+    const cliAgents = Object.assign([agent()], { missingFields: ['cliAgents'] });
+    const rows = cliMatrixRows({ ...PROTOTYPE, cliAgents });
+    expect(ids(rows.installed)).toEqual(expect.arrayContaining(['codex', 'glm-1']));
+    expect(rows.missing).toEqual(['cliAgents']);
   });
 });

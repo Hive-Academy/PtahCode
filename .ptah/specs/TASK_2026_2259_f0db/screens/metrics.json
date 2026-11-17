@@ -1,0 +1,30 @@
+[
+  {
+    "image": "lanes-1440-dark.jpg",
+    "expanded": false,
+    "rowCount": 5,
+    "pageWidth": 1440,
+    "tableWidth": 792
+  },
+  {
+    "image": "lanes-1440-dark-expanded.jpg",
+    "expanded": true,
+    "rowCount": 5,
+    "pageWidth": 1440,
+    "tableWidth": 792
+  },
+  {
+    "image": "lanes-1920-dark.jpg",
+    "expanded": false,
+    "rowCount": 5,
+    "pageWidth": 1920,
+    "tableWidth": 792
+  },
+  {
+    "image": "lanes-1920-dark-expanded.jpg",
+    "expanded": true,
+    "rowCount": 5,
+    "pageWidth": 1920,
+    "tableWidth": 792
+  }
+]
