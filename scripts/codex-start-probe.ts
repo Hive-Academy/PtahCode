@@ -109,8 +109,8 @@ function processHandle(child: ChildProcess, whenSpawned: Promise<number | null>)
       if (child.exitCode !== null || child.signalCode !== null) return false;
       if (process.platform === 'win32' && child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
         const root = process.env['SystemRoot'] ?? process.env['windir'];
-        const command = root ? join(root, 'System32', 'taskkill.exe') : 'taskkill';
-        const result = spawnSync(command, ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, encoding: 'utf8', timeout: 3000 });
+        // Never start a bare `taskkill`: the Windows search path can find a file in the current directory.
+        const result = !root || !isAbsolute(root) ? { error: new Error('SystemRoot is not an absolute path'), status: null, stdout: '', stderr: '' } : spawnSync(join(root, 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, encoding: 'utf8', timeout: 3000 });
         if (result.error || (result.status !== 0 && result.status !== 128 && !/not found|no running instance of the task/i.test(`${result.stdout}\n${result.stderr}`)))
           process.stderr.write(`taskkill failed: ${result.error?.message ?? result.stderr ?? result.status}\n`);
       }

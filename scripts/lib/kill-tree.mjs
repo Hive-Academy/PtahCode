@@ -25,8 +25,15 @@ export function killTree(target, signal = 'SIGTERM', dependencies = {}) {
   if (!Number.isSafeInteger(pid) || pid <= 0 ||
       (child && (exited.has(child) || child.exitCode !== null || child.signalCode !== null))) return { ok: true };
   if ((dependencies.platform ?? process.platform) === 'win32') {
-    const root = process.env.SystemRoot ?? process.env.windir;
-    const command = root ? path.join(root, 'System32', 'taskkill.exe') : 'taskkill';
+    // Never start a bare `taskkill`: the Windows search path can find a file in the current directory.
+    const env = dependencies.env ?? process.env;
+    const root = env.SystemRoot ?? env.windir;
+    if (!root || !path.win32.isAbsolute(root)) {
+      const error = new Error(`taskkill skipped for PID ${pid}: SystemRoot is not an absolute path`);
+      report(error.message, dependencies);
+      return { ok: false, error };
+    }
+    const command = path.win32.join(root, 'System32', 'taskkill.exe');
     let result;
     try {
       result = (dependencies.spawnSync ?? spawnSync)(command, ['/PID', String(pid), '/T', '/F'], {

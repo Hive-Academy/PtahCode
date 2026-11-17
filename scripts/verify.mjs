@@ -205,6 +205,8 @@ async function main() {
       // The child usually got the same Ctrl-C from the console. Stop the
       // whole tree anyway for kill/SIGTERM, then release after it exits.
       const result = stopWithFallback(child, signal);
+      if (!result.ok)
+        log(`the tree stop failed for PID ${child.pid}. Descendants can still run after the lock release. Examine them with "node scripts/verify.mjs --status" and "npm run clean:stale-nx".`);
       if (!result.ok && settleInterruptedPhase && !interruptionTimer) {
         interruptionTimer = setTimeout(() => settleInterruptedPhase?.(1), 5_000);
         interruptionTimer.unref();

@@ -168,7 +168,7 @@ test('already removed directory succeeds; removal failure is nonzero', () => {
 
 test('a taskkill failure is recorded as an apply failure', () => {
   const failure = killTree(42, 'SIGTERM', {
-    platform: 'win32', spawnSync: () => ({ status: 5, stderr: 'access denied' }),
+    platform: 'win32', env: { SystemRoot: 'C:/Windows' }, spawnSync: () => ({ status: 5, stderr: 'access denied' }),
     stderr: { write: () => true },
   });
   assert.equal(failure.ok, false);
