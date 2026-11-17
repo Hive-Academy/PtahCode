@@ -25,7 +25,7 @@ describe('WindowsOrphanDescendants', () => {
   it('stops a direct child created within the root lifetime', async () => {
     const { orphan, query, kill } = setup([row(11, 10, 15_000)]);
     await orphan.stop();
-    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
     expect(kill).toHaveBeenCalledWith(11);
   });
 
@@ -41,6 +41,18 @@ describe('WindowsOrphanDescendants', () => {
     expect(kill).not.toHaveBeenCalled();
   });
 
+  it('rejects a child of a reused root PID one millisecond after exit and its descendant', async () => {
+    const { orphan, kill } = setup([row(11, 10, rootExitedAtMs + 1), row(12, 11, rootExitedAtMs + 2)]);
+    await orphan.stop();
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('cannot link an orphan grandchild after its intermediate parent exits', async () => {
+    const { orphan, kill } = setup([row(12, 11, 16_000)]);
+    await orphan.stop();
+    expect(kill).not.toHaveBeenCalled();
+  });
+
   it('never stops a row carrying the exited root PID', async () => {
     const { orphan, kill } = setup([row(10, 1, 15_000)]);
     await orphan.stop();
@@ -48,9 +60,26 @@ describe('WindowsOrphanDescendants', () => {
   });
 
   it('stops a grandchild of a live selected child before its parent', async () => {
-    const { orphan, kill } = setup([row(11, 10, 15_000), row(12, 11, 16_000)]);
+    const { orphan, query, kill } = setup([row(11, 10, 15_000), row(12, 11, 16_000)]);
     await orphan.stop();
+    expect(query).toHaveBeenCalledTimes(2);
     expect(kill.mock.calls.map(([pid]) => pid)).toEqual([12, 11]);
+  });
+
+  it('does not kill a PID reused between selection and the second query', async () => {
+    const { orphan, query, kill } = setup([row(11, 10, 15_000)]);
+    query.mockResolvedValueOnce([row(11, 10, 15_000)]).mockResolvedValueOnce([row(11, 10, 15_001)]);
+    await orphan.stop();
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('kills nothing and reports one error if the second query fails', async () => {
+    const { orphan, query, kill, onError } = setup([row(11, 10, 15_000)]);
+    query.mockResolvedValueOnce([row(11, 10, 15_000)]).mockRejectedValueOnce(new Error('second query failed'));
+    await orphan.stop();
+    expect(kill).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'second query failed' }));
   });
 
   it('rejects a row older than its selected parent', async () => {

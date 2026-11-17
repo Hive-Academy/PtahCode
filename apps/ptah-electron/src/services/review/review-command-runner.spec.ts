@@ -148,7 +148,8 @@ describe('ReviewCommandRunner', () => {
         child.emit('exit', 0, null);
         await jest.advanceTimersByTimeAsync(100);
         await expect(result).resolves.toMatchObject({ timedOut: true, exitCode: 0 });
-        expect(query).toHaveBeenCalledTimes(1);
+        // A selected descendant needs a second identity query before the kill.
+        expect(query).toHaveBeenCalledTimes(identity === 'verified' ? 2 : 1);
         expect(killTree).toHaveBeenCalledTimes(identity === 'verified' ? 1 : 0);
         if (identity === 'verified') expect(killTree).toHaveBeenCalledWith(43214, 'SIGTERM', expect.any(Function));
       } finally {

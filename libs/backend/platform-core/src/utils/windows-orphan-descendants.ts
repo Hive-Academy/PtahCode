@@ -41,7 +41,9 @@ interface TimedRow {
   createdAtMs: number;
 }
 
-/** Finds live descendants of a root that exited within the supplied clock window. */
+/** Finds live descendants of a root that exited within the supplied clock window.
+ * A snapshot cannot link a grandchild once its intermediate parent has exited.
+ */
 export class WindowsOrphanDescendants {
   constructor(
     private readonly rootPid: number,
@@ -53,13 +55,8 @@ export class WindowsOrphanDescendants {
   ) {}
 
   async stop(): Promise<void> {
-    // An empty list after a query failure selects no process.
-    let live: ProcessRow[] = [];
-    try {
-      live = await this.query();
-    } catch (error: unknown) {
-      this.report(error);
-    }
+    const live = await this.snapshot();
+    if (live === undefined) return;
 
     const timed: TimedRow[] = live.flatMap((row) => {
       if (row.ProcessId === this.rootPid) return [];
@@ -73,8 +70,9 @@ export class WindowsOrphanDescendants {
     const selected = new Map<number, TimedRow>();
     let frontier = timed.filter((row) =>
       row.parentPid === this.rootPid &&
+      // Allow clock rounding at start; after exit, a reused root PID is unsafe.
       row.createdAtMs >= this.rootStartedAtMs - ROOT_TIME_TOLERANCE_MS &&
-      row.createdAtMs <= this.rootExitedAtMs + ROOT_TIME_TOLERANCE_MS);
+      row.createdAtMs <= this.rootExitedAtMs);
     const levels: TimedRow[][] = [];
     while (frontier.length > 0) {
       levels.push(frontier);
@@ -85,8 +83,15 @@ export class WindowsOrphanDescendants {
           row.createdAtMs >= parent.createdAtMs;
       });
     }
+    if (levels.length === 0) return;
+    const current = await this.snapshot();
+    if (current === undefined) return;
+    const stillLive = new Set(current.map((row) =>
+      `${row.ProcessId}:${row.ParentProcessId}:${creationTime(row.CreationDate)}`));
+    // A race remains between this query and taskkill; a Windows job object is the complete fix.
     for (const level of levels.reverse()) {
       for (const row of level) {
+        if (!stillLive.has(`${row.pid}:${row.parentPid}:${row.createdAtMs}`)) continue;
         try {
           await this.kill(row.pid);
         } catch (error: unknown) {
@@ -94,6 +99,14 @@ export class WindowsOrphanDescendants {
         }
       }
     }
+  }
+
+  /** One query. A failure is reported and gives no rows, so no process is selected. */
+  private snapshot(): Promise<ProcessRow[] | undefined> {
+    return this.query().catch((error: unknown) => {
+      this.report(error);
+      return undefined;
+    });
   }
 
   private report(error: unknown): void {

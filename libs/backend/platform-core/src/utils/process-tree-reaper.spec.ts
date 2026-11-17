@@ -82,6 +82,18 @@ describe('killProcessTree', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('exit code 5): Access denied') }));
   });
 
+  it('reports taskkill errors when a mock supplies no output arguments', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    mockExecFile.mockImplementationOnce((...args: unknown[]) => {
+      const done = args.at(-1) as (error: Error) => void;
+      done(new Error('failed without output'));
+    });
+    const onError = jest.fn();
+    await killProcessTree(4242, 'SIGTERM', onError);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('failed without output') }));
+  });
+
   it('accepts a taskkill process-not-found result', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     mockExecFile.mockImplementationOnce((...args: unknown[]) => {
