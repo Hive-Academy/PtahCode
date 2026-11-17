@@ -1,4 +1,6 @@
 import {
+  afterNextRender,
+  booleanAttribute,
   ChangeDetectionStrategy,
   Component,
   Directive,
@@ -7,11 +9,20 @@ import {
   forwardRef,
   computed,
   inject,
+  Injector,
   input,
   signal,
+  viewChild,
   ViewEncapsulation,
 } from '@angular/core';
 import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
+import { PtahTableColumn, resolveHiddenColumns } from './table-columns';
+
+/**
+ * The overflow guard keeps its extra hidden columns until the host grows by more
+ * than this many px. The margin stops a loop when a scrollbar comes and goes.
+ */
+const GUARD_HYSTERESIS_PX = 32;
 
 @Component({
   selector: 'ptah-table',
@@ -29,10 +40,17 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
     'data-ptah-pattern': 'table',
     '[attr.data-density]': 'density() ?? null',
     '[attr.data-collapsed]': 'collapsed()',
+    '[attr.data-reflow]': 'columnsMode() ? "columns" : null',
+    '[attr.data-overflow]': 'overflowFallback() ? "scroll" : null',
   },
   template: `
-    <div class="overflow-x-auto">
+    <div
+      #wrapper
+      [class.overflow-x-auto]="!columnsMode() || overflowFallback()"
+      [class.ptah-table-reflow]="columnsMode()"
+    >
       <table
+        #grid
         class="table ptah-table-grid"
         [class.table-xs]="size() === 'xs'"
         [class.table-sm]="size() === 'sm'"
@@ -52,9 +70,20 @@ import { PTAH_TABLE_CONTEXT, PtahTableContext } from './table-detail';
         border-collapse: collapse;
       }
       .ptah-table-collapsible[hidden],
+      .ptah-table-column[hidden],
       .ptah-table-detail-row[hidden],
       .ptah-table-row-expander[hidden] {
         display: none;
+      }
+      .ptah-table-reflow {
+        max-width: 100%;
+      }
+      .ptah-table-reflow > .ptah-table-grid {
+        width: 100%;
+      }
+      .ptah-table-reflow > .ptah-table-grid th,
+      .ptah-table-reflow > .ptah-table-grid td {
+        overflow-wrap: break-word;
       }
       .ptah-table-detail-cell dl {
         display: grid;
@@ -179,31 +208,128 @@ export class PtahTableComponent implements PtahTableContext {
   readonly size = input<'xs' | 'sm'>('xs');
   readonly density = input<'default' | 'compact'>();
   readonly collapseBelow = input(0);
+  /**
+   * Column definitions. An empty list (default) keeps the legacy behavior: no
+   * column hides by priority, and the grid scrolls sideways when it is too wide.
+   * A non-empty list turns on columns mode: optional columns hide one at a time,
+   * cells wrap, and the grid scrolls sideways only as a last resort.
+   */
+  readonly columns = input<readonly PtahTableColumn[]>([]);
+  /** Show the row expanders and detail rows also when no column is hidden. */
+  readonly wideDetail = input(false, { transform: booleanAttribute });
   readonly announcement = signal('');
+
   private readonly width = signal(Number.POSITIVE_INFINITY);
+  private readonly guardExtra = signal(0);
+  /** The guard found no column left to hide, so the grid scrolls sideways. */
+  readonly overflowFallback = signal(false);
+
+  readonly columnsMode = computed(() => this.columns().length > 0);
   readonly collapsed = computed(
     () => this.collapseBelow() > 0 && this.width() < this.collapseBelow(),
   );
+  readonly hiddenColumns = computed<ReadonlySet<string>>(() =>
+    resolveHiddenColumns(this.columns(), this.width(), {
+      collapseBelow: this.collapseBelow(),
+      guardExtra: this.guardExtra(),
+    }),
+  );
+  /** Number of declared columns that show. Use it for the detail cell colspan. */
+  readonly visibleColumnCount = computed(
+    () => this.columns().length - this.hiddenColumns().size,
+  );
+  private readonly optionalColumnCount = computed(
+    () => this.columns().filter((column) => typeof column.priority === 'number').length,
+  );
+  readonly detailEnabled = computed(
+    () => this.collapsed() || this.hiddenColumns().size > 0 || this.wideDetail(),
+  );
+  readonly narrow = computed(
+    () =>
+      this.collapsed() ||
+      (this.optionalColumnCount() > 0 &&
+        this.hiddenColumns().size >= this.optionalColumnCount()),
+  );
+
+  private readonly wrapper = viewChild.required<ElementRef<HTMLElement>>('wrapper');
+  private readonly grid = viewChild.required<ElementRef<HTMLTableElement>>('grid');
+  private readonly injector = inject(Injector);
   private readonly observer: ResizeObserver | null;
+  private guardWidth = 0;
+  private checkScheduled = false;
 
   constructor() {
-    const host = inject<ElementRef<HTMLElement>>(ElementRef);
+    const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     if (typeof ResizeObserver === 'undefined') {
       this.observer = null;
     } else {
-      this.observer = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (entry) this.width.set(entry.contentRect.width);
+      const observer = new ResizeObserver((entries) => {
+        let measured = false;
+        for (const entry of entries) {
+          // An entry without a target (test doubles) counts as the host.
+          if (!entry.target || entry.target === host) {
+            this.onHostWidth(entry.contentRect.width);
+            measured = true;
+          }
+        }
+        if (!measured) this.scheduleOverflowCheck();
       });
-      this.observer.observe(host.nativeElement);
+      observer.observe(host);
+      this.observer = observer;
+      afterNextRender(() => observer.observe(this.grid().nativeElement));
     }
     inject(DestroyRef).onDestroy(() => this.observer?.disconnect());
+  }
+
+  isColumnHidden(id: string): boolean {
+    return this.hiddenColumns().has(id);
   }
 
   announce(message: string): void {
     // Clear first so a repeated message is read again by the live region.
     this.announcement.set('');
     queueMicrotask(() => this.announcement.set(message));
+  }
+
+  private onHostWidth(width: number): void {
+    this.width.set(width);
+    const guarded = this.guardExtra() > 0 || this.overflowFallback();
+    if (guarded && width > this.guardWidth + GUARD_HYSTERESIS_PX) {
+      this.guardExtra.set(0);
+      this.overflowFallback.set(false);
+    }
+    this.scheduleOverflowCheck();
+  }
+
+  private scheduleOverflowCheck(): void {
+    if (!this.columnsMode() || this.checkScheduled) return;
+    this.checkScheduled = true;
+    afterNextRender(
+      () => {
+        this.checkScheduled = false;
+        this.checkOverflow();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /**
+   * Guard: when the cells cannot wrap enough and the grid is wider than its
+   * wrapper, hide one more optional column. With no optional column left, let
+   * the grid scroll sideways.
+   */
+  private checkOverflow(): void {
+    if (!this.columnsMode()) return;
+    const available = this.wrapper().nativeElement.clientWidth;
+    const needed = this.grid().nativeElement.offsetWidth;
+    if (available <= 0 || needed <= available + 1) return;
+    this.guardWidth = this.width();
+    if (this.hiddenColumns().size < this.optionalColumnCount()) {
+      this.guardExtra.update((count) => count + 1);
+      this.scheduleOverflowCheck();
+    } else {
+      this.overflowFallback.set(true);
+    }
   }
 }
 
@@ -217,5 +343,7 @@ export class PtahNumericCellDirective {}
 export * from './table-cells';
 export * from './table-row-actions.component';
 export * from './table-detail';
+export * from './table-detail-layout';
+export * from './table-columns';
 export * from './table-order';
 export * from './table-matrix';
