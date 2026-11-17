@@ -5,6 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import type { SpawnedProcessHandle } from '@ptah-extension/platform-core';
+import { killProcessTree } from '@ptah-extension/platform-core';
+jest.mock('@ptah-extension/platform-core', () => ({
+  ...jest.requireActual('@ptah-extension/platform-core'),
+  killProcessTree: jest.fn(async () => undefined),
+}));
 import type {
   CodexExecutableSource,
   IProcessSpawner,
@@ -158,6 +163,69 @@ describe('CodexAppServerProcess', () => {
       },
       logger,
     );
+  });
+  it.each(['win32', 'linux'] as const)('stops the app server on %s', async (platform) => {
+    if (process.platform === 'win32') useWindowsExecutableFixture();
+    const started = runtime.start();
+    try {
+      child.send({ id: 1, result: initializeResult });
+      await started;
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const closing = runtime.close();
+      expect(killProcessTree).not.toHaveBeenCalled();
+      expect(child.kill).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1000);
+      if (platform === 'win32') {
+        expect(killProcessTree).toHaveBeenCalledWith(42, 'SIGKILL', expect.any(Function));
+        const failure = new Error('taskkill failed');
+        const callback = jest.mocked(killProcessTree).mock.calls[0][2];
+        callback?.(failure);
+        expect(logger.error).toHaveBeenCalledWith('Codex process tree kill failed', failure);
+        expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      } else {
+        expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+        expect(killProcessTree).not.toHaveBeenCalled();
+      }
+      await closing;
+    } finally {
+      if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
+    }
+  });
+  it('does not use the root fallback when exit is observed before tree-kill failure', async () => {
+    if (process.platform === 'win32') useWindowsExecutableFixture();
+    const started = runtime.start();
+    child.send({ id: 1, result: initializeResult });
+    await started;
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      jest.mocked(killProcessTree).mockImplementationOnce(async (_pid, _signal, onError) => {
+        child.emit('exit', null, 'SIGTERM');
+        onError?.(new Error('taskkill failed'));
+      });
+      const closing = runtime.close();
+      jest.advanceTimersByTime(1000);
+      expect(killProcessTree).toHaveBeenCalledTimes(1);
+      expect(child.kill).not.toHaveBeenCalled();
+      await closing;
+    } finally {
+      if (original) Object.defineProperty(process, 'platform', original);
+    }
+  });
+  it('does not tree-kill an app server after its exit was observed', async () => {
+    if (process.platform === 'win32') useWindowsExecutableFixture();
+    const started = runtime.start();
+    child.send({ id: 1, result: initializeResult });
+    await started;
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      child.emit('exit', null, 'SIGTERM');
+      jest.advanceTimersByTime(1000);
+      expect(killProcessTree).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(process, 'platform', original);
+    }
   });
   it('passes the original request through an optional spawn wrapper', async () => {
     const wrapper = jest.fn(request => ({ ...request, detached: true }));
@@ -933,7 +1001,8 @@ describe('CodexAppServerProcess', () => {
     const closing = runtime.close();
     await jest.advanceTimersByTimeAsync(1000);
     await closing;
-    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    if (process.platform === 'win32') expect(killProcessTree).toHaveBeenCalledWith(42, 'SIGKILL', expect.any(Function));
+    else expect(child.kill).toHaveBeenCalledWith('SIGKILL');
     expect(child.listenerCount('error')).toBe(1);
     expect(child.listenerCount('close')).toBe(0);
     expect(child.stdout.listenerCount('data')).toBe(0);
@@ -1077,7 +1146,8 @@ describe('CodexAppServerProcess', () => {
     jest.advanceTimersByTime(999);
     expect(child.kill).not.toHaveBeenCalled();
     jest.advanceTimersByTime(1);
-    expect(child.kill).toHaveBeenCalledTimes(1);
+    if (process.platform === 'win32') expect(killProcessTree).toHaveBeenCalledTimes(1);
+    else expect(child.kill).toHaveBeenCalledTimes(1);
     child.emit('exit', 0, null);
     await flush();
     expect(settled).toBe(true);
