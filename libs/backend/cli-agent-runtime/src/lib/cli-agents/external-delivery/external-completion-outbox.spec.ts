@@ -34,6 +34,21 @@ describe('ExternalCompletionOutbox', () => {
     expect(box.claim(owner, { maxEntries: 1, maxBytes: 100 }).entries).toHaveLength(0);
   });
 
+  it('removes a delivered entry when its held claim is released or expires', () => {
+    const box = new ExternalCompletionOutbox(logger, { now: () => now, leaseMs: 10 });
+    box.record(entry('a'));
+    const held = box.claim(owner, { maxEntries: 1, maxBytes: 100 });
+    box.markDelivered(owner, entry('a').completionId);
+    expect(box.pendingCount(owner)).toBe(1);
+    box.release(owner, held.claimId);
+    expect(box.pendingCount(owner)).toBe(0);
+    box.record(entry('b'));
+    box.claim(owner, { maxEntries: 1, maxBytes: 100 });
+    box.markDelivered(owner, entry('b').completionId);
+    now = 11;
+    expect(box.pendingCount(owner)).toBe(0);
+  });
+
   it('bounds tombstones by age and total size', () => {
     const aged = new ExternalCompletionOutbox(logger, { maxAgeMs: 10, now: () => now });
     aged.markDelivered(owner, entry('old').completionId);

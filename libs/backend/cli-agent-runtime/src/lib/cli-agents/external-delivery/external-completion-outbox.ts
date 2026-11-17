@@ -73,7 +73,7 @@ export class ExternalCompletionOutbox {
     for (const [id, claim] of this.claims) {
       if (claim.expiresAt > now) continue;
       this.claims.delete(id);
-      for (const entry of claim.entries) this.releaseEntry(entry);
+      for (const entry of claim.entries) this.releaseClaimed(entry);
     }
     let count = 0;
     for (const entry of this.entries.values()) {
@@ -86,6 +86,12 @@ export class ExternalCompletionOutbox {
 
   private releaseEntry(entry: ExternalCompletionEntry): void {
     if (this.held.get(entry.completionId) === entry) this.held.delete(entry.completionId);
+  }
+
+  /** A released claim drops an entry that a terminal wait already delivered. */
+  private releaseClaimed(entry: ExternalCompletionEntry): void {
+    this.releaseEntry(entry);
+    if (this.delivered.has(`${ownerKeyId(entry.owner)}:${entry.completionId}`)) this.removeEntry(entry);
   }
 
   private removeEntry(entry: ExternalCompletionEntry): boolean {
@@ -192,7 +198,7 @@ export class ExternalCompletionOutbox {
     const claim = this.claims.get(claimId);
     if (!claim || !ownerKeysEqual(owner, claim.owner)) return;
     this.claims.delete(claimId);
-    for (const entry of claim.entries) this.releaseEntry(entry);
+    for (const entry of claim.entries) this.releaseClaimed(entry);
   }
 
   /** Retire a connection whose bearer record is gone; its entries cannot be claimed. */
