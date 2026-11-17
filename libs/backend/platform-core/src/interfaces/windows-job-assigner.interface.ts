@@ -13,7 +13,9 @@ export interface IWindowsJobAssigner {
   /**
    * Creates a private kill-on-close job and adds the process. Throws an Error on
    * failure. Call it in the same tick as the spawn, while the `ChildProcess` is
-   * live, so that the PID cannot be reused and no child starts before the job.
+   * live, so that the PID cannot be reused. This makes the gap small but does
+   * not remove it: a child that the process starts before the assignment is
+   * not in the job. Keep the snapshot cleanup for such a child.
    */
   assignToNewJob(pid: number): WindowsJobHandle;
 }
