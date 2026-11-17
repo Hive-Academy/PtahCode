@@ -19,6 +19,11 @@ export type {
 export { FileType, PlatformType } from './types/platform.types';
 export type { IFileSystemProvider } from './interfaces/file-system-provider.interface';
 export type {
+  WindowsJobPolicy,
+  WindowsJobHandle,
+  IWindowsJobAssigner,
+} from './interfaces/windows-job-assigner.interface';
+export type {
   IHostAttentionNotifications,
   SafeHostAttentionNotice,
 } from './interfaces/host-attention-notifications.interface';

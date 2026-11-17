@@ -19,6 +19,8 @@
  * caller's, so a caller can pass the same `command` on every platform.
  */
 
+import type { WindowsJobPolicy } from './windows-job-assigner.interface';
+
 /**
  * File facts that must still hold at the instant the child is created
  * (TASK_2026_559 Lane K, closing review r2 finding 1).
@@ -72,6 +74,8 @@ export interface ProcessSpawnRequest {
   readonly detached?: boolean;
   /** Windows: after a spontaneous root exit, stop linked descendants. Runs one process query per exit. Use only for long-lived agent runtime roots. */
   readonly cleanupOrphanDescendants?: boolean;
+  /** Windows job lifetime policy. Omitted means 'no-job'. No spawner reads this yet. */
+  readonly windowsJobPolicy?: WindowsJobPolicy;
   /** Windows: give the child its own hidden console. ConPTY needs one. */
   readonly needsConsole?: boolean;
   /**
