@@ -46,6 +46,6 @@ export interface CodexRuntimeLogger {
   ): void;
   error(
     message: string,
-    metadata?: Readonly<Record<string, string | number | boolean>>,
+    metadata?: Readonly<Record<string, string | number | boolean>> | Error,
   ): void;
 }

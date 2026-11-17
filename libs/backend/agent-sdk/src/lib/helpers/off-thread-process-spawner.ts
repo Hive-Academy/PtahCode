@@ -21,12 +21,13 @@
  *
  * **Three rules this shim exists to keep:**
  *
- * 1. **`kill()` also fires `process.kill(pid, signal)` directly.** The SDK
+ * 1. **`kill()` starts a direct stop from this thread.** The SDK
  *    registers a `process.on('exit')` sweep that SIGTERMs every live transport
  *    on host shutdown. That handler runs synchronously as the host dies, so a
  *    kill routed only through `postMessage` would never be drained by the
- *    worker and the CLI child would be orphaned. A kill arriving before the pid
- *    is known is queued and applied when `spawned` lands.
+ *    worker and the CLI child would be orphaned. Windows starts `taskkill`
+ *    synchronously; POSIX signals the pid directly. A kill arriving before the
+ *    pid is known is queued and applied when `spawned` lands.
  * 2. **`exitCode` stays `null` until the child actually exits.** The SDK gates
  *    every stdin write on `process.exitCode !== null`; reporting an exit code
  *    early turns a live session into "Cannot write to terminated process".
@@ -95,6 +96,33 @@ import {
 } from './spawn-worker-pool';
 
 const SERVICE_TAG = '[OffThreadProcessSpawner]';
+
+/** Launch taskkill before returning, including from the SDK's exit sweep. */
+function stopWindowsTree(pid: number, logger: Logger, fallback?: (timedOut: boolean) => void): void {
+  const fail = (error: Error, timedOut = false): void => {
+    logger.error(`${SERVICE_TAG} Process tree kill failed`, error);
+    fallback?.(timedOut);
+  };
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    fail(new Error(`Invalid process id for tree kill: ${pid}`));
+    return;
+  }
+  const systemRoot = process.env['SystemRoot'] ?? process.env['windir'];
+  const executable = systemRoot
+    ? String.raw`${systemRoot}\System32\taskkill.exe`
+    : 'taskkill';
+  try {
+    childProcess.execFile(executable, ['/PID', String(pid), '/T', '/F'],
+      { windowsHide: true, timeout: 3_000 }, (error, stdout, stderr) => {
+        if (!error) return;
+        if (error.code === 128 ||
+            /not found|no running instance of the task/i.test(`${stdout}\n${stderr}`)) return;
+        fail(new Error(`taskkill failed: ${String(stderr).trim() || error.message}`, { cause: error }), error.killed === true);
+      });
+  } catch (error: unknown) {
+    fail(error instanceof Error ? error : new Error(String(error)));
+  }
+}
 
 /** Set to `1` to bypass the worker and spawn inline (the SDK's own behaviour). */
 const INLINE_SPAWN_ENV_KEY = 'PTAH_SDK_INLINE_SPAWN';
@@ -257,6 +285,7 @@ class WorkerBackedProcess
     private readonly hooks: OffThreadSpawnHooks,
     pool: SpawnWorkerPool,
     private readonly onReleased: (target: WorkerBackedProcess) => void,
+    private readonly logger: Logger,
   ) {
     super();
     // An EventEmitter with no 'error' listener THROWS on emit. The SDK attaches
@@ -384,16 +413,14 @@ class WorkerBackedProcess
    * now and close out instead of waiting the drain grace for an end that will
    * never come — and signal the child directly, since no worker is left to.
    *
-   * On Windows `process.kill` ends only the named process, not its tree. Every
-   * tree-kill helper in the repo is private to another lib (or spawns
-   * `taskkill` on this thread), so that gap is recorded, not papered over here.
+   * On Windows the direct stop starts taskkill before the worker is released.
    */
   private onWorkerLost(error: Error): void {
     // SIGTERM when there is a live child to send it to; with no pid the thread
     // vanished before a child existed, and SIGKILL is the honest description.
     let signal: NodeJS.Signals = 'SIGKILL';
     if (!this.settled && this.childPid !== null) {
-      this.signalDirectly(this.childPid, 'SIGTERM');
+      this.signalDirectly(this.childPid, 'SIGTERM', true);
       signal = 'SIGTERM';
     }
     this.endAbnormally(signal, error);
@@ -472,6 +499,10 @@ class WorkerBackedProcess
         return;
       }
       case 'error': {
+        if (message.code === 'TREE_KILL_FAILED') {
+          this.logger.error(`${SERVICE_TAG} Worker process tree kill failed`, rebuildError(message));
+          return;
+        }
         this.fail(rebuildError(message));
         return;
       }
@@ -603,15 +634,35 @@ class WorkerBackedProcess
    * Signal the child from THIS thread. See rule 1 in the file header: the SDK's
    * exit sweep runs as the host process dies, and a worker round trip does not
    * survive that.
+   *
+   * `rootFallback` is for a lost worker only: no thread is left to kill the
+   * root when taskkill fails, so the host does it. A live worker runs its own
+   * fallback. A taskkill that timed out proves nothing about the PID 3 s later,
+   * and the host cannot see the exit of this child, so that case only logs: a
+   * signal then could reach an unrelated process that reused the PID.
    */
-  private signalDirectly(pid: number, signal: NodeJS.Signals): void {
+  private signalDirectly(pid: number, signal: NodeJS.Signals, rootFallback = false): void {
+    if (process.platform === 'win32') {
+      if (this.exitReported || this.settled) return;
+      stopWindowsTree(pid, this.logger, rootFallback
+        ? (timedOut) => { if (!timedOut && !this.exitReported) this.killRoot(pid, signal); }
+        : undefined);
+      return;
+    }
+    this.killRoot(pid, signal);
+  }
+
+  private killRoot(pid: number, signal: NodeJS.Signals): void {
     try {
       process.kill(pid, signal);
     } catch (error: unknown) {
       // ESRCH means the child is already gone, which is the outcome we wanted.
       // Anything else is equally unactionable here — the 'exit'/'error' event
       // is what the caller reads.
-      void error;
+      if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ESRCH') {
+        this.logger.error(`${SERVICE_TAG} Process kill failed`,
+          error instanceof Error ? error : new Error(String(error)));
+      }
     }
   }
 
@@ -645,10 +696,13 @@ class InlineProcess
   /** An inline spawn already has its pid, so the port's promise is settled. */
   readonly whenSpawned: Promise<number | null>;
   private observedExit = false;
+  /** Windows stops the tree with taskkill, so `child.killed` stays false. */
+  private killRequested = false;
 
   constructor(
     private readonly child: childProcess.ChildProcess,
     stdioMode: StdioMode,
+    private readonly logger: Logger,
   ) {
     super();
     this.on('error', () => undefined);
@@ -673,7 +727,7 @@ class InlineProcess
   }
 
   get killed(): boolean {
-    return this.child.killed;
+    return this.child.killed || this.killRequested;
   }
 
   get exitCode(): number | null {
@@ -689,6 +743,20 @@ class InlineProcess
   }
 
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
+    if (this.observedExit || this.child.exitCode !== null || this.child.signalCode !== null) return false;
+    if (process.platform === 'win32' && this.child.pid !== undefined) {
+      this.killRequested = true;
+      stopWindowsTree(this.child.pid, this.logger, () => {
+        if (!this.observedExit && this.child.exitCode === null && this.child.signalCode === null) {
+          try { this.child.kill(signal); }
+          catch (error: unknown) {
+            this.logger.error(`${SERVICE_TAG} Fallback process kill failed`,
+              error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+      });
+      return true;
+    }
     return this.child.kill(signal);
   }
 }
@@ -863,6 +931,7 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
         hooks,
         this.pool,
         (target) => this.live.delete(target),
+        this.logger,
       );
       this.live.add(spawned);
       return spawned;
@@ -929,6 +998,6 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
       });
     }
 
-    return new InlineProcess(child, plan.stdioMode);
+    return new InlineProcess(child, plan.stdioMode, this.logger);
   }
 }
