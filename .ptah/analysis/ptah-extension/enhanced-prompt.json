@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-10-15T07:44:43.934Z",
+  "generatedAt": "2026-11-17T18:23:23.991Z",
   "configHash": "",
   "detectedStack": {
     "languages": [
-      "JavaScript",
-      "TypeScript"
+      "TypeScript",
+      "JavaScript"
     ],
     "frameworks": [
       "angular"
@@ -13,20 +13,20 @@
     "testingFrameworks": [],
     "additionalTools": [
       "@agentclientprotocol/sdk",
-      "@angular/cdk-experimental",
+      "@angular/aria",
       "@angular/common",
       "@angular/compiler",
       "@angular/core",
       "@angular/forms",
       "@angular/platform-browser",
-      "@angular/platform-browser-dynamic",
       "@angular/platform-server",
       "@angular/router",
       "@angular/ssr",
-      "@angular/youtube-player",
       "@anthropic-ai/claude-agent-sdk",
       "@anthropic-ai/sdk",
-      "@astrojs/starlight"
+      "@astrojs/starlight",
+      "@codemirror/commands",
+      "@codemirror/language"
     ],
     "projectType": "monorepo",
     "configFiles": []
@@ -38,5 +38,5 @@
     "quality-audit",
     "elevation-plan"
   ],
-  "promptLength": 6971
+  "promptLength": 6847
 }

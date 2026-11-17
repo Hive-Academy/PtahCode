@@ -1,392 +1,364 @@
-# 01 — Project Profile: ptah-extension
+# Project Profile — ptah-extension
 
-> Phase 1 factual profile. Source data: root `package.json`, `nx.json`, `tsconfig.base.json`, per-project `project.json` / `package.json`, and `git ls-files` (tracked files only). Snapshot taken on branch `fix/settled-text-markdown-handoff-skill`.
-
----
+Sources: root `package.json`, `nx.json`, `tsconfig.base.json`, `.nvmrc`, every `project.json`,
+`git ls-files` (tracked files only), and the Ptah workspace analysis. Collected 2026-11-17 on
+branch `main` (head `b4ab8f096`).
 
 ## Tech Stack
 
 ### Languages
-| Language | Version / Source |
-|---|---|
-| TypeScript | `typescript@6.0.3` (root devDependency) |
-| JavaScript (ESM `.mjs`, CJS `.cjs`/`.cts`) | Build scripts, ESLint configs, tooling |
-| SQL | Prisma migrations (`apps/ptah-license-server/prisma/migrations`) |
-| HTML / CSS | Angular templates, Tailwind CSS |
 
-**`tsconfig.base.json` compiler options:** `target: ES2022`, `module: esnext`, `moduleResolution: node16`, `lib: [es2022, dom]`, `experimentalDecorators: true`, `emitDecoratorMetadata: false`, `importHelpers: true`, `strict: false`, `skipLibCheck: true`, `esModuleInterop: true`; **115** path aliases.
+| Language | Version | Evidence |
+| --- | --- | --- |
+| TypeScript | 6.0.3 (exact pin) | `package.json` devDependencies `typescript` |
+| JavaScript (ESM `.mjs`, CJS `.cjs`, `.js`) | — | scripts, configs (`eslint.config.mjs`, `esbuild.config.cjs`) |
+| HTML (Angular templates, index pages) | — | `apps/*/src/index.html`, lib templates |
+| CSS (Tailwind + PostCSS) | — | `apps/ptah-extension-webview/src/styles.css`, `postcss.config.js` |
+| Markdown / MDX | — | `.ptah/`, `.claude/`, `plugins/`, `apps/ptah-docs` |
 
-### Runtime environment
-| Item | Value |
-|---|---|
-| Node.js (root `engines`) | `24.x` |
-| Node.js (`.nvmrc`) | `24` |
-| VS Code engine (extension) | `^1.100.0` (`@types/vscode@^1.103.0`) |
-| Electron | `^44.4.3` (packaged via `electron-builder@26.16.1`) |
-| CLI package engine | `node >=20.12` |
-| Database (license server) | PostgreSQL via Prisma `7.10.0` (`@prisma/adapter-pg`, `pg@^8.20.0`) |
-| Local persistence (extension/desktop) | SQLite via `better-sqlite3@^13.0.3`, `sqlite-vec@0.1.9` |
-| Containers | Docker Compose (`docker-compose.yml`, `docker-compose.prod.yml`), Caddy reverse proxy (`caddy/Caddyfile`) |
+TypeScript compiler options in `tsconfig.base.json`: `target: ES2022`, `module: esnext`,
+`moduleResolution: node16`, `lib: [es2022, dom]`, `experimentalDecorators: true`,
+`emitDecoratorMetadata: false`, `importHelpers: true`, `strict: false`, `skipLibCheck: true`,
+`sourceMap: true`, `declaration: false`. It defines 112 `paths` aliases.
 
 ### Frameworks
-| Framework | Version | Used by |
-|---|---|---|
-| Angular (core/common/forms/router/platform-*) | `22.1.7` (`@angular/ssr@22.1.8`, `@angular/build@22.1.8`) | Webview app, landing page, `libs/frontend/*`, `libs/web/*` |
-| NestJS (common/core/config/jwt/schedule/event-emitter/platform-express) | `^12.0.x` (`@nestjs/throttler@^6.7.0`) | `ptah-license-server`, `libs/api/*` |
-| Prisma | `7.10.0` | License server |
-| Nx | `23.2.1` | Monorepo tooling |
-| React / React DOM | `~19.2.0` | `ptah-video-studio` (Remotion), `ptah-tui` (Ink) |
-| Ink | `^7.0.0` | `ptah-tui` terminal UI |
-| Remotion | `4.0.484` | `ptah-video-studio` |
-| Astro + Starlight | `^7.3.3` / `^0.42.2` | `ptah-docs` |
-| Tailwind CSS + DaisyUI | `^3.4.18` / `^4.12.24` | Webview, landing page |
-| tsyringe (DI) | `^4.10.0` | Backend libraries / extension host |
-| RxJS | `7.8.2` | Angular apps |
-| zone.js | `0.16.3` | Angular apps |
-| Zod | `4.6.5` | Schema validation |
 
----
+| Framework | Version | Evidence |
+| --- | --- | --- |
+| Angular (core, common, compiler, forms, router, platform-browser, platform-server, ssr) | ~22.2.0 | `package.json` dependencies |
+| `@angular/aria` | 22.2.6 | `package.json` dependencies |
+| `@angular/cdk`, `@angular/build`, `@angular/compiler-cli` | ~22.2.0 | `package.json` devDependencies |
+| Electron | ^44.4.3 | `package.json` devDependencies |
+| Nx | 24.0.0 | `package.json` devDependencies (`nx`, `@nx/*`) |
+| Astro | ^7.3.3 | `package.json` dependencies; `apps/ptah-docs/astro.config.mjs` |
+| Astro Starlight | ^0.42.2 | `package.json` dependencies |
+| Tailwind CSS | ^3.4.18 | `package.json` devDependencies; `tailwind.config.js` in webview and landing apps |
+| daisyUI | ^4.12.24 | `package.json` devDependencies |
+| RxJS | 7.8.2 | `package.json` dependencies |
+| zone.js | 0.16.3 | `package.json` dependencies |
+
+### Runtime environment
+
+- Node.js `24.x` (`package.json` `engines.node`); `.nvmrc` contains `24`.
+- Package manager: npm (`package-lock.json`, `.npmrc`).
+- Electron main process bundle: ESM (`main.mjs`), esbuild `platform: node`, `target: node20`
+  (`apps/ptah-electron/project.json` target `build-main`).
+- Electron app package: `ptah-desktop` version `2.0.0`, `main: main.mjs`
+  (`apps/ptah-electron/package.json`).
+- Root package: `@ptah-extension/source` version `0.0.0`, `private: true`, license `MIT`.
 
 ## Dependencies
 
-### Count summary (root `package.json`)
-| Category | Count |
-|---|---|
-| `dependencies` | 116 |
-| `devDependencies` | 84 |
-| **Total** | **200** |
+### Production dependencies (notable)
 
-Root `overrides`: `lucide-angular` (peer Angular pins), `@sentry/nestjs` (peer Nest pins), `tar >=7.5.11`, `onnxruntime-node 1.24.3`, `@hono/node-server ^1.19.13`, `@module-federation/dts-plugin → axios 1.15.0`.
-
-### Notable production dependencies
 | Area | Packages |
-|---|---|
-| AI / agent SDKs | `@anthropic-ai/claude-agent-sdk@0.3.278`, `@anthropic-ai/sdk@0.127.0`, `@openai/codex-sdk@^0.155.1`, `@cursor/sdk@^1.0.13`, `@agentclientprotocol/sdk@1.7.0`, `@modelcontextprotocol/sdk@^1.29.0` |
-| Local ML / speech | `@huggingface/transformers@3.8.1`, `kokoro-js@1.2.1`, `nodejs-whisper@0.3.1`, `@remotion/install-whisper-cpp`, `gpt-tokenizer@^4.0.0` |
-| Code intelligence | `web-tree-sitter@^0.27.0`, `@vscode/tree-sitter-wasm@^0.3.0`, `shiki@4.4.3`, `fast-glob@3.3.3`, `minimatch@10.2.6`, `picomatch@4.0.7`, `@parcel/watcher@2.6.0`, `chokidar@^5.0.0` |
-| Terminal / process | `node-pty@1.1.0`, `cross-spawn@^7.0.6`, `which@^7.0.0` |
-| Browser automation | `chrome-launcher@^1.2.1`, `chrome-remote-interface@^0.34.0` |
-| Messaging gateways | `@slack/bolt@5.1.0`, `discord.js@14.27.0`, `grammy@1.46.0` (Telegram) |
-| Web search | `@tavily/core@^0.7.2`, `exa-js@^2.22.1` |
-| Billing / auth / email | `@paddle/paddle-node-sdk@^3.10.0`, `@paddle/paddle-js@^1.6.1`, `@workos-inc/node@^10.13.0`, `resend@^6.9.0` |
-| Observability | `@sentry/nestjs@^10.75.0`, `@sentry/node@^10.75.0` |
-| Editor / UI | `@codemirror/*` (6.x), `mermaid@^11.17.2`, `marked@^18.0.13`, `dompurify@^3.3.3`, `sanitize-html@^2.17.7`, `gridstack@^12.5.0`, `@fullcalendar/angular@^7.0.2`, `lucide-angular@^1.0.0`, `@hive-academy/angular-gsap@^1.1.0`, `@pierre/diffs@1.5.1` |
-| Scheduling | `croner@^10.0.1`, `@nestjs/schedule` |
-| CLI | `commander@^15.0.0`, `@clack/prompts@^1.8.1` |
-| Utilities | `zod`, `jsonrepair@3.15.0`, `gray-matter@^4.0.3`, `lru-cache@^11.5.3`, `ulid@3.0.2`, `uuid@^11.1.0`, `eventemitter3@5.0.4`, `bottleneck@^2.19.5`, `temporal-polyfill@^1.0.2`, `culori@^4.0.2` |
-| Media | `ffmpeg-static@5.3.0`, `gifenc@^1.0.3`, `jpeg-js@^0.4.4`, `@react-three/drei@10.7.7` |
+| --- | --- |
+| AI / agent SDKs | `@anthropic-ai/claude-agent-sdk` >=0.3.318, `@anthropic-ai/sdk` 0.127.0, `@openai/codex-sdk` >=0.165.0, `@cursor/sdk` ^1.0.13, `@agentclientprotocol/sdk` 1.7.0, `@modelcontextprotocol/sdk` ^1.29.0 |
+| Local ML / speech | `@huggingface/transformers` 3.8.1, `kokoro-js` 1.2.1, `gpt-tokenizer` ^4.0.0, `ffmpeg-static` 5.3.0 |
+| Persistence | `better-sqlite3` ^13.0.3, `sqlite-vec` 0.1.9 |
+| Dependency injection | `tsyringe` ^4.10.0, `reflect-metadata` ^0.2.2 |
+| Validation | `zod` 4.6.5 |
+| Code parsing | `web-tree-sitter` ^0.27.0, `@vscode/tree-sitter-wasm` ^0.3.0 |
+| Editor / rendering | `@codemirror/*` (commands 6.11.1, language 6.12.4, language-data 6.5.2, state 6.7.6, view 6.43.13), `shiki` 4.4.3, `marked` ^18.0.13, `mermaid` ^11.17.2, `@pierre/diffs` 1.5.1, `dompurify` ^3.3.3, `gridstack` ^12.5.0, `lucide-angular` ^1.0.0, `@floating-ui/dom` ^1.7.4, `@hive-academy/angular-gsap` ^1.1.0 |
+| Messaging platforms | `@slack/bolt` 5.1.0, `discord.js` 14.27.0, `grammy` 1.46.0 |
+| Web search | `@tavily/core` ^0.7.2, `exa-js` ^2.22.1 |
+| File system / process | `@parcel/watcher` 2.6.0, `chokidar` ^5.0.0, `fast-glob` 3.3.3, `minimatch` 10.2.6, `picomatch` 4.0.7, `cross-spawn` ^7.0.6, `which` ^7.0.0 |
+| Browser automation | `chrome-launcher` ^1.2.1, `chrome-remote-interface` ^0.34.0 |
+| Networking / scheduling | `axios` ^1.15.0, `ws` ^8.21.0, `bottleneck` ^2.19.5, `croner` ^10.0.1 |
+| Telemetry | `@sentry/node` ^10.75.0 |
+| Utilities | `yaml` ^2.9.1, `gray-matter` ^4.0.3, `jsonrepair` 3.15.0, `json2md` ^2.0.3, `lru-cache` ^11.5.3, `ulid` 3.0.2, `uuid` ^11.1.0, `eventemitter3` 5.0.4, `culori` ^4.0.2, `temporal-polyfill` ^1.0.2, `gifenc` ^1.0.3, `jpeg-js` ^0.4.4 |
+| Docs site | `astro` ^7.3.3, `@astrojs/starlight` ^0.42.2, `starlight-links-validator` ^0.27.0 |
 
-### Notable dev dependencies
+### Dev dependencies
+
 | Area | Packages |
-|---|---|
-| Nx plugins | `nx`, `@nx/angular`, `@nx/esbuild`, `@nx/eslint`, `@nx/eslint-plugin`, `@nx/jest`, `@nx/js`, `@nx/node`, `@nx/web`, `@nx/workspace` (all `23.2.1`), `@nx-tools/nx-prisma@^7.2.0` |
-| Build | `esbuild@^0.28.2`, `ng-packagr@22.1.1`, `@swc/core@~1.16.2`, `@swc-node/register@~1.12.1`, `ts-node@^10.9.2`, `postcss@^8.5.6`, `autoprefixer@^10.4.22` |
-| Testing | `jest@^30.0.2`, `ts-jest@^29.4.0`, `jest-preset-angular@17.0.0`, `jest-environment-jsdom@^30.3.0`, `@playwright/test@^1.50.0`, `@axe-core/playwright@^4.12.1`, `@vscode/test-electron@^3.1.0`, `@nestjs/testing@^12.0.3`, `@xterm/headless@^6.0.0` |
-| Lint / format | `eslint@^10.11.0`, `typescript-eslint@^8.29.0`, `angular-eslint@22.5.0`, `prettier@^3.8.1`, `jsonc-eslint-parser@^3.1.0` |
-| Git hooks / commits | `husky@^9.1.7`, `lint-staged@^17.5.1`, `@commitlint/cli@^21.2.3`, `@commitlint/config-conventional@^21.2.3` |
-| Packaging | `@vscode/vsce@^4.0.0`, `electron@^44.4.3`, `electron-builder@26.16.1` |
-| Code transforms | `ts-morph@^28.0.0` |
+| --- | --- |
+| Monorepo / build | `nx` 24.0.0, `@nx/angular`, `@nx/esbuild`, `@nx/eslint`, `@nx/eslint-plugin`, `@nx/jest`, `@nx/js`, `@nx/web`, `@nx/workspace` (all 24.0.0), `esbuild` ^0.28.2, `ng-packagr` ~22.2.0, `@swc/core` ~1.16.2, `@swc-node/register` ~1.12.1, `ts-node` ^10.9.2, `tslib` ^2.3.0 |
+| Desktop packaging | `electron` ^44.4.3, `electron-builder` 26.16.1 |
+| Testing | `jest` ^30.0.2, `@jest/globals` ^30.0.0, `ts-jest` ^29.4.0, `jest-preset-angular` 17.0.0, `jest-environment-jsdom` ^30.3.0, `jest-environment-node` ^30.0.2, `@playwright/test` ^1.50.0, `@axe-core/playwright` ^4.12.1, `axe-core` ^4.12.1 |
+| Linting / formatting | `eslint` ^10.11.0, `@eslint/js` ^10.0.1, `typescript-eslint` ^8.29.0, `@typescript-eslint/utils` ^8.40.0, `angular-eslint` 22.6.0, `jsonc-eslint-parser` ^3.1.0, `prettier` ^3.8.1 |
+| Git hooks / commits | `husky` ^9.1.7, `lint-staged` ^17.5.1, `@commitlint/cli` ^21.2.3, `@commitlint/config-conventional` ^21.2.3 |
+| Styling | `tailwindcss` ^3.4.18, `postcss` ^8.5.6, `autoprefixer` ^10.4.22, `daisyui` ^4.12.24 |
+| Other | `gsap` ^3.14.2, `ngx-markdown` ^22.0.2, `ts-morph` ^28.0.0, `svgo` ^4.1.0, `cross-env` ^7.0.3, `@types/vscode` ^1.103.0, `@types/node` ^24.13.6 |
 
----
+### Dependency count summary (root `package.json`)
+
+| Group | Count |
+| --- | --- |
+| dependencies | 76 |
+| devDependencies | 66 |
+| optionalDependencies (`@nx/nx-*` native binaries, 24.0.0) | 5 |
+| **Total** | **147** |
+
+- `overrides`: `lucide-angular` (Angular peer pins), `tar` >=7.5.11, `onnxruntime-node` 1.24.3,
+  `@hono/node-server` ^1.19.13, `@module-federation/dts-plugin` → `axios` 1.15.0.
+- `apps/ptah-electron/package.json` declares 45 dependencies of its own.
+- 43 `package.json` files are tracked in the repository.
+
+### Stack Summary
+
+```stack-summary
+{"items":[
+{"kind":"language","name":"TypeScript 6.0.3","evidence":"package.json devDependencies typescript: 6.0.3; 8370 tracked .ts files","sourcePhase":"project-profile"},
+{"kind":"language","name":"JavaScript (ESM/CJS)","evidence":"113 .mjs, 58 .js, 12 .cjs tracked files; eslint.config.mjs, apps/ptah-electron/esbuild.config.cjs","sourcePhase":"project-profile"},
+{"kind":"framework","name":"Node.js 24.x","evidence":"package.json engines.node: 24.x; .nvmrc: 24","sourcePhase":"project-profile"},
+{"kind":"framework","name":"Angular 22.2","evidence":"package.json dependencies @angular/core ~22.2.0; apps/ptah-extension-webview and apps/ptah-landing-page use @angular/build:application","sourcePhase":"project-profile"},
+{"kind":"framework","name":"Electron 44","evidence":"package.json devDependencies electron ^44.4.3; apps/ptah-electron/src/main.ts and preload.ts","sourcePhase":"project-profile"},
+{"kind":"framework","name":"Nx 24.0.0","evidence":"nx.json; package.json devDependencies nx 24.0.0; 92 project.json files","sourcePhase":"project-profile"},
+{"kind":"framework","name":"Astro 7 + Starlight","evidence":"apps/ptah-docs/astro.config.mjs; package.json astro ^7.3.3, @astrojs/starlight ^0.42.2","sourcePhase":"project-profile"},
+{"kind":"framework","name":"Angular SSR","evidence":"package.json @angular/ssr ~22.2.0; apps/ptah-landing-page/src/main.server.ts","sourcePhase":"project-profile"},
+{"kind":"framework","name":"Tailwind CSS 3.4","evidence":"package.json tailwindcss ^3.4.18; apps/ptah-extension-webview/tailwind.config.js","sourcePhase":"project-profile"},
+{"kind":"library","name":"daisyUI 4","evidence":"package.json daisyui ^4.12.24; webview build styles include node_modules/daisyui/dist/themes.css","sourcePhase":"project-profile"},
+{"kind":"library","name":"RxJS 7.8.2","evidence":"package.json dependencies rxjs 7.8.2","sourcePhase":"project-profile"},
+{"kind":"library","name":"tsyringe","evidence":"package.json dependencies tsyringe ^4.10.0, reflect-metadata ^0.2.2","sourcePhase":"project-profile"},
+{"kind":"library","name":"Zod 4","evidence":"package.json dependencies zod 4.6.5","sourcePhase":"project-profile"},
+{"kind":"library","name":"better-sqlite3 + sqlite-vec","evidence":"package.json dependencies better-sqlite3 ^13.0.3, sqlite-vec 0.1.9; libs/backend/persistence-sqlite","sourcePhase":"project-profile"},
+{"kind":"library","name":"Claude Agent SDK","evidence":"package.json dependencies @anthropic-ai/claude-agent-sdk >=0.3.318, @anthropic-ai/sdk 0.127.0","sourcePhase":"project-profile"},
+{"kind":"library","name":"OpenAI Codex SDK","evidence":"package.json dependencies @openai/codex-sdk >=0.165.0; libs/backend/codex-runtime","sourcePhase":"project-profile"},
+{"kind":"library","name":"Model Context Protocol SDK","evidence":"package.json dependencies @modelcontextprotocol/sdk ^1.29.0","sourcePhase":"project-profile"},
+{"kind":"library","name":"Agent Client Protocol SDK","evidence":"package.json dependencies @agentclientprotocol/sdk 1.7.0","sourcePhase":"project-profile"},
+{"kind":"library","name":"web-tree-sitter","evidence":"package.json dependencies web-tree-sitter ^0.27.0, @vscode/tree-sitter-wasm ^0.3.0; assets/tree-sitter","sourcePhase":"project-profile"},
+{"kind":"library","name":"Hugging Face Transformers.js","evidence":"package.json dependencies @huggingface/transformers 3.8.1; overrides onnxruntime-node 1.24.3","sourcePhase":"project-profile"},
+{"kind":"library","name":"CodeMirror 6","evidence":"package.json dependencies @codemirror/view 6.43.13, @codemirror/state 6.7.6","sourcePhase":"project-profile"},
+{"kind":"library","name":"Shiki","evidence":"package.json dependencies shiki 4.4.3","sourcePhase":"project-profile"},
+{"kind":"library","name":"Mermaid","evidence":"package.json dependencies mermaid ^11.17.2","sourcePhase":"project-profile"},
+{"kind":"library","name":"Sentry (Node)","evidence":"package.json dependencies @sentry/node ^10.75.0","sourcePhase":"project-profile"},
+{"kind":"library","name":"Slack Bolt / discord.js / grammY","evidence":"package.json dependencies @slack/bolt 5.1.0, discord.js 14.27.0, grammy 1.46.0; libs/backend/messaging-gateway","sourcePhase":"project-profile"},
+{"kind":"library","name":"esbuild","evidence":"package.json devDependencies esbuild ^0.28.2; apps/ptah-electron build-main uses @nx/esbuild:esbuild","sourcePhase":"project-profile"},
+{"kind":"library","name":"electron-builder","evidence":"package.json devDependencies electron-builder 26.16.1; apps/ptah-electron/electron-builder.yml","sourcePhase":"project-profile"},
+{"kind":"test-tool","name":"Jest 30","evidence":"package.json devDependencies jest ^30.0.2, jest-preset-angular 17.0.0; jest.preset.js, jest.config.ts; 3565 tracked .spec.ts files","sourcePhase":"project-profile"},
+{"kind":"test-tool","name":"Playwright","evidence":"package.json devDependencies @playwright/test ^1.50.0; apps/ptah-electron-e2e/playwright.config.ts, apps/ptah-landing-page-e2e/playwright.config.ts","sourcePhase":"project-profile"},
+{"kind":"test-tool","name":"ESLint 10 + typescript-eslint","evidence":"package.json devDependencies eslint ^10.11.0, typescript-eslint ^8.29.0, angular-eslint 22.6.0; eslint.config.mjs","sourcePhase":"project-profile"}
+]}
+```
 
 ## File Structure
 
-### Top-level tree (depth 2)
-```
+### Directory tree (depth 2–3)
+
+```text
 ptah-extension/
-├── apps/                     # 13 Nx application projects
-│   ├── ptah-extension-vscode/      ptah-extension-vscode-e2e/
-│   ├── ptah-extension-webview/
-│   ├── ptah-electron/              ptah-electron-e2e/
-│   ├── ptah-cli/                   ptah-tui/
-│   ├── ptah-license-server/        ptah-license-server-e2e/
-│   ├── ptah-landing-page/          ptah-landing-page-e2e/
-│   ├── ptah-docs/
-│   └── ptah-video-studio/
+├── apps/
+│   ├── ptah-docs/                 astro.config.mjs, public/, scripts/, src/
+│   ├── ptah-electron/             src/ (main.ts, preload.ts), worker-host/, esbuild-plugins/,
+│   │                              scripts/, electron-builder.yml, esbuild.config.cjs
+│   ├── ptah-electron-e2e/         src/, scripts/, playwright.config.ts (+ 5 other *.config.ts)
+│   ├── ptah-extension-webview/    src/ (main.ts, index.html, styles.css), public/, scripts/
+│   ├── ptah-landing-page/         src/ (main.ts, main.server.ts, index.html), public/
+│   └── ptah-landing-page-e2e/     src/, playwright.config.ts
 ├── libs/
-│   ├── backend/              # 31 Node/extension-host libraries
-│   ├── frontend/             # 28 Angular webview libraries
-│   ├── api/                  # 15 NestJS server libraries
-│   ├── api-contracts/        # 1 (community)
-│   ├── web/                  # 10 Angular landing-site libraries
-│   ├── shared/               # @ptah-extension/shared
-│   └── showcase-manifest/
-├── tools/                    # ai-migrations, degradation-audit, di-lint, hyperframes,
-│                             # mcp-bench, migration, perf, video-editor
-├── scripts/                  # build/packaging/maintenance scripts (~67 tracked files)
-├── docs/                     # benchmarks, community, deployment, design-system,
-│                             # development, video-scripts
-├── caddy/                    # Caddyfile
-├── .github/workflows/        # 22 workflow files
-├── .husky/                   # git hooks
-├── .ptah/                    # analysis, specs, handoffs, research, eval, screenshots
-├── .claude/ .codex/ .opencode/ .cursor/ .agents/   # agent tool configs
-└── __mocks__/  e2e  type-dts/  assets/
+│   ├── backend/                   42 libraries
+│   ├── frontend/                  30 libraries
+│   ├── shared/                    1 library
+│   ├── web/                       core/, landing/, legal/, ui/
+│   └── worker-protocol/           1 library
+├── tools/                         ci/, degradation-audit/, di-lint/, mcp-bench/, migration/,
+│                                  perf/, process-sampler/, review-eval/, role-census/,
+│                                  ui-class-audit/
+├── plugins/                       ptah-angular/, ptah-core/, ptah-dotnet/, ptah-nx-saas/,
+│                                  ptah-react/ (skills/, commands/)
+├── scripts/                       agent-usage/, brand-icons/, dev/, diagnostics/,
+│                                  orchestration-skill/, perf/, windows-hide-patch/, verify.mjs, …
+├── assets/tree-sitter/
+├── docs/                          design-system/, development/
+├── type-dts/vscode.d.ts
+├── __mocks__/vscode.ts
+├── .github/                       workflows/ (15), actions/setup-ci/, ci/, dependabot.yml
+├── .husky/  .claude/  .codex/  .opencode/  .cursor/  .vscode/  .do/  .semgrep/  .ptah/
+└── package.json, package-lock.json, nx.json, tsconfig.base.json, jest.preset.js,
+    jest.config.ts, eslint.config.mjs, eslint.angular.config.mjs,
+    eslint.spec-change-detection.mjs
 ```
 
-### Tracked files by top-level directory
+### Tracked files by top-level directory (`git ls-files`, 12,867 total)
+
 | Directory | Files |
-|---|---|
-| `libs/` | 6,439 |
-| `.ptah/` | 5,056 |
-| `apps/` | 1,540 |
-| `tools/` | 482 |
-| `.claude/` | 238 |
-| `docs/` | 71 |
-| `scripts/` | 67 |
-| `.github/` | 25 |
-| `.codex/`, `.opencode/` | 15 each |
-| **Total tracked** | **14,005** |
+| --- | --- |
+| `libs/` | 8,146 |
+| `.ptah/` | 2,893 |
+| `apps/` | 856 |
+| `tools/` | 361 |
+| `plugins/` | 222 |
+| `.claude/` | 204 |
+| `scripts/` | 85 |
+| `.github/` | 19 |
+| `.codex/`, `.opencode/` | 14 each |
+| other (root files, `.vscode`, `docs`, `assets`, `.husky`, …) | 53 |
 
-### Tracked files by extension (top)
-| Ext | Count | Ext | Count |
-|---|---|---|---|
-| `.ts` | 6,718 | `.js` | 60 |
-| `.md` | 3,024 | `.jsonl` | 49 |
-| `.png` | 2,400 | `.svg` | 41 |
-| `.json` | 803 | `.mdx` | 39 |
-| `.mjs` | 234 | `.yml` | 28 |
-| `.html` | 186 | `.cts` / `.css` | 27 / 27 |
-| `.tsx` | 147 | `.cjs` | 24 |
-| `.sql` | 23 | `.ndjson` | 22 |
+### Tracked files by type
 
-Test files (`*.spec.ts(x)` / `*.test.ts(x)`): **2,678**.
+| Extension | Count |
+| --- | --- |
+| `.ts` | 8,370 (of which 3,565 are `.spec.ts`) |
+| `.md` | 3,287 |
+| `.json` | 504 |
+| `.mjs` | 113 |
+| `.png` | 94 |
+| `.html` | 81 |
+| `.js` | 58 |
+| `.jsonl` | 54 |
+| `.css` | 51 |
+| `.webp` | 41 |
+| `.woff2` | 28 |
+| `.txt` | 26 |
+| `.mdx` | 26 |
+| `.yml` / `.yaml` | 19 / 3 |
+| `.toml` | 14 |
+| `.cjs` | 12 |
+| `.ndjson` | 11 |
+| `.mp4` / `.webm` | 11 / 7 |
+| `.jpg` | 8 |
+| `.svg` | 6 |
+| `.cts` | 4 |
+| `.sh` | 3 |
+| `.py` | 2 |
 
----
+The Ptah workspace index (which applies its own excludes and includes untracked files) reports
+10,657 files: `.ts` 8,363, `.html` 550, `.json` 502, `.js` 177, `.css` 48, `.scss` 1.
 
 ## Entry Points & Configuration
 
 ### Application entry points
-| Project | Entry point(s) | Build executor |
-|---|---|---|
-| `ptah-extension-vscode` | `apps/ptah-extension-vscode/src/main.ts` → packaged `main.mjs` | `build` = `nx:noop` orchestrating `build-esbuild` (esbuild) |
-| `ptah-extension-webview` | `apps/ptah-extension-webview/src/main.ts` | `@angular/build:application` |
-| `ptah-electron` | `apps/ptah-electron/src/main.ts` (main), `apps/ptah-electron/src/preload.ts` (preload); plus worker builds: embedder, integrity, workspace-watch-host, state-storage, voice | `nx:run-commands` (`esbuild.config.cjs`) |
-| `ptah-cli` | `apps/ptah-cli/src/main.ts` → `main.mjs`; worker builds: embedder, integrity, workspace-watch-host | `nx:noop` → `build-esbuild` |
-| `ptah-tui` | `apps/ptah-tui/src/main.tsx` | `@nx/esbuild:esbuild` |
-| `ptah-license-server` | `apps/ptah-license-server/src/main.ts` (+ `instrument.ts` Sentry) | `@nx/esbuild:esbuild` |
-| `ptah-landing-page` | `apps/ptah-landing-page/src/main.ts` | `@angular/build:application` |
-| `ptah-docs` | `apps/ptah-docs/astro.config.mjs` | `nx:run-commands` (Astro) |
-| `ptah-video-studio` | `apps/ptah-video-studio/remotion.config.ts` | Remotion CLI targets (`studio`, `render`, `narrate`, `caption`, …) |
-| Backend libs | `libs/backend/<name>/src/index.ts` | `@nx/esbuild:esbuild` |
-| `@ptah-extension/markdown`, `@ptah-extension/ui` | — | `@nx/angular:ng-packagr-lite` |
 
-### Published package identities
-| App | `package.json` name | Version |
-|---|---|---|
-| VS Code extension | `ptah-coding-orchestra` (publisher `ptah-extensions`) | 0.2.43 |
-| Electron desktop | `ptah-desktop` | 0.1.70 |
-| CLI | `@hive-academy/ptah-cli` | 0.2.6 |
-| TUI | `@ptah-extension/ptah-tui` | 0.0.1 |
+| App | Entry | Evidence |
+| --- | --- | --- |
+| `ptah-electron` (main process) | `apps/ptah-electron/src/main.ts` → `dist/apps/ptah-electron/main.mjs` | `project.json` target `build-main` (`@nx/esbuild:esbuild`, format `esm`) |
+| `ptah-electron` (preload) | `apps/ptah-electron/src/preload.ts` | target `build-preload`, `tsconfig.preload.json` |
+| `ptah-electron` (workers) | separate bundles: embedder, search, tree-sitter, integrity, wal-checkpoint, workspace-watch-host, worker-host, state-storage, voice | targets `build-*-worker` / `build-worker-host` / `build-workspace-watch-host`; one `tsconfig.*.json` each |
+| `ptah-extension-webview` (renderer) | `apps/ptah-extension-webview/src/main.ts`, `src/index.html`, `src/styles.css` | target `build` (`@angular/build:application`), output `dist/apps/ptah-extension-webview` |
+| `ptah-landing-page` | `apps/ptah-landing-page/src/main.ts`, `src/main.server.ts`, `src/index.html` | `project.json` targets `build`, `serve`, `serve-static` |
+| `ptah-docs` | `apps/ptah-docs/astro.config.mjs`, `apps/ptah-docs/src/` | targets `build`, `dev`, `serve`, `preview`, `screenshots`, `videos`, `check-screenshots` |
+| `ptah-electron-e2e` | `apps/ptah-electron-e2e/playwright.config.ts` | targets `e2e`, `e2e:nightly`, `typecheck` |
+| `ptah-landing-page-e2e` | `apps/ptah-landing-page-e2e/playwright.config.ts` | targets `e2e`, `e2e:p0`, `typecheck`, `lint` |
 
-VS Code activation events include `onWebviewPanel:ptah-angular-spa`, `onView:ptah.main`, `onCommand:ptah.openFullPanel`.
+`ptah-electron` targets: `build-main`, `build-preload`, nine worker/host build targets, `build`,
+`build-dev`, `copy-renderer`, `copy-renderer-dev`, `rebuild-native`, `serve`, `serve:watch`,
+`package`, `package-local-production`, `typecheck`, `validate-deps`, `test`, `lint`.
 
-### Top-level source folders of main hosts
-| App | `src/` subfolders |
-|---|---|
-| `ptah-extension-vscode` | `activation`, `commands`, `core`, `di`, `integration`, `providers`, `services`, `assets` |
-| `ptah-electron` | `activation`, `config`, `di`, `integration`, `ipc`, `menu`, `services`, `shims`, `windows`, `assets` |
-| `ptah-cli` | `cli`, `di`, `services`, `skills`, `test-utils` |
-| `ptah-license-server` | `admin`, `app`, `common`, `health`, `testing`, `assets` |
+`ptah-extension-webview` targets: `build`, `serve`, `extract-i18n`, `test`, `serve-static`,
+`verify-eager-bundle`, `typecheck`, `typecheck-templates`.
+
+### Root npm scripts (selection)
+
+| Script | Command |
+| --- | --- |
+| `build` | `nx build ptah-electron` |
+| `dev` | `nx serve:watch ptah-electron` |
+| `verify` | `node scripts/verify.mjs` |
+| `test` | `nx run-many -t test -p ptah-electron ptah-extension-webview shared` |
+| `lint` | `nx run-many -t lint -p ptah-electron ptah-extension-webview shared` |
+| `electron:package` | `nx package ptah-electron` |
+| `landing` | `cross-env PORT=4200 nx serve ptah-landing-page` |
+| `docs` | `npx nx dev ptah-docs` |
+| `postinstall` | `rebuild-native.js`, `patch-transformers-onnx-dep.js`, `patch-windows-hide-deps.js` |
+| `prepare` | `husky \|\| true` |
 
 ### Key configuration files
-| Category | Files |
-|---|---|
-| Nx | `nx.json` (`parallel: 2`; cached target defaults for Angular build, ESLint, Jest, esbuild, tsc, ng-packagr-lite), `.nxignore`, per-project `project.json` |
-| TypeScript | `tsconfig.base.json`; per-project `tsconfig.json`, `tsconfig.app.json`, `tsconfig.lib.json`, `tsconfig.spec.json`, `tsconfig.build.json`; Electron/CLI worker tsconfigs |
-| ESLint | `eslint.config.mjs`, `eslint.angular.config.mjs`, `eslint.spec-change-detection.mjs`, per-project `eslint.config.mjs`; custom rules in `tools/` |
-| Jest | `jest.config.ts`, `jest.preset.js`, per-project `jest.config.ts`/`.cjs`; `libs/api/jest.api-preset.cjs`; CLI `jest.e2e.config.cjs`, `jest.pty.config.cjs` |
-| Formatting / style | `.prettierrc`, `.prettierignore`, `.editorconfig`, `.markdownlint.json` |
-| Git hooks & commits | `.husky/`, `.lintstagedrc.mjs`, `.commitlintrc.json` (extends config-conventional; enforced type-enum and scope-enum) |
-| Styling | `apps/ptah-extension-webview/tailwind.config.js`, `postcss.config.js`; `apps/ptah-landing-page/tailwind.config.js` |
-| Electron packaging | `apps/ptah-electron/electron-builder.yml`, `electron-builder.local-production.cjs`, `esbuild.config.cjs`, `esbuild-plugins/` |
-| Prisma | `apps/ptah-license-server/prisma/schema.prisma`, `prisma.config.ts`, `prisma/migrations`, `prisma/seed` |
-| Docker / infra | `docker-compose.yml`, `docker-compose.prod.yml`, `apps/ptah-license-server/Dockerfile`, `Dockerfile.dev`, `.dockerignore`, `caddy/Caddyfile`, `.do/` |
-| Static analysis | `.semgrep/`, `.sonarcloud.properties`, `.coderabbit.yaml` |
-| Agent tooling | `.mcp.json`, `.claude/`, `.codex/`, `.opencode/`, `.cursor/`, `.agents/`, `CLAUDE.md`, `agent-pack-manifest.json`, `content-manifest.json` |
-| Other | `.npmrc`, `.gitattributes`, `.vscode/` |
 
-### CI/CD workflows (`.github/workflows/`)
-`ci.yml`, `cli-e2e.yml`, `electron-e2e.yml`, `vscode-e2e.yml`, `webview-e2e.yml`, `nightly-coverage.yml`, `semgrep.yml`, `mcp-bench.yml`, `content-manifest.yml`, `connectors-probe.yml`, `model-lists-probe.yml`, `uptime-probe.yml`, `deploy-docs.yml`, `deploy-landing.yml`, `deploy-server.yml`, `license-server-image.yml`, `publish-cli.yml`, `publish-electron.yml`, `publish-extension.yml`, `render-showcase.yml`, `sync-release-branch.yml`, `upload-recordings.yml`, `authorize-workstation-key.yml`.
+| File | Role |
+| --- | --- |
+| `nx.json` | Nx workspace config; plugins `@nx/eslint/plugin` (two registrations: `eslint:lint` and `lint` with an explicit include list) |
+| `tsconfig.base.json` | Shared compiler options and 112 path aliases |
+| `jest.preset.js`, `jest.config.ts` | Root Jest preset and config; per-project `jest.config.ts` |
+| `eslint.config.mjs`, `eslint.angular.config.mjs`, `eslint.spec-change-detection.mjs` | ESLint flat configs |
+| `.prettierrc`, `.prettierignore`, `.editorconfig`, `.markdownlint.json` | Formatting |
+| `.commitlintrc.json`, `.lintstagedrc.mjs`, `.husky/` | Commit and hook rules |
+| `apps/ptah-electron/esbuild.config.cjs`, `esbuild-plugins/` | Electron bundling |
+| `apps/ptah-electron/electron-builder.yml`, `electron-builder.local-production.cjs` | Desktop packaging |
+| `apps/ptah-extension-webview/tailwind.config.js`, `postcss.config.js` | Renderer styling |
+| `apps/ptah-landing-page/tailwind.config.js` | Landing page styling |
+| `apps/ptah-docs/astro.config.mjs` | Docs site |
+| `apps/ptah-electron-e2e/*.config.ts` | `playwright`, `design-preview`, `docs-screenshots`, `docs-videos`, `git-dock-preview`, `visual-parity` |
+| `.github/workflows/*.yml` (15) | `ci`, `electron-e2e`, `webview-e2e`, `publish-electron`, `deploy-docs`, `deploy-landing`, `nightly-coverage`, `semgrep`, `mcp-bench`, `content-manifest`, `connectors-probe`, `model-lists-probe`, `decision-model-live-eval`, `sync-release-branch`, `authorize-workstation-key` |
+| `.github/dependabot.yml`, `.coderabbit.yaml`, `.sonarcloud.properties`, `.semgrep/` | Dependency updates, review and static-analysis services |
+| `content-manifest.json`, `agent-pack-manifest.json` | Generated manifests (`npm run manifest:generate`) |
+| `.nxignore`, `.gitattributes`, `.gitignore`, `.npmrc`, `.nvmrc` | Tooling |
+| `CLAUDE.md`, `CONVENTIONS.md`, `CONTRIBUTING.md`, `DESIGN.md`, `PRODUCT.md`, `SECURITY.md`, `README.md`, `LICENSE.md` | Root documentation |
 
 ### Environment configuration files
-| File | Notes |
-|---|---|
-| `.env`, `.env.example` | Root; keys include `DATABASE_URL`, `PORT`, `NODE_ENV`, `FRONTEND_URL`, `JWT_SECRET`, `JWT_EXPIRATION`, `ADMIN_API_KEY`, `ADMIN_SECRET`, `WORKOS_*`, `PADDLE_*`, `BUILDERS_CHECKOUT_ENABLED`, `CIRCLE_*`, `GOOGLE_OAUTH_*`, `GOOGLE_CALENDAR_ID`, `YOUTUBE_API_KEY`, `RESEND_API_KEY`, `FROM_EMAIL`, `FROM_NAME`, `LICENSE_SIGNING_PRIVATE_KEY`, `MAGIC_LINK_TTL_MS` |
-| `.env.prod`, `.env.prod.example` | Production compose (`docker:prod` script) |
-| `apps/ptah-license-server/.env.example` | License server |
-| `apps/ptah-video-studio/.env.example` | Video studio |
-| `apps/ptah-landing-page/proxy.conf.json` | Dev-server API proxy |
 
----
+- `.env` and `.env.prod` exist at the workspace root; neither is tracked by git.
+- `.mcp.json` (and `.mcp.json.bak`) exist at the root; not tracked by git.
+- `.do/` (2 tracked files) and `scripts/do-build.sh`, `scripts/do-docs-build.sh`.
 
 ## Monorepo Structure
 
-- **Tool:** Nx `23.2.1` (single root `package.json` / `package-lock.json`; no npm `workspaces` field).
-- **Project count:** 13 applications + 86 libraries = **99** `project.json` projects.
-- **Tagging scheme:** `scope:*` (`extension`, `webview`, `electron`, `cli`, `shared`, `api`, `api-contracts`, `web`, `landing`, `docs`, `e2e`, `video-studio`, `app`) and `type:*` (`app`, `e2e`, `feature`, `util`, `core`, `ui`, `data-access`, `test-harness`); some carry `platform:angular` or `domain:vscode`.
+- Tool: **Nx 24.0.0** (`nx.json`; detected type `nx`). Single root `package.json`, npm lockfile.
+- 92 `project.json` files: 6 apps, 78 libraries, 8 tools.
+- Project tags in use: `scope:extension` 36, `scope:webview` 30, `scope:shared` 5, `scope:web` 4,
+  `scope:electron` 3, `scope:cli` 3, `scope:landing` 2, `scope:e2e` 2, `scope:docs` 1;
+  `type:feature` 57, `type:util` 9, `type:tool` 8, `type:core` 5, `type:app` 5, `type:ui` 4,
+  `type:data-access` 2, `type:e2e` 2, `type:test-harness` 1; `platform:angular` 12;
+  `domain:vscode` 1.
+- Library import names follow `@ptah-extension/<name>` (workspace analysis).
 
-### Applications
-| Project | Tags | Purpose (from structure/naming) | Tracked files / specs |
-|---|---|---|---|
-| `ptah-extension-vscode` | scope:extension | VS Code extension host | 277 / 14 |
-| `ptah-extension-webview` | scope:webview | Angular SPA rendered in the VS Code webview and Electron renderer | 43 / 17 |
-| `ptah-electron` | scope:electron | Electron desktop app (main, preload, workers) | 183 / 63 |
-| `ptah-cli` | scope:cli | Headless CLI (`@hive-academy/ptah-cli`) | 186 / 85 |
-| `ptah-tui` | scope:cli | Ink/React terminal UI | 138 / 26 |
-| `ptah-license-server` | scope:app | NestJS + Prisma licensing/billing/community API | 61 / 7 |
-| `ptah-landing-page` | scope:landing | Angular marketing site (SSR-capable) | 64 / 3 |
-| `ptah-docs` | scope:docs | Astro Starlight documentation site | 207 / 0 |
-| `ptah-video-studio` | scope:video-studio | Remotion marketing-video pipeline | 183 / 0 |
-| `ptah-extension-vscode-e2e` | scope:e2e | VS Code E2E tests | 5 / 0 |
-| `ptah-electron-e2e` | scope:e2e, scope:electron | Electron Playwright E2E + showcase capture | 147 / 73 |
-| `ptah-landing-page-e2e` | scope:e2e, scope:landing | Landing-page Playwright E2E | 34 / 22 |
-| `ptah-license-server-e2e` | — | License server E2E | 12 / 1 |
+### Apps (`apps/`)
 
-### Libraries — `libs/backend/` (31, Node / extension host; npm scope `@ptah-extension/*`)
-| Library | Tags | Files / specs |
-|---|---|---|
-| agent-sdk | extension, feature | 354 / 157 |
-| rpc-handlers | extension, feature | 358 / 150 |
-| cli-agent-runtime | extension, feature | 238 / 105 |
-| vscode-lm-tools | extension, feature, domain:vscode | 204 / 91 |
-| workspace-intelligence | extension, feature | 197 / 70 |
-| auth-providers | extension, feature | 175 / 69 |
-| skill-synthesis | extension, feature | 171 / 88 |
-| platform-core | shared, util | 157 / 47 |
-| vscode-core | extension, util | 151 / 60 |
-| persistence-sqlite | extension, util | 140 / 52 |
-| agent-generation | extension, feature | 135 / 36 |
-| harness-sync | extension, feature | 114 / 57 |
-| memory-curator | extension, feature | 106 / 47 |
-| platform-electron | electron, feature | 82 / 39 |
-| cli-engine | cli, feature | 63 / 24 |
-| settings-core | extension, core | 59 / 8 |
-| messaging-gateway | extension, feature | 47 / 14 |
-| platform-vscode | extension, feature | 47 / 18 |
-| platform-cli | cli, feature | 43 / 15 |
-| task-specs | extension, feature | 43 / 18 |
-| voice-providers | extension, feature | 37 / 9 |
-| tool-output-reducers | extension, util | 31 / 11 |
-| output-styles | extension, feature | 29 / 9 |
-| cron-scheduler | extension, feature | 24 / 5 |
-| thoth-runtime | extension, feature | 23 / 7 |
-| plugin-marketplace | extension, feature | 21 / 5 |
-| session-organization | extension, feature | 19 / 6 |
-| memory-contracts | extension, core | 16 / 0 |
-| gateway-chat-bridge | extension, feature | 14 / 2 |
-| voice-contracts | extension, core | 13 / 0 |
-| auth-providers-tokens | extension, core | 6 / 0 |
+| Project | Type | Tags |
+| --- | --- | --- |
+| `ptah-electron` | Electron desktop app (main, preload, worker bundles; packaged with electron-builder) | — |
+| `ptah-extension-webview` | Angular application (the renderer copied into the Electron build by `copy-renderer`) | — |
+| `ptah-landing-page` | Angular application with a server entry | `scope:landing`, `type:app` |
+| `ptah-docs` | Astro + Starlight docs site | `scope:docs`, `type:app` |
+| `ptah-electron-e2e` | Playwright tests for the Electron app | `scope:e2e`, `type:e2e`, `scope:electron`, `type:app` |
+| `ptah-landing-page-e2e` | Playwright tests for the landing page | `scope:e2e`, `type:e2e`, `scope:landing` |
 
-### Libraries — `libs/frontend/` (28, Angular webview)
-| Library | Tags | Files / specs |
-|---|---|---|
-| chat | webview, feature | 424 / 196 |
-| chat-ui | webview, feature | 186 / 68 |
-| marketplace | webview, feature | 155 / 66 |
-| ui | webview, ui (ng-packagr-lite build) | 123 / 37 |
-| git-ui | webview, feature | 114 / 44 |
-| core | webview, core | 107 / 40 |
-| skill-synthesis-ui | webview, feature, angular | 84 / 36 |
-| webview-e2e-harness | webview, test-harness | 77 / 31 |
-| declarative-dashboard | webview, ui, angular | 61 / 25 |
-| tasks-ui | webview, feature, angular | 57 / 20 |
-| setup-wizard | webview, feature | 53 / 13 |
-| memory-curator-ui | webview, feature, angular | 51 / 18 |
-| chat-streaming | webview, feature | 50 / 25 |
-| tribunal-panel | webview, feature | 48 / 16 |
-| dashboard | webview, feature, angular | 46 / 13 |
-| chat-state | webview, data-access | 45 / 22 |
-| mcp-apps-page | webview, feature, angular | 42 / 16 |
-| canvas | webview, feature | 30 / 9 |
-| markdown | shared, ui (ng-packagr-lite build) | 25 / 7 |
-| harness-builder | webview, feature | 23 / 6 |
-| messaging-gateway-ui | webview, feature, angular | 23 / 4 |
-| cron-scheduler-ui | webview, feature, angular | 20 / 4 |
-| chat-execution-tree | webview, feature | 18 / 3 |
-| chat-routing | webview, feature | 18 / 6 |
-| notification-center | webview, feature | 18 / 4 |
-| thoth-shell | webview, feature, angular | 14 / 2 |
-| workspace-indexing | webview, feature | 14 / 2 |
-| chat-types | webview, util | 7 / 0 |
+### Backend libraries (`libs/backend/`, 42)
 
-### Libraries — `libs/api/` (15, NestJS license-server domain; names `api-*`)
-| Library | Type | Files / specs |
-|---|---|---|
-| community | feature | 79 / 19 |
-| forum | feature | 74 / 21 |
-| learning | feature | 73 / 22 |
-| billing | feature | 42 / 8 |
-| identity | util | 42 / 8 |
-| marketing | feature | 40 / 5 |
-| admin | feature | 30 / 5 |
-| licensing | feature | 29 / 5 |
-| member-hub | feature | 29 / 9 |
-| core | util | 23 / 4 |
-| notifications | util | 21 / 5 |
-| youtube | util | 19 / 4 |
-| membership | util | 17 / 3 |
-| email | util | 14 / 2 |
-| audit | util | 13 / 1 |
+`agent-generation`, `agent-sdk`, `auth-providers`, `auth-providers-tokens`, `cli-agent-runtime`,
+`cli-engine`, `codex-runtime`, `cron-scheduler`, `gateway-chat-bridge`, `harness-sync`,
+`lane-outcomes`, `lane-routing`, `memory-contracts`, `memory-curator`, `messaging-gateway`,
+`output-styles`, `persistence-sqlite`, `platform-cli`, `platform-core`, `platform-electron`,
+`plugin-marketplace`, `remote-machines`, `review-contracts`, `review-core`, `review-github`,
+`rpc-handlers`, `session-organization`, `settings-core`, `skill-synthesis`, `task-end-hook`,
+`task-specs`, `thoth-runtime`, `tool-output-reducers`, `usage-analytics`,
+`user-layer-composition`, `voice-contracts`, `voice-providers`, `vscode-core`,
+`vscode-lm-tools`, `worker-host`, `worker-runtime`, `workspace-intelligence`.
 
-`libs/api-contracts/community` (`api-contracts-community`, type:util): 30 / 2.
+### Frontend libraries (`libs/frontend/`, 30)
 
-### Libraries — `libs/web/` (10, Angular landing-site; names `web-*`)
-| Library | Type | Files / specs |
-|---|---|---|
-| admin | feature | 145 / 24 |
-| members | feature | 117 / 45 |
-| core | util | 39 / 4 |
-| panel-ui | ui | 34 / 5 |
-| landing | feature | 30 / 0 |
-| account | feature | 23 / 0 |
-| auth | feature | 23 / 1 |
-| ui | ui | 18 / 1 |
-| pricing | feature | 15 / 0 |
-| legal | feature | 14 / 0 |
+`canvas`, `chat`, `chat-execution-tree`, `chat-routing`, `chat-state`, `chat-streaming`,
+`chat-types`, `chat-ui`, `command-center`, `core`, `cron-scheduler-ui`, `dashboard`,
+`declarative-dashboard`, `git-ui`, `machines-ui`, `markdown`, `marketplace`, `mcp-apps-page`,
+`memory-curator-ui`, `messaging-gateway-ui`, `notification-center`, `onboarding`,
+`review-runs-ui`, `setup-wizard`, `skill-synthesis-ui`, `tasks-ui`, `thoth-shell`, `ui`,
+`webview-e2e-harness`, `workspace-indexing`.
 
-### Shared libraries
-| Library | Tags | Build | Files / specs |
-|---|---|---|---|
-| `@ptah-extension/shared` (`libs/shared`) | scope:shared, type:util | `@nx/esbuild:esbuild` (`src/index.ts`) | 349 / 112 |
-| `@ptah-extension/showcase-manifest` | scope:shared, type:util | `@nx/esbuild:esbuild` | 6 / 0 |
-| `@ptah-extension/platform-core` | scope:shared, type:util | `@nx/esbuild:esbuild` | 157 / 47 |
-| `@ptah-extension/markdown` | scope:shared, type:ui | `@nx/angular:ng-packagr-lite` | 25 / 7 |
+### Shared and other libraries (6)
 
-### Workspace tooling (`tools/`)
-`ai-migrations`, `degradation-audit`, `di-lint` (DI lint gate run on pre-push), `hyperframes`, `mcp-bench`, `migration`, `perf`, `video-editor` — 482 tracked files.
+| Project | Path |
+| --- | --- |
+| `shared` | `libs/shared` |
+| `worker-protocol` | `libs/worker-protocol` |
+| web `core`, `landing`, `legal`, `ui` | `libs/web/*` |
 
-### Notable root scripts
-`build` / `lint` / `test` (extension + webview + shared), `package` (vsce), `electron:*` (serve/build/package/rebuild native), `cli:*`, `prisma:*`, `docker:*`, `manifest:*` (content manifest), `gate:eager-closure`, `test:native`, `test:e2e`, `eval:build` / `eval:run`, `postinstall` (native rebuild, ONNX patch, Windows-hide patch).
+### Tool projects (`tools/`, 8 with `project.json`)
 
----
+`degradation-audit`, `di-lint`, `mcp-bench`, `migration`, `process-sampler`, `review-eval`,
+`role-census`, `ui-class-audit`. `tools/ci` and `tools/perf` have no `project.json`.
+
+### Non-Nx content packages
+
+`plugins/ptah-angular`, `plugins/ptah-core`, `plugins/ptah-dotnet`, `plugins/ptah-nx-saas`,
+`plugins/ptah-react` hold `skills/` (and `commands/` in `ptah-core` and `ptah-nx-saas`);
+222 tracked files, mostly Markdown.
 
 ## Language Distribution
 
-### Source/code files (tracked, excluding docs/assets/data)
-| Language | Files | % of code files |
-|---|---|---|
-| TypeScript (`.ts`) | 6,718 | 90.1% |
-| JavaScript ESM (`.mjs`) | 234 | 3.1% |
-| HTML (`.html`) | 186 | 2.5% |
-| TSX (`.tsx`) | 147 | 2.0% |
-| JavaScript (`.js`) | 60 | 0.8% |
-| CommonJS TS (`.cts`) | 27 | 0.4% |
-| CSS (`.css`) | 27 | 0.4% |
-| CommonJS (`.cjs`) | 24 | 0.3% |
-| SQL (`.sql`) | 23 | 0.3% |
-| Shell (`.sh`) | 8 | 0.1% |
-| **Total** | **7,454** | 100% |
+Based on 12,867 git-tracked files.
 
-### All tracked files
-| Category | Files | % of 14,005 |
-|---|---|---|
-| TypeScript (`.ts` + `.tsx` + `.cts`) | 6,892 | 49.2% |
-| Markdown (`.md` + `.mdx`) | 3,063 | 21.9% |
-| Images (`.png`, `.svg`, `.webp`) | 2,449 | 17.5% |
-| JSON / JSONL / NDJSON | 874 | 6.2% |
-| JavaScript (`.mjs` + `.js` + `.cjs`) | 318 | 2.3% |
-| HTML / CSS | 213 | 1.5% |
-| Other (yml, sql, toml, txt, fonts, audio/video, glb, etc.) | ~196 | ~1.4% |
+| Language / format | Files | Approx. share |
+| --- | --- | --- |
+| TypeScript (`.ts`, `.cts`) | 8,374 | 65.1% |
+| Markdown / MDX (`.md`, `.mdx`) | 3,313 | 25.7% |
+| JSON family (`.json`, `.jsonl`, `.ndjson`) | 569 | 4.4% |
+| JavaScript (`.mjs`, `.js`, `.cjs`) | 183 | 1.4% |
+| Images / media / fonts (`.png`, `.webp`, `.jpg`, `.svg`, `.ico`, `.mp4`, `.webm`, `.woff2`) | 197 | 1.5% |
+| HTML | 81 | 0.6% |
+| CSS | 51 | 0.4% |
+| YAML / TOML | 36 | 0.3% |
+| Shell / Python | 5 | <0.1% |
+| Other (`.txt`, `.snap`, dotfiles, no extension) | 58 | 0.5% |
 
-Note: `.ptah/` accounts for 5,056 tracked files (specs, analysis, handoffs, research, screenshots), which contributes most of the Markdown and PNG counts.
+Among source-code files only (TypeScript, JavaScript, HTML, CSS; 8,689 files): TypeScript 96.4%,
+JavaScript 2.1%, HTML 0.9%, CSS 0.6%. Of the 8,370 `.ts` files, 3,565 (42.6%) are `.spec.ts`.

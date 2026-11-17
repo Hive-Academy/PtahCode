@@ -1,79 +1,71 @@
 ## Project-Specific Guidance
 
 ### Project Context
-Ptah is an AI coding-assistant platform delivered as an Nx monorepo (Nx 23.2.1, TypeScript 6.0.3, Node 24). It ships one product to several hosts:
-- **VS Code extension** (`apps/ptah-extension-vscode`, engine ^1.100.0) with an **Angular 22 webview** (`apps/ptah-extension-webview`)
-- **Electron desktop app** (`apps/ptah-electron`, Electron 44)
-- **Headless CLI** (`apps/ptah-cli`, Commander) and an **Ink/React TUI** (`apps/ptah-tui`)
-- **NestJS 12 license server** (`apps/ptah-license-server`) on PostgreSQL via Prisma 7, with Paddle billing, WorkOS auth, Resend email and Sentry
-- **Angular SSR landing page**, **Astro Starlight docs** and a **Remotion video studio**
+Ptah is an AI coding-agent desktop app built as an Nx 24 monorepo (npm, Node 24.x, TypeScript 6.0.3): 6 apps, 78 libs, 8 tool projects, ~1.06M production lines.
 
-The core domain is agent orchestration: `@anthropic-ai/claude-agent-sdk`, `@anthropic-ai/sdk`, `@openai/codex-sdk`, `@cursor/sdk`, `@agentclientprotocol/sdk` and `@modelcontextprotocol/sdk`. The hosts also expose a local MCP HTTP server with `ptah_*` tools. Supporting systems:
-- Code intelligence: `web-tree-sitter`, SQLite via `better-sqlite3` + `sqlite-vec`
-- Terminals: `node-pty`
-- Browser automation: CDP
-- Messaging gateways: Slack, Discord, Telegram
-- Local ML and speech: transformers, kokoro, whisper
+- **Priority host: Electron 44** (`apps/ptah-electron`: ESM main `main.ts`, `preload.ts`, nine worker/host bundles built with esbuild, packaged with electron-builder). Plan, build and verify for Electron first.
+- **Renderer: Angular 22.2** (`apps/ptah-extension-webview`) — despite the name it is the Electron renderer, not a VS Code host. Styling: Tailwind 3.4 + daisyUI 4; rendering with CodeMirror 6, Shiki, marked, Mermaid, DOMPurify.
+- **Other apps:** `ptah-landing-page` (Angular SSR), `ptah-docs` (Astro 7 + Starlight), two Playwright e2e projects.
+- **Backend libs (`libs/backend`, 42):** tsyringe DI, Zod 4 validation, better-sqlite3 + sqlite-vec persistence, agent SDKs (`@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk`, `@cursor/sdk`, ACP, MCP), web-tree-sitter, Transformers.js, Slack/Discord/Telegram gateways, Sentry.
+- **Frontend libs (`libs/frontend`, 30)**, `libs/shared` (RPC contract), `libs/worker-protocol`, `libs/web/*` (landing site).
+- A second host exists: the CLI (`libs/backend/platform-cli`, `cli-engine`). Keep it and provider CLI lanes working.
+- `plugins/` holds skill content packages (ptah-core, ptah-angular, ptah-nx-saas, …), not Nx projects.
 
-DI uses tsyringe on the backends and Angular `inject()` on the frontends. Zod validates schemas, and Tailwind with DaisyUI handles styling. Jest 30 is the unit runner and Playwright runs e2e.
+_(section shortened to fit the prompt budget)_
 
 ### Framework Guidelines
-**Angular (webview, `libs/frontend/*`, `libs/web/*`)**
-- Write standalone components with `ChangeDetectionStrategy.OnPush`, `inject()`, `input()`/`input.required()` and `output()`. Never add `@Input`/`@Output`, `NgModule` or constructor injection.
-- Hold state in signals (`signal`/`computed`/`effect`) inside data-access stores. Bridge RxJS 7.8 with `toSignal`/`toObservable`. For big features, split smart and presentational components and extract a store rather than growing a component (see `provider-setup-wizard.component.ts`). Apply the **angular-frontend-patterns** skill.
-- Never use `[innerHTML]` with untrusted content. Sanitize markdown (`marked`) with DOMPurify, and never render raw errors or secrets.
-- Talk to the host only through `ClaudeRpcService` and `MESSAGE_HANDLERS` multi-providers that `MessageRouterService` collects. Do not call transports directly.
-- Test with `jest-preset-angular`.
+**Angular 22 (renderer, `libs/frontend`, `libs/web`)** — follow `angular-frontend-patterns`:
+- Standalone components only, `ChangeDetectionStrategy.OnPush`, `inject()` instead of constructor injection, `input()`/`output()` and signal queries (`viewChild()`); never `@Input`/`@Output`/`@NgModule`.
+- Use built-in control flow (`@if`, `@for`, `@defer`); use `[class]`/`[style]`, not `ngClass`/`ngStyle`. Give `@for` a stable id in `track`, not `$index`, when the list can reorder.
+- State lives in injectable signal stores: private writable `signal`, public `.asReadonly()`, methods as the only writers. No NgRx, no `BehaviorSubject`/`Subject`. Prefer `computed`/`linkedSignal` over `effect` for derived state; use `untracked` inside effects.
+- The app is zoneless by default (`app.config.ts`); do not rely on zone-triggered change detection.
+- Server data comes through RPC (`claude-rpc.service.ts`) and pushed messages via `MESSAGE_HANDLERS`; there is no HTTP layer in the renderer.
+- Never add `[innerHTML]` or `bypassSecurityTrust*`; route markdown through `libs/frontend/markdown` (DOMPurify).
+- Keep components small (33 already exceed 800 lines): move orchestration into stores, extract child components.
+- Add new routes as lazy `loadComponent`/`loadChildren`; respect secondary entry points (`…/services`, `…/presentation`) guarded by `verify-eager-bundle`.
+- After a template change run `npm run verify -- -t typecheck-templates -p ptah-extension-webview`.
 
-**NestJS (`libs/api/*`)**
-- Keep the layering module → controller → service. Controllers must not inject `PrismaService`. Type requests with `RequestUser`, never `as any`.
-- Keep helmet, validation and throttling on. Use the **nestjs-backend-patterns**, **resilient-nestjs-patterns** and **webhook-architecture** (Paddle) skills.
-
-**Extension host / Electron / CLI (tsyringe)**
-- Load `reflect-metadata` first. Register through per-lib `di/tokens.ts` + `registration.ts`.
-- Use constructor injection. Call `container.resolve` only in the composition roots (`apps/*/src/di/phase-0..4-*.ts`, `cli-engine/container.ts`).
+**Electron 44**
 
 _(section shortened to fit the prompt budget)_
 
 ### Coding Standards
-- **Type safety:** the base `tsconfig` has `strict: false`, but every project should opt into `strict`, and all new code must compile under it. Do not use `any`, `@ts-ignore` or `as unknown as X`. Use `unknown` in catch blocks and narrow it. At every boundary (tool args, IPC payloads, RPC params, webhooks), parse with Zod instead of casting.
-- **Logging:** use the injected `Logger` (`TOKENS.LOGGER`), never `console.*` in libs. Pass real `Error` objects to `logger.error`. Never cast context objects to `Error`, because that drops data.
-- **Error handling:** never swallow errors silently. Any intentional swallow needs the suppression comment the `tools/degradation-audit` ratchet expects. Do not raise its baselines.
-- **SOLID:** keep files and functions small. The file-size lint rule only warns, but treat it as a hard limit for new code. Split god files (`git-info.service.ts`, `protocol-dispatcher.ts`, `tab-manager.service.ts`, `router.ts`) behind their existing facades instead of extending them. Define contracts as interfaces, not concrete classes.
-- **Naming:** use kebab-case files with role suffixes (`*.service.ts`, `*.store.ts`, `*-rpc.handlers.ts`, `*.component.ts`, `*.spec.ts`). Use `Symbol.for` DI tokens in `di/tokens.ts`.
-- **Imports:** import only from a lib's public `src/index.ts` alias (`@ptah-extension/*`, `@ptah-api/*`). No deep `/src/` paths and no relative cross-project imports.
-- **Security:** allowlist URL schemes before any `openExternal`, validate paths with `isInsideRoot`, and never log secrets.
+**Type safety**
+- Write strict code everywhere: 79 of 84 projects set `strict: true` (root default is `false`, so a new lib must opt in with `strict`, `noImplicitOverride`, `noImplicitReturns`, `noFallthroughCasesInSwitch`).
+- No `any`, no `as any`; avoid `as unknown as` — fix the type instead (e.g. `Logger.error` already accepts a context object). No non-null `!` to silence errors.
+- Use `@ts-expect-error <reason>`, never `@ts-ignore`.
+- Parse external data (`JSON.parse`, files, child processes, IPC, network) through a Zod schema.
+
+**Error handling**
+- `catch (error: unknown)` with an `instanceof Error` check. Throw typed errors; use `RpcUserError` for user refusals. Never throw strings.
+- No empty catch blocks. A deliberate swallow needs a comment (use the `degradation-audit: reported` convention) and a `debug` log when behaviour changes.
+- `void fn()` only when the callee handles its own errors; there is no floating-promise lint.
+- Log through the injected `Logger`, not `console.*` (allowed only in boot/worker entry files).
+
+**Process and security**
+- Spawn with `cross-spawn`/`which` and argument arrays; never `shell: true`. No `eval`/`new Function`. No hardcoded secrets; secrets go through the secret-storage port.
+
+**Structure and naming (SOLID)**
+- Single responsibility: keep files under 700 lines (`max-lines`); do not grow the existing god files — split along seams behind a facade (`humanize-library`).
 
 _(section shortened to fit the prompt budget)_
 
 ### Architecture Notes
-**Nx monorepo:** 13 apps and about 86 libs. Apps are thin composition roots, and logic lives in libs. The lib groups are:
-- `libs/backend`: Node / extension host
-- `libs/frontend`: Angular webview
-- `libs/api`: NestJS
-- `libs/web`: landing site
-- `libs/api-contracts`
-- `libs/shared`
+**Boundaries (enforced, `@nx/enforce-module-boundaries` at `error`, 0 violations, 0 cycles)**
+- Every project carries a `scope:*` and a `type:*` tag; rules live in `eslint.config.mjs`. A new lib needs both tags, an alias in `tsconfig.base.json` and one public `src/index.ts`. Use `nx-workspace-architect` for new libs, tags or moves.
+- Direction is strictly downward: apps → libs; `libs/frontend` never imports `libs/backend` (sole exception: the `scope:shared` `review-contracts`); `libs/backend` never imports `libs/frontend`; no lib imports an app.
+- Do not add feature → feature imports. Share state through a `type:data-access` lib or a secondary entry (`tasks-ui/services`), or invert with an `InjectionToken` in `libs/frontend/core/src/lib/tokens/`.
 
-**Module boundaries:** `@nx/enforce-module-boundaries` is set to error on two axes:
-- `scope:{shared,extension,webview,electron,cli,api,web,api-contracts,e2e}`
-- `type:{app,feature,data-access,ui,util,core,tool}`
+**Layers (bottom to top)**
+1. Contracts: `memory-contracts`, `voice-contracts`, `review-contracts`, `chat-types`, `worker-protocol`, then `shared` (RPC types; fan-in 66).
+2. Ports: `platform-core/src/interfaces/*.interface.ts` and its tokens. Keep new concrete services out of it.
+3. Infrastructure: `vscode-core` — despite the name this is the host-neutral backend core (`RpcHandler`, `Logger`, git, licence, Sentry, main `TOKENS`); `settings-core`, `persistence-sqlite` (migration runner, repositories).
+4. Adapters: `platform-electron/src/implementations/electron-*.ts`, `platform-cli`. Only host composition code imports these.
+5. Domain features: `agent-sdk`, `workspace-intelligence`, `harness-sync`, `task-specs`, `memory-curator`, `messaging-gateway` (adapter interface per provider), …
+6. API layer: `rpc-handlers` — keep handlers thin (validate, delegate, map errors); put new application services in the owning domain lib.
+7. Composition roots: `apps/ptah-electron/src/di/` (`phase-0-platform` … `phase-4-handlers`, `expected-resolvable.ts`) and `cli-engine` container. A new injectable must be registered in both; `tools/di-lint` checks wiring on push.
 
-The lib graph is acyclic. Keep it that way: before you add an import, check the dependency direction with `ptah_get_dependents`/`ptah_get_dependencies`. Use `type:app` (not `type:application`) and `platform:angular` tags, and apply the **nx-workspace-architect** skill for tagging and new libs.
-
-**Ports & adapters for hosts:**
-- `libs/backend/platform-core` defines about 34 interfaces (file system, secret storage, workspace, process spawner, user interaction…) bound to `PLATFORM_TOKENS`.
-- `platform-vscode`, `platform-electron` and `platform-cli` implement them, each with its own `registration.ts`.
-- New host capabilities start as a port in `platform-core` plus an adapter in each platform lib. Never import `vscode` or `electron` into host-neutral libs.
-
-**vscode-core:** despite its name, it is the shared infrastructure core (`Logger`, `TOKENS`, `RpcHandler`). Do not add more VS Code-specific value imports to its public surface. Put host-neutral code in host-neutral libs.
-
-**Phased DI:** the VS Code and Electron roots compose in `phase-0-platform → phase-1-infra → phase-2-libraries → phase-3-handlers → phase-4-app`. Four specs guard this: `container.smoke.spec.ts`, `expected-resolvable.ts`, `rpc-surface.spec.ts` and `surface-composition.spec.ts`. When you register a service or an RPC method, update these guards. The CLI composes in `libs/backend/cli-engine/src/lib/container.ts`.
-
-**Host↔UI RPC:**
-- The contract lives in `libs/shared/src/lib/types/rpc.types.ts`.
-- Handlers live in `libs/backend/rpc-handlers/src/lib/handlers` (one file per sub-domain), with an allowlist via `ALLOWED_METHOD_PREFIXES`.
-- Transports are Electron `ipc-bridge.ts` (validate the sender) and VS Code webview messaging.
-- On the frontend, use `ClaudeRpcService`.
+**Key abstractions**
+- Typed RPC over IPC: contract in `libs/shared/src/lib/types/` (add new domains as a separate `rpc-<domain>.types.ts`, not into the 4,311-line `rpc.types.ts`), server `RpcHandler.registerMethod` (method names must match the allowed prefixes), client `claude-rpc.service.ts`, transport `apps/ptah-electron/src/ipc/ipc-bridge.ts`.
 
 _(section shortened to fit the prompt budget)_

@@ -1,32 +1,89 @@
 {
-  "version": 3,
-  "runId": "01M4VSDK08BRNJ7KRR82FDP303",
+  "version": 4,
+  "runId": "01M7NAPGJDRDBWEJHJY8AZP2F2",
   "slug": "ptah-extension",
-  "analyzedAt": "2026-10-13T23:26:31.944Z",
-  "updatedAt": "2026-10-15T07:28:19.624Z",
+  "analyzedAt": "2026-11-17T18:00:54.605Z",
+  "updatedAt": "2026-11-17T18:17:10.155Z",
   "lifecycle": "completed",
-  "model": "opus",
-  "totalDurationMs": 2965231,
+  "model": "default",
+  "totalDurationMs": 975550,
+  "workspaceFingerprint": {
+    "algorithm": "sha256-v2",
+    "digest": "e35056fba22efe54f13710a51736f2a205b1418c68dbaa1a2be9ae63ab81b5c9",
+    "capturedAt": "2026-11-17T18:00:54.413Z"
+  },
   "phases": {
     "project-profile": {
       "status": "completed",
       "file": "01-project-profile.md",
-      "durationMs": 506167
+      "durationMs": 119027,
+      "attempt": 1,
+      "sessionId": "08041e91-5f4a-4996-bd15-ad7a2465748f",
+      "input": {
+        "workspaceSha256": "e35056fba22efe54f13710a51736f2a205b1418c68dbaa1a2be9ae63ab81b5c9",
+        "promptSha256": "2fa9c23325d965fee3c1baf11dd786dab23e925bf9e9ceeed3c785cc70113552",
+        "priorPhaseSha256": null,
+        "model": "default"
+      },
+      "verification": {
+        "status": "verified",
+        "outputSha256": "535eaf2725a87480261bce1e56d759d294fb8fd28f92a8252ef172840e8aa079",
+        "checkedAt": "2026-11-17T18:02:53.655Z"
+      }
     },
     "architecture-assessment": {
       "status": "completed",
       "file": "02-architecture-assessment.md",
-      "durationMs": 362868
+      "durationMs": 316130,
+      "attempt": 1,
+      "sessionId": "18353db1-e075-4d00-85cc-d92aad5735ec",
+      "input": {
+        "workspaceSha256": "e35056fba22efe54f13710a51736f2a205b1418c68dbaa1a2be9ae63ab81b5c9",
+        "promptSha256": "94f4c288bd18b89b62191ae592124d065947e1da7ffd7d67cd6b7e522b7e9ae6",
+        "priorPhaseSha256": "535eaf2725a87480261bce1e56d759d294fb8fd28f92a8252ef172840e8aa079",
+        "model": "default"
+      },
+      "verification": {
+        "status": "verified",
+        "outputSha256": "584e353a66701399e719efe22d29489c975e65317d30bdb2e3c4282c9e5ce2d1",
+        "checkedAt": "2026-11-17T18:08:09.807Z"
+      }
     },
     "quality-audit": {
       "status": "completed",
       "file": "03-quality-audit.md",
-      "durationMs": 553666
+      "durationMs": 295856,
+      "attempt": 1,
+      "sessionId": "a033f3b9-03d9-4784-b519-8f3b67809560",
+      "input": {
+        "workspaceSha256": "e35056fba22efe54f13710a51736f2a205b1418c68dbaa1a2be9ae63ab81b5c9",
+        "promptSha256": "554c6c549e5dc8015fafbcf17d5b1c57b7cd734ea077fd7d72b0b94af03d256f",
+        "priorPhaseSha256": "584e353a66701399e719efe22d29489c975e65317d30bdb2e3c4282c9e5ce2d1",
+        "model": "default"
+      },
+      "verification": {
+        "status": "verified",
+        "outputSha256": "35be6d3e01696148e8155bcd41d2b19069129ab034655113f6db34a68eb74404",
+        "checkedAt": "2026-11-17T18:13:05.696Z"
+      }
     },
     "elevation-plan": {
       "status": "completed",
       "file": "04-elevation-plan.md",
-      "durationMs": 634839
+      "durationMs": 244440,
+      "attempt": 1,
+      "sessionId": "2d231791-5711-4ef4-8159-c1bf23ec3e6b",
+      "input": {
+        "workspaceSha256": "e35056fba22efe54f13710a51736f2a205b1418c68dbaa1a2be9ae63ab81b5c9",
+        "promptSha256": "e73df4b041d9d1f2ed7c54efb232724259a7bf6ae42775a281dee9b11188f9ac",
+        "priorPhaseSha256": "35be6d3e01696148e8155bcd41d2b19069129ab034655113f6db34a68eb74404",
+        "model": "default"
+      },
+      "verification": {
+        "status": "verified",
+        "outputSha256": "24694cc1132c57f0f1d3ac858c236ad71f2d7ee346352539f49e53c289d1a89b",
+        "checkedAt": "2026-11-17T18:17:10.153Z"
+      }
     }
   }
 }
