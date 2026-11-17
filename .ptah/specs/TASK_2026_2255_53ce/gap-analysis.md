@@ -449,6 +449,6 @@ when the lanes table at 1440 px has `data-collapsed="true"`.
 |---|---|
 | `lanes/pr-survey.md` | Phase B PR survey and root-cause verdicts (Appendix A) |
 | `lanes/component-audit.md` | Shared-component audit with counts and file:line evidence (Appendix B) |
-| `screens/*.jpg` | Electron captures (dark 1024/1440/1920/2560, light 1440) |
+| `screens/*.jpg` | Electron captures (dark 1024/1440/1920/2560, light 1440). **Local only**: `.gitignore:136` ignores `.ptah/specs/**/*.jpg`, so the JPEG files are not in the pull request. They stay in the task worktree. Step 10 must choose a tracked location for gate screenshots. |
 | `screens/metrics.json` | Measured nav, main, panel and table widths |
 | `screens/probe.json` | Lanes table host attributes and row counts per width |
