@@ -131,11 +131,17 @@ export function buildSessionNamespace(
 
   return {
     start: async (input) => {
-      const result = await requireSpawner().start({
+      const spawner = requireSpawner();
+      const result = await spawner.start({
         ...input,
         callerSessionId: caller(),
       });
-      if (result.ok && !result.alreadyExists) {
+      if (result.ok && result.child.status === 'queued' && !result.alreadyExists) {
+        spawner.onQueuedStart?.(result.child.childSessionId, (child) => {
+          deps.onWorktreeChanged?.({ action: 'created', worktreePath: child.worktreePath, branch: child.branch });
+        });
+      }
+      if (result.ok && !result.alreadyExists && result.child.status !== 'queued') {
         deps.onWorktreeChanged?.({
           action: 'created',
           worktreePath: result.child.worktreePath,

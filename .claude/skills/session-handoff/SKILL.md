@@ -22,6 +22,9 @@ after `/session-handoff` (for example a context-usage figure) is context only, n
   context; `ptah_agent_wait` returns after at most 45 s per call. Never poll.
 - Subagents (Task tool) are the exception: they live inside this session and end with it. Let a
   foreground subagent finish its step, or record it as lost.
+- A child in `queued` memory admission is cancelled when its parent ends and is not adopted by
+  the successor. Record its id and task in HANDOFF.md so the successor can start a replacement;
+  the old parent receives one terminal completion.
 - Record and continue: anything still running, or waiting on a permission or other outside input
   (for example `awaiting-permission`), is unfinished. Record it under **Background work** in
   HANDOFF.md (its id, its task, its state), then go on. If its report arrives before you finish,

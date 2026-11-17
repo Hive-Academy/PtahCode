@@ -1,5 +1,5 @@
 /**
- * The seven `ptah.agentSessions.*` settings that bound child sessions
+ * Child session limits and shared agent orchestration memory settings
  * (TASK_2026_584), read fresh on every `ptah_session_start`.
  *
  * The extension manifest protects only the VS Code settings UI; Electron, the
@@ -14,6 +14,8 @@ import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 export const SESSION_CHILD_SETTINGS_SECTION = 'ptah';
 
 export interface SessionChildSettings {
+  readonly minFreeMemoryGb: number;
+  readonly spawnQueueTimeoutMs: number;
   /** Live children across the whole host; 0 means no limit. */
   readonly maxConcurrent: number;
   /** Wall-clock cap per child, in minutes. */
@@ -94,6 +96,8 @@ export function readSessionChildSettings(
 ): SessionChildSettings {
   const maxRuntimeMinutes = readInteger(workspace, SESSION_CHILD_MAX_RUNTIME_MINUTES);
   return {
+    minFreeMemoryGb: readNumber(workspace, 'agentOrchestration.minFreeMemoryGb', 3, 0, 100),
+    spawnQueueTimeoutMs: readNumber(workspace, 'agentOrchestration.spawnQueueTimeoutMs', 300_000, 60_000, 600_000),
     maxConcurrent: readInteger(workspace, SESSION_CHILD_MAX_CONCURRENT),
     maxRuntimeMinutes,
     runtimeWarnLeadMinutes: Math.max(1, Math.min(maxRuntimeMinutes - 1,
@@ -106,6 +110,13 @@ export function readSessionChildSettings(
     ),
     bashAllowlist: readAllowlist(workspace),
   };
+}
+
+function readNumber(workspace: Pick<IWorkspaceProvider, 'getConfiguration'>, key: string,
+  fallback: number, min: number, max: number): number {
+  const value = workspace.getConfiguration<unknown>(SESSION_CHILD_SETTINGS_SECTION, key, fallback);
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(min, Math.min(max, value)) : fallback;
 }
 
 function readInteger(

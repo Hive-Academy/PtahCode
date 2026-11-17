@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { ampleFreeMemory } from '../__fixtures__/memory-probe';
 import { resolve } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -52,6 +53,7 @@ function harness(refusal?: ProviderAccountPortRefusal) {
     { getWorkspaceFolders: () => [ROOT], getConfiguration: <T>(_section: string, _key: string, fallback: T) => fallback } as unknown as Args[13],
     { appendLine: jest.fn() } as unknown as Args[14], adapter as unknown as Args[15], scope,
     { getPort: () => 4321 }, registrar, null, budget,
+    undefined, undefined, ampleFreeMemory,
   );
   return { service, host, registry, provisioner, releasePolicy, registrar, adapter, budget };
 }
