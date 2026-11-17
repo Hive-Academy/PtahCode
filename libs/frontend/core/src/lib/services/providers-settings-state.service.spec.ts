@@ -2153,7 +2153,7 @@ describe('ProvidersSettingsStateService', () => {
       // A host without the TTL fields reads as 'auto' with no env override.
       expect(service.orchestration()).toEqual({
         status: 'ready',
-        data: { ...expected, subagentPromptCacheTtl: 'auto' },
+        data: { ...expected, cliLaneDefaults: {}, missingFields: ['cliLaneDefaults'], subagentPromptCacheTtl: 'auto' },
         error: null,
       });
       expect(

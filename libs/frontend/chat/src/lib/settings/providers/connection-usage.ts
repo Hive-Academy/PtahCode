@@ -51,8 +51,8 @@ function codexCliEnabled(
   systemClis: NonNullable<ConnectionUsageSources['systemClis']>,
 ): boolean {
   return (
-    !systemClis.disabledClis.includes('codex') &&
-    systemClis.detectedClis.some(
+    !(Array.isArray(systemClis.disabledClis) && systemClis.disabledClis.includes('codex')) &&
+    Array.isArray(systemClis.detectedClis) && systemClis.detectedClis.some(
       (entry) =>
         entry.cli === 'codex' && entry.installed && entry.disabled !== true,
     )
@@ -109,7 +109,7 @@ export function connectionUsage(
   }
   addRole(sources.curatorProvider, 'memory-curator', 'Memory curator');
   addRole(sources.enhancementProvider, 'enhancement', 'Enhancement');
-  for (const agent of sources.cliAgents ?? []) {
+  for (const agent of Array.isArray(sources.cliAgents) ? sources.cliAgents : []) {
     const provider = agent.providerId.trim();
     if (provider) {
       add(provider, {
@@ -134,7 +134,7 @@ export function connectionUsage(
       sources.mainProviderId !== undefined &&
       sources.curatorProvider !== null &&
       sources.enhancementProvider !== null &&
-      sources.cliAgents !== null &&
+      Array.isArray(sources.cliAgents) &&
       sources.systemClis !== null,
   };
 }

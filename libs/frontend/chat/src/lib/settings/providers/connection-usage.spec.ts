@@ -69,4 +69,11 @@ describe('connection usage', () => {
     expect(result.byProvider['openai-codex']).toBeUndefined();
     expect(result.byProvider['kimi-code'].map((entry) => entry.id)).toEqual(['enhancement']);
   });
+  it('keeps readable connection usage when CLI summaries are not an array', () => {
+    const malformed = { ...loaded };
+    Object.defineProperty(malformed, 'cliAgents', { value: {} });
+    const result = connectionUsage(malformed);
+    expect(result.complete).toBe(false);
+    expect(result.byProvider['openai-codex'].map(entry => entry.id)).toEqual(['codex-cli']);
+  });
 });

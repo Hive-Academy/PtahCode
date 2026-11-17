@@ -1,3 +1,4 @@
+import { movePreferredAgentOrder } from './move-preferred-agent-order';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -271,7 +272,7 @@ export class CliOrchestrationMatrixComponent {
     this.state.orchestration().status === 'error' ||
     this.state.cliAgents().status === 'error'
       ? 'Could not load lanes.'
-      : null,
+      : this.rows().missing.length ? 'Some lane data could not be loaded. Showing the lanes that could be read.' : null,
   );
   protected async retryLanes(): Promise<void> {
     await Promise.all([this.state.refreshOrchestration(), this.state.refreshCliAgents()]);
@@ -293,11 +294,10 @@ export class CliOrchestrationMatrixComponent {
   protected async moveLane(row: LaneTableRow, direction: -1 | 1): Promise<void> {
     if (!this.state.reviewContext() || this.busy()) return;
     const installed = this.rows().installed.map(item => item.id);
-    const index = installed.indexOf(row.id);
-    const next = index + direction;
-    if (index < 0 || next < 0 || next >= installed.length) return;
-    [installed[index], installed[next]] = [installed[next], installed[index]];
-    await savePreferredAgentOrder(this.state, this.feedback, installed);
+    const saved = this.state.orchestration().data?.preferredAgentOrder;
+    const order = movePreferredAgentOrder(Array.isArray(saved) ? saved : [], installed, row.id, direction);
+    if (!order) return;
+    await savePreferredAgentOrder(this.state, this.feedback, order);
   }
   protected editLane(row: LaneTableRow): void {
     if (row.kind === 'instance') this.openEdit(row);
@@ -326,9 +326,10 @@ export class CliOrchestrationMatrixComponent {
   protected async resetTableDefault(row: LaneTableRow): Promise<void> {
     if (row.kind === 'system') await this.resetLaneDefault(row);
   }
-  protected readonly ptahManifest = computed(() =>
-    this.state.orchestration().data?.detectedClis.find(cli => cli.ptahCliId)?.manifest,
-  );
+  protected readonly ptahManifest = computed(() => {
+    const detected = this.state.orchestration().data?.detectedClis;
+    return Array.isArray(detected) ? detected.find(cli => cli.ptahCliId)?.manifest : undefined;
+  });
   /** Neither source has data yet (the container shows each section's own loading or error line). */
   protected readonly loading = computed(
     () => !this.state.orchestration().data && !this.state.cliAgents().data,
@@ -515,9 +516,8 @@ export class CliOrchestrationMatrixComponent {
     const label = `${row.name} ${enabled ? 'on' : 'off'}`;
     if (row.kind === 'system') {
       const set = (on: boolean) => () => {
-        const others = (
-          this.state.orchestration().data?.disabledClis ?? []
-        ).filter((cli) => cli !== row.cli);
+        const disabled = this.state.orchestration().data?.disabledClis;
+        const others = (Array.isArray(disabled) ? disabled : []).filter((cli) => cli !== row.cli);
         return this.state.saveSettings(
           {
             orchestration: { disabledClis: on ? others : [...others, row.cli] },

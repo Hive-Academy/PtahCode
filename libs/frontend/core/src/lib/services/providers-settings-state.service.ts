@@ -1,3 +1,4 @@
+import { parseCliAgents, parseDetectedClis, parseOrchestration } from './providers-orchestration-schema';
 import {
   Injectable,
   computed,
@@ -8,7 +9,6 @@ import {
 } from '@angular/core';
 import {
   SCOPED_SETTING_KEYS,
-  SUBAGENT_PROMPT_CACHE_TTL_SETTINGS,
   getAllAnthropicProviders,
   setCustomProviderEntries,
   type AuthCancelDraftVerificationParams,
@@ -55,7 +55,7 @@ import type {
   ProvidersEnhancementSettings,
   ProvidersExternalAuthAction,
   ProvidersMainSources,
-  ProvidersCliTest,
+  ProvidersCliTest, ProvidersCliAgents,
   ProvidersCustomEntry,
   ProvidersDetectedClis,
   ProvidersOrchestration,
@@ -141,7 +141,7 @@ export class ProvidersSettingsStateService {
   private readonly enhancementStore =
     createSectionStore<ProvidersEnhancementSettings>();
   private readonly cliStore =
-    createSectionStore<RpcMethodResult<'ptahCli:list'>['agents']>();
+    createSectionStore<ProvidersCliAgents>();
   private readonly orchestrationStore =
     createSectionStore<ProvidersOrchestration>();
   private readonly customEntriesStore =
@@ -715,7 +715,7 @@ export class ProvidersSettingsStateService {
   async refreshCliAgents(): Promise<void> {
     await this.read(
       this.cliStore,
-      async () => (await this.require('ptahCli:list', {})).agents,
+      async () => parseCliAgents((await this.require('ptahCli:list', {})).agents),
     );
   }
   /** The CLI summary omits pinned models. Project only model fields from persisted non-secret configuration. */
@@ -790,44 +790,13 @@ export class ProvidersSettingsStateService {
    * A failed read drops the previous value: a stale Cursor flag would read as a current "Set".
    * The section shows its error and Retry instead.
    */
-  async refreshOrchestration(): Promise<void> {
+  async refreshOrchestration(missingFields: readonly string[] = []): Promise<void> {
     await readSection(
       this.orchestrationStore,
       this.workspace,
       async (): Promise<ProvidersOrchestration> => {
-        const config = await this.require('agent:getConfig', undefined);
-        return {
-          codexModel: config.codexModel,
-          copilotModel: config.copilotModel,
-          cursorModel: config.cursorModel,
-          antigravityModel: config.antigravityModel,
-          grokModel: config.grokModel,
-          opencodeModel: config.opencodeModel,
-          piModel: config.piModel,
-          codexReasoningEffort: config.codexReasoningEffort,
-          copilotReasoningEffort: config.copilotReasoningEffort,
-          grokReasoningEffort: config.grokReasoningEffort,
-          antigravityReasoningEffort: config.antigravityReasoningEffort,
-          piReasoningEffort: config.piReasoningEffort,
-          claudeModel: config.claudeModel,
-          claudeReasoningEffort: config.claudeReasoningEffort,
-          detectedClis: config.detectedClis,
-          disabledClis: config.disabledClis,
-          cliLaneDefaults: config.cliLaneDefaults,
-          preferredAgentOrder: config.preferredAgentOrder,
-          maxConcurrentAgents: config.maxConcurrentAgents,
-          copilotAutoApprove: config.copilotAutoApprove,
-          // Both optional on the RPC result: a missing or unknown setting reads as 'auto', a missing override as none.
-          subagentPromptCacheTtl:
-            SUBAGENT_PROMPT_CACHE_TTL_SETTINGS.find(
-              (value) => value === config.subagentPromptCacheTtl,
-            ) ?? 'auto',
-          subagentPromptCacheTtlEnvOverride:
-            config.subagentPromptCacheTtlEnvOverride,
-          cursorApiKeyConfigured: config.cursorApiKeyConfigured,
-          cursorApiKeyStored: config.cursorApiKeyStored,
-          cursorApiKeyEnvSet: config.cursorApiKeyEnvSet,
-        };
+        const parsed = parseOrchestration(await this.require('agent:getConfig', undefined));
+        return { ...parsed, missingFields: [...new Set([...parsed.missingFields ?? [], ...missingFields])] };
       },
       false,
     );
@@ -840,14 +809,17 @@ export class ProvidersSettingsStateService {
    */
   async redetectClis(): Promise<boolean> {
     let detected = false;
+    let missingFields: readonly string[] = [];
     await this.read(this.detectionStore, async () => {
       const { clis } = await this.require('agent:detectClis', undefined);
       detected = true;
-      return clis;
+      const parsed = parseDetectedClis(clis);
+      missingFields = parsed.missingFields;
+      return parsed.clis;
     });
     if (!detected) return false;
     await Promise.all([
-      this.refreshOrchestration(),
+      this.refreshOrchestration(missingFields),
       this.refreshCliAgents(),
       this.refreshCliModels(),
     ]);

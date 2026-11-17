@@ -167,6 +167,7 @@ export function cliTestFailedText(reason: string | null): string {
 export type CliMatrixRow = SystemCliMatrixRow | InstanceCliMatrixRow;
 
 export interface CliMatrixRows {
+  readonly missing: readonly string[];
   /** Installed system CLIs and every Ptah instance, in `preferredAgentOrder` rank order. */
   readonly installed: readonly CliMatrixRow[];
   /** System CLIs detection reports as not installed, in detection order (#71). */
@@ -198,9 +199,9 @@ export interface CliMatrixSources {
         | 'copilotAutoApprove'
         | LoadedCliSettingKey
       > &
-        Partial<Record<ForwardCliSettingKey, string>>)
+        Partial<Record<ForwardCliSettingKey, string>> & { readonly missingFields?: readonly string[] })
     | null;
-  readonly cliAgents: readonly PtahCliSummary[] | null;
+  readonly cliAgents: (readonly PtahCliSummary[] & { readonly missingFields?: readonly string[] }) | null;
   readonly cliModels: ProvidersCliModels | null;
   readonly cliTest: ProvidersCliTest | null;
 }
@@ -342,10 +343,10 @@ function providerFromModelId(model: string): string | null {
 function systemRows(
   orchestration: NonNullable<CliMatrixSources['orchestration']>,
 ): SystemCliMatrixRow[] {
-  const disabled = new Set(orchestration.disabledClis);
+  const disabled = new Set(Array.isArray(orchestration.disabledClis) ? orchestration.disabledClis : []);
   const rows: SystemCliMatrixRow[] = [];
   const seen = new Set<SystemCliType>();
-  for (const detected of orchestration.detectedClis) {
+  for (const detected of Array.isArray(orchestration.detectedClis) ? orchestration.detectedClis : []) {
     // Ptah instances come from `cliAgents()`, not from detection.
     if (
       detected.ptahCliId ||
@@ -482,15 +483,24 @@ function byPreferredOrder<T extends { readonly id: string }>(
  * order, ranked by `preferredAgentOrder`), then the system CLIs detection reports as not installed.
  */
 export function cliMatrixRows(sources: CliMatrixSources): CliMatrixRows {
+  const orchestration = sources.orchestration;
+  const missing = new Set(orchestration?.missingFields ?? []);
+  for (const field of ['detectedClis', 'disabledClis', 'preferredAgentOrder'] as const) {
+    if (orchestration && !Array.isArray(orchestration[field])) missing.add(field);
+  }
+  const detected = Array.isArray(orchestration?.detectedClis) ? orchestration.detectedClis : [];
   const system = sources.orchestration ? systemRows(sources.orchestration) : [];
-  const instances = (sources.cliAgents ?? []).map((agent) =>
+  for (const field of sources.cliAgents?.missingFields ?? []) missing.add(field);
+  if (sources.cliAgents !== null && !Array.isArray(sources.cliAgents)) missing.add('cliAgents');
+  const instances = (Array.isArray(sources.cliAgents) ? sources.cliAgents : []).map((agent) =>
     instanceRow(agent, sources.cliModels, sources.cliTest,
-      sources.orchestration?.detectedClis.find(detected => detected.ptahCliId === agent.id)?.manifest),
+      detected.find(detected => detected.ptahCliId === agent.id)?.manifest),
   );
   return {
+    missing: [...missing],
     installed: byPreferredOrder<CliMatrixRow>(
       [...system.filter((row) => row.installed), ...instances],
-      sources.orchestration?.preferredAgentOrder ?? [],
+      Array.isArray(orchestration?.preferredAgentOrder) ? orchestration.preferredAgentOrder : [],
     ),
     uninstalled: system.filter((row) => !row.installed),
   };

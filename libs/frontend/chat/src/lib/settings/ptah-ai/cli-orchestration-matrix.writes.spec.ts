@@ -410,11 +410,51 @@ describe('CliOrchestrationMatrixComponent', () => {
   });
 
   it('routes order moves through preferredAgentOrder with undo', async () => {
+    const originalOrder = ['codex', 'cursor', 'antigravity', 'glm-1', 'copilot'];
+    state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: originalOrder }));
+    fixture.detectChanges();
     table().moved.emit({ row: lane('codex'), direction: 1 }); await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { orchestration: { preferredAgentOrder: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'] } },
+      { orchestration: { preferredAgentOrder: ['antigravity', 'cursor', 'codex', 'glm-1', 'copilot', 'opencode'] } },
       CONTEXT,
     );
+    expect(feedback.toast()?.canUndo).toBe(true);
+    await feedback.undo();
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledTimes(2);
+    expect(state.saveSettings).toHaveBeenLastCalledWith(
+      { orchestration: { preferredAgentOrder: originalOrder } }, CONTEXT,
+    );
+  });
+
+  it('saves the full order including uninstalled IDs', async () => {
+    state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: ['codex', 'cursor', 'antigravity', 'glm-1', 'copilot'] }));
+    fixture.detectChanges();
+    table().moved.emit({ row: lane('codex'), direction: 1 }); await flush();
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      { orchestration: { preferredAgentOrder: ['antigravity', 'cursor', 'codex', 'glm-1', 'copilot', 'opencode'] } }, CONTEXT,
+    );
+  });
+
+  it('shows one partial-data table message alongside readable lanes', () => {
+    const malformed = { ...ORCHESTRATION };
+    Object.defineProperty(malformed, 'detectedClis', { value: null });
+    state.orchestration.set(ready(malformed));
+    fixture.detectChanges();
+    const messages = element().querySelectorAll('.ptah-table-message-cell');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].textContent).toContain('Some lane data could not be loaded. Showing the lanes that could be read.');
+    expect(q('[data-testid="cli-matrix-row-glm-1"]')).not.toBeNull();
+  });
+
+  it('shows one partial-data message for salvaged CLI summaries alongside all readable lanes', () => {
+    state.cliAgents.set(ready(Object.assign([GLM], { missingFields: ['cliAgents'] })));
+    fixture.detectChanges();
+    const messages = element().querySelectorAll('.ptah-table-message-cell');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].textContent).toContain('Some lane data could not be loaded. Showing the lanes that could be read.');
+    expect(row('codex')).not.toBeNull();
+    expect(q('[data-testid="cli-matrix-row-glm-1"]')).not.toBeNull();
   });
 
   it('routes test and last result to the existing connection test', async () => {
