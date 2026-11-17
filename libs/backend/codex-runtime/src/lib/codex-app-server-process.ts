@@ -185,6 +185,7 @@ export class CodexAppServerProcess {
       const spawnRequest: ProcessSpawnRequest = {
         command: this.executable.path,
         args: ['app-server'],
+        windowsJobPolicy: 'job',
         cwd: this.profile.cwd,
         env: {
           // Match the evidence harness's names; retain host home/temp paths because

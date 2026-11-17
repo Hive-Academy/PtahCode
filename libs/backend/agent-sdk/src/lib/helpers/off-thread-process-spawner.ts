@@ -71,10 +71,14 @@ import {
 } from '@ptah-extension/vscode-core';
 import {
   LAUNCH_GUARD_REFUSED,
+  shouldUseWindowsJob,
+  WINDOWS_JOB_ENV_KEY,
   launchGuardRefusal,
 } from '@ptah-extension/platform-core';
 import type {
   IProcessSpawner,
+  IWindowsJobAssigner,
+  WindowsJobHandle,
   ProcessSpawnRequest,
   SpawnLaunchGuard,
   SpawnedProcessHandle,
@@ -178,6 +182,9 @@ export interface PtahSpawnedProcess extends SpawnedProcess {
 interface SpawnPlan {
   readonly command: string;
   readonly args: readonly string[];
+  readonly rootKind: 'claude' | 'process';
+  readonly windowsJobPolicy?: 'job' | 'no-job';
+  readonly windowsJobBinaryPath?: string;
   readonly cwd?: string;
   readonly env: Record<string, string>;
   /** Only the SDK seam forwards a signal; the port has no equivalent. */
@@ -340,6 +347,7 @@ class WorkerBackedProcess
     this.post({
       type: 'spawn',
       command: plan.command,
+      ...(plan.windowsJobBinaryPath ? { windowsJobBinaryPath: plan.windowsJobBinaryPath, windowsJobPolicy: 'job' as const } : {}),
       args: [...plan.args],
       cwd: plan.cwd,
       env: plan.env,
@@ -474,12 +482,22 @@ class WorkerBackedProcess
           this.rootStartedAt = message.startedAt;
         }
         this.childPid = message.pid;
+        if (message.job?.ok === true && message.pid !== null) this.logger.debug(`[WindowsJob] assigned pid=${message.pid} root=${this.plan.rootKind}`);
+        if (message.job?.ok === false && message.pid !== null) {
+          const error = new Error(message.job.message);
+          if (message.job.stack) error.stack = message.job.stack;
+          this.logger.error(`[WindowsJob] assignment failed pid=${message.pid} root=${this.plan.rootKind}; snapshot cleanup active`, error);
+        }
         this.settleSpawned(message.pid);
         if (this.pendingKill !== null && this.childPid !== null) {
           const signal = this.pendingKill;
           this.pendingKill = null;
           this.signalDirectly(this.childPid, signal);
         }
+        return;
+      }
+      case 'job-close-error': {
+        this.logger.error(`[WindowsJob] close failed pid=${this.pid} root=${this.plan.rootKind}`, new Error(message.message));
         return;
       }
       case 'stdout': {
@@ -727,6 +745,9 @@ class InlineProcess
     private readonly cleanupOrphanDescendants: boolean,
     private readonly rootStartedAt: number,
     private readonly orphanCleanup: OrphanCleanupDependencies,
+    private readonly rootKind: SpawnPlan['rootKind'],
+    private job?: WindowsJobHandle,
+    private readonly onFinished?: () => void,
   ) {
     super();
     this.on('error', () => undefined);
@@ -741,6 +762,8 @@ class InlineProcess
       if (this.observedExit) return;
       // Node's own child: every `exit` it emits is the child's real exit.
       this.observedExit = true;
+      this.closeJob();
+      this.onFinished?.();
       if (this.cleanupOrphanDescendants && !this.killRequested) {
         scheduleWindowsOrphanCleanup(
           child.pid, this.rootStartedAt, this.detached,
@@ -756,6 +779,14 @@ class InlineProcess
     child.on('error', (error: Error) => {
       this.emit('error', error);
     });
+  }
+
+  closeJob(): void {
+    const job = this.job;
+    this.job = undefined;
+    try { job?.close(); } catch (error: unknown) {
+      this.logger.error(`[WindowsJob] close failed pid=${this.child.pid} root=${this.rootKind}`, error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   get killed(): boolean {
@@ -776,6 +807,7 @@ class InlineProcess
 
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
     if (this.observedExit || this.child.exitCode !== null || this.child.signalCode !== null) return false;
+    this.closeJob();
     if (process.platform === 'win32' && this.child.pid !== undefined) {
       this.killRequested = true;
       stopWindowsTree(this.child.pid, this.logger, () => {
@@ -846,7 +878,31 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
   private readonly live = new Set<WorkerBackedProcess>();
   private readonly pool: SpawnWorkerPool;
   private warnedInline = false;
+  private readonly inline = new Set<InlineProcess>();
   private orphanCleanup: OrphanCleanupDependencies = defaultOrphanCleanupDependencies;
+  private windowsJobAssigner?: IWindowsJobAssigner;
+  private windowsJobBinaryPath?: string;
+  private windowsJobSetting: () => boolean = () => false;
+
+  configureWindowsJobs(assigner: IWindowsJobAssigner, binaryPath: string, setting: () => boolean): void {
+    this.windowsJobAssigner = assigner;
+    this.windowsJobBinaryPath = binaryPath;
+    this.windowsJobSetting = setting;
+  }
+
+  private jobPath(policy?: 'job' | 'no-job'): string | undefined {
+    if (process.platform !== 'win32' || process.arch !== 'x64' || policy !== 'job') return undefined;
+    try {
+      return shouldUseWindowsJob({ policy, settingEnabled: this.windowsJobSetting(),
+        env: process.env[WINDOWS_JOB_ENV_KEY], platform: process.platform, arch: process.arch })
+        ? this.windowsJobBinaryPath : undefined;
+    } catch (error: unknown) {
+      // degradation-audit: reported - a setting failure must not fail the spawn.
+      this.logger.error('[WindowsJob] setting read failed; switch off',
+        error instanceof Error ? error : new Error(String(error)));
+      return undefined;
+    }
+  }
 
   /** Test seam. The DI constructor only accepts registered services. */
   setOrphanCleanupDependencies(dependencies: OrphanCleanupDependencies): void {
@@ -882,6 +938,9 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
     const spawned = this.launch(
       {
         command: options.command,
+        rootKind: 'claude',
+        windowsJobPolicy: 'job',
+        windowsJobBinaryPath: this.jobPath('job'),
         args: options.args,
         cwd: options.cwd,
         env: stripUndefinedEnv(options.env),
@@ -932,6 +991,9 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
     return this.launch(
       {
         command: parsed.command,
+        rootKind: 'process',
+        windowsJobPolicy: request.windowsJobPolicy,
+        windowsJobBinaryPath: this.jobPath(request.windowsJobPolicy),
         args: parsed.args,
         cwd: request.cwd,
         env,
@@ -993,6 +1055,7 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
    * that proves no thread is left behind.
    */
   async dispose(): Promise<void> {
+    for (const target of [...this.inline]) target.closeJob();
     for (const target of [...this.live]) target.forceTerminate();
     this.live.clear();
     await this.pool.dispose();
@@ -1034,6 +1097,16 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
       windowsVerbatimArguments: plan.windowsVerbatimArguments,
     });
 
+    let job: WindowsJobHandle | undefined;
+    if (plan.windowsJobBinaryPath && this.windowsJobAssigner && child.pid !== undefined) {
+      try {
+        job = this.windowsJobAssigner.assignToNewJob(child.pid);
+        this.logger.debug(`[WindowsJob] assigned pid=${child.pid} root=${plan.rootKind}`);
+      } catch (error: unknown) {
+        this.logger.error(`[WindowsJob] assignment failed pid=${child.pid} root=${plan.rootKind}; snapshot cleanup active`,
+          error instanceof Error ? error : new Error(String(error)));
+      }
+    }
     const onStderr = hooks.onStderr;
     if (plan.stderrMode === 'callback' && onStderr && child.stderr) {
       child.stderr.on('data', (data: Buffer) => {
@@ -1041,8 +1114,10 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
       });
     }
 
-    return new InlineProcess(child, plan.stdioMode, this.logger,
+    const inline = new InlineProcess(child, plan.stdioMode, this.logger,
       plan.detached, plan.cleanupOrphanDescendants, rootStartedAt,
-      this.orphanCleanup);
+      this.orphanCleanup, plan.rootKind, job, () => this.inline.delete(inline));
+    this.inline.add(inline);
+    return inline;
   }
 }

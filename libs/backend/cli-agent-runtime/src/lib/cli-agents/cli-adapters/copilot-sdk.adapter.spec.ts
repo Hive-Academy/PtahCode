@@ -271,6 +271,7 @@ describe('CopilotSdkAdapter', () => {
       });
       handle.onOutput(() => {});
 
+      expect(mockSpawnCli.mock.calls[0][2]).toEqual(expect.objectContaining({ windowsJobPolicy: 'job' }));
       const [binaryArg] = mockSpawnCli.mock.calls[0] as [
         string,
         string[],

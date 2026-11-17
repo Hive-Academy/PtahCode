@@ -21,6 +21,7 @@ import { TOKENS } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
   type IWorkspaceProvider,
+  type IWindowsJobAssigner,
 } from '@ptah-extension/platform-core';
 import type {
   BackgroundWorkGovernor,
@@ -247,6 +248,7 @@ export function registerSdkServices(
   options: {
     readonly devHost?: boolean;
     readonly env?: NodeJS.ProcessEnv;
+    readonly windowsJobs?: { assigner: IWindowsJobAssigner; binaryPath: string; setting: () => boolean };
   } = {},
 ): void {
   const overrides = readDevOverrides(
@@ -554,8 +556,13 @@ export function registerSdkServices(
 
   container.register(
     SDK_TOKENS.SDK_PROCESS_SPAWNER,
-    { useClass: OffThreadProcessSpawner },
-    { lifecycle: Lifecycle.Singleton },
+    { useFactory: instanceCachingFactory((c: DependencyContainer) => {
+      const spawner = c.resolve(OffThreadProcessSpawner);
+      if (options.windowsJobs) spawner.configureWindowsJobs(
+        options.windowsJobs.assigner, options.windowsJobs.binaryPath, options.windowsJobs.setting,
+      );
+      return spawner;
+    }) },
   );
 
   container.register(

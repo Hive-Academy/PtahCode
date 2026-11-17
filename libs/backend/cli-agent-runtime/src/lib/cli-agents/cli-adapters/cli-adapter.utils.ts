@@ -6,6 +6,8 @@
  * - `which`: Library-based binary resolution (no subprocess, no \r issues)
  */
 import crossSpawn from 'cross-spawn';
+import { assignCliWindowsJob } from './cli-windows-job';
+import type { CliWindowsJobDependencies } from './cli-windows-job';
 import whichLib from 'which';
 import { readFile } from 'fs/promises';
 import * as path from 'path';
@@ -105,7 +107,7 @@ type RawListener = (...args: unknown[]) => void;
 class ChildProcessHandle implements SpawnedProcessHandle {
   readonly whenSpawned: Promise<number | null>;
 
-  constructor(private readonly child: ChildProcess) {
+  constructor(private readonly child: ChildProcess, private readonly closeJob: () => void) {
     this.whenSpawned = Promise.resolve(child.pid ?? null);
   }
 
@@ -134,6 +136,7 @@ class ChildProcessHandle implements SpawnedProcessHandle {
   }
 
   kill(signal?: NodeJS.Signals): boolean {
+    this.closeJob();
     return this.child.kill(signal);
   }
 
@@ -312,6 +315,9 @@ export function spawnCli(
     detached?: boolean;
     cleanupOrphanDescendants?: boolean;
     spawner?: IProcessSpawner;
+    // With job policy and the switch on, root exit also stops detached descendants.
+    windowsJobPolicy?: 'job' | 'no-job';
+    windowsJob?: CliWindowsJobDependencies;
   },
 ): SpawnedProcessHandle {
   assertCommandLineWithinLimit(binary, args);
@@ -325,6 +331,7 @@ export function spawnCli(
 
   if (options.spawner) {
     return options.spawner.spawnProcess({
+      windowsJobPolicy: options.windowsJobPolicy ?? 'no-job',
       command: binary,
       args,
       cwd: options.cwd,
@@ -344,11 +351,12 @@ export function spawnCli(
     detached,
     windowsHide: !(options.needsConsole && process.platform === 'win32'),
   });
+  const closeJob = assignCliWindowsJob(child, options.windowsJobPolicy, options.windowsJob);
   if (startedAt !== undefined) {
     child.once('exit', () => scheduleWindowsOrphanCleanup(child.pid, startedAt, detached,
       (error) => { process.emitWarning(error); }, defaultOrphanCleanupDependencies));
   }
-  return new ChildProcessHandle(child);
+  return new ChildProcessHandle(child, closeJob);
 }
 
 /**

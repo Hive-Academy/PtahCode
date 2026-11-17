@@ -13,7 +13,9 @@ import type {
   SentryService,
 } from '@ptah-extension/vscode-core';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
-import type { IProcessSpawner } from '@ptah-extension/platform-core';
+import { PLATFORM_TOKENS, WINDOWS_JOB_SETTING_KEY } from '@ptah-extension/platform-core';
+import type { IProcessSpawner, IWindowsJobAssigner, IWorkspaceProvider } from '@ptah-extension/platform-core';
+import type { CliWindowsJobDependencies } from './cli-adapters/cli-windows-job';
 import type { CliType, CliDetectionResult } from '@ptah-extension/shared';
 import type {
   CliAdapter,
@@ -139,7 +141,16 @@ export class CliDetectionService {
     /** The host supplies the native Codex lane; null marks it unavailable. */
     @inject(CLI_AGENT_RUNTIME_TOKENS.CODEX_ADAPTER_FACTORY, { isOptional: true })
     codexAdapterFactory: CodexAdapterFactory | null = null,
+    @inject(PLATFORM_TOKENS.WINDOWS_JOB_ASSIGNER, { isOptional: true })
+    windowsJobAssigner?: IWindowsJobAssigner,
+    @inject(PLATFORM_TOKENS.WORKSPACE_PROVIDER, { isOptional: true })
+    workspace?: IWorkspaceProvider,
   ) {
+    const windowsJob: CliWindowsJobDependencies = {
+      assigner: windowsJobAssigner,
+      settingEnabled: () => workspace?.getConfiguration<boolean>('ptah', WINDOWS_JOB_SETTING_KEY, false) === true,
+      logger: this.logger,
+    };
     let codexAdapter: CliAdapter;
     if (codexAdapterFactory) {
       try {
@@ -162,7 +173,7 @@ export class CliDetectionService {
     const permissionBridge = new CopilotPermissionBridge();
     this.adapters.set(
       'copilot',
-      new CopilotSdkAdapter(permissionBridge, this.spawner),
+      new CopilotSdkAdapter(permissionBridge, this.spawner, windowsJob),
     );
 
     // The Cursor provider key lives only in the secrets store (TASK_2026_538);
@@ -177,8 +188,8 @@ export class CliDetectionService {
       'antigravity',
       new AntigravityCliAdapter(this.spawner, undefined, this.logger),
     );
-    this.adapters.set('opencode', new OpencodeCliAdapter(this.spawner, this.logger));
-    this.adapters.set('pi', new PiCliAdapter(this.spawner));
+    this.adapters.set('opencode', new OpencodeCliAdapter(this.spawner, this.logger, windowsJob));
+    this.adapters.set('pi', new PiCliAdapter(this.spawner, windowsJob));
     this.adapters.set('grok', new GrokCliAdapter(this.spawner, this.logger));
     // Last, so the existing auto-detect fallback order is unchanged.
     if (claudeAdapter) this.adapters.set('claude', claudeAdapter);

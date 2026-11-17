@@ -117,11 +117,14 @@ if (!parentPort) {
 // The child this worker serves now. Replaced wholesale by every 'spawn'
 // message, so a reused worker carries nothing over from the previous child.
 let current = null;
+if (typeof process.on === 'function') process.on('exit', function () { if (current) closeJob(current); });
 
 function createState(message) {
   return {
     id: message.id,
     child: null,
+    job: null,
+    jobBinding: null,
     exited: false,
     stdoutEnded: false,
     stderrEnded: false,
@@ -130,6 +133,15 @@ function createState(message) {
     pendingEnd: false,
     pendingKill: null,
   };
+}
+
+function closeJob(state) {
+  if (!state.job) return;
+  const handle = state.job;
+  state.job = null;
+  try { state.jobBinding.closeJob(handle); } catch (err) {
+    send(state, { type: 'job-close-error', message: String(err) });
+  }
 }
 
 function send(state, message, transfer) {
@@ -305,11 +317,24 @@ function startChild(state, message) {
     return;
   }
   state.child = child;
+  let job;
+  if (message.windowsJobPolicy === 'job' && message.windowsJobBinaryPath && child.pid) {
+    try {
+      const binding = require(message.windowsJobBinaryPath);
+      if (!binding || typeof binding.createJobForPid !== 'function' || typeof binding.closeJob !== 'function') throw new Error('Windows job native binary has an invalid binding shape');
+      state.jobBinding = binding;
+      state.job = binding.createJobForPid(child.pid);
+      job = { ok: true };
+    } catch (err) {
+      job = { ok: false, message: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined };
+    }
+  }
 
   send(state, {
     type: 'spawned',
     pid: child.pid === undefined ? null : child.pid,
     startedAt: startedAt,
+    job: job,
   });
 
   child.on('error', function (err) {
@@ -320,6 +345,7 @@ function startChild(state, message) {
 
   child.on('exit', function (code, signal) {
     state.exited = true;
+    closeJob(state);
     send(state, { type: 'exit', code: code, signal: signal });
   });
 
@@ -386,6 +412,7 @@ function startChild(state, message) {
 parentPort.on('message', function (message) {
   if (!message || typeof message !== 'object') return;
   if (message.type === 'spawn') {
+    if (current) closeJob(current);
     current = createState(message);
     startChild(current, message);
     return;
@@ -403,6 +430,7 @@ parentPort.on('message', function (message) {
       else state.pendingEnd = true;
       return;
     case 'kill':
+      closeJob(state);
       if (state.child) killChild(state, message.signal);
       else state.pendingKill = message.signal || 'SIGTERM';
       return;

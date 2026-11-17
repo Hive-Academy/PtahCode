@@ -35,3 +35,5 @@ export { ElectronWorkspaceWatcher } from './workspace-watch/electron-workspace-w
 export type { ElectronWorkspaceWatcherOptions } from './workspace-watch/electron-workspace-watcher';
 export { createInProcessWorkspaceWatchHostForker } from './workspace-watch/in-process-workspace-watch-host';
 export type { InProcessWorkspaceWatchHostOptions } from './workspace-watch/in-process-workspace-watch-host';
+
+export { resolveElectronWindowsJobBinaryPath } from './implementations/electron-windows-job-assigner';

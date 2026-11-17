@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import * as path from 'node:path';
+import { NativeWindowsJobAssigner } from '@ptah-extension/windows-job-native';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -127,6 +130,7 @@ async function treeFor(
   cleanupOrphanDescendants: boolean,
   descendantsDetached: boolean,
   pids: Set<number>,
+  job = false,
 ): Promise<{
   root: ReturnType<typeof spawnCli>;
   rootPid: number;
@@ -139,6 +143,11 @@ async function treeFor(
     {
       detached: true,
       cleanupOrphanDescendants,
+      windowsJobPolicy: job ? 'job' : 'no-job',
+      windowsJob: job ? {
+        assigner: new NativeWindowsJobAssigner((): unknown => require(jobBinary)), settingEnabled: () => true,
+        logger: { debug: () => undefined, error: (_message, error) => { throw error; } },
+      } : undefined,
     },
   );
   const rootPid = await root.whenSpawned;
@@ -231,5 +240,19 @@ async function treeFor(
     );
     // A Windows libuv job can kill non-detached descendants when their parent exits.
     await poll(() => !alive(tree.child) && !alive(tree.grandchild));
+  }, 30000);
+});
+
+const jobBinary = path.resolve(__dirname, '../../../../../windows-job-native/build/Release/windows_job.node');
+(process.platform === 'win32' && process.env['PTAH_SKIP_LIVE_WINDOWS'] !== '1' && existsSync(jobBinary)
+  ? describe : describe.skip)('inline CLI Windows job', () => {
+  const pids = new Set<number>();
+  afterEach(async () => { await dispose(pids); });
+  it.each(['exit', 'stop'] as const)('kills an immediate detached grandchild on %s', async (mode) => {
+    const tree = await treeFor(false, true, pids, true);
+    expect(alive(tree.grandchild)).toBe(true);
+    if (mode === 'exit') tree.root.stdin?.write('exit\n');
+    else tree.root.kill();
+    await poll(() => !alive(tree.rootPid) && !alive(tree.child) && !alive(tree.grandchild));
   }, 30000);
 });

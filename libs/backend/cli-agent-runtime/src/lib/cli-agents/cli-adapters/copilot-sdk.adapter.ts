@@ -1,3 +1,4 @@
+import type { CliWindowsJobDependencies } from './cli-windows-job';
 /**
  * Copilot CLI Adapter (formerly Copilot SDK Adapter)
  *
@@ -158,6 +159,7 @@ export class CopilotSdkAdapter implements CliAdapter {
   constructor(
     permissionBridge: CopilotPermissionBridge,
     private readonly spawner?: IProcessSpawner,
+    private readonly windowsJob?: CliWindowsJobDependencies,
   ) {
     this.permissionBridge = permissionBridge;
   }
@@ -381,6 +383,8 @@ export class CopilotSdkAdapter implements CliAdapter {
           needsConsole: true,
           detached: true,
           cleanupOrphanDescendants: true,
+          windowsJobPolicy: 'job',
+          windowsJob: this.windowsJob,
           spawner: this.spawner,
         },
       );

@@ -22,15 +22,10 @@ export class ElectronWindowsJobAssigner implements IWindowsJobAssigner {
     if (platform !== 'win32' || arch !== 'x64') {
       throw new Error('Windows jobs require win32 x64');
     }
-    const resourcesPath = this.options.resourcesPath ??
-      ('resourcesPath' in process && typeof process.resourcesPath === 'string'
-        ? process.resourcesPath : this.options.appPath);
-    const packed = join(resourcesPath, 'windows-job', 'windows_job.node');
+    const file = resolveElectronWindowsJobBinaryPath(this.options);
+    const packed = join(this.options.resourcesPath ?? ('resourcesPath' in process && typeof process.resourcesPath === 'string' ? process.resourcesPath : this.options.appPath), 'windows-job', 'windows_job.node');
     const exists = this.options.exists ?? existsSync;
     const isPackaged = this.options.appPath.endsWith('.asar');
-    const file = isPackaged || exists(packed) ? packed : resolve(
-      this.options.appPath, '../../../libs/backend/windows-job-native/build/Release/windows_job.node',
-    );
     const load = this.options.load ?? ((candidate: string): unknown => require(candidate));
     return new NativeWindowsJobAssigner(() => {
       if (isPackaged && !exists(packed)) {
@@ -39,4 +34,12 @@ export class ElectronWindowsJobAssigner implements IWindowsJobAssigner {
       return load(file);
     }, () => platform).assignToNewJob(pid);
   }
+}
+
+export function resolveElectronWindowsJobBinaryPath(options: ElectronWindowsJobOptions): string {
+  const resourcesPath = options.resourcesPath ??
+    ('resourcesPath' in process && typeof process.resourcesPath === 'string' ? process.resourcesPath : options.appPath);
+  const packed = join(resourcesPath, 'windows-job', 'windows_job.node');
+  return options.appPath.endsWith('.asar') || (options.exists ?? existsSync)(packed)
+    ? packed : resolve(options.appPath, '../../../libs/backend/windows-job-native/build/Release/windows_job.node');
 }

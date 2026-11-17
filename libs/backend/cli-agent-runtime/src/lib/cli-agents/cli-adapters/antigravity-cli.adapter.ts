@@ -864,6 +864,7 @@ export class AntigravityCliAdapter implements CliAdapter {
           needsConsole: true,
           detached: true,
           cleanupOrphanDescendants: true,
+          windowsJobPolicy: 'no-job',
           spawner: this.spawner,
         },
       );
