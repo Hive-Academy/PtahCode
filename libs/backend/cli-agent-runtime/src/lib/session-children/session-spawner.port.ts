@@ -376,6 +376,7 @@ export interface SessionChildReadResult {
 /** The child as the completion notifier needs to see it. */
 export interface SessionChildCompletionSubject {
   readonly childSessionId: string;
+  readonly rollback?: readonly SessionChildRollbackStep[];
   /** Terminal admission before a child tab or worktree was created. */
   readonly neverStartedReason?: string;
   readonly succeededBy?: string;

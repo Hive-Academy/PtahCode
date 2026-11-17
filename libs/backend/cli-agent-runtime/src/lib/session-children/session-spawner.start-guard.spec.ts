@@ -4,8 +4,10 @@
  * `starting` record and the implicit idempotency of a retried start.
  */
 import { denySessionSpawnerHandoffAccess } from './__fixtures__/session-spawner-fs-access';
+import { mutableMemoryProbe } from '../__fixtures__/memory-probe';
 import { makeHarness, PARENT } from './session-spawner.service.spec';
 import { SESSION_CHILD_FIRST_TURN_TIMEOUT_MS } from './session-child-first-turn.watchdog';
+import { SESSION_CHILD_STOP_START_WAIT_MS } from './session-start-stop-wait';
 import type { SessionChildStartResult } from './session-spawner.port';
 
 // The succession path looks for a handoff file with real file I/O, which fake
@@ -13,6 +15,7 @@ import type { SessionChildStartResult } from './session-spawner.port';
 denySessionSpawnerHandoffAccess();
 
 const CHILD_SDK_ID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+const PARENT_SDK_ID = '22222222-3333-4444-8555-666666666666';
 
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 50; i++) await Promise.resolve();
@@ -33,11 +36,11 @@ function listed(h: Harness) {
 }
 
 describe('SessionSpawnerService memory admission', () => {
-  let freeMemory = 0;
-  beforeEach(() => { freeMemory = 0; });
+  let memory = mutableMemoryProbe();
+  beforeEach(() => { memory = mutableMemoryProbe(); });
 
   function queuedHarness() {
-    const h = makeHarness({ memoryProbe: () => freeMemory, config: {
+    const h = makeHarness({ memoryProbe: memory.probe, config: {
       'agentOrchestration.minFreeMemoryGb': 1,
       'agentOrchestration.spawnQueueTimeoutMs': 60_000,
       'agentSessions.maxConcurrent': 1,
@@ -59,7 +62,7 @@ describe('SessionSpawnerService memory admission', () => {
     const h = queuedHarness();
     const first = await h.spawner.start(h.request());
     if (!first.ok) throw new Error('expected queued child');
-    freeMemory = 2 * 1024 ** 3;
+    memory.setBytes(2 * 1024 ** 3);
     jest.advanceTimersByTime(1000);
     const stopped = h.spawner.stop({ callerSessionId: PARENT, childSessionId: first.child.childSessionId });
     await stopped;
@@ -75,7 +78,7 @@ describe('SessionSpawnerService memory admission', () => {
     h.host.resolveChildModel.mockResolvedValueOnce({ accepted: false, code: 'invalid-model', message: 'missing model' });
     const first = await h.spawner.start(h.request({ model: 'missing' }));
     if (!first.ok) throw new Error('expected queued child');
-    freeMemory = 2 * 1024 ** 3;
+    memory.setBytes(2 * 1024 ** 3);
     jest.advanceTimersByTime(1000);
     await flush();
     expect(listed(h)[0].status).toBe('failed');
@@ -93,7 +96,7 @@ describe('SessionSpawnerService memory admission', () => {
     expect(h.provisioner.create).not.toHaveBeenCalled();
     expect(listed(h)[0].status).toBe('queued');
     expect(await h.spawner.start(h.request({ branch: 'feat/other' }))).toMatchObject({ ok: false, refusal: 'cap-reached' });
-    freeMemory = 2 * 1024 ** 3;
+    memory.setBytes(2 * 1024 ** 3);
     jest.advanceTimersByTime(1000);
     await flush();
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
@@ -120,7 +123,7 @@ describe('SessionSpawnerService memory admission', () => {
     h.provisioner.create.mockRejectedValueOnce(new Error('disk full'));
     const start = await h.spawner.start(h.request());
     if (!start.ok) throw new Error('expected queued start');
-    freeMemory = 2 * 1024 ** 3;
+    memory.setBytes(2 * 1024 ** 3);
     jest.advanceTimersByTime(1000);
     await flush();
     expect(listed(h)[0].status).toBe('failed');
@@ -151,6 +154,173 @@ describe('SessionSpawnerService memory admission', () => {
     expect(h.registry.get(start.child.childSessionId)?.endReason).toContain('parent session ended');
     expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
     expect(jest.getTimerCount()).toBe(0);
+    h.spawner.dispose();
+  });
+
+  it.each(['normal', 'succeed'] as const)(
+    'cancels after dequeue while provisioning when the parent ends (%s)', async (cause) => {
+      const h = queuedHarness();
+      const release = holdProvisioner(h);
+      const start = await h.spawner.start(h.request());
+      if (!start.ok) throw new Error('expected queued start');
+      memory.setBytes(2 * 1024 ** 3);
+      jest.advanceTimersByTime(1000);
+      await flush();
+      expect(h.provisioner.create).toHaveBeenCalledTimes(1);
+      h.sessionEnd.notifyAll({ sessionId: PARENT, workspaceRoot: start.child.worktreePath, cause });
+      release();
+      await flush();
+      expect(h.host.startChildSession).not.toHaveBeenCalled();
+      expect(h.provisioner.rollback).toHaveBeenCalledTimes(1);
+      expect(listed(h)[0].status).toBe('stopped');
+      expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+      const next = await h.spawner.start(h.request({ branch: 'feat/other' }));
+      expect(next).toMatchObject({ ok: true });
+      h.spawner.dispose();
+    },
+  );
+
+  it('cancels at MCP retention before the host starts, using the parent SDK id', async () => {
+    const h = queuedHarness();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    h.registrar.retainRoot.mockImplementationOnce(async () => {
+      await gate;
+      return { registered: true };
+    });
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    memory.setBytes(2 * 1024 ** 3);
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(h.registrar.retainRoot).toHaveBeenCalledTimes(1);
+    h.sessionEnd.notifyAll({ sessionId: PARENT_SDK_ID, workspaceRoot: start.child.worktreePath, cause: 'normal' });
+    release();
+    await flush();
+    expect(h.host.startChildSession).not.toHaveBeenCalled();
+    expect(h.provisioner.rollback).toHaveBeenCalledTimes(1);
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    expect(listed(h)[0].status).toBe('stopped');
+    expect(await h.spawner.start(h.request({ branch: 'feat/next' }))).toMatchObject({ ok: true });
+    h.spawner.dispose();
+  });
+
+  it('interrupts a host start completed after the parent SDK session ends', async () => {
+    const h = queuedHarness();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    h.host.startChildSession.mockImplementationOnce(async (input) => {
+      await gate;
+      h.active.add(input.tabId);
+      return { started: true as const, uiAnnounced: true };
+    });
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    memory.setBytes(2 * 1024 ** 3);
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
+    h.sessionEnd.notifyAll({ sessionId: PARENT_SDK_ID, workspaceRoot: start.child.worktreePath, cause: 'succeed' });
+    release();
+    await flush();
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(start.child.childSessionId, expect.anything());
+    expect(h.provisioner.rollback).toHaveBeenCalledTimes(1);
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    expect(listed(h)[0].status).toBe('stopped');
+    expect(await h.spawner.start(h.request({ branch: 'feat/next' }))).toMatchObject({ ok: true });
+    h.spawner.dispose();
+  });
+
+  it('joins a retried start after admission and reports status as starting', async () => {
+    const h = queuedHarness();
+    const release = holdProvisioner(h);
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    memory.setBytes(2 * 1024 ** 3);
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(listed(h)[0].status).toBe('starting');
+    expect(listed(h)[0].waitingForMemory).not.toBe(true);
+    let settled = false;
+    const retry = h.spawner.start(h.request()).then((result) => { settled = true; return result; });
+    await flush();
+    expect(settled).toBe(false);
+    release();
+    await flush();
+    expect(await retry).toMatchObject({ ok: true, alreadyExists: true });
+    h.spawner.dispose();
+  });
+
+  it('stops an admitted start after provisioning settles', async () => {
+    const h = queuedHarness();
+    const release = holdProvisioner(h);
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    memory.setBytes(2 * 1024 ** 3);
+    jest.advanceTimersByTime(1000);
+    await flush();
+    const stopped = h.spawner.stop({ callerSessionId: PARENT, childSessionId: start.child.childSessionId });
+    release();
+    expect(await stopped).toMatchObject({ ok: true, child: { status: 'stopped' } });
+    expect(h.provisioner.rollback).toHaveBeenCalledTimes(1);
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    h.spawner.dispose();
+  });
+
+  it('bounds a stop while admitted provisioning is hung', async () => {
+    const h = queuedHarness();
+    const release = holdProvisioner(h);
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    memory.setBytes(2 * 1024 ** 3);
+    jest.advanceTimersByTime(1000);
+    await flush();
+    const stopped = h.spawner.stop({ callerSessionId: PARENT, childSessionId: start.child.childSessionId });
+    jest.advanceTimersByTime(SESSION_CHILD_STOP_START_WAIT_MS);
+    expect(await stopped).toMatchObject({ ok: false, reason: 'starting' });
+    release();
+    await flush();
+    expect(listed(h)[0].status).toBe('stopped');
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+    h.spawner.dispose();
+  });
+
+  it('stops a live child when a queued-start listener calls stop', async () => {
+    const h = queuedHarness();
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    let stopped: ReturnType<typeof h.spawner.stop> | undefined;
+    h.spawner.onQueuedStart(start.child.childSessionId, () => {
+      stopped = h.spawner.stop({ callerSessionId: PARENT, childSessionId: start.child.childSessionId });
+    });
+    memory.setBytes(2 * 1024 ** 3);
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(stopped).toBeDefined();
+    expect(await stopped).toMatchObject({ ok: true, child: { status: 'stopped' } });
+    expect(h.adapter.interruptSession).toHaveBeenCalled();
+    h.spawner.dispose();
+  });
+
+  it('carries a failed queued rollback into the terminal record and completion', async () => {
+    const h = queuedHarness();
+    h.host.startChildSession.mockRejectedValueOnce(new Error('host failed'));
+    h.provisioner.rollback.mockResolvedValueOnce([
+      { step: 'remove-worktree', ok: false, detail: 'locked' },
+      { step: 'delete-branch', ok: true },
+    ]);
+    const start = await h.spawner.start(h.request());
+    if (!start.ok) throw new Error('expected queued start');
+    memory.setBytes(2 * 1024 ** 3);
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(h.registry.get(start.child.childSessionId)?.rollback).toEqual(expect.arrayContaining([
+      { step: 'remove-worktree', ok: false, detail: 'locked' },
+    ]));
+    expect(h.notifier.signalSessionChild.mock.calls[0][0]).toEqual(expect.objectContaining({
+      rollback: expect.arrayContaining([expect.objectContaining({ step: 'remove-worktree', ok: false })]),
+    }));
+    expect(listed(h)[0]).not.toHaveProperty('rollback');
     h.spawner.dispose();
   });
 

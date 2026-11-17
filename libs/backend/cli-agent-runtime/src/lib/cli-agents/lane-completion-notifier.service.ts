@@ -90,6 +90,7 @@ import type {
   SessionChildCompletionEnvelope,
   SessionChildCompletionRefusalReason,
   SessionChildCompletionSubject,
+  SessionChildRollbackStep,
   SessionChildSettle,
 } from '../session-children/session-spawner.port';
 
@@ -291,7 +292,9 @@ export function buildSessionChildCompletionEnvelope(
         `${formatDuration(durationMs)} (settled turn ${settle.turn}).`,
     `Task: ${headline(subject.task) || '(no task headline)'}`,
     `Branch: ${subject.branch}`,
-    subject.neverStartedReason ? 'No worktree or child tab was created.' : `Worktree: ${subject.worktreePath}`,
+    subject.neverStartedReason
+      ? rollbackResourceLine(subject.rollback, subject.worktreePath, subject.branch)
+      : `Worktree: ${subject.worktreePath}`,
   ];
   if (settle.status === 'handed-off' && subject.succeededBy) {
     lines.push(
@@ -338,6 +341,25 @@ export function buildSessionChildCompletionEnvelope(
       toolProfileApplied: subject.toolProfileApplied,
     }),
   };
+}
+
+function rollbackResourceLine(
+  rollback: readonly SessionChildRollbackStep[] | undefined,
+  worktreePath: string,
+  branch: string,
+): string {
+  const failed = rollback?.filter((step) => !step.ok) ?? [];
+  if (!failed.length) return 'No worktree or child tab was created.';
+  const resources = failed.map(({ step }) => {
+    switch (step) {
+      case 'remove-worktree': return `worktree ${worktreePath}`;
+      case 'delete-branch': return `branch ${branch}`;
+      case 'remove-link': return 'child tab or link';
+      case 'release-mcp-root': return 'Ptah tool access for the worktree';
+      case 'release-policy': return 'child permission policy';
+    }
+  });
+  return `Rollback incomplete; may remain: ${resources.join(', ')}.`;
 }
 
 export interface LaneCompletionContext {

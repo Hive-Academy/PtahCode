@@ -15,6 +15,7 @@ import { injectable } from 'tsyringe';
 import type { PhaseKind } from '@ptah-extension/shared';
 import type {
   SessionChildCompletionEnvelope,
+  SessionChildRollbackStep,
   SessionChildSnapshot,
   SessionChildTerminalStatus,
 } from './session-spawner.port';
@@ -39,6 +40,7 @@ export interface SessionChildRecord extends Omit<
 > {
   /** The task as given to {@link ISessionSpawner.start} (without the contract). */
   readonly task: string;
+  readonly rollback?: readonly SessionChildRollbackStep[];
   /** Phase kind from start. Kept off the public snapshot. */
   readonly phaseKind?: PhaseKind;
   /** Phase tool denials from start. Kept off the public snapshot. */
@@ -226,13 +228,13 @@ export class SessionChildRegistry {
 
   /** Preserve an admission that ended before provisioning for status/history. */
   finishPending(childSessionId: string, status: SessionChildTerminalStatus, reason: string,
-    fallback?: SessionChildRecord): SessionChildRecord | undefined {
+    fallback?: SessionChildRecord, rollback?: readonly SessionChildRollbackStep[]): SessionChildRecord | undefined {
     const current = this.records.get(childSessionId);
     if (current) return this.markEnded(childSessionId, status, reason);
     const pending = this.pending.get(childSessionId) ?? fallback;
     if (!pending) return undefined;
     this.pending.delete(childSessionId);
-    const ended: SessionChildRecord = { ...pending, waitingForMemory: false, terminalStatus: status,
+    const ended: SessionChildRecord = { ...pending, ...(rollback ? { rollback } : {}), waitingForMemory: false, terminalStatus: status,
       endedAt: new Date().toISOString(), endReason: reason };
     this.records.set(childSessionId, ended);
     this.endedOrder.push(childSessionId);

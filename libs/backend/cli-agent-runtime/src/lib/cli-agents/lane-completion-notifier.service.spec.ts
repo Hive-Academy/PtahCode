@@ -1610,6 +1610,32 @@ describe('LaneCompletionNotifier.signalSessionChild', () => {
   });
 
   describe('envelope', () => {
+    it('names resources remaining after a failed queued rollback', () => {
+      const envelope = buildSessionChildCompletionEnvelope(subject({
+        neverStartedReason: 'provisioning failed before start: git failed',
+        rollback: [{ step: 'remove-worktree', ok: false }, { step: 'delete-branch', ok: false }],
+      }), settle({ status: 'failed' }), []);
+      expect(envelope.text).toContain(`worktree ${WT}`);
+      expect(envelope.text).toContain('branch feat/auth-fix');
+      expect(envelope.text).not.toContain('No worktree or child tab was created.');
+    });
+    it('keeps the clean queued rollback completion text', () => {
+      const envelope = buildSessionChildCompletionEnvelope(subject({
+        neverStartedReason: 'provisioning failed before start: host failed',
+        rollback: [{ step: 'remove-worktree', ok: true }, { step: 'delete-branch', ok: true }],
+      }), settle({ status: 'failed' }), []);
+      expect(envelope.text).toContain('No worktree or child tab was created.');
+    });
+    it('uses plain language for failed internal rollback steps', () => {
+      const envelope = buildSessionChildCompletionEnvelope(subject({
+        neverStartedReason: 'provisioning failed before start: host failed',
+        rollback: [{ step: 'release-mcp-root', ok: false }, { step: 'release-policy', ok: false }],
+      }), settle({ status: 'failed' }), []);
+      expect(envelope.text).toContain('Ptah tool access for the worktree');
+      expect(envelope.text).toContain('child permission policy');
+      expect(envelope.text).not.toContain('release-mcp-root');
+      expect(envelope.text).not.toContain('release-policy');
+    });
     it.each([
       ['cancelled before start: parent session ended', 'unverified'],
       ['memory wait timed out before start: waited for memory', 'failed'],

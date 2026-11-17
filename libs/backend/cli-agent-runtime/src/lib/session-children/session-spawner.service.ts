@@ -20,6 +20,7 @@
  */
 import { inject, injectable, type DependencyContainer } from 'tsyringe';
 import { SessionMemoryAdmission, SessionMemoryTicket } from './session-memory-admission';
+import { waitForChildStart } from './session-start-stop-wait';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 import { isAbsolute, resolve } from 'node:path';
 import { access, readFile, realpath } from 'node:fs/promises';
@@ -231,7 +232,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     Promise<SessionChildStartResult>
   >();
   private readonly disposers: Array<() => void> = [];
-  private readonly queuedAdmissions = new Map<string, { ticket: SessionMemoryTicket; reservation: SessionChildReservation }>();
+  private readonly queuedAdmissions = new Map<string, { ticket: SessionMemoryTicket; reservation: SessionChildReservation; cancelled?: string }>();
   private readonly queuedStartListeners = new Map<string, (child: SessionChildSnapshot) => void>();
 
   onQueuedStart(childSessionId: string, listener: (child: SessionChildSnapshot) => void): void {
@@ -546,9 +547,9 @@ export class SessionSpawnerService implements ISessionSpawner {
       this.queuedAdmissions.set(childTabId, { ticket, reservation: guard.reservation });
       const run = admitted.then(async () => {
         if (!ticket.isPending() || this.disposed) return this.refuseStart('session-start-failed', 'cancelled before start');
-        this.queuedAdmissions.delete(childTabId);
         ticket.admitted();
-        const result = await this.routeAndStart(childTabId, request, guard, prepared);
+        const cancelled = () => this.queuedAdmissions.get(childTabId)?.cancelled;
+        const result = await this.routeAndStart(childTabId, request, guard, prepared, cancelled);
         if (result.ok) {
           const listener = this.queuedStartListeners.get(childTabId);
           if (listener) {
@@ -556,10 +557,9 @@ export class SessionSpawnerService implements ISessionSpawner {
             catch (error: unknown) { this.logger?.error('[SessionSpawner] Queued worktree notification failed', error instanceof Error ? error : new Error(String(error))); }
           }
         }
-        if (!result.ok) await this.finishQueuedAdmission(childTabId, 'failed', result.detail, pendingRecord);
+        if (!result.ok) await this.finishQueuedAdmission(childTabId, cancelled() ? 'stopped' : 'failed', cancelled() ?? result.detail, pendingRecord, result.rollback);
         return result;
       }).catch(async (error: unknown) => {
-        this.queuedAdmissions.delete(childTabId);
         if (this.registry.pendingOf([guard.caller]).some((child) => child.childSessionId === childTabId))
           await this.finishQueuedAdmission(childTabId, /timed out/i.test(errorMessage(error)) ? 'timed-out' : 'failed', errorMessage(error), pendingRecord);
         return this.refuseStart('session-start-failed', errorMessage(error));
@@ -585,10 +585,11 @@ export class SessionSpawnerService implements ISessionSpawner {
   }
 
   private async finishQueuedAdmission(id: string, status: 'failed' | 'timed-out' | 'stopped', reason: string,
-    fallback?: SessionChildRecord): Promise<void> {
+    fallback?: SessionChildRecord, rollback?: readonly SessionChildRollbackStep[]): Promise<void> {
+    if (this.registry.get(id)?.terminalStatus) return;
     const detail = status === 'failed' ? `provisioning failed before start: ${reason}`
       : status === 'timed-out' ? `memory wait timed out before start: ${reason}` : reason;
-    const ended = this.registry.finishPending(id, status, detail, fallback);
+    const ended = this.registry.finishPending(id, status, detail, fallback, rollback);
     if (!ended) return;
     await this.settle(id, status === 'timed-out' ? 'timeout' : 'failed', detail, Date.now());
   }
@@ -602,7 +603,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     existing: Extract<SessionChildStartResult, { ok: true }>,
   ): Promise<SessionChildStartResult> {
     const run = this.pendingStarts.get(existing.child.childSessionId);
-    if (this.queuedAdmissions.has(existing.child.childSessionId))
+    if (this.queuedAdmissions.get(existing.child.childSessionId)?.ticket.isPending())
       return { ...existing, child: { ...existing.child, status: 'queued', waitingForMemory: true } };
     if (!run) return existing;
     const settled = await run;
@@ -646,6 +647,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       readonly skillPrompts: readonly string[];
       readonly resolvedSkills: readonly { name: string; text: string }[];
     },
+    cancelled?: () => string | undefined,
   ): Promise<SessionChildStartResult> {
     // After the cheap argument checks, still before any git work: a refused
     // model leaves no worktree, branch or registry record behind.
@@ -721,6 +723,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       }
     }
 
+    const beforeProvision = cancelled?.();
+    if (beforeProvision) return this.refuseStart('session-start-failed', beforeProvision);
     if (this.disposed) return this.refuseStart('session-start-failed', 'host disposed before start');
     let provisioned;
     if (request.attachToSessionId) {
@@ -774,6 +778,11 @@ export class SessionSpawnerService implements ISessionSpawner {
     // older, so it never reads as this child's deliverable.
     const startedAt = new Date().toISOString();
     const { worktree } = provisioned;
+    const afterProvision = cancelled?.();
+    if (afterProvision) return {
+      ok: false, refusal: 'session-start-failed', detail: afterProvision,
+      rollback: worktree.owned === false ? [] : await this.provisioner.rollback(worktree),
+    };
     let canonicalWorktreePath: string;
     try {
       canonicalWorktreePath = await realpath(worktree.worktreePath);
@@ -838,6 +847,8 @@ export class SessionSpawnerService implements ISessionSpawner {
         runtime.policy,
       );
       await this.retainMcpRoot(childTabId, runtime, worktree.worktreePath);
+      const beforeHostStart = cancelled?.();
+      if (beforeHostStart) return await this.failStart(childTabId, runtime, beforeHostStart);
       if (this.disposed) return await this.failStart(childTabId, runtime, 'host disposed before start');
 
       const contract = renderSessionChildContract({
@@ -873,6 +884,11 @@ export class SessionSpawnerService implements ISessionSpawner {
         ...(resolvedEffort ? { effort: resolvedEffort } : {}),
         ...(request.phase ? { phase: { ...request.phase, skills: resolvedSkills } } : {}),
       });
+      const afterHostStart = cancelled?.();
+      if (afterHostStart) {
+        if (outcome.started) await this.interruptInBackground(childTabId);
+        return await this.failStart(childTabId, runtime, afterHostStart);
+      }
       if (!outcome.started) {
         return await this.failStart(
           childTabId,
@@ -1213,6 +1229,15 @@ export class SessionSpawnerService implements ISessionSpawner {
     };
   }
 
+  private startingStopRefusal(pending: SessionChildRecord, stopRecorded = false): SessionChildStopResult {
+    const next = stopRecorded
+      ? 'The stop is recorded and is applied when the start settles. Call ptah_session_status to confirm.'
+      : 'nothing was stopped. Call ptah_session_status until it is live, then stop it.';
+    return { ok: false, reason: 'starting',
+      detail: `session ${pending.childSessionId} is still starting (branch ${pending.branch}); ${next}`,
+    };
+  }
+
   async stop(query: SessionChildStopQuery): Promise<SessionChildStopResult> {
     // A pending start has no session to interrupt yet (review m5).
     const pending = this.ownedPending(
@@ -1220,22 +1245,32 @@ export class SessionSpawnerService implements ISessionSpawner {
       query.childSessionId,
     );
     if (pending) {
+      let continueToLiveStop = false;
       const queued = this.queuedAdmissions.get(pending.childSessionId);
       if (queued) {
-        this.queuedAdmissions.delete(pending.childSessionId);
-        this.memoryAdmission.cancel(queued.ticket);
-        this.registry.release(queued.reservation);
-        await this.finishQueuedAdmission(pending.childSessionId, 'stopped', 'cancelled before start');
-        const ended = this.registry.get(pending.childSessionId);
-        if (!ended) throw new Error(`Queued child ${pending.childSessionId} was not recorded after cancellation`);
-        return { ok: true, child: this.snapshotOf(ended),
-          requestedSessionId: pending.childSessionId, followed: false, alreadyEnded: false };
+        if (!queued.ticket.isPending()) {
+          queued.cancelled = 'cancelled before start';
+          if (!await waitForChildStart(this.pendingStarts.get(pending.childSessionId)))
+            return this.startingStopRefusal(pending, true);
+          const ended = this.registry.get(pending.childSessionId);
+          if (!ended) throw new Error(`Queued child ${pending.childSessionId} was not recorded after cancellation`);
+          if (ended.terminalStatus)
+            return { ok: true, child: this.snapshotOf(ended),
+              requestedSessionId: pending.childSessionId, followed: false, alreadyEnded: false };
+          // Defensive: a start that settled live after the wait takes the normal stop path.
+          continueToLiveStop = true;
+        } else {
+          this.queuedAdmissions.delete(pending.childSessionId);
+          this.memoryAdmission.cancel(queued.ticket);
+          this.registry.release(queued.reservation);
+          await this.finishQueuedAdmission(pending.childSessionId, 'stopped', 'cancelled before start');
+          const ended = this.registry.get(pending.childSessionId);
+          if (!ended) throw new Error(`Queued child ${pending.childSessionId} was not recorded after cancellation`);
+          return { ok: true, child: this.snapshotOf(ended),
+            requestedSessionId: pending.childSessionId, followed: false, alreadyEnded: false };
+        }
       }
-      return {
-        ok: false,
-        reason: 'starting',
-        detail: `session ${pending.childSessionId} is still starting (branch ${pending.branch}); nothing was stopped. Call ptah_session_status until it is live, then stop it.`,
-      };
+      if (!continueToLiveStop) return this.startingStopRefusal(pending);
     }
     const owned = this.resolveOwned(
       query.callerSessionId,
@@ -1496,11 +1531,14 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (this.disposed) return;
     this.disposed = true;
     for (const [id, queued] of this.queuedAdmissions) {
+      if (!queued.ticket.isPending()) {
+        queued.cancelled = 'cancelled before start: host disposed';
+        continue;
+      }
       this.memoryAdmission.cancel(queued.ticket);
       this.registry.release(queued.reservation);
       void this.finishQueuedAdmission(id, 'stopped', 'cancelled before start: host disposed');
     }
-    this.queuedAdmissions.clear();
     for (const release of this.disposers.splice(0)) release();
     for (const child of this.registry.live()) {
       const runtime = this.runtimes.get(child.childSessionId);
@@ -1625,8 +1663,15 @@ export class SessionSpawnerService implements ISessionSpawner {
 
   private onSessionEnd(payload: SessionEndPayload): void {
     for (const [id, queued] of this.queuedAdmissions) {
-      const pending = this.registry.pendingOf([payload.sessionId]).find(child => child.childSessionId === id);
+      const record = this.registry.get(id);
+      const pending = this.registry.pendingOf([payload.sessionId]).find(child => child.childSessionId === id)
+        ?? (record && (record.parentSessionId === payload.sessionId || record.parentSdkSessionId === payload.sessionId)
+          ? record : undefined);
       if (!pending) continue;
+      if (!queued.ticket.isPending()) {
+        queued.cancelled = 'cancelled before start: parent session ended';
+        continue;
+      }
       this.queuedAdmissions.delete(id);
       this.memoryAdmission.cancel(queued.ticket);
       this.registry.release(queued.reservation);
@@ -1955,6 +2000,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         {
           childSessionId,
           label: child.label,
+          ...(child.rollback ? { rollback: child.rollback } : {}),
           ...(!child.sdkSessionId && child.endReason &&
           /before start/i.test(child.endReason)
             ? { neverStartedReason: child.endReason } : {}),
@@ -2124,7 +2170,7 @@ export class SessionSpawnerService implements ISessionSpawner {
 
   private statusOf(child: SessionChildRecord): SessionChildStatus {
     if (child.terminalStatus) return child.terminalStatus;
-    if (this.queuedAdmissions.has(child.childSessionId)) return 'queued';
+    if (this.queuedAdmissions.get(child.childSessionId)?.ticket.isPending()) return 'queued';
     if (child.pendingPermission) return 'awaiting-permission';
     const phase = this.phaseOf(child);
     switch (phase) {
@@ -2241,6 +2287,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     delete snapshot['phaseKind'];
     delete snapshot['phaseDisallowedTools'];
     delete snapshot['toolProfileApplied'];
+    delete snapshot['rollback'];
     const held = record.heldCompletion;
     const latest =
       record.terminalStatus === 'handed-off'
@@ -2257,7 +2304,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         'status' | 'heldCompletion' | 'outcome'
       >),
       status: this.statusOf(record),
-      ...(this.queuedAdmissions.has(record.childSessionId) ? { waitingForMemory: true } : {}),
+      ...(this.queuedAdmissions.get(record.childSessionId)?.ticket.isPending() ? { waitingForMemory: true } : {}),
       ...(held
         ? {
             heldCompletion: {
