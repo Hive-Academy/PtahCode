@@ -57,8 +57,8 @@ Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processe
 | B2.3b: synchronous admission and reply deadline | TASK_2026_2181_dbbb | #1367 | merged |
 | B2.4 to B2.6: status, wait and read polish, renderer, agent text | TASK_2026_2181_dbbb | #1375 | merged |
 | B3 PR 1: external owner key and completion outbox (runtime) | TASK_2026_2181_dbbb | #1377 | merged |
-| B3 PR 2: HTTP binding and piggyback on the next tool result | TASK_2026_2181_dbbb | #1389 | in review |
-| B3 PR 3: stdio owner, `ptah_agent_wait` envelope, agent text | TASK_2026_2181_dbbb | none | not started |
+| B3 PR 2: HTTP binding and piggyback on the next tool result | TASK_2026_2181_dbbb | #1389 | merged |
+| B3 PR 3: stdio owner, `ptah_agent_wait` envelope, agent text | TASK_2026_2181_dbbb | #1394 | in review |
 | P2: Nx daemon and worktree cost (PR 1: verify without the daemon in worktrees) | TASK_2026_2242_f87b | #1379 | merged |
 | P2: Nx daemon and worktree cost (PR 2: pre-push hook without the daemon in worktrees) | TASK_2026_2242_f87b | #1381 | merged |
 | P2: Nx daemon and worktree cost (PR 3: dry-run cleanup command for stale Nx data) | TASK_2026_2242_f87b | #1383 | merged |
@@ -67,7 +67,7 @@ Source report for those: `D:\projects\ptah-extension\.ptah\tmp\orphaned-processe
 | P3: process tree stop on Windows (batch 3: SDK spawner and Codex app server) | TASK_2026_2231_816c | #1390 | merged |
 | P3: process tree stop on Windows (batch 4: verify script, watcher and auth command) | TASK_2026_2231_816c | #1391 | merged |
 | P3: process tree stop on Windows (batch 5: Codex app server root exit) | TASK_2026_2231_816c | #1392 | merged |
-| P3: process tree stop on Windows (batch 6: shared spawner, watcher and CLI adapter root exit) | TASK_2026_2231_816c | #1393 | in review |
+| P3: process tree stop on Windows (batch 6: shared spawner, watcher and CLI adapter root exit) | TASK_2026_2231_816c | #1393 | merged |
 | P4a: extract shared memory gate | TASK_2026_2181_dbbb | #1382 | merged |
 | P4b: session memory queue admission | TASK_2026_2181_dbbb | #1388 | merged |
 | P5: host load (PR 1: measure task index rebuilds and plan limits load) | TASK_2026_2241_c297 | #1380 | merged |

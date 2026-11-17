@@ -88,6 +88,7 @@ import {
   RunCheckArgsSchema,
 } from '../mcp-core/wait-tools-args.schema';
 import { runAgentWait } from '../mcp-core/agent-wait.tool';
+import { markWaitResponse } from '../mcp-core/completion-delivery';
 import { runCheck } from '../mcp-core/run-check.tool';
 import { handleRouteToolCall } from '../mcp-core/route-tool-handlers';
 import type { OutcomeReportDependencies } from '../mcp-core/tools/outcome-report.tool';
@@ -497,6 +498,7 @@ export class AgentToolDispatcher {
             modelTier: p.modelTier,
             resumeSessionId: p.resume_session_id,
             parentSessionId: callerSessionId,
+            externalOwner: request._externalOwner,
             role: p.role,
             effort: p.effort,
             taskKind: p.taskKind,
@@ -567,12 +569,12 @@ export class AgentToolDispatcher {
           request,
           'agent_spawn',
           `Replay of earlier spawn: ${result.agentId}\n` +
-            'An identical ptah_agent_spawn call started this lane less than 120 s ago, so no second lane was started. ' +
-            'Use ptah_agent_status / ptah_agent_read with this agent ID. ' +
+            'An identical agent_spawn call started this lane less than 120 s ago, so no second lane was started. ' +
+            'Use agent_status / agent_read with this agent ID. ' +
             'To start another identical lane on purpose, pass force: true or a distinct idempotencyKey.' +
             (callerSessionId
               ? ''
-              : '\nNo parent session: completion signals and reports will not be pushed. Use agent_wait / agent_status / agent_read.'),
+              : '\nExternal completion: check the next tool result for a Completion ID block, or call agent_wait to wait. Use agent_status / agent_read.'),
           { agentId: result.agentId },
         );
       }
@@ -605,7 +607,7 @@ export class AgentToolDispatcher {
         formattedSpawn +
           (callerSessionId
             ? ''
-            : '\nNo parent session: completion signals and reports will not be pushed. Use agent_wait / agent_status / agent_read.'),
+            : '\nExternal completion: check the next tool result for a Completion ID block, or call agent_wait to wait. Use agent_status / agent_read.'),
         {
           agentId: result.agentId,
           cli: result.cli,
@@ -1062,7 +1064,7 @@ export class AgentToolDispatcher {
         readOutput: (agentId, tail) => this.ptahAPI.agent.read(agentId, tail),
         signal: request._abortSignal,
       });
-      return await this.toolSuccess(request, 'agent_wait', text, {
+      const response = await this.toolSuccess(request, 'agent_wait', text, {
         timedOut: waited?.timedOut ?? false,
         cancelled: waited?.cancelled ?? false,
         lanes: (waited?.entries ?? []).map((entry) => ({
@@ -1078,6 +1080,9 @@ export class AgentToolDispatcher {
             : {}),
         })),
       });
+      return markWaitResponse(response, request._externalOwner?.exclusive ? (waited?.entries ?? [])
+        .flatMap(entry => entry.state === 'exited' && entry.info.completedAt
+          ? [`${entry.agentId}:${entry.info.completedAt}`] : []) : []);
     } catch (err: unknown) {
       return toolError(
         request,

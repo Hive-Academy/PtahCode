@@ -21,6 +21,7 @@
  */
 
 import 'reflect-metadata';
+import { prepareCompletion } from './completion-delivery';
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -368,6 +369,24 @@ describe('terminal lane read acknowledgment', () => {
     );
     expect(resolveCallerParentId).toHaveBeenCalledWith('wait-tab-alias');
     expect(wasTerminalReadAcknowledged(key)).toBe(true);
+  });
+
+  it('does not tombstone an HTTP completion when wait has an internal caller session', async () => {
+    const owner = { transport: 'http' as const, principal: 'a'.repeat(32), exclusive: true };
+    const box = new ExternalCompletionOutbox(Object.assign(Object.create(Logger.prototype), { info: jest.fn() }) as Logger);
+    const waitForAgents = jest.fn().mockResolvedValue({
+      mode: 'all', timedOut: false, cancelled: false, waitedMs: 0,
+      entries: [{ agentId: agent.agentId, state: 'exited', info: agent }],
+    });
+    const deps = buildDeps({ ptahAPI: buildPtahAPIStub({ agent: { waitForAgents, read: jest.fn().mockResolvedValue({ stdout: '', stderr: '' }) } }) });
+    const response = await handleMCPRequest(makeRequest({
+      method: 'tools/call', _callerSessionId: 'internal-parent', _externalOwner: owner,
+      params: { name: 'ptah_agent_wait', arguments: { agentIds: [agent.agentId], timeoutSec: 0 } },
+    }), deps);
+    const prepared = prepareCompletion(response, 'tools/call', owner, box, 'http');
+    prepared.success();
+    box.record({ completionId: `${agent.agentId}:${agent.completedAt}`, agentId: agent.agentId, owner, body: 'late', completedAt: agent.completedAt ?? '', recordedAt: Date.now() });
+    expect(box.pendingCount(owner)).toBe(1);
   });
 
   it.each(['status', 'resolver', 'cancellation'] as const)(
