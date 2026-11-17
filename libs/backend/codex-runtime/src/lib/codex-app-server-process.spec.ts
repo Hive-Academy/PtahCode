@@ -205,6 +205,7 @@ describe('CodexAppServerProcess', () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     try {
       jest.mocked(killProcessTree).mockImplementationOnce(async (_pid, _signal, onError) => {
+        child.exitCode = 1;
         child.emit('exit', null, 'SIGTERM');
         onError?.(new Error('taskkill failed'));
       });
@@ -273,11 +274,8 @@ describe('CodexAppServerProcess', () => {
     expect(now).toHaveBeenCalledTimes(3);
   });
 
-  it('queries once after a host tree kill and settles close while the query is pending', async () => {
-    let finishQuery: ((value: Awaited<ReturnType<ProcessQuery>>) => void) | undefined;
-    const query = jest.fn<ReturnType<ProcessQuery>, []>(() => new Promise(resolve => {
-      finishQuery = resolve;
-    }));
+  it('skips orphan cleanup after a successful host tree kill', async () => {
+    const query = jest.fn<ReturnType<ProcessQuery>, []>(async () => []);
     const kill = jest.fn(async (_pid: number) => undefined);
     useWindowsExecutableFixture({ query, kill, now: () => 1000 });
     Object.defineProperty(process, 'platform', { value: 'win32' });
@@ -289,15 +287,51 @@ describe('CodexAppServerProcess', () => {
     jest.advanceTimersByTime(1000);
     expect(killProcessTree).toHaveBeenCalledWith(42, 'SIGKILL', expect.any(Function));
     await flush();
-    expect(query).toHaveBeenCalledTimes(1);
     await closing;
     expect(child.kill).not.toHaveBeenCalled();
     child.emit('exit', 0, null);
     await flush();
-    expect(query).toHaveBeenCalledTimes(1);
-    finishQuery?.([]);
-    await flush();
+    expect(query).not.toHaveBeenCalled();
     expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('cleans up once after a failed tree kill when the root exits later', async () => {
+    const query = jest.fn<ReturnType<ProcessQuery>, []>(async () => []);
+    useWindowsExecutableFixture({ query, now: () => 1000 });
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    await start();
+    const closing = runtime.close();
+    jest.advanceTimersByTime(1000);
+    jest.mocked(killProcessTree).mock.calls[0][2]?.(new Error('taskkill failed'));
+    await closing;
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(query).not.toHaveBeenCalled();
+    child.exitCode = 1;
+    child.emit('exit', 1, null);
+    await flush();
+    expect(query).toHaveBeenCalledTimes(1);
+    child.emit('exit', 1, null);
+    await flush();
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans up once after a failed tree kill when the root already exited', async () => {
+    const query = jest.fn<ReturnType<ProcessQuery>, []>(async () => []);
+    useWindowsExecutableFixture({ query, now: () => 1000 });
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    await start();
+    const closing = runtime.close();
+    jest.advanceTimersByTime(1000);
+    child.exitCode = 1;
+    child.emit('exit', 1, null);
+    jest.mocked(killProcessTree).mock.calls[0][2]?.(new Error('taskkill failed'));
+    await closing;
+    await flush();
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledTimes(1);
+    child.emit('exit', 1, null);
+    await flush();
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it.each([undefined, 0])('skips orphan query when the root PID is %s', async (pid) => {

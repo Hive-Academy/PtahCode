@@ -1,4 +1,33 @@
-import { killProcessTree, queryWindowsProcesses, WindowsOrphanDescendants, type ProcessQuery } from '@ptah-extension/platform-core';
+import { killProcessTree, queryWindowsProcesses, WindowsOrphanDescendants, type ProcessQuery, type SpawnedProcessHandle } from '@ptah-extension/platform-core';
+
+/** Signal deaths can leave exitCode null on off-thread process handles. */
+export function childHasExited(child: SpawnedProcessHandle): boolean {
+  if (child.exitCode !== null) return true;
+  if ('signalCode' in child && child.signalCode != null) return true;
+  return 'exitObserved' in child && child.exitObserved === true;
+}
+
+export function cleanupAfterFailedTreeKill(
+  child: SpawnedProcessHandle,
+  exitObserved: boolean,
+  cleanup: () => void,
+): void {
+  if (exitObserved || childHasExited(child)) cleanup();
+  else child.once('exit', cleanup);
+}
+
+export function startOrphanCleanupForRoot(
+  child: SpawnedProcessHandle | undefined,
+  startedAt: number | undefined,
+  options: OrphanCleanupOptions,
+  report: (error: Error) => void,
+): boolean {
+  const pid = child?.pid;
+  if (process.platform !== 'win32' || !pid || !Number.isSafeInteger(pid) ||
+      pid <= 0 || startedAt === undefined) return false;
+  startOrphanCleanup(pid, startedAt, options, report);
+  return true;
+}
 
 export interface OrphanCleanupOptions {
   readonly query?: ProcessQuery;
