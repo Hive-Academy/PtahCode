@@ -362,7 +362,7 @@ describe('buildAgentNamespace — spawn (non-ptahCli)', () => {
       expect.objectContaining({
         parentSessionId: undefined,
         notice: expect.stringContaining(
-          'Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.',
+          'completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.',
         ),
       }),
     );

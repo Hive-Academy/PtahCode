@@ -77,6 +77,7 @@ import {
   buildAgentWaitTool,
   runAgentWait,
 } from './agent-wait.tool';
+import { markWaitResponse } from './completion-delivery';
 import {
   RUN_CHECK_TOOL_NAME,
   buildRunCheckTool,
@@ -1356,7 +1357,9 @@ async function handleIndividualTool(
                   'To start another identical lane on purpose, pass force: true or a distinct idempotencyKey.' +
                   (callerSessionId
                     ? ''
-                    : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
+                    : request._externalOwner?.exclusive
+                    ? '\nExternal completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.'
+                    : '\nNo parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
                 deps,
               );
             }
@@ -1467,7 +1470,9 @@ async function handleIndividualTool(
             replyWithLimits +
               (callerSessionId
                 ? ''
-                : '\nNo parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
+                : request._externalOwner?.exclusive
+                    ? '\nExternal completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.'
+                    : '\nNo parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
             deps,
           );
         } finally {
@@ -1809,6 +1814,7 @@ async function handleIndividualTool(
           requestedTimeoutSec,
           HTTP_MAX_AGENT_WAIT_SEC,
         );
+        const terminalIds: string[] = [];
         const text = await runAgentWait(
           { ...parsed.data, timeoutSec },
           {
@@ -1821,6 +1827,9 @@ async function handleIndividualTool(
               );
               for (const entry of result.entries) {
                 if (entry.state !== 'exited') continue;
+                if (entry.info.completedAt && request._externalOwner?.exclusive && !request._callerSessionId?.trim()) {
+                  terminalIds.push(`${entry.agentId}:${entry.info.completedAt}`);
+                }
                 try {
                   const raw = request._callerSessionId;
                   const reader = raw
@@ -1845,7 +1854,7 @@ async function handleIndividualTool(
               : {}),
           },
         );
-        return await createToolSuccessResponse(request, text, deps);
+        return markWaitResponse(await createToolSuccessResponse(request, text, deps), terminalIds);
       }
 
       case RUN_CHECK_TOOL_NAME: {

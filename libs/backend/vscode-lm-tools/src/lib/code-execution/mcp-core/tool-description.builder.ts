@@ -642,19 +642,17 @@ export function buildAgentSpawnTool({
       'WHICH of either family exists on this machine is a runtime fact — call ' +
       'ptah_agent_list; do not assume a provider from any list you have read. ' +
       'It may reply "starting" and runs while you work. ' +
-      'Do NOT poll: when the agent reaches a terminal status, a ' +
-      '<agent-lane-completed> turn is pushed into this session carrying its ' +
+      'External clients receive a Completion ID block on the next tool result, including wait. ' +
+      'In-process Ptah sessions receive a pushed completion turn carrying ' +
       'status, exit code, duration and — when you declared "deliverables" — ' +
       'whether each declared file was actually written. A verdict of ' +
       '"no-deliverable" means the agent exited cleanly WITHOUT doing the ' +
       'work, so declare "deliverables" on every spawn whose output is a file. ' +
-      'To block until lanes end, call ptah_agent_wait; never poll ptah_agent_status. ' +
+      `Keep working, or call ${transport === 'stdio' ? 'agent_wait' : 'ptah_agent_wait'} to block until lanes end. ` +
       (transport === 'http'
         ? `HTTP calls wait at most ${HTTP_MAX_AGENT_WAIT_SEC} s, so repeat while lanes run. `
         : '') +
-      'Use ptah_agent_status and ptah_agent_read as the fallback when no ' +
-      'signal arrives (some adapters report nothing useful, and a signal is ' +
-      'refused when this session is no longer live). ' +
+      'Use status and read as recovery tools when a completion is unavailable. ' +
       'For Ptah CLI agents, pass ptahCliId (from ptah_agent_list). ' +
       'Use modelTier to control capability level: "opus" for complex work, ' +
       '"sonnet" (default for Ptah CLI agents) for balanced work, ' +
@@ -719,7 +717,7 @@ export function buildAgentSpawnTool({
             'The files this agent MUST write before it exits. A relative ' +
             'entry resolves against taskFolder when one is given, otherwise ' +
             'against workingDirectory. Two things use it: the agent is told ' +
-            'to write exactly these paths, and the completion signal pushed ' +
+            'to write exactly these paths, and the completion block delivered ' +
             'back to you reports whether each one exists and is non-empty. ' +
             'Omit it and the signal can only say the process exited — an ' +
             'agent that exits 0 having written nothing then looks like a ' +

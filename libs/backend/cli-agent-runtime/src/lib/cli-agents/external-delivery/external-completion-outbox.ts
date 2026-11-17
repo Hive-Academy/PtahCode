@@ -39,6 +39,7 @@ export class ExternalCompletionOutbox {
   private readonly claims = new Map<string, HeldClaim>();
   private readonly held = new Map<string, ExternalCompletionEntry>();
   private readonly retiredOwners = new Map<string, number>();
+  private readonly delivered = new Map<string, number>();
   private isActiveHttpOwner?: (owner: ExternalOwnerKey) => boolean;
   private readonly maxPerOwner: number;
   private readonly maxTotal: number;
@@ -63,6 +64,9 @@ export class ExternalCompletionOutbox {
 
   private prune(): void {
     const now = this.now();
+    for (const [id, at] of this.delivered) {
+      if (now - at > this.maxAgeMs) this.delivered.delete(id);
+    }
     for (const [id, retiredAt] of this.retiredOwners) {
       if (now - retiredAt > this.maxAgeMs) this.retiredOwners.delete(id);
     }
@@ -117,7 +121,12 @@ export class ExternalCompletionOutbox {
       return;
     }
     if (this.entries.has(entry.completionId)) return;
-    const note = '\n[Completion truncated; call ptah_agent_read for the full lane output.]';
+    if (this.delivered.has(`${ownerKeyId(entry.owner)}:${entry.completionId}`)) {
+      this.logger.info('[ExternalCompletionOutbox] Discarded tombstone-suppressed completion');
+      return;
+    }
+    const readTool = entry.owner.transport === 'stdio' ? 'agent_read' : 'ptah_agent_read';
+    const note = `\n[Completion truncated; call ${readTool} for the full lane output.]`;
     const bytes = Buffer.byteLength(entry.body);
     let body = entry.body;
     if (bytes > this.maxBodyBytes) {
@@ -169,7 +178,10 @@ export class ExternalCompletionOutbox {
     this.claims.delete(claimId);
     let count = 0;
     for (const entry of claim.entries) {
-      if (this.removeEntry(entry)) count++;
+      if (this.removeEntry(entry)) {
+        this.markDelivered(owner, entry.completionId);
+        count++;
+      }
     }
     return count;
   }
@@ -186,6 +198,9 @@ export class ExternalCompletionOutbox {
   discardOwner(owner: ExternalOwnerKey): number {
     this.prune();
     this.retiredOwners.set(ownerKeyId(owner), this.now());
+    for (const id of this.delivered.keys()) {
+      if (id.startsWith(`${ownerKeyId(owner)}:`)) this.delivered.delete(id);
+    }
     let dropped = 0;
     while (this.retiredOwners.size > this.maxTotal) {
       const oldest = this.retiredOwners.keys().next().value;
@@ -207,11 +222,36 @@ export class ExternalCompletionOutbox {
     return Array.from(this.entries.values()).find(entry => entry.agentId === agentId && ownerKeysEqual(owner, entry.owner));
   }
 
+  hasCompletion(owner: ExternalOwnerKey, completionId: string): boolean {
+    this.prune();
+    const entry = this.entries.get(completionId);
+    return entry !== undefined && ownerKeysEqual(owner, entry.owner);
+  }
+
   acknowledgeCompletion(owner: ExternalOwnerKey, completionId: string): boolean {
     this.prune();
     const entry = this.entries.get(completionId);
     if (!entry || !ownerKeysEqual(owner, entry.owner) || this.held.has(completionId)) return false;
-    return this.entries.delete(completionId);
+    this.markDelivered(owner, completionId);
+    return true;
+  }
+
+  /** Suppress a record that arrives after a terminal wait reply was written. */
+  markDelivered(owner: ExternalOwnerKey, completionId: string): void {
+    this.prune();
+    if (!owner.exclusive || this.retiredOwners.has(ownerKeyId(owner))) return;
+    const recorded = this.entries.get(completionId);
+    if (recorded && ownerKeysEqual(owner, recorded.owner) && !this.held.has(completionId)) {
+      this.removeEntry(recorded);
+    }
+    const id = `${ownerKeyId(owner)}:${completionId}`;
+    this.delivered.delete(id);
+    this.delivered.set(id, this.now());
+    while (this.delivered.size > this.maxTotal) {
+      const oldest = this.delivered.keys().next().value;
+      if (oldest === undefined) break;
+      this.delivered.delete(oldest);
+    }
   }
 
   pendingCount(owner: ExternalOwnerKey): number {

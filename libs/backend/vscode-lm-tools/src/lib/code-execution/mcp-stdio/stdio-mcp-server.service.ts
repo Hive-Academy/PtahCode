@@ -23,6 +23,12 @@
  */
 
 import { injectable, inject } from 'tsyringe';
+import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
+import { CLI_AGENT_RUNTIME_TOKENS, derivePrincipal, type ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
+import type { ExternalOwnerKey } from '@ptah-extension/shared';
+import { runWithMcpRequestContext } from '../mcp-core/mcp-request-context';
+import { prepareCompletion } from '../mcp-core/completion-delivery';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
 import type {
   MCPRequest,
@@ -92,13 +98,31 @@ export class StdioMcpServerService {
   >();
   /** Replies to calls the peer cancelled: they must not be sent. */
   private readonly cancelledResponses = new WeakSet<MCPResponse>();
+  private readonly owner: ExternalOwnerKey = Object.freeze({
+    transport: 'stdio',
+    principal: derivePrincipal(randomBytes(32).toString('hex')),
+    exclusive: true,
+  });
+  private disposed = false;
 
   constructor(
     @inject(TOKENS.LOGGER)
     private readonly logger: Logger,
     @inject(TOKENS.PTAH_API_BUILDER)
     private readonly apiBuilder: PtahAPIBuilder,
+    @inject(CLI_AGENT_RUNTIME_TOKENS.EXTERNAL_COMPLETION_OUTBOX, { isOptional: true })
+    private readonly completionOutbox?: ExternalCompletionOutbox,
   ) {}
+
+  /** The wire writer MUST call exactly one of success or failure per prepared response,
+   * and MUST call dispose on stream end. Without this, a claim lease expires and
+   * the completion is offered again. */
+  prepareToolResponse(response: MCPResponse): { response: MCPResponse; success(): void; failure(): void } {
+    if (this.disposed || this.wasCancelledByPeer(response)) {
+      return { response, success: () => undefined, failure: () => undefined };
+    }
+    return prepareCompletion(response, 'tools/call', this.owner, this.completionOutbox);
+  }
 
   /**
    * Register the CLI-supplied composite-tool handler. Called once by
@@ -163,8 +187,8 @@ export class StdioMcpServerService {
    * when the session-submit handler has not yet been registered.
    */
   async handleToolsCall(request: MCPRequest): Promise<MCPResponse> {
-    const params = request.params as
-      { name?: unknown; arguments?: Record<string, unknown> } | undefined;
+    const parsedParams = z.object({ name: z.unknown().optional(), arguments: z.unknown().optional() }).passthrough().safeParse(request.params);
+    const params = parsedParams.success ? parsedParams.data : undefined;
     const name = params?.name;
     if (typeof name !== 'string' || name.length === 0) {
       return {
@@ -280,10 +304,13 @@ export class StdioMcpServerService {
     this.inFlightCalls.set(request.id, controller);
     let resp: MCPResponse | null;
     try {
-      resp = await dispatcher.dispatch(
-        name,
-        { ...request, _abortSignal: controller.signal },
-        args,
+      resp = await runWithMcpRequestContext(
+        { externalOwner: this.owner, signal: controller.signal },
+        () => dispatcher.dispatch(
+          name,
+          { ...request, _externalOwner: this.owner, _abortSignal: controller.signal },
+          args,
+        ),
       );
     } finally {
       if (this.inFlightCalls.get(request.id) === controller) {
@@ -353,6 +380,8 @@ export class StdioMcpServerService {
    * Never rejects; a kill failure is logged once.
    */
   async dispose(): Promise<void> {
+    this.disposed = true;
+    this.completionOutbox?.discardOwner(this.owner);
     for (const controller of this.inFlightCalls.values()) controller.abort();
     this.inFlightCalls.clear();
     try {

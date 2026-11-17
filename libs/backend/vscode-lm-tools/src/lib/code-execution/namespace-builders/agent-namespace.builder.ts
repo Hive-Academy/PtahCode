@@ -367,7 +367,7 @@ function assertOutcomeField(
  * Build the agent namespace for ptah.agent.*
  */
 const NO_PARENT_NOTICE =
-  'No parent session: completion signals and reports will not be pushed. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.';
+  'External completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.';
 
 const resolvedSkillsSchema = z.array(
   z
@@ -504,7 +504,9 @@ export function buildAgentNamespace(
           return {
             ...spawned,
             parentSessionId: undefined,
-            notice: NO_PARENT_NOTICE,
+            notice: getAuthenticatedExternalOwner()?.exclusive
+              ? NO_PARENT_NOTICE
+              : 'No parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.',
           };
         };
         let roleDefinition: AgentRoleDefinition | undefined;

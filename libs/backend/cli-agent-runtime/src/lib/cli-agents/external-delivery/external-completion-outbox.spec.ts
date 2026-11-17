@@ -13,6 +13,44 @@ describe('ExternalCompletionOutbox', () => {
 
   beforeEach(() => { now = 0; logs.length = 0; });
 
+  it('markDelivered removes an unclaimed record and suppresses a late duplicate only for its owner', () => {
+    const box = new ExternalCompletionOutbox(logger, { now: () => now });
+    box.record(entry('a'));
+    box.markDelivered(owner, entry('a').completionId);
+    expect(box.pendingCount(owner)).toBe(0);
+    box.record(entry('a'));
+    expect(box.pendingCount(owner)).toBe(0);
+    expect(logs.at(-1)).toContain('tombstone-suppressed');
+    box.record(entry('a', other));
+    expect(box.pendingCount(other)).toBe(1);
+  });
+
+  it('bounds tombstones by age and total size', () => {
+    const aged = new ExternalCompletionOutbox(logger, { maxAgeMs: 10, now: () => now });
+    aged.markDelivered(owner, entry('old').completionId);
+    now = 11;
+    aged.record(entry('old'));
+    expect(aged.pendingCount(owner)).toBe(1);
+
+    now = 0;
+    const bounded = new ExternalCompletionOutbox(logger, { maxTotal: 1, now: () => now });
+    bounded.markDelivered(owner, entry('first').completionId);
+    bounded.markDelivered(owner, entry('second').completionId);
+    bounded.record(entry('first'));
+    bounded.record(entry('second'));
+    expect(bounded.hasCompletion(owner, entry('first').completionId)).toBe(true);
+    expect(bounded.hasCompletion(owner, entry('second').completionId)).toBe(false);
+  });
+
+  it('discardOwner clears its tombstone when the retired marker is later evicted', () => {
+    const box = new ExternalCompletionOutbox(logger, { maxTotal: 1, now: () => now });
+    box.markDelivered(owner, entry('a').completionId);
+    box.discardOwner(owner);
+    box.discardOwner(other);
+    box.record(entry('a'));
+    expect(box.pendingCount(owner)).toBe(1);
+  });
+
   it('deduplicates, bounds and expires oldest entries without logging bodies', () => {
     const box = new ExternalCompletionOutbox(logger, { maxPerOwner: 2, maxTotal: 2, maxAgeMs: 10, now: () => now });
     box.record(entry('a')); box.record(entry('a')); now++; box.record(entry('b')); now++; box.record(entry('c'));
