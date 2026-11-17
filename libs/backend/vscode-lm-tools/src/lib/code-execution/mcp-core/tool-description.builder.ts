@@ -642,7 +642,7 @@ export function buildAgentSpawnTool({
       'WHICH of either family exists on this machine is a runtime fact — call ' +
       'ptah_agent_list; do not assume a provider from any list you have read. ' +
       'It may reply "starting" and runs while you work. ' +
-      'External clients receive a Completion ID block on the next tool result, including wait. ' +
+      'Exclusive external owners receive queued Completion ID blocks on later tool results, including wait. ' +
       'In-process Ptah sessions receive a pushed completion turn carrying ' +
       'status, exit code, duration and — when you declared "deliverables" — ' +
       'whether each declared file was actually written. A verdict of ' +

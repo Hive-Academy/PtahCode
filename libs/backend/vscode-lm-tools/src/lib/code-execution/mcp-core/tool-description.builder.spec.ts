@@ -47,7 +47,7 @@ describe('external completion wording', () => {
     const stdio = buildAgentSpawnTool({ transport: 'stdio' }).description;
     expect(http).toContain('call ptah_agent_wait to block');
     expect(stdio).toContain('call agent_wait to block');
-    expect(http).toContain('Completion ID block on the next tool result');
+    expect(http).toContain('Exclusive external owners receive queued Completion ID blocks on later tool results');
     expect(stdio).not.toContain('turn is pushed into this session');
     expect(buildAgentWaitTool({ transport: 'http' }).description).toContain('Full output: ptah_agent_read.');
     expect(buildAgentWaitTool({ transport: 'stdio' }).description).toContain('Full output: agent_read.');

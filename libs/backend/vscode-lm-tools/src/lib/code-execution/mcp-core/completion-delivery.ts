@@ -35,10 +35,6 @@ export function prepareCompletion(
   if (!parsed.success || (transport === 'stdio' && parsed.data['isError'] === true)) return empty;
   const claim = outbox.claim(owner, limits);
   const terminalIds = waitIds.get(response) ?? [];
-  const lateIds = terminalIds.filter(id =>
-    !claim.entries.some(entry => entry.completionId === id) &&
-    !outbox.hasCompletion(owner, id),
-  );
   const content = [
     ...parsed.data.content,
     ...claim.entries.map(entry => ({ type: 'text', text: `Completion ID: ${entry.completionId}\n${boundedBody(entry.body, transport)}` })),
@@ -47,7 +43,7 @@ export function prepareCompletion(
     response: claim.entries.length ? { ...response, result: { ...parsed.data, content } } : response,
     success: () => {
       outbox.acknowledge(owner, claim.claimId);
-      for (const id of lateIds) outbox.markDelivered(owner, id);
+      for (const id of terminalIds) outbox.markDelivered(owner, id);
     },
     failure: () => outbox.release(owner, claim.claimId),
   };

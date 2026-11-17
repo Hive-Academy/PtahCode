@@ -3,13 +3,22 @@ import { Logger } from '@ptah-extension/vscode-core';
 import { ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
 import type { PtahAPIBuilder } from '../ptah-api-builder.service';
 import type { MCPResponse } from '../mcp-core/types/mcp-protocol.types';
-import { StdioMcpServerService } from './stdio-mcp-server.service';
+import { createStdioMcpServer, StdioMcpServerService } from './stdio-mcp-server.service';
 
 const logger = Object.assign(Object.create(Logger.prototype), { info: jest.fn() }) as Logger;
 const builder = Object.create(null) as PtahAPIBuilder;
 const response: MCPResponse = { jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: 'tool' }] } };
 
 describe('stdio completion write contract', () => {
+  it('passes the shared outbox through the public factory', () => {
+    const box = new ExternalCompletionOutbox(logger);
+    const service = createStdioMcpServer({ logger, apiBuilder: builder, completionOutbox: box });
+    box.record({ completionId: 'factory:done', agentId: 'factory', owner: service['owner'], body: 'factory', completedAt: 'done', recordedAt: Date.now() });
+    const prepared = service.prepareToolResponse(response);
+    expect(JSON.stringify(prepared.response)).toContain('Completion ID: factory:done');
+    prepared.success();
+    expect(box.pendingCount(service['owner'])).toBe(0);
+  });
   it('gives two connections distinct exclusive owners', () => {
     const box = new ExternalCompletionOutbox(logger);
     const first = new StdioMcpServerService(logger, builder, box);

@@ -622,6 +622,7 @@ export function buildAgentNamespace(
               taskFolder: request.taskFolder,
               deliverables: request.deliverables,
               parentSessionId: activeSessionId,
+              externalOwner: getAuthenticatedExternalOwner(),
               ptahCliName: result.agentName,
               ptahCliId: request.ptahCliId,
               potentialCapabilities: result.potentialCapabilities,

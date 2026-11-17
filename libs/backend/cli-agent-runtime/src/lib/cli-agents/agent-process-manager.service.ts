@@ -51,6 +51,7 @@ import type {
   OutcomeTaskKind,
   OutcomeRoutingSource,
   ProviderAccountSelection,
+  ExternalOwnerKey,
 } from '@ptah-extension/shared';
 import {
   killProcessTree,
@@ -1426,6 +1427,7 @@ export class AgentProcessManager {
        */
       deliverables?: readonly string[];
       parentSessionId?: string;
+      externalOwner?: ExternalOwnerKey;
       ptahCliName?: string;
       ptahCliId?: string;
       taskKind?: OutcomeTaskKind;
@@ -1558,6 +1560,7 @@ export class AgentProcessManager {
         { mcpPort: meta.mcpPort, expectsMcp: meta.expectsMcp },
         undefined,
         meta.admission?.agentId,
+        meta.externalOwner,
       );
       return meta.resumeDecision
         ? { ...spawned, resumeDecision: meta.resumeDecision }
@@ -1589,6 +1592,7 @@ export class AgentProcessManager {
     mcp?: { readonly mcpPort?: number; readonly expectsMcp?: boolean },
     modelLog?: LaneModelLogState,
     admittedAgentId?: AgentId,
+    externalOwner?: ExternalOwnerKey,
   ): SpawnAgentResult {
     const agentId = info.agentId;
     const handleReference = snapshotLaneAccountReference(
@@ -1680,6 +1684,7 @@ export class AgentProcessManager {
       admitted.provisionalCli = false;
       tracked = admitted;
     }
+    if (externalOwner) tracked.externalOwner = externalOwner;
 
     const previousBudget = info.cliSessionId
       ? previousResumeRecord(this.agents.values(), info.cli, info.cliSessionId)

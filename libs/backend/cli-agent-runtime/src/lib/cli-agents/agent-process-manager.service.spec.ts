@@ -1513,6 +1513,15 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(spawnedInfos[0]).toMatchObject(expected);
     });
 
+    it('keeps the authenticated external owner on a direct SDK lane record', async () => {
+      const externalOwner = { transport: 'stdio' as const, principal: 'a'.repeat(32), exclusive: true };
+      const result = await manager.spawnFromSdkHandle(createMockSdkHandle().handle, {
+        task: 'Review', cli: 'ptah-cli', workingDirectory: '/workspace/root',
+        ptahCliId: 'ptah-cli-1', expectsMcp: false, externalOwner,
+      });
+      expect(manager['agents'].get(result.agentId)?.externalOwner).toEqual(externalOwner);
+    });
+
     it('accepts role fields on spawnFromSdkHandle only as one complete stamp', () => {
       type Meta = Parameters<AgentProcessManager['spawnFromSdkHandle']>[1];
       const noFlatRoleKeys: Extract<

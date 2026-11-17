@@ -25,6 +25,15 @@ describe('ExternalCompletionOutbox', () => {
     expect(box.pendingCount(other)).toBe(1);
   });
 
+  it('does not reclaim a held entry after a terminal wait has delivered it', () => {
+    const box = new ExternalCompletionOutbox(logger, { now: () => now });
+    box.record(entry('a'));
+    const held = box.claim(owner, { maxEntries: 1, maxBytes: 100 });
+    box.markDelivered(owner, entry('a').completionId);
+    box.release(owner, held.claimId);
+    expect(box.claim(owner, { maxEntries: 1, maxBytes: 100 }).entries).toHaveLength(0);
+  });
+
   it('bounds tombstones by age and total size', () => {
     const aged = new ExternalCompletionOutbox(logger, { maxAgeMs: 10, now: () => now });
     aged.markDelivered(owner, entry('old').completionId);

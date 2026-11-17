@@ -159,6 +159,7 @@ export class ExternalCompletionOutbox {
     let bytes = 0;
     for (const entry of this.entries.values()) {
       if (!ownerKeysEqual(owner, entry.owner) || this.held.has(entry.completionId)) continue;
+      if (this.delivered.has(`${ownerKeyId(owner)}:${entry.completionId}`)) continue;
       const size = Buffer.byteLength(entry.body);
       if (entries.length >= limits.maxEntries) break;
       if (entries.length > 0 && bytes + size > limits.maxBytes) break;

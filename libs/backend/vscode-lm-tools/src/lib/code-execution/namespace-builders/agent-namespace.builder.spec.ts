@@ -1687,6 +1687,20 @@ describe('buildAgentNamespace — waitForAgents', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildAgentNamespace — spawn boundary', () => {
+  it('passes the authenticated owner to the direct Ptah CLI lane', async () => {
+    const { deps, mocks } = makeDeps();
+    const authenticated = { transport: 'stdio' as const, principal: 'b'.repeat(32), exclusive: true };
+    mocks.registry?.spawnAgent.mockResolvedValue({
+      handle: { abort: new AbortController(), done: Promise.resolve(0), onOutput: jest.fn() },
+      agentName: 'MyAgent', setAgentId: jest.fn(),
+    });
+    mocks.processManager.spawnFromSdkHandle.mockResolvedValue({ agentId: 'spawned-1' } as SpawnAgentResult);
+    await runWithMcpRequestContext({ externalOwner: authenticated }, () =>
+      buildAgentNamespace(deps).spawn({ task: 'work', ptahCliId: 'agent-a' }));
+    expect(mocks.processManager.spawnFromSdkHandle).toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ externalOwner: authenticated }),
+    );
+  });
   it('drops caller-supplied external owners from spawn and beginSpawn', async () => {
     const { deps, mocks } = makeDeps();
     const externalOwner = {

@@ -84,7 +84,7 @@ export function buildAgentWaitTool(
       `timeoutSec (0-${MAX_WAIT_TIMEOUT_SEC}, default ${DEFAULT_AGENT_WAIT_TIMEOUT_SEC}) bounds the wait; ` +
       'a timeout returns a PARTIAL result (not an error); repeat is safe.' +
       httpCap +
-      ' A completion also arrives as a Completion ID block on the next tool result, so wait only to block. ' +
+      ' Exclusive external owners may get queued Completion ID blocks on later results; wait blocks. ' +
       `Per lane: status (or starting), exit code, duration, stop reason, deliverables on disk, last output (max ${WAIT_SUMMARY_MAX_CHARS} chars). ` +
       `Full output: ${transport === 'stdio' ? 'agent_read' : 'ptah_agent_read'}.`,
     inputSchema: {

@@ -68,31 +68,41 @@ describe('completion preparation', () => {
     expect(box.pendingCount(owner)).toBe(0);
   });
 
-  it('leaves the fifth terminal completion pending for the next tool result', () => {
+  it('settles the fifth terminal completion reported by a successful wait', () => {
     const box = new ExternalCompletionOutbox(logger);
     const ids = ['one', 'two', 'three', 'four', 'five'];
     ids.forEach(id => box.record(entry(id)));
     const wait = prepareCompletion(markWaitResponse(result(), ids.map(completionId)), 'tools/call', owner, box);
     expect(JSON.stringify(wait.response)).not.toContain(completionId('five'));
     wait.success();
-    expect(box.pendingCount(owner)).toBe(1);
+    expect(box.pendingCount(owner)).toBe(0);
     const next = prepareCompletion(result(), 'tools/call', owner, box);
-    expect(JSON.stringify(next.response)).toContain(`Completion ID: ${completionId('five')}`);
+    expect(next.response).toEqual(result());
     next.success();
     expect(box.pendingCount(owner)).toBe(0);
   });
 
-  it('leaves an over-budget second completion pending', () => {
+  it('settles an over-budget completion reported by the successful wait', () => {
     const box = new ExternalCompletionOutbox(logger);
     box.record(entry('one', owner, 'x'.repeat(16_000)));
     box.record(entry('two', owner, 'y'.repeat(1_000)));
     const wait = prepareCompletion(markWaitResponse(result(), [completionId('one'), completionId('two')]), 'tools/call', owner, box);
     expect(JSON.stringify(wait.response)).not.toContain(completionId('two'));
     wait.success();
-    expect(box.pendingCount(owner)).toBe(1);
+    expect(box.pendingCount(owner)).toBe(0);
     const next = prepareCompletion(result(), 'tools/call', owner, box);
-    expect(JSON.stringify(next.response)).toContain(`Completion ID: ${completionId('two')}`);
+    expect(next.response).toEqual(result());
     next.success();
+  });
+
+  it('retries an over-budget completion when the wait write fails', () => {
+    const box = new ExternalCompletionOutbox(logger);
+    for (const id of ['a', 'b', 'c', 'd', 'e']) box.record(entry(id));
+    const wait = prepareCompletion(markWaitResponse(result(), [completionId('e')]), 'tools/call', owner, box);
+    wait.failure();
+    const first = prepareCompletion(result(), 'tools/call', owner, box);
+    first.success();
+    expect(JSON.stringify(prepareCompletion(result(), 'tools/call', owner, box).response)).toContain(`Completion ID: ${completionId('e')}`);
   });
 
   it('keeps HTTP isError piggyback behavior and matches stdio block shape', () => {

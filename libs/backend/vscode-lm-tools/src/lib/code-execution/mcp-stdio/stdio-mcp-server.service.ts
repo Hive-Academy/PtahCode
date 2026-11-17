@@ -552,6 +552,7 @@ export class StdioMcpServerService {
 export function createStdioMcpServer(deps: {
   logger: Logger;
   apiBuilder: PtahAPIBuilder;
+  completionOutbox?: ExternalCompletionOutbox;
 }): StdioMcpServerService {
-  return new StdioMcpServerService(deps.logger, deps.apiBuilder);
+  return new StdioMcpServerService(deps.logger, deps.apiBuilder, deps.completionOutbox);
 }
