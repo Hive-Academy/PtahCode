@@ -380,6 +380,7 @@ export class CopilotSdkAdapter implements CliAdapter {
           cwd: options.workingDirectory,
           needsConsole: true,
           detached: true,
+          cleanupOrphanDescendants: true,
           spawner: this.spawner,
         },
       );

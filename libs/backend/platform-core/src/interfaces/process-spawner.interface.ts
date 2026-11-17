@@ -70,6 +70,8 @@ export interface ProcessSpawnRequest {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** POSIX: make the child a process-group leader so a tree kill can reach it. */
   readonly detached?: boolean;
+  /** Windows: after a spontaneous root exit, stop linked descendants. Runs one process query per exit. Use only for long-lived agent runtime roots. */
+  readonly cleanupOrphanDescendants?: boolean;
   /** Windows: give the child its own hidden console. ConPTY needs one. */
   readonly needsConsole?: boolean;
   /**

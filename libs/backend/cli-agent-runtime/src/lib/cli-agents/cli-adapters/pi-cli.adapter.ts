@@ -461,6 +461,7 @@ export class PiCliAdapter implements CliAdapter {
         {
           cwd: options.workingDirectory,
           detached: true,
+          cleanupOrphanDescendants: true,
           spawner: this.spawner,
         },
       );

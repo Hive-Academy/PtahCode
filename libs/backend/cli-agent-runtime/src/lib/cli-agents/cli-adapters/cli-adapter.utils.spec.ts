@@ -56,6 +56,7 @@ import { SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
 import { transformAgentBody } from '@ptah-extension/harness-sync';
 
 import {
+  defaultOrphanCleanupDependencies,
   killProcessTree,
   PROCESS_TREE_KILL_GRACE_MS as KILL_GRACE_PERIOD,
 } from '@ptah-extension/platform-core';
@@ -974,6 +975,34 @@ describe('spawnCli', () => {
     expect(handle.stdout).toBe(child.stdout);
   });
 
+  it('cleans only descendants created before an inline Windows child exits', async () => {
+    setPlatform('win32');
+    const child = createFakeChild();
+    mockCrossSpawn.mockReturnValueOnce(child);
+    let now = 10_000;
+    const nowSpy = jest.spyOn(defaultOrphanCleanupDependencies, 'now').mockImplementation(() => now);
+    const query = jest.spyOn(defaultOrphanCleanupDependencies, 'query').mockImplementation(async () => [
+      { ProcessId: 43, ParentProcessId: child.pid, CreationDate: new Date(10_050).toISOString() },
+      { ProcessId: 44, ParentProcessId: child.pid, CreationDate: new Date(10_150).toISOString() },
+    ]);
+    const kill = jest.spyOn(defaultOrphanCleanupDependencies, 'kill').mockImplementation(async () => undefined);
+    try {
+      spawnCli('opencode.cmd', ['run'], { cleanupOrphanDescendants: true });
+      now = 10_100;
+      child.emit('exit', 0);
+      now = 10_200;
+      child.emit('close', 0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(kill).toHaveBeenCalledTimes(1);
+      expect(kill).toHaveBeenCalledWith(43);
+    } finally {
+      nowSpy.mockRestore();
+      query.mockRestore();
+      kill.mockRestore();
+    }
+  });
+
   it('delegates to the injected spawner instead of cross-spawn', () => {
     const { spawner, requests } = createFakeSpawner();
 
@@ -991,6 +1020,7 @@ describe('spawnCli', () => {
     // The clean-env defaults still apply, and the caller's env wins over them.
     expect(requests[0].env['NO_COLOR']).toBe('1');
     expect(requests[0].env['OPENCODE_CONFIG_CONTENT']).toBe('{}');
+    expect(requests[0].cleanupOrphanDescendants).toBe(false);
   });
 
   it('forwards needsConsole and detached to the spawner on POSIX', () => {
@@ -1010,6 +1040,16 @@ describe('spawnCli', () => {
     spawnCli('opencode.cmd', [], { detached: true, spawner });
 
     expect(requests[0].detached).toBe(false);
+  });
+
+  it('forwards the explicit runtime orphan cleanup opt-in on Windows', () => {
+    setPlatform('win32');
+    const { spawner, requests } = createFakeSpawner();
+    spawnCli('opencode.cmd', ['run'], {
+      detached: true, cleanupOrphanDescendants: true, spawner,
+    });
+    expect(requests[0].detached).toBe(false);
+    expect(requests[0].cleanupOrphanDescendants).toBe(true);
   });
 });
 
