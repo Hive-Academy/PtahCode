@@ -38,6 +38,8 @@ export class ExternalCompletionOutbox {
   private readonly entries = new Map<string, ExternalCompletionEntry>();
   private readonly claims = new Map<string, HeldClaim>();
   private readonly held = new Map<string, ExternalCompletionEntry>();
+  private readonly retiredOwners = new Map<string, number>();
+  private isActiveHttpOwner?: (owner: ExternalOwnerKey) => boolean;
   private readonly maxPerOwner: number;
   private readonly maxTotal: number;
   private readonly maxAgeMs: number;
@@ -61,6 +63,9 @@ export class ExternalCompletionOutbox {
 
   private prune(): void {
     const now = this.now();
+    for (const [id, retiredAt] of this.retiredOwners) {
+      if (now - retiredAt > this.maxAgeMs) this.retiredOwners.delete(id);
+    }
     for (const [id, claim] of this.claims) {
       if (claim.expiresAt > now) continue;
       this.claims.delete(id);
@@ -95,8 +100,22 @@ export class ExternalCompletionOutbox {
     return true;
   }
 
+  /** The HTTP server owns the bounded connection registry used to validate late completions. */
+  setHttpOwnerIsActive(isActive: (owner: ExternalOwnerKey) => boolean): void {
+    this.isActiveHttpOwner = isActive;
+  }
+
   record(entry: ExternalCompletionEntry): void {
     this.prune();
+    if (entry.owner.transport === 'http' && !entry.owner.exclusive) return;
+    if (entry.owner.transport === 'http' && this.isActiveHttpOwner && !this.isActiveHttpOwner(entry.owner)) {
+      this.logger.info('[ExternalCompletionOutbox] Discarded 1 completion for a retired connection');
+      return;
+    }
+    if (this.retiredOwners.has(ownerKeyId(entry.owner))) {
+      this.logger.info('[ExternalCompletionOutbox] Discarded 1 completion for a retired connection');
+      return;
+    }
     if (this.entries.has(entry.completionId)) return;
     const note = '\n[Completion truncated; call ptah_agent_read for the full lane output.]';
     const bytes = Buffer.byteLength(entry.body);
@@ -161,6 +180,26 @@ export class ExternalCompletionOutbox {
     if (!claim || !ownerKeysEqual(owner, claim.owner)) return;
     this.claims.delete(claimId);
     for (const entry of claim.entries) this.releaseEntry(entry);
+  }
+
+  /** Retire a connection whose bearer record is gone; its entries cannot be claimed. */
+  discardOwner(owner: ExternalOwnerKey): number {
+    this.prune();
+    this.retiredOwners.set(ownerKeyId(owner), this.now());
+    let dropped = 0;
+    while (this.retiredOwners.size > this.maxTotal) {
+      const oldest = this.retiredOwners.keys().next().value;
+      if (oldest === undefined) break;
+      this.retiredOwners.delete(oldest);
+      dropped++;
+    }
+    if (dropped) this.logger.info(`[ExternalCompletionOutbox] Dropped ${dropped} retired owner keys`);
+    let count = 0;
+    for (const entry of this.entries.values()) {
+      if (ownerKeysEqual(owner, entry.owner) && this.removeEntry(entry)) count++;
+    }
+    if (count) this.logger.info(`[ExternalCompletionOutbox] Discarded ${count} unreachable connection entries`);
+    return count;
   }
 
   findForLane(owner: ExternalOwnerKey, agentId: string): ExternalCompletionEntry | undefined {

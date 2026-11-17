@@ -67,6 +67,8 @@ export interface MCPRequest {
 
   /** Transport-owned credential binding. Absent off the HTTP socket. */
   _callerBinding?: McpCallerBinding;
+  /** Authenticated HTTP credential owner; never supplied by the body. */
+  _externalOwner?: import('@ptah-extension/shared').ExternalOwnerKey;
 
   /**
    * Aborted when the caller stops waiting for this request: the HTTP

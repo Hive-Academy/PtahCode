@@ -50,6 +50,7 @@ import {
   acknowledgeTerminalRead,
 } from '@ptah-extension/cli-agent-runtime';
 import { AgentSpawnArgsSchema } from './agent-spawn-args.schema';
+import { httpSpawnOwnerScope } from './http-spawn-owner-scope';
 import {
   AgentSpawnDedupe,
   agentSpawnTiming,
@@ -447,6 +448,7 @@ export async function handleMCPRequest(
             callerAgentId: caller.agentId,
             callerToolProfile: resolveMcpToolProfile(request),
             callerBinding: request._callerBinding,
+            externalOwner: request._externalOwner,
             callerCapability: requestCapability(request),
             signal: request._abortSignal,
           },
@@ -1233,14 +1235,7 @@ async function handleIndividualTool(
             const root = knownWorkspaceFolders(deps)[0] ?? process.cwd();
             const callerAgentId = getCallerAgentId();
             const binding = request._callerBinding;
-            const identity = binding?.agentId ?? binding?.sessionId;
-            const scope = JSON.stringify([
-              callerSessionId ?? root,
-              callerAgentId ?? null,
-              !callerSessionId && !callerAgentId && identity
-                ? [binding?.kind, identity]
-                : null,
-            ]);
+            const scope = httpSpawnOwnerScope(root, callerSessionId, callerAgentId, binding, request._externalOwner);
             let agentSpawnDedupe = agentSpawnDedupes.get(ptahAPI);
             if (!agentSpawnDedupe) {
               agentSpawnDedupe = new AgentSpawnDedupe();
@@ -1264,6 +1259,7 @@ async function handleIndividualTool(
                   modelTier,
                   resumeSessionId: spawnArgs.resume_session_id,
                   parentSessionId: callerSessionId,
+                  externalOwner: request._externalOwner,
                   role: spawnArgs.role,
                   phase: spawnArgs.phase,
                   skills: spawnArgs.skills,
