@@ -121,6 +121,8 @@ export class McpCallerTokenRegistry {
       /** Current setting is authoritative when a stored record is loaded. */
       readonly externalCallerAccess?: McpExternalAccess;
       readonly now?: () => number;
+      /** Called for each revoked internal-query credential, so its queued completions can be dropped. */
+      readonly onExclusiveOwnerRevoked?: (owner: ExternalOwnerKey) => void;
     },
   ) {
     this.currentAccess = options.externalCallerAccess;
@@ -143,14 +145,24 @@ export class McpCallerTokenRegistry {
   revokeSubject(subject: string): void {
     for (let index = this.laneRecords.length - 1; index >= 0; index -= 1) {
       if (this.laneRecords[index]?.subject === subject) {
-        this.laneRecords.splice(index, 1);
+        const [removed] = this.laneRecords.splice(index, 1);
+        if (removed) this.notifyExclusiveOwnerRevoked(removed);
       }
     }
   }
 
   /** `stop()`: lane and session tokens die. Persistent hashes stay on disk. */
   revokeEphemeral(): void {
-    this.laneRecords.length = 0;
+    for (const removed of this.laneRecords.splice(0)) this.notifyExclusiveOwnerRevoked(removed);
+  }
+
+  private notifyExclusiveOwnerRevoked(record: LaneRecord): void {
+    if (record.binding.kind !== 'internal-query') return;
+    this.options.onExclusiveOwnerRevoked?.({
+      transport: 'http',
+      principal: derivePrincipal(record.tokenHash.toString('hex')),
+      exclusive: true,
+    });
   }
 
   /** Only a live internal-query credential can own an exclusive HTTP completion. */

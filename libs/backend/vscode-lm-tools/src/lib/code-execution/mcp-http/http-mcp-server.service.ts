@@ -405,6 +405,7 @@ export class CodeExecutionMCP
       logger: this.logger,
       externalCallerAccess: this.externalCallerAccess(),
       ...(legacyNotice === undefined ? {} : { notice: legacyNotice }),
+      onExclusiveOwnerRevoked: (owner) => { this.completionOutbox?.discardOwner(owner); },
     });
     // The event has nowhere to return a promise to, so this call site stays
     // fire-and-forget — but it is no longer UNORDERED. `queueRepoint` puts it

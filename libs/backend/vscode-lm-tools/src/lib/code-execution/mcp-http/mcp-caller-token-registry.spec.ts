@@ -100,6 +100,21 @@ describe('McpCallerTokenRegistry', () => {
     now = 150;
     expect(registry.isExclusiveOwnerActive(expiringAuth.externalOwner)).toBe(false);
   });
+  it('reports each revoked internal-query owner and no other binding kind', () => {
+    const revoked: unknown[] = [];
+    const registry = new McpCallerTokenRegistry({ logger: logger(), onExclusiveOwnerRevoked: owner => revoked.push(owner) });
+    const owners = ['a', 'b'].map(subject => {
+      const token = registry.issue({ kind: 'internal-query', workspaceRoot: '/ws', capability: 'privileged' }, subject, 50_000);
+      const auth = registry.authorize({ token, workspaceRoot: '/ws' });
+      if (!auth.ok || !auth.externalOwner) throw new Error('Expected internal-query owner');
+      return auth.externalOwner;
+    });
+    registry.issue({ kind: 'workspace', workspaceRoot: '/ws', capability: 'privileged' }, 'workspace', 50_000);
+    registry.revokeSubject('a');
+    expect(revoked).toEqual([owners[0]]);
+    registry.revokeEphemeral();
+    expect(revoked).toEqual(owners);
+  });
   it('uses a recorder-compatible principal for an authorized persistent token and connection', async () => {
     const registry = new McpCallerTokenRegistry({ state: new MemoryState(), logger: logger() });
     const token = await registry.issuePersistent({ configPath: '/ws/.mcp.json', kind: 'workspace', workspaceRoot: '/ws', setting: 'read-only' });
