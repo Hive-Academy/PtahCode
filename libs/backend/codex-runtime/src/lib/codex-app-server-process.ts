@@ -3,6 +3,7 @@ import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import { CodexStderrTail, redactCodexDiagnostics } from './codex-stderr-tail';
 import { normalizeCodexHomeKey } from './codex-home-path';
 import { killProcessTree, type ProcessSpawnRequest, type SpawnedProcessHandle } from '@ptah-extension/platform-core';
+import { startOrphanCleanup, type OrphanCleanupOptions } from './codex-orphan-cleanup';
 import type {
   CodexRuntimeLogger,
   CodexExecutableSource,
@@ -168,6 +169,7 @@ export class CodexAppServerProcess {
     private readonly handlers: CodexAppServerHandlers,
     private readonly logger?: CodexRuntimeLogger,
     private readonly wrapSpawnRequest?: (request: ProcessSpawnRequest) => ProcessSpawnRequest,
+    private readonly orphanCleanup: OrphanCleanupOptions = {},
   ) {}
 
   start(signal?: AbortSignal): Promise<void> {
@@ -187,7 +189,7 @@ export class CodexAppServerProcess {
           (process.platform === 'win32' && !canonical.toLowerCase().endsWith('.exe')))
         throw new Error('Codex executable is not a canonical native file');
       accessSync(canonical, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
-      const spawnStartedAt = Date.now();
+      const spawnStartedAt = (this.orphanCleanup.now ?? Date.now)();
       this.spawnStartedAt = spawnStartedAt;
       const spawnRequest: ProcessSpawnRequest = {
         command: this.executable.path,
@@ -243,7 +245,7 @@ export class CodexAppServerProcess {
           CODEX_INITIALIZE_TIMEOUT_MS,
         ),
       );
-      const startupDurationMs = Date.now() - spawnStartedAt;
+      const startupDurationMs = (this.orphanCleanup.now ?? Date.now)() - spawnStartedAt;
       try {
         if (
           normalizeCodexHomeKey(initialized.codexHome, process.platform) !==
@@ -575,7 +577,18 @@ export class CodexAppServerProcess {
     this.fail('Codex process aborted');
   };
   private readonly onExit = (): void => {
+    if (this.exitObserved) return;
     this.exitObserved = true;
+    const child = this.child;
+    // One asynchronous CIM query per Windows root exit, including host tree kills,
+    // catches descendants left behind by a partial taskkill /T.
+    if (process.platform === 'win32' && child?.pid && Number.isSafeInteger(child.pid) && child.pid > 0 &&
+        this.spawnStartedAt !== undefined) {
+      const report = (error: Error): void => {
+        this.logger?.error('Codex orphan descendant cleanup failed', error);
+      };
+      startOrphanCleanup(child.pid, this.spawnStartedAt, this.orphanCleanup, report);
+    }
     this.fail('Codex process exited');
   };
   private readonly onClose = (): void => {
@@ -619,7 +632,7 @@ export class CodexAppServerProcess {
           : {}),
         ...(initializeTimeout && spawnStartedAt !== undefined
           ? {
-              elapsedMs: Date.now() - spawnStartedAt,
+              elapsedMs: (this.orphanCleanup.now ?? Date.now)() - spawnStartedAt,
               timeoutMs: CODEX_INITIALIZE_TIMEOUT_MS,
             }
           : {}),

@@ -79,6 +79,7 @@ export function registerCodexRuntime(
             async () => (await ports.selectionSnapshot.selectForOpen()).selected,
             profile,
             handlers,
+            ports.logger,
           ),
         () => ports.clock.now(),
       ),
