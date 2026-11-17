@@ -78,6 +78,28 @@ function hashOf(token: string): string {
 }
 
 describe('McpCallerTokenRegistry', () => {
+  it('recognizes only live internal-query exclusive owners', () => {
+    let now = 100;
+    const registry = new McpCallerTokenRegistry({ logger: logger(), now: () => now });
+    const internal = registry.issue({ kind: 'internal-query', workspaceRoot: '/ws', capability: 'privileged' }, 'query', 50);
+    const authorized = registry.authorize({ token: internal, workspaceRoot: '/ws' });
+    if (!authorized.ok || !authorized.externalOwner) throw new Error('Expected internal-query owner');
+    const owner = authorized.externalOwner;
+    expect(registry.isExclusiveOwnerActive(owner)).toBe(true);
+    expect(registry.isExclusiveOwnerActive({ ...owner, principal: 'f'.repeat(32) })).toBe(false);
+    expect(registry.isExclusiveOwnerActive({ ...owner, exclusive: false })).toBe(false);
+    const workspace = registry.issue({ kind: 'workspace', workspaceRoot: '/ws', capability: 'privileged' }, 'workspace', 50);
+    const workspaceAuth = registry.authorize({ token: workspace, workspaceRoot: '/ws' });
+    if (!workspaceAuth.ok || !workspaceAuth.externalOwner) throw new Error('Expected workspace owner');
+    expect(registry.isExclusiveOwnerActive({ ...workspaceAuth.externalOwner, exclusive: true })).toBe(false);
+    registry.revokeSubject('query');
+    expect(registry.isExclusiveOwnerActive(owner)).toBe(false);
+    const expiring = registry.issue({ kind: 'internal-query', workspaceRoot: '/ws', capability: 'privileged' }, 'expiring', 50);
+    const expiringAuth = registry.authorize({ token: expiring, workspaceRoot: '/ws' });
+    if (!expiringAuth.ok || !expiringAuth.externalOwner) throw new Error('Expected expiring owner');
+    now = 150;
+    expect(registry.isExclusiveOwnerActive(expiringAuth.externalOwner)).toBe(false);
+  });
   it('uses a recorder-compatible principal for an authorized persistent token and connection', async () => {
     const registry = new McpCallerTokenRegistry({ state: new MemoryState(), logger: logger() });
     const token = await registry.issuePersistent({ configPath: '/ws/.mcp.json', kind: 'workspace', workspaceRoot: '/ws', setting: 'read-only' });

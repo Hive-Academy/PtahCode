@@ -490,6 +490,7 @@ export class CodeExecutionMCP
       logger: this.logger,
       workspaceState: this.workspaceState,
       authenticate: (input) => this.callerCredentials.authorize(input),
+      isExclusiveOwnerActive: (owner) => this.callerCredentials.isExclusiveOwnerActive(owner),
       completionOutbox: this.completionOutbox,
       onMCPRequest: (request) =>
         handleMCPRequest(request, {

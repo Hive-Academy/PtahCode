@@ -15,6 +15,7 @@
 import * as crypto from 'node:crypto';
 import { z } from 'zod';
 import { derivePrincipal } from '@ptah-extension/cli-agent-runtime';
+import type { ExternalOwnerKey } from '@ptah-extension/shared';
 import type {
   IStateStorage,
   McpCallerBinding,
@@ -150,6 +151,17 @@ export class McpCallerTokenRegistry {
   /** `stop()`: lane and session tokens die. Persistent hashes stay on disk. */
   revokeEphemeral(): void {
     this.laneRecords.length = 0;
+  }
+
+  /** Only a live internal-query credential can own an exclusive HTTP completion. */
+  isExclusiveOwnerActive(owner: ExternalOwnerKey): boolean {
+    if (owner.transport !== 'http' || !owner.exclusive) return false;
+    const now = this.now();
+    return this.laneRecords.some(record =>
+      record.binding.kind === 'internal-query' &&
+      record.expiresAt > now &&
+      derivePrincipal(record.tokenHash.toString('hex')) === owner.principal,
+    );
   }
 
   /**

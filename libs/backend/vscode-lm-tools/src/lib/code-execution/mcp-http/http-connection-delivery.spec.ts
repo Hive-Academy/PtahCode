@@ -5,6 +5,7 @@ import { ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
 import type { IStateStorage } from '@ptah-extension/platform-core';
 import type { MCPRequest, MCPResponse } from '../types';
 import { startHttpServer } from './http-server.handler';
+import { McpCallerTokenRegistry } from './mcp-caller-token-registry';
 
 class MemoryState implements IStateStorage {
   get<T>(_key: string, fallback?: T): T | undefined { return fallback; }
@@ -17,9 +18,9 @@ const logger: Logger = Object.assign(Object.create(Logger.prototype), {
 });
 const shared = { transport: 'http' as const, principal: 'a'.repeat(32), exclusive: false };
 
-function call(port: number, method: string, headers: http.OutgoingHttpHeaders = {}, params?: Record<string, unknown>, bodyOwner?: unknown): Promise<{ headers: http.IncomingHttpHeaders; body: MCPResponse }> {
+function call(port: number, method: string, headers: http.OutgoingHttpHeaders = {}, params?: Record<string, unknown>, bodyOwner?: unknown, path = '/'): Promise<{ headers: http.IncomingHttpHeaders; body: MCPResponse }> {
   return new Promise((resolve, reject) => {
-    const request = http.request({ hostname: 'localhost', port, method: 'POST', path: '/', headers: {
+    const request = http.request({ hostname: 'localhost', port, method: 'POST', path, headers: {
       'Content-Type': 'application/json', Authorization: `Bearer ${'a'.repeat(43)}`, ...headers,
     } }, response => {
       let body = '';
@@ -33,6 +34,35 @@ function call(port: number, method: string, headers: http.OutgoingHttpHeaders = 
 }
 
 describe('HTTP connection completion delivery', () => {
+  it('delivers an internal-query completion and discards one after revocation', async () => {
+    const registry = new McpCallerTokenRegistry({ logger });
+    const token = registry.issue({ kind: 'internal-query', workspaceRoot: '/ws', capability: 'privileged' }, 'query', 60_000);
+    const auth = registry.authorize({ token, workspaceRoot: '/ws' });
+    if (!auth.ok || !auth.externalOwner) throw new Error('Expected internal-query owner');
+    const owner = auth.externalOwner;
+    const box = new ExternalCompletionOutbox(logger);
+    const server = await startHttpServer({
+      port: 0, logger, workspaceState: new MemoryState(), completionOutbox: box,
+      authenticate: input => registry.authorize(input),
+      isExclusiveOwnerActive: candidate => registry.isExclusiveOwnerActive(candidate),
+      onMCPRequest: async request => ({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: 'ordinary' }] } }),
+    });
+    const headers = { Authorization: `Bearer ${token}` };
+    const path = `/workspace/${encodeURIComponent('/ws')}`;
+    try {
+      expect(box.pendingCount(owner)).toBe(0);
+      box.record({ completionId: 'query:one', agentId: 'query', owner, body: '<agent-lane-completed>one</agent-lane-completed>', completedAt: 'done', recordedAt: Date.now() });
+      expect(box.pendingCount(owner)).toBe(1);
+      expect(JSON.stringify((await call(server.port, 'tools/call', headers, { name: 'ptah_agent_status' }, undefined, path)).body)).toContain('<agent-lane-completed>one');
+      expect(box.pendingCount(owner)).toBe(0);
+      registry.revokeSubject('query');
+      box.record({ completionId: 'query:two', agentId: 'query', owner, body: '<agent-lane-completed>two</agent-lane-completed>', completedAt: 'done', recordedAt: Date.now() });
+      expect(box.pendingCount(owner)).toBe(0);
+      expect(JSON.stringify((await call(server.port, 'tools/call', headers, { name: 'ptah_agent_status' }, undefined, path)).body)).not.toContain('<agent-lane-completed>two');
+    } finally {
+      await new Promise<void>((resolve, reject) => server.server.close(error => error ? reject(error) : resolve()));
+    }
+  });
   it.each(['session', 'agent'] as const)('does not issue a session header for a failed initialize or hosted %s credentials', async hostedKind => {
     const server = await startHttpServer({
       port: 0, logger, workspaceState: new MemoryState(),
@@ -81,6 +111,9 @@ describe('HTTP connection completion delivery', () => {
       expect(reinitialized.headers['mcp-session-id']).toBeUndefined();
       await call(server.port, 'tools/call', { 'Mcp-Session-Id': id }, { name: 'ptah_agent_status' });
       expect(seen.at(-1)?._externalOwner).toEqual(owner);
+      const unknownOwner = { ...owner, principal: 'f'.repeat(32) };
+      box.record({ completionId: 'unknown:done', agentId: 'unknown', owner: unknownOwner, body: 'unknown completion', completedAt: 'done', recordedAt: Date.now() });
+      expect(box.pendingCount(unknownOwner)).toBe(0);
       box.record({ completionId: 'lane:done', agentId: 'lane', owner, body: '<agent-lane-completed>lane</agent-lane-completed>', completedAt: 'done', recordedAt: Date.now() });
       const forged = { _externalOwner: owner, code: `ptah.agent.spawn({ externalOwner: ${JSON.stringify(owner)} })` };
       expect(JSON.stringify((await call(server.port, 'tools/call', { 'Mcp-Session-Id': otherId }, { name: 'execute_code', arguments: forged })).body)).not.toContain('agent-lane-completed');

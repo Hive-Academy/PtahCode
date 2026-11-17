@@ -12,6 +12,7 @@ import { mcpAttachmentObserver } from './mcp-attachment-observer';
 import { writeHttpMcpResponse } from './http-response-writer';
 import { HttpConnectionOwners } from './http-connection-owners';
 import type { ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
+import type { ExternalOwnerKey } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   IStateStorage,
@@ -59,6 +60,7 @@ export interface HttpServerConfig {
    * so parser tests keep exercising the URL grammar.
    */
   authenticate?: (input: McpHttpAuthInput) => McpRequestAuth;
+  isExclusiveOwnerActive?: (owner: ExternalOwnerKey) => boolean;
   completionOutbox?: ExternalCompletionOutbox;
 }
 
@@ -215,7 +217,9 @@ export async function startHttpServer(
   const server = http.createServer((req, res) => {
     handleHttpRequest(req, res, onMCPRequest, logger, config.authenticate, config.completionOutbox, connectionOwners);
   });
-  config.completionOutbox?.setHttpOwnerIsActive(owner => server.listening && connectionOwners.isActive(owner));
+  config.completionOutbox?.setHttpOwnerIsActive(owner =>
+    server.listening && (connectionOwners.isActive(owner) || (config.isExclusiveOwnerActive?.(owner) ?? false)),
+  );
 
   const candidates = getMcpPortCandidates(configuredPort);
   const failures: UnavailablePort[] = [];
