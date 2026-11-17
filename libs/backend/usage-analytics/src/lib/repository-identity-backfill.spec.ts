@@ -84,8 +84,9 @@ it('enriches reactive rows on its own timer and cancels future passes on stop', 
 
 function deferred<T>() {
   let complete: (value: T) => void = () => { throw new Error('deferred not initialized'); };
-  const promise = new Promise<T>((resolve) => { complete = resolve; });
-  return { promise, complete };
+  let fail: (error: Error) => void = () => { throw new Error('deferred not initialized'); };
+  const promise = new Promise<T>((resolve, reject) => { complete = resolve; fail = reject; });
+  return { promise, complete, fail };
 }
 
 describe('backfill lifecycle cancellation', () => {
@@ -159,6 +160,35 @@ describe('backfill lifecycle cancellation', () => {
     expect(jest.getTimerCount()).toBe(1);
     service.stop();
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('runs the restarted pass immediately when the cancelled repository read rejects', async () => {
+    const { service, repository, gate, resolve, debug } = setup();
+    const read = deferred<Awaited<ReturnType<PageRepository['getUnresolvedRepositoryUsagePage']>>>();
+    const reads = jest.spyOn(repository, 'getUnresolvedRepositoryUsagePage').mockReturnValueOnce(read.promise);
+    try {
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+      service.stop();
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(reads).toHaveBeenCalledTimes(1);
+      expect(resolve).not.toHaveBeenCalled();
+      gate.complete({ repositoryId: 'repo', worktreePath: '/resolved' });
+      const restartedAt = Date.now();
+      read.fail(new Error('cancelled read failed'));
+      await jest.advanceTimersByTimeAsync(0);
+      expect(reads).toHaveBeenCalledTimes(2);
+      expect(repository.updates.flat()).toHaveLength(3);
+      expect(Date.now()).toBe(restartedAt);
+      expect(debug).toHaveBeenCalledWith('[UsageBackfill] Previous pass failed', { reason: 'cancelled read failed' });
+      expect(jest.getTimerCount()).toBe(1);
+      service.stop();
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      service.stop();
+      reads.mockRestore();
+    }
   });
 
   it('joins concurrent public passes with the same result', async () => {

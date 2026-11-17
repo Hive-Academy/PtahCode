@@ -52,7 +52,15 @@ export class RepositoryIdentityBackfillService {
   private async runScheduled(generation: number): Promise<void> {
     try {
       // TASK_2026_2254_b94b: a restarted lifecycle waits for cancelled work.
-      if (this.inFlight) await this.inFlight;
+      if (this.inFlight) {
+        try {
+          await this.inFlight;
+        } catch (error: unknown) {
+          this.logger.debug('[UsageBackfill] Previous pass failed', {
+            reason: error instanceof Error ? error.message : 'unknown',
+          });
+        }
+      }
       if (!this.isCurrent(generation)) return;
       await this.runOnce();
     } catch (error: unknown) {
