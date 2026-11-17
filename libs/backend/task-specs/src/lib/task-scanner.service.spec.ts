@@ -28,6 +28,16 @@ function validTask(id: string): string {
 }
 
 describe('TaskScannerService', () => {
+  it('scans selected folders with full-scan parsing rules and reports removed folders', async () => {
+    const fs = createMockFileSystemProvider();
+    await fs.writeFile(carrier('TASK_2026_001'), validTask('TASK_2026_001'));
+    await fs.writeFile(carrier('TASK_2026_002'), validTask('TASK_2026_002'));
+    const scanner = new TaskScannerService(fs, makeLogger());
+    const result = await scanner.scanFolders(ROOT, ['TASK_2026_001', 'TASK_2026_003']);
+    expect(result.tasks.map((task) => task.id)).toEqual(['TASK_2026_001']);
+    expect(result.deletedFolders).toEqual(['TASK_2026_003']);
+    expect(result.timing.carriers).toBe(2);
+  });
   it('yields to the event loop during a many-carrier scan without changing result order', async () => {
     const fs = createMockFileSystemProvider();
     for (let index = 0; index < 120; index++) {

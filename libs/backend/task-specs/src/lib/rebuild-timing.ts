@@ -1,6 +1,7 @@
 import type { Logger } from '@ptah-extension/vscode-core';
 
 export interface RebuildTiming {
+  mode: 'full' | 'folders';
   trigger: string;
   rootId: string;
   activeRoots: number;
@@ -24,6 +25,7 @@ export interface RebuildTiming {
 export function logRebuildTiming(logger: Pick<Logger, 'debug' | 'info' | 'warn'>, timing: RebuildTiming): void {
   const message = '[task-specs] index rebuild timing';
   const metrics = {
+    mode: timing.mode,
     trigger: timing.trigger,
     rootId: timing.rootId,
     activeRoots: timing.activeRoots,
