@@ -10,3 +10,4 @@ export * from './table/table.component';
 export * from './setting-row/setting-row.component';
 export * from './inline-confirm/inline-confirm.component';
 export * from './card-grid/card-grid.directive';
+export * from './form-section/field-grid.directive';

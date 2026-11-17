@@ -110,7 +110,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
             @for (field of fields; track field.key) {
               <ptah-field
                 appearance="stacked"
-                class="lane-guards-number-field"
+                class="w-full min-w-0"
                 [label]="field.label"
                 [hint]="field.help + ' Range: ' + field.min + ' or greater.'"
                 [error]="fieldMessage(field.key)"
@@ -123,7 +123,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
                   [id]="field.testId"
                   ptahInput
                   size="sm"
-                  class="min-w-0 flex-1 text-right tabular-nums"
+                  class="w-full min-w-0 flex-1 text-right tabular-nums"
                   [invalid]="!!fieldMessage(field.key)"
                   [value]="drafts()[field.key]"
                   [ptahBusyDisabled]="busy() || feedback.saving()"
@@ -147,9 +147,6 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
     </section>
   `,
   styles: `
-    .lane-guards-number-field {
-      max-inline-size: 22rem;
-    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
