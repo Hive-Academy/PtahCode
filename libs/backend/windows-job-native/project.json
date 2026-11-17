@@ -1,0 +1,21 @@
+{
+  "name": "@ptah-extension/windows-job-native",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/backend/windows-job-native/src",
+  "tags": [
+    "scope:shared",
+    "type:util"
+  ],
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit --project libs/backend/windows-job-native/tsconfig.lib.json"
+      }
+    },
+    "test": {
+      "cache": false
+    }
+  }
+}

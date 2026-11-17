@@ -152,6 +152,9 @@
       "@ptah-extension/platform-core": [
         "./libs/backend/platform-core/src/index.ts"
       ],
+      "@ptah-extension/windows-job-native": [
+        "./libs/backend/windows-job-native/src/index.ts"
+      ],
       "@ptah-extension/platform-core/testing": [
         "./libs/backend/platform-core/src/testing/index.ts"
       ],
