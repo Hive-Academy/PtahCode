@@ -1,0 +1,74 @@
+{
+  "1024": [
+    {
+      "tag": "PTAH-TABLE",
+      "attrs": [
+        "data-ptah-pattern=table",
+        "label=Lanes",
+        "density=compact",
+        "data-testid=cli-provider-grid",
+        "class=ptah-table block"
+      ],
+      "width": 566,
+      "permHidden": false,
+      "permHiddenAttr": null,
+      "permDisplay": "table-cell",
+      "rows": 0,
+      "expanders": 0
+    }
+  ],
+  "1440": [
+    {
+      "tag": "PTAH-TABLE",
+      "attrs": [
+        "data-ptah-pattern=table",
+        "label=Lanes",
+        "density=compact",
+        "data-testid=cli-provider-grid",
+        "class=ptah-table block"
+      ],
+      "width": 792,
+      "permHidden": false,
+      "permHiddenAttr": null,
+      "permDisplay": "table-cell",
+      "rows": 0,
+      "expanders": 0
+    }
+  ],
+  "1920": [
+    {
+      "tag": "PTAH-TABLE",
+      "attrs": [
+        "data-ptah-pattern=table",
+        "label=Lanes",
+        "density=compact",
+        "data-testid=cli-provider-grid",
+        "class=ptah-table block"
+      ],
+      "width": 792,
+      "permHidden": false,
+      "permHiddenAttr": null,
+      "permDisplay": "table-cell",
+      "rows": 0,
+      "expanders": 0
+    }
+  ],
+  "2560": [
+    {
+      "tag": "PTAH-TABLE",
+      "attrs": [
+        "data-ptah-pattern=table",
+        "label=Lanes",
+        "density=compact",
+        "data-testid=cli-provider-grid",
+        "class=ptah-table block"
+      ],
+      "width": 792,
+      "permHidden": false,
+      "permHiddenAttr": null,
+      "permDisplay": "table-cell",
+      "rows": 0,
+      "expanders": 0
+    }
+  ]
+}
