@@ -58,7 +58,7 @@ import {
 import type { OutputStyleFailedOperation } from './output-style.store';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { OutputStyleNoticesComponent } from './output-style-notices.component';
-import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahSkeletonComponent } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahCardGridDirective, PtahIconButtonDirective, PtahSkeletonComponent } from '@ptah-extension/ui';
 
 export { PARITY_TIERS, type ParityTierOption };
 
@@ -102,7 +102,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
 @Component({
   selector: 'ptah-output-style-list',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahSkeletonComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahSkeletonComponent, PtahCardGridDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ptah-output-style-notices
@@ -127,9 +127,10 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
         Reading your style files…
       </div>
     } @else {
-      <div class="[container-type:inline-size]">
+      <div>
         <div
-          class="grid grid-cols-1 gap-[var(--ptah-gap-controls)] [@container(min-width:640px)]:grid-cols-2 [@container(min-width:900px)]:grid-cols-3"
+          ptahCardGrid
+          variant="tight"
           role="radiogroup"
           aria-label="Active output style"
           data-testid="output-style-matrix"

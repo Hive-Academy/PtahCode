@@ -282,6 +282,15 @@ describe('PtahSettingsLayoutComponent', () => {
     expect(q('[data-testid="panel-content"]')).not.toBeNull();
   });
 
+  it('centers one fluid main column with the content cap; the panel has no own cap', () => {
+    const main = q('[data-testid="settings-layout-main"]') as HTMLElement;
+    expect(main.classList.contains('mx-auto')).toBe(true);
+    expect(main.classList.contains('w-full')).toBe(true);
+    expect(main.classList.contains('max-w-[var(--ptah-settings-content-max-w)]')).toBe(true);
+    expect(panel().classList.contains('w-full')).toBe(true);
+    expect(panel().className).not.toMatch(/\bmax-w-/);
+  });
+
   it('projects the slots and shows the description', () => {
     expect(q('nav [data-testid="nav-header"]')).not.toBeNull();
     expect(q('nav [data-testid="nav-footer"]')).not.toBeNull();

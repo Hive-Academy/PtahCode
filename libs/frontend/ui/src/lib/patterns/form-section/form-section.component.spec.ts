@@ -14,6 +14,7 @@ import { PtahFormSectionComponent } from './form-section.component';
       [divider]="divider()"
       [disabled]="disabled()"
       [error]="error()"
+      [wide]="wide()"
     >
       <span aside data-testid="aside-content">Beta</span>
       <input data-testid="field-input" aria-label="Name" />
@@ -28,6 +29,7 @@ class HostComponent {
   readonly divider = signal(false);
   readonly disabled = signal(false);
   readonly error = signal<string | null>(null);
+  readonly wide = signal(false);
 }
 
 const RAW_SPACING = /\b(gap|p|px|py|m|mx|my|space-[xy])-\d/;
@@ -211,6 +213,19 @@ describe('PtahFormSectionComponent', () => {
     expect(classes).toContain(
       '[@container(min-width:640px)]:grid-cols-[var(--ptah-form-section-aside-w)_minmax(0,var(--ptah-form-section-fields-max-w))]',
     );
+  });
+
+  it('lets the fields column grow to the content cap only when wide is set', () => {
+    const wide = '[--ptah-form-section-fields-max-w:var(--ptah-settings-content-max-w)]';
+    expect(section().classList.contains(wide)).toBe(false);
+    host.wide.set(true);
+    fixture.detectChanges();
+    expect(section().classList.contains(wide)).toBe(true);
+    expect(section().classList.contains('grid')).toBe(true);
+    expect(section().hasAttribute('style')).toBe(false);
+    host.wide.set(false);
+    fixture.detectChanges();
+    expect(section().classList.contains(wide)).toBe(false);
   });
 
   it('uses no raw spacing utility on any rendered element', () => {

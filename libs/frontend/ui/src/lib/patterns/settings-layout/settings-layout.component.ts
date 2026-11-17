@@ -96,8 +96,11 @@ const NAV_CLASS = [
 /**
  * Settings layout pattern (TASK_2026_1177_9109, `pattern-spec.md` section 5).
  * The settings page frame: a side nav of tabs, a page header and one tab
- * panel with a max width. Below the `layout-split` width (768px of its own
- * container) the nav becomes a horizontal strip above the header.
+ * panel. The header and the panel share one fluid, centered main column,
+ * capped at `--ptah-settings-content-max-w`. Table and card-grid sections use
+ * the full column; field sections keep the form-section grid. Below the
+ * `layout-split` width (768px of its own container) the nav becomes a
+ * horizontal strip above the header.
  *
  * Tabs use manual activation (decision D5): arrow keys, Home and End move
  * focus, Enter, Space or a click emits `selectedChange`. The parent owns the
@@ -201,7 +204,10 @@ const NAV_CLASS = [
           <div [class]="navSlotClass()"><ng-content select="[nav-footer]" /></div>
         </nav>
       }
-      <div class="flex min-w-0 flex-col" data-testid="settings-layout-main">
+      <div
+        class="mx-auto flex w-full min-w-0 max-w-[var(--ptah-settings-content-max-w)] flex-col"
+        data-testid="settings-layout-main"
+      >
         <header
           class="mb-[var(--ptah-gap-group)] flex flex-wrap items-start justify-between gap-[var(--ptah-gap-controls)]"
           data-testid="settings-layout-header"
@@ -227,7 +233,7 @@ const NAV_CLASS = [
         </header>
         <div class="empty:hidden" data-testid="settings-layout-header-band"><ng-content select="[header-band]" /></div>
         <div
-          class="flex w-full min-w-0 max-w-[var(--ptah-settings-content-max-w)] flex-col gap-[var(--ptah-gap-section)] scroll-pb-[calc(var(--ptah-control-h-md)+2*var(--ptah-surface-pad))]"
+          class="flex w-full min-w-0 flex-col gap-[var(--ptah-gap-section)] scroll-pb-[calc(var(--ptah-control-h-md)+2*var(--ptah-surface-pad))]"
           [id]="panelId"
           [attr.role]="hasTabs() && navMode() === 'tabs' ? 'tabpanel' : null"
           [attr.aria-labelledby]="hasTabs() && navMode() === 'tabs' ? panelLabelledBy() : null"

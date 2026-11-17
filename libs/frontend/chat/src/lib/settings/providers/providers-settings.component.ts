@@ -72,6 +72,7 @@ import {
   PtahAlertComponent,
   PtahStatePanelComponent,
   PtahSkeletonComponent,
+  PtahCardGridDirective,
 } from '@ptah-extension/ui';
 
 /**
@@ -118,6 +119,7 @@ const CONTROL =
     PtahAlertComponent,
     PtahStatePanelComponent,
     PtahSkeletonComponent,
+    PtahCardGridDirective,
   ],
   template: `
     <div
@@ -360,12 +362,9 @@ const CONTROL =
               </p>
             }
             <!-- Compact cards (≤ 80 px): the whole card opens the drawer, which holds every per-state action but one.
-                 Rows come from the CONTAINER width (auto-fit: empty tracks collapse, so a few cards share the whole row).
-                 Each column is at least 27 rem; below 27 rem the one column shrinks to the container (onboarding's 400 px content area). -->
-            <div
-              class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,27rem),1fr))] items-start gap-2"
-              data-testid="connections-grid"
-            >
+                 Columns come from the CONTAINER width (ptahCardGrid, auto-fill). The wide variant (27 rem tracks) keeps the
+                 name, status and badges of a card on one line; below 27 rem the one column shrinks to the container (onboarding's 400 px). -->
+            <div ptahCardGrid variant="wide" data-testid="connections-grid">
               @for (connection of shownConnections(); track connection.id) {
                 <ptah-provider-connection-card
                   [attr.data-connection-id]="connection.id"
