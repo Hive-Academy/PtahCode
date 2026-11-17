@@ -204,18 +204,23 @@ function killChild(state, signal) {
       require('node:child_process').execFile(taskkill,
         ['/PID', String(state.child.pid), '/T', '/F'],
         { windowsHide: true, timeout: 3000 }, function (err, stdout, stderr) {
-          if (!err) return;
-          if (err.code === 128 || /not found|no running instance of the task/i.test(String(stdout) + String(stderr))) return;
-          if (!state.exited) {
-            try { state.child.kill(signal || 'SIGTERM'); }
-            catch (killErr) {
-              if (!killErr || killErr.code !== 'ESRCH') send(state, flattenError(killErr));
+          try {
+            if (!err) return;
+            if (err.code === 128 || /not found|no running instance of the task/i.test(String(stdout) + String(stderr))) return;
+            if (!state.exited) {
+              try { state.child.kill(signal || 'SIGTERM'); }
+              catch (killErr) {
+                if (!killErr || killErr.code !== 'ESRCH') send(state, flattenError(killErr));
+              }
             }
+            send(state, { type: 'error', code: 'TREE_KILL_FAILED',
+              message: 'taskkill failed: ' + (String(stderr).trim() || err.message) });
+          } finally {
+            closeJob(state);
           }
-          send(state, { type: 'error', code: 'TREE_KILL_FAILED',
-            message: 'taskkill failed: ' + (String(stderr).trim() || err.message) });
         });
     } catch (err) {
+      closeJob(state);
       if (!state.exited) {
         try { state.child.kill(signal || 'SIGTERM'); }
         catch (killErr) {
@@ -227,6 +232,7 @@ function killChild(state, signal) {
     }
     return;
   }
+  closeJob(state);
   try {
     state.child.kill(signal || 'SIGTERM');
   } catch (err) {
@@ -430,7 +436,6 @@ parentPort.on('message', function (message) {
       else state.pendingEnd = true;
       return;
     case 'kill':
-      closeJob(state);
       if (state.child) killChild(state, message.signal);
       else state.pendingKill = message.signal || 'SIGTERM';
       return;

@@ -2,9 +2,55 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { EventEmitter } from 'node:events';
+import { runInNewContext } from 'node:vm';
 import { OFF_THREAD_SPAWNER_WORKER_SOURCE } from './off-thread-process-spawner-source';
 
 type Message = { type: string; id: number; pid?: number; job?: { ok: boolean; message?: string } };
+
+describe('generated worker job kill ordering', () => {
+  it.each(['success', 'not-found', 'failure', 'timeout', 'throw'] as const)(
+    'starts taskkill before closing and closes once after %s', (outcome) => {
+      const child = Object.assign(new EventEmitter(), {
+        pid: 4242, stdin: null, stdout: null, stderr: null, kill: jest.fn(),
+      });
+      const closeJob = jest.fn();
+      let complete: ((error: Error | null, stdout: string, stderr: string) => void) | undefined;
+      const execFile = jest.fn((_file: string, _args: string[], _options: object, callback: NonNullable<typeof complete>) => {
+        expect(closeJob).not.toHaveBeenCalled();
+        if (outcome === 'throw') throw new Error('launch failed');
+        complete = callback;
+      });
+      let onMessage: ((message: Record<string, unknown>) => void) | undefined;
+      runInNewContext(OFF_THREAD_SPAWNER_WORKER_SOURCE, {
+        process: { platform: 'win32', env: {} }, Buffer,
+        require: (id: string): unknown => {
+          if (id === 'node:worker_threads') return { parentPort: {
+            on: (_event: string, listener: typeof onMessage) => { onMessage = listener; },
+            postMessage: jest.fn(),
+          } };
+          if (id === 'node:child_process') return { spawn: () => child, execFile };
+          if (id === 'C:/windows_job.node') return { createJobForPid: () => ({ pid: child.pid }), closeJob };
+          return jest.requireActual(id);
+        },
+      });
+      onMessage?.({ type: 'spawn', id: 1, command: 'fake', args: [], env: {}, stdioMode: 'ignore',
+        windowsJobPolicy: 'job', windowsJobBinaryPath: 'C:/windows_job.node' });
+      onMessage?.({ type: 'kill', id: 1, signal: 'SIGTERM' });
+      expect(execFile).toHaveBeenCalledTimes(1);
+      if (outcome !== 'throw') {
+        expect(closeJob).not.toHaveBeenCalled();
+        expect(complete).toBeDefined();
+        complete?.(outcome === 'success' ? null : Object.assign(new Error(outcome), {
+          code: outcome === 'not-found' ? 128 : 5, killed: outcome === 'timeout',
+        }), '', outcome === 'not-found' ? 'not found' : '');
+      }
+      expect(closeJob).toHaveBeenCalledTimes(1);
+      child.emit('exit', null, 'SIGTERM');
+      expect(closeJob).toHaveBeenCalledTimes(1);
+    },
+  );
+});
 
 describe('generated worker Windows jobs', () => {
   let directory: string;

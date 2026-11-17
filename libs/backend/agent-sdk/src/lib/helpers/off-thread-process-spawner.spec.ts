@@ -1828,6 +1828,59 @@ describe('OffThreadProcessSpawner', () => {
       expect(close).toHaveBeenCalledTimes(1);
       expect(query).toHaveBeenCalled();
     });
+    it.each(['success', 'not-found', 'failure', 'timeout', 'throw'] as const)(
+      'starts taskkill before closing the job and closes after %s', (outcome) => {
+        const close = jest.fn();
+        spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },
+          'C:/windows_job.node', () => true);
+        const child = fakeChild();
+        const kill = jest.spyOn(child, 'kill').mockReturnValue(true);
+        jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+        let complete: ((error: Error | null, stdout: string, stderr: string) => void) | undefined;
+        const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+          expect(close).not.toHaveBeenCalled();
+          if (outcome === 'throw') throw new Error('launch failed');
+          complete = args.at(-1) as NonNullable<typeof complete>;
+          return new childProcess.ChildProcess();
+        });
+        try {
+          const handle = spawner.spawnProcess(request);
+          expect(handle.kill()).toBe(true);
+          expect(execFile).toHaveBeenCalledTimes(1);
+          if (outcome !== 'throw') {
+            expect(close).not.toHaveBeenCalled();
+            const error = outcome === 'success' ? null : Object.assign(new Error(outcome), {
+              code: outcome === 'not-found' ? 128 : 5, killed: outcome === 'timeout',
+            });
+            expect(complete).toBeDefined();
+            complete?.(error, '', outcome === 'not-found' ? 'not found' : '');
+          }
+          expect(close).toHaveBeenCalledTimes(1);
+          expect(kill).toHaveBeenCalledTimes(outcome === 'success' || outcome === 'not-found' ? 0 : 1);
+          child.emit('exit', null, 'SIGTERM');
+          child.emit('close', null, 'SIGTERM');
+          expect(close).toHaveBeenCalledTimes(1);
+        } finally {
+          execFile.mockRestore();
+        }
+      },
+    );
+    it.each(['failed-spawn', 'exit-and-close'] as const)('finishes inline tracking once for %s', (outcome) => {
+      const close = jest.fn();
+      spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },
+        'C:/windows_job.node', () => true);
+      const child = fakeChild();
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => child);
+      const finished = jest.spyOn(spawner['inline'], 'delete');
+      spawner.spawnProcess(request);
+      expect(spawner['inline'].size).toBe(1);
+      if (outcome === 'failed-spawn') child.emit('error', Object.assign(new Error('missing executable'), { code: 'ENOENT' }));
+      else child.emit('exit', 0, null);
+      child.emit('close', null, null);
+      expect(spawner['inline'].size).toBe(0);
+      expect(finished).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
     it('closes the assigned handle on spawner stop', async () => {
       const close = jest.fn();
       spawner.configureWindowsJobs({ assignToNewJob: () => ({ close }) },

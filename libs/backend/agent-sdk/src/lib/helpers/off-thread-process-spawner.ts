@@ -107,13 +107,14 @@ import {
 const SERVICE_TAG = '[OffThreadProcessSpawner]';
 
 /** Launch taskkill before returning, including from the SDK's exit sweep. */
-function stopWindowsTree(pid: number, logger: Logger, fallback?: (timedOut: boolean) => void): void {
+function stopWindowsTree(pid: number, logger: Logger, fallback?: (timedOut: boolean) => void, onComplete?: () => void): void {
   const fail = (error: Error, timedOut = false): void => {
     logger.error(`${SERVICE_TAG} Process tree kill failed`, error);
     fallback?.(timedOut);
   };
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     fail(new Error(`Invalid process id for tree kill: ${pid}`));
+    onComplete?.();
     return;
   }
   const systemRoot = process.env['SystemRoot'] ?? process.env['windir'];
@@ -123,13 +124,18 @@ function stopWindowsTree(pid: number, logger: Logger, fallback?: (timedOut: bool
   try {
     childProcess.execFile(executable, ['/PID', String(pid), '/T', '/F'],
       { windowsHide: true, timeout: 3_000 }, (error, stdout, stderr) => {
-        if (!error) return;
-        if (error.code === 128 ||
-            /not found|no running instance of the task/i.test(`${stdout}\n${stderr}`)) return;
-        fail(new Error(`taskkill failed: ${String(stderr).trim() || error.message}`, { cause: error }), error.killed === true);
+        try {
+          if (!error) return;
+          if (error.code === 128 ||
+              /not found|no running instance of the task/i.test(`${stdout}\n${stderr}`)) return;
+          fail(new Error(`taskkill failed: ${String(stderr).trim() || error.message}`, { cause: error }), error.killed === true);
+        } finally {
+          onComplete?.();
+        }
       });
   } catch (error: unknown) {
     fail(error instanceof Error ? error : new Error(String(error)));
+    onComplete?.();
   }
 }
 
@@ -736,6 +742,7 @@ class InlineProcess
   private observedExit = false;
   /** Windows stops the tree with taskkill, so `child.killed` stays false. */
   private killRequested = false;
+  private finished = false;
 
   constructor(
     private readonly child: childProcess.ChildProcess,
@@ -763,7 +770,7 @@ class InlineProcess
       // Node's own child: every `exit` it emits is the child's real exit.
       this.observedExit = true;
       this.closeJob();
-      this.onFinished?.();
+      this.finish();
       if (this.cleanupOrphanDescendants && !this.killRequested) {
         scheduleWindowsOrphanCleanup(
           child.pid, this.rootStartedAt, this.detached,
@@ -774,11 +781,19 @@ class InlineProcess
       this.emit('exit', code, signal);
     });
     child.on('close', (code, signal) => {
+      this.closeJob();
+      this.finish();
       this.emit('close', code, signal);
     });
     child.on('error', (error: Error) => {
       this.emit('error', error);
     });
+  }
+
+  private finish(): void {
+    if (this.finished) return;
+    this.finished = true;
+    this.onFinished?.();
   }
 
   closeJob(): void {
@@ -807,9 +822,9 @@ class InlineProcess
 
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
     if (this.observedExit || this.child.exitCode !== null || this.child.signalCode !== null) return false;
-    this.closeJob();
     if (process.platform === 'win32' && this.child.pid !== undefined) {
       this.killRequested = true;
+      // Enumerate pre-assignment descendants before closing the job kills the root.
       stopWindowsTree(this.child.pid, this.logger, () => {
         if (!this.observedExit && this.child.exitCode === null && this.child.signalCode === null) {
           try { this.child.kill(signal); }
@@ -818,9 +833,10 @@ class InlineProcess
               error instanceof Error ? error : new Error(String(error)));
           }
         }
-      });
+      }, () => this.closeJob());
       return true;
     }
+    this.closeJob();
     return this.child.kill(signal);
   }
 }
