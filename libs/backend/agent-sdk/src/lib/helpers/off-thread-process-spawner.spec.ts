@@ -427,6 +427,7 @@ describe('OffThreadProcessSpawner', () => {
       Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
       try {
         child.kill('SIGTERM');
+        expect(child.killed).toBe(true);
         expect(execFile).toHaveBeenCalledWith(expect.stringContaining('taskkill'),
           ['/PID', String(pid), '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
       } finally {
@@ -1035,6 +1036,40 @@ describe('OffThreadProcessSpawner', () => {
         expect(execFile).toHaveBeenCalledWith(expect.stringContaining('taskkill'),
           ['/PID', String(pid), '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
         expect(hostKill).toHaveBeenCalledWith(pid, 'SIGTERM');
+      } finally {
+        hostKill.mockRestore();
+        execFile.mockRestore();
+        if (original) Object.defineProperty(process, 'platform', original);
+        if (pid !== null) {
+          try { process.kill(pid, 'SIGKILL'); }
+          catch (error: unknown) {
+            // ESRCH: the test child is already gone.
+            void error;
+          }
+        }
+      }
+    });
+
+    it('does not signal the PID from the host when taskkill timed out after a lost worker', async () => {
+      const handle = spawner.spawnProcess({ command: process.execPath, args: ['-e', IDLE_SCRIPT], env: process.env });
+      const failed = new Promise<void>((resolve) => handle.once('error', () => resolve()));
+      const pid = await handle.whenSpawned;
+      expect(pid).not.toBeNull();
+      const original = Object.getOwnPropertyDescriptor(process, 'platform');
+      const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+        const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+        callback(Object.assign(new Error('taskkill failed'), { killed: true }), '', '');
+        return new EventEmitter() as childProcess.ChildProcess;
+      });
+      const hostKill = jest.spyOn(process, 'kill').mockImplementation(() => true);
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        const [crashed] = spawnWorkers();
+        await crashed.terminate();
+        await failed;
+        expect(execFile).toHaveBeenCalledWith(expect.stringContaining('taskkill'),
+          ['/PID', String(pid), '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
+        expect(hostKill).not.toHaveBeenCalled();
       } finally {
         hostKill.mockRestore();
         execFile.mockRestore();

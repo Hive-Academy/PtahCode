@@ -98,10 +98,10 @@ import {
 const SERVICE_TAG = '[OffThreadProcessSpawner]';
 
 /** Launch taskkill before returning, including from the SDK's exit sweep. */
-function stopWindowsTree(pid: number, logger: Logger, fallback?: () => void): void {
-  const fail = (error: Error): void => {
+function stopWindowsTree(pid: number, logger: Logger, fallback?: (timedOut: boolean) => void): void {
+  const fail = (error: Error, timedOut = false): void => {
     logger.error(`${SERVICE_TAG} Process tree kill failed`, error);
-    fallback?.();
+    fallback?.(timedOut);
   };
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     fail(new Error(`Invalid process id for tree kill: ${pid}`));
@@ -117,7 +117,7 @@ function stopWindowsTree(pid: number, logger: Logger, fallback?: () => void): vo
         if (!error) return;
         if (error.code === 128 ||
             /not found|no running instance of the task/i.test(`${stdout}\n${stderr}`)) return;
-        fail(new Error(`taskkill failed: ${String(stderr).trim() || error.message}`, { cause: error }));
+        fail(new Error(`taskkill failed: ${String(stderr).trim() || error.message}`, { cause: error }), error.killed === true);
       });
   } catch (error: unknown) {
     fail(error instanceof Error ? error : new Error(String(error)));
@@ -637,13 +637,15 @@ class WorkerBackedProcess
    *
    * `rootFallback` is for a lost worker only: no thread is left to kill the
    * root when taskkill fails, so the host does it. A live worker runs its own
-   * fallback.
+   * fallback. A taskkill that timed out proves nothing about the PID 3 s later,
+   * and the host cannot see the exit of this child, so that case only logs: a
+   * signal then could reach an unrelated process that reused the PID.
    */
   private signalDirectly(pid: number, signal: NodeJS.Signals, rootFallback = false): void {
     if (process.platform === 'win32') {
       if (this.exitReported || this.settled) return;
       stopWindowsTree(pid, this.logger, rootFallback
-        ? () => { if (!this.exitReported) this.killRoot(pid, signal); }
+        ? (timedOut) => { if (!timedOut && !this.exitReported) this.killRoot(pid, signal); }
         : undefined);
       return;
     }
@@ -694,6 +696,8 @@ class InlineProcess
   /** An inline spawn already has its pid, so the port's promise is settled. */
   readonly whenSpawned: Promise<number | null>;
   private observedExit = false;
+  /** Windows stops the tree with taskkill, so `child.killed` stays false. */
+  private killRequested = false;
 
   constructor(
     private readonly child: childProcess.ChildProcess,
@@ -723,7 +727,7 @@ class InlineProcess
   }
 
   get killed(): boolean {
-    return this.child.killed;
+    return this.child.killed || this.killRequested;
   }
 
   get exitCode(): number | null {
@@ -741,6 +745,7 @@ class InlineProcess
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
     if (this.observedExit || this.child.exitCode !== null || this.child.signalCode !== null) return false;
     if (process.platform === 'win32' && this.child.pid !== undefined) {
+      this.killRequested = true;
       stopWindowsTree(this.child.pid, this.logger, () => {
         if (!this.observedExit && this.child.exitCode === null && this.child.signalCode === null) {
           try { this.child.kill(signal); }
