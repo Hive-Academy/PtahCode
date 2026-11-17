@@ -94,6 +94,11 @@ import {
   type WorkerErrorMessage,
   type WorkerMessage,
 } from './spawn-worker-pool';
+import {
+  defaultOrphanCleanupDependencies,
+  scheduleWindowsOrphanCleanup,
+  type OrphanCleanupDependencies,
+} from '@ptah-extension/platform-core';
 
 const SERVICE_TAG = '[OffThreadProcessSpawner]';
 
@@ -178,6 +183,7 @@ interface SpawnPlan {
   /** Only the SDK seam forwards a signal; the port has no equivalent. */
   readonly signal?: AbortSignal;
   readonly detached: boolean;
+  readonly cleanupOrphanDescendants: boolean;
   readonly windowsHide: boolean;
   readonly windowsVerbatimArguments: boolean;
   /** `'ignore'` creates no pipe at all; the handle's streams are then `null`. */
@@ -279,6 +285,7 @@ class WorkerBackedProcess
   private stderrEnded: boolean;
   private graceTimer: NodeJS.Timeout | null = null;
   private readonly onAbort: () => void;
+  private rootStartedAt: number | null = null;
 
   constructor(
     private readonly plan: SpawnPlan,
@@ -286,6 +293,7 @@ class WorkerBackedProcess
     pool: SpawnWorkerPool,
     private readonly onReleased: (target: WorkerBackedProcess) => void,
     private readonly logger: Logger,
+    private readonly orphanCleanup: OrphanCleanupDependencies,
   ) {
     super();
     // An EventEmitter with no 'error' listener THROWS on emit. The SDK attaches
@@ -461,6 +469,10 @@ class WorkerBackedProcess
   private onWorkerMessage(message: WorkerMessage): void {
     switch (message.type) {
       case 'spawned': {
+        // A future value can only shrink the cleanup window: a missed cleanup, never a wrong kill.
+        if (Number.isSafeInteger(message.startedAt) && message.startedAt > 0) {
+          this.rootStartedAt = message.startedAt;
+        }
         this.childPid = message.pid;
         this.settleSpawned(message.pid);
         if (this.pendingKill !== null && this.childPid !== null) {
@@ -495,6 +507,14 @@ class WorkerBackedProcess
         return;
       }
       case 'exit': {
+        if (!this.settled && !this.killedFlag && this.plan.cleanupOrphanDescendants &&
+            this.rootStartedAt !== null) {
+          scheduleWindowsOrphanCleanup(
+            this.childPid, this.rootStartedAt, this.plan.detached,
+            (error) => this.logger.error(`${SERVICE_TAG} Orphan cleanup failed`, error),
+            this.orphanCleanup,
+          );
+        }
         this.finish(message.code, message.signal);
         return;
       }
@@ -703,6 +723,10 @@ class InlineProcess
     private readonly child: childProcess.ChildProcess,
     stdioMode: StdioMode,
     private readonly logger: Logger,
+    private readonly detached: boolean,
+    private readonly cleanupOrphanDescendants: boolean,
+    private readonly rootStartedAt: number,
+    private readonly orphanCleanup: OrphanCleanupDependencies,
   ) {
     super();
     this.on('error', () => undefined);
@@ -714,8 +738,16 @@ class InlineProcess
     this.stderr = child.stderr;
     this.whenSpawned = Promise.resolve(child.pid ?? null);
     child.on('exit', (code, signal) => {
+      if (this.observedExit) return;
       // Node's own child: every `exit` it emits is the child's real exit.
       this.observedExit = true;
+      if (this.cleanupOrphanDescendants && !this.killRequested) {
+        scheduleWindowsOrphanCleanup(
+          child.pid, this.rootStartedAt, this.detached,
+          (error) => this.logger.error(`${SERVICE_TAG} Orphan cleanup failed`, error),
+          this.orphanCleanup,
+        );
+      }
       this.emit('exit', code, signal);
     });
     child.on('close', (code, signal) => {
@@ -814,6 +846,12 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
   private readonly live = new Set<WorkerBackedProcess>();
   private readonly pool: SpawnWorkerPool;
   private warnedInline = false;
+  private orphanCleanup: OrphanCleanupDependencies = defaultOrphanCleanupDependencies;
+
+  /** Test seam. The DI constructor only accepts registered services. */
+  setOrphanCleanupDependencies(dependencies: OrphanCleanupDependencies): void {
+    this.orphanCleanup = dependencies;
+  }
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -849,6 +887,8 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
         env: stripUndefinedEnv(options.env),
         signal: options.signal,
         detached: false,
+        // Also covers the short model probes on this seam; a probe pays one query only on a crash.
+        cleanupOrphanDescendants: true,
         windowsHide: true,
         windowsVerbatimArguments: false,
         stdioMode: 'pipe',
@@ -896,6 +936,7 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
         cwd: request.cwd,
         env,
         detached: request.detached === true,
+        cleanupOrphanDescendants: request.cleanupOrphanDescendants === true,
         // ConPTY's AttachConsole() fails without a console of its own, which is
         // what breaks shell execution inside the rival CLIs on Windows. A user
         // console is a visible one by definition.
@@ -932,6 +973,7 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
         this.pool,
         (target) => this.live.delete(target),
         this.logger,
+        this.orphanCleanup,
       );
       this.live.add(spawned);
       return spawned;
@@ -978,6 +1020,7 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
       refused.code = LAUNCH_GUARD_REFUSED;
       throw refused;
     }
+    const rootStartedAt = this.orphanCleanup.now();
     const child = childProcess.spawn(plan.command, [...plan.args], {
       cwd: plan.cwd,
       env: plan.env,
@@ -998,6 +1041,8 @@ export class OffThreadProcessSpawner implements IProcessSpawner {
       });
     }
 
-    return new InlineProcess(child, plan.stdioMode, this.logger);
+    return new InlineProcess(child, plan.stdioMode, this.logger,
+      plan.detached, plan.cleanupOrphanDescendants, rootStartedAt,
+      this.orphanCleanup);
   }
 }

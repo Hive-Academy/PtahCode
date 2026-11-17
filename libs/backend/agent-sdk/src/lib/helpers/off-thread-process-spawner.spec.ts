@@ -1,5 +1,12 @@
 import 'reflect-metadata';
 
+jest.mock('node:child_process', () => {
+  const actual = jest.requireActual<typeof import('node:child_process')>('node:child_process');
+  const mocked = { ...actual, spawn: jest.fn(actual.spawn) };
+  Object.defineProperty(mocked, 'execFile', { get: () => actual.execFile, enumerable: true });
+  return mocked;
+});
+
 import { createHash } from 'node:crypto';
 import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
@@ -187,6 +194,9 @@ describe('OffThreadProcessSpawner', () => {
       asLogger(logger),
       reporter as unknown as DegradationReporter,
     );
+    spawner.setOrphanCleanupDependencies({
+      query: async () => [], kill: async () => undefined, now: Date.now,
+    });
   });
 
   afterEach(async () => {
@@ -1403,7 +1413,7 @@ describe('OffThreadProcessSpawner', () => {
      * Intercept every `spawn` message and answer it as a worker whose child
      * started with `pid` and exited 0 — without creating any child.
      */
-    function fakeWorkerSpawns(pid: number): Array<Record<string, unknown>> {
+    function fakeWorkerSpawns(pid: number, code = 0, duplicate = false, startedAt?: number, lost = false): Array<Record<string, unknown>> {
       const seen: Array<Record<string, unknown>> = [];
       postSpy = jest
         .spyOn(Worker.prototype, 'postMessage')
@@ -1420,10 +1430,15 @@ describe('OffThreadProcessSpawner', () => {
           seen.push(record);
           const id = record['id'];
           setImmediate(() => {
-            this.emit('message', { id, type: 'spawned', pid });
+            if (lost) {
+              this.emit('exit', 1);
+              return;
+            }
+            this.emit('message', { id, type: 'spawned', pid, startedAt: startedAt ?? 10_000 });
             this.emit('message', { id, type: 'stdout-end' });
             this.emit('message', { id, type: 'stderr-end' });
-            this.emit('message', { id, type: 'exit', code: 0, signal: null });
+            this.emit('message', { id, type: 'exit', code, signal: null });
+            if (duplicate) this.emit('message', { id, type: 'exit', code, signal: null });
           });
         });
       return seen;
@@ -1467,6 +1482,102 @@ describe('OffThreadProcessSpawner', () => {
       );
       // `windowsHide` stays an explicit key (windows-hide-spawn.guard.spec.ts).
       expect(Object.keys(messages[0] ?? {})).toContain('windowsHide');
+    });
+
+    it('cleans linked descendants after a worker root exits without touching unrelated PIDs', async () => {
+      setPlatform('win32');
+      const query = jest.fn(async () => [
+        { ProcessId: 5001, ParentProcessId: 4242, CreationDate: new Date(10_000).toISOString() },
+        { ProcessId: 5002, ParentProcessId: 1, CreationDate: new Date(10_000).toISOString() },
+      ]);
+      const kill = jest.fn(async (_pid: number) => undefined);
+      spawner.setOrphanCleanupDependencies({ query, kill, now: () => 10_000 });
+      fakeWorkerSpawns(4242);
+      const child = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, cleanupOrphanDescendants: true });
+      await waitForCloseCode(child);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(kill).toHaveBeenCalledWith(5001);
+      expect(kill).not.toHaveBeenCalledWith(4242);
+      expect(kill).not.toHaveBeenCalledWith(5002);
+    });
+
+    it.each([
+      { name: 'crash', platform: 'win32', detached: false, code: 17, queryFails: false, killFails: false, expectedQueries: 2, expectedKills: 1 },
+      { name: 'query failure', platform: 'win32', detached: false, code: 0, queryFails: true, killFails: false, expectedQueries: 1, expectedKills: 0 },
+      { name: 'kill failure', platform: 'win32', detached: false, code: 0, queryFails: false, killFails: true, expectedQueries: 2, expectedKills: 1 },
+      { name: 'non-Windows', platform: 'linux', detached: false, code: 0, queryFails: false, killFails: false, expectedQueries: 0, expectedKills: 0 },
+      { name: 'detached rival CLI', platform: 'win32', detached: true, code: 0, queryFails: false, killFails: false, expectedQueries: 0, expectedKills: 0 },
+    ] as const)('worker exit: $name', async ({ platform, detached, code, queryFails, killFails, expectedQueries, expectedKills }) => {
+      setPlatform(platform);
+      const queryError = new Error('query failed');
+      const killError = new Error('kill failed');
+      const query = jest.fn(async () => {
+        if (queryFails) throw queryError;
+        return [{ ProcessId: 5001, ParentProcessId: 4242, CreationDate: new Date(10_000).toISOString() }];
+      });
+      const kill = jest.fn(async (_pid: number) => { if (killFails) throw killError; });
+      spawner.setOrphanCleanupDependencies({ query, kill, now: () => 10_000 });
+      fakeWorkerSpawns(4242, code, true);
+      const child = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, detached, cleanupOrphanDescendants: true });
+      await waitForCloseCode(child);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).toHaveBeenCalledTimes(expectedQueries);
+      expect(kill).toHaveBeenCalledTimes(expectedKills);
+      if (queryFails) expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Orphan cleanup failed'), queryError);
+      if (killFails) expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Orphan cleanup failed'), killError);
+    });
+
+    it('keeps the live-root stop after a host-initiated worker kill', async () => {
+      setPlatform('win32');
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: () => 10_000 });
+      const treeStop = jest.spyOn(actualChildProcess, 'execFile').mockImplementationOnce(((...args: unknown[]) => {
+        const callback = args[3];
+        if (typeof callback === 'function') callback(null, '', '');
+        return new childProcess.ChildProcess();
+      }) as typeof childProcess.execFile);
+      try {
+        fakeWorkerSpawns(4242);
+        const child = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, cleanupOrphanDescendants: true });
+        child.kill('SIGTERM');
+        await waitForCloseCode(child);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(treeStop).toHaveBeenCalledWith(expect.any(String), ['/PID', '4242', '/T', '/F'], expect.any(Object), expect.any(Function));
+        expect(query).not.toHaveBeenCalled();
+      } finally {
+        treeStop.mockRestore();
+      }
+    });
+
+    it('does not query for a generic or unconfirmed worker root', async () => {
+      setPlatform('win32');
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: () => 10_000 });
+      fakeWorkerSpawns(4242);
+      await waitForCloseCode(spawner.spawnProcess({ command: 'fake', args: [], env: process.env }));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).not.toHaveBeenCalled();
+
+      fakeWorkerSpawns(4243, 0, false, Number.NaN);
+      await waitForCloseCode(spawner.spawnProcess({
+        command: 'fake', args: [], env: process.env, cleanupOrphanDescendants: true,
+      }));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).not.toHaveBeenCalled();
+    });
+
+    it('does not query after a worker is lost before spawn confirmation', async () => {
+      setPlatform('win32');
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: () => 10_000 });
+      fakeWorkerSpawns(4242, 0, false, undefined, true);
+      const child = spawner.spawnProcess({
+        command: 'fake', args: [], env: process.env, cleanupOrphanDescendants: true,
+      });
+      await waitForCloseCode(child);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(query).not.toHaveBeenCalled();
     });
 
     it('needsConsole is unchanged and a plain request still pipes', async () => {
@@ -1648,6 +1759,76 @@ describe('OffThreadProcessSpawner', () => {
   });
 
   describe('PTAH_SDK_INLINE_SPAWN escape hatch', () => {
+    it.each([
+      { name: 'clean', platform: 'win32', detached: false, code: 0, queryFails: false, killFails: false, queries: 2, kills: 1 },
+      { name: 'crash', platform: 'win32', detached: false, code: 19, queryFails: false, killFails: false, queries: 2, kills: 1 },
+      { name: 'query failure', platform: 'win32', detached: false, code: 0, queryFails: true, killFails: false, queries: 1, kills: 0 },
+      { name: 'kill failure', platform: 'win32', detached: false, code: 0, queryFails: false, killFails: true, queries: 2, kills: 1 },
+      { name: 'non-Windows', platform: 'linux', detached: false, code: 0, queryFails: false, killFails: false, queries: 0, kills: 0 },
+      { name: 'detached', platform: 'win32', detached: true, code: 0, queryFails: false, killFails: false, queries: 0, kills: 0 },
+    ] as const)('inline root exit: $name', async ({ platform, detached, code, queryFails, killFails, queries, kills }) => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+      const fakeChild = Object.assign(new childProcess.ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild);
+      const queryError = new Error('query failed');
+      const killError = new Error('kill failed');
+      const query = jest.fn(async () => {
+        if (queryFails) throw queryError;
+        return [{ ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_000).toISOString() }];
+      });
+      const kill = jest.fn(async (_pid: number) => { if (killFails) throw killError; });
+      spawner.setOrphanCleanupDependencies({ query, kill, now: () => 10_000 });
+      try {
+        const handle = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, detached, cleanupOrphanDescendants: true });
+        fakeChild.exitCode = code;
+        fakeChild.emit('exit', code, null);
+        fakeChild.emit('exit', code, null);
+        fakeChild.emit('close', code, null);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(handle.pid).toBe(42);
+        expect(query).toHaveBeenCalledTimes(queries);
+        expect(kill).toHaveBeenCalledTimes(kills);
+        if (queryFails) expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Orphan cleanup failed'), queryError);
+        if (killFails) expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Orphan cleanup failed'), killError);
+      } finally {
+        jest.mocked(childProcess.spawn).mockImplementation(actualChildProcess.spawn);
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      }
+    });
+    it('inline root exit after a host kill: live-root stop only, no orphan query', async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
+      const fakeChild = Object.assign(new childProcess.ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      });
+      jest.mocked(childProcess.spawn).mockImplementationOnce(() => fakeChild);
+      const query = jest.fn(async () => []);
+      spawner.setOrphanCleanupDependencies({ query, kill: async () => undefined, now: () => 10_000 });
+      const treeStop = jest.spyOn(actualChildProcess, 'execFile').mockImplementationOnce(((...args: unknown[]) => {
+        const callback = args[3];
+        if (typeof callback === 'function') callback(null, '', '');
+        return new childProcess.ChildProcess();
+      }) as typeof childProcess.execFile);
+      try {
+        const handle = spawner.spawnProcess({ command: 'fake', args: [], env: process.env, ignoreStdio: true, cleanupOrphanDescendants: true });
+        expect(handle.kill('SIGTERM')).toBe(true);
+        fakeChild.exitCode = 1;
+        fakeChild.emit('exit', 1, null);
+        fakeChild.emit('close', 1, null);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(treeStop).toHaveBeenCalledWith(expect.any(String), ['/PID', '42', '/T', '/F'], expect.any(Object), expect.any(Function));
+        expect(query).not.toHaveBeenCalled();
+      } finally {
+        treeStop.mockRestore();
+        jest.mocked(childProcess.spawn).mockImplementation(actualChildProcess.spawn);
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      }
+    });
     it('spawns inline, warns once, and still round-trips stdio', async () => {
       process.env['PTAH_SDK_INLINE_SPAWN'] = '1';
 

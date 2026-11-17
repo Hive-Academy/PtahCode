@@ -310,6 +310,7 @@ export function spawnCli(
     env?: NodeJS.ProcessEnv;
     needsConsole?: boolean;
     detached?: boolean;
+    cleanupOrphanDescendants?: boolean;
     spawner?: IProcessSpawner;
   },
 ): SpawnedProcessHandle {
@@ -329,6 +330,7 @@ export function spawnCli(
       cwd: options.cwd,
       env,
       detached,
+      cleanupOrphanDescendants: options.cleanupOrphanDescendants === true,
       needsConsole: options.needsConsole === true,
     });
   }

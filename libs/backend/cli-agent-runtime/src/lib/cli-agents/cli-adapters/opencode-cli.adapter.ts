@@ -863,6 +863,7 @@ export class OpencodeCliAdapter implements CliAdapter {
       cwd: launch.workingDirectory,
       env: launch.env,
       detached: true,
+      cleanupOrphanDescendants: true,
       spawner: this.spawner,
     });
     launch.onSpawned(child);

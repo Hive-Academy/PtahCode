@@ -991,6 +991,7 @@ describe('spawnCli', () => {
     // The clean-env defaults still apply, and the caller's env wins over them.
     expect(requests[0].env['NO_COLOR']).toBe('1');
     expect(requests[0].env['OPENCODE_CONFIG_CONTENT']).toBe('{}');
+    expect(requests[0].cleanupOrphanDescendants).toBe(false);
   });
 
   it('forwards needsConsole and detached to the spawner on POSIX', () => {
@@ -1010,6 +1011,16 @@ describe('spawnCli', () => {
     spawnCli('opencode.cmd', [], { detached: true, spawner });
 
     expect(requests[0].detached).toBe(false);
+  });
+
+  it('forwards the explicit runtime orphan cleanup opt-in on Windows', () => {
+    setPlatform('win32');
+    const { spawner, requests } = createFakeSpawner();
+    spawnCli('opencode.cmd', ['run'], {
+      detached: true, cleanupOrphanDescendants: true, spawner,
+    });
+    expect(requests[0].detached).toBe(false);
+    expect(requests[0].cleanupOrphanDescendants).toBe(true);
   });
 });
 

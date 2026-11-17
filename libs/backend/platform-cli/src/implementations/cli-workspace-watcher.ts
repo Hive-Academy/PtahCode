@@ -35,6 +35,9 @@ import * as path from 'node:path';
 
 import {
   killProcessTree,
+  defaultOrphanCleanupDependencies,
+  scheduleWindowsOrphanCleanup,
+  type ProcessQuery,
   WorkspaceWatchSupervisor,
   type IDisposable,
   type IWorkspaceWatcher,
@@ -83,13 +86,19 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
   private readonly child: ChildProcess;
   private readonly exitListeners: Array<(code: number | null) => void> = [];
   private exited = false;
+  private treeKillRequested = false;
   private stderrTail = '';
+  private readonly rootStartedAt: number;
 
   /** Throws when the bundle is missing or the fork itself fails. */
-  constructor(hostPath: string, private readonly onDiagnostic?: (diagnostic: WorkspaceWatcherDiagnostic) => void) {
+  constructor(hostPath: string, private readonly onDiagnostic?: (diagnostic: WorkspaceWatcherDiagnostic) => void,
+    private readonly query: ProcessQuery = defaultOrphanCleanupDependencies.query,
+    private readonly killOrphan: (pid: number) => Promise<void> = defaultOrphanCleanupDependencies.kill,
+    private readonly now: () => number = Date.now) {
     if (!fs.existsSync(hostPath)) {
       throw new Error(`watch host bundle not found: ${hostPath}`);
     }
+    this.rootStartedAt = this.now();
     this.child = fork(hostPath, [], {
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
       // The parent's flags (`--inspect`, loaders) are not the host's.
@@ -149,6 +158,7 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
     if (this.exited || this.child.exitCode !== null || this.child.signalCode !== null) return;
     const pid = this.child.pid;
     if (process.platform === 'win32' && pid !== undefined && Number.isSafeInteger(pid) && pid > 0) {
+      this.treeKillRequested = true;
       void killProcessTree(pid, 'SIGTERM', (error) => this.reportStopError(error instanceof Error ? error : new Error(String(error))))
         .catch((error: unknown) => this.reportStopError(error instanceof Error ? error : new Error(String(error))))
         .finally(() => {
@@ -167,9 +177,24 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
     }
   }
 
+  private reportOrphanError(error: Error): void {
+    try {
+      this.onDiagnostic?.({ level: 'error', message: '[WorkspaceWatcher] orphan cleanup failed', detail: { error } });
+    } catch {
+      // degradation-audit: optional-capability - a throwing diagnostic sink must not interrupt orphan cleanup.
+    }
+  }
+
   private notifyExit(code: number | null): void {
     if (this.exited) return;
     this.exited = true;
+    const pid = this.child.pid;
+    const exitedAt = this.now();
+    if (!this.treeKillRequested) {
+      scheduleWindowsOrphanCleanup(pid, this.rootStartedAt, false,
+        (error) => this.reportOrphanError(error),
+        { query: this.query, kill: this.killOrphan, now: () => exitedAt });
+    }
     for (const listener of this.exitListeners) listener(code);
   }
 }

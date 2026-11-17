@@ -373,6 +373,7 @@ export {
   killProcessTree,
 } from './utils/process-tree-reaper';
 export { WindowsOrphanDescendants, queryWindowsProcesses, type ProcessQuery } from './utils/windows-orphan-descendants';
+export { defaultOrphanCleanupDependencies, scheduleWindowsOrphanCleanup, type OrphanCleanupDependencies } from './utils/windows-orphan-cleanup';
 export {
   createExecutableEditorDefinitions,
   detectEditorTargets,

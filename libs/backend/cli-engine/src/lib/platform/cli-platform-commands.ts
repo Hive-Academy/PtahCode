@@ -16,7 +16,12 @@
  */
 
 import spawn from 'cross-spawn';
-import { killProcessTree } from '@ptah-extension/platform-core';
+import {
+  defaultOrphanCleanupDependencies,
+  killProcessTree,
+  scheduleWindowsOrphanCleanup,
+  type ProcessQuery,
+} from '@ptah-extension/platform-core';
 import type { IPlatformCommands } from '@ptah-extension/rpc-handlers';
 import type {
   AuthCommandRequest,
@@ -49,6 +54,9 @@ export interface CliPlatformCommandsOptions {
    * timeout path is testable in bounded time; production omits it.
    */
   authCommandTimeoutMs?: number;
+  processQuery?: ProcessQuery;
+  killOrphan?: (pid: number) => Promise<void>;
+  now?: () => number;
 }
 
 /**
@@ -73,12 +81,18 @@ export class CliPlatformCommands
   private readonly verbose: boolean;
   private readonly pushSink: AuthCommandPushSink | undefined;
   private readonly authCommandTimeoutMs: number;
+  private readonly processQuery: ProcessQuery;
+  private readonly killOrphan: (pid: number) => Promise<void>;
+  private readonly now: () => number;
 
   constructor(options: CliPlatformCommandsOptions = {}) {
     this.verbose = options.verbose === true;
     this.pushSink = options.pushSink;
     this.authCommandTimeoutMs =
       options.authCommandTimeoutMs ?? AUTH_COMMAND_TIMEOUT_MS;
+    this.processQuery = options.processQuery ?? defaultOrphanCleanupDependencies.query;
+    this.killOrphan = options.killOrphan ?? defaultOrphanCleanupDependencies.kill;
+    this.now = options.now ?? Date.now;
   }
 
   async reloadWindow(): Promise<void> {
@@ -130,12 +144,15 @@ export class CliPlatformCommands
     }
 
     return new Promise<AuthCommandResult>((resolve) => {
+      const rootStartedAt = this.now();
       const child = spawn(file, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
 
       let settled = false;
+      let rootExitObserved = false;
+      let treeKillRequested = false;
       const settle = (result: AuthCommandResult): void => {
         if (settled) return;
         settled = true;
@@ -146,6 +163,7 @@ export class CliPlatformCommands
       const timer = setTimeout(() => {
         if (!settled && child.exitCode === null && child.signalCode === null) {
           if (process.platform === 'win32' && child.pid !== undefined && Number.isSafeInteger(child.pid) && child.pid > 0) {
+            treeKillRequested = true;
             const report = (error: unknown): void => {
               const failure = error instanceof Error ? error : new Error(String(error));
               process.stderr.write(`[ptah] Auth command tree stop failed: ${failure.message}\n`);
@@ -183,6 +201,16 @@ export class CliPlatformCommands
       });
 
       child.on('close', (code: number | null) => {
+        if (!rootExitObserved) {
+          rootExitObserved = true;
+          const pid = child.pid;
+          const exitedAt = this.now();
+          if (!treeKillRequested) {
+            scheduleWindowsOrphanCleanup(pid, rootStartedAt, false,
+              (error) => this.reportOrphanError(error),
+              { query: this.processQuery, kill: this.killOrphan, now: () => exitedAt });
+          }
+        }
         settle(
           code === 0
             ? { success: true, exitCode: 0 }
@@ -223,6 +251,10 @@ export class CliPlatformCommands
         buffer = '';
       }
     });
+  }
+
+  private reportOrphanError(error: Error): void {
+    process.stderr.write(`[ptah] Auth command orphan cleanup failed: ${error.message}\n`);
   }
 
   private emitLine(
