@@ -106,6 +106,7 @@ interface WorkspaceState {
   trailing: Promise<RebuildResult> | null;
   trailingFolders: Set<string>;
   trailingForceFull: boolean;
+  trailingEmit: boolean;
   trailingReason: TaskIndexChangeEvent['reason'];
   trailingCount: number;
   flushRetries: Map<string, number>;
@@ -243,6 +244,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
       trailing: null,
       trailingFolders: new Set<string>(),
       trailingForceFull: false,
+      trailingEmit: false,
       trailingReason: 'watcher',
       trailingCount: 0,
       flushRetries: new Map(),
@@ -634,7 +636,14 @@ export class TaskIndexService implements ITaskIndexNotifier {
       state.writerFolders.clear();
       if (waiters.length > 0) {
         pendingWrites.push(this.scheduleRebuild(root, folders, 'write', false).then(
-          () => waiters.forEach(({ resolve }) => resolve()),
+          (result) => {
+            try {
+              this.assertIndexPersisted(result);
+              waiters.forEach(({ resolve }) => resolve());
+            } catch (error: unknown) {
+              waiters.forEach(({ reject }) => reject(error));
+            }
+          },
           (error: unknown) => waiters.forEach(({ reject }) => reject(error)),
         ));
       }
@@ -774,9 +783,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
       const result = unknown || folderNames.length > MAX_FOLDER_REBUILD
         ? await this.scheduleRebuild(root, [], reason, true, true)
         : changed.length > 0 ? await this.scheduleRebuild(root, changed, reason) : null;
-      if (result && !result.indexWritten && this.store.isReady()) {
-        throw new Error('task index write not persisted');
-      }
+      if (result) this.assertIndexPersisted(result);
       for (const { resolve } of waiters) resolve();
       const suppressed = folderNames.length - changed.length;
       if (suppressed > 0) this.logger.info('[task-specs] watcher echoes suppressed', { suppressed });
@@ -807,6 +814,12 @@ export class TaskIndexService implements ITaskIndexNotifier {
     }
   }
 
+  private assertIndexPersisted(result: RebuildResult): void {
+    if (!result.indexWritten && this.store.isReady()) {
+      throw new Error('task index write not persisted');
+    }
+  }
+
   private scheduleRebuild(
     root: string,
     folders: string[],
@@ -819,6 +832,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
     if (state.running) {
       for (const folder of folders) state.trailingFolders.add(folder);
       state.trailingForceFull ||= forceFull;
+      state.trailingEmit ||= emit;
       if (reason === 'reindex' || (reason === 'write' && state.trailingReason === 'watcher')) {
         state.trailingReason = reason;
       }
@@ -830,12 +844,14 @@ export class TaskIndexService implements ITaskIndexNotifier {
           const nextFolders = [...state.trailingFolders];
           const nextReason = state.trailingReason;
           const nextForceFull = state.trailingForceFull;
+          const nextEmit = state.trailingEmit;
           const count = state.trailingCount;
           state.trailingFolders.clear();
           state.trailingCount = 0;
           state.trailingReason = 'watcher';
           state.trailingForceFull = false;
-          const next = this.rebuildQueue.enqueue(root, (queuedFolders, queuedForceFull) => this.rebuild(root, queuedFolders, nextReason, true, this.now() - queuedAt, count, queuedForceFull), nextFolders, nextForceFull);
+          state.trailingEmit = false;
+          const next = this.rebuildQueue.enqueue(root, (queuedFolders, queuedForceFull) => this.rebuild(root, queuedFolders, nextReason, nextEmit, this.now() - queuedAt, count, queuedForceFull), nextFolders, nextForceFull);
           state.running = next;
           state.trailing = null;
           void next.then(() => { if (state.running === next && !state.trailing) state.running = null; },

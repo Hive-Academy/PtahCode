@@ -1124,6 +1124,65 @@ describe('TaskIndexService write-order (applyFolderChange)', () => {
     } finally { jest.useRealTimers(); }
   });
 
+  it('keeps a trailing dispose drain silent while an earlier writer rebuild finishes', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, scanner } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      const events: TaskIndexChangeEvent[] = [];
+      service.onDidChangeIndex((event) => events.push(event));
+      const original = scanner.scanFolders.bind(scanner);
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const scan = jest.spyOn(scanner, 'scanFolders').mockImplementationOnce(async (root, names) => {
+        await gate;
+        return original(root, names);
+      });
+      for (const name of ['TASK_2026_007', 'TASK_2026_008']) {
+        fs.setFile(carrier(name), validTask(name));
+      }
+      const first = service.applyFolderChange(ROOT, 'TASK_2026_007');
+      await flush();
+      jest.advanceTimersByTime(300);
+      await flush();
+      expect(scan).toHaveBeenCalledTimes(1);
+      const second = service.applyFolderChange(ROOT, 'TASK_2026_008');
+      await flush();
+      service.dispose();
+      release?.();
+      await Promise.all([first, second]);
+      expect(scan).toHaveBeenCalledTimes(2);
+      expect(events.map((event) => event.folderNames)).toEqual([['TASK_2026_007']]);
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('rejects a dispose-drained writer when a ready store does not persist it', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    try {
+      const fs = new FakeFs();
+      seedTwoValidOneExcluded(fs);
+      const { service, store } = buildServiceWithParts(fs);
+      await service.ensureStarted(ROOT);
+      jest.spyOn(store, 'applyFolderChanges').mockImplementationOnce(() => { throw new Error('folder write failed'); });
+      jest.spyOn(store, 'replaceWorkspace').mockImplementationOnce(() => { throw new Error('full write failed'); });
+      const write = service.applyFolderChange(ROOT, 'TASK_2026_007');
+      const rejected = expect(write).rejects.toThrow('task index write not persisted');
+      await flush();
+      service.dispose();
+      await rejected;
+
+      const offline = buildServiceWithParts(fs);
+      jest.spyOn(offline.store, 'isReady').mockReturnValue(false);
+      await offline.service.ensureStarted(ROOT);
+      const offlineWrite = offline.service.applyFolderChange(ROOT, 'TASK_2026_007');
+      await flush();
+      offline.service.dispose();
+      await expect(offlineWrite).resolves.toBeUndefined();
+    } finally { jest.useRealTimers(); }
+  });
+
   it('rejects a pending writer when its dispose drain rebuild fails', async () => {
     jest.useFakeTimers({ doNotFake: ['setImmediate'] });
     try {
