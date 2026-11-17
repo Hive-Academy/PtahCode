@@ -152,9 +152,19 @@ export class CliPlatformCommands
 
       let settled = false;
       let rootExitObserved = false;
-      let rootExitedAt: number | undefined;
-      child.once('exit', () => { rootExitedAt = this.now(); });
       let treeKillRequested = false;
+      // Start on 'exit': a descendant that holds an inherited pipe can delay
+      // 'close' for as long as it lives. 'close' is the fallback.
+      const startOrphanCleanup = (): void => {
+        if (rootExitObserved) return;
+        rootExitObserved = true;
+        const exitedAt = this.now();
+        if (treeKillRequested) return;
+        scheduleWindowsOrphanCleanup(child.pid, rootStartedAt, false,
+          (error) => this.reportOrphanError(error),
+          { query: this.processQuery, kill: this.killOrphan, now: () => exitedAt });
+      };
+      child.once('exit', startOrphanCleanup);
       const settle = (result: AuthCommandResult): void => {
         if (settled) return;
         settled = true;
@@ -203,16 +213,7 @@ export class CliPlatformCommands
       });
 
       child.on('close', (code: number | null) => {
-        if (!rootExitObserved) {
-          rootExitObserved = true;
-          const pid = child.pid;
-          const exitedAt = rootExitedAt ?? this.now();
-          if (!treeKillRequested) {
-            scheduleWindowsOrphanCleanup(pid, rootStartedAt, false,
-              (error) => this.reportOrphanError(error),
-              { query: this.processQuery, kill: this.killOrphan, now: () => exitedAt });
-          }
-        }
+        startOrphanCleanup();
         settle(
           code === 0
             ? { success: true, exitCode: 0 }

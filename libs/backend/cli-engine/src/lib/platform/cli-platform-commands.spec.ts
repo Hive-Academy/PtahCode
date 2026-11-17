@@ -412,6 +412,37 @@ describe('CliPlatformCommands', () => {
       }
     });
 
+    it('starts the orphan cleanup on exit when a held pipe delays close', async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const fakeChild = Object.assign(new ChildProcess(), {
+        pid: 42, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+        stdout: new PassThrough(), stderr: new PassThrough(), kill: jest.fn(() => true),
+      });
+      jest.mocked(spawn).mockImplementationOnce(() => fakeChild);
+      let now = 10_000;
+      const query = jest.fn(async () => [
+        { ProcessId: 43, ParentProcessId: 42, CreationDate: new Date(10_050).toISOString() },
+      ]);
+      const kill = jest.fn(async (_pid: number) => undefined);
+      try {
+        const cmds = new CliPlatformCommands({ processQuery: query, killOrphan: kill, now: () => now });
+        const result = cmds.runAuthCommand({ provider: 'openai-codex', name: 'Login', command: 'fake-login' });
+        now = 10_100;
+        fakeChild.emit('exit', 0);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(kill).toHaveBeenCalledWith(43);
+        const queriesBeforeClose = query.mock.calls.length;
+        fakeChild.exitCode = 0;
+        fakeChild.emit('close', 0);
+        expect((await result).success).toBe(true);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(query).toHaveBeenCalledTimes(queriesBeforeClose);
+      } finally {
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+      }
+    });
+
     it('excludes a reused PID child created after exit but before close', async () => {
       const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
       Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });

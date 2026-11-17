@@ -89,7 +89,7 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
   private treeKillRequested = false;
   private stderrTail = '';
   private readonly rootStartedAt: number;
-  private rootExitedAt: number | undefined;
+  private orphanCleanupStarted = false;
 
   /** Throws when the bundle is missing or the fork itself fails. */
   constructor(hostPath: string, private readonly onDiagnostic?: (diagnostic: WorkspaceWatcherDiagnostic) => void,
@@ -122,7 +122,9 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
     }
     // 'close', not 'exit': it follows the end of stderr, so the tail read on
     // failure holds everything the host wrote before it died.
-    this.child.once('exit', () => { this.rootExitedAt = this.now(); });
+    // Orphan cleanup starts on 'exit': a descendant that holds the stderr pipe
+    // can delay 'close' for as long as it lives.
+    this.child.once('exit', () => this.startOrphanCleanup());
     this.child.on('close', (code) => this.notifyExit(code));
     // A spawn or IPC failure. The host is unusable either way: end it, and
     // report the exit ourselves when the spawn failed and no 'exit' will come.
@@ -187,16 +189,20 @@ export class CliWorkspaceWatchHostProcess implements WorkspaceWatchHostProcess {
     }
   }
 
+  private startOrphanCleanup(): void {
+    if (this.orphanCleanupStarted) return;
+    this.orphanCleanupStarted = true;
+    const exitedAt = this.now();
+    if (this.treeKillRequested) return;
+    scheduleWindowsOrphanCleanup(this.child.pid, this.rootStartedAt, false,
+      (error) => this.reportOrphanError(error),
+      { query: this.query, kill: this.killOrphan, now: () => exitedAt });
+  }
+
   private notifyExit(code: number | null): void {
     if (this.exited) return;
     this.exited = true;
-    const pid = this.child.pid;
-    const exitedAt = this.rootExitedAt ?? this.now();
-    if (!this.treeKillRequested) {
-      scheduleWindowsOrphanCleanup(pid, this.rootStartedAt, false,
-        (error) => this.reportOrphanError(error),
-        { query: this.query, kill: this.killOrphan, now: () => exitedAt });
-    }
+    this.startOrphanCleanup();
     for (const listener of this.exitListeners) listener(code);
   }
 }
