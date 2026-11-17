@@ -357,6 +357,29 @@ describe('PtahSettingsLayoutComponent', () => {
     expect(host.emitted).toEqual(['accounts']);
   });
 
+  it('applies each navigation frame class on its own and keeps them out of tabs mode', () => {
+    const frameClasses = [
+      '[@container(min-width:640px)]:grid-cols-[var(--ptah-settings-nav-column-w)_minmax(0,1fr)]',
+      '[@container(min-width:640px)]:gap-x-0',
+      '[@container(min-width:640px)]:p-0',
+    ];
+    const frame = q('[data-testid="settings-layout"]') as HTMLElement;
+    for (const cls of frameClasses) expect(frame.classList.contains(cls)).toBe(false);
+    host.navMode.set('navigation');
+    fixture.detectChanges();
+    for (const cls of frameClasses) expect(frame.classList.contains(cls)).toBe(true);
+    const main = q('[data-testid="settings-layout-main"]') as HTMLElement;
+    expect(main.classList.contains('[@container(min-width:640px)]:p-[var(--ptah-page-gutter)]')).toBe(true);
+    const list = q('[data-testid="settings-layout-tablist"]') as HTMLElement;
+    expect(list.classList.contains('min-h-0')).toBe(true);
+    expect(list.classList.contains('[@container(min-width:640px)]:overflow-y-auto')).toBe(true);
+    const footer = (q('[data-testid="nav-footer"]') as HTMLElement).parentElement as HTMLElement;
+    expect(footer.classList.contains('mt-auto')).toBe(true);
+    expect(footer.classList.contains('shrink-0')).toBe(true);
+    const nav = q('nav') as HTMLElement;
+    expect(nav.classList.contains('[@container(min-width:640px)]:h-[var(--ptah-settings-nav-height)]')).toBe(true);
+  });
+
   it('does not cancel Tab, Enter, Space or arrow keys on navigation buttons', () => {
     host.navMode.set('navigation');
     fixture.detectChanges();
@@ -381,7 +404,7 @@ describe('PtahSettingsLayoutComponent', () => {
     expect(buttons[0].getAttribute('data-in-section')).toBe('true');
     expect(buttons[0].getAttribute('aria-current')).toBeNull();
     expect(buttons[1].getAttribute('aria-current')).toBe('page');
-    expect(buttons[1].parentElement?.className).toContain('ml-[var(--ptah-gap-section)]');
+    expect(buttons[1].parentElement?.className).toContain('ml-[var(--ptah-settings-nav-child-indent)]');
   });
 
   it('shows a state dot and count with an accessible label', () => {

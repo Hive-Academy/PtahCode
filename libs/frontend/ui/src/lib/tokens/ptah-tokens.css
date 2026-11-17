@@ -481,6 +481,27 @@
      fluid and centered: table and card-grid sections use its full width up to
      this cap, field sections keep the form-section grid. */
   --ptah-settings-nav-w: 13rem;
+  --ptah-settings-nav-column-w: 14.5rem;
+  /* Sidebar height in navigation mode. The consumer must put
+     container-type: size on the settings scrollport (settings.component.html
+     does), so 100cqh is the visible scrollport height. Without a size
+     container, cqh falls back to the small viewport height. */
+  --ptah-settings-nav-height: 100cqh;
+  --ptah-settings-nav-gap: 1rem;
+  --ptah-settings-nav-px: .75rem;
+  --ptah-settings-nav-py: 1rem;
+  --ptah-settings-nav-list-gap: 2px;
+  --ptah-settings-nav-navigation-item-h: 2.5rem;
+  --ptah-settings-nav-item-pl: .875rem;
+  --ptah-settings-nav-item-pr: .625rem;
+  --ptah-settings-nav-icon-gap: .5rem;
+  --ptah-settings-nav-navigation-active-bg: color-mix(in oklab, oklch(var(--p)) 15%, transparent);
+  --ptah-settings-nav-child-indent: 1.25rem;
+  --ptah-settings-nav-connector-left: .3rem;
+  --ptah-settings-nav-connector-w: .5rem;
+  --ptah-settings-nav-connector-radius: 5px;
+  --ptah-field-grid-min-sm: 10rem;
+  --ptah-field-grid-min-md: 14rem;
   --ptah-settings-content-max-w: 96rem;
   /* ptah-card-grid: auto-fill track minimums (default, tight, pair, wide) and
      gap. wide is for row cards (name, status and badges on one line). */
