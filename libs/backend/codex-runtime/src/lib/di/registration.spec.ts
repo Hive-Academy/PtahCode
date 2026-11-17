@@ -5,8 +5,10 @@ import {
   CODEX_RUNTIME_TOKENS,
   registerCodexRuntime,
   type CodexRuntimeRegistrationPorts,
+  type CodexExecutionProfile,
   type CodexSelectionSnapshotPort,
 } from '../../index';
+import { CodexAppServerProcess } from '../codex-app-server-process';
 
 function ports(): CodexRuntimeRegistrationPorts {
   const selectionSnapshot: CodexSelectionSnapshotPort = {
@@ -30,6 +32,48 @@ function ports(): CodexRuntimeRegistrationPorts {
 }
 
 describe('registerCodexRuntime composition', () => {
+  it('passes the registered logger to account-usage app-server processes', async () => {
+    const scope = container.createChildContainer();
+    const dependencies = ports();
+    const profile: CodexExecutionProfile = {
+      normalizedHome: '/usage', contextId: 'usage', consumer: 'usage',
+      providerId: 'openai-codex', workspaceId: 'usage', cwd: process.cwd(),
+      model: 'unused', permissionLevel: 'plan', approvalPolicy: 'never',
+      sandboxPolicy: { mode: 'read-only', networkAccess: false, writableRoots: [] },
+      instructionSources: [], mcpServers: [], attachments: [], profileFingerprint: 'usage',
+    };
+    const original = CodexAccountUsageClient.fromProfiles;
+    let createProcess: Parameters<typeof CodexAccountUsageClient.fromProfiles>[2] | undefined;
+    const spy = jest.spyOn(CodexAccountUsageClient, 'fromProfiles').mockImplementation(
+      (auth, profileForHome, factory, now) => {
+        createProcess = factory;
+        return original(auth, profileForHome, factory, now);
+      });
+    const withUsage: CodexRuntimeRegistrationPorts = {
+      ...dependencies,
+      usage: {
+        auth: { isAuthenticated: jest.fn(), ensureTokensFresh: jest.fn(),
+          getUsageEligibility: jest.fn(), watch: jest.fn() },
+        profileForHome: jest.fn(() => profile),
+      },
+    };
+    try {
+      registerCodexRuntime(scope, withUsage);
+      scope.resolve(CodexAccountUsageClient);
+      expect(createProcess).toBeDefined();
+      const child = createProcess?.(profile, {
+        onNotification: jest.fn(), onRequest: jest.fn(async () => undefined),
+      });
+      expect(child).toBeInstanceOf(CodexAppServerProcess);
+      expect(child?.['logger']).toBe(withUsage.logger);
+      await child?.close();
+      await scope.resolve<CodexRuntime>(CODEX_RUNTIME_TOKENS.Runtime).close();
+      await scope.resolve(CodexAccountUsageClient).close();
+    } finally {
+      spy.mockRestore();
+      await scope.dispose();
+    }
+  });
   it('binds the host selection snapshot and runtime in one scope without spawning', async () => {
     const scope = container.createChildContainer();
     const dependencies = ports();
