@@ -151,6 +151,7 @@ const GENERATED_ROOT_FILES: readonly string[] = [
 @injectable()
 export class TaskIndexService implements ITaskIndexNotifier {
   private readonly states = new Map<string, WorkspaceState>();
+  private readonly activeFlushes = new Set<Promise<void>>();
   private readonly rootRebuildCounts = new Map<string, number>();
   private readonly triggerRebuildCounts = new Map<string, number>();
   private readonly _onDidChangeIndex: IEvent<TaskIndexChangeEvent>;
@@ -637,8 +638,8 @@ export class TaskIndexService implements ITaskIndexNotifier {
       state.watcher?.dispose();
     }
     this.states.clear();
-    if (pendingWrites.length > 0) {
-      void Promise.allSettled(pendingWrites).then(() => this.rebuildQueue.dispose());
+    if (pendingWrites.length > 0 || this.activeFlushes.size > 0) {
+      void Promise.allSettled([...pendingWrites, ...this.activeFlushes]).then(() => this.rebuildQueue.dispose());
     } else {
       this.rebuildQueue.dispose();
     }
@@ -701,7 +702,9 @@ export class TaskIndexService implements ITaskIndexNotifier {
     if (isRetry && state.timer) return;
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
-      void this.flush(root);
+      const active = this.flush(root);
+      this.activeFlushes.add(active);
+      void active.finally(() => this.activeFlushes.delete(active));
     }, delayMs);
   }
 
@@ -773,7 +776,7 @@ export class TaskIndexService implements ITaskIndexNotifier {
         error: error instanceof Error ? error.name : 'Unknown error',
         retryInMs: retry ? nextDelay : null,
       });
-      if (retry) this.armFlush(root, state, nextDelay, true);
+      if (retry && this.states.get(root) === state) this.armFlush(root, state, nextDelay, true);
     }
   }
 
