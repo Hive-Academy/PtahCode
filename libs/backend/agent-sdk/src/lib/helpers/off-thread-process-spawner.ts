@@ -420,7 +420,7 @@ class WorkerBackedProcess
     // vanished before a child existed, and SIGKILL is the honest description.
     let signal: NodeJS.Signals = 'SIGKILL';
     if (!this.settled && this.childPid !== null) {
-      this.signalDirectly(this.childPid, 'SIGTERM');
+      this.signalDirectly(this.childPid, 'SIGTERM', true);
       signal = 'SIGTERM';
     }
     this.endAbnormally(signal, error);
@@ -634,13 +634,23 @@ class WorkerBackedProcess
    * Signal the child from THIS thread. See rule 1 in the file header: the SDK's
    * exit sweep runs as the host process dies, and a worker round trip does not
    * survive that.
+   *
+   * `rootFallback` is for a lost worker only: no thread is left to kill the
+   * root when taskkill fails, so the host does it. A live worker runs its own
+   * fallback.
    */
-  private signalDirectly(pid: number, signal: NodeJS.Signals): void {
+  private signalDirectly(pid: number, signal: NodeJS.Signals, rootFallback = false): void {
     if (process.platform === 'win32') {
       if (this.exitReported || this.settled) return;
-      stopWindowsTree(pid, this.logger);
+      stopWindowsTree(pid, this.logger, rootFallback
+        ? () => { if (!this.exitReported) this.killRoot(pid, signal); }
+        : undefined);
       return;
     }
+    this.killRoot(pid, signal);
+  }
+
+  private killRoot(pid: number, signal: NodeJS.Signals): void {
     try {
       process.kill(pid, signal);
     } catch (error: unknown) {

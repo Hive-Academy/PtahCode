@@ -1015,6 +1015,40 @@ describe('OffThreadProcessSpawner', () => {
       }
     });
 
+    it('kills the root from the host when the worker is lost and taskkill fails', async () => {
+      const handle = spawner.spawnProcess({ command: process.execPath, args: ['-e', IDLE_SCRIPT], env: process.env });
+      const failed = new Promise<void>((resolve) => handle.once('error', () => resolve()));
+      const pid = await handle.whenSpawned;
+      expect(pid).not.toBeNull();
+      const original = Object.getOwnPropertyDescriptor(process, 'platform');
+      const execFile = jest.spyOn(actualChildProcess, 'execFile').mockImplementation((...args: unknown[]) => {
+        const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+        callback(Object.assign(new Error('taskkill failed'), { code: 5 }), '', 'access denied');
+        return new EventEmitter() as childProcess.ChildProcess;
+      });
+      const hostKill = jest.spyOn(process, 'kill').mockImplementation(() => true);
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        const [crashed] = spawnWorkers();
+        await crashed.terminate();
+        await failed;
+        expect(execFile).toHaveBeenCalledWith(expect.stringContaining('taskkill'),
+          ['/PID', String(pid), '/T', '/F'], expect.objectContaining({ windowsHide: true }), expect.any(Function));
+        expect(hostKill).toHaveBeenCalledWith(pid, 'SIGTERM');
+      } finally {
+        hostKill.mockRestore();
+        execFile.mockRestore();
+        if (original) Object.defineProperty(process, 'platform', original);
+        if (pid !== null) {
+          try { process.kill(pid, 'SIGKILL'); }
+          catch (error: unknown) {
+            // ESRCH: the test child is already gone.
+            void error;
+          }
+        }
+      }
+    });
+
     it('parks at most 4 idle workers, unref’d, and terminates the rest', async () => {
       const unrefSpy = jest.spyOn(Worker.prototype, 'unref');
       const terminateSpy = jest.spyOn(Worker.prototype, 'terminate');
