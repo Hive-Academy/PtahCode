@@ -65,8 +65,17 @@ export async function killProcessTree(
         execFile(
           resolveTaskkill(),
           ['/pid', String(pid), '/T', '/F'],
-          { windowsHide: true },
-          (error: Error | null) => (error ? reject(error) : resolve()),
+          { windowsHide: true, timeout: 3_000 },
+          (error: Error | null, stdout: string | undefined, stderr: string | undefined) => {
+            if (!error) return resolve();
+            const output = typeof stdout === 'string' ? stdout : '';
+            const detail = typeof stderr === 'string' ? stderr : '';
+            // An already exited process is the successful termination outcome.
+            if (('code' in error && error.code === 128) ||
+              /not found|no running instance of the task/i.test(`${output}\n${detail}`)) return resolve();
+            const code = 'code' in error ? String(error.code) : 'unknown';
+            reject(new Error(`taskkill failed (exit code ${code}): ${detail.trim() || error.message}`, { cause: error }));
+          },
         );
       });
     } catch (error: unknown) {

@@ -372,6 +372,7 @@ export {
   PROCESS_TREE_KILL_GRACE_MS,
   killProcessTree,
 } from './utils/process-tree-reaper';
+export { WindowsOrphanDescendants, queryWindowsProcesses, type ProcessQuery } from './utils/windows-orphan-descendants';
 export {
   createExecutableEditorDefinitions,
   detectEditorTargets,
