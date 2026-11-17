@@ -74,20 +74,27 @@ describe('usage reconciliation', () => {
     service.stop();
   });
 
-  it('defers startup and scans once after a producer trigger debounce', async () => {
+  it('ignores live enqueue notifications without starting a scan or scheduling timers', async () => {
+    const { service, collector, sources, store } = fixture();
+    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
+    await jest.advanceTimersByTimeAsync(60 * 60_000);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(sources.listClaudeRoots).not.toHaveBeenCalled();
+    expect(collector.collect).not.toHaveBeenCalled();
+    expect(store.commit).not.toHaveBeenCalled();
+  });
+
+  it('ignores enqueue even when an explicit scan was started', async () => {
     const { service, collector, store } = fixture();
-    expect(collector.collect).not.toHaveBeenCalled();
     service.start();
-    expect(collector.collect).not.toHaveBeenCalled();
     await flush();
     expect(collector.collect).toHaveBeenCalledTimes(1);
-    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
-    await jest.advanceTimersByTimeAsync(1_999);
+    const timers = jest.getTimerCount();
+    service.enqueue({ kind: 'lane-completed', sessionId: 'synthetic', providerId: 'codex', occurredAtMs: 1 });
+    expect(jest.getTimerCount()).toBe(timers);
+    await jest.advanceTimersByTimeAsync(2_000);
     expect(collector.collect).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(1);
-    expect(collector.collect).toHaveBeenCalledTimes(2);
-    expect(collector.collect).toHaveBeenCalledWith(cursor.sourcePath, null, 1_048_576);
-    expect(store.commit).toHaveBeenCalledTimes(2);
+    expect(store.commit).toHaveBeenCalledTimes(1);
     service.stop();
   });
 
@@ -139,8 +146,7 @@ describe('usage reconciliation', () => {
     await flush();
     expect(collector.collect).toHaveBeenCalledTimes(16);
     expect(store.saveDiscoveryKey).toHaveBeenCalledWith(JSON.stringify({ source: 0, root: '/synthetic', file: '/synthetic/04.jsonl' }));
-    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
-    await jest.advanceTimersByTimeAsync(2_000);
+    await jest.advanceTimersByTimeAsync(2_001);
     await flush();
     await flush();
     expect(collector.collect).toHaveBeenCalledTimes(20);
@@ -181,8 +187,7 @@ describe('usage reconciliation', () => {
     await flush();
     expect(collector.collect).toHaveBeenCalledTimes(4);
     expect(store.saveDiscoveryKey).toHaveBeenCalledWith(JSON.stringify({ source: 0, root: '/synthetic', file: cursor.sourcePath, pending: true, pendingPasses: 1 }));
-    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
-    await jest.advanceTimersByTimeAsync(2_000);
+    await jest.advanceTimersByTimeAsync(2_001);
     await flush();
     expect(collector.collect).toHaveBeenCalledTimes(5);
     expect(jest.mocked(collector.collect).mock.calls[4][0]).toBe(cursor.sourcePath);
@@ -211,17 +216,17 @@ describe('usage reconciliation', () => {
       next: { ...cursor, sourcePath: file, byteOffset: (previous?.byteOffset ?? 0) + (file === growing ? 1_048_576 : 8) },
       more: file === growing,
     }));
-    const nextPass = async (pass: number) => {
-      service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: pass });
-      await jest.advanceTimersByTimeAsync(2_000);
+    const nextPass = async () => {
+      await jest.advanceTimersByTimeAsync(2_001);
       await flush();
     };
     service.start();
     await flush();
-    for (let pass = 1; pass <= 4; pass++) await nextPass(pass);
+    for (let pass = 1; pass <= 4; pass++) await nextPass();
     expect(jest.mocked(collector.collect).mock.calls.map(([file]) => file)).toContain(other);
     expect(offsets.get(growing)).toBe(16 * 1_048_576);
-    await nextPass(5);
+    await jest.advanceTimersByTimeAsync(60 * 60_000);
+    await flush();
     expect(offsets.get(growing)).toBe(20 * 1_048_576);
     service.stop();
   });
@@ -279,8 +284,7 @@ describe('usage reconciliation', () => {
     expect(store.saveDiscoveryKey).toHaveBeenCalledWith(JSON.stringify({
       source: 0, root: '/synthetic', file: '/synthetic/missing.jsonl',
     }));
-    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
-    await jest.advanceTimersByTimeAsync(2_000);
+    await jest.advanceTimersByTimeAsync(2_001);
     await flush();
     expect(collector.collect).toHaveBeenCalledWith('/synthetic/other.jsonl', null, 1_048_576);
     service.stop();
@@ -299,13 +303,11 @@ describe('usage reconciliation', () => {
     await flush();
     files = files.filter((file) => file !== '/synthetic/04.jsonl');
     files.push('/synthetic/20.jsonl', '/synthetic/02a.jsonl');
-    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 1 });
-    await jest.advanceTimersByTimeAsync(2_000);
+    await jest.advanceTimersByTimeAsync(2_001);
     await flush();
     expect(jest.mocked(collector.collect).mock.calls.slice(16).map(([file]) => file))
       .toEqual(['/synthetic/03.jsonl', '/synthetic/02a.jsonl', '/synthetic/02.jsonl', '/synthetic/01.jsonl', '/synthetic/00.jsonl']);
-    service.enqueue({ kind: 'turn-settled', sessionId: 'synthetic', providerId: 'claude', occurredAtMs: 2 });
-    await jest.advanceTimersByTimeAsync(2_000);
+    await jest.advanceTimersByTimeAsync(60 * 60_000);
     await flush();
     expect(jest.mocked(collector.collect).mock.calls.map(([file]) => file)).toContain('/synthetic/20.jsonl');
     service.stop();

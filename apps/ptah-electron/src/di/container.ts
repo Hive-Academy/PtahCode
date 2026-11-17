@@ -30,7 +30,6 @@ import { repositoryBackfillAvailable } from './repository-backfill-availability'
 
 export class ElectronDIContainer {
   private static _root: DependencyContainer | undefined;
-  private static _stopping = false;
 
   private static ensureRoot(): DependencyContainer {
     if (!ElectronDIContainer._root) {
@@ -40,7 +39,6 @@ export class ElectronDIContainer {
   }
 
   static setup(options: ElectronPlatformOptions): DependencyContainer {
-    ElectronDIContainer._stopping = false;
     const root = ElectronDIContainer.ensureRoot();
     root.register(PLATFORM_TOKENS.DI_CONTAINER, { useValue: root });
     const { logger } = registerPhase0Platform(root, options);
@@ -50,16 +48,11 @@ export class ElectronDIContainer {
     registerPhase4Handlers(root, logger);
     // Start after every phase so eager recorder resolution sees the complete graph.
     startAndRegisterLaneOutcomes(root, logger, { observeSubagentEnded: true });
-    const usageReconciliationService = root.resolve(UsageReconciliationService);
+    // TASK_2026_2254_b94b: transcript scans caused a main-process hang.
+    // A later transcript import must run off the main thread.
     if (repositoryBackfillAvailable(root)) {
-      const backfill = root.resolve(RepositoryIdentityBackfillService);
-      usageReconciliationService.setAfterPass(() => backfill.runOnce().then(() => undefined));
+      root.resolve(RepositoryIdentityBackfillService).start();
     }
-    setImmediate(() => {
-      if (!ElectronDIContainer._stopping && ElectronDIContainer._root === root) {
-        usageReconciliationService.start();
-      }
-    });
     logger.info('[Electron DI] All services registered successfully');
     return root;
   }
@@ -69,7 +62,9 @@ export class ElectronDIContainer {
   }
 
   static stopUsageReconciliation(): void {
-    ElectronDIContainer._stopping = true;
+    if (ElectronDIContainer._root?.isRegistered(RepositoryIdentityBackfillService)) {
+      ElectronDIContainer._root.resolve(RepositoryIdentityBackfillService).stop();
+    }
     if (ElectronDIContainer._root?.isRegistered(UsageReconciliationService)) {
       ElectronDIContainer._root.resolve(UsageReconciliationService).stop();
     }

@@ -1,3 +1,4 @@
+import { RepositoryIdentityBackfillService } from '@ptah-extension/usage-analytics';
 /**
  * Unit tests for `shutdownHostRuntime` — the one host-runtime teardown helper
  * (TASK_2026_326 finding 1).
@@ -43,11 +44,12 @@ interface FakeSubsystems {
  * subsystem was ever registered.
  */
 function makeContainer(
-  registered: symbol[] = [AGENT_PROCESS_MANAGER_TOKEN, PTAH_CLI_REGISTRY_TOKEN],
+  registered: (symbol | typeof RepositoryIdentityBackfillService)[] = [AGENT_PROCESS_MANAGER_TOKEN, PTAH_CLI_REGISTRY_TOKEN],
   overrides: {
     agentDisposeAll?: jest.Mock;
     proxyDisposeAll?: jest.Mock;
     watcherDispose?: jest.Mock;
+    backfillStop?: jest.Mock;
   } = {},
 ): { container: DependencyContainer; fakes: FakeSubsystems } {
   const order: string[] = [];
@@ -70,10 +72,11 @@ function makeContainer(
       order.push('watcher');
     });
 
-  const registeredSet = new Set<symbol>(registered);
+  const registeredSet = new Set(registered);
   const container = {
-    isRegistered: jest.fn((token: symbol) => registeredSet.has(token)),
-    resolve: jest.fn((token: symbol) => {
+    isRegistered: jest.fn((token: symbol | typeof RepositoryIdentityBackfillService) => registeredSet.has(token)),
+    resolve: jest.fn((token: symbol | typeof RepositoryIdentityBackfillService) => {
+      if (token === RepositoryIdentityBackfillService) return { stop: overrides.backfillStop };
       if (token === AGENT_PROCESS_MANAGER_TOKEN) {
         return { disposeAll: agentDisposeAll };
       }
@@ -271,6 +274,7 @@ describe('shutdownHostRuntime', () => {
 
       // Every step was attempted — one failure does not skip the next.
       expect((container.resolve as jest.Mock).mock.calls.map(([token]) => token)).toEqual([
+        RepositoryIdentityBackfillService,
         AGENT_PROCESS_MANAGER_TOKEN,
         PTAH_CLI_REGISTRY_TOKEN,
         LANE_OUTCOME_TOKENS.DISPOSER,
@@ -340,7 +344,7 @@ describe('shutdownHostRuntime', () => {
     const order: string[] = [];
     const container = {
       isRegistered: jest.fn(() => true),
-      resolve: jest.fn((token: symbol) => {
+      resolve: jest.fn((token: symbol | typeof RepositoryIdentityBackfillService) => {
         if (token === AGENT_PROCESS_MANAGER_TOKEN)
           return {
             disposeAll: async () => {
@@ -391,5 +395,34 @@ describe('shutdownHostRuntime', () => {
       expect(fakes.proxyDisposeAll).toHaveBeenCalledTimes(1);
       expect(fakes.agentDisposeAll).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('repository backfill teardown (TASK_2026_2254_b94b)', () => {
+  it('stops backfill in normal and repeated common shutdown', async () => {
+    const backfillStop = jest.fn();
+    const { container } = makeContainer([RepositoryIdentityBackfillService], { backfillStop });
+    await shutdownHostRuntime(container);
+    await shutdownHostRuntime(container);
+    expect(backfillStop).toHaveBeenCalledTimes(2);
+  });
+
+  it('tolerates partial initialization without backfill registration', async () => {
+    const { container } = makeContainer([]);
+    await expect(shutdownHostRuntime(container)).resolves.toBeUndefined();
+    expect(container.resolve).not.toHaveBeenCalled();
+  });
+
+  it('isolates an unresolvable backfill and still stops other subsystems', async () => {
+    const { container, fakes } = makeContainer([RepositoryIdentityBackfillService, AGENT_PROCESS_MANAGER_TOKEN]);
+    const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    jest.spyOn(container, 'resolve').mockImplementationOnce(() => { throw new Error('unresolvable backfill'); });
+    try {
+      await expect(shutdownHostRuntime(container)).resolves.toBeUndefined();
+      expect(fakes.agentDisposeAll).toHaveBeenCalledTimes(1);
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining('unresolvable backfill'));
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

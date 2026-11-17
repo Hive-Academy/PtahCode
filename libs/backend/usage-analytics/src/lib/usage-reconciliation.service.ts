@@ -49,7 +49,6 @@ const PASS_FILE_BUDGET = 16;
 const PASS_DISCOVERY_BUDGET = 64;
 const PASS_BYTE_BUDGET = 4 * BYTE_BUDGET;
 const MAX_PENDING_PASSES = 4;
-const DEBOUNCE_MS = 2_000;
 const CONTINUATION_MS = 2_001;
 const ACTIVE_IDLE_MS = 15 * 60_000;
 const QUIET_IDLE_MS = 60 * 60_000;
@@ -72,7 +71,6 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
   private running = false;
   private followUp = false;
   private passIncomplete = false;
-  private debounceTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private firstTimer: NodeJS.Timeout | null = null;
   private idleDelayMs = ACTIVE_IDLE_MS;
@@ -110,22 +108,13 @@ export class UsageReconciliationService implements UsageReconciliationTrigger {
     this.started = false;
     this.followUp = false;
     if (this.firstTimer) clearTimeout(this.firstTimer);
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.firstTimer = this.debounceTimer = this.idleTimer = null;
+    this.firstTimer = this.idleTimer = null;
   }
 
   enqueue(_event: Parameters<UsageReconciliationTrigger['enqueue']>[0]): void {
-    if (!this.started) return;
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
-    this.idleDelayMs = ACTIVE_IDLE_MS;
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = null;
-      this.requestPass();
-    }, DEBOUNCE_MS);
-    this.debounceTimer.unref();
+    // Live Ptah usage is recorded by the reactive sink. Never scan transcripts
+    // from completion notifications (TASK_2026_2254_b94b).
   }
 
   private requestPass(): void {

@@ -939,10 +939,9 @@ export class CliDIContainer {
 
     registerThothLibraries(container, logger);
     startCliLaneOutcomes(container, logger);
-    const usageReconciliationService = container.resolve(UsageReconciliationService);
-    const backfill = container.resolve(RepositoryIdentityBackfillService);
-    usageReconciliationService.setAfterPass(() => backfill.runOnce().then(() => undefined));
-    usageReconciliationService.start();
+    // TASK_2026_2254_b94b: transcript scans caused a main-process hang.
+    // A later transcript import must run off the main thread.
+    container.resolve(RepositoryIdentityBackfillService).start();
 
     phaseEnd('2', phase2Start);
     const phase3Start = phaseStart('3');

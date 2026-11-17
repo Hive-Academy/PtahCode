@@ -12,14 +12,15 @@ import {
 } from '@ptah-extension/rpc-handlers';
 
 describe('Electron usage reconciliation composition', () => {
-  it('binds the producer and starts once after all phases', () => {
+  it('keeps import DI resolvable without starting transcript reconciliation', () => {
     const phase = readFileSync(join(__dirname, 'phase-2-libraries.ts'), 'utf8');
     const composition = readFileSync(join(__dirname, 'container.ts'), 'utf8');
     const main = readFileSync(join(__dirname, '..', 'main.ts'), 'utf8');
     expect(phase).toContain('PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER');
     expect(phase).toContain('REPOSITORY_IDENTITY_BACKFILL_TOKENS.resolver');
-    expect(composition.indexOf('registerPhase4Handlers(root, logger)')).toBeLessThan(composition.indexOf('usageReconciliationService.start()'));
-    expect(composition).toContain('usageReconciliationService.setAfterPass');
+    expect(composition).not.toContain('usageReconciliationService.start()');
+    expect(composition).not.toContain('setAfterPass');
+    expect(composition).toContain('root.resolve(RepositoryIdentityBackfillService).start()');
     expect(main).toContain('ElectronDIContainer.stopUsageReconciliation()');
     expect(EXPECTED_RESOLVABLE_TOKENS).toContainEqual(['USAGE_RECONCILIATION_SERVICE', UsageReconciliationService]);
   });
