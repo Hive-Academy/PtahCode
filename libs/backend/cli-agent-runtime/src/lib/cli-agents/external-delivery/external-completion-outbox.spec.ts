@@ -39,6 +39,26 @@ describe('ExternalCompletionOutbox', () => {
     expect(box.claim({ ...owner, exclusive: false }, limits).entries).toHaveLength(0);
   });
 
+  it('discards only retired connection entries and logs a count without secrets', () => {
+    const box = new ExternalCompletionOutbox(logger, { now: () => now });
+    box.record(entry('a'));
+    box.record(entry('b', other));
+    expect(box.discardOwner(owner)).toBe(1);
+    expect(box.pendingCount(owner)).toBe(0);
+    expect(box.pendingCount(other)).toBe(1);
+    expect(logs).toEqual(['[ExternalCompletionOutbox] Discarded 1 unreachable connection entries']);
+    box.record(entry('late'));
+    expect(box.pendingCount(owner)).toBe(0);
+    expect(logs.at(-1)).toBe('[ExternalCompletionOutbox] Discarded 1 completion for a retired connection');
+  });
+
+  it('logs only the count when retired owner keys exceed the cap', () => {
+    const box = new ExternalCompletionOutbox(logger, { maxTotal: 1, now: () => now });
+    box.discardOwner(owner);
+    box.discardOwner(other);
+    expect(logs).toEqual(['[ExternalCompletionOutbox] Dropped 1 retired owner keys']);
+  });
+
   it('bounds total entries across owners and acknowledges only the matching claim', () => {
     const box = new ExternalCompletionOutbox(logger, { maxTotal: 2, now: () => now });
     box.record(entry('a')); now++;

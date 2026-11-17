@@ -49,6 +49,7 @@ import {
   type OutlineQueryRunner,
 } from '../mcp-core/code-outliner.adapter';
 import type { CodeOutliner } from '@ptah-extension/tool-output-reducers';
+import { CLI_AGENT_RUNTIME_TOKENS, type ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
 import {
   isFileLockTimeoutError,
   withMcpConfigLock,
@@ -389,6 +390,8 @@ export class CodeExecutionMCP
     /** Once-per-process grace notice. CLI and tests may omit it. */
     @inject(PLATFORM_TOKENS.USER_INTERACTION, { isOptional: true })
     legacyNotice?: IUserInteraction,
+    @inject(CLI_AGENT_RUNTIME_TOKENS.EXTERNAL_COMPLETION_OUTBOX, { isOptional: true })
+    private readonly completionOutbox?: ExternalCompletionOutbox,
   ) {
     this.codeOutliner =
       treeSitterParser === undefined
@@ -487,6 +490,7 @@ export class CodeExecutionMCP
       logger: this.logger,
       workspaceState: this.workspaceState,
       authenticate: (input) => this.callerCredentials.authorize(input),
+      completionOutbox: this.completionOutbox,
       onMCPRequest: (request) =>
         handleMCPRequest(request, {
           ptahAPI: this.ptahAPI,

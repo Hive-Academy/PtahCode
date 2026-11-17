@@ -9,6 +9,9 @@
 import * as http from 'http';
 import { z } from 'zod';
 import { mcpAttachmentObserver } from './mcp-attachment-observer';
+import { writeHttpMcpResponse } from './http-response-writer';
+import { HttpConnectionOwners } from './http-connection-owners';
+import type { ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   IStateStorage,
@@ -56,6 +59,7 @@ export interface HttpServerConfig {
    * so parser tests keep exercising the URL grammar.
    */
   authenticate?: (input: McpHttpAuthInput) => McpRequestAuth;
+  completionOutbox?: ExternalCompletionOutbox;
 }
 
 /**
@@ -206,9 +210,10 @@ export async function startHttpServer(
   config: HttpServerConfig,
 ): Promise<HttpServerResult> {
   const { port: configuredPort, logger, workspaceState, onMCPRequest } = config;
+  const connectionOwners = new HttpConnectionOwners(Date.now, owner => config.completionOutbox?.discardOwner(owner));
 
   const server = http.createServer((req, res) => {
-    handleHttpRequest(req, res, onMCPRequest, config.authenticate);
+    handleHttpRequest(req, res, onMCPRequest, logger, config.authenticate, config.completionOutbox, connectionOwners);
   });
 
   const candidates = getMcpPortCandidates(configuredPort);
@@ -376,7 +381,10 @@ async function handleHttpRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   onMCPRequest: (request: MCPRequest) => Promise<MCPResponse>,
+  logger: Logger,
   authenticate?: (input: McpHttpAuthInput) => McpRequestAuth,
+  completionOutbox?: ExternalCompletionOutbox,
+  connectionOwners?: HttpConnectionOwners,
 ): Promise<void> {
   const port = req.socket.localPort ?? 0;
   const recordRejected = (
@@ -505,6 +513,7 @@ async function handleHttpRequest(
     return;
   }
   const accepted = decision;
+  const externalOwner = connectionOwners?.resolve(accepted.externalOwner, req.headers['mcp-session-id']) ?? accepted.externalOwner;
 
   let body = '';
   let bodySize = 0;
@@ -556,6 +565,7 @@ async function handleHttpRequest(
         _callerToolProfile: _ignoredBodyProfile,
         _callerCapability: _ignoredBodyCapability,
         _callerBinding: _ignoredBodyBinding,
+        _externalOwner: _ignoredBodyOwner,
         _abortSignal: _ignoredBodySignal,
         ...envelope
       } = parsed.data;
@@ -568,6 +578,7 @@ async function handleHttpRequest(
         _callerToolProfile: extractCallerToolProfile(identityUrl),
         _callerCapability: accepted.binding.capability,
         _callerBinding: accepted.binding,
+        _externalOwner: externalOwner,
         _abortSignal: abortOnEarlyClose(res),
       };
 
@@ -605,9 +616,12 @@ async function handleHttpRequest(
       // The caller is gone: there is no one to write the reply to.
       if (res.destroyed) return;
 
-      const status = isToolDenial(mcpResponse) ? 403 : 200;
-      res.writeHead(status, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(mcpResponse));
+      writeHttpMcpResponse({
+        res, response: mcpResponse, method: mcpRequest.method,
+        status: isToolDenial(mcpResponse) ? 403 : 200,
+        owner: externalOwner, initialOwner: accepted.externalOwner,
+        outbox: completionOutbox, connections: connectionOwners, logger,
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';

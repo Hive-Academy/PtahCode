@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import * as crypto from 'node:crypto';
 import {
   INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
@@ -9,6 +10,8 @@ import {
   type McpCredentialLogger,
 } from './mcp-caller-token-registry';
 import { isToolPermitted } from '../mcp-core/mcp-caller-policy';
+import { HttpConnectionOwners } from './http-connection-owners';
+import { externalOwnerKeySchema } from '@ptah-extension/cli-agent-runtime';
 
 const STORE_KEY = 'ptah.mcp.callerCredentialHashes';
 
@@ -75,6 +78,18 @@ function hashOf(token: string): string {
 }
 
 describe('McpCallerTokenRegistry', () => {
+  it('uses a recorder-compatible principal for an authorized persistent token and connection', async () => {
+    const registry = new McpCallerTokenRegistry({ state: new MemoryState(), logger: logger() });
+    const token = await registry.issuePersistent({ configPath: '/ws/.mcp.json', kind: 'workspace', workspaceRoot: '/ws', setting: 'read-only' });
+    const authorized = registry.authorize({ token, workspaceRoot: '/ws' });
+    if (!authorized.ok || !authorized.externalOwner) throw new Error('Expected authorized workspace owner');
+    expect(externalOwnerKeySchema.safeParse(authorized.externalOwner).success).toBe(true);
+    const connections = new HttpConnectionOwners();
+    const id = connections.issue(authorized.externalOwner);
+    const resolved = connections.resolve(authorized.externalOwner, id);
+    expect(externalOwnerKeySchema.safeParse(resolved).success).toBe(true);
+    expect(resolved?.exclusive).toBe(true);
+  });
   it('stores a hash, not the raw token, and authorizes by digest', async () => {
     const state = new MemoryState();
     const registry = new McpCallerTokenRegistry({ state, logger: logger() });

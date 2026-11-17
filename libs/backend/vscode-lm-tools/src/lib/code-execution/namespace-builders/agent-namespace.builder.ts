@@ -34,6 +34,7 @@ import {
   getCallerAgentId,
   getCallerBinding,
   getCallerSessionId,
+  getAuthenticatedExternalOwner,
   isMcpRequestInFlight,
 } from '../mcp-core/mcp-request-context';
 import {
@@ -728,6 +729,7 @@ export function buildAgentNamespace(
           ...(accountSelection && { accountSelection }),
           ...(workingDirectory && { workingDirectory }),
           ...(activeSessionId && { parentSessionId: activeSessionId }),
+          ...(getAuthenticatedExternalOwner() && { externalOwner: getAuthenticatedExternalOwner() }),
           ...(parentLevel && { parentLevel }),
           ...(roleDefinition && { roleDefinition }),
           ...(projectGuidance && { projectGuidance }),
@@ -772,6 +774,7 @@ export function buildAgentNamespace(
         cli: request.ptahCliId ? 'ptah-cli' : request.cli,
         workingDirectory: request.workingDirectory ?? getWorkspaceRoot(),
         parentSessionId: rawSessionId ? resolveCallerParentId(rawSessionId) : undefined,
+        ...(getAuthenticatedExternalOwner() && { externalOwner: getAuthenticatedExternalOwner() }),
       });
     },
     executeSpawn: (ticket, request, force?: boolean) => executeNamespaceSpawn(request, ticket, force),

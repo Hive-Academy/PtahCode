@@ -14,6 +14,7 @@
 
 import * as crypto from 'node:crypto';
 import { z } from 'zod';
+import { derivePrincipal } from '@ptah-extension/cli-agent-runtime';
 import type {
   IStateStorage,
   McpCallerBinding,
@@ -366,7 +367,12 @@ export class McpCallerTokenRegistry {
     if (!bindingMatchesUrl(binding, input)) {
       return { ok: false, failure: callerForbiddenFailure() };
     }
-    return { ok: true, legacy: false, binding };
+    // A persistent workspace/home slot is shared by every client using its
+    // config. Session and agent credentials belong to hosted Ptah parents.
+    const externalOwner = binding.kind === 'workspace' || binding.kind === 'home' || binding.kind === 'internal-query'
+      ? { transport: 'http' as const, principal: derivePrincipal(digest.toString('hex')), exclusive: binding.kind === 'internal-query' }
+      : undefined;
+    return { ok: true, legacy: false, binding, externalOwner };
   }
 
   private lookup(digest: Buffer): McpCallerBinding | undefined {
