@@ -118,7 +118,7 @@ async function dispose(pids: Set<number>): Promise<void> {
 (process.platform === 'win32' && process.env['PTAH_SKIP_LIVE_WINDOWS'] !== '1' && existsSync(binary)
   ? describe : describe.skip)('native Windows job with real processes', () => {
   const pids = new Set<number>();
-  const assigner = new NativeWindowsJobAssigner();
+  const assigner = new NativeWindowsJobAssigner((): unknown => require(binary));
   afterEach(async () => { await dispose(pids); });
 
   it('close kills root, child and detached grandchild', async () => {

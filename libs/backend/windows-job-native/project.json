@@ -8,6 +8,20 @@
     "type:util"
   ],
   "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": [
+        "{options.outputPath}"
+      ],
+      "options": {
+        "outputPath": "dist/libs/backend/windows-job-native",
+        "main": "libs/backend/windows-job-native/src/index.ts",
+        "tsConfig": "libs/backend/windows-job-native/tsconfig.lib.json",
+        "format": [
+          "cjs"
+        ]
+      }
+    },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {

@@ -45,6 +45,7 @@ import {
 } from './workspace-watch/electron-workspace-watcher';
 import { ElectronHostAttentionNotifications, type ElectronAttentionCapabilities } from './implementations/electron-host-attention-notifications';
 import { TaskCleanupAdapter } from './git/task-cleanup.adapter';
+import { ElectronWindowsJobAssigner } from './implementations/electron-windows-job-assigner';
 
 /**
  * The shared `TOKENS.LOGGER` registry key. Spelled out here because a value
@@ -106,6 +107,9 @@ export function registerPlatformElectronServices(
   container: DependencyContainer,
   options: ElectronPlatformOptions,
 ): void {
+  container.register(PLATFORM_TOKENS.WINDOWS_JOB_ASSIGNER, {
+    useValue: new ElectronWindowsJobAssigner({ appPath: options.appPath }),
+  });
   container.register(TASK_END_GIT_CLEANUP_PORT, {
     useFactory: child => new TaskCleanupAdapter(child.resolve<Logger>(LOGGER_TOKEN)),
   });
