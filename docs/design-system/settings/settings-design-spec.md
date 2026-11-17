@@ -123,6 +123,10 @@ Rules:
 | Tabular data with columns        | table component from the other child (GAP G7)                                                                                      | raw `table table-xs`                                                          |
 | Fold a group                     | disclosure from the other child (GAP G8)                                                                                           | raw `details/summary`                                                         |
 
+Newer rule (user decision, 2026-11-17): for dropdowns and text field labels, the section
+[User decisions after rev 2](README.md#user-decisions-after-rev-2) replaces the "Pick one of
+many" row above.
+
 ## 4. Per-tab design
 
 The block tables give: block | function | component now | target component | change.

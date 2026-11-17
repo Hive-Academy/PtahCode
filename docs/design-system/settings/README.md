@@ -8,6 +8,24 @@ rules are in [visual-gate.md](visual-gate.md).
 Providers and Context. Rev 1 is still the target for Advanced and Search & Voice, because
 rev 2 has no screen for these pages.
 
+## User decisions after rev 2
+
+These rules come from a user decision of 2026-11-17. They take priority over the design spec,
+the apply plan and the screens.
+
+- Every Settings dropdown uses the shared `ptah-select` (designed menu). The native
+  `select[ptahSelect]` menu is not permitted in Settings. This rule replaces the "Pick one of
+  many" row of `settings-design-spec.md`, which permits `select[ptahSelect]` for short static
+  lists.
+- Every text field uses `ptah-field` with a true floating label. The label rests in the field
+  when the field is empty and has no focus. The label goes up only on focus or when the field
+  has a value. A real placeholder must not hold the label up. Put help text in the hint line.
+- Exception that stays: in a `ptah-setting-row` and in a compact table cell, the control shows
+  no floating label, because the row title or the column header is the label. The dropdown of
+  that control still uses the designed menu.
+- The "Field appearance (F3)" rule of `settings-apply-plan.md` (`appearance="stacked"` for
+  fields that always have a value) is replaced by the floating label rule above.
+
 ## Source
 
 The files were copied from the design task `TASK_2026_2196_0f09` (branch
@@ -24,6 +42,8 @@ after the copy:
   rev 2 file. The plan now refers to the screen index below.
 - In `settings-apply-plan.md` the visual gate item now refers to `visual-gate.md`, which adds
   the 1920 and 2560 px dark screenshots.
+- In `settings-design-spec.md` a note after the "when to use" table points to the user
+  decisions above. The rows of the table did not change.
 
 The HTML prototype and the screens are unchanged copies.
 

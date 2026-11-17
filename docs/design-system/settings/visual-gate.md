@@ -23,6 +23,11 @@ come from section 6 of the gap analysis in `TASK_2026_2255_53ce`. The design tar
    states the result of the parity check in one line. Parity alone does not pass the gate.
 8. A fixture-profile error in a screenshot (for example "could not be read") blocks the gate
    until the fixture is fixed. It is not accepted as "data only".
+9. A pull request that touches a form control shows each changed control type in three
+   states: empty, focus and with value. It also shows one open dropdown menu. A native select
+   menu fails the gate. A label that stays up on an empty field without focus fails the gate.
+   The rules for controls are in
+   [User decisions after rev 2](README.md#user-decisions-after-rev-2).
 
 ## Where to put gate screenshots
 
