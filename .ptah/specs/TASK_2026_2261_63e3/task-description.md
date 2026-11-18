@@ -243,7 +243,19 @@ Approve selected options by number. Recommendations remain proposals. This is th
 6. **Bot delete, memory and run history.** Options: archive only; hard delete always purges private memory and history; archive plus hard delete with independent retain/purge choices for memory and history (four combinations). Recommend the third, with archive as default. Retained runs keep revisions and a tombstone id; retained private memory stays isolated. Purge does not delete shared workspace memory or unrelated host transcripts. Evidence: the memory contract exposes stored records (`libs/backend/memory-contracts/src/lib/memory-reader.port.ts:15`); bot run/revision records are proposed new storage. This retention matrix is a product choice, not existing behavior.
 7. **Scheduler owner across Electron and CLI.** Options: Electron owns schedules exclusively; a configured CLI service owns them exclusively; either may hold one renewable data-store lease with passive contenders. Recommend the lease with fencing and deterministic takeover checks. Evidence: current startup has an instance `started` guard (`libs/backend/cron-scheduler/src/lib/cron-scheduler.ts:103`) and documents database slot uniqueness (`libs/backend/cron-scheduler/src/lib/cron-scheduler.ts:97`). Neither establishes cross-process timer ownership. Add coordination in phase 3.
 
-Record the selected option for every number on approval. This document records no answer on the user's behalf.
+### Selected options (user, 2026-11-18)
+
+The user approved the recommended option for each of the seven decisions ("for 1410 do the recommended options").
+
+1. **Scope and memory:** user and workspace bots; workspace is the creation default; bot-private memory by default; workspace memory by explicit opt-in.
+2. **Triggers and senders:** manual first, then local cron and the existing gateways with explicit sender lists; messages need authenticated sender authorization and use ask/plan by default; unsupported triggers stay inactive suggestions.
+3. **Approval defaults:** explicit bot rules with ask by default; confirmation of trigger activation; review of imported choices.
+4. **Continuity and rollover:** one resumable bot/workspace conversation with manual rollover and linked successors; a prompt at the reported context limit of the runtime.
+5. **Creation before the designer:** minimal Electron manual editor plus shared CRUD RPC in phase 1.
+6. **Delete, memory and run history:** archive (default) plus hard delete with independent retain/purge choices for memory and history.
+7. **Scheduler owner:** one renewable data-store lease with fencing and passive contenders, added in phase 3.
+
+These selections approve the product decisions only. They do not approve a UI design (each UI phase needs its own design approval) and they approve no removal.
 
 ## Lane-introduced constraints
 
