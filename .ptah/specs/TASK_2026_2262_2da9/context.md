@@ -37,6 +37,12 @@ change this scan.
 3. A real spawn from a worktree needs a new build of the application. Only the user can
    install it.
 
+## Pull request
+
+https://github.com/Hive-Academy/PtahCode/pull/1411 (branch `fix/lane-account-ancestor-scan`).
+The task is in review. The installed application does not contain the change until a new build
+is installed, so a real spawn from a worktree is not proved.
+
 ## Follow-up
 
 The independent review (`code-logic-review.md`, finding 3) found a gap that existed before this
