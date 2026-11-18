@@ -951,7 +951,7 @@ describe('ChatMessageHandler — payload validation (TASK_2026_120 Phase B)', ()
       expect(streamRouter.routeStreamEventForSurface).not.toHaveBeenCalled();
     });
 
-    it('applies a hidden terminal status without scheduling its content event', () => {
+    it.each([undefined, true])('routes hidden terminal activity (%s) without scheduling content', (turnRan) => {
       const event = {
         id: 'terminal-hidden', eventType: 'turn_state', timestamp: 2,
         sessionId: CHUNK_SESSION, messageId: `turn-state-${CHUNK_SESSION}`,
@@ -959,9 +959,9 @@ describe('ChatMessageHandler — payload validation (TASK_2026_120 Phase B)', ()
         terminalReason: 'completed',
       };
       handler.handleMessage({ type: MESSAGE_TYPES.CHAT_CHUNK,
-        payload: { tabId: 'tab-1', sessionId: CHUNK_SESSION, event, statusOnly: true } });
+        payload: { tabId: 'tab-1', sessionId: CHUNK_SESSION, event, statusOnly: true, turnRan } });
       expect(tabManager.applyHiddenTurnStateStatus).toHaveBeenCalledWith(
-        'tab-1', event, CHUNK_SESSION,
+        'tab-1', event, CHUNK_SESSION, { turnRan },
       );
       expect(chatStore.processStreamEvent).not.toHaveBeenCalled();
     });

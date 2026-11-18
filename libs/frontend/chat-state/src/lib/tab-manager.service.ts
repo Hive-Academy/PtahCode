@@ -58,6 +58,7 @@ import { ConversationRegistry } from './conversation-registry.service';
 import { TabId } from './identity/ids';
 import { withTerminalFailureSeq } from './terminal-failure-seq';
 import { WorkflowSessionIndexService } from './workflow-session-index.service';
+import { SessionTurnActivityStore } from './session-turn-activity.store';
 import {
   buildPersistedTabState,
   nextPersistFailure,
@@ -246,6 +247,7 @@ export class TabManagerService {
   private readonly workspacePartition = inject(TabWorkspacePartitionService);
   readonly backgroundTabsRevision = this.workspacePartition.backgroundRevision$;
   private readonly workflowIndex = inject(WorkflowSessionIndexService);
+  private readonly turnActivity = inject(SessionTurnActivityStore);
   /**
    * Multi-tab fan-out support.
    *
@@ -1780,6 +1782,13 @@ export class TabManagerService {
    * @param updates - Partial tab state updates
    */
   private updateTabInternal(tabId: string, updates: Partial<TabState>): void {
+    if (updates.status === 'streaming' || updates.claudeSessionId !== undefined) {
+      const tab = this._tabs().find((item) => item.id === tabId) ?? this.findTabByIdAcrossWorkspaces(tabId)?.tab;
+      const sessionId = updates.claudeSessionId === undefined ? tab?.claudeSessionId : updates.claudeSessionId;
+      if (tab && (updates.status ?? tab.status) === 'streaming' && sessionId) {
+        this.turnActivity.recordTurnActivity(sessionId);
+      }
+    }
     let found = false;
     let changed = false;
 
@@ -2039,6 +2048,7 @@ export class TabManagerService {
     tabId: string,
     state: SessionTurnState,
     sessionId?: string,
+    options?: { readonly turnRan?: boolean },
   ): void {
     if (
       (state.phase !== 'idle' && state.phase !== 'failed') ||
@@ -2051,6 +2061,9 @@ export class TabManagerService {
       )
     )
       return;
+    const boundSessionId = this.findTabByIdAcrossWorkspaces(tabId)?.tab.claudeSessionId;
+    if (options?.turnRan === true && boundSessionId && (sessionId ?? boundSessionId) === boundSessionId)
+      this.turnActivity.recordTurnActivity(boundSessionId);
     this.updateTabInternal(tabId, {
       status: 'loaded',
       lastTerminalReason: state.terminalReason,

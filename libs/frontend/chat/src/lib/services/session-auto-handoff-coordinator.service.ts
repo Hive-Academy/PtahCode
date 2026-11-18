@@ -12,6 +12,7 @@ import {
   QueuedFollowUpStore,
   TabManagerService,
   TabWorkspacePartitionService,
+  SessionTurnActivityStore,
   type QueuedFollowUpRef,
 } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
@@ -55,7 +56,9 @@ const LOG_CONTEXT = '[SessionAutoHandoff]';
  * only the SHOWN tab and its visible banner, so a background tab â€” or a
  * background workspace partition â€” that reached its limit never fired. This
  * coordinator watches the budget state of EVERY mounted tab, in the active
- * workspace and every background partition:
+ * workspace and every background partition. Only sessions with renderer or backend-confirmed turn activity in
+ * this page lifetime qualify, even if their budget reaches the limit after the
+ * turn ends: a reopened idle session at its limit does not fire.
  *
  * - The effect depends on the active tab-set signal and the background
  *   revision, so any tab update in any partition re-evaluates every candidate.
@@ -79,6 +82,7 @@ const LOG_CONTEXT = '[SessionAutoHandoff]';
 export class SessionAutoHandoffCoordinatorService {
   private readonly tabManager = inject(TabManagerService);
   private readonly partition = inject(TabWorkspacePartitionService);
+  private readonly turnActivity = inject(SessionTurnActivityStore);
   private readonly messageDispatch = inject(MessageDispatchService);
   private readonly followUpStore = inject(QueuedFollowUpStore);
   /** Resolved on first use: the queue service has its own construction-time wiring. */
@@ -147,8 +151,8 @@ export class SessionAutoHandoffCoordinatorService {
   }
 
   /**
-   * Every session that must fire now, one tab each: a limit budget with the
-   * setting on, not yet claimed, cancelled, wrapped up by hand, marked without
+   * Sessions with turn activity this page that must fire now, one tab each: at the
+   * limit with the setting on, not yet claimed, cancelled, wrapped up by hand, marked without
    * the skill, in flight, rate-gated or given up â€” and with no pending
    * permission prompt on its tab. Called inside the effect: every read here
    * that can change (tab state in both partitions, the permission prompts)
@@ -159,9 +163,9 @@ export class SessionAutoHandoffCoordinatorService {
     const found: HandoffCandidate[] = [];
     const sessions = new Set<string>();
     for (const tab of this.budgetTabs()) {
+      const sessionId = tab.claudeSessionId;
       const budget = tab.sessionBudget;
       if (!budget || budget.stage !== 'limit') continue;
-      const sessionId = tab.claudeSessionId;
       if (typeof sessionId !== 'string') continue;
       if (budget.sessionId !== sessionId) {
         this.logSkip(sessionId, 'session id mismatch', tab.id);
@@ -169,6 +173,10 @@ export class SessionAutoHandoffCoordinatorService {
       }
       if (budget.autoHandoff !== true) {
         this.logSkip(sessionId, 'auto handoff off', tab.id);
+        continue;
+      }
+      if (!this.turnActivity.hasTurnActivity(sessionId)) {
+        this.logSkip(sessionId, 'no turn in this page lifetime', tab.id);
         continue;
       }
       if (sessions.has(sessionId)) continue; // the first tab per session sends
@@ -433,6 +441,7 @@ export class SessionAutoHandoffCoordinatorService {
     if (tab.claudeSessionId !== sessionId) return null;
     if (budget.sessionId !== sessionId) return null;
     if (budget.autoHandoff !== true) return null;
+    if (!this.turnActivity.hasTurnActivity(sessionId)) return null;
     if (tab.status === 'resuming') return null;
     return budget.stage === 'limit' ? { budget } : null;
   }

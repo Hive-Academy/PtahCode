@@ -35,6 +35,7 @@ interface DeferredTerminal {
 }
 
 interface TabDeliveryState {
+  turnRan: boolean;
   lastSequence: number;
   sessionId?: string;
   tail: StreamDeltaCoalescer;
@@ -135,6 +136,7 @@ export class ChatStreamDeliveryCoordinator {
 
     const state = this.getState(tabId, sessionId);
     state.lastSequence = ++this.sequence;
+    if (sessionId && state.sessionId && state.sessionId !== sessionId) state.turnRan = false;
     if (sessionId) state.sessionId = sessionId;
     if (!surfaceMode) {
       if (state.projection.observe(event, state.lastSequence)) {
@@ -168,6 +170,10 @@ export class ChatStreamDeliveryCoordinator {
     sessionId?: string,
     surfaceMode?: boolean,
   ): void | Promise<void> {
+    const turnRan = state.turnRan;
+    if (event.eventType === 'turn_state' && !event.retirementOnly) {
+      state.turnRan = event.phase === 'generating';
+    }
     if (this.visibleTabIds.has(tabId)) {
       return this.buffer.push({
         type: MESSAGE_TYPES.CHAT_CHUNK,
@@ -187,7 +193,7 @@ export class ChatStreamDeliveryCoordinator {
         (event.phase === 'idle' || event.phase === 'failed')) {
       return this.buffer.push({
         type: MESSAGE_TYPES.CHAT_CHUNK,
-        payload: { tabId, sessionId, event, statusOnly: true },
+        payload: { tabId, sessionId, event, statusOnly: true, ...(turnRan ? { turnRan: true } : {}) },
       });
     }
   }
@@ -280,6 +286,7 @@ export class ChatStreamDeliveryCoordinator {
     let state = this.states.get(tabId);
     if (!state) {
       state = {
+        turnRan: false,
         lastSequence: this.sequence,
         ...(sessionId ? { sessionId } : {}),
         tail: new StreamDeltaCoalescer(),
