@@ -15,7 +15,7 @@
  *   (`session-loader.service.ts:792-797`).
  * - The plan-limit snapshots, shaped by `plan-limit.types.ts` and reusing the
  *   data of `stats-limit-view-model.spec.ts` and
- *   `provider-account-card.component.spec.ts`.
+ *   `plan-limits-panel.component.spec.ts`.
  * - The lane runs: two restored runs carried by `chat:resume.cliSessions`
  *   (restored runs always have `usageTotals: null`,
  *   `agent-monitor.store.ts:1204`) and three live runs pushed as

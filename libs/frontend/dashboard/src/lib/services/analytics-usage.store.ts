@@ -18,6 +18,13 @@ import {
   ClaudeRpcService,
 } from '@ptah-extension/core';
 import type { UsageRangeDays, UsageSummary } from '@ptah-extension/shared';
+import {
+  computeKpiDeltas,
+  slicePreviousPeriod,
+  widerRangeFor,
+  type KpiDeltas,
+  type PreviousUsagePeriod,
+} from './kpi-delta';
 
 export const USAGE_RANGE_OPTIONS: ReadonlyArray<{
   readonly value: UsageRangeDays;
@@ -53,8 +60,11 @@ export class AnalyticsUsageStore {
   private readonly _summary = signal<UsageSummary | null>(null);
   private readonly _isLoading = signal(false);
   private readonly _loadError = signal<string | null>(null);
+  /** The wider-range summary the previous period is sliced from. */
+  private readonly _widerSummary = signal<UsageSummary | null>(null);
 
   private generation = 0;
+  private readonly _summaryGeneration = signal<number | null>(null);
   private controller: AbortController | null = null;
   /** The (range, workspace) the loaded summary belongs to. */
   private summaryScope: UsageSummaryScope | null = null;
@@ -63,6 +73,22 @@ export class AnalyticsUsageStore {
   readonly summary = this._summary.asReadonly();
   readonly isLoading = this._isLoading.asReadonly();
   readonly loadError = this._loadError.asReadonly();
+
+  /**
+   * The facts of the period directly before the loaded window, read from the
+   * next wider range. Null for a 90-day range, while the wider answer is
+   * missing or failed, or when it does not cover the whole previous period.
+   */
+  readonly previousPeriod = computed<PreviousUsagePeriod | null>(() => {
+    const current = this._summary();
+    const wider = this._widerSummary();
+    return this._summaryGeneration() === this.generation && current && wider ? slicePreviousPeriod(current, wider) : null;
+  });
+
+  /** Spend and token change against `previousPeriod` (fraction, or null). */
+  readonly kpiDeltas = computed<KpiDeltas>(() =>
+    computeKpiDeltas(this._summary(), this.previousPeriod()),
+  );
 
   /**
    * True while a request is in flight and an older summary stays on screen.
@@ -115,22 +141,32 @@ export class AnalyticsUsageStore {
     ) {
       this.summaryScope = null;
       this._summary.set(null);
+      this._widerSummary.set(null);
     }
+    const widerRange = widerRangeFor(range);
+    this._widerSummary.set(null);
+    this._summaryGeneration.set(null);
     this._isLoading.set(true);
     this._loadError.set(null);
     try {
-      const result = await this.rpc.call(
+      const request = this.rpc.call(
         'analytics:spendSummary',
         { range, ...(workspace ? { workspace } : {}) },
         // Allow external-source reads and transport to return a partial summary.
         { signal: controller.signal, timeout: 40_000 },
       );
+      // The main request goes first; the wider one only feeds KPI deltas.
+      if (widerRange !== null) {
+        void this.loadWider(generation, controller, widerRange, workspace);
+      }
+      const result = await request;
       if (generation !== this.generation) return;
       if (!result.isSuccess()) {
         throw new Error(result.error || 'Failed to load usage');
       }
       this.summaryScope = { range, workspace };
       this._summary.set(result.data);
+      this._summaryGeneration.set(generation);
     } catch {
       // degradation-audit: reported - the failure is surfaced through
       // `loadError` as a fixed user message with a retry. Raw error details
@@ -141,6 +177,35 @@ export class AnalyticsUsageStore {
       this._loadError.set(USAGE_LOAD_FAILED_MESSAGE);
     } finally {
       if (generation === this.generation) this._isLoading.set(false);
+    }
+  }
+
+  /**
+   * Request the wider range for the previous-period delta, in parallel with
+   * the main request. A failure only clears the delta: it never sets
+   * `loadError`, because the summary itself is still valid.
+   */
+  private async loadWider(
+    generation: number,
+    controller: AbortController,
+    range: UsageRangeDays,
+    workspace: string,
+  ): Promise<void> {
+    try {
+      const result = await this.rpc.call(
+        'analytics:spendSummary',
+        { range, ...(workspace ? { workspace } : {}) },
+        { signal: controller.signal, timeout: 40_000 },
+      );
+      if (generation !== this.generation) return;
+      this._widerSummary.set(result.isSuccess() ? result.data : null);
+    } catch (error: unknown) {
+      // degradation-audit: reported - a failed wider read only hides the
+      // KPI deltas (they render as "no comparison"); the error is dropped
+      // for the same reason as in `load`.
+      void error;
+      if (generation !== this.generation) return;
+      this._widerSummary.set(null);
     }
   }
 

@@ -23,6 +23,7 @@ import {
   FakeRpc,
   answerUsage,
   flush,
+  mainUsageCalls,
   usageFact,
   usageSummary,
 } from '../../services/dashboard-rpc.testing';
@@ -88,7 +89,7 @@ describe('UsageDashboardComponent', () => {
     null;
   const count = (selector: string): number =>
     el().querySelectorAll(selector).length;
-  const usageCall = (i = 0) => rpc.of('analytics:spendSummary')[i]!;
+  const usageCall = (i = 0) => mainUsageCalls(rpc)[i]!;
 
   async function settle(): Promise<void> {
     await flush();
@@ -177,13 +178,14 @@ describe('UsageDashboardComponent', () => {
     expect(el().querySelector('[data-testid="usage-kpis"]')?.getAttribute('aria-label'))
       .toBe('Usage totals for the selected range');
     const processed = el().querySelector('[data-testid="usage-kpi-processed"]')!;
-    expect(processed.querySelector('p:last-child')?.textContent).toContain('Output 700 tokens');
+    expect(processed.querySelector('[data-testid="usage-kpi-output"]')?.textContent).toContain('Output 700 tokens');
     expect(el().querySelectorAll('[data-testid="usage-kpis"] > div')).toHaveLength(6);
     const content = el().querySelector('[data-testid="usage-content"]')!;
     const kpi = content.querySelector('[data-testid="usage-kpis"]')!;
-    const chart = content.querySelector('[data-testid="usage-chart"]')!;
-    const share = content.querySelector('[data-testid="usage-cost-donut"]')!;
-    const breakdown = content.querySelector('[data-testid="usage-breakdown"]')!;
+    // Charts and tables are rows after the projected plan limits.
+    const chart = el().querySelector('[data-testid="usage-chart-row"] [data-testid="usage-chart"]')!;
+    const share = el().querySelector('[data-testid="usage-chart-row"] [data-testid="usage-cost-donut"]')!;
+    const breakdown = el().querySelector('[data-testid="usage-table-row"] [data-testid="usage-breakdown"]')!;
     expect(kpi.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(chart.compareDocumentPosition(share) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(share.compareDocumentPosition(breakdown) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -276,9 +278,10 @@ describe('UsageDashboardComponent', () => {
     await settle();
     expect(text('usage-total-cost')).toBe('$2.00');
 
-    clickButton('7d');
+    TestBed.inject(AnalyticsUsageStore).setRange(7);
+    fixture.detectChanges();
 
-    expect(rpc.of('analytics:spendSummary')).toHaveLength(2);
+    expect(mainUsageCalls(rpc)).toHaveLength(2);
     expect(usageCall(1).params).toEqual({ range: 7, workspace: '/ws/a' });
     expect(usageCall(0).signal?.aborted).toBe(true);
     // The old 30-day answer is never shown under the 7-day selection: the
@@ -299,7 +302,8 @@ describe('UsageDashboardComponent', () => {
     answerUsage(usageCall(0), usageSummary([factSonnetDay18]));
     await settle();
 
-    clickButton('7d');
+    TestBed.inject(AnalyticsUsageStore).setRange(7);
+    fixture.detectChanges();
     usageCall(1).reply.resolve(
       new RpcResult(
         false,
@@ -315,14 +319,15 @@ describe('UsageDashboardComponent', () => {
     expect(el().querySelector('[data-testid="usage-total-cost"]')).toBeNull();
 
     clickButton('Retry');
-    expect(rpc.of('analytics:spendSummary')).toHaveLength(3);
+    expect(mainUsageCalls(rpc)).toHaveLength(3);
   });
 
   it('keeps the last data but marks it updating during a refresh', async () => {
     answerUsage(usageCall(0), usageSummary([factSonnetDay18]));
     await settle();
 
-    clickButton('Refresh');
+    TestBed.inject(AnalyticsUsageStore).refresh();
+    fixture.detectChanges();
 
     // Same scope: the old summary stays visible, dimmed and labelled.
     expect(text('usage-total-cost')).toBe('$2.00');
@@ -341,7 +346,8 @@ describe('UsageDashboardComponent', () => {
     answerUsage(usageCall(0), usageSummary([factSonnetDay18]));
     await settle();
 
-    clickButton('Refresh');
+    TestBed.inject(AnalyticsUsageStore).refresh();
+    fixture.detectChanges();
     usageCall(1).reply.resolve(
       new RpcResult(false, undefined, 'transport reset: C:\\Users\\me\\secret'),
     );
@@ -371,7 +377,7 @@ describe('UsageDashboardComponent', () => {
     expect(el().textContent).not.toContain('SECRET');
 
     clickButton('Retry');
-    expect(rpc.of('analytics:spendSummary')).toHaveLength(2);
+    expect(mainUsageCalls(rpc)).toHaveLength(2);
   });
 
   it('shows the empty state when the range has no usage', async () => {
@@ -738,7 +744,7 @@ describe('AnalyticsUsageStore', () => {
     });
   });
 
-  const usageCall = (i = 0) => rpc.of('analytics:spendSummary')[i]!;
+  const usageCall = (i = 0) => mainUsageCalls(rpc)[i]!;
 
   it('sends the default range and the open workspace, and stores the summary', async () => {
     const store = TestBed.inject(AnalyticsUsageStore);
@@ -762,7 +768,7 @@ describe('AnalyticsUsageStore', () => {
     const stale = store.load(); // range 30, stays pending
     store.setRange(7); // aborts it and requests the new range
 
-    expect(rpc.of('analytics:spendSummary')).toHaveLength(2);
+    expect(mainUsageCalls(rpc)).toHaveLength(2);
     expect(usageCall(1).params).toEqual({ range: 7, workspace: '/ws/a' });
     expect(usageCall(0).signal?.aborted).toBe(true);
 
@@ -892,7 +898,7 @@ describe('AnalyticsUsageStore', () => {
 
     store.refresh();
 
-    expect(rpc.of('analytics:spendSummary')).toHaveLength(2);
+    expect(mainUsageCalls(rpc)).toHaveLength(2);
     expect(usageCall(1).params).toEqual({ range: 30, workspace: '/ws/a' });
   });
 });

@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ptah dashboard redesign mockup</title>
+<style>
+/* Token approximation: tailwind.config.js ptah-glass / ptah-glass-light + styles.css surface-1/2 */
+:root[data-theme="dark"]{
+  --b1:#17191d;--b2:#202329;--b3:#2a2e35;--bc:#f2f2f1;--bcm:#a8acb3;
+  --gold:#e4b94a;--accent:#45d0be;--info:#6aa6ff;--ok:#3fd08a;--warn:#ff9f45;--err:#ff6b6b;
+  --ink-warn:#ffb26b;--ink-err:#ff8a8a;--ink-ok:#5fe0a3;
+  --surface-1:color-mix(in oklab,#202329 88%,#17191d);--surface-2:#202329;
+  --border:rgba(242,242,241,.14);--border-strong:rgba(242,242,241,.22);--hi:rgba(242,242,241,.07);
+  --page-bg:radial-gradient(1100px 600px at 12% -10%,rgba(228,185,74,.10),transparent 60%),radial-gradient(900px 500px at 100% 0,rgba(69,208,190,.08),transparent 55%),#17191d;
+  --shadow:0 1px 2px rgba(0,0,0,.35);--track:rgba(242,242,241,.10);
+  --s1:#e4b94a;--s2:#45d0be;--s3:#6aa6ff;--s4:#c39bff;--s5:#8d939c;
+}
+:root[data-theme="light"]{
+  --b1:#f7f3fd;--b2:#eee8f8;--b3:#e2daf1;--bc:#1e1936;--bcm:#5b5478;
+  --gold:#7c5700;--accent:#0b7f77;--info:#2a5fd0;--ok:#167a45;--warn:#f59a3a;--err:#cf3a3a;
+  --ink-warn:#8d5200;--ink-err:#b02a2a;--ink-ok:#0f6a3a;
+  --surface-1:color-mix(in oklab,#eee8f8 88%,#f7f3fd);--surface-2:#eee8f8;
+  --border:rgba(30,25,54,.14);--border-strong:rgba(30,25,54,.24);--hi:rgba(30,25,54,.06);
+  --page-bg:radial-gradient(1100px 600px at 12% -10%,rgba(124,87,0,.07),transparent 60%),radial-gradient(900px 500px at 100% 0,rgba(11,127,119,.07),transparent 55%),#f7f3fd;
+  --shadow:0 1px 2px rgba(30,25,54,.10);--track:rgba(30,25,54,.10);
+  --s1:#9a6b12;--s2:#0b7f77;--s3:#2a5fd0;--s4:#7a45c9;--s5:#6d7480;
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--page-bg);background-attachment:fixed;color:var(--bc);font:13px/1.4 system-ui,"Segoe UI",sans-serif;min-height:100vh}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--bcm)}
+button{font:inherit;color:inherit;cursor:pointer}
+/* page = container (container queries) */
+.page{container:dash/inline-size;max-width:1400px;margin:0 auto;padding:16px}
+.stack{display:grid;gap:16px}
+/* header */
+.head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.head h1{font-size:1.125rem;font-weight:600;letter-spacing:-.01em;line-height:1.75rem}
+.head p{font-size:12px;color:var(--bcm)}
+.grow{flex:1}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface-1)}
+.seg button{background:none;border:0;padding:5px 12px;font-size:12px;color:var(--bcm)}
+.seg button[aria-pressed=true]{background:var(--hi);color:var(--bc);font-weight:600;box-shadow:inset 0 -2px 0 var(--gold)}
+.btn{border:1px solid var(--border);background:var(--surface-1);border-radius:8px;padding:5px 12px;font-size:12px}
+.btn:hover{border-color:var(--border-strong)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:2px 10px;font-size:11px;color:var(--bcm);background:var(--surface-1)}
+/* card surface */
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:14px;min-width:0;backdrop-filter:blur(8px)}
+.card>header{display:flex;align-items:center;gap:8px;margin-bottom:10px;min-height:24px}
+.card>header h2{font-size:13px;font-weight:600;letter-spacing:.01em}
+.card>header small{color:var(--bcm);font-size:11px}
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.kpi{background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:10px 12px;display:grid;gap:2px;min-width:0}
+.kpi .l{font-size:11px;color:var(--bcm);text-transform:uppercase;letter-spacing:.05em}
+.kpi .v{font-size:1.5rem;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi .d{font-size:11px;color:var(--bcm);display:flex;gap:6px;align-items:center}
+.kpi svg{width:100%;height:22px;margin-top:2px}
+.up{color:var(--ink-ok)}.down{color:var(--ink-err)}
+/* limits */
+.limits{display:grid;grid-template-columns:repeat(auto-fill,minmax(15.5rem,1fr));gap:12px}
+.lc{position:relative;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px;display:grid;gap:10px;align-content:start;min-width:0}
+.lc.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.lc.err{border-color:color-mix(in oklab,var(--err) 55%,transparent)}
+.lc.sel.err{border-color:var(--gold)}
+.lh{display:flex;align-items:center;gap:8px;min-width:0}
+.mark{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;flex:none}
+.lh b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{margin-left:auto;font-size:10.5px;font-weight:600;padding:1px 8px;border-radius:999px;border:1px solid;white-space:nowrap;display:inline-flex;gap:4px;align-items:center}
+.pill i{width:6px;height:6px;background:currentColor;display:inline-block}
+.p-ok{color:var(--ink-ok);border-color:color-mix(in oklab,var(--ok) 45%,transparent)}
+.p-ok i{border-radius:50%}
+.p-warn{color:var(--ink-warn);border-color:color-mix(in oklab,var(--warn) 55%,transparent)}
+.p-warn i{transform:rotate(45deg)}
+.p-err{color:var(--ink-err);border-color:color-mix(in oklab,var(--err) 55%,transparent)}
+.p-neutral{color:var(--bcm);border-color:var(--border)}
+.selmark{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gold)}
+.hero{display:flex;gap:12px;align-items:center}
+.ring{width:60px;height:60px;flex:none;position:relative}
+.ring svg{width:60px;height:60px;transform:rotate(-90deg)}
+.ring .t{fill:none;stroke:var(--track);stroke-width:6}
+.ring .a{fill:none;stroke-width:6;stroke-linecap:round}
+.ring span{position:absolute;inset:0;display:grid;place-items:center;font-weight:700;font-size:14px;font-variant-numeric:tabular-nums}
+.hero .w{display:grid;gap:1px;min-width:0}
+.hero .w b{font-size:13px;font-weight:600}
+.hero .w span{font-size:12px;color:var(--bcm)}
+.mini{display:grid;gap:5px}
+.mrow{display:grid;grid-template-columns:4.2rem 1fr 2.4rem;gap:8px;align-items:center;font-size:11px;color:var(--bcm)}
+.mrow em{font-style:normal;text-align:right;color:var(--bc);font-variant-numeric:tabular-nums}
+.bar{height:5px;border-radius:99px;background:var(--track);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:99px}
+.lf{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--bcm);border-top:1px solid var(--border);padding-top:8px;margin-top:auto}
+.lf .grow{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lf button{background:none;border:0;color:var(--bcm);padding:0 2px;text-decoration:underline dotted}
+.lf button:hover{color:var(--bc)}
+.big{font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+.chips .lbl{font-size:11px;color:var(--bcm)}
+.chips .chip .mark{width:14px;height:14px;font-size:8px;border-radius:5px;opacity:.6}
+/* charts */
+.row{display:grid;gap:16px;grid-template-columns:repeat(12,minmax(0,1fr))}
+.c8{grid-column:span 8}.c4{grid-column:span 4}.c6{grid-column:span 6}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--bcm);margin-bottom:6px}
+.legend span{display:inline-flex;gap:5px;align-items:center}
+.legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.chart{width:100%;height:auto;display:block}
+.chart text{fill:var(--bcm);font-size:10px;font-variant-numeric:tabular-nums}
+.chart .g{stroke:var(--border);stroke-dasharray:2 3}
+.chart rect.bar-s:hover{opacity:.8}
+.donutwrap{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center}
+.donut{width:150px;height:150px;position:relative}
+.donut svg{width:150px;height:150px;transform:rotate(-90deg)}
+.donut div{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+.donut b{font-size:1.25rem;font-variant-numeric:tabular-nums}
+.donut small{color:var(--bcm);font-size:10px}
+.dl{display:grid;gap:7px;font-size:12px}
+.dl div{display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center}
+.dl i{width:10px;height:10px;border-radius:3px}
+.dl em{font-style:normal;color:var(--bcm);font-variant-numeric:tabular-nums}
+/* table */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{font-weight:600;color:var(--bcm);font-size:11px;text-align:right;padding:4px 8px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0}
+th:first-child,td:first-child{text-align:left}
+td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td:first-child{white-space:normal}
+.pm{display:flex;gap:8px;align-items:center}
+.share{display:inline-block;width:56px;height:5px;border-radius:9px;background:var(--track);vertical-align:middle;margin-left:6px;overflow:hidden}
+.share i{display:block;height:100%}
+.tw{overflow-x:auto}
+.sl{display:grid;gap:0;list-style:none;padding:0}
+.sl li{display:grid;grid-template-columns:18px 1fr auto;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);align-items:center}
+.sl li:last-child{border:0}
+.sl .rk{color:var(--bcm);font-size:11px;text-align:center}
+.sl b{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sl small{color:var(--bcm);font-size:11px}
+.sl .co{text-align:right;font-variant-numeric:tabular-nums}
+/* secondary */
+.sec{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.rowi{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)}
+.rowi:last-child{border:0}
+.rowi .grow b{font-weight:600}
+.sw{width:30px;height:17px;border-radius:99px;background:var(--track);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--bcm)}
+.sw.on{background:color-mix(in oklab,var(--gold) 55%,transparent)}
+.sw.on::after{left:15px;background:var(--bc)}
+/* container breakpoints (page container, not viewport) */
+@container dash (max-width:1279px){
+  .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@container dash (max-width:959px){
+  .c8,.c4,.c6{grid-column:span 12}
+  .sec{grid-template-columns:1fr}
+}
+@container dash (max-width:639px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .donutwrap{grid-template-columns:1fr;justify-items:center}
+  .head .grow{display:none}
+}
+</style>
+</head>
+<body>
+<div class="page"><div class="stack">
+
+<!-- HEADER + TOOLBAR (ptah-page-header + ptah-toolbar) -->
+<div class="head">
+  <div><h1>Dashboard</h1><p>Usage, plan limits and spend across your providers</p></div>
+  <div class="grow"></div>
+  <div class="toolbar">
+    <span class="chip">Workspace: ptah-extension</span>
+    <div class="seg" role="group" aria-label="Date range" id="range">
+      <button aria-pressed="false">7d</button><button aria-pressed="true">30d</button><button aria-pressed="false">90d</button>
+    </div>
+    <button class="btn">Refresh</button>
+    <span class="muted" style="font-size:11px">Updated 4m ago</span>
+    <button class="btn" id="theme" aria-label="Toggle theme">Light theme</button>
+  </div>
+</div>
+
+<!-- KPI STRIP (ptah-stat dense + ptah-sparkline) -->
+<div class="kpis" id="kpis"></div>
+
+<!-- PLAN LIMITS -->
+<section class="card" aria-labelledby="pl">
+  <header><h2 id="pl">Plan limits</h2><small>Most constrained window per provider</small><span class="grow"></span>
+    <span class="pill p-err"><i></i>2 limits reached</span><span class="pill p-warn"><i></i>1 near limit</span></header>
+  <div class="limits" id="limits"></div>
+  <div class="chips">
+    <span class="lbl">No readings</span>
+    <span class="chip"><span class="mark" style="background:#4285f4">G</span>Gemini · no usage source</span>
+    <span class="chip"><span class="mark" style="background:#6e7681">C</span>Copilot · sign in to read limits</span>
+  </div>
+</section>
+
+<!-- ROW 3 -->
+<div class="row">
+  <section class="card c8">
+    <header><h2>Daily usage</h2><small>Last 30 days, by provider</small><span class="grow"></span>
+      <div class="seg" id="metric" role="group" aria-label="Metric"><button aria-pressed="true">Cost</button><button aria-pressed="false">Tokens</button></div></header>
+    <div class="legend" id="legend"></div>
+    <svg class="chart" id="bars" viewBox="0 0 760 230" role="img" aria-label="Daily usage stacked by provider"></svg>
+  </section>
+  <section class="card c4">
+    <header><h2>Cost share</h2><small>by provider</small></header>
+    <div class="donutwrap"><div class="donut"><svg viewBox="0 0 150 150" id="donut"></svg><div><b>$1,285</b><small>30 days</small></div></div><div class="dl" id="dl"></div></div>
+    <div class="chips" style="margin-top:12px"><span class="pill p-ok"><i></i>Cost quality 94% exact</span><span class="muted" style="font-size:11px">6% estimated from tokens</span></div>
+  </section>
+</div>
+
+<!-- ROW 4 -->
+<div class="row">
+  <section class="card c8">
+    <header><h2>Provider and model breakdown</h2><span class="grow"></span><small>Sorted by cost</small></header>
+    <div class="tw"><table>
+      <thead><tr><th>Provider / model</th><th>Sessions</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cost</th></tr></thead>
+      <tbody id="tbl"></tbody></table></div>
+  </section>
+  <section class="card c4">
+    <header><h2>Top sessions</h2><span class="grow"></span><small>by cost</small></header>
+    <ul class="sl" id="sess"></ul>
+  </section>
+</div>
+
+<!-- ROW 5 secondary -->
+<div class="sec">
+  <section class="card"><header><h2>Skill selection</h2><span class="grow"></span><small>4 of 11 active</small></header>
+    <div class="rowi"><div class="grow"><b>angular-frontend-patterns</b><div class="muted" style="font-size:11px">Signals, OnPush, control flow</div></div><span class="sw on"></span></div>
+    <div class="rowi"><div class="grow"><b>nx-workspace-architect</b><div class="muted" style="font-size:11px">Tags and module boundaries</div></div><span class="sw on"></span></div>
+    <div class="rowi"><div class="grow"><b>ui-ux-designer</b><div class="muted" style="font-size:11px">Design tokens and specs</div></div><span class="sw"></span></div>
+  </section>
+  <section class="card"><header><h2>Builders</h2><span class="grow"></span><small>3 configured</small></header>
+    <div class="rowi"><div class="grow"><b>Agent builder</b><div class="muted" style="font-size:11px">Compose a specialist agent</div></div><button class="btn">Open</button></div>
+    <div class="rowi"><div class="grow"><b>MCP builder</b><div class="muted" style="font-size:11px">Install and configure servers</div></div><button class="btn">Open</button></div>
+    <div class="rowi"><div class="grow"><b>Harness builder</b><div class="muted" style="font-size:11px">Skills, commands, hooks</div></div><button class="btn">Open</button></div>
+  </section>
+</div>
+
+</div></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const root=document.documentElement;
+$('#theme').onclick=()=>{const d=root.dataset.theme==='dark';root.dataset.theme=d?'light':'dark';$('#theme').textContent=d?'Dark theme':'Light theme'};
+document.querySelectorAll('.seg').forEach(g=>g.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;g.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b));if(g.id==='metric')drawBars(b.textContent==='Cost'?'cost':'tok')}));
+
+/* sample data */
+const P=[
+ {n:'Claude',c:'var(--s1)',m:'#d97757',l:'C',share:52,cost:668},
+ {n:'Codex',c:'var(--s2)',m:'#10a37f',l:'X',share:21,cost:270},
+ {n:'Grok',c:'var(--s3)',m:'#111',l:'G',share:11,cost:141},
+ {n:'Kimi',c:'var(--s4)',m:'#2b6cff',l:'K',share:8,cost:103},
+ {n:'OpenCode',c:'var(--s5)',m:'#5b6470',l:'O',share:8,cost:103}];
+
+/* KPI */
+const spark=(pts,col)=>{const w=120,h=22,mx=Math.max(...pts),mn=Math.min(...pts);const d=pts.map((v,i)=>`${i?'L':'M'}${(i/(pts.length-1)*w).toFixed(1)},${(h-2-(v-mn)/(mx-mn||1)*(h-4)).toFixed(1)}`).join(' ');return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round"/></svg>`};
+const K=[
+ ['Spend','$1,284.60','+12% vs prev 30d','up',[3,4,3,5,6,5,7,6,8,7,9,8],'var(--gold)'],
+ ['Tokens','1.84B','+8% vs prev 30d','up',[5,5,6,5,7,8,7,8,9,8,9,10],'var(--accent)'],
+ ['Sessions','412','-3% vs prev 30d','down',[8,9,8,9,7,8,7,8,7,7,6,7],'var(--info)'],
+ ['Cache hit rate','71%','+2 pts','up',[6,6,7,7,6,7,8,7,8,8,8,9],'var(--ok)'],
+ ['Avg cost / session','$3.12','+16%','down',[4,4,5,5,5,6,6,6,7,7,8,8],'var(--warn)'],
+ ['Peak day','$96.40','Nov 4','',[2,3,2,4,3,9,4,3,4,3,5,4],'var(--s4)']];
+$('#kpis').innerHTML=K.map(k=>`<div class="kpi"><span class="l">${k[0]}</span><span class="v">${k[1]}</span><span class="d"><span class="${k[3]}">${k[2]}</span></span>${spark(k[4],k[5])}</div>`).join('');
+
+/* limit cards */
+const tone=p=>p>=100?'var(--err)':p>=90?'var(--warn)':'var(--accent)';
+const C=2*Math.PI*24;
+const ring=(p,col)=>`<div class="ring" role="meter" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100" aria-label="used"><svg viewBox="0 0 60 60"><circle class="t" cx="30" cy="30" r="24"/><circle class="a" cx="30" cy="30" r="24" stroke="${col}" stroke-dasharray="${(C*p/100).toFixed(1)} ${C.toFixed(1)}"/></svg><span>${p}%</span></div>`;
+const mini=(l,p,r)=>`<div class="mrow"><span>${l}</span><div class="bar" role="meter" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100" aria-label="${l} used"><i style="width:${p}%;background:${tone(p)}"></i></div><em>${p}%</em></div>`;
+const L=[
+ {p:P[0],sel:1,pct:94,win:'Weekly',reset:'Resets in 2d 4h',badge:['warn','Near limit'],mini:[['5-hour',32]],src:'Provider API · 4m ago'},
+ {p:P[2],pct:100,win:'Weekly',reset:'Resets in 1d 4h',badge:['err','Limit reached'],err:1,src:'Provider API · 4m ago'},
+ {p:P[3],pct:100,win:'Monthly',reset:'Resets in ~12d (estimated)',badge:['err','Limit reached'],err:1,src:'Provider API · 3h ago (aged)'},
+ {p:P[1],pct:71,win:'Weekly',reset:'Resets in 3d 8h',badge:['ok','Available'],src:'Provider API · 4m ago'},
+ {p:P[4],local:1,badge:['neutral','Local usage only'],src:'Local CLI accounting · 4m ago'}];
+$('#limits').innerHTML=L.map(x=>{
+ const mark=`<span class="mark" style="background:${x.p.m}">${x.p.l}</span>`;
+ const badge=`<span class="pill p-${x.badge[0]}"><i></i>${x.badge[1]}</span>`;
+ const head=`<div class="lh">${mark}<b>${x.p.n}</b>${badge}</div>`;
+ const body=x.local
+  ?`<div style="display:grid;gap:2px"><div class="big">484M</div><span class="muted">tokens recorded locally</span><span class="muted" style="font-size:11px">Since Dec 31, 2025 · no quota reading</span></div>`
+  :`<div class="hero">${ring(x.pct,tone(x.pct))}<div class="w"><b>${x.win}</b><span>${x.reset}</span></div></div>`+(x.mini?`<div class="mini">${x.mini.map(m=>mini(m[0],m[1])).join('')}</div>`:'');
+ return `<article class="lc ${x.sel?'sel':''} ${x.err?'err':''}">${x.sel?'<span class="selmark">Selected for chat</span>':''}${head}${body}<div class="lf"><span class="grow">${x.src}</span><button>Details</button></div></article>`}).join('');
+
+/* stacked bars */
+function rnd(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const r=rnd(7),D=30,W=[.5,.2,.12,.08,.1],TF=[1.1,1.6,.9,.7,2.4];
+const data=[...Array(D)].map((_,i)=>{const base=22+r()*26+(i===3?55:0)+(i%7>4?-14:0);return W.map(w=>Math.max(0,base*w*(.6+r()*.8)))});
+const fmt=(v,m)=>m==='cost'?'$'+v.toFixed(0):(v/1).toFixed(0)+'M';
+$('#legend').innerHTML=P.map(p=>`<span><i style="background:${p.c}"></i>${p.n}</span>`).join('');
+function drawBars(m){
+ const L0=40,R0=752,T=10,B=200,H=B-T,bw=(R0-L0)/D;
+ const val=d=>d.map((v,i)=>m==='cost'?v:v*TF[i]*4);
+ const tot=data.map(d=>val(d).reduce((a,b)=>a+b,0));
+ const max=Math.ceil(Math.max(...tot)/20)*20, ticks=4;
+ let s='';
+ for(let i=0;i<=ticks;i++){const y=B-H*i/ticks;s+=`<line class="g" x1="${L0}" x2="${R0}" y1="${y}" y2="${y}"/><text x="${L0-6}" y="${y+3}" text-anchor="end">${fmt(max*i/ticks,m)}</text>`}
+ data.forEach((d,i)=>{let y=B;val(d).forEach((v,k)=>{const h=v/max*H;y-=h;s+=`<rect class="bar-s" x="${(L0+i*bw+bw*.14).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw*.72).toFixed(1)}" height="${Math.max(0,h-.6).toFixed(1)}" rx="1.5" fill="${P[k].c}"><title>Day ${i+1} · ${P[k].n} ${fmt(v,m)}</title></rect>`});
+  if(i%5===0)s+=`<text x="${(L0+i*bw+bw/2).toFixed(1)}" y="218" text-anchor="middle">Oct ${i+20>31?i-11:i+20}</text>`});
+ $('#bars').innerHTML=s;
+}
+drawBars('cost');
+
+/* donut */
+let off=0;const R=58,CC=2*Math.PI*R;
+$('#donut').innerHTML=`<circle cx="75" cy="75" r="${R}" fill="none" stroke="var(--track)" stroke-width="18"/>`+P.map(p=>{const l=CC*p.share/100,gap=2,o=off;off+=l;return `<circle cx="75" cy="75" r="${R}" fill="none" stroke="${p.c}" stroke-width="18" stroke-dasharray="${Math.max(0,l-gap).toFixed(1)} ${(CC-l+gap).toFixed(1)}" stroke-dashoffset="${(-o).toFixed(1)}"><title>${p.n} ${p.share}%</title></circle>`}).join('');
+$('#dl').innerHTML=P.map(p=>`<div><i style="background:${p.c}"></i><span>${p.n}</span><em>$${p.cost} · ${p.share}%</em></div>`).join('');
+
+/* table */
+const T=[
+ [0,'claude-opus-4','142','48.2M','9.1M','612.4M','$412.80'],
+ [0,'claude-sonnet-4.5','188','61.0M','12.7M','702.9M','$255.20'],
+ [1,'gpt-5-codex','61','22.4M','4.8M','188.0M','$270.10'],
+ [2,'grok-4','12','6.3M','1.1M','24.2M','$141.00'],
+ [3,'kimi-k2','9','4.1M','0.9M','16.7M','$103.20'],
+ [4,'opencode / mixed','—','—','—','—','local only']];
+$('#tbl').innerHTML=T.map(t=>`<tr><td><span class="pm"><span class="mark" style="background:${P[t[0]].m};width:18px;height:18px;font-size:9px">${P[t[0]].l}</span><span><b style="font-weight:600">${P[t[0]].n}</b> <span class="muted">${t[1]}</span></span></span></td><td>${t[2]}</td><td>${t[3]}</td><td>${t[4]}</td><td>${t[5]}</td><td><b>${t[6]}</b></td></tr>`).join('');
+const S=[['Refactor rpc-handlers split',0,'claude-opus-4','$48.20','212M'],['Dashboard redesign spec',0,'claude-sonnet-4.5','$31.75','148M'],['CSP for renderer',1,'gpt-5-codex','$27.40','96M'],['Sandbox worker timeout',0,'claude-opus-4','$22.10','81M'],['Streaming markdown XSS spec',3,'kimi-k2','$14.90','54M']];
+$('#sess').innerHTML=S.map((s,i)=>`<li><span class="rk">${i+1}</span><div style="min-width:0"><b>${s[0]}</b><small>${P[s[1]].n} · ${s[2]} · ${s[4]} tokens</small></div><span class="co"><b>${s[3]}</b></span></li>`).join('');
+</script>
+</body>
+</html>

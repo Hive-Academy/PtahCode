@@ -106,3 +106,22 @@ export function answerUsage(
 ): void {
   call.reply.resolve(new RpcResult<UsageSummary>(true, summary));
 }
+
+/**
+ * The main `analytics:spendSummary` calls, without the wider companion call
+ * that each 7- or 30-day load sends right after its main call for KPI deltas.
+ */
+export function mainUsageCalls(rpc: FakeRpc): RecordedCall[] {
+  const all = rpc.of('analytics:spendSummary');
+  const main: RecordedCall[] = [];
+  for (let i = 0; i < all.length; i++) {
+    const call = all[i];
+    if (call === undefined) continue;
+    main.push(call);
+    const range = (call.params as { range?: number } | undefined)?.range;
+    const wider = range === 7 ? 30 : range === 30 ? 90 : null;
+    const next = all[i + 1];
+    if (wider !== null && (next?.params as { range?: number } | undefined)?.range === wider) i++;
+  }
+  return main;
+}

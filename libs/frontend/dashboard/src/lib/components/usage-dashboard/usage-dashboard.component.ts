@@ -23,21 +23,17 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { LucideAngularModule, RefreshCw } from 'lucide-angular';
 import { ModelStateService } from '@ptah-extension/core';
-import type { UsageRangeDays } from '@ptah-extension/shared';
-import {
-  AnalyticsUsageStore,
-  USAGE_RANGE_OPTIONS,
-} from '../../services/analytics-usage.store';
+import { AnalyticsUsageStore } from '../../services/analytics-usage.store';
+import { dailyTotals, downsample } from './usage-trend';
 import { buildUsageViewModel, type UsageViewModel } from './usage-summary.view-model';
 import { formatChartUsd, formatCompactTokens, providerDisplayName } from './usage-formatting';
 import {
   StackedBarChartComponent,
   type StackedBarSeries,
 } from './stacked-bar-chart.component';
-import { UsageCostSummaryComponent } from './usage-cost-summary.component';
 import { UsageCostDonutComponent } from './usage-cost-donut.component';
+import { UsageCostSummaryComponent } from './usage-cost-summary.component';
 import { UsageKpiStripComponent } from './usage-kpi-strip.component';
 import { UsageBreakdownTableComponent } from './usage-breakdown-table.component';
 import { UsageCostQualityComponent } from './usage-cost-quality.component';
@@ -48,10 +44,9 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent, Pt
   selector: 'ptah-usage-dashboard',
   standalone: true,
   imports: [
-    LucideAngularModule,
     StackedBarChartComponent,
-    UsageCostSummaryComponent,
     UsageCostDonutComponent,
+    UsageCostSummaryComponent,
     UsageKpiStripComponent,
     UsageBreakdownTableComponent,
     UsageCostQualityComponent,
@@ -64,13 +59,14 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent, Pt
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './usage-dashboard.component.html',
+  // Rows follow the page width (container), not the viewport: 8/4 of 12.
   styles: [`
     .usage-dashboard { container-type: inline-size; }
-    @container (min-width: 720px) {
-      .usage-share-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @container (min-width: 960px) {
+      .usage-chart-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
     }
-    @container (min-width: 900px) {
-      .usage-table-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @container (min-width: 1280px) {
+      .usage-table-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
     }
   `],
 })
@@ -78,8 +74,6 @@ export class UsageDashboardComponent {
   private readonly usageStore = inject(AnalyticsUsageStore);
   private readonly modelState = inject(ModelStateService);
 
-  protected readonly RefreshCwIcon = RefreshCw;
-  protected readonly rangeOptions = USAGE_RANGE_OPTIONS;
   protected readonly range = this.usageStore.range;
   protected readonly isLoading = this.usageStore.isLoading;
   protected readonly loadError = this.usageStore.loadError;
@@ -100,6 +94,17 @@ export class UsageDashboardComponent {
       .filter((source) => source.status !== 'complete')
       .map((source) => `${providerDisplayName(source.sourceId)}: ${source.reason ?? source.status}`)
       .join('; '),
+  );
+
+  /** KPI change against the previous equal range; null parts hide the line. */
+  protected readonly kpiDeltas = this.usageStore.kpiDeltas;
+
+  /** Daily totals for the KPI sparklines, at most 12 points. */
+  protected readonly costTrend = computed(() =>
+    downsample(dailyTotals((this.viewModel()?.providerSeries ?? []).map((p) => p.costValues))),
+  );
+  protected readonly tokenTrend = computed(() =>
+    downsample(dailyTotals((this.viewModel()?.providerSeries ?? []).map((p) => p.tokenValues))),
   );
 
   protected readonly partialBadgeFocused = signal(false);
@@ -140,10 +145,6 @@ export class UsageDashboardComponent {
       untracked(() => void this.usageStore.load());
     });
     inject(DestroyRef).onDestroy(() => this.usageStore.cancelLoad());
-  }
-
-  protected setRange(range: UsageRangeDays): void {
-    this.usageStore.setRange(range);
   }
 
   protected retry(): void {
