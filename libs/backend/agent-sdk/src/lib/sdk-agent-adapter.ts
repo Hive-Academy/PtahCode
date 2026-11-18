@@ -1321,17 +1321,23 @@ export class SdkAgentAdapter implements IAgentAdapter {
         if (isCompactBoundary(message)) {
           const post = message.compact_metadata.post_tokens;
           const config = this.compactionConfigProvider?.getConfig();
+          const configuredWindow = config
+            ? resolveAutoCompactControl({
+                enabled: config.enabled,
+                windowTokens: config.contextTokenThreshold,
+                envWindow: config.envWindow,
+                modelClass: nativeAnthropic ? 'claude' : 'proxied',
+              }).effectiveWindow
+            : null;
+          const override = this.sessionLifecycle.find(ownerId as string)?.autoCompactOverride;
           const sample = {
             postCompactionContextTokens:
               typeof post === 'number' && Number.isFinite(post) && post >= 0 ? post : null,
-            effectiveAutoCompactWindowTokens: config
-              ? resolveAutoCompactControl({
-                  enabled: config.enabled,
-                  windowTokens: config.contextTokenThreshold,
-                  envWindow: config.envWindow,
-                  modelClass: nativeAnthropic ? 'claude' : 'proxied',
-                }).effectiveWindow
-              : null,
+            effectiveAutoCompactWindowTokens:
+              override ?? configuredWindow ??
+              this.sessionLifecycle.getLastContextUsage(message.session_id)?.autoCompactThreshold ??
+              this.sessionLifecycle.getLastContextUsage(ownerId as string)?.autoCompactThreshold ??
+              null,
           };
           this.pendingBudgetCompactions.set(ownerId as string, sample);
           this.pendingBudgetCompactions.set(message.session_id, sample);

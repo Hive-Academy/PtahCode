@@ -38,6 +38,8 @@
  */
 
 import 'reflect-metadata';
+import type { IContextUsagePort } from './compaction/context-usage.port';
+
 
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SubagentRegistryService } from '@ptah-extension/vscode-core';
@@ -224,6 +226,7 @@ function makeHarness(
     }) => Query;
     authEnv?: Partial<AuthEnv>;
     sessionBudget?: SessionBudgetService;
+    contextUsagePort?: IContextUsagePort;
   } = {},
 ): Harness {
   const logger = createMockLogger();
@@ -305,7 +308,7 @@ function makeHarness(
     null,
     null,
     null,
-    null,
+    opts.contextUsagePort ?? null,
     null,
     opts.sessionBudget ?? null,
   );
@@ -1594,5 +1597,26 @@ describe('SessionLifecycleManager queue identity on interrupt', () => {
     expect(rec.messageQueue).toEqual([held]);
     expect(rec.messageQueue[0]).toBe(held);
     expect(rec.turnInFlight).toBe(false);
+  });
+});
+
+describe('SessionLifecycleManager cached context usage', () => {
+  it('returns no reading when the runtime reader is absent', () => {
+    expect(makeHarness().manager.getLastContextUsage('tab-1')).toBeUndefined();
+  });
+
+  it.each(['tab-1', 'old-id', 'new-id'])('finds the cached reading under %s around a session rekey', (cachedId) => {
+    const reading = {
+      totalTokens: 150_000, maxTokens: 1_000_000,
+      autoCompactThreshold: 300_000, source: 'sdk-getContextUsage' as const,
+    };
+    const getLast = jest.fn((id: string) => id === cachedId ? reading : undefined);
+    const { manager } = makeHarness({ contextUsagePort: {
+      getLast, readAtTurnEnd: jest.fn(), release: jest.fn(), rekey: jest.fn(),
+    } });
+    jest.spyOn(manager, 'find').mockReturnValue({
+      tabId: 'tab-1', realSessionId: cachedId === 'new-id' ? 'new-id' : 'old-id',
+    } as ReturnType<SessionLifecycleManager['find']>);
+    expect(manager.getLastContextUsage('new-id')).toBe(reading);
   });
 });

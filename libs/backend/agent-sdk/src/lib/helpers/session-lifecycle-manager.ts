@@ -72,7 +72,7 @@ import {
   type CompactionCoordinatorSink,
   type SubagentBudgetSink,
 } from './session-lifecycle/session-query-executor.service';
-import type { IContextUsagePort } from './compaction/context-usage.port';
+import type { ContextUsageReading, IContextUsagePort } from './compaction/context-usage.port';
 import { SessionControl } from './session-lifecycle/session-control.service';
 import { SessionBudgetService } from './session-budget/session-budget.service';
 import type { SessionEndCallbackRegistry } from './session-end-callback-registry';
@@ -1054,6 +1054,16 @@ export class SessionLifecycleManager {
     effort: EffortLevel | undefined,
   ): Promise<void> {
     return this._control.setSessionEffort(sessionId, effort);
+  }
+
+  getLastContextUsage(sessionId: string): ContextUsageReading | undefined {
+    const record = this.find(sessionId);
+    for (const key of [sessionId, record?.realSessionId, record?.tabId]) {
+      if (!key) continue;
+      const reading = this.contextUsagePort?.getLast(key);
+      if (reading) return reading;
+    }
+    return undefined;
   }
 
   /**
