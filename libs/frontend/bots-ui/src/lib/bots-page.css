@@ -1,0 +1,75 @@
+:host {
+  display: block;
+  padding: var(--ptah-page-gutter, 24px);
+  color: var(--bc);
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+p {
+  color: var(--bcm);
+}
+ptah-alert {
+  display: block;
+  margin-bottom: 16px;
+}
+.roster {
+  padding: 12px;
+}
+.filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.7fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.filters label,
+.create-scope {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8125rem;
+}
+.create-scope {
+  max-width: 420px;
+  margin: 16px 0;
+}
+.filters .archive-filter {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 0;
+}
+.import-preview {
+  border: 1px dashed var(--line);
+  border-radius: var(--glass-radius-inner, 14px);
+  padding: 12px;
+  margin-top: 16px;
+  color: var(--bcm);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.selection-prompt {
+  display: grid;
+  place-items: center;
+  min-height: 450px;
+  margin: 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--glass-radius-inner, 14px);
+}
