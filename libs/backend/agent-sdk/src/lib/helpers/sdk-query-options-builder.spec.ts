@@ -2162,7 +2162,7 @@ describe('SdkQueryOptionsBuilder.build — permission routing safeParse fallback
       expect(activityHold.release).toHaveBeenCalledTimes(1);
     });
 
-    it('leaves the callback untouched when no hold is supplied', async () => {
+    it('calls the callback with no hold when no hold is supplied', async () => {
       const gate = jest.fn(async () => ({ behavior: 'allow' }));
       const { builder, permissionHandler } = makeBuilderWithPermissionSpy();
       permissionHandler.createCallback.mockReturnValue(gate);
@@ -2179,7 +2179,58 @@ describe('SdkQueryOptionsBuilder.build — permission routing safeParse fallback
         } as AISessionConfig,
       });
 
-      expect(config.options.canUseTool).toBe(gate);
+      const context = {
+        signal: new AbortController().signal,
+        toolUseID: 'tu-1',
+        requestId: 'req-1',
+      };
+      await expect(
+        config.options.canUseTool?.('Bash', { command: 'ls' }, context),
+      ).resolves.toEqual({ behavior: 'allow' });
+      expect(gate).toHaveBeenCalledWith('Bash', { command: 'ls' }, context);
+    });
+
+    it('asks for a cron write in PreToolUse, ahead of SDK allow rules', async () => {
+      const gate = jest.fn(async () => ({
+        behavior: 'deny',
+        message: 'User said no.',
+      }));
+      const { builder, permissionHandler } = makeBuilderWithPermissionSpy();
+      permissionHandler.createCallback.mockReturnValue(gate);
+
+      const config = await builder.build({
+        userMessageStream: (async function* () {
+          // Intentionally empty.
+        })(),
+        abortController: new AbortController(),
+        sessionConfig: {
+          model: 'claude-sonnet-4',
+          projectPath: 'D:/tmp/ws',
+          tabId: VALID_TAB_UUID,
+        } as AISessionConfig,
+      });
+
+      const matcher = config.options.hooks?.PreToolUse?.find(
+        (entry) => entry.matcher === 'mcp__ptah__ptah_cron_.*',
+      );
+      const output = await matcher?.hooks[0](
+        {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'mcp__ptah__ptah_cron_create',
+          tool_input: { name: 'Nightly' },
+          tool_use_id: 'tu-9',
+        } as never,
+        'tu-9',
+        { signal: new AbortController().signal },
+      );
+      expect(gate).toHaveBeenCalledTimes(1);
+      expect(output).toEqual({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'User said no.',
+        },
+      });
     });
   });
 });

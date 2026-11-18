@@ -985,7 +985,8 @@ export class PtahAPIBuilder {
       cron: this.buildNamespaceSafe('cron', () =>
         buildCronNamespace({
           getService: () => this.resolveCronJobService(),
-          getSessionId: () => getCallerSessionId(),
+          // The caller id can be a tab id; a job records the SDK session.
+          getSessionId: () => this.resolveCallerSdkSessionId(),
           // Not `getWorkspaceRoot()`: its home-directory fallback must never
           // become the workspace of a scheduled job.
           getWorkspaceRoot: () => this.resolveSessionWorkspaceRoot(),

@@ -329,9 +329,15 @@ export function buildCronNamespace(
 
     update: (args) =>
       withService((service) => {
-        if (!service.get(args.id)) return notFound(args.id);
-        if (args.cronExpression !== undefined) {
-          const fieldRefusal = fiveFieldRefusal(args.cronExpression);
+        const current = service.get(args.id);
+        if (!current) return notFound(args.id);
+        // Check the expression that the job has after this call: a supplied
+        // one, or the stored one when the call enables the job.
+        const expression =
+          args.cronExpression ??
+          (args.enabled === true ? current.cronExpr : undefined);
+        if (expression !== undefined) {
+          const fieldRefusal = fiveFieldRefusal(expression);
           if (fieldRefusal) return fieldRefusal;
         }
         const job = service.update(args.id, {
@@ -350,7 +356,12 @@ export function buildCronNamespace(
 
     toggle: (args) =>
       withService((service) => {
-        if (!service.get(args.id)) return notFound(args.id);
+        const current = service.get(args.id);
+        if (!current) return notFound(args.id);
+        if (args.enabled) {
+          const fieldRefusal = fiveFieldRefusal(current.cronExpr);
+          if (fieldRefusal) return fieldRefusal;
+        }
         const job = service.toggle(args.id, args.enabled);
         return { status: 'ok' as const, job: toJobView(job, false) };
       }),

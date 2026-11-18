@@ -214,7 +214,10 @@ export class CronScheduler {
     if (!job) throw new JobNotFoundError(id);
     const slot = Math.floor(Date.now() / 1000) * 1000;
     await this.runner.run(job, slot, { signal });
-    return this.runs.latestForJob(id);
+    // Only the run of this slot answers this call. When the runner started
+    // none, an older run must not be reported as the result.
+    const run = this.runs.latestForJob(id);
+    return run && run.scheduledFor === slot ? run : null;
   }
 
   listRuns(id: JobId, opts?: { limit?: number; offset?: number }): JobRun[] {

@@ -424,6 +424,20 @@ describe('JobStore.upsert', () => {
     expect(row?.last_run_at).toBe(9999999);
   });
 
+  it('returns the stored job, so a kept last run shows in the result', () => {
+    const { store, fakeDb } = buildStore();
+    const input = {
+      id: '@ptah/daily-backup',
+      name: 'Daily SQLite Backup',
+      cronExpr: '0 3 * * *',
+      prompt: 'handler:backup:daily',
+    };
+    store.upsert(input);
+    fakeDb.setLastRunAt('@ptah/daily-backup', 9999999);
+
+    expect(store.upsert(input).lastRunAt).toBe(9999999);
+  });
+
   it('defaults timezone to UTC when not specified', () => {
     const { store, fakeDb } = buildStore();
 

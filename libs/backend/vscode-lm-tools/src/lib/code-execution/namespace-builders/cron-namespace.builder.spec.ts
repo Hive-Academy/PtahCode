@@ -492,6 +492,41 @@ describe('buildCronNamespace', () => {
       });
     });
 
+    it('refuses to enable a job whose stored expression has six fields', async () => {
+      service.get.mockReturnValue(
+        makeJob({ enabled: false, cronExpr: '*/10 * * * * *' }),
+      );
+
+      const result = await cron.toggle({ id: 'job-1', enabled: true });
+
+      expect(result).toMatchObject({
+        status: 'refused',
+        field: 'cronExpression',
+      });
+      expect(service.toggle).not.toHaveBeenCalled();
+
+      // A disable call and an update that does not enable stay possible.
+      service.toggle.mockReturnValue(makeJob({ enabled: false }));
+      await expect(
+        cron.toggle({ id: 'job-1', enabled: false }),
+      ).resolves.toMatchObject({ status: 'ok' });
+      service.update.mockReturnValue(makeJob({ enabled: false }));
+      await expect(
+        cron.update({ id: 'job-1', name: 'Renamed' }),
+      ).resolves.toMatchObject({ status: 'ok' });
+      await expect(
+        cron.update({ id: 'job-1', enabled: true }),
+      ).resolves.toMatchObject({ status: 'refused', field: 'cronExpression' });
+      // A five-field expression in the same call makes the enable valid.
+      await expect(
+        cron.update({
+          id: 'job-1',
+          enabled: true,
+          cronExpression: '*/10 * * * *',
+        }),
+      ).resolves.toMatchObject({ status: 'ok' });
+    });
+
     it('refuses an unknown id without a toggle', async () => {
       service.get.mockReturnValue(null);
 

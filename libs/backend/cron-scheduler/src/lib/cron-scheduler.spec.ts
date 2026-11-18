@@ -403,3 +403,41 @@ describe('CronScheduler.stop — safe against an in-flight replay', () => {
     expect(FakeCron.constructed).toHaveLength(2);
   });
 });
+
+describe('CronScheduler.runNow', () => {
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-01-01T00:00:05.400Z'));
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const SLOT = new Date('2026-01-01T00:00:05.000Z').getTime();
+
+  it('returns the run of the slot that this call fired', async () => {
+    const { scheduler, jobStore, runStore, runner } = build();
+    jobStore.get.mockReturnValue(makeJob());
+    runner.run.mockResolvedValue(undefined);
+    const run = { id: 'run-new', scheduledFor: SLOT };
+    runStore.latestForJob.mockReturnValue(run);
+
+    await expect(scheduler.runNow('job-1' as JobId)).resolves.toBe(run);
+    expect(runner.run).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-1' }),
+      SLOT,
+      { signal: undefined },
+    );
+  });
+
+  it('returns null when the runner started no run, not an older run', async () => {
+    const { scheduler, jobStore, runStore, runner } = build();
+    jobStore.get.mockReturnValue(makeJob());
+    runner.run.mockResolvedValue(undefined);
+    runStore.latestForJob.mockReturnValue({
+      id: 'run-old',
+      scheduledFor: SLOT - 3_600_000,
+    });
+
+    await expect(scheduler.runNow('job-1' as JobId)).resolves.toBeNull();
+  });
+});

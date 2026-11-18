@@ -25,6 +25,7 @@ import {
   type IWorkspaceProvider,
   type IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
+import { createCronApprovalGate } from '../permission/cron-approval-gate';
 import { MemoryPromptInjector } from './memory-prompt-injector';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
 import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
@@ -1370,29 +1371,44 @@ export class SdkQueryOptionsBuilder {
         { tabId: sessionConfig.tabId },
       );
     }
-    const gateToolCall: CanUseTool = this.permissionHandler.createCallback(
-      routingSessionId ?? undefined,
-      undefined,
-      routingTabId ?? undefined,
-      permissionLevelResolver,
-      sessionConfig?.tabId,
-      sessionIdResolver,
-    );
+    const permissionCallback: CanUseTool =
+      this.permissionHandler.createCallback(
+        routingSessionId ?? undefined,
+        undefined,
+        routingTabId ?? undefined,
+        permissionLevelResolver,
+        sessionConfig?.tabId,
+        sessionIdResolver,
+      );
     // Silence while `canUseTool` is parked is Ptah's own doing, not the
     // provider's — see `QueryOptionsInput.activityHold`. The hold is taken for
     // every tool call, not just the blocking ones: an auto-approved tool
     // resolves in the same tick, so the cost is a matched hold/release pair,
     // and there is no list of "which branches block" to keep in step.
-    const canUseToolCallback: CanUseTool = activityHold
+    const heldPermissionCallback: CanUseTool = activityHold
       ? async (toolName, input_, options) => {
           activityHold.hold();
           try {
-            return await gateToolCall(toolName, input_, options);
+            return await permissionCallback(toolName, input_, options);
           } finally {
             activityHold.release();
           }
         }
-      : gateToolCall;
+      : permissionCallback;
+    // An SDK allow rule (for example `mcp__ptah__*` in project settings)
+    // decides a call before `canUseTool`. `PreToolUse` runs first, so the
+    // cron write approval also runs there (permission/cron-approval-gate.ts).
+    const cronApprovalGate = createCronApprovalGate(heldPermissionCallback, {
+      onError: (error, toolName) =>
+        this.logger.warn(
+          '[SdkQueryOptionsBuilder] Cron approval prompt failed; denying the call',
+          {
+            toolName,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ),
+    });
+    const canUseToolCallback: CanUseTool = cronApprovalGate.canUseTool;
     const hooks = this.createHooks(
       cwd,
       sessionId,
@@ -1463,6 +1479,7 @@ export class SdkQueryOptionsBuilder {
     };
     hooks.PreToolUse = [
       { matcher: 'SendMessage', hooks: [budgetMessageGate] },
+      cronApprovalGate.hookMatcher,
       ...(hooks.PreToolUse ?? []),
     ];
     const compactionConfig = this.compactionConfigProvider.getConfig();
@@ -2376,9 +2393,9 @@ export class SdkQueryOptionsBuilder {
             }
           : {}),
         capability: 'privileged',
-        // This host routes every tool call through `SdkPermissionHandler`,
-        // whose cron branch prompts in every permission level
-        // (permission/cron-tool-policy.ts).
+        // This host asks the user before every cron write: the cron branch
+        // of `SdkPermissionHandler` runs in `canUseTool` and, ahead of SDK
+        // allow rules, in `PreToolUse` (permission/cron-approval-gate.ts).
         cronWriteApproval: true,
       },
       subject,

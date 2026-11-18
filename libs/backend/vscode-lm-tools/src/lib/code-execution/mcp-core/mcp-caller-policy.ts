@@ -65,6 +65,10 @@ const READ_TOOLS: ReadonlySet<string> = new Set([
   'ptah_harness_search_mcp_registry',
   'ptah_harness_list_installed_mcp',
   'ptah_surface_get_state',
+  'ptah_cron_list',
+  'ptah_cron_get',
+  'ptah_cron_runs',
+  'ptah_cron_next_fire',
 ]);
 
 const AGENT_CONTROL_TOOLS: ReadonlySet<string> = new Set([
@@ -111,10 +115,6 @@ const HARNESS_TOOLS: ReadonlySet<string> = new Set([
   'ptah_artifact_publish',
   'ptah_dashboard_propose_spec',
   'ptah_surface_update',
-  'ptah_cron_list',
-  'ptah_cron_get',
-  'ptah_cron_runs',
-  'ptah_cron_next_fire',
 ]);
 
 /**

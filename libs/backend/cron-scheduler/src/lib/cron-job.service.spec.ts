@@ -357,6 +357,26 @@ describe('CronJobService', () => {
     expect(scheduler.get).toHaveBeenCalledTimes(2);
   });
 
+  it('reads a system job by its deterministic id, and keeps writes to ULIDs', () => {
+    const SYSTEM_ID = '@ptah/daily-backup';
+    scheduler.get.mockReturnValueOnce(makeJob());
+    scheduler.listRuns.mockReturnValueOnce([]);
+    scheduler.nextFire.mockReturnValueOnce(123);
+
+    expect(service.get(SYSTEM_ID)).not.toBeNull();
+    expect(scheduler.get).toHaveBeenCalledWith(SYSTEM_ID);
+    expect(service.runs(SYSTEM_ID)).toEqual([]);
+    expect(scheduler.listRuns).toHaveBeenCalledWith(SYSTEM_ID, {
+      limit: undefined,
+      offset: undefined,
+    });
+    expect(service.nextFire(SYSTEM_ID)).toBe(123);
+
+    expect(service.delete(SYSTEM_ID)).toBe(false);
+    expect(scheduler.delete).not.toHaveBeenCalled();
+    expect(service.get('@ptah/../etc')).toBeNull();
+  });
+
   it('runs delegates with the paging options and returns [] for a malformed id', () => {
     scheduler.listRuns.mockReturnValue([makeRun()]);
 

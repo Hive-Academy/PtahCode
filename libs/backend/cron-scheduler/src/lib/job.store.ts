@@ -264,6 +264,10 @@ export class JobStore implements IJobStore {
       id: input.id,
       name: input.name,
     });
+    // Read the row back: on a conflict the stored creation time, last run
+    // and creator stay, so the input alone does not describe the job.
+    const stored = this.get(input.id as unknown as JobId);
+    if (stored) return stored;
     return {
       id: input.id as unknown as JobId,
       name: input.name,

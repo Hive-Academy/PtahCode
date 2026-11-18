@@ -165,6 +165,21 @@ function isKnownTimezone(timezone: unknown): timezone is string {
   }
 }
 
+/** Deterministic id of a system job, for example `@ptah/daily-backup`. */
+const SYSTEM_JOB_ID = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
+
+/**
+ * Id that the read methods accept: a ULID, or the id of a system job, which
+ * `list` also returns. The write methods accept a ULID only.
+ */
+function readableJobId(id: string): JobId | null {
+  const jobId = JobId.safeParse(id);
+  if (jobId) return jobId;
+  return typeof id === 'string' && SYSTEM_JOB_ID.test(id)
+    ? (id as unknown as JobId)
+    : null;
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -300,7 +315,7 @@ export class CronJobService {
 
   /** `null` for an unknown or malformed id. */
   get(id: string): ScheduledJobDto | null {
-    const jobId = JobId.safeParse(id);
+    const jobId = readableJobId(id);
     if (!jobId) return null;
     const job = this.scheduler.get(jobId);
     return job ? toJobDto(job) : null;
@@ -383,8 +398,9 @@ export class CronJobService {
   }
 
   /**
-   * Fire a job now and return its latest run. `null` for a malformed id;
-   * throws `JobNotFoundError` for an unknown one.
+   * Fire a job now and return the run of this call. `null` for a malformed
+   * id, or when the scheduler started no run; throws `JobNotFoundError` for
+   * an unknown id.
    */
   async runNow(id: string, signal?: AbortSignal): Promise<JobRunDto | null> {
     const jobId = JobId.safeParse(id);
@@ -395,7 +411,7 @@ export class CronJobService {
 
   /** Run history, newest first. `[]` for a malformed id. */
   runs(id: string, opts?: CronJobRunsOptions): JobRunDto[] {
-    const jobId = JobId.safeParse(id);
+    const jobId = readableJobId(id);
     if (!jobId) return [];
     return this.scheduler
       .listRuns(jobId, { limit: opts?.limit, offset: opts?.offset })
@@ -404,7 +420,7 @@ export class CronJobService {
 
   /** Next fire time (epoch ms) of a saved, enabled job; otherwise `null`. */
   nextFire(id: string): number | null {
-    const jobId = JobId.safeParse(id);
+    const jobId = readableJobId(id);
     if (!jobId) return null;
     return this.scheduler.nextFire(jobId);
   }
