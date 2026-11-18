@@ -9,6 +9,7 @@ import {
 import { LoggingService, VSCodeService, rpcCall } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
+  PtahFieldGridDirective,
   PtahFieldComponent,
   PtahFormSectionComponent,
   PtahSettingRowComponent,
@@ -188,6 +189,7 @@ function storedNumberIsValid(
   standalone: true,
   imports: [
     SettingsBusyDisabledDirective,
+    PtahFieldGridDirective,
     PtahFieldComponent,
     PtahFormSectionComponent,
     PtahSettingRowComponent,
@@ -258,7 +260,7 @@ function storedNumberIsValid(
             }
 
             <div class="session-budget-fields">
-              <div class="session-budget-fields-grid">
+              <div ptahFieldGrid minColumn="md">
                 <div class="flex min-w-0 flex-col gap-1">
                   <label
                     for="session-budget-unit"
@@ -376,7 +378,7 @@ function storedNumberIsValid(
                 @for (field of numberFields; track field.key) {
                   <ptah-field
                     appearance="stacked"
-                    class="session-budget-number-field"
+                    class="w-full min-w-0"
                     [label]="field.label"
                     [hint]="field.help + ' Range: ' + range(field.key) + '.'"
                     [error]="errors()[field.key] ?? null"
@@ -453,27 +455,6 @@ function storedNumberIsValid(
     .session-budget-fields {
       container-type: inline-size;
       min-width: 0;
-    }
-    .session-budget-fields-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      column-gap: var(--ptah-space-4);
-      row-gap: calc(var(--ptah-gap-field) + var(--ptah-space-1));
-      align-items: start;
-    }
-    .session-budget-number-field {
-      min-width: 0;
-      max-inline-size: 22rem;
-    }
-    @container (min-width: 36rem) {
-      .session-budget-fields-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-    }
-    @container (min-width: 56rem) {
-      .session-budget-fields-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
     }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;

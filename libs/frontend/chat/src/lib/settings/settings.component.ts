@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
   AudioLines,
   Wrench,
+  ShieldCheck,
 } from 'lucide-angular';
 import {
   MotionStageDirective,
@@ -163,6 +164,7 @@ export class SettingsComponent implements OnInit {
   private readonly document = inject(DOCUMENT);
   readonly ArrowLeftIcon = ArrowLeft;
   readonly SetupIcon = Wrench;
+  readonly SecurityIcon = ShieldCheck;
   /** Card tabs, in order. Each label is the button's exact accessible name (live-app scripts use it). */
   readonly settingsTabs = [
     { id: 'claude-auth', label: 'Providers', icon: Plug },

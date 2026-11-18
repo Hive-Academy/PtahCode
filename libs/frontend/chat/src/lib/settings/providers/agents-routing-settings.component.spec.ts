@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  booleanAttribute,
   input,
   output,
   signal,
@@ -48,10 +49,11 @@ class ConsumerStub {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template:
-    '<table data-testid="cli-matrix" tabindex="-1" aria-label="CLI matrix"><tbody><tr><td>Codex</td></tr></tbody></table>',
+    '<section data-testid="settings-cli-matrix"><table data-testid="cli-matrix" tabindex="-1" aria-label="CLI matrix"><tbody><tr><td>Codex</td></tr></tbody></table><ng-content select="[read-states]" /></section>',
 })
 class CliMatrixStub {
   readonly codexSettingsRequested = output<void>();
+  readonly hostReadStates = input(false, { transform: booleanAttribute });
 }
 
 const ready = <T>(data: T): ProvidersSettingsSection<T> => ({
@@ -368,16 +370,50 @@ describe('AgentsRoutingSettingsComponent', () => {
     expect(state.refreshCliModels).toHaveBeenCalledTimes(1);
     expect(state.refreshCliAgents).not.toHaveBeenCalled();
   });
+
+  // TASK_2026_2256: the read states show inside the matrix card, and the matrix does not repeat its own loading line.
+  it('shows the loading and error states of the CLI reads inside the matrix card', async () => {
+    state.cliAgents.set({ status: 'loading', data: [], error: null });
+    state.orchestration.set({
+      status: 'error',
+      data: {},
+      error: 'Could not load this section. Retry.',
+    });
+    await render();
+    const card = element.querySelector<HTMLElement>('[data-testid="settings-cli-matrix"]');
+    const loading = element.querySelector<HTMLElement>('[data-read-loading="cli"]');
+    const failed = element.querySelector<HTMLElement>('[data-read-error="orchestration"]');
+    expect(card?.contains(loading)).toBe(true);
+    expect(card?.contains(failed)).toBe(true);
+    expect(loading?.getAttribute('role')).toBe('status');
+    expect(loading?.textContent).toContain('Loading CLI agents…');
+    expect(failed?.querySelector('[role="alert"]')).not.toBeNull();
+    expect(failed?.textContent).toContain(
+      'delegated CLI models could not be loaded. Your saved settings have',
+    );
+    expect(
+      fixture.debugElement.query(By.directive(CliMatrixStub)).injector.get(CliMatrixStub).hostReadStates(),
+    ).toBe(true);
+    button(element, 'Retry delegated CLI models').click();
+    expect(state.refreshOrchestration).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows no read state once every CLI read is ready', async () => {
+    await render();
+    expect(element.querySelector('[data-read-loading], [data-read-error]')).toBeNull();
+  });
 });
 
 describe('AgentsRoutingSettingsComponent matrix chunk', () => {
   afterEach(() => TestBed.resetTestingModule());
 
   it('keeps the matrix in its own deferred chunk behind a same-footprint, aria-busy placeholder', async () => {
+    const state = new StateStub();
+    state.cliAgents.set({ status: 'loading', data: [], error: null });
     TestBed.configureTestingModule({
       imports: [AgentsRoutingSettingsComponent],
       providers: [
-        { provide: ProvidersSettingsStateService, useValue: new StateStub() },
+        { provide: ProvidersSettingsStateService, useValue: state },
         {
           provide: AppStateManager,
           useValue: { requestSettingsTab: jest.fn() },
@@ -399,11 +435,22 @@ describe('AgentsRoutingSettingsComponent matrix chunk', () => {
     const placeholder = element.querySelector(
       '[data-testid="cli-matrix-placeholder"]',
     );
-    expect(placeholder?.getAttribute('aria-busy')).toBe('true');
+    expect(placeholder?.hasAttribute('aria-busy')).toBe(false);
+    expect(
+      placeholder?.querySelector('[data-testid="cli-matrix-placeholder-busy"]')?.getAttribute('aria-busy'),
+    ).toBe('true');
     expect(element.querySelector('[data-testid="cli-matrix"]')).toBeNull();
+    // The read states also show in the placeholder, so the page never shows them below an empty slot.
+    const placeholderRead = placeholder?.querySelector('[data-read-loading="cli"]');
+    expect(placeholderRead).not.toBeNull();
+    // A live region under a busy ancestor can stay unannounced.
+    expect(placeholderRead?.closest('[aria-busy="true"]')).toBeNull();
     const [block] = await fixture.getDeferBlocks();
     await block.render(DeferBlockState.Complete);
     expect(element.querySelector('[data-testid="cli-matrix"]')).not.toBeNull();
+    const card = element.querySelector('[data-testid="settings-cli-matrix"]');
+    expect(element.querySelectorAll('[data-read-loading="cli"]')).toHaveLength(1);
+    expect(card?.querySelector('[data-read-loading="cli"]')).not.toBeNull();
     fixture.destroy();
   });
 });

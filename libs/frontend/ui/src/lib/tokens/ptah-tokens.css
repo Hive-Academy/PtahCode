@@ -471,15 +471,45 @@
 :root,
 [data-theme] {
   /* ptah-form-section: title column width at form-split, field column max width. */
-  --ptah-form-section-aside-w: 16rem;
+  --ptah-form-section-aside-w: 15rem;
   --ptah-form-section-fields-max-w: 36rem;
   /* ptah-description-list: term column width at form-split, row min height, empty ink. */
   --ptah-dl-term-w: 12rem;
   --ptah-dl-row-min-h: var(--ptah-control-h-md);
   --ptah-dl-empty-fg: oklch(var(--bcm, var(--bc)));
-  /* ptah-settings-layout: side nav and content column. */
+  /* ptah-settings-layout: side nav and content column. The content column is
+     fluid and centered: table and card-grid sections use its full width up to
+     this cap, field sections keep the form-section grid. */
   --ptah-settings-nav-w: 13rem;
-  --ptah-settings-content-max-w: 52rem;
+  --ptah-settings-nav-column-w: 14.5rem;
+  /* Sidebar height in navigation mode. The consumer must put
+     container-type: size on the settings scrollport (settings.component.html
+     does), so 100cqh is the visible scrollport height. Without a size
+     container, cqh falls back to the small viewport height. */
+  --ptah-settings-nav-height: 100cqh;
+  --ptah-settings-nav-gap: 1rem;
+  --ptah-settings-nav-px: .75rem;
+  --ptah-settings-nav-py: 1rem;
+  --ptah-settings-nav-list-gap: 2px;
+  --ptah-settings-nav-navigation-item-h: 2.5rem;
+  --ptah-settings-nav-item-pl: .875rem;
+  --ptah-settings-nav-item-pr: .625rem;
+  --ptah-settings-nav-icon-gap: .5rem;
+  --ptah-settings-nav-navigation-active-bg: color-mix(in oklab, oklch(var(--p)) 15%, transparent);
+  --ptah-settings-nav-child-indent: 1.25rem;
+  --ptah-settings-nav-connector-left: .3rem;
+  --ptah-settings-nav-connector-w: .5rem;
+  --ptah-settings-nav-connector-radius: 5px;
+  --ptah-field-grid-min-sm: 10rem;
+  --ptah-field-grid-min-md: 14rem;
+  --ptah-settings-content-max-w: 96rem;
+  /* ptah-card-grid: auto-fill track minimums (default, tight, pair, wide) and
+     gap. wide is for row cards (name, status and badges on one line). */
+  --ptah-card-grid-min: 16.5rem;
+  --ptah-card-grid-min-tight: 14rem;
+  --ptah-card-grid-min-pair: 20rem;
+  --ptah-card-grid-min-wide: 27rem;
+  --ptah-card-grid-gap: 0.75rem;
   --ptah-settings-nav-item-h: var(--ptah-control-h-md);
   --ptah-settings-nav-active-bg: var(--ptah-btn-selected-bg);
   --ptah-settings-nav-active-edge: oklch(var(--p));

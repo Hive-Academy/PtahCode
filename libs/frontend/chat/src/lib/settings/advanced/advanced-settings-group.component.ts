@@ -22,6 +22,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 import {
   PtahButtonDirective,
+  PtahFieldGridDirective,
   PtahFieldComponent,
   PtahInputDirective,
   PtahSettingRowComponent,
@@ -88,6 +89,7 @@ function formatValue(
   imports: [
     NgTemplateOutlet,
     PtahButtonDirective,
+    PtahFieldGridDirective,
     PtahFieldComponent,
     PtahSettingRowComponent,
     PtahInputDirective,
@@ -168,7 +170,7 @@ function formatValue(
           }
           @default {
             <div
-              class="settings-grid grid grid-cols-1 items-start gap-x-4 gap-y-[var(--ptah-gap-section)]"
+              ptahFieldGrid minColumn="md"
             >
               @for (setting of settings(); track setting.key) {
                 <div
@@ -299,17 +301,6 @@ function formatValue(
     }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
-    }
-    /* Columns follow the group's own width, so a narrow drawer gets one column. */
-    @container (min-width: 36rem) {
-      .settings-grid {
-        grid-template-columns: repeat(2, minmax(0, 22rem));
-      }
-    }
-    @container (min-width: 56rem) {
-      .settings-grid {
-        grid-template-columns: repeat(3, minmax(0, 22rem));
-      }
     }
   `,
 })

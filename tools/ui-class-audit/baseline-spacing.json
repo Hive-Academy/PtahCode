@@ -1,10 +1,8 @@
 {
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
     "gap-1": 1,
-    "gap-1.5": 1,
     "gap-2": 1,
     "gap-3": 1,
-    "gap-x-4": 1,
     "mt-0.5": 1,
     "mt-1": 1,
     "pb-7": 1,
@@ -77,11 +75,9 @@
     "gap-8": 1,
     "ml-auto": 1,
     "mt-2": 1,
-    "p-4": 1,
     "pt-2": 1,
     "pt-6": 1,
-    "py-1": 1,
-    "space-y-2": 1
+    "py-1": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/cli-tier-mapping-modal.component.ts": {
     "-mb-6": 1,
@@ -246,7 +242,7 @@
     "space-y-4": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/providers-settings.component.ts": {
-    "gap-2": 4,
+    "gap-2": 3,
     "mt-3": 1,
     "p-3": 1,
     "p-4": 1,

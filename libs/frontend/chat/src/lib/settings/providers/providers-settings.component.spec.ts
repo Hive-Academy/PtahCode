@@ -759,10 +759,13 @@ describe('ProvidersSettingsComponent', () => {
       button('Clear filter').click(); await render();
       expect(element.querySelectorAll('ptah-provider-connection-card')).toHaveLength(2);
     });
-    it('the list takes its columns from the container width (27rem minimum, empty tracks collapse), and the catalog caption is one passive row under the header', async () => {
+    it('the list is a wide card grid (columns from the container width), and the catalog caption is one passive row under the header', async () => {
       await render();
-      expect(element.querySelector('[data-testid="connections-grid"]')?.className).toContain('grid-cols-[repeat(auto-fit,minmax(min(100%,27rem),1fr))]');
-      expect(element.querySelector('[data-testid="connections-grid"]')?.className).toContain('items-start');
+      const grid = element.querySelector('[data-testid="connections-grid"]');
+      expect(grid?.getAttribute('data-ptah-pattern')).toBe('card-grid');
+      expect(grid?.getAttribute('data-variant')).toBe('wide');
+      expect(grid?.className).toContain('grid-cols-[repeat(auto-fill,minmax(min(var(--ptah-card-grid-min-wide),100%),1fr))]');
+      expect(grid?.className).toContain('items-start');
       const hint = element.querySelector('[data-testid="catalog-hint"]');
       // Directly under the header row (the row holding "Connect provider").
       expect(hint?.previousElementSibling?.querySelector('[data-testid="connect-provider"]')).not.toBeNull();

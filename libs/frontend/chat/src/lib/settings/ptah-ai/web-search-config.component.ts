@@ -200,7 +200,7 @@ function providerLabel(provider: ProviderId): string {
                 [value]="maxResults()"
                 [ptahBusyDisabled]="saving()"
                 (change)="onMaxResultsChange($event)"
-                class="range range-xs range-primary w-40 max-w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                class="range range-xs range-primary w-full min-w-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 data-testid="settings-web-search-max-results"
               />
               <span

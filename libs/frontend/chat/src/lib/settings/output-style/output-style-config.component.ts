@@ -64,6 +64,7 @@ const OUTPUT_STYLE_PARITY_FAILED =
       data-glass-surface="content"
       aria-labelledby="output-style-heading"
       data-testid="output-style-card"
+      wide
     >
       <div class="flex items-center gap-[var(--ptah-gap-field)] mb-[var(--ptah-gap-controls)]">
         <h2 id="output-style-heading" class="sr-only">Output Style</h2>
