@@ -1,0 +1,99 @@
+<label
+  class="grid h-full grid-cols-[auto_minmax(0,1fr)] gap-x-[var(--ptah-gap-heading)] rounded-[var(--glass-radius-inner,var(--ptah-radius-surface))] border border-[var(--ptah-border-color)] bg-[var(--glass-fill-tile,var(--surface-1))] p-[var(--ptah-surface-pad)] cursor-pointer transition-colors duration-ptah-fast ease-ptah-standard hover:border-[var(--ptah-border-color-strong)] hover:bg-[var(--surface-2)] has-[:focus-visible]:outline has-[:focus-visible]:outline-ptah-focus-width has-[:focus-visible]:outline-ptah-focus has-[:focus-visible]:outline-offset-ptah-focus data-[selected]:border-[color-mix(in_oklch,oklch(var(--p))_70%,transparent)] data-[selected]:bg-[color-mix(in_oklch,oklch(var(--p))_8%,var(--glass-fill-tile,var(--surface-1)))] data-[selected]:hover:border-primary"
+  [attr.data-selected]="selected() ? '' : null"
+  [class.opacity-[var(--ptah-btn-disabled-opacity)]]="disabled()"
+  [class.cursor-not-allowed]="disabled()"
+>
+  <input
+    ptahCheckbox
+    type="checkbox"
+    class="mt-0.5"
+    [checked]="selected()"
+    [disabled]="disabled()"
+    [attr.aria-label]="'Select ' + skill().name"
+    [attr.aria-describedby]="descriptionId()"
+    (change)="toggled.emit()"
+  />
+  <span class="flex min-w-0 flex-col gap-1.5">
+    <span class="flex min-w-0 items-center gap-2"
+      ><strong
+        class="min-w-0 flex-1 truncate text-base font-semibold text-base-content"
+        [title]="skill().name"
+        >{{ skill().name }}</strong
+      >
+      @if (skill().isInstalled) {
+        <span ptahBadge tone="ok" size="xs">Installed</span>
+      }
+    </span>
+    <span [id]="descriptionId()" class="contents">
+      <span
+        class="flex min-w-0 items-center gap-2 text-xs text-base-content-muted"
+        ><span
+          class="truncate font-mono text-[0.6875rem] font-medium"
+          [title]="skill().source + '/' + skill().skillId"
+          >{{ skill().source }}</span
+        ><span
+          class="inline-flex shrink-0 items-center gap-1"
+          [attr.aria-label]="fullInstalls() + ' installs'"
+          ><lucide-icon
+            [img]="download"
+            class="size-ptah-icon-xs"
+            aria-hidden="true"
+          />{{ installs() }}</span
+        ></span
+      >
+      <span
+        class="mt-1 line-clamp-3 text-sm text-base-content"
+        [class.text-base-content-muted]="!skill().description.trim()"
+        [title]="description()"
+        >{{ description() }}</span
+      >
+      @if (coveredItems().length || rawEvidence()) {
+        <span class="mt-auto flex flex-wrap items-center gap-1 pt-1.5"
+          ><span class="text-xs font-medium text-base-content-muted"
+            >Covers</span
+          >
+          @for (item of coveredItems().slice(0, 3); track item) {
+            <span
+              ptahBadge
+              [tone]="item === highlightItem() ? 'accent' : 'neutral'"
+              appearance="outline"
+              size="xs"
+              >{{ item }}</span
+            >
+          }
+          @if (coveredItems().length > 3) {
+            <span ptahBadge size="xs">+{{ coveredItems().length - 3 }}</span>
+          }
+          @if (!coveredItems().length) {
+            <span class="text-xs text-base-content-muted">{{
+              rawEvidence()
+            }}</span>
+          }
+        </span>
+      }
+    </span>
+    @if (safeUrl(); as url) {
+      <a
+        ptahButton
+        variant="link"
+        size="xs"
+        class="self-end"
+        [href]="url"
+        target="_blank"
+        rel="noopener noreferrer"
+        (click)="stopLink($event)"
+        >View on skills.sh
+        <lucide-icon
+          [img]="externalLink"
+          class="size-ptah-icon-xs"
+          aria-hidden="true"
+      /></a>
+    }
+    @if (skill().isInstalled) {
+      <span class="text-xs text-base-content-muted"
+        >Select to reinstall this version.</span
+      >
+    }
+  </span>
+</label>

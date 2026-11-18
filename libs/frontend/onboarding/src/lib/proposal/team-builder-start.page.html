@@ -45,12 +45,16 @@
         class="min-h-[140px] w-full"
         placeholder="Describe the work for your team"
         [ngModel]="intent()"
-        (ngModelChange)="intent.set($event)"
+        (ngModelChange)="state.setIntent($event)"
         (blur)="touched.set(true)"
         (paste)="attachments.onPaste($event)"
         (dragover)="$event.preventDefault()"
         (drop)="attachments.onDrop($event)"
-        [attr.aria-describedby]="invalid() ? 'team-attachment-hint team-intent-error' : 'team-attachment-hint'"
+        [attr.aria-describedby]="
+            invalid()
+              ? 'team-attachment-hint team-intent-error'
+              : 'team-attachment-hint'
+          "
       ></textarea>
     </ptah-field>
     <ptah-attachment-tray />
@@ -86,12 +90,19 @@
     <button ptahButton variant="ghost" type="button" (click)="back()">
       Back
     </button>
-    <p role="status" aria-live="polite">
-      {{ launched() ? 'Chat opened. Use Back to leave this page.' : 'Launching chat…' }}
-    </p>
+    <p role="status" aria-live="polite">{{ launchStatus() }}</p>
     @if (state.guidanceNote()) {
-    <p role="status" class="text-sm text-base-content-muted">{{ state.guidanceNote() }}</p>
-    }
+    <p role="status" class="text-sm text-base-content-muted">
+      {{ state.guidanceNote() }}
+    </p>
+    } } @else if (skillsInstalled()) {
+    <p role="alert">{{ actionError() }}</p>
+    <button ptahButton variant="ghost" type="button" (click)="backToIntent()">
+      Back
+    </button>
+    <button ptahButton variant="primary" type="button" (click)="launchChat()">
+      Continue to team builder
+    </button>
     } @else { @if (state.stage() === 'installing') {
     <p role="status" aria-live="polite">Installing skills...</p>
     }
@@ -108,14 +119,21 @@
         [busy]="starting()"
         [selectedIds]="state.selectedIds()"
         [loading]="state.loading()"
+        [previewing]="state.previewing()"
+        [previewScriptCount]="state.previewScriptCount()"
+        (retryRequested)="loadReview()"
         [searching]="searching()"
         [error]="actionError()"
+        [loadError]="loadError()"
         [searchError]="searchError()"
         [query]="state.searchQuery()"
-        (queryChange)="state.searchQuery.set($event)"
-        (ownerDecisionChange)="state.ownerDecision.set($event); ownerDecisionError.set(false)"
+        (queryChange)="state.setSearchQuery($event)"
+        (ownerDecisionChange)="
+              state.setOwnerDecision($event); ownerDecisionError.set(false)
+            "
         (selectionToggled)="state.toggle($event)"
         (searchRequested)="search($event)"
+        (searchCleared)="search('')"
         (continueRequested)="reviewSelection()"
         (skip)="launchChat()"
         (back)="backToIntent()"
@@ -135,4 +153,3 @@
     (cancelRequested)="closeConsent()"
   />
 </section>
-

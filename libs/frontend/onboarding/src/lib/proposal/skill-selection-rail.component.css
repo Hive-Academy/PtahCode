@@ -1,0 +1,102 @@
+:host {
+  align-self: start;
+}
+[data-selection-frame] {
+  background: var(--surface-1);
+}
+:host(:not(.responsive)[data-layout='rail']) [data-selection-frame] {
+  max-height: calc(var(--skill-rail-height, 100dvh) - var(--ptah-space-4));
+}
+/* One sticky owner; the bar's actions and notes share its opaque surface. */
+:host(.responsive),
+:host([data-layout='bar']) {
+  position: sticky;
+  top: auto;
+  bottom: 0;
+  z-index: var(--ptah-z-raised);
+}
+:host(.responsive) [data-selection-frame],
+:host([data-layout='bar']) [data-selection-frame] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--ptah-gap-controls);
+  row-gap: var(--ptah-space-1);
+  padding-block: var(--ptah-space-3);
+  max-height: none;
+  overflow: visible;
+}
+:host(.responsive) [data-selected-list],
+:host(.responsive) [data-selection-title],
+:host(.responsive) progress,
+:host([data-layout='bar']) progress {
+  display: none;
+}
+:host(.responsive) [data-selection-count],
+:host([data-layout='bar']) [data-selection-count] {
+  font-size: var(--ptah-text-body-size);
+  line-height: var(--ptah-text-body-leading);
+}
+:host(.responsive) footer,
+:host([data-layout='bar']) footer {
+  display: contents;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+:host(.responsive) [data-selection-notes],
+:host([data-layout='bar']) [data-selection-notes] {
+  grid-column: 1 / -1;
+  margin-top: 0;
+  text-align: end;
+}
+:host(.responsive) [data-selection-notes] > p + p,
+:host([data-layout='bar']) [data-selection-notes] > p + p {
+  margin-top: var(--ptah-space-1);
+}
+:host(.responsive) [data-selection-skip],
+:host([data-layout='bar']) [data-selection-skip] {
+  order: -1;
+}
+@container skills (min-width: 960px) {
+  :host(.responsive) {
+    top: var(--ptah-space-6);
+    bottom: auto;
+  }
+  :host(.responsive) [data-selection-frame] {
+    display: flex;
+    gap: var(--ptah-gap-field);
+    padding-block: var(--ptah-surface-pad);
+    max-height: calc(var(--skill-rail-height, 100dvh) - var(--ptah-space-4));
+    overflow: hidden;
+    align-items: stretch;
+  }
+  :host(.responsive) [data-selection-title],
+  :host(.responsive) [data-selected-list],
+  :host(.responsive) progress {
+    display: block;
+  }
+  :host(.responsive) [data-selection-count] {
+    font-size: var(--ptah-text-page-title-size);
+    line-height: var(--ptah-text-page-title-leading);
+  }
+  :host(.responsive) footer {
+    display: block;
+    margin-top: auto;
+    padding-top: var(--ptah-space-3);
+    border-top: 1px solid var(--surface-3);
+  }
+  :host(.responsive) [data-selection-notes] {
+    margin-top: var(--ptah-space-2);
+    text-align: start;
+  }
+  :host(.responsive) [data-selection-skip] {
+    order: initial;
+  }
+  :host(.responsive) button {
+    width: 100%;
+  }
+  :host(.responsive) [data-selected-list] button {
+    width: auto;
+  }
+}

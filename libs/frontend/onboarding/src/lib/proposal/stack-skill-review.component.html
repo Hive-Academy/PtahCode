@@ -1,203 +1,342 @@
-<section class="space-y-[var(--ptah-gap-group)]" aria-labelledby="skill-review-title">
-  <div>
-    <h2 id="skill-review-title" class="text-xl font-semibold" tabindex="-1">
-      Review skills
-    </h2>
-    <p class="text-sm text-base-content-muted">
-      Choose skills for this project. You can continue without installing any.
-    </p>
-  </div>
-  @if (error()) {
-    <p role="alert" class="text-sm text-state-err">{{ error() }}</p>
-  }
-  @if (loading()) {
-    <div role="status" aria-live="polite">
-      <ptah-state-panel state="loading" title="Finding recommended skills" />
-    </div>
-  } @else {
-    <section aria-labelledby="recommended-title" class="space-y-3">
-      <h3 id="recommended-title" class="font-semibold">
-        Recommended for this workspace
-      </h3>
-      @if (recommendations().length === 0) {
-        <ptah-state-panel
-          state="empty"
-          title="No recommendations yet"
-          body="Search for skills or skip this step."
-        />
-      }
-      @for (row of recommendations(); track key(row.skill)) {
-        <ptah-native-card>
-          <label class="flex cursor-pointer gap-[var(--ptah-gap-heading)] p-[var(--ptah-surface-pad)]">
-            <input
-              type="checkbox"
-              ptahCheckbox
-              [checked]="selected(row.skill)"
-              [attr.aria-label]="'Select ' + row.skill.name"
-              (change)="selectionToggled.emit(key(row.skill))"
-            />
-            <span class="min-w-0"
-              ><strong class="block">{{ row.skill.name }}</strong
-              ><span class="block break-all text-xs text-base-content-muted">{{
-                key(row.skill)
-              }}</span>
-              <span class="block text-sm">{{ row.skill.description }}</span>
-              @if (row.evidence) {
-                <span class="block text-xs text-base-content-muted"
-                  >Why: {{ row.evidence }}</span
-                >
-              }
-              @if (row.score !== null && row.score !== undefined) {
-                <span class="block text-xs text-base-content-muted"
-                  >Relevance score: {{ row.score }}</span
-                >
-              }
-            </span>
-          </label>
-        </ptah-native-card>
-      }
-    </section>
-  }
-  <section class="space-y-3" aria-labelledby="search-title">
-    <h3 id="search-title" class="font-semibold">Find more skills</h3>
-    <form
-      class="flex flex-wrap items-end gap-[var(--ptah-gap-controls)]"
-      (submit)="submitSearch($event)"
+<section class="skills-container" aria-labelledby="skill-review-title">
+  <div class="skills-layout">
+    <header
+      class="skills-header flex flex-wrap items-start justify-between gap-[var(--ptah-gap-heading)]"
     >
-      <ptah-field
-        label="Search skills"
-        appearance="stacked"
-        class="min-w-0 grow"
-        ><input
-          ptahInput
-          name="skill-search"
-          [ngModel]="query()"
-          (ngModelChange)="queryChange.emit($event)"
-      /></ptah-field>
-      <button
-        ptahButton
-        type="submit"
-        [disabled]="searching() || !query().trim()"
-      >
-        Search
-      </button>
-    </form>
-    @if (searching()) {
-      <p role="status" aria-live="polite">Searching skills…</p>
-    }
-    @if (searchError()) {
-      <p role="alert" class="text-sm text-state-err">{{ searchError() }}</p>
-    }
-    @for (skill of searchResults(); track key(skill)) {
-      @if (!recommendationIds().has(key(skill))) {
-        <ptah-native-card
-          ><label class="flex cursor-pointer gap-[var(--ptah-gap-heading)] p-[var(--ptah-surface-pad)]"
-            ><input
-              type="checkbox"
-              ptahCheckbox
-              [checked]="selected(skill)"
-              [attr.aria-label]="'Select ' + skill.name"
-              (change)="selectionToggled.emit(key(skill))"
-            />
-            <span class="min-w-0"
-              ><strong class="block">{{ skill.name }}</strong
-              ><span class="block break-all text-xs text-base-content-muted">{{
-                key(skill)
-              }}</span
-              ><span class="block text-sm">{{ skill.description }}</span></span
+      <div class="flex items-start gap-[var(--ptah-gap-heading)]">
+        <button
+          ptahButton
+          variant="ghost"
+          type="button"
+          [disabled]="busy()"
+          (click)="back.emit()"
+        >
+          Back
+        </button>
+        <div>
+          @if (headingLevel() === 1) {
+            <h1
+              id="skill-review-title"
+              tabindex="-1"
+              class="text-xl font-semibold"
             >
-          </label></ptah-native-card
-        >
-      }
-    }
-  </section>
-  @if (guidanceFacts().length) {
-    <section aria-labelledby="guidance-title" class="space-y-2">
-      <h3 id="guidance-title" class="font-semibold">Project guidance</h3>
-      @for (fact of guidanceFacts(); track $index) {
-        <div
-          class="rounded-[14px] border border-base-300 p-3"
-          data-glass-surface="tile"
-        >
-          <span class="text-xs font-semibold"
-            >{{ fact.category }} · {{ label(fact.label) }}</span
-          >
-          <p class="text-sm">{{ fact.fact }}</p>
-          @if (fact.evidence) {
-            <p class="text-xs text-base-content-muted">{{ fact.evidence }}</p>
+              Choose skills for your stack
+            </h1>
+          } @else {
+            <h2
+              id="skill-review-title"
+              tabindex="-1"
+              class="text-xl font-semibold"
+            >
+              Choose skills for your stack
+            </h2>
           }
+          <p class="text-sm text-base-content-muted">
+            Choose skills for this project. You can continue without installing
+            any.
+          </p>
         </div>
+      </div>
+      <ng-content select="[reviewActions]" />
+    </header>
+    <div class="skills-coverage space-y-3">
+      @if (detectedItems().length || stackLoading()) {
+        <ptah-stack-coverage-strip
+          data-testid="stack-coverage-strip"
+          [items]="coverage()"
+          [activeItem]="activeItem()"
+          [loading]="initialLoading() || stackLoading()"
+          (filterChanged)="setFilter($event)"
+        >
+          <ng-container [ngTemplateOutlet]="coverageMessages" />
+        </ptah-stack-coverage-strip>
+      } @else if (summarySource() === 'none') {
+        <p class="text-sm text-base-content-muted">
+          No stack summary was found for this analysis.
+        </p>
       }
-    </section>
-  }
-  @if (guidanceNote()) {
-    <p role="status" class="text-sm">{{ guidanceNote() }}</p>
-  }
-  @if (showOwnerDecision()) {
-  <fieldset class="space-y-2" [disabled]="busy()">
-    <legend class="font-semibold">
-      {{
-        ownerDecisionPrompt() ||
-          'How should the team handle existing practices?'
-      }}
-      @if (!decisionRequired()) { (optional) }
-    </legend>
-    <label class="flex items-center gap-2"
-      ><input
-        type="radio"
-        ptahCheckbox
-        name="owner-decision"
-        value="match"
-        [checked]="ownerDecision() === 'match'"
-        (change)="ownerDecisionChange.emit('match')"
-      />Match the repository</label
-    >
-    <label class="flex items-center gap-2"
-      ><input
-        type="radio"
-        ptahCheckbox
-        name="owner-decision"
-        value="raise"
-        [checked]="ownerDecision() === 'raise'"
-        (change)="ownerDecisionChange.emit('raise')"
-      />Raise the standard</label
-    >
-  </fieldset>
-  @if (ownerDecisionError()) {
-    <p role="alert" class="text-sm text-state-err">
-      Choose how to handle existing practices before continuing or skipping.
-    </p>
-  }
-  }
-  <div class="flex flex-wrap justify-between gap-[var(--ptah-gap-controls)]">
-    <button
-      ptahButton
-      variant="ghost"
-      type="button"
-      [disabled]="busy()"
-      (click)="back.emit()"
-    >
-      Back
-    </button>
-    <div class="flex gap-2">
-      <button
-        ptahButton
-        variant="ghost"
-        type="button"
-        [disabled]="busy() || loading()"
-        (click)="skip.emit()"
-      >
-        Skip skills</button
-      ><button
-        ptahButton
-        variant="primary"
-        type="button"
-        [disabled]="loading() || busy()"
-        (click)="continueRequested.emit()"
-      >
-        {{ selectedIds().size ? 'Review selected skills (' + selectedIds().size + ')' : 'Continue without skills' }}
-      </button>
+      @if (!detectedItems().length && !stackLoading()) {
+        <ng-container [ngTemplateOutlet]="coverageMessages" />
+      }
+      <ng-template #coverageMessages>
+        @if (warning()) {
+          <ptah-alert tone="warning" live="polite">{{ warning() }}</ptah-alert>
+        }
+        @if (searchFailures().length) {
+          <ptah-alert
+            tone="warning"
+            live="polite"
+            [title]="
+              'Search failed for ' +
+              searchFailures().length +
+              ' stack ' +
+              (searchFailures().length === 1 ? 'item' : 'items')
+            "
+          >
+            <ul aria-label="Skill search failures">
+              @for (failure of searchFailures(); track failure.item) {
+                <li>{{ failure.item }}: {{ failure.reason }}</li>
+              }
+            </ul>
+          </ptah-alert>
+        }
+        @if (selectionReset()) {
+          <ptah-alert tone="info" live="polite"
+            >Skill selection was reset to the new recommendations.<button
+              alertAction
+              ptahButton
+              type="button"
+              variant="ghost"
+              size="xs"
+              aria-label="Dismiss selection reset message"
+              (click)="selectionResetDismissed.emit()"
+            >
+              Dismiss
+            </button></ptah-alert
+          >
+        }
+      </ng-template>
     </div>
+    <div class="skills-main min-w-0 space-y-[var(--ptah-gap-group)]">
+      @if (error() && !loadError()) {
+        <ptah-alert tone="error" live="assertive">{{ error() }}</ptah-alert>
+      }
+      <section aria-labelledby="search-title" class="space-y-2">
+        <h2 id="search-title" class="font-semibold">Find more skills</h2>
+        <form
+          class="flex flex-wrap items-end gap-[var(--ptah-gap-controls)]"
+          (submit)="submitSearch($event)"
+        >
+          <ptah-field
+            label="Search skills"
+            appearance="stacked"
+            class="min-w-0 grow"
+            ><input
+              #searchInput
+              ptahInput
+              name="skill-search"
+              placeholder="Search the skill registry"
+              [ngModel]="query()"
+              (ngModelChange)="queryChange.emit($event)"
+          /></ptah-field>
+          <button
+            ptahButton
+            type="submit"
+            [busy]="searching()"
+            [disabled]="searching() || !query().trim()"
+          >
+            Search
+          </button>
+        </form>
+        @if (searchError()) {
+          <p role="alert" class="text-sm text-state-err">{{ searchError() }}</p>
+        }
+      </section>
+      @if (searching() || otherResults().length || submittedQuery()) {
+        <section aria-labelledby="search-results-title" class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="search-results-title" class="font-semibold">
+              Search results
+              @if (submittedQuery()) {
+                for "{{ submittedQuery() }}"
+              }
+            </h2>
+            <button
+              ptahButton
+              variant="ghost"
+              size="sm"
+              type="button"
+              (click)="clearSearch()"
+            >
+              Clear
+            </button>
+          </div>
+          @if (searching()) {
+            <p role="status" aria-live="polite" class="sr-only">
+              Searching skills…
+            </p>
+            <div class="skill-grid">
+              @for (id of [1, 2]; track id) {
+                <ptah-skeleton shape="block" size="lg" />
+              }
+            </div>
+          }
+          @if (
+            !searching() &&
+            !searchError() &&
+            !otherResults().length &&
+            submittedQuery()
+          ) {
+            <p class="text-sm text-base-content-muted">
+              No other skills found for "{{ submittedQuery() }}".
+            </p>
+          }
+          <ul class="skill-grid" aria-label="Search results skills">
+            @for (skill of otherResults(); track key(skill)) {
+              <li>
+                <ptah-skill-pick-card
+                  data-testid="skill-pick-card"
+                  [skill]="skill"
+                  [selected]="selected(skill)"
+                  [disabled]="blocked()"
+                  (toggled)="selectionToggled.emit(key(skill))"
+                />
+              </li>
+            }
+          </ul>
+        </section>
+      }
+      <section
+        aria-labelledby="recommended-title"
+        class="space-y-3"
+        [attr.aria-busy]="loading() ? 'true' : null"
+        [class.opacity-[var(--ptah-btn-disabled-opacity)]]="
+          loading() && !initialLoading()
+        "
+      >
+        <h2 id="recommended-title" class="flex items-center gap-2 font-semibold">
+          Recommended for this workspace
+          <span ptahBadge count data-recommendation-count>
+            {{ recommendations().length }}
+          </span>
+        </h2>
+        @if (initialLoading()) {
+          <p role="status" aria-live="polite" class="sr-only">
+            Finding recommended skills
+          </p>
+          <div class="skill-grid">
+            @for (id of skeletons; track id) {
+              <ptah-skeleton shape="block" size="lg" />
+            }
+          </div>
+        } @else {
+          @if (!recommendations().length && !loadError()) {
+            <ptah-state-panel
+              state="empty"
+              title="No skills match your stack yet"
+              body="Search the registry, or continue without skills."
+              actionLabel="Search the registry"
+              (action)="focusSearch()"
+            />
+          }
+          @if (loadError() && error()) {
+            <ptah-state-panel
+              state="error"
+              [title]="error()"
+              [actionLabel]="backOnLoadError() ? 'Back' : 'Re-run skill search'"
+              (action)="backOnLoadError() ? back.emit() : retryRequested.emit()"
+            />
+          }
+          @if (activeItem() && !filteredRecommendations().length) {
+            <p class="text-sm text-base-content-muted">
+              No recommended skills cover {{ activeItemName() }}.
+            </p>
+          }
+          <ul class="skill-grid" aria-label="Recommended skills">
+            @for (row of filteredRecommendations(); track key(row.skill)) {
+              <li>
+                <ptah-skill-pick-card
+                  data-testid="skill-pick-card"
+                  [skill]="row.skill"
+                  [coveredItems]="evidence(row.evidence).coveredItems"
+                  [rawEvidence]="evidence(row.evidence).rawEvidence"
+                  [highlightItem]="activeItemName()"
+                  [selected]="selected(row.skill)"
+                  [disabled]="blocked()"
+                  (toggled)="selectionToggled.emit(key(row.skill))"
+                />
+              </li>
+            }
+          </ul>
+        }
+      </section>
+      <ptah-unmatched-stack-list
+        [items]="unmatchedItems()"
+        [searching]="searching()"
+        (searchRequested)="searchItem($event)"
+      />
+      @if (guidanceFacts().length) {
+        <section aria-labelledby="guidance-title" class="space-y-2">
+          <h3 id="guidance-title" class="font-semibold">Project guidance</h3>
+          @for (
+            fact of guidanceFacts();
+            track fact.category + fact.label + fact.fact + fact.evidence
+          ) {
+            <div
+              class="rounded-[14px] border border-base-300 p-3"
+              data-glass-surface="tile"
+            >
+              <span class="text-xs font-semibold"
+                >{{ fact.category }} · {{ label(fact.label) }}</span
+              >
+              <p class="text-sm">{{ fact.fact }}</p>
+              @if (fact.evidence) {
+                <p class="text-xs text-base-content-muted">
+                  {{ fact.evidence }}
+                </p>
+              }
+            </div>
+          }
+        </section>
+      }
+      @if (guidanceNote()) {
+        <p role="status" class="text-sm">{{ guidanceNote() }}</p>
+      }
+      @if (showOwnerDecision()) {
+        <fieldset class="space-y-2" [disabled]="blocked()">
+          <legend class="font-semibold">
+            {{
+              ownerDecisionPrompt() ||
+                'How should the team handle existing practices?'
+            }}
+            @if (!decisionRequired()) {
+              (optional)
+            }
+          </legend>
+          <label class="flex items-center gap-2"
+            ><input
+              type="radio"
+              ptahCheckbox
+              name="owner-decision"
+              value="match"
+              [checked]="ownerDecision() === 'match'"
+              (change)="ownerDecisionChange.emit('match')"
+            />Match the repository</label
+          >
+          <label class="flex items-center gap-2"
+            ><input
+              type="radio"
+              ptahCheckbox
+              name="owner-decision"
+              value="raise"
+              [checked]="ownerDecision() === 'raise'"
+              (change)="ownerDecisionChange.emit('raise')"
+            />Raise the standard</label
+          >
+        </fieldset>
+        @if (ownerDecisionError()) {
+          <p role="alert" class="text-sm text-state-err">
+            Choose how to handle existing practices before continuing or
+            skipping.
+          </p>
+        }
+      }
+    </div>
+    <ptah-skill-selection-rail
+      class="skills-selection"
+      data-testid="skill-selection-rail"
+      [responsive]="true"
+      [selected]="selectedSkills()"
+      [total]="totalSkills()"
+      [coveredCount]="coveredCount()"
+      [stackCount]="coverage().length"
+      [busy]="busy()"
+      [loading]="loading()"
+      [previewing]="previewing()"
+      [previewScriptCount]="previewScriptCount()"
+      (removed)="selectionToggled.emit($event)"
+      (primary)="continueRequested.emit()"
+      (skip)="skip.emit()"
+    />
   </div>
 </section>
-

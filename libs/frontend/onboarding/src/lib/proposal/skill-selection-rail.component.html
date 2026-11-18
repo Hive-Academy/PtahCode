@@ -1,0 +1,128 @@
+<section
+  data-selection-frame
+  class="flex min-h-0 flex-col gap-[var(--ptah-gap-field)] rounded-[22px] border border-base-300 p-[var(--ptah-surface-pad)]"
+  [class.overflow-hidden]="layout() === 'rail'"
+>
+  <div class="shrink-0" data-selection-header>
+    @if (responsive() || layout() === 'rail') {
+      <h2 data-selection-title class="text-base font-semibold">
+        Your selection
+      </h2>
+    }
+    <div aria-live="polite">
+      <p data-selection-count class="text-xl font-semibold">
+        {{ selected().length }}
+        <span class="text-sm font-normal text-base-content-muted"
+          >of {{ total() }} selected</span
+        >
+      </p>
+      @if (stackCount() > 0) {
+        <p class="text-xs text-base-content-muted">
+          Covers {{ coveredCount() }} of {{ stackCount() }} stack items
+        </p>
+        <progress
+          class="progress progress-success h-1.5 w-full"
+          [value]="coveredCount()"
+          [max]="stackCount()"
+          aria-label="Selected stack coverage"
+        ></progress>
+      }
+    </div>
+  </div>
+  @if (responsive() || layout() === 'rail') {
+    <div data-selected-list class="min-h-0 flex-1 overflow-y-auto">
+      @if (loading()) {
+        <p role="status">Finding skills…</p>
+      } @else if (!selected().length) {
+        <p class="text-sm text-base-content-muted">No skills selected.</p>
+      }
+      <ul class="space-y-2">
+        @for (item of selected(); track item.key) {
+          <li class="flex min-w-0 items-center gap-2">
+            <span class="min-w-0 flex-1 truncate text-sm" [title]="item.name">{{
+              item.name
+            }}</span
+            ><button
+              ptahButton
+              type="button"
+              variant="ghost"
+              size="xs"
+              [disabled]="blocked()"
+              [attr.aria-label]="'Remove ' + item.name"
+              (click)="removed.emit(item.key)"
+            >
+              <lucide-icon
+                [img]="close"
+                class="size-ptah-icon-xs"
+                aria-hidden="true"
+              />
+            </button>
+          </li>
+        }
+      </ul>
+    </div>
+  }
+  <footer class="mt-auto shrink-0 space-y-2 border-t border-base-300 pt-3">
+    <ptah-form-actions
+      flush
+      label="Skill selection actions"
+      class="[&_[data-ptah-form-actions-buttons]]:w-full [&_[data-ptah-form-actions-buttons]]:justify-end [&_[data-ptah-form-actions-start]]:hidden"
+      [class]="
+        responsive()
+          ? '[&_[data-ptah-form-actions-buttons]]:flex-nowrap [@container_skills(min-width:960px)]:[&_[data-ptah-form-actions-buttons]]:flex-col'
+          : layout() === 'rail'
+            ? '[&_[data-ptah-form-actions-buttons]]:flex-col [&_[data-ptah-form-actions-buttons]>*]:w-full'
+            : '[&_[data-ptah-form-actions-buttons]]:flex-nowrap'
+      "
+    >
+      <button
+        ptahButton
+        type="button"
+        variant="primary"
+        size="md"
+        class="whitespace-normal"
+        data-testid="skill-install-primary"
+        [disabled]="blocked()"
+        [busy]="previewing()"
+        [attr.aria-describedby]="loading() ? null : helperId"
+        (click)="primary.emit()"
+      >
+        {{ primaryLabel() }}
+      </button>
+      @if (selected().length > 0) {
+        <button
+          ptahButton
+          type="button"
+          variant="ghost"
+          data-selection-skip
+          size="sm"
+          [disabled]="blocked()"
+          (click)="skip.emit()"
+        >
+          Skip skills
+        </button>
+      }
+    </ptah-form-actions>
+    @if (!loading()) {
+      <div
+        data-selection-notes
+        [id]="helperId"
+        class="space-y-2 text-xs text-base-content-muted"
+      >
+        <p>
+          {{
+            selected().length
+              ? 'Installs the selected skills in this workspace, then opens the next step.'
+              : 'Opens the next step. No skill is installed.'
+          }}
+        </p>
+        @if (scriptHelper(); as helper) {
+          <p>
+            <span aria-hidden="true" class="text-state-need">!</span>
+            {{ helper }}
+          </p>
+        }
+      </div>
+    }
+  </footer>
+</section>

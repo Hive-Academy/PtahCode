@@ -1,0 +1,36 @@
+@if (items().length) {
+  <section
+    aria-label="Unmatched project stack"
+    class="space-y-[var(--ptah-gap-heading)] rounded-[22px] border border-base-300 p-[var(--ptah-surface-pad)]"
+  >
+    <h2 class="text-base font-semibold">No match in the registry</h2>
+    <ul class="space-y-2">
+      @for (item of items(); track item.kind + ':' + item.name) {
+        <li
+          class="space-y-3 rounded-[var(--glass-radius-inner,var(--ptah-radius-surface))] border border-[var(--ptah-border-color)] bg-[var(--glass-fill-tile,var(--surface-1))] p-3"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span
+              ><strong>{{ item.name }}</strong>
+              <span class="text-xs text-base-content-muted">{{
+                item.kind
+              }}</span></span
+            ><button
+              ptahButton
+              type="button"
+              variant="secondary"
+              size="sm"
+              [disabled]="searching()"
+              (click)="searchRequested.emit(item.name)"
+            >
+              Search for {{ item.name }}
+            </button>
+          </div>
+          @if (item.kind === 'framework' || item.kind === 'pattern') {
+            <ptah-project-skill-draft [item]="item" />
+          }
+        </li>
+      }
+    </ul>
+  </section>
+}

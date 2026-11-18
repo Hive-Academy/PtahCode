@@ -94,10 +94,55 @@ describe('TeamBuilderStartPage', () => {
 
   afterEach(() => TestBed.resetTestingModule());
 
+  it('retries a failed launch after successful installation without reinstalling', async () => {
+    const fixture = TestBed.createComponent(TeamBuilderStartPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const page = fixture.componentInstance;
+    page.state.setIntent('Build a team');
+    page.state.setPreview([
+      {
+        skillName: 'owner/repo/one',
+        files: [],
+        scriptFiles: [],
+        hasScripts: false,
+        contentHash: 'hash',
+      },
+    ]);
+    page.state.setStage('consent');
+    call.mockResolvedValueOnce({
+      isSuccess: () => true,
+      data: { success: true, installed: ['owner/repo/one'] },
+    });
+    launchTeamBuilder.mockRejectedValueOnce(new Error('navigation failed'));
+    await page.install();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(page.state.installed()).toEqual(['owner/repo/one']);
+    expect(root.textContent).toContain(
+      'Skills are installed. Could not start the team builder. Try again.',
+    );
+    expect(
+      root.querySelector('[data-testid="skill-install-primary"]'),
+    ).toBeNull();
+    expect('set' in page.loadError).toBe(false);
+    const callsAfterInstall = call.mock.calls.length;
+    await page.install();
+    expect(call).toHaveBeenCalledTimes(callsAfterInstall);
+    const retry = [...root.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Continue to team builder'),
+    );
+    expect(retry).toBeDefined();
+    retry?.click();
+    await fixture.whenStable();
+    expect(launchTeamBuilder).toHaveBeenCalledTimes(2);
+    expect(call).toHaveBeenCalledTimes(callsAfterInstall);
+  });
+
   it('shows launch completion and clears it on Back', async () => {
     const fixture = TestBed.createComponent(TeamBuilderStartPage);
     const page = fixture.componentInstance;
-    page.intent.set('Build a team');
+    page.state.setIntent('Build a team');
     await page.launchChat();
     fixture.detectChanges();
     expect(page.launched()).toBe(true);
@@ -112,12 +157,12 @@ describe('TeamBuilderStartPage', () => {
     const page = TestBed.runInInjectionContext(
       () => new TeamBuilderStartPage(),
     );
-    page.intent.set('Build a team');
+    page.state.setIntent('Build a team');
     await page.submit(submitEvent());
-    page.state.guidanceFacts.set([
+    page.state.setGuidanceFacts([
       { category: 'test', label: 'tolerate', fact: 'Old tests' },
     ]);
-    page.state.selectedIds.set(new Set(['owner/skill']));
+    page.state.setSelectedIds(new Set(['owner/skill']));
     await page.reviewSelection();
     expect(page.ownerDecisionError()).toBe(true);
     expect(call).not.toHaveBeenCalledWith(
@@ -126,42 +171,54 @@ describe('TeamBuilderStartPage', () => {
     );
     await page.launchChat();
     expect(launchTeamBuilder).not.toHaveBeenCalled();
-    page.state.ownerDecision.set('raise');
+    page.state.setOwnerDecision('raise');
     await page.launchChat();
-    expect(call).toHaveBeenCalledWith('wizard:get-project-guidance', expect.objectContaining({ ownerDecision: 'raise' }));
+    expect(call).toHaveBeenCalledWith(
+      'wizard:get-project-guidance',
+      expect.objectContaining({ ownerDecision: 'raise' }),
+    );
     expect(launchTeamBuilder.mock.calls[0][0]).toContain(
       'Owner decision: Raise the standard',
     );
   });
   it('keeps Skip locked during loading and launches after record failure', async () => {
-    const page = TestBed.runInInjectionContext(() => new TeamBuilderStartPage());
-    page.intent.set('Build a team');
-    page.state.loading.set(true);
+    const page = TestBed.runInInjectionContext(
+      () => new TeamBuilderStartPage(),
+    );
+    page.state.setIntent('Build a team');
+    page.state.setLoading(true);
     await page.launchChat();
     expect(launchTeamBuilder).not.toHaveBeenCalled();
-    page.state.loading.set(false);
-    page.state.ownerDecision.set('match');
-    call.mockImplementation(async (method: string) => method === 'wizard:get-project-guidance'
-      ? { isSuccess: () => false }
-      : { isSuccess: () => true, data: { skills: [] } });
+    page.state.setLoading(false);
+    page.state.setOwnerDecision('match');
+    call.mockImplementation(async (method: string) =>
+      method === 'wizard:get-project-guidance'
+        ? { isSuccess: () => false }
+        : { isSuccess: () => true, data: { skills: [] } },
+    );
     await page.launchChat();
     expect(launchTeamBuilder).toHaveBeenCalledTimes(1);
     expect(page.state.guidanceNote()).toBe('Guidance record was not written.');
   });
 
   it('starts the chat from Continue when no skill is selected', async () => {
-    const page = TestBed.runInInjectionContext(() => new TeamBuilderStartPage());
-    page.intent.set('Build a team');
+    const page = TestBed.runInInjectionContext(
+      () => new TeamBuilderStartPage(),
+    );
+    page.state.setIntent('Build a team');
     await page.reviewSelection();
     expect(launchTeamBuilder).toHaveBeenCalledTimes(1);
-    expect(call).not.toHaveBeenCalledWith('wizard:preview-skills-for-consent', expect.anything());
+    expect(call).not.toHaveBeenCalledWith(
+      'wizard:preview-skills-for-consent',
+      expect.anything(),
+    );
   });
 
   it('shows limited guidance without a saved analysis and returns to intent on Back', async () => {
     const page = TestBed.runInInjectionContext(
       () => new TeamBuilderStartPage(),
     );
-    page.intent.set('Build a team');
+    page.state.setIntent('Build a team');
     await page.submit(submitEvent());
     expect(page.state.guidanceNote()).toBe(
       'No stored project analysis. Guidance is limited.',
@@ -178,7 +235,7 @@ describe('TeamBuilderStartPage', () => {
     await page.submit(submitEvent());
     expect(launchTeamBuilder).not.toHaveBeenCalled();
 
-    page.intent.set('  A research team  ');
+    page.state.setIntent('  A research team  ');
     page.attachments.addFile(attachment('/ws/team.md'));
     await page.submit(submitEvent());
     expect(page.state.stage()).toBe('review');
@@ -209,7 +266,7 @@ describe('TeamBuilderStartPage', () => {
       () => new TeamBuilderStartPage(),
     );
 
-    page.intent.set('A research team');
+    page.state.setIntent('A research team');
     page.attachments.addFile(attachment('/ws/team.md'));
     await page.submit(submitEvent());
     await page.launchChat();
@@ -240,7 +297,7 @@ describe('TeamBuilderStartPage', () => {
       () => new TeamBuilderStartPage(),
     );
 
-    page.intent.set('A research team');
+    page.state.setIntent('A research team');
     page.attachments.addFile(attachment('/ws/team.md'));
     await page.submit(submitEvent());
     const pending = page.launchChat();
@@ -269,7 +326,7 @@ describe('TeamBuilderStartPage', () => {
       () => new TeamBuilderStartPage(),
     );
 
-    page.intent.set('A research team');
+    page.state.setIntent('A research team');
     page.attachments.addFile(attachment('/ws/first.md'));
     page.attachments.pendingReads.set(1);
     await page.submit(submitEvent());
@@ -323,7 +380,7 @@ describe('TeamBuilderStartPage', () => {
     const page = TestBed.runInInjectionContext(
       () => new TeamBuilderStartPage(),
     );
-    page.state.preview.set([
+    page.state.setPreview([
       {
         skillName: '<broken>',
         contentHash: 'hash',
@@ -345,7 +402,7 @@ describe('TeamBuilderStartPage', () => {
     const fixture = TestBed.createComponent(TeamBuilderStartPage);
     fixture.detectChanges();
     const page = fixture.componentInstance;
-    page.state.recommendations.set([
+    page.state.setRecommendations([
       {
         skill: {
           source: 'old',
@@ -359,7 +416,7 @@ describe('TeamBuilderStartPage', () => {
         score: 1,
       },
     ]);
-    page.state.searchResults.set([
+    page.state.setSearchResults([
       {
         source: 'old',
         skillId: 'skill',
@@ -369,10 +426,10 @@ describe('TeamBuilderStartPage', () => {
         isInstalled: false,
       },
     ]);
-    page.state.guidanceFacts.set([
+    page.state.setGuidanceFacts([
       { category: 'old', label: 'follow', fact: 'Old' },
     ]);
-    page.state.installed.set(['old']);
+    page.state.setInstalled(['old']);
     workspaceRoot.set('/next');
     fixture.detectChanges();
     expect(page.state.recommendations()).toEqual([]);
@@ -391,11 +448,11 @@ describe('TeamBuilderStartPage', () => {
     const page = TestBed.runInInjectionContext(
       () => new TeamBuilderStartPage(),
     );
-    page.state.guidanceFacts.set([
+    page.state.setGuidanceFacts([
       { category: 'old', label: 'follow', fact: 'Old' },
     ]);
-    page.state.selectedIds.set(new Set(['old']));
-    page.state.ownerDecision.set('raise');
+    page.state.setSelectedIds(new Set(['old']));
+    page.state.setOwnerDecision('raise');
     await page.loadReview();
     expect(page.state.guidanceFacts()).toEqual([]);
     expect(page.state.selectedIds().size).toBe(0);
@@ -425,7 +482,7 @@ describe('TeamBuilderStartPage', () => {
     const page = TestBed.runInInjectionContext(
       () => new TeamBuilderStartPage(),
     );
-    page.state.preview.set([
+    page.state.setPreview([
       {
         skillName: 'skill',
         contentHash: 'hash',
@@ -442,5 +499,72 @@ describe('TeamBuilderStartPage', () => {
     finish({ isSuccess: () => true, data: { success: false, installed: [] } });
     await pending;
   });
+  it('keeps the review grid while previewing and clears previewing when returning to intent', async () => {
+    const fixture = TestBed.createComponent(TeamBuilderStartPage);
+    fixture.detectChanges();
+    const page = fixture.componentInstance;
+    page.state.setStage('review');
+    page.state.setRecommendations([
+      {
+        skill: {
+          source: 'owner/repo',
+          skillId: 'one',
+          name: 'One skill',
+          description: 'Patterns',
+          installs: 1,
+          isInstalled: false,
+        },
+        evidence: 'Angular',
+        score: 1,
+      },
+    ]);
+    page.state.setSelectedIds(new Set(['owner/repo/one']));
+    let finish: () => void = () => {
+      throw new Error('Preview not started');
+    };
+    call.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({
+              isSuccess: () => true,
+              data: {
+                skills: [
+                  {
+                    skillName: 'owner/repo/one',
+                    files: [],
+                    scriptFiles: [],
+                    hasScripts: false,
+                    contentHash: 'abc',
+                  },
+                ],
+              },
+            });
+        }),
+    );
+    const pending = page.reviewSelection();
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(page.state.previewing()).toBe(true);
+    expect(page.state.loading()).toBe(false);
+    expect(root.querySelectorAll('ptah-skill-pick-card')).toHaveLength(1);
+    expect(
+      root.querySelector('[data-testid="skill-install-primary"]')?.textContent,
+    ).toContain('Preparing install\u2026');
+    page.backToIntent();
+    expect(page.state.previewing()).toBe(false);
+    finish();
+    await pending;
+    expect(page.state.stage()).toBe('intent');
+  });
+  it('renders launching chat as one clean status string', () => {
+    const fixture = TestBed.createComponent(TeamBuilderStartPage);
+    fixture.componentInstance.state.setStage('launching');
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement as HTMLElement)
+        .querySelector('[role="status"]')
+        ?.textContent?.trim(),
+    ).toBe('Launching chat…');
+  });
 });
-
