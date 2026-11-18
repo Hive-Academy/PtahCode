@@ -34,6 +34,7 @@ jest.mock('node:worker_threads', () => {
 
     readonly posted: Array<Record<string, unknown>> = [];
     readonly workerData: { tsModulePath: string };
+    readonly resourceLimits: { maxOldGenerationSizeMb: number };
     terminateCalls = 0;
     refCalls = 0;
     unrefCalls = 0;
@@ -43,10 +44,15 @@ jest.mock('node:worker_threads', () => {
 
     constructor(
       readonly source: string,
-      options: { eval?: boolean; workerData?: { tsModulePath: string } },
+      options: {
+        eval?: boolean;
+        workerData?: { tsModulePath: string };
+        resourceLimits: { maxOldGenerationSizeMb: number };
+      },
     ) {
       super();
       this.workerData = options.workerData ?? { tsModulePath: '' };
+      this.resourceLimits = options.resourceLimits;
       MockWorker.instances.push(this);
     }
 
@@ -81,6 +87,7 @@ jest.mock('node:worker_threads', () => {
 
 /** The mock's surface, as this spec drives it. */
 interface MockWorkerInstance {
+  readonly resourceLimits: { maxOldGenerationSizeMb: number };
   emit(event: string, payload?: unknown): boolean;
   readonly posted: Array<Record<string, unknown>>;
   readonly workerData: { tsModulePath: string };
@@ -296,31 +303,47 @@ describe('TsDiagnosticsWorker', () => {
   });
 
   describe('two compilers (TASK_2026_325 finding 4)', () => {
-    it('gives each compiler its own worker instead of replacing the running one', async () => {
-      const runA = sut.run(request('/compilers/a/typescript.js', '/wsA'));
-      const runB = sut.run(request('/compilers/b/typescript.js', '/wsB'));
-
-      expect(WorkerMock.instances).toHaveLength(2);
-      const [workerA, workerB] = WorkerMock.instances;
-      expect(workerA.workerData.tsModulePath).toBe(
-        '/compilers/a/typescript.js',
-      );
-      expect(workerB.workerData.tsModulePath).toBe(
-        '/compilers/b/typescript.js',
-      );
-      // The whole point: A's in-flight compile survives B's arrival.
+    it('queues a different compiler until the busy lane settles without rejecting its run', async () => {
+      const runA = sut.run(request('/a'));
+      const runB = sut.run(request('/b'));
+      expect(WorkerMock.instances).toHaveLength(1);
+      const workerA = WorkerMock.instances[0];
       expect(workerA.terminateCalls).toBe(0);
-
-      reply(workerB, 7);
       reply(workerA, 5);
-
       await expect(runA).resolves.toMatchObject({ programCount: 5 });
+      await flush();
+      expect(WorkerMock.instances).toHaveLength(2);
+      reply(WorkerMock.instances[1], 7);
       await expect(runB).resolves.toMatchObject({ programCount: 7 });
+    });
+
+    it('a later run for the busy compiler does not pass an older queued run of another compiler', async () => {
+      const runA = sut.run(request('/a'));
+      const runB = sut.run(request('/b'));
+      const runA2 = sut.run(request('/a'));
+      expect(WorkerMock.instances).toHaveLength(1);
+
+      // Posted directly, runA2 would keep worker A busy and B would wait on.
+      reply(WorkerMock.instances[0], 1);
+      await expect(runA).resolves.toMatchObject({ programCount: 1 });
+      await flush();
+      expect(WorkerMock.instances[0].terminateCalls).toBe(1);
+      expect(WorkerMock.instances).toHaveLength(2);
+
+      reply(WorkerMock.instances[1], 2);
+      await expect(runB).resolves.toMatchObject({ programCount: 2 });
+      await flush();
+      expect(WorkerMock.instances).toHaveLength(3);
+
+      reply(WorkerMock.instances[2], 3);
+      await expect(runA2).resolves.toMatchObject({ programCount: 3 });
     });
 
     it('a failing compiler only takes down its own worker', async () => {
       const runA = sut.run(request('/compilers/a/typescript.js', '/wsA'));
-      const runB = sut.run(request('/compilers/b/typescript.js', '/wsB'));
+      const runB = sut.run(
+        request('/compilers/b/typescript.js', '/wsB', 'scoped'),
+      );
       const [workerA, workerB] = WorkerMock.instances;
 
       workerB.emit('error', new Error('B is broken'));
@@ -448,7 +471,10 @@ describe('TsDiagnosticsWorker', () => {
       jest.advanceTimersByTime(60_000);
       expect(unscopedThread.terminateCalls).toBe(1);
 
-      // A terminated lane is respawned on demand, not reused.
+      // Termination must finish before a replacement thread starts.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       const next = sut.run(request(TS, '/ws', 'scoped'));
       expect(WorkerMock.instances).toHaveLength(3);
       reply(WorkerMock.instances[2]);
@@ -568,7 +594,9 @@ describe('TsDiagnosticsWorker', () => {
 
     it('terminates every live worker, not just the most recent', async () => {
       const runA = sut.run(request('/compilers/a/typescript.js', '/wsA'));
-      const runB = sut.run(request('/compilers/b/typescript.js', '/wsB'));
+      const runB = sut.run(
+        request('/compilers/b/typescript.js', '/wsB', 'scoped'),
+      );
       const [workerA, workerB] = WorkerMock.instances;
       const settled = Promise.all([
         expect(runA).rejects.toThrow('disposed'),
@@ -595,6 +623,100 @@ describe('TsDiagnosticsWorker', () => {
    * interpolation. Nothing else in the toolchain checks this: the body is not
    * type-checked, not linted, and a broken template still compiles.
    */
+  it('awaits idle compiler termination before constructing its replacement', async () => {
+    const first = sut.run(request('/a'));
+    const worker = WorkerMock.instances[0];
+    reply(worker);
+    await first;
+    worker.holdTerminate = true;
+    const second = sut.run(request('/b'));
+    await flush();
+    expect(worker.terminateCalls).toBe(1);
+    expect(WorkerMock.instances).toHaveLength(1);
+    worker.finishTerminate();
+    await flush();
+    expect(WorkerMock.instances).toHaveLength(2);
+    reply(WorkerMock.instances[1]);
+    await second;
+  });
+
+  it('runs different compilers in different lanes concurrently with lane memory caps', async () => {
+    const a = sut.run(request('/a'));
+    const b = sut.run(request('/b', '/ws', 'scoped'));
+    expect(WorkerMock.instances).toHaveLength(2);
+    expect(WorkerMock.instances[0].resourceLimits.maxOldGenerationSizeMb).toBe(
+      1792,
+    );
+    expect(WorkerMock.instances[1].resourceLimits.maxOldGenerationSizeMb).toBe(
+      1024,
+    );
+    WorkerMock.instances.forEach((worker) => reply(worker));
+    await Promise.all([a, b]);
+  });
+
+  it('disposal rejects queued runs and prevents a replacement thread after termination', async () => {
+    const a = sut.run(request('/a'));
+    const worker = WorkerMock.instances[0];
+    const b = sut.run(request('/b'));
+    const settled = Promise.all([
+      expect(a).rejects.toThrow('disposed'),
+      expect(b).rejects.toThrow('disposed'),
+    ]);
+    await sut.dispose();
+    await settled;
+    await flush();
+    expect(worker.terminateCalls).toBe(1);
+    expect(WorkerMock.instances).toHaveLength(1);
+  });
+
+  it('bounds queue wait independently of the compile timeout', async () => {
+    jest.useFakeTimers();
+    const a = sut.run(request('/a'));
+    jest.advanceTimersByTime(1000);
+    const b = sut.run(request('/b'));
+    const worker = WorkerMock.instances[0];
+    worker.holdTerminate = true;
+    const aRejected = expect(a).rejects.toThrow('run exceeded');
+    const bRejected = expect(b).rejects.toThrow('queue wait exceeded 300000ms');
+    jest.advanceTimersByTime(300000);
+    await bRejected;
+    expect(WorkerMock.instances).toHaveLength(1);
+    worker.finishTerminate();
+    await aRejected;
+  });
+
+  it.each([
+    ['unscoped', 1792],
+    ['scoped', 1024],
+  ] as const)('reports a %s worker memory-cap failure', async (lane, limit) => {
+    const run = sut.run(request('/a', '/ws', lane));
+    const error = Object.assign(new Error('Worker terminated'), {
+      code: 'ERR_WORKER_OUT_OF_MEMORY',
+    });
+    WorkerMock.instances[0].emit('error', error);
+    await expect(run).rejects.toThrow(
+      `memory limit of ${limit} MB. Retry a narrower check (pass files)`,
+    );
+  });
+
+  it('carries heap telemetry through the success outcome', async () => {
+    const run = sut.run(request('/a'));
+    const worker = WorkerMock.instances[0];
+    worker.emit('message', {
+      id: idOf(worker),
+      ok: true,
+      collected: [],
+      errors: [],
+      programCount: 2,
+      heapUsedMb: 123,
+      heapTotalMb: 150,
+    });
+    await expect(run).resolves.toMatchObject({
+      heapUsedMb: 123,
+      heapTotalMb: 150,
+    });
+  });
+
   it('the worker source stays a valid String.raw payload', () => {
     expect(TS_DIAGNOSTICS_WORKER_SOURCE).not.toContain('`');
     expect(TS_DIAGNOSTICS_WORKER_SOURCE).not.toContain('${');

@@ -1474,3 +1474,36 @@ describe('TypeScriptDiagnosticsProvider', () => {
     });
   });
 });
+
+
+describe('worker telemetry', () => {
+  it('logs heap figures and duration once per completed worker run', async () => {
+    const root = writeFixture({ 'tsconfig.json': tsconfigContent({ files: ['a.ts'] }), 'a.ts': 'export {};' });
+    const logger = { info: jest.fn(), warn: jest.fn() };
+    const run = jest.spyOn(tsDiagnosticsWorker, 'run').mockResolvedValue({ collected: [], errors: [], programCount: 1, heapUsedMb: 42, heapTotalMb: 64 });
+    try {
+      const provider = new TypeScriptDiagnosticsProvider(fsProviderReturning([path.join(root, 'tsconfig.json')]), undefined, process.platform, logger);
+      await provider.getDiagnostics(root);
+      await provider.getDiagnostics(root);
+      expect(logger.info).toHaveBeenCalledTimes(1);
+      expect(logger.info).toHaveBeenCalledWith('TypeScript diagnostics worker run completed', { lane: 'unscoped', heapUsedMb: 42, heapTotalMb: 64, durationMs: expect.any(Number), programCount: 1 });
+    } finally {
+      run.mockRestore();
+    }
+  });
+
+  it('warns on a memory-cap rejection and reports unavailable', async () => {
+    const root = writeFixture({ 'tsconfig.json': tsconfigContent({ files: ['a.ts'] }), 'a.ts': 'export {};' });
+    const logger = { info: jest.fn(), warn: jest.fn() };
+    const error = Object.assign(new Error('TypeScript check exceeded its memory limit of 1792 MB. Retry a narrower check (pass files).'), { code: 'ERR_WORKER_OUT_OF_MEMORY' });
+    const run = jest.spyOn(tsDiagnosticsWorker, 'run').mockRejectedValue(error);
+    try {
+      const provider = new TypeScriptDiagnosticsProvider(fsProviderReturning([path.join(root, 'tsconfig.json')]), undefined, process.platform, logger);
+      await expect(provider.getDiagnostics(root)).resolves.toMatchObject({ status: 'unavailable', reason: expect.stringContaining('1792 MB') });
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.info).not.toHaveBeenCalled();
+    } finally {
+      run.mockRestore();
+    }
+  });
+});

@@ -34,7 +34,8 @@
  *   request:  { id, configPaths: string[], normRoot: string,
  *               platform: NodeJS.Platform }
  *   response: { id, ok: true, collected: CollectedDiagnostic[],
- *               errors: ConfigFailure[], programCount: number }
+ *               errors: ConfigFailure[], programCount: number,
+ *               heapUsedMb: number, heapTotalMb: number }
  *           | { id, ok: false, error: string }
  *
  * **Root containment is checked in TWO places, doing two different jobs**
@@ -271,12 +272,15 @@ function run(request) {
 parentPort.on('message', function (message) {
   try {
     const outcome = run(message);
+    const heap = process.memoryUsage();
     parentPort.postMessage({
       id: message.id,
       ok: true,
       collected: outcome.collected,
       errors: outcome.errors,
       programCount: outcome.programCount,
+      heapUsedMb: Math.round(heap.heapUsed / 1048576),
+      heapTotalMb: Math.round(heap.heapTotal / 1048576),
     });
   } catch (error) {
     parentPort.postMessage({
