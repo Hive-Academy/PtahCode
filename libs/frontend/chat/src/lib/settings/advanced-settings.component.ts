@@ -93,7 +93,12 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
     PtahInstrumentBandComponent,
   ],
   template: `
-    <div class="flex flex-col pb-[var(--ptah-gap-field)]" data-advanced-sections>
+    <!-- Each glass section is its own stacking context. The section with focus (an open select
+         panel) is raised, so the next section cannot cover the panel. -->
+    <div
+      class="flex flex-col pb-[var(--ptah-gap-field)] [&>*]:relative [&>*:focus-within]:z-[var(--ptah-z-raised)]"
+      data-advanced-sections
+    >
       <ptah-instrument-band
         class="mb-[var(--ptah-gap-heading)]"
         [segments]="overview.segments()"

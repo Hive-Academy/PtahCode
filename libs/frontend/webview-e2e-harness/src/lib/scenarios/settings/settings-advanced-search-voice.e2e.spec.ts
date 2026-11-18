@@ -257,6 +257,9 @@ for (const host of HOSTS) {
       await expect(value).toContainText('Medium');
       failures.set('config:effort-set', rpcError(HOST_DETAIL));
       await value.click();
+      // The panel opens over the next section: a trial click on the lowest option fails if that
+      // section covers the panel (pointer hit-target check, no write).
+      await page.getByRole('listbox').getByRole('option').last().click({ trial: true });
       await page.getByRole('listbox').getByRole('option', { name: 'High', exact: true }).click();
       await expectFailedWrite(page, 'Could not save the chat reasoning effort.');
       await expect(value).toContainText('Medium');
