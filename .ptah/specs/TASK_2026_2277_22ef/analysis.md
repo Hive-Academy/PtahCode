@@ -43,9 +43,9 @@ Executed help/version only, with native child-process argument arrays, `shell:fa
 
 | Probe | Installed path / result |
 | --- | --- |
-| `grok --help` | `C:\Users\abdal\.grok\bin\grok.exe`; 197 ms |
+| `grok --help` | `~\.grok\bin\grok.exe`; 197 ms |
 | `grok --version` | `grok 1.0.77 (50ca579fa996)`; 151 ms |
-| `agy --help` | `C:\Users\abdal\AppData\Local\agy\bin\agy.exe`; 648 ms |
+| `agy --help` | `~\AppData\Local\agy\bin\agy.exe`; 648 ms |
 | `grok usage --help` | exit 0; additional help-only probe to establish exact flags |
 
 Relevant Grok help lines (verbatim):
@@ -107,24 +107,24 @@ Claude API pricing and usage:
 
 ## F. Renderer surfaces
 
-- `PlanLimitsStore` ó `libs/frontend/core/src/lib/services/plan-limits.store.ts`
-- `ProviderAccountCardComponent` ó `libs/frontend/dashboard/src/lib/components/provider-account-card/provider-account-card.component.ts`
-- `ProviderAccountTileComponent` ó `libs/frontend/dashboard/src/lib/components/provider-account-tile/provider-account-tile.component.ts`
-- `PlanLimitTileComponent` ó `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-limit-tile.component.ts`
-- `PlanWindowDetailComponent` ó `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-window-detail.component.ts`
-- `ProviderLaneLimitTileComponent` ó `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/provider-lane-limit-tile.component.ts`
-- `LaneUsageTileComponent` ó `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/lane-usage-tile.component.ts`
-- `LaneSubtotalTileComponent` ó `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/lane-subtotal-tile.component.ts`
-- `LimitsAlertComponent` ó `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/limits-alert.component.ts`
-- `CliLaneUsageSummaryComponent` ó `libs/frontend/chat/src/lib/components/molecules/agent-card/cli-lane-usage-summary.component.ts`
-- `AnalyticsUsageStore` ó `libs/frontend/dashboard/src/lib/services/analytics-usage.store.ts`
-- `UsageDashboardComponent` ó `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-dashboard.component.ts`
-- `UsageCostSummaryComponent` ó `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-cost-summary.component.ts`
-- `UsageCostQualityComponent` ó `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-cost-quality.component.ts`
-- `UsageKpiStripComponent` ó `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-kpi-strip.component.ts`
-- `UsageBreakdownTableComponent` ó `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-breakdown-table.component.ts`
-- `UsageTopSessionsComponent` ó `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-top-sessions.component.ts`
-- `UsageCostDonutComponent` ó `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-cost-donut.component.ts`
+- `PlanLimitsStore` ‚Äî `libs/frontend/core/src/lib/services/plan-limits.store.ts`
+- `ProviderAccountCardComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/provider-account-card/provider-account-card.component.ts`
+- `ProviderAccountTileComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/provider-account-tile/provider-account-tile.component.ts`
+- `PlanLimitTileComponent` ‚Äî `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-limit-tile.component.ts`
+- `PlanWindowDetailComponent` ‚Äî `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/plan-window-detail.component.ts`
+- `ProviderLaneLimitTileComponent` ‚Äî `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/provider-lane-limit-tile.component.ts`
+- `LaneUsageTileComponent` ‚Äî `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/lane-usage-tile.component.ts`
+- `LaneSubtotalTileComponent` ‚Äî `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/lane-subtotal-tile.component.ts`
+- `LimitsAlertComponent` ‚Äî `libs/frontend/chat-ui/src/lib/molecules/session/plan-limits/limits-alert.component.ts`
+- `CliLaneUsageSummaryComponent` ‚Äî `libs/frontend/chat/src/lib/components/molecules/agent-card/cli-lane-usage-summary.component.ts`
+- `AnalyticsUsageStore` ‚Äî `libs/frontend/dashboard/src/lib/services/analytics-usage.store.ts`
+- `UsageDashboardComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-dashboard.component.ts`
+- `UsageCostSummaryComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-cost-summary.component.ts`
+- `UsageCostQualityComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-cost-quality.component.ts`
+- `UsageKpiStripComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-kpi-strip.component.ts`
+- `UsageBreakdownTableComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-breakdown-table.component.ts`
+- `UsageTopSessionsComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-top-sessions.component.ts`
+- `UsageCostDonutComponent` ‚Äî `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-cost-donut.component.ts`
 
 ## Proposed approach
 
@@ -143,7 +143,7 @@ Claude API pricing and usage:
 - Actual Grok plan JSON and Antigravity `/usage` output remain uncaptured. Help proves available invocation flags, not output shape, token-free handling, account ownership or successful authentication.
 - Grok account usage requires its background service; whether the installed command starts it safely is untested. API-key users may still have no subscription plan to report after adding the probe.
 - The exact earlier Antigravity failure and remaining backoff were not determined. Avoid clearing backoff blindly or recording stale output with a new observation timestamp.
-- No GLM quota source was found in current reader registration. Clarify whether ìGlm sourceî means another branch, a provider integration outside quota, or GLM running through Ollama Cloud.
+- No GLM quota source was found in current reader registration. Clarify whether ‚ÄúGlm source‚Äù means another branch, a provider integration outside quota, or GLM running through Ollama Cloud.
 - No named profile IDs, secrets or credential payloads were inspected. Account storage/certification on CLI hosts and idle-profile OAuth token refresh need implementation-specific decisions.
 - Decide whether API eligibility should be based on a configured local spend budget, actual provider rate-limit headers, or permissive unknown-with-spend. Ptah-observed spend cannot prove account-wide credit availability.
 - Direct Anthropic current model prices, long-context/cache TTL/service-tier coverage and administrative usage/billing API permissions need authoritative verification during implementation. This report establishes repository gaps rather than asserting new prices.
