@@ -221,7 +221,7 @@ export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
     min: 100_000,
     max: 5_000_000,
     integer: true,
-    default: 150_000,
+    default: 750_000,
     apply: 'live',
   },
   // Codex agents. Read on each Codex spawn.
