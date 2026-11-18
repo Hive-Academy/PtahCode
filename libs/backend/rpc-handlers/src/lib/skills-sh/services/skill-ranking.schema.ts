@@ -22,7 +22,7 @@ export function skillRankingItemSchema(labels: readonly string[]) {
     })
     .transform(({ order, reason }) => ({
       order: [...new Set([...order, ...labels])],
-      ...(reason === undefined ? {} : { reason }),
+      reason,
     }));
 }
 
