@@ -278,7 +278,7 @@ describe('SessionBudgetSettingsComponent', () => {
     ).toBeNull();
   });
 
-  it('keeps only long help in popovers and gives every grid field a hint', async () => {
+  it('keeps the full help in popovers and a range-only hint below each number field', async () => {
     await create();
     const fields = [
       {
@@ -319,14 +319,18 @@ describe('SessionBudgetSettingsComponent', () => {
     ] as const;
     for (const setting of fields) {
       const row = field(setting.key).closest('ptah-field');
-      const longHelp = setting.key === 'handoffAfterCompactions';
+      // Token and cost help only repeats the label; every other field keeps its full help in the popover.
+      const longHelp = setting.key !== 'tokens' && setting.key !== 'usd';
       expect(row?.querySelector(`button[aria-label="More about ${setting.label}"]`) !== null).toBe(longHelp);
       if (longHelp) {
         const info = row?.querySelector<HTMLElement>('.sr-only[id^="ptah-field-info-"]');
         expect(info?.textContent).toBe(setting.help);
         expect(field(setting.key).getAttribute('aria-describedby')?.split(' ')).toContain(info?.id);
+        row?.querySelector<HTMLButtonElement>(`button[aria-label="More about ${setting.label}"]`)?.click();
+        fixture.detectChanges();
+        expect(row?.querySelector('.ptah-field__info-panel')?.textContent?.trim()).toBe(setting.help);
       }
-      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toContain(`Range: ${SESSION_BUDGET_SETTINGS[setting.key].min.toLocaleString('en-US')} to ${SESSION_BUDGET_SETTINGS[setting.key].max.toLocaleString('en-US')}.`);
+      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(`Range: ${SESSION_BUDGET_SETTINGS[setting.key].min.toLocaleString('en-US')} to ${SESSION_BUDGET_SETTINGS[setting.key].max.toLocaleString('en-US')}.`);
       const suffix = row?.querySelector('[ptahFieldTrailing]');
       expect(suffix?.classList.contains('shrink-0')).toBe(true);
       expect(suffix?.getAttribute('aria-hidden')).toBe('true');
@@ -608,9 +612,9 @@ describe('SessionBudgetSettingsComponent', () => {
             field('tightenWindowTokens')
               .getAttribute('aria-describedby')
               ?.split(' ')
-              .find((id) => id.startsWith('ptah-field-description-')),
+              .find((id) => id.startsWith('ptah-field-info-')),
         )?.textContent,
-      ).toMatch(/Advisory until set/i);
+      ).toBe('Advisory only until set; then lowers the compact window.');
       await enter('tightenWindowTokens', '');
       expect(writes()).toEqual([
         { key: 'sessionBudget.tightenWindowTokens', value: null },

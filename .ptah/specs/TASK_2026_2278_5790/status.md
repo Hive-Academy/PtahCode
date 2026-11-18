@@ -87,3 +87,12 @@ PR #1429, head 56df676881741c80fff4db4ea17d931fb153f6d9. All 5 coordinator findi
 - New shot checks: 2 columns at 1168. Save is centred (within 2 px) on the custom field box. The Voice select is not narrower than the custom row.
 - Checks: focused jest 93 PASS. Full gate (chat, ptah-electron-e2e, webview-e2e-harness, ui-class-audit) PASS with no test failure. typecheck-templates PASS. Electron after shot spec 1 passed.
 - Not merged. Only the coordinator merges PR #1429.
+
+## Report 5 — full help back in the popovers (2026-11-18)
+
+- Correction: my earlier decision table gave shortened texts as the help, not the real `help` strings. That removed information from the UI.
+- Fix: Fallback weighted tokens ("Used when model pricing is unavailable."), Tighten at ("Starts tightening; stays below Handoff."), Handoff at ("Offers to wrap up and hand off to a new session.") and Compact window ("Advisory only until set; then lowers the compact window.") have the info icon with the full original help. Their hint is the range only. The short `hint` strings are removed. Handoff after compactions is unchanged (popover). Token budget and Cost budget have no info (accepted).
+- Wide fields in the 2-column range stay the same three: Fallback weighted tokens, Compact window, Handoff after compactions. With the unit and the info icon, their labels do not fit one 232 px track. The grid has no empty cell, no cut label, and equal row gaps (shot checks pass).
+- Budget unit / Token measure: unchanged (short hint, full help in the sr-only help paragraphs). An info icon there would make "Weighted session tokens" narrower again.
+- Specs: the budget spec opens each info popover and checks the full help text, the sr-only info text and `aria-describedby`.
+- Checks: budget spec 50 PASS; tsc chat lib PASS; eslint 0 errors. Full gate (chat, ptah-electron-e2e, webview-e2e-harness, ui-class-audit) PASS. typecheck-templates PASS. Electron after shot spec 1 passed on the final code.

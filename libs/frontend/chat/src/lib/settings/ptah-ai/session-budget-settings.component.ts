@@ -84,9 +84,8 @@ interface NumberField {
   readonly key: NumberKey;
   readonly label: string;
   readonly help: string;
-  readonly hint?: string;
   readonly info?: boolean;
-  /** Label or hint too long for one two-column track: the field spans both columns there. */
+  /** Label (with unit and info icon) too long for one two-column track: the field spans both columns there. */
   readonly wide?: boolean;
 }
 
@@ -105,25 +104,26 @@ const NUMBER_FIELDS: readonly NumberField[] = [
     key: 'fallbackWeightedTokens',
     label: 'Fallback weighted tokens',
     help: 'Used when model pricing is unavailable.',
-    hint: 'Without pricing.',
+    info: true,
     wide: true,
   },
   {
     key: 'tightenPercent',
     label: 'Tighten at (%)',
     help: 'Starts tightening; stays below Handoff.',
-    hint: 'Below Handoff.',
+    info: true,
   },
   {
     key: 'handoffPercent',
     label: 'Handoff at (%)',
     help: 'Offers to wrap up and hand off to a new session.',
+    info: true,
   },
   {
     key: 'tightenWindowTokens',
     label: 'Compact window (tokens)',
     help: 'Advisory only until set; then lowers the compact window.',
-    hint: 'Advisory until set.',
+    info: true,
     wide: true,
   },
   {
@@ -327,7 +327,7 @@ function storedNumberIsValid(
                     class="w-full min-w-0"
                     [class.session-budget-wide]="field.wide"
                     [label]="field.label"
-                    [hint]="(field.hint ? field.hint + ' ' : '') + 'Range: ' + range(field.key) + '.'"
+                    [hint]="'Range: ' + range(field.key) + '.'"
                     [info]="field.info ? field.help : null"
                     [error]="errors()[field.key] ?? null"
                     [errorTestId]="'session-budget-' + field.key + '-error'"
