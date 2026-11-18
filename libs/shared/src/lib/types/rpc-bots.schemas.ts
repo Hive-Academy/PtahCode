@@ -186,6 +186,14 @@ export const BotsListParamsSchema = z.strictObject({
 });
 export const BotsListResultSchema = BotAvailabilitySchema.extend({
   summaries: z.array(BotSummarySchema),
+  unidentifiedRowCount: z.number().int().nonnegative(),
+  unreadable: z.array(
+    z.strictObject({
+      id: BotIdSchema,
+      schemaVersion: z.number().int().positive().optional(),
+      diagnostics: z.array(BotDiagnosticSchema).min(1),
+    }),
+  ),
   archivedCount: z.number().int().nonnegative(),
 });
 export const BotsGetParamsSchema = z.strictObject({

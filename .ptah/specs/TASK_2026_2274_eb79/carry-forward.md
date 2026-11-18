@@ -11,3 +11,5 @@ named batch.
 | B04 review #7 | The 20 MiB quota covers staged images only. Claimed images have no total bound. Record the limit in the B06 design and think about a per-bot image cap at claim. | B06 |
 | B04 decision 6 | `SqliteBotRepository.configure({ now })` sets the clock. Composition uses the default `Date.now`. | B10, B11 |
 | B04 re-review N1 | `revisions()` returns `BotRevision \| InvalidBotRevision`. Narrow with `'definitionJson' in row` before reading. | B06 |
+| B06 report | ID-based application methods take the current workspace root as a separate argument (the wire params carry no scope). B08 supplies the open workspace root from the host; never trust a renderer path. | B08, U03 |
+| B06 report | `bots:list` returns `unreadable` items (id, version, diagnostics) and `unidentifiedRowCount` beside valid `summaries`. The renderer shows unreadable items as item diagnostics with no actions, and the count as one notice. | B08, U03, U04 |

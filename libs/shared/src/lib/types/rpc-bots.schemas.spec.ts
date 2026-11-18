@@ -15,6 +15,7 @@ import {
   BotRuntimeSchema,
   BotsCreateParamsSchema,
   BotsListParamsSchema,
+  BotsListResultSchema,
   BotsRpcSchemas,
   BotsUpdateParamsSchema,
 } from './rpc-bots.schemas';
@@ -309,4 +310,112 @@ describe('bots contracts', () => {
         .success,
     ).toBe(false);
   });
+  it('accepts safe unreadable identities and diagnostics alongside valid summaries', () => {
+    const result = {
+      executionAvailable: false,
+      summaries: [
+        {
+          id,
+          revision: 1,
+          name: editable.name,
+          description: editable.description,
+          scope: editable.scope,
+          enabled: false,
+          runtime: editable.runtime,
+          archivedAt: null,
+          updatedAt: 0,
+        },
+      ],
+      archivedCount: 0,
+      unidentifiedRowCount: 0,
+      unreadable: [
+        {
+          id,
+          schemaVersion: 99,
+          diagnostics: [
+            {
+              code: 'BOT_SCHEMA_UNSUPPORTED',
+              message: 'Unsupported schema.',
+              severity: 'error',
+            },
+          ],
+        },
+      ],
+    };
+    expect(BotsListResultSchema.parse(result)).toEqual(result);
+    expect(
+      BotsListResultSchema.safeParse({
+        ...result,
+        unreadable: [{ id, diagnostics: result.unreadable[0].diagnostics }],
+      }).success,
+    ).toBe(true);
+  });
+  it.each([undefined, []])(
+    'refuses unreadable items without diagnostics: %j',
+    (diagnostics) => {
+      expect(
+        BotsListResultSchema.safeParse({
+          executionAvailable: false,
+          summaries: [],
+          archivedCount: 0,
+          unidentifiedRowCount: 0,
+          unreadable: [{ id, diagnostics }],
+        }).success,
+      ).toBe(false);
+    },
+  );
+  it.each(['raw', 'definitionJson', 'instructions'])(
+    'refuses extra unreadable item key %s',
+    (key) => {
+      expect(
+        BotsListResultSchema.safeParse({
+          executionAvailable: false,
+          summaries: [],
+          archivedCount: 0,
+          unidentifiedRowCount: 0,
+          unreadable: [
+            {
+              id,
+              diagnostics: [
+                {
+                  code: 'BOT_SCHEMA_UNSUPPORTED',
+                  message: 'Invalid snapshot.',
+                  severity: 'error',
+                },
+              ],
+              [key]: 'private',
+            },
+          ],
+        }).success,
+      ).toBe(false);
+    },
+  );
+  it.each([0, 2])(
+    'accepts unidentified row count %i',
+    (unidentifiedRowCount) => {
+      expect(
+        BotsListResultSchema.parse({
+          executionAvailable: false,
+          summaries: [],
+          unreadable: [],
+          archivedCount: 0,
+          unidentifiedRowCount,
+        }).unidentifiedRowCount,
+      ).toBe(unidentifiedRowCount);
+    },
+  );
+  it.each([-1, 1.5, undefined])(
+    'refuses invalid unidentified row count %j',
+    (unidentifiedRowCount) => {
+      expect(
+        BotsListResultSchema.safeParse({
+          executionAvailable: false,
+          summaries: [],
+          unreadable: [],
+          archivedCount: 0,
+          unidentifiedRowCount,
+        }).success,
+      ).toBe(false);
+    },
+  );
 });
