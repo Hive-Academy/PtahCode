@@ -3,6 +3,7 @@
   label="Lanes"
   density="compact"
   [wideDetail]="true"
+  [attr.data-model-column]="modelColumn()"
   [collapseBelow]="950"
   data-testid="cli-provider-grid"
 >
@@ -12,6 +13,9 @@
       <col class="lane-order" />
       <col />
       <col class="lane-status" />
+      @if (modelColumn()) {
+        <col class="lane-model" />
+      }
       <col class="lane-enabled" />
       <col class="lane-expander" />
     </colgroup>
@@ -34,7 +38,7 @@
       <th scope="col">Status</th>
       <th scope="col" ptahCollapsible>Permission</th>
       <th scope="col" ptahCollapsible>Network</th>
-      <th scope="col" ptahCollapsible>Model</th>
+      <th scope="col" [hidden]="table.collapsed() && !modelColumn()">Model</th>
       <th scope="col">Enabled</th>
       <th scope="col" class="lane-expander">
         <span class="sr-only">Details</span>
@@ -94,7 +98,7 @@
             [collapsed]="table.collapsed()"
             (installGuideRequested)="recover(row)"
           />
-          @if (table.collapsed()) {
+          @if (table.collapsed() && !modelColumn()) {
             <ng-container
               [ngTemplateOutlet]="modelEffort"
               [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
@@ -249,7 +253,7 @@
           }
         </td>
         <td
-          ptahCollapsible
+          [hidden]="table.collapsed() && !modelColumn()"
           [attr.title]="modelOf(row).title"
           data-testid="cli-matrix-model"
           class="ptah-table-control-cell"
@@ -321,7 +325,7 @@
                     trigger
                     type="button"
                     ptahButton
-                    variant="ghost"
+                    [variant]="place === 'detail' ? 'outline' : 'ghost'"
                     size="xs"
                     density="compact"
                     data-popover-kind="effort"
@@ -334,7 +338,8 @@
                     [title]="effortOf(row)"
                     (click)="togglePopover(row, 'effort', place)"
                   >
-                    {{ effortOf(row) }}
+                    {{ place === 'detail' ? 'Effort: ' : ''
+                    }}{{ effortOf(row) }}
                   </button>
                   @if (isOpen(row, 'effort', place)) {
                     <ptah-cli-model-effort-popover
@@ -349,7 +354,7 @@
               <span class="sr-only" data-testid="lanes-effort-na"></span>
             </span>
           </ng-template>
-          @if (!table.collapsed()) {
+          @if (!table.collapsed() || modelColumn()) {
             <ng-container
               [ngTemplateOutlet]="modelEffort"
               [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
@@ -387,7 +392,10 @@
         [ptahDetailRow]="detailRowId() === row.id"
         [id]="'lane-detail-' + row.id"
       >
-        <td ptahDetailCell [colspan]="table.collapsed() ? 5 : 8">
+        <td
+          ptahDetailCell
+          [colspan]="table.collapsed() ? (modelColumn() ? 6 : 5) : 8"
+        >
           @if (detailRowId() === row.id) {
             <ptah-lanes-table-detail
               [row]="row"

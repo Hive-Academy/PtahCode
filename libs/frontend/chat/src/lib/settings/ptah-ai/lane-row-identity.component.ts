@@ -104,7 +104,8 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
     ptah-lane-row-identity[data-collapsed='true']
       .ptah-table-row-title-primary[class] {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: auto auto auto;
+      justify-content: start;
       align-items: center;
     }
     ptah-lane-row-identity[data-collapsed='true'] ptah-lane-default-warning {
@@ -116,7 +117,7 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
       display: none;
     }
     ptah-lane-row-identity[data-collapsed='true'] .ptah-table-row-title-name {
-      white-space: normal;
+      white-space: nowrap;
       overflow: visible;
       overflow-wrap: normal;
       word-break: normal;

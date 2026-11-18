@@ -1,5 +1,13 @@
 # Status — TASK_2026_2266_a6fd (child D), PR #1419
 
+## Update (session 4, final push)
+Coordinator: ptah-ptah-extension-design-epic-coordina-0ffed60000psk2rrprrea04.
+PR #1419 head 2455296e1ad6be0a0b5abb8b30eeb24ca591effe (origin/main 1790df54 merged). CI watcher running.
+Commits since 3546f9bb: 0436f17c0 L11 polish, e494bf3e7 merge 8826c726 (baseline by fresh audit run), 790d6f6e7 L12 webview-e2e fixes, 3b9cacc5d L13 compact fixes, d99279cfc merge 1790df54, 2455296e1 iter11 shots.
+webview-e2e fixes: 7 product fixes (orchestration:246, :516; visual:900, :887, :909, :1345, :1047), 2 spec changes for approved design changes (orchestration:382 six Status-cell menu items, exact count; providers:227 ptah-select label with auth modality). No limit raised. Details: L12-e2e-report.md.
+Checks on merged head: lint+typecheck 8/8 PASS, typecheck-templates PASS, ui-class-audit 0 over (885/609), iter11 shots PASS, core tests PASS; chat tests 1 FAIL in session-auto-handoff-coordinator.service.spec.ts (unchanged from origin/main, came with #1423, fails alone too) — main defect, not this PR.
+Shots: docs/design-system/settings/gate/1419/*-after.jpg (iter11); raw .ptah/specs/TASK_2026_2266_a6fd/screens/iter11/.
+
 ## Update (session 4, later)
 Coordinator: ptah-ptah-extension-design-epic-coordina-0ffed60000acw2rrgvdnt1b (new).
 - CI of 3546f9bb: webview-e2e FAIL (17 failed, 9 distinct settings scenarios; passes on main). Log: ci-webview-e2e-3546f9bb.txt.

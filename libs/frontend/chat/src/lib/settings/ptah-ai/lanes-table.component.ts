@@ -87,6 +87,8 @@ export type LaneTableRow = CliMatrixRow & {
   templateUrl: './lanes-table.component.html',
 })
 export class LanesTableComponent {
+  /** Middle tier is based on the actual pane, never the app viewport. */
+  protected readonly modelColumn = signal(false);
   protected recover(row: LaneTableRow): void {
     if (row.status.kind === 'not-installed') {
       this.showDetail(row, 'install');
@@ -213,6 +215,14 @@ export class LanesTableComponent {
     );
   }
   constructor() {
+    afterNextRender(() => {
+      if (typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(([entry]) => {
+        this.modelColumn.set(entry.contentRect.width >= 640);
+      });
+      observer.observe(this.element.nativeElement);
+      this.destroyRef.onDestroy(() => observer.disconnect());
+    });
     // The UI order component restores focus after a move. Suppress its focus tooltip
     // for that return, as the policy order editor does when its popover closes.
     const onOrderFocus = (event: FocusEvent): void => {

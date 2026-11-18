@@ -85,17 +85,46 @@ interface InlineAction {
     .connection-face {
       display: grid;
       grid-template-columns: auto minmax(7rem, 1fr) minmax(0, auto);
-      gap: var(--ptah-gap-inline);
+      column-gap: var(--ptah-gap-inline);
+      row-gap: 0;
     }
     .connection-provenance > span,
     .connection-provenance [data-testid='card-subtitle'] {
       display: inline;
     }
+    .connection-face > div:first-of-type {
+      display: contents;
+    }
+    .connection-face [data-testid='provider-name'] {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .connection-face > span {
+      grid-row: 1 / 3;
+    }
+    .connection-face > div:last-child {
+      grid-column: 3;
+      grid-row: 1;
+    }
+    .connection-face
+      > div:last-child
+      button[data-ptah-button]:is(.btn, #ptah-button) {
+      height: var(--ptah-control-h-xs);
+      min-height: var(--ptah-control-h-xs);
+      padding-block: 0;
+    }
     .connection-provenance {
-      display: -webkit-box;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 2;
-      overflow: hidden;
+      grid-column: 2 / -1;
+      grid-row: 2;
+      white-space: normal;
+      overflow-wrap: normal;
+    }
+    .connection-provenance [data-testid='card-subtitle'],
+    .connection-provenance [data-testid='used-by-segment'] {
+      overflow: visible;
+      white-space: normal;
+      text-overflow: clip;
+      -webkit-line-clamp: unset;
     }
   `,
   template: `
@@ -158,13 +187,13 @@ interface InlineAction {
                 data-testid="used-by-segment"
               >
                 @if (subtitle()) {
-                  <span aria-hidden="true">&#183; </span>
+                  <span aria-hidden="true">&#32;&#183;&#160;</span>
                 }
                 <span data-testid="used-by-count"
                   >Used by {{ usedByCount() }}</span
                 >
                 @if (usedByLabels().length) {
-                  <span aria-hidden="true"> · </span>
+                  <span aria-hidden="true">&#32;&#183;&#160;</span>
                   <span
                     [attr.title]="usageOverflows() ? usedForText() : null"
                     data-testid="used-for"

@@ -160,7 +160,7 @@ describe('LanesTableComponent visual presentation', () => {
             name +
             '"]',
         );
-        expect(effort?.textContent?.trim()).toBe('default');
+        expect(effort?.textContent?.trim()).toBe('Effort: default');
         effort?.click();
         fixture.detectChanges();
         expect(effort?.getAttribute('aria-expanded')).toBe('true');
@@ -381,6 +381,30 @@ describe('LanesTableComponent visual presentation', () => {
     triggers?.[0].click();
     fixture.detectChanges();
     expect(triggers?.[0].getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('puts one reachable row model in its own column in a 742px container', async () => {
+    const { fixture, host } = await mount([system('codex')]);
+    const table = fixture.debugElement.query(By.directive(PtahTableComponent))
+      .componentInstance as PtahTableComponent;
+    table['width'].set(742);
+    fixture.componentInstance['modelColumn'].set(true);
+    fixture.detectChanges();
+    const row = q(host, '[data-testid="cli-provider-card-codex"]');
+    const models = row?.querySelectorAll('[data-popover-kind="model"]');
+    expect(models).toHaveLength(1);
+    expect(
+      models?.[0].closest('[data-testid="cli-matrix-model"]'),
+    ).not.toBeNull();
+    expect(
+      q(host, '[data-testid="lanes-colgroup-collapsed"]')?.children,
+    ).toHaveLength(6);
+    q(host, 'ptah-table-row-expander button')?.click();
+    fixture.detectChanges();
+    expect(q(host, '#lane-detail-codex td')?.getAttribute('colspan')).toBe('6');
+    expect(
+      q(host, '#lane-detail-codex [data-popover-kind="model"]'),
+    ).not.toBeNull();
   });
 
   it('keeps compact names and kind together before the separate model line', async () => {

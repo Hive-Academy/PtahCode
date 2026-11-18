@@ -349,3 +349,111 @@ ptah-lanes-table
   text-overflow: clip;
   text-align: start;
 }
+
+/* Compact budget: 48 order + 112 status + 32 enabled + 40 expander.
+   At 358px this leaves 126px for the full lane name. */
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-order {
+  width: 3rem;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-status {
+  width: 7rem;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-enabled {
+  width: 2rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > :is(thead, tbody)
+  > tr
+  > :first-child {
+  padding-inline: var(--ptah-space-2);
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .ptah-status-text {
+  white-space: nowrap;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  > ptah-lanes-table-status {
+  max-width: 100%;
+  margin: 0;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]:has(.lane-row-actions > button)
+  ptah-table-row-actions {
+  top: auto;
+  bottom: var(--ptah-space-1);
+  transform: none;
+}
+ptah-lanes-table td[hidden],
+ptah-lanes-table th[hidden] {
+  display: none;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true'][data-model-column='true']
+  .lane-status {
+  width: 13rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true'][data-model-column='true']
+  .lane-model {
+  width: 10rem;
+}
+ptah-lanes-table
+  .ptah-table[data-model-column='true']
+  ptah-lane-row-identity[data-collapsed='true']
+  .ptah-table-row-title-primary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: start;
+}
+ptah-lanes-table
+  .ptah-table[data-model-column='true']
+  ptah-lane-row-identity[data-collapsed='true']
+  .ptah-table-row-title-kind {
+  grid-column: auto;
+  grid-row: auto;
+}
+ptah-lanes-table
+  .ptah-table[data-model-column='true']
+  [data-lane-status]
+  > ptah-lanes-table-status {
+  display: inline-flex;
+}
+ptah-lanes-table
+  .ptah-table[data-model-column='true']
+  [data-lane-status]
+  .lane-row-actions
+  > button {
+  display: inline-block;
+}
+ptah-lanes-table
+  .ptah-table[data-model-column='true']
+  [data-lane-status]
+  > .lane-row-actions {
+  display: inline-flex;
+  position: static;
+  transform: none;
+}
+ptah-lanes-table
+  .ptah-table[data-model-column='true']
+  [data-lane-status]
+  .lane-row-actions
+  ptah-table-row-actions {
+  position: absolute;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+ptah-lanes-table
+  .lane-default-value
+  [data-popover-kind='effort'][data-ptah-button]:is(.btn, #ptah-button) {
+  border: var(--ptah-border-width) solid var(--ptah-card-border-faint);
+  border-radius: var(--ptah-space-1);
+  padding-inline: var(--ptah-space-1);
+}
