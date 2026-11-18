@@ -104,7 +104,7 @@ describe('SkillRankingService.rank', () => {
     });
     const result = await service.rank({
       ...request,
-      items: { ...request.items, next: request.items.angular },
+      items: { ...request.items, next: request.items['angular'] },
     });
     expect(result.items['angular']).toEqual({
       order: ['a', 'b'],
@@ -123,7 +123,7 @@ describe('SkillRankingService.rank', () => {
     });
     const result = await service.rank({
       ...request,
-      items: { ...request.items, next: request.items.angular },
+      items: { ...request.items, next: request.items['angular'] },
     });
     expect(
       JSON.parse(run.mock.calls[0][0].execute.prompt).items,
@@ -141,7 +141,7 @@ describe('SkillRankingService.rank', () => {
       const { service, run } = setup();
       const baseline = await service.rank(request);
       const modified = structuredClone(request);
-      modified.items.angular.candidates[0].description = injection;
+      modified.items['angular'].candidates[0].description = injection;
       const result = await service.rank(modified);
       expect(run.mock.calls[1][0].execute.prompt).not.toMatch(
         /<img|onerror|<script|javascript:/i,
@@ -152,7 +152,7 @@ describe('SkillRankingService.rank', () => {
   it('constrains prompt metadata and requests a tool-free item-scoped JSON schema', async () => {
     const { service, run } = setup();
     const modified = structuredClone(request);
-    modified.items.angular.candidates[0].description =
+    modified.items['angular'].candidates[0].description =
       'https://private.invalid D:\\secret\\file /private/file ' +
       'x'.repeat(250);
     await service.rank({
@@ -190,7 +190,7 @@ describe('SkillRankingService.rank', () => {
     await jest.advanceTimersByTimeAsync(2999);
     expect(run).not.toHaveBeenCalled();
     await jest.advanceTimersByTimeAsync(1);
-    expect((await pending).items.angular.rankedBy).toBe('session-model');
+    expect((await pending).items['angular'].rankedBy).toBe('session-model');
   });
   it('fires the session deadline at exactly 15 seconds and preserves heuristic order', async () => {
     const { service, run } = setup();
@@ -203,14 +203,14 @@ describe('SkillRankingService.rank', () => {
     await jest.advanceTimersByTimeAsync(14999);
     expect(settled).toBe(false);
     await jest.advanceTimersByTimeAsync(1);
-    expect((await pending).items.angular).toEqual({
+    expect((await pending).items['angular']).toEqual({
       order: ['a', 'b'],
       rankedBy: 'heuristic',
     });
   });
   it('retains heuristic order without either model', async () => {
     expect(
-      (await setup(false, false).service.rank(request)).items.angular.rankedBy,
+      (await setup(false, false).service.rank(request)).items['angular'].rankedBy,
     ).toBe('heuristic');
   });
   it('caps nonheuristic reasons below 140 characters', async () => {
@@ -221,7 +221,7 @@ describe('SkillRankingService.rank', () => {
       },
     });
     const result = await service.rank(request);
-    expect(result.items.angular.order).toEqual(['b', 'a']);
-    expect(result.items.angular.reason).toHaveLength(139);
+    expect(result.items['angular'].order).toEqual(['b', 'a']);
+    expect(result.items['angular'].reason).toHaveLength(139);
   });
 });
