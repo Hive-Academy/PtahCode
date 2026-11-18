@@ -155,8 +155,8 @@ export async function readAntigravityOAuthQuota(
             let body: unknown;
             try { body = await bounded(boundedJson(refreshed)); }
             catch (error: unknown) {
-              if (controller.signal.aborted) return failure('timeout');
               // degradation-audit: reported — retain the known HTTP status when its body is unreadable.
+              if (controller.signal.aborted) return failure('timeout');
               logger?.debug('[PlanUsage] OAuth refresh error body unavailable', { cause: error instanceof SyntaxError ? 'schema-mismatch' : 'request-failed', httpStatus: 400 });
             }
             if (z.object({ error: z.string() }).safeParse(body).data?.error === 'invalid_grant') {
@@ -195,9 +195,9 @@ export async function readAntigravityOAuthQuota(
               windowSetEstablished: true, windows };
             lastFailure = failure('schema-mismatch');
           } catch (error: unknown) {
+            // degradation-audit: reported — another endpoint may still provide quota.
             if (controller.signal.aborted || (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError'))) return failure('timeout');
             lastFailure = failure(error instanceof SyntaxError || error instanceof z.ZodError ? 'schema-mismatch' : 'request-failed');
-            // degradation-audit: reported — another endpoint may still provide quota.
             logger?.debug('[PlanUsage] OAuth endpoint failed; trying next endpoint', { cause: lastFailure.sourceFailures?.[0]?.cause });
           }
         }
