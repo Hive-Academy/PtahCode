@@ -47,7 +47,9 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
         throw error;
       }
     });
-    this.pending = write.catch(() => { /* Caller receives rejection; keep queue drainable. */ });
+    // degradation-audit: reported - the caller receives the same rejection
+    // through `return write`; this branch only keeps the write queue drainable.
+    this.pending = write.catch(() => undefined);
     return write;
   }
   recordUsage(event: SessionUsageContribution): Promise<void> {
