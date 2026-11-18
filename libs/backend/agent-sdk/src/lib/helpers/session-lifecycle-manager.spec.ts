@@ -1601,6 +1601,34 @@ describe('SessionLifecycleManager queue identity on interrupt', () => {
 });
 
 describe('SessionLifecycleManager cached context usage', () => {
+  it.each(['tab-1', 'real-id'])('invalidates every alias only after a successful model change via %s', async (id) => {
+    const release = jest.fn();
+    const { manager } = makeHarness({ contextUsagePort: {
+      getLast: jest.fn(), readAtTurnEnd: jest.fn(), release, rekey: jest.fn(),
+    } });
+    await manager.executeQuery({
+      sessionId: 'tab-1' as SessionId,
+      sessionConfig: createSessionConfig({ model: 'model-a' }),
+    });
+    manager.bindRealSessionId('tab-1', 'real-id');
+    const record = manager.find(id);
+    if (!record?.query) throw new Error('Expected a live query');
+    const setModel = jest.spyOn(record.query, 'setModel');
+    setModel.mockRejectedValueOnce(new Error('model rejected'));
+    await expect(manager.setSessionModel(id as SessionId, 'model-b')).rejects.toThrow('model rejected');
+    expect(release).not.toHaveBeenCalled();
+    await manager.setSessionModel(id as SessionId, 'model-a');
+    expect(release).not.toHaveBeenCalled();
+    setModel.mockImplementationOnce(async () => {
+      expect(release).not.toHaveBeenCalled();
+    });
+    await manager.setSessionModel(id as SessionId, 'model-b');
+    expect(release.mock.calls.map(([key]) => key).sort()).toEqual(['real-id', 'tab-1']);
+    release.mockClear();
+    await manager.setSessionModel(id as SessionId, 'model-b');
+    expect(release).not.toHaveBeenCalled();
+  });
+
   it('returns no reading when the runtime reader is absent', () => {
     expect(makeHarness().manager.getLastContextUsage('tab-1')).toBeUndefined();
   });

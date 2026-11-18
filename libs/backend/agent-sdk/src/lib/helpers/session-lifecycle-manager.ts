@@ -1043,10 +1043,16 @@ export class SessionLifecycleManager {
    */
   async setSessionModel(sessionId: SessionId, model: string): Promise<void> {
     const record = this._registry.find(sessionId as string);
+    const previousModel = record?.currentModel;
     this.idleCompaction?.promptPrefixChanged(
       record?.realSessionId ?? (sessionId as string),
     );
-    return this._control.setSessionModel(sessionId, model);
+    await this._control.setSessionModel(sessionId, model);
+    if (record && record.currentModel !== previousModel) {
+      for (const key of new Set([sessionId, record.realSessionId, record.tabId])) {
+        if (key) this.contextUsagePort?.release(key);
+      }
+    }
   }
 
   async setSessionEffort(

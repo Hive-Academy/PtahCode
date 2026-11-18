@@ -74,8 +74,10 @@ import {
   type SessionStatsPrefix,
 } from './session-stats/session-stats-owner.service';
 import { SessionBudgetService } from './helpers/session-budget/session-budget.service';
+import { SessionLifecycleManager } from './helpers/session-lifecycle-manager';
+import { ContextUsagePort } from './helpers/compaction/context-usage.port';
+import { SessionEndCallbackRegistry } from './helpers/session-end-callback-registry';
 import type {
-  SessionLifecycleManager,
   StreamTransformer,
   SdkModuleLoader,
   SdkModelService,
@@ -3414,15 +3416,25 @@ describe('SdkAgentAdapter', () => {
       });
     });
 
-    it('promotes a default Claude session to handoff using its runtime threshold', async () => {
+    it.each([false, true])('uses fresh runtime thresholds for handoff after a model change: %s', async (changeModel) => {
       const h = makeAdapter();
       const arg = await startNewSession(h, undefined, true);
-      h.sessionLifecycle.getLastContextUsage.mockImplementation((id) =>
-        id === 'tab_1' ? {
-          totalTokens: 180_000, maxTokens: 1_000_000,
-          autoCompactThreshold: 300_000, source: 'sdk-getContextUsage',
-        } : undefined,
-      );
+      const port = new ContextUsagePort(asLogger(h.logger), new SessionEndCallbackRegistry(asLogger(h.logger)));
+      const record = { tabId: 'tab_1', realSessionId: REAL_ID, currentModel: 'model-a' };
+      const lifecycle = Object.assign(Object.create(SessionLifecycleManager.prototype), {
+        _registry: { find: () => record },
+        _control: { setSessionModel: async (_id: SessionId, model: string) => { record.currentModel = model; } },
+        contextUsagePort: port,
+      }) as SessionLifecycleManager;
+      h.sessionLifecycle.getLastContextUsage.mockImplementation((id) => lifecycle.getLastContextUsage(id));
+      const read = async (threshold: number) => {
+        for (const id of ['tab_1', REAL_ID]) {
+          await port.readAtTurnEnd(id, 'turn-1', {
+            getContextUsage: async () => ({ totalTokens: 180_000, maxTokens: 1_000_000, autoCompactThreshold: threshold, isAutoCompactEnabled: true }),
+          });
+        }
+      };
+      await read(changeModel ? 200_000 : 300_000);
       const service = new SessionBudgetService(
         asLogger(h.logger),
         { getConfig: () => ({ ...SESSION_BUDGET_DEFAULT_CONFIG, tokenMeasure: 'raw' }) },
@@ -3439,13 +3451,28 @@ describe('SdkAgentAdapter', () => {
       h.sessionBudget.recordCompaction.mockImplementation((id, sample) =>
         service.recordCompaction(id, sample),
       );
+      if (changeModel) {
+        await lifecycle.setSessionModel(REAL_ID as SessionId, 'model-b');
+        for (let count = 0; count < SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions; count++) {
+          await arg.onMessage?.({
+            type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+            compact_metadata: { trigger: 'auto', pre_tokens: 290_000, post_tokens: 150_000 },
+          } as SDKMessage);
+          arg.onCompactBoundary?.(REAL_ID as SessionId);
+          expect(h.sessionBudget.recordCompaction).toHaveBeenLastCalledWith(REAL_ID, {
+            postCompactionContextTokens: 150_000, effectiveAutoCompactWindowTokens: null,
+          });
+          expect(service.observe({ ...snapshot, revision: count + 2 })?.stage).toBe('normal');
+        }
+        await read(300_000);
+      }
       for (let count = 0; count < SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions; count++) {
         await arg.onMessage?.({
           type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
           compact_metadata: { trigger: 'auto', pre_tokens: 290_000, post_tokens: 150_000 },
         } as SDKMessage);
         arg.onCompactBoundary?.(REAL_ID as SessionId);
-        if (count < SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions - 1) {
+        if (!changeModel && count < SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions - 1) {
           expect(service.observe({ ...snapshot, revision: count + 2 })?.stage).toBe('normal');
         }
       }
@@ -3453,7 +3480,7 @@ describe('SdkAgentAdapter', () => {
         postCompactionContextTokens: 150_000, effectiveAutoCompactWindowTokens: 300_000,
       });
       expect(service.observe({ ...snapshot, revision: 10 })).toMatchObject({
-        stage: 'handoff', compactions: SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions,
+        stage: 'handoff', compactions: SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions * (changeModel ? 2 : 1),
       });
     });
 
