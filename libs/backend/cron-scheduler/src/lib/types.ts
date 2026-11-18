@@ -1,11 +1,13 @@
 /**
  * Public types for the cron scheduler.
  *
- * Schema authority: `libs/backend/persistence-sqlite/src/lib/migrations/0004_cron.sql`.
+ * Schema authority: `libs/backend/persistence-sqlite/src/lib/migrations/0004_cron.sql`
+ * plus the forward-only `0076_cron_job_creator.ts`.
  *  - `scheduled_jobs(id ULID, name, cron_expr, timezone DEFAULT 'UTC', prompt,
- *      workspace_root, enabled, created_at, updated_at, last_run_at, next_run_at)`
+ *      workspace_root, enabled, created_at, updated_at, last_run_at, next_run_at,
+ *      created_by_kind DEFAULT 'user', created_by_session_id)`
  *  - `job_runs(id ULID, job_id FK CASCADE, scheduled_for INTEGER, started_at,
- *      ended_at, status CHECK(...), result_summary, error_message,
+ *      ended_at, status CHECK(...), result_summary, error_message, session_id,
  *      UNIQUE(job_id, scheduled_for))`
  *
  * Time format: integer epoch milliseconds (matches existing Ptah convention —
@@ -19,11 +21,7 @@ import type { JobId, RunId } from '@ptah-extension/shared';
 
 /** Job run status. Mirrors the SQL CHECK constraint exactly. */
 export type JobRunStatus =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'skipped';
+  'pending' | 'running' | 'succeeded' | 'failed' | 'skipped';
 
 /**
  * Catchup policy per job — applied when {@link CatchupCoordinator} sees
@@ -33,6 +31,14 @@ export type JobRunStatus =
  *  - `all`: fire every missed slot up to {@link CronSchedulerOptions.catchupWindowMs}.
  */
 export type CatchupPolicy = 'none' | 'last' | 'all';
+
+/**
+ * Who created a job (issue #1400): the user (UI / RPC) or an agent session
+ * through the `ptah_cron_*` MCP tools. Rows written before migration 0076
+ * read as `{ kind: 'user' }`.
+ */
+export type CronJobCreator =
+  { kind: 'user' } | { kind: 'session'; sessionId: string };
 
 /** Persisted scheduled job row (returned by {@link IJobStore}). */
 export interface ScheduledJob {
@@ -49,6 +55,9 @@ export interface ScheduledJob {
   updatedAt: number;
   lastRunAt: number | null;
   nextRunAt: number | null;
+  createdBy: CronJobCreator;
+  /** Status of the most recent run (by `scheduled_for`), or null when none. */
+  lastRunStatus: JobRunStatus | null;
 }
 
 /** Persisted job-run row (returned by {@link IRunStore}). */
@@ -62,6 +71,8 @@ export interface JobRun {
   status: JobRunStatus;
   resultSummary: string | null;
   errorMessage: string | null;
+  /** SDK session id of a prompt run, or null (handler runs, old rows). */
+  sessionId: string | null;
 }
 
 /** Args for `IJobStore.create`. The store assigns id/timestamps/next_run_at. */
@@ -75,6 +86,8 @@ export interface CreateJobInput {
   enabled?: boolean;
   /** Pre-computed by the scheduler before insert. */
   nextRunAt: number | null;
+  /** Defaults to `{ kind: 'user' }` if omitted. */
+  createdBy?: CronJobCreator;
 }
 
 /**

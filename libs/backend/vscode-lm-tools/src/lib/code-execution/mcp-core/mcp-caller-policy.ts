@@ -9,7 +9,10 @@
  * after this one sets it to false; missing tokens then fail closed.
  */
 
-import type { McpCallerCapability } from '@ptah-extension/platform-core';
+import type {
+  McpCallerBinding,
+  McpCallerCapability,
+} from '@ptah-extension/platform-core';
 
 /** Accept a POST with no token as read-only for one release. */
 export const MCP_LEGACY_UNTOKENED_READ_ONLY = true;
@@ -81,6 +84,13 @@ const AGENT_CONTROL_TOOLS: ReadonlySet<string> = new Set([
   'ptah_outcome_report',
   'ptah_run_check',
   'ptah_run_check_wait',
+  // Cron write tools: privileged callers only, and the permission handler
+  // asks the user before each call (agent-sdk CRON_MUTATING_TOOL_NAMES).
+  'ptah_cron_create',
+  'ptah_cron_update',
+  'ptah_cron_toggle',
+  'ptah_cron_delete',
+  'ptah_cron_run_now',
 ]);
 
 const TASK_GIT_TOOLS: ReadonlySet<string> = new Set([
@@ -101,7 +111,41 @@ const HARNESS_TOOLS: ReadonlySet<string> = new Set([
   'ptah_artifact_publish',
   'ptah_dashboard_propose_spec',
   'ptah_surface_update',
+  'ptah_cron_list',
+  'ptah_cron_get',
+  'ptah_cron_runs',
+  'ptah_cron_next_fire',
 ]);
+
+/**
+ * Cron tools that change scheduler state. A scheduled job runs a prompt later
+ * with nobody watching, so each of these calls needs a user approval.
+ */
+const CRON_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'ptah_cron_create',
+  'ptah_cron_update',
+  'ptah_cron_toggle',
+  'ptah_cron_delete',
+  'ptah_cron_run_now',
+]);
+
+export const MCP_CRON_WRITE_DENIED_MESSAGE =
+  'Scheduled jobs can only be created or changed from an interactive Ptah ' +
+  'chat session, where the user approves each change. This caller cannot ' +
+  'ask the user, so the call was not run.';
+
+/**
+ * True when `name` is a cron write tool and the caller's credential does not
+ * prove a host that asks the user first (`cronWriteApproval`). One-shot
+ * queries, CLI lanes, external clients and untokened callers are all denied,
+ * whatever their capability.
+ */
+export function isCronWriteDenied(
+  name: string,
+  binding: McpCallerBinding | undefined,
+): boolean {
+  return CRON_WRITE_TOOLS.has(name) && binding?.cronWriteApproval !== true;
+}
 
 /** Class of one tool name. Unknown names are `agent-control`. */
 export function toolClass(name: string): McpToolClass {

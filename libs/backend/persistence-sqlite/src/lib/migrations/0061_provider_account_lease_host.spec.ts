@@ -32,17 +32,24 @@ describe('migration 0061_provider_account_lease_host', () => {
 
   afterEach(() => db.close());
 
-  function lease(leaseId: string, hostPid?: number | null, hostMachine?: string | null): void {
+  function lease(
+    leaseId: string,
+    hostPid?: number | null,
+    hostMachine?: string | null,
+  ): void {
     if (hostPid === undefined) {
-      db.prepare(`INSERT INTO provider_account_run_leases
+      db.prepare(
+        `INSERT INTO provider_account_run_leases
         (lease_id, run_id, provider, profile_id, route_fingerprint, owner_id, acquired_at)
-        VALUES (?, ?, 'claude', NULL, 'fp-ambient', 'owner', 1)`).run(leaseId, 'run-' + leaseId);
+        VALUES (?, ?, 'claude', NULL, 'fp-ambient', 'owner', 1)`,
+      ).run(leaseId, 'run-' + leaseId);
       return;
     }
-    db.prepare(`INSERT INTO provider_account_run_leases
+    db.prepare(
+      `INSERT INTO provider_account_run_leases
       (lease_id, run_id, provider, profile_id, route_fingerprint, owner_id, acquired_at, host_pid, host_machine)
-      VALUES (?, ?, 'claude', NULL, 'fp-ambient', 'owner', 1, ?, ?)`)
-      .run(leaseId, 'run-' + leaseId, hostPid, hostMachine ?? null);
+      VALUES (?, ?, 'claude', NULL, 'fp-ambient', 'owner', 1, ?, ?)`,
+    ).run(leaseId, 'run-' + leaseId, hostPid, hostMachine ?? null);
   }
 
   it('registers 0061 immediately after 0060', () => {
@@ -52,18 +59,35 @@ describe('migration 0061_provider_account_lease_host', () => {
       name: '0061_provider_account_lease_host',
       sql,
     });
-    expect(Math.max(...MIGRATIONS.map((entry) => entry.version))).toBe(75);
+    expect(Math.max(...MIGRATIONS.map((entry) => entry.version))).toBe(76);
   });
 
   it('keeps legacy leases with no owning host and records owners on new rows', () => {
     lease('legacy');
     db.exec(sql);
     lease('owned', 4242, machine);
-    expect(db.prepare('SELECT lease_id, host_pid, host_machine, child_pid, lease_state FROM provider_account_run_leases ORDER BY lease_id').all())
-      .toEqual([
-        { lease_id: 'legacy', host_pid: null, host_machine: null, child_pid: null, lease_state: 'live' },
-        { lease_id: 'owned', host_pid: 4242, host_machine: machine, child_pid: null, lease_state: 'live' },
-      ]);
+    expect(
+      db
+        .prepare(
+          'SELECT lease_id, host_pid, host_machine, child_pid, lease_state FROM provider_account_run_leases ORDER BY lease_id',
+        )
+        .all(),
+    ).toEqual([
+      {
+        lease_id: 'legacy',
+        host_pid: null,
+        host_machine: null,
+        child_pid: null,
+        lease_state: 'live',
+      },
+      {
+        lease_id: 'owned',
+        host_pid: 4242,
+        host_machine: machine,
+        child_pid: null,
+        lease_state: 'live',
+      },
+    ]);
   });
 
   it.each([
@@ -78,6 +102,8 @@ describe('migration 0061_provider_account_lease_host', () => {
   it('rejects a non-positive child pid', () => {
     db.exec(sql);
     lease('owned', 4242, machine);
-    expect(() => db.prepare('UPDATE provider_account_run_leases SET child_pid = 0').run()).toThrow(/CHECK/);
+    expect(() =>
+      db.prepare('UPDATE provider_account_run_leases SET child_pid = 0').run(),
+    ).toThrow(/CHECK/);
   });
 });

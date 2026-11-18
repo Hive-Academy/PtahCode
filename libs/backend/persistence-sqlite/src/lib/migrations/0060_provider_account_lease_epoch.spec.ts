@@ -36,12 +36,24 @@ describe('migration 0060_provider_account_lease_epoch', () => {
 
   afterEach(() => db.close());
 
-  function profile(profileId: string, fingerprint: string, authEpoch = 0, routeRevision = 0): void {
-    db.prepare(`INSERT INTO provider_account_profiles
+  function profile(
+    profileId: string,
+    fingerprint: string,
+    authEpoch = 0,
+    routeRevision = 0,
+  ): void {
+    db.prepare(
+      `INSERT INTO provider_account_profiles
       (profile_id, provider, label, canonical_route, route_fingerprint,
        route_revision, auth_epoch, state, created_at, updated_at)
-      VALUES (?, 'claude', 'Work', ?, ?, ?, ?, 'signed-in', 1, 1)`)
-      .run(profileId, 'route-' + profileId, fingerprint, routeRevision, authEpoch);
+      VALUES (?, 'claude', 'Work', ?, ?, ?, ?, 'signed-in', 1, 1)`,
+    ).run(
+      profileId,
+      'route-' + profileId,
+      fingerprint,
+      routeRevision,
+      authEpoch,
+    );
   }
 
   function binding(
@@ -51,30 +63,42 @@ describe('migration 0060_provider_account_lease_epoch', () => {
     authEpoch: number,
     routeRevision: number,
   ): void {
-    db.prepare(`INSERT INTO provider_account_run_bindings
+    db.prepare(
+      `INSERT INTO provider_account_run_bindings
       (run_id, provider, profile_id, route_revision, route_fingerprint,
        auth_epoch, identity_kind, created_at)
-      VALUES (?, 'claude', ?, ?, ?, ?, 'known', 1)`)
-      .run(runId, profileId, routeRevision, fingerprint, authEpoch);
+      VALUES (?, 'claude', ?, ?, ?, ?, 'known', 1)`,
+    ).run(runId, profileId, routeRevision, fingerprint, authEpoch);
   }
 
-  function lease(leaseId: string, runId: string, profileId: string | null, fingerprint: string): void {
-    db.prepare(`INSERT INTO provider_account_run_leases
+  function lease(
+    leaseId: string,
+    runId: string,
+    profileId: string | null,
+    fingerprint: string,
+  ): void {
+    db.prepare(
+      `INSERT INTO provider_account_run_leases
       (lease_id, run_id, provider, profile_id, route_fingerprint, owner_id, acquired_at)
-      VALUES (?, ?, 'claude', ?, ?, 'owner-0001', 1)`)
-      .run(leaseId, runId, profileId, fingerprint);
+      VALUES (?, ?, 'claude', ?, ?, 'owner-0001', 1)`,
+    ).run(leaseId, runId, profileId, fingerprint);
   }
 
   function leases(): LeaseRow[] {
     return db
-      .prepare(`SELECT lease_id, auth_epoch, route_revision, lease_state
-        FROM provider_account_run_leases ORDER BY lease_id`)
+      .prepare(
+        `SELECT lease_id, auth_epoch, route_revision, lease_state
+        FROM provider_account_run_leases ORDER BY lease_id`,
+      )
       .all() as LeaseRow[];
   }
 
   function columns(table: string): string[] {
-    return (db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[])
-      .map((row) => row.name);
+    return (
+      db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as {
+        name: string;
+      }[]
+    ).map((row) => row.name);
   }
 
   it('registers 0060 immediately after 0059 as the maximum version', () => {
@@ -84,7 +108,7 @@ describe('migration 0060_provider_account_lease_epoch', () => {
       name: '0060_provider_account_lease_epoch',
       sql,
     });
-    expect(Math.max(...MIGRATIONS.map((entry) => entry.version))).toBe(75);
+    expect(Math.max(...MIGRATIONS.map((entry) => entry.version))).toBe(76);
   });
 
   it('adds lease epoch, route revision and state columns and a NULL identity_ref', () => {
@@ -94,9 +118,9 @@ describe('migration 0060_provider_account_lease_epoch', () => {
       expect.arrayContaining(['auth_epoch', 'route_revision', 'lease_state']),
     );
     expect(columns('provider_account_profiles')).toContain('identity_ref');
-    expect(db.prepare('SELECT identity_ref FROM provider_account_profiles').all()).toEqual([
-      { identity_ref: null },
-    ]);
+    expect(
+      db.prepare('SELECT identity_ref FROM provider_account_profiles').all(),
+    ).toEqual([{ identity_ref: null }]);
   });
 
   it('backfills legacy leases (a)-(e) and quarantines inconsistent rows without losing any', () => {
@@ -117,26 +141,63 @@ describe('migration 0060_provider_account_lease_epoch', () => {
     // (e) ambient lease whose run has a binding.
     binding('run-e', 'profile-a', 'fp-a', 4, 2);
     lease('lease-e', 'run-e', null, 'fp-a');
-    const bindingsBefore = db.prepare('SELECT * FROM provider_account_run_bindings ORDER BY run_id').all();
-    const profilesBefore = db.prepare('SELECT * FROM provider_account_profiles ORDER BY profile_id').all();
+    const bindingsBefore = db
+      .prepare('SELECT * FROM provider_account_run_bindings ORDER BY run_id')
+      .all();
+    const profilesBefore = db
+      .prepare('SELECT * FROM provider_account_profiles ORDER BY profile_id')
+      .all();
 
     db.exec(sql);
 
     expect(leases()).toEqual([
-      { lease_id: 'lease-a', auth_epoch: 0, route_revision: 0, lease_state: 'live' },
-      { lease_id: 'lease-b', auth_epoch: 4, route_revision: 2, lease_state: 'live' },
-      { lease_id: 'lease-c', auth_epoch: 0, route_revision: 0, lease_state: 'quarantined' },
-      { lease_id: 'lease-d', auth_epoch: 0, route_revision: 0, lease_state: 'quarantined' },
-      { lease_id: 'lease-e', auth_epoch: 0, route_revision: 0, lease_state: 'quarantined' },
+      {
+        lease_id: 'lease-a',
+        auth_epoch: 0,
+        route_revision: 0,
+        lease_state: 'live',
+      },
+      {
+        lease_id: 'lease-b',
+        auth_epoch: 4,
+        route_revision: 2,
+        lease_state: 'live',
+      },
+      {
+        lease_id: 'lease-c',
+        auth_epoch: 0,
+        route_revision: 0,
+        lease_state: 'quarantined',
+      },
+      {
+        lease_id: 'lease-d',
+        auth_epoch: 0,
+        route_revision: 0,
+        lease_state: 'quarantined',
+      },
+      {
+        lease_id: 'lease-e',
+        auth_epoch: 0,
+        route_revision: 0,
+        lease_state: 'quarantined',
+      },
     ]);
-    expect(db.prepare('SELECT * FROM provider_account_run_bindings ORDER BY run_id').all())
-      .toEqual(bindingsBefore);
     expect(
-      (db.prepare('SELECT * FROM provider_account_profiles ORDER BY profile_id').all() as Record<string, unknown>[])
-        .map(({ identity_ref, ...rest }) => {
-          expect(identity_ref).toBeNull();
-          return rest;
-        }),
+      db
+        .prepare('SELECT * FROM provider_account_run_bindings ORDER BY run_id')
+        .all(),
+    ).toEqual(bindingsBefore);
+    expect(
+      (
+        db
+          .prepare(
+            'SELECT * FROM provider_account_profiles ORDER BY profile_id',
+          )
+          .all() as Record<string, unknown>[]
+      ).map(({ identity_ref, ...rest }) => {
+        expect(identity_ref).toBeNull();
+        return rest;
+      }),
     ).toEqual(profilesBefore);
   });
 
@@ -152,7 +213,12 @@ describe('migration 0060_provider_account_lease_epoch', () => {
     db.exec(sql);
 
     expect(leases()).toEqual([
-      { lease_id: 'lease-d', auth_epoch: 0, route_revision: 0, lease_state: 'quarantined' },
+      {
+        lease_id: 'lease-d',
+        auth_epoch: 0,
+        route_revision: 0,
+        lease_state: 'quarantined',
+      },
     ]);
   });
 
@@ -163,11 +229,15 @@ describe('migration 0060_provider_account_lease_epoch', () => {
     lease('lease-b', 'run-b', 'profile-a', 'fp-a');
     lease('lease-c', 'run-c', 'profile-a', 'fp-a');
     const counts = (): unknown =>
-      db.prepare(`SELECT
+      db
+        .prepare(
+          `SELECT
         (SELECT COUNT(*) FROM provider_account_profiles) AS profiles,
         (SELECT COUNT(*) FROM provider_account_run_bindings) AS bindings,
         (SELECT COUNT(*) FROM provider_account_run_leases) AS leases,
-        (SELECT COUNT(*) FROM provider_account_session_links) AS links`).all();
+        (SELECT COUNT(*) FROM provider_account_session_links) AS links`,
+        )
+        .all();
     const before = counts();
     expect(before).toEqual([{ profiles: 1, bindings: 1, leases: 3, links: 0 }]);
     db.exec(sql);
@@ -178,17 +248,25 @@ describe('migration 0060_provider_account_lease_epoch', () => {
     db.exec(sql);
     profile('profile-a', 'fp-a');
     const insert = (epoch: number, revision: number, state: string): unknown =>
-      db.prepare(`INSERT INTO provider_account_run_leases
+      db
+        .prepare(
+          `INSERT INTO provider_account_run_leases
         (lease_id, run_id, provider, profile_id, route_fingerprint, owner_id, acquired_at,
          auth_epoch, route_revision, lease_state)
-        VALUES ('lease-x', 'run-x', 'claude', 'profile-a', 'fp-a', 'owner-0001', 1, ?, ?, ?)`)
+        VALUES ('lease-x', 'run-x', 'claude', 'profile-a', 'fp-a', 'owner-0001', 1, ?, ?, ?)`,
+        )
         .run(epoch, revision, state);
     expect(() => insert(-1, 0, 'live')).toThrow(/CHECK constraint failed/);
     expect(() => insert(0, -1, 'live')).toThrow(/CHECK constraint failed/);
     expect(() => insert(0, 0, 'released')).toThrow(/CHECK constraint failed/);
     insert(3, 1, 'quarantined');
     expect(leases()).toEqual([
-      { lease_id: 'lease-x', auth_epoch: 3, route_revision: 1, lease_state: 'quarantined' },
+      {
+        lease_id: 'lease-x',
+        auth_epoch: 3,
+        route_revision: 1,
+        lease_state: 'quarantined',
+      },
     ]);
   });
 
@@ -196,7 +274,12 @@ describe('migration 0060_provider_account_lease_epoch', () => {
     db.exec(sql);
     lease('lease-a', 'run-a', null, 'fp-ambient');
     expect(leases()).toEqual([
-      { lease_id: 'lease-a', auth_epoch: 0, route_revision: 0, lease_state: 'live' },
+      {
+        lease_id: 'lease-a',
+        auth_epoch: 0,
+        route_revision: 0,
+        lease_state: 'live',
+      },
     ]);
   });
 });

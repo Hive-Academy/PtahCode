@@ -29,6 +29,10 @@ interface FakeRow {
   updated_at: number;
   last_run_at: number | null;
   next_run_at: number | null;
+  created_by_kind: string;
+  created_by_session_id: string | null;
+  /** Result of the correlated `job_runs` subquery (0076). */
+  last_run_status: string | null;
 }
 
 /**
@@ -37,7 +41,7 @@ interface FakeRow {
  * Supports:
  *  - INSERT INTO scheduled_jobs ... VALUES (...) (the create path)
  *  - INSERT INTO scheduled_jobs ... ON CONFLICT(id) DO UPDATE ... (the upsert path)
- *  - SELECT * FROM scheduled_jobs WHERE id = ?
+ *  - SELECT j.*, (last run status subquery) FROM scheduled_jobs j WHERE j.id = ?
  *  - UPDATE scheduled_jobs SET last_run_at = ... WHERE id = ? (used in test setup)
  *  - Any other statement: no-op (not used by JobStore)
  */
@@ -99,6 +103,9 @@ class FakeScheduledJobsDatabase {
               updated_at,
               last_run_at: null,
               next_run_at,
+              created_by_kind: 'user',
+              created_by_session_id: null,
+              last_run_status: null,
             });
           }
           return { changes: 1, lastInsertRowid: 0 };
@@ -124,6 +131,8 @@ class FakeScheduledJobsDatabase {
             created_at,
             updated_at,
             next_run_at,
+            created_by_kind,
+            created_by_session_id,
           ] = params as [
             string,
             string,
@@ -135,6 +144,8 @@ class FakeScheduledJobsDatabase {
             number,
             number,
             number | null,
+            string,
+            string | null,
           ];
           rows.set(id, {
             id,
@@ -148,6 +159,9 @@ class FakeScheduledJobsDatabase {
             updated_at,
             last_run_at: null,
             next_run_at,
+            created_by_kind,
+            created_by_session_id,
+            last_run_status: null,
           });
           return { changes: 1, lastInsertRowid: 0 };
         },
@@ -157,8 +171,8 @@ class FakeScheduledJobsDatabase {
       };
     }
 
-    // ── SELECT * FROM scheduled_jobs WHERE id = ? ─────────────────────────
-    if (/SELECT \* FROM scheduled_jobs WHERE id/i.test(sql)) {
+    // ── SELECT ... FROM scheduled_jobs j WHERE j.id = ? ───────────────────
+    if (/FROM scheduled_jobs j\s+WHERE j\.id = \?/i.test(sql)) {
       return {
         run: () => ({ changes: 0, lastInsertRowid: 0 }),
         get(...params: unknown[]) {
@@ -170,8 +184,8 @@ class FakeScheduledJobsDatabase {
       };
     }
 
-    // ── SELECT * FROM scheduled_jobs [WHERE ...] ORDER BY ... ─────────────
-    if (/SELECT \* FROM scheduled_jobs/i.test(sql)) {
+    // ── SELECT ... FROM scheduled_jobs j [WHERE ...] ORDER BY ... ─────────
+    if (/FROM scheduled_jobs j/i.test(sql)) {
       const filterEnabled = /enabled = 1/i.test(sql);
       const filterWorkspace = /workspace_root = \?/i.test(sql);
       return {
@@ -247,6 +261,12 @@ class FakeScheduledJobsDatabase {
   setLastRunAt(id: string, value: number): void {
     const row = this.rows.get(id);
     if (row) row.last_run_at = value;
+  }
+
+  /** Direct setter for test setup (simulates the newest run's status). */
+  setLastRunStatus(id: string, status: string): void {
+    const row = this.rows.get(id);
+    if (row) row.last_run_status = status;
   }
 
   rowCount(): number {
@@ -576,4 +596,105 @@ describe('JobStore.list workspaceRoot normalization', () => {
       expect(store.list({ workspaceRoot: 'd:/foo' })).toHaveLength(0);
     },
   );
+});
+
+describe('JobStore creator and last run status (0076)', () => {
+  const base = {
+    cronExpr: '0 9 * * *',
+    prompt: 'do the thing',
+    nextRunAt: null,
+  };
+
+  it('records the user as the creator by default', () => {
+    const { store, fakeDb } = buildStore();
+
+    const job = store.create({ ...base, name: 'by-user' });
+
+    expect(job.createdBy).toEqual({ kind: 'user' });
+    expect(fakeDb.getRow(job.id)?.created_by_kind).toBe('user');
+    expect(fakeDb.getRow(job.id)?.created_by_session_id).toBeNull();
+    expect(store.get(job.id)?.createdBy).toEqual({ kind: 'user' });
+  });
+
+  it('round-trips a session creator through create, get and list', () => {
+    const { store, fakeDb } = buildStore();
+
+    const job = store.create({
+      ...base,
+      name: 'by-agent',
+      createdBy: { kind: 'session', sessionId: 'sess-123' },
+    });
+
+    expect(job.createdBy).toEqual({ kind: 'session', sessionId: 'sess-123' });
+    expect(fakeDb.getRow(job.id)?.created_by_kind).toBe('session');
+    expect(fakeDb.getRow(job.id)?.created_by_session_id).toBe('sess-123');
+    expect(store.get(job.id)?.createdBy).toEqual({
+      kind: 'session',
+      sessionId: 'sess-123',
+    });
+    expect(store.list()[0].createdBy).toEqual({
+      kind: 'session',
+      sessionId: 'sess-123',
+    });
+  });
+
+  it('reads a session row without a session id as the user', () => {
+    const { store, fakeDb } = buildStore();
+    const job = store.create({ ...base, name: 'orphan' });
+    const row = fakeDb.getRow(job.id);
+    if (!row) throw new Error('row missing');
+    row.created_by_kind = 'session';
+    row.created_by_session_id = null;
+
+    expect(store.get(job.id)?.createdBy).toEqual({ kind: 'user' });
+  });
+
+  it('keeps the creator when the job is updated', () => {
+    const { store } = buildStore();
+    const job = store.create({
+      ...base,
+      name: 'by-agent',
+      createdBy: { kind: 'session', sessionId: 'sess-9' },
+    });
+
+    store.update(job.id, { name: 'renamed' });
+
+    expect(store.get(job.id)?.createdBy).toEqual({
+      kind: 'session',
+      sessionId: 'sess-9',
+    });
+  });
+
+  it('reports no last run status for a job that never ran', () => {
+    const { store } = buildStore();
+    const job = store.create({ ...base, name: 'fresh' });
+
+    expect(job.lastRunStatus).toBeNull();
+    expect(store.get(job.id)?.lastRunStatus).toBeNull();
+    expect(store.list()[0].lastRunStatus).toBeNull();
+  });
+
+  it('maps the status of the newest run on get and list', () => {
+    const { store, fakeDb } = buildStore();
+    const job = store.create({ ...base, name: 'ran' });
+    fakeDb.setLastRunStatus(job.id, 'failed');
+
+    expect(store.get(job.id)?.lastRunStatus).toBe('failed');
+    expect(store.list()[0].lastRunStatus).toBe('failed');
+  });
+
+  it('reads the newest run status with one correlated subquery', () => {
+    const { store, fakeDb } = buildStore();
+    const prepare = jest.spyOn(fakeDb, 'prepare');
+    store.create({ ...base, name: 'a' });
+    store.create({ ...base, name: 'b' });
+    prepare.mockClear();
+
+    store.list();
+
+    expect(prepare).toHaveBeenCalledTimes(1);
+    const sql = prepare.mock.calls[0][0];
+    expect(sql).toMatch(/FROM job_runs r\s+WHERE r\.job_id = j\.id/);
+    expect(sql).toMatch(/ORDER BY r\.scheduled_for DESC\s+LIMIT 1/);
+  });
 });

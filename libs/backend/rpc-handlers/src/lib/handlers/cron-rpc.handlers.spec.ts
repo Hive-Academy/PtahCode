@@ -24,6 +24,7 @@ import {
 } from '@ptah-extension/vscode-core/testing';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import {
+  CronJobService,
   normalizeWorkspaceRoot,
   type CronScheduler,
   type ScheduledJob,
@@ -45,6 +46,8 @@ function makeJob(over: Partial<ScheduledJob> = {}): ScheduledJob {
     updatedAt: over.updatedAt ?? 0,
     lastRunAt: over.lastRunAt ?? null,
     nextRunAt: over.nextRunAt ?? null,
+    createdBy: over.createdBy ?? { kind: 'user' },
+    lastRunStatus: over.lastRunStatus ?? null,
   };
 }
 
@@ -68,10 +71,16 @@ function buildSuite(): Suite {
     update: jest.fn((_id, patch) => makeJob(patch)),
   };
 
+  // The real CronJobService sits between the handlers and the fake
+  // scheduler, so these specs cover the validation the handlers rely on.
+  const service = new CronJobService(
+    scheduler as unknown as CronScheduler,
+    logger as unknown as Logger,
+  );
   const handlers = new CronRpcHandlers(
     logger as unknown as Logger,
     rpc as unknown as RpcHandler,
-    scheduler as unknown as CronScheduler,
+    service,
   );
   handlers.register();
 

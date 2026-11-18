@@ -5,6 +5,16 @@
  * without notice.
  */
 export { CronScheduler } from './lib/cron-scheduler';
+export {
+  CronJobService,
+  CRON_PREVIEW_MAX_COUNT,
+  CRON_JOB_NAME_MAX,
+  CRON_JOB_PROMPT_MAX,
+  type CronJobCreateInput,
+  type CronJobListFilter,
+  type CronJobRunsOptions,
+  type CronJobUpdatePatch,
+} from './lib/cron-job.service';
 export { JobRunner } from './lib/job-runner';
 export { CatchupCoordinator } from './lib/catchup-coordinator';
 export { JobStore, type IJobStore } from './lib/job.store';
@@ -22,6 +32,8 @@ export {
   CronSchedulerError,
   JobNotFoundError,
   CronConfigError,
+  CronJobValidationError,
+  type CronJobValidationField,
 } from './lib/errors';
 
 export type { IPowerMonitor } from './lib/power-monitor.interface';
@@ -39,6 +51,7 @@ export type {
   UpsertJobInput,
   CronSchedulerOptions,
   CatchupPolicy,
+  CronJobCreator,
   IHandlerRegistry,
   JobHandler,
   JobHandlerContext,

@@ -56,6 +56,8 @@ function drainJob(): ScheduledJob {
     updatedAt: 0,
     lastRunAt: null,
     nextRunAt: null,
+    createdBy: { kind: 'user' },
+    lastRunStatus: null,
   };
 }
 
@@ -67,6 +69,7 @@ interface Harness {
     markSucceeded: jest.Mock;
     markFailed: jest.Mock;
     markSkipped: jest.Mock;
+    setSessionId: jest.Mock;
     list: jest.Mock;
     get: jest.Mock;
     latestForJob: jest.Mock;
@@ -74,6 +77,7 @@ interface Harness {
   jobs: { update: jest.Mock };
   internalQuery: { execute: jest.Mock };
   workspaceLlm: { resolveForPath: jest.Mock };
+  logWithContext: jest.Mock;
 }
 
 /**
@@ -91,11 +95,13 @@ function makeHarness(handler: JobHandler | null): Harness {
       status: 'pending' as const,
       resultSummary: null,
       errorMessage: null,
+      sessionId: null,
     })),
     markStarted: jest.fn(),
     markSucceeded: jest.fn(),
     markFailed: jest.fn(),
     markSkipped: jest.fn(),
+    setSessionId: jest.fn(),
     list: jest.fn(() => []),
     get: jest.fn(() => null),
     latestForJob: jest.fn(() => null),
@@ -115,12 +121,13 @@ function makeHarness(handler: JobHandler | null): Harness {
     has: jest.fn(() => handler !== null),
     resolve: jest.fn(() => handler ?? undefined),
   };
+  const logWithContext = jest.fn();
   const logger = {
     debug: jest.fn(),
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
-    logWithContext: jest.fn(),
+    logWithContext,
   } as unknown as Logger;
 
   const runner = new JobRunner(
@@ -132,7 +139,7 @@ function makeHarness(handler: JobHandler | null): Harness {
     workspaceLlm,
     null,
   );
-  return { runner, runs, jobs, internalQuery, workspaceLlm };
+  return { runner, runs, jobs, internalQuery, workspaceLlm, logWithContext };
 }
 
 describe('JobRunner outcomes', () => {
@@ -319,5 +326,124 @@ describe('JobRunner prompt jobs — workspace provider and model', () => {
 
     expect(h.workspaceLlm.resolveForPath).toHaveBeenCalledWith(undefined);
     expect(h.internalQuery.execute.mock.calls[0][0].model).toBe('glm-5.3');
+  });
+});
+
+describe('JobRunner prompt jobs — run session id', () => {
+  const SESSION_ID = '5b2c1d4e-0000-4000-8000-0000000000aa';
+
+  function handleOf(messages: readonly unknown[]) {
+    return {
+      stream: (async function* () {
+        for (const message of messages) yield message;
+      })(),
+      close: jest.fn(),
+      abort: jest.fn(),
+    };
+  }
+
+  function promptJob(): ScheduledJob {
+    return {
+      ...drainJob(),
+      prompt: 'Summarise the repo',
+      workspaceRoot: '/ws/a',
+    };
+  }
+
+  it('records the SDK session id once, from the first message that carries it', async () => {
+    const h = makeHarness(null);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        { type: 'system', subtype: 'init', session_id: SESSION_ID },
+        { type: 'assistant', session_id: SESSION_ID },
+        // A later message naming another session must not replace the link.
+        { type: 'assistant', session_id: 'another-session' },
+        {
+          type: 'result',
+          subtype: 'success',
+          result: 'done',
+          session_id: SESSION_ID,
+        },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.runs.setSessionId).toHaveBeenCalledTimes(1);
+    expect(h.runs.setSessionId).toHaveBeenCalledWith(RUN_ID, SESSION_ID);
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(RUN_ID, 'done');
+  });
+
+  it('skips messages without a usable session id and records the first real one', async () => {
+    const h = makeHarness(null);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        null,
+        'not-an-object',
+        { type: 'system', subtype: 'init' },
+        { type: 'system', session_id: '' },
+        { type: 'system', session_id: 42 },
+        { type: 'assistant', session_id: SESSION_ID },
+        { type: 'result', subtype: 'success', result: 'done' },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.runs.setSessionId).toHaveBeenCalledTimes(1);
+    expect(h.runs.setSessionId).toHaveBeenCalledWith(RUN_ID, SESSION_ID);
+  });
+
+  it('does not write a session id when the stream never reports one', async () => {
+    const h = makeHarness(null);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([{ type: 'result', subtype: 'success', result: 'done' }]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.runs.setSessionId).not.toHaveBeenCalled();
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(RUN_ID, 'done');
+  });
+
+  it('a throwing setSessionId is logged and does not fail the run', async () => {
+    const h = makeHarness(null);
+    const storeError = new Error('database is locked');
+    h.runs.setSessionId.mockImplementation(() => {
+      throw storeError;
+    });
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        { type: 'system', subtype: 'init', session_id: SESSION_ID },
+        { type: 'assistant', session_id: SESSION_ID },
+        { type: 'result', subtype: 'success', result: 'done' },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    // One attempt only: the failed write is not retried on later messages.
+    expect(h.runs.setSessionId).toHaveBeenCalledTimes(1);
+    expect(h.runs.markFailed).not.toHaveBeenCalled();
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(RUN_ID, 'done');
+    expect(h.jobs.update).toHaveBeenCalledTimes(1);
+    expect(h.logWithContext).toHaveBeenCalledWith(
+      'warn',
+      '[cron-scheduler] could not record the run session id',
+      { error: storeError, metadata: { jobId: JOB_ID, runId: RUN_ID } },
+    );
+  });
+
+  it('a handler run has no SDK stream and never writes a session id', async () => {
+    const h = makeHarness(async () => ({ summary: 'claimed 1, done 1' }));
+
+    await h.runner.run(drainJob(), 1_700_000_000_000);
+
+    expect(h.internalQuery.execute).not.toHaveBeenCalled();
+    expect(h.runs.setSessionId).not.toHaveBeenCalled();
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(
+      RUN_ID,
+      'claimed 1, done 1',
+    );
   });
 });

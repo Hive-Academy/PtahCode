@@ -16,6 +16,7 @@ import type { DependencyContainer } from 'tsyringe';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { CRON_TOKENS } from './tokens';
 import { CatchupCoordinator } from '../catchup-coordinator';
+import { CronJobService } from '../cron-job.service';
 import { CronScheduler } from '../cron-scheduler';
 import { HandlerRegistry } from '../handler-registry';
 import { JobRunner } from '../job-runner';
@@ -39,6 +40,7 @@ export function registerCronSchedulerServices(
     CatchupCoordinator,
   );
   container.registerSingleton(CRON_TOKENS.CRON_SCHEDULER, CronScheduler);
+  container.registerSingleton(CRON_TOKENS.CRON_JOB_SERVICE, CronJobService);
 
   logger.info('[cron-scheduler] services registered', {
     tokens: Object.keys(CRON_TOKENS),

@@ -118,7 +118,10 @@ export type {
   SessionUsageCostAuthority,
   SessionUsageSink,
 } from './lib/session-stats/session-usage-sink';
-export type { UsageCollector, UsageSourceCursor } from './lib/session-stats/usage-collector.interface';
+export type {
+  UsageCollector,
+  UsageSourceCursor,
+} from './lib/session-stats/usage-collector.interface';
 export { ClaudeJsonlUsageCollector } from './lib/session-stats/claude-jsonl-usage-collector';
 export { ClaudeUsageSourceRegistry } from './lib/session-stats/usage-source-registry';
 
@@ -157,6 +160,13 @@ export {
   PLAN_LANE_PTAH_TOOLS,
   isPlanLaneAllowedPtahTool,
 } from './lib/permission/plan-lane-tool-policy';
+export {
+  CRON_MUTATING_TOOL_BASE_NAMES,
+  CRON_MUTATING_TOOL_NAMES,
+  CRON_UNATTENDED_DENY_MESSAGE,
+  isCronMutatingTool,
+  type CronMutatingToolBaseName,
+} from './lib/permission/cron-tool-policy';
 export type { IAuthEnvProvider } from './lib/auth-env.port';
 export {
   MODEL_DISPATCH_PROVENANCE_TAP,

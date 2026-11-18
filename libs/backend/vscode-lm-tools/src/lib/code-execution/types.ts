@@ -22,6 +22,8 @@ import type {
   AgentWaitMode,
   AgentWaitResult,
   SpawnAdmission,
+  AgentMessageAckRequestState,
+  AgentMessageAckResult,
 } from '@ptah-extension/cli-agent-runtime';
 import type {
   Approximation,
@@ -47,6 +49,7 @@ import type { MemoryNamespace } from './namespace-builders/memory-namespace.buil
 import type { CorpusNamespace } from './namespace-builders/corpus-namespace.builder';
 import type { CodeNamespace } from './namespace-builders/code-namespace.builder';
 import type { TasksNamespace } from './namespace-builders/tasks-namespace.builder';
+import type { CronNamespace } from './namespace-builders/cron-namespace.builder';
 import type { SessionOrganizationNamespace } from './namespace-builders/session-organization-namespace.builder';
 import type { RouteNamespace } from './namespace-builders/route-namespace.builder';
 import type {
@@ -88,6 +91,12 @@ export interface PtahAPI {
    * by hand — which is the failure mode this namespace exists to remove.
    */
   tasks: TasksNamespace;
+  /**
+   * Scheduled jobs (issue #1400). NON-optional: on a host without the
+   * scheduler every method returns a `refused` result that names the reason,
+   * so there is no host on which the namespace is missing.
+   */
+  cron: CronNamespace;
   /**
    * Per-user session organization (TASK_2026_580). NON-optional: without a
    * recorder (VS Code) every method returns `organization-unavailable`, so
@@ -323,9 +332,16 @@ export interface AgentNamespace {
    * @param force - Skip memory gate condition (the fixed concurrent cap still applies)
    * @returns Spawn result with agentId
    */
-  spawn: (request: SpawnAgentRequest, force?: boolean) => Promise<SpawnAgentResult>;
+  spawn: (
+    request: SpawnAgentRequest,
+    force?: boolean,
+  ) => Promise<SpawnAgentResult>;
   beginSpawn: (request: SpawnAgentRequest) => SpawnAdmission;
-  executeSpawn: (ticket: SpawnAdmission, request: SpawnAgentRequest, force?: boolean) => Promise<SpawnAgentResult>;
+  executeSpawn: (
+    ticket: SpawnAdmission,
+    request: SpawnAgentRequest,
+    force?: boolean,
+  ) => Promise<SpawnAgentResult>;
   markSpawnReplied: (ticket: SpawnAdmission) => boolean;
   failSpawn: (ticket: SpawnAdmission, error: unknown) => void;
 
@@ -379,20 +395,53 @@ export interface AgentNamespace {
    * @param agentId - Agent ID
    * @param message - Text to deliver to the agent
    */
-  message: (agentId: string, message: string, delivery?: 'queue' | 'now' | 'steer', allowPartialTurnLoss?: boolean, idempotencyKey?: string) => Promise<AgentMessageOutcome>;
+  message: (
+    agentId: string,
+    message: string,
+    delivery?: 'queue' | 'now' | 'steer',
+    allowPartialTurnLoss?: boolean,
+    idempotencyKey?: string,
+  ) => Promise<AgentMessageOutcome>;
   /** Alias-aware: a message sent to an agent is found under its resumed id too. */
-  messageStatus: (agentId: string, messageId: string) => Promise<import('@ptah-extension/shared').AgentDeliveryReceipt | { status: 'pending' | 'delivered' | 'failed' | 'unknown'; reason?: string }>;
+  messageStatus: (
+    agentId: string,
+    messageId: string,
+  ) => Promise<
+    | import('@ptah-extension/shared').AgentDeliveryReceipt
+    | {
+        status: 'pending' | 'delivered' | 'failed' | 'unknown';
+        reason?: string;
+      }
+  >;
   /**
    * Retry or cancel a message the caller sent. A retry of a message that may
    * already have run needs `confirmDuplicateRisk`.
    */
-  control: (agentId: string, messageId: string, action: 'retry' | 'cancel', confirmDuplicateRisk?: boolean) => Promise<AgentMessageOutcome | import('@ptah-extension/shared').AgentDeliveryReceipt>;
+  control: (
+    agentId: string,
+    messageId: string,
+    action: 'retry' | 'cancel',
+    confirmDuplicateRisk?: boolean,
+  ) => Promise<
+    AgentMessageOutcome | import('@ptah-extension/shared').AgentDeliveryReceipt
+  >;
   /**
    * Acknowledge a message delivered to the calling lane. The lane is the one
    * the MCP credential is bound to; without such a binding the result is
    * `unattributed-caller`.
    */
-  ack: (messageId: string, state: import('@ptah-extension/cli-agent-runtime').AgentMessageAckRequestState, note?: string) => Promise<import('@ptah-extension/cli-agent-runtime').AgentMessageAckResult | { readonly ok: false; readonly messageId: string; readonly code: 'unattributed-caller' }>;
+  ack: (
+    messageId: string,
+    state: AgentMessageAckRequestState,
+    note?: string,
+  ) => Promise<
+    | AgentMessageAckResult
+    | {
+        readonly ok: false;
+        readonly messageId: string;
+        readonly code: 'unattributed-caller';
+      }
+  >;
 
   /**
    * Deliver a report to the session that started the reporter.

@@ -19,20 +19,37 @@ describe('migration 0070_indexing_last_run', () => {
     };
     const db = new DatabaseSync(':memory:');
     try {
-      const previous = MIGRATIONS.findIndex((migration) => migration.version === 69);
-      expect(MIGRATIONS[previous + 1]).toEqual({ version: 70, name: '0070_indexing_last_run', sql });
-      expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(75);
+      const previous = MIGRATIONS.findIndex(
+        (migration) => migration.version === 69,
+      );
+      expect(MIGRATIONS[previous + 1]).toEqual({
+        version: 70,
+        name: '0070_indexing_last_run',
+        sql,
+      });
+      expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(76);
       db.exec(indexingStateSql);
-      db.prepare(`INSERT INTO indexing_state
+      db.prepare(
+        `INSERT INTO indexing_state
         (workspace_fingerprint, git_head_sha, last_indexed_at, last_error)
-        VALUES (?, ?, ?, ?)`).run('fp', 'head', 123, 'old error');
+        VALUES (?, ?, ?, ?)`,
+      ).run('fp', 'head', 123, 'old error');
       db.exec(sql);
       const columns = db.prepare('PRAGMA table_info(indexing_state)').all() as {
-        name: string; notnull: number;
+        name: string;
+        notnull: number;
       }[];
-      expect(columns.find((column) => column.name === 'last_run_json')).toMatchObject({ notnull: 0 });
-      expect(db.prepare(`SELECT workspace_fingerprint, git_head_sha,
-        last_indexed_at, last_error, last_run_json FROM indexing_state`).get()).toEqual({
+      expect(
+        columns.find((column) => column.name === 'last_run_json'),
+      ).toMatchObject({ notnull: 0 });
+      expect(
+        db
+          .prepare(
+            `SELECT workspace_fingerprint, git_head_sha,
+        last_indexed_at, last_error, last_run_json FROM indexing_state`,
+          )
+          .get(),
+      ).toEqual({
         workspace_fingerprint: 'fp',
         git_head_sha: 'head',
         last_indexed_at: 123,

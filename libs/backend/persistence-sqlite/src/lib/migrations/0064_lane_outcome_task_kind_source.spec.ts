@@ -33,20 +33,24 @@ describe('migration 0064_lane_outcome_task_kind_source', () => {
       name: '0064_lane_outcome_task_kind_source',
       sql,
     });
-    expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(75);
+    expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(76);
   });
 
   it('keeps an existing outcome row without reconstructed provenance', () => {
-    db.prepare(`INSERT INTO lane_outcome_records
+    db.prepare(
+      `INSERT INTO lane_outcome_records
       (run_id, executor_kind, lane_id, agent_id, model, verdict,
        ended_at, created_at, updated_at)
-      VALUES (?, 'cli', 'lane-1', 'agent-1', 'model-1', 'completed', 1, 1, 1)`)
-      .run('old-run');
+      VALUES (?, 'cli', 'lane-1', 'agent-1', 'model-1', 'completed', 1, 1, 1)`,
+    ).run('old-run');
 
     db.exec(sql);
 
     expect(
-      db.prepare('SELECT task_kind_source FROM lane_outcome_records WHERE run_id = ?')
+      db
+        .prepare(
+          'SELECT task_kind_source FROM lane_outcome_records WHERE run_id = ?',
+        )
         .get('old-run'),
     ).toMatchObject({ task_kind_source: null });
   });

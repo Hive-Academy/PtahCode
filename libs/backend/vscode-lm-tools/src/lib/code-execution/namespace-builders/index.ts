@@ -127,3 +127,12 @@ export {
   type SurfaceUpdateOutcome,
   type SurfaceGetStateOutcome,
 } from './surface-namespace.builder';
+export {
+  buildCronNamespace,
+  readOnlyCronNamespace,
+  type CronNamespace,
+  type CronNamespaceDependencies,
+  type CronJobView,
+  type CronRunView,
+  type CronRefusal,
+} from './cron-namespace.builder';

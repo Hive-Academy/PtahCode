@@ -1062,27 +1062,37 @@ export function withPhaseDelivery(
   skills?: readonly PhaseSkillV1[],
 ): Options['systemPrompt'] {
   if (!phase && !skills?.length) return systemPrompt;
-  if (!systemPrompt || typeof systemPrompt !== 'object' ||
-      Array.isArray(systemPrompt) || systemPrompt.type !== 'preset') {
+  if (
+    !systemPrompt ||
+    typeof systemPrompt !== 'object' ||
+    Array.isArray(systemPrompt) ||
+    systemPrompt.type !== 'preset'
+  ) {
     throw new SdkError('Phase delivery requires a preset system prompt.');
   }
   const preset = systemPrompt;
   return {
     ...preset,
-    append: [preset.append, phase?.text, ...(skills ?? phase?.skills ?? []).map(skill => {
-      if (skill.text) return `Skill ${skill.name}: ${skill.text}`;
-      if (!skill.path?.trim()) return undefined;
+    append: [
+      preset.append,
+      phase?.text,
+      ...(skills ?? phase?.skills ?? []).map((skill) => {
+        if (skill.text) return `Skill ${skill.name}: ${skill.text}`;
+        if (!skill.path?.trim()) return undefined;
 
-      const realCandidate = resolveWorkspaceSkillPath(cwd, skill.path);
-      if (!realCandidate) return undefined;
-      try {
-        return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
-      } catch {
-        // degradation-audit: optional-capability - an unreadable skill file is
-        // skipped like a missing one (decision O-6); the phase text still applies.
-        return undefined;
-      }
-    })].filter(Boolean).join('\n\n'),
+        const realCandidate = resolveWorkspaceSkillPath(cwd, skill.path);
+        if (!realCandidate) return undefined;
+        try {
+          return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
+        } catch {
+          // degradation-audit: optional-capability - an unreadable skill file is
+          // skipped like a missing one (decision O-6); the phase text still applies.
+          return undefined;
+        }
+      }),
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
   };
 }
 
@@ -1409,10 +1419,15 @@ export class SdkQueryOptionsBuilder {
         if (!toolInput.success) return {};
         const budgetSession = sessionIdResolver?.() ?? sessionId;
         if (!budgetSession) {
-          this.logger.warn('[SdkQueryOptionsBuilder] SendMessage budget gate missing session id; allowing the call', {
-            hasSessionId: false, eventName: hookInput.hook_event_name,
-            agentId: toolInput.data.to, toolName: hookInput.tool_name,
-          });
+          this.logger.warn(
+            '[SdkQueryOptionsBuilder] SendMessage budget gate missing session id; allowing the call',
+            {
+              hasSessionId: false,
+              eventName: hookInput.hook_event_name,
+              agentId: toolInput.data.to,
+              toolName: hookInput.tool_name,
+            },
+          );
           // No session-independent stopped-target state is available here, so allow this call.
           return {};
         }
@@ -1482,8 +1497,13 @@ export class SdkQueryOptionsBuilder {
     );
     const builtinPolicy = resolveClaudeBuiltinPolicy(builtinOptIns);
     // Preserve Claude preset denials and apply the phase profile to every route.
-    if (phase && (!phase.toolProfile || !Array.isArray(phase.toolProfile.disallowedTools))) {
-      throw new SdkError('Phase tool profile requires a disallowedTools array.');
+    if (
+      phase &&
+      (!phase.toolProfile || !Array.isArray(phase.toolProfile.disallowedTools))
+    ) {
+      throw new SdkError(
+        'Phase tool profile requires a disallowedTools array.',
+      );
     }
     const phaseDisallowedTools = phase
       ? uniqueNames([...phase.toolProfile.disallowedTools])
@@ -1650,8 +1670,10 @@ export class SdkQueryOptionsBuilder {
       prompt: userMessageStream,
       // Builder evidence: the phase denials were merged into this options set.
       // This does not certify a later caller's mutations to Options before query().
-      ...(phaseDisallowedTools?.length && phaseDisallowedTools.every(tool => disallowedTools.includes(tool))
-        ? { toolProfileApplied: true as const } : {}),
+      ...(phaseDisallowedTools?.length &&
+      phaseDisallowedTools.every((tool) => disallowedTools.includes(tool))
+        ? { toolProfileApplied: true as const }
+        : {}),
       options: {
         abortController,
         cwd,
@@ -2347,11 +2369,17 @@ export class SdkQueryOptionsBuilder {
         sessionId: routingSessionId,
         workspaceRoot: cwd,
         ...(toolProfile === 'apps' ? { toolProfile: 'apps' as const } : {}),
-        ...(phase ? {
-          phaseKind: phase.kind,
-          disallowedTools: phaseDisallowedTools,
-        } : {}),
+        ...(phase
+          ? {
+              phaseKind: phase.kind,
+              disallowedTools: phaseDisallowedTools,
+            }
+          : {}),
         capability: 'privileged',
+        // This host routes every tool call through `SdkPermissionHandler`,
+        // whose cron branch prompts in every permission level
+        // (permission/cron-tool-policy.ts).
+        cronWriteApproval: true,
       },
       subject,
       INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
@@ -2435,7 +2463,11 @@ export class SdkQueryOptionsBuilder {
     phaseKind?: PhaseKind,
   ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     // Root tool lifetime, not child registration, owns watchdog protection.
-    const subagentHooks = this.subagentHookHandler.createHooks(cwd, sessionId, phaseKind);
+    const subagentHooks = this.subagentHookHandler.createHooks(
+      cwd,
+      sessionId,
+      phaseKind,
+    );
     const compactionHooks = this.compactionHookHandler.createHooks(
       sessionId,
       cwd,

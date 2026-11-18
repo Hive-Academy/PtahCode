@@ -111,6 +111,8 @@ function makeJob(overrides: Partial<ScheduledJob> = {}): ScheduledJob {
     updatedAt: 1,
     lastRunAt: null,
     nextRunAt: null,
+    createdBy: { kind: 'user' },
+    lastRunStatus: null,
     ...overrides,
   };
 }

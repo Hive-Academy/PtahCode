@@ -57,7 +57,11 @@ import {
   type AgentSpawnTiming,
 } from './agent-spawn-dedupe';
 import { isSpawnReplayValid } from './agent-spawn-replay-status';
-import { admitAndRaceSpawn, raceSpawnReply, SPAWN_REPLY_DEADLINE_MS } from './agent-spawn-deadline';
+import {
+  admitAndRaceSpawn,
+  raceSpawnReply,
+  SPAWN_REPLY_DEADLINE_MS,
+} from './agent-spawn-deadline';
 import {
   AgentMessageAckArgsSchema,
   AgentMessageArgsSchema,
@@ -103,6 +107,7 @@ import type {
   SymbolIndexPage,
 } from '../types';
 import { parseSymbolIndexQuery } from '../namespace-builders/symbol-index-query';
+import { readOnlyCronNamespace } from '../namespace-builders/cron-namespace.builder';
 import { AgentMessageControlIdentityError } from '../namespace-builders/agent-message-control-actor';
 import {
   buildExecuteCodeTool,
@@ -238,7 +243,11 @@ import {
   type McpCaller,
   type McpCallerKind,
 } from './mcp-caller';
-import { isToolPermitted } from './mcp-caller-policy';
+import {
+  isCronWriteDenied,
+  isToolPermitted,
+  MCP_CRON_WRITE_DENIED_MESSAGE,
+} from './mcp-caller-policy';
 import {
   composeEffectiveToolList,
   buildToolDefinitions,
@@ -835,6 +844,14 @@ async function handleToolsCall(
       );
       return response;
     }
+    if (isCronWriteDenied(toolNameOf(request), request._callerBinding)) {
+      response = createErrorResponse(
+        request.id,
+        MCP_CALLER_FORBIDDEN_CODE,
+        MCP_CRON_WRITE_DENIED_MESSAGE,
+      );
+      return response;
+    }
     response = await dispatchToolsCall(request, deps);
     return response;
   } finally {
@@ -1236,7 +1253,13 @@ async function handleIndividualTool(
             const root = knownWorkspaceFolders(deps)[0] ?? process.cwd();
             const callerAgentId = getCallerAgentId();
             const binding = request._callerBinding;
-            const scope = httpSpawnOwnerScope(root, callerSessionId, callerAgentId, binding, request._externalOwner);
+            const scope = httpSpawnOwnerScope(
+              root,
+              callerSessionId,
+              callerAgentId,
+              binding,
+              request._externalOwner,
+            );
             let agentSpawnDedupe = agentSpawnDedupes.get(ptahAPI);
             if (!agentSpawnDedupe) {
               agentSpawnDedupe = new AgentSpawnDedupe();
@@ -1273,45 +1296,51 @@ async function handleIndividualTool(
                 };
                 const force = spawnArgs.force;
                 const admitted = typeof ptahAPI.agent.beginSpawn === 'function';
-                const ticket = admitted ? ptahAPI.agent.beginSpawn(spawnRequest) : undefined;
+                const ticket = admitted
+                  ? ptahAPI.agent.beginSpawn(spawnRequest)
+                  : undefined;
                 const pipeline = async () => {
-                try {
-                  gate = await evaluateSpawnLimitGate(
-                    target,
-                    spawnArgs.force,
-                    (namedTarget) => {
-                      const lookup = lookupAgentLimits(ptahAPI, undefined, {
-                        target: namedTarget,
-                        model: spawnArgs.model,
-                      });
-                      void lookup.then(
-                        () => {
-                          limitLookupSettled = true;
-                        },
-                        () => {
-                          limitLookupSettled = true;
-                        },
-                      );
-                      return lookup;
-                    },
-                  );
-                  gatedAt = performance.now();
-                  if (gate.refusal) throw new SpawnGateRefusal(gate.refusal);
                   try {
-                    return await agentSpawnTiming.run(namespaceTiming, () =>
-                      ticket
-                        ? ptahAPI.agent.executeSpawn(ticket, spawnRequest, force)
-                        : ptahAPI.agent.spawn(spawnRequest, force),
+                    gate = await evaluateSpawnLimitGate(
+                      target,
+                      spawnArgs.force,
+                      (namedTarget) => {
+                        const lookup = lookupAgentLimits(ptahAPI, undefined, {
+                          target: namedTarget,
+                          model: spawnArgs.model,
+                        });
+                        void lookup.then(
+                          () => {
+                            limitLookupSettled = true;
+                          },
+                          () => {
+                            limitLookupSettled = true;
+                          },
+                        );
+                        return lookup;
+                      },
                     );
-                  } finally {
-                    spawnedAt = performance.now();
+                    gatedAt = performance.now();
+                    if (gate.refusal) throw new SpawnGateRefusal(gate.refusal);
+                    try {
+                      return await agentSpawnTiming.run(namespaceTiming, () =>
+                        ticket
+                          ? ptahAPI.agent.executeSpawn(
+                              ticket,
+                              spawnRequest,
+                              force,
+                            )
+                          : ptahAPI.agent.spawn(spawnRequest, force),
+                      );
+                    } finally {
+                      spawnedAt = performance.now();
+                    }
+                  } catch (error: unknown) {
+                    if (ticket && error instanceof SpawnGateRefusal) {
+                      ptahAPI.agent.failSpawn(ticket, error);
+                    }
+                    throw new SpawnAttemptError(error, gate);
                   }
-                } catch (error: unknown) {
-                  if (ticket && error instanceof SpawnGateRefusal) {
-                    ptahAPI.agent.failSpawn(ticket, error);
-                  }
-                  throw new SpawnAttemptError(error, gate);
-                }
                 };
                 if (!ticket) return pipeline();
                 return admitAndRaceSpawn(
@@ -1324,7 +1353,9 @@ async function handleIndividualTool(
                     cliDetectionPending: !spawnRequest.cli && !ptahCliId,
                     status: 'starting' as const,
                     startedAt: admission.startedAt,
-                    ...(admission.waitingForMemory && { waitingForMemory: true }),
+                    ...(admission.waitingForMemory && {
+                      waitingForMemory: true,
+                    }),
                   }),
                 );
               },
@@ -1358,8 +1389,8 @@ async function handleIndividualTool(
                   (callerSessionId
                     ? ''
                     : request._externalOwner?.exclusive
-                    ? '\nExternal completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.'
-                    : '\nNo parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
+                      ? '\nExternal completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.'
+                      : '\nNo parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
                 deps,
               );
             }
@@ -1448,9 +1479,10 @@ async function handleIndividualTool(
             );
             return lookup.kind === 'settled' ? lookup.value : gate.peekLimits();
           };
-          const limits = target || result.status === 'starting'
-            ? gate?.peekLimits()
-            : await resolveAutoLimits();
+          const limits =
+            target || result.status === 'starting'
+              ? gate?.peekLimits()
+              : await resolveAutoLimits();
           const formattedSpawn = formatAgentSpawn(
             result,
             {
@@ -1471,8 +1503,8 @@ async function handleIndividualTool(
               (callerSessionId
                 ? ''
                 : request._externalOwner?.exclusive
-                    ? '\nExternal completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.'
-                    : '\nNo parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
+                  ? '\nExternal completion: check the next tool result for a Completion ID block, or call ptah_agent_wait to wait. Use ptah_agent_status / ptah_agent_read.'
+                  : '\nNo parent session or exclusive external owner: completion delivery is unavailable. Use ptah_agent_wait / ptah_agent_status / ptah_agent_read.'),
             deps,
           );
         } finally {
@@ -1827,8 +1859,14 @@ async function handleIndividualTool(
               );
               for (const entry of result.entries) {
                 if (entry.state !== 'exited') continue;
-                if (entry.info.completedAt && request._externalOwner?.exclusive && !request._callerSessionId?.trim()) {
-                  terminalIds.push(`${entry.agentId}:${entry.info.completedAt}`);
+                if (
+                  entry.info.completedAt &&
+                  request._externalOwner?.exclusive &&
+                  !request._callerSessionId?.trim()
+                ) {
+                  terminalIds.push(
+                    `${entry.agentId}:${entry.info.completedAt}`,
+                  );
                 }
                 try {
                   const raw = request._callerSessionId;
@@ -1854,7 +1892,10 @@ async function handleIndividualTool(
               : {}),
           },
         );
-        return markWaitResponse(await createToolSuccessResponse(request, text, deps), terminalIds);
+        return markWaitResponse(
+          await createToolSuccessResponse(request, text, deps),
+          terminalIds,
+        );
       }
 
       case RUN_CHECK_TOOL_NAME: {
@@ -4448,7 +4489,9 @@ async function handleExecuteCodeCall(
     // The request signal ends the run, and `ptah.agent.waitFor`, when the
     // caller stops waiting (TASK_2026_614 Batch 23).
     const result = await executeCode(code, actualTimeout, {
-      ptahAPI,
+      // Cron writes need the per-call user approval of their MCP tools, which
+      // a script would skip.
+      ptahAPI: { ...ptahAPI, cron: readOnlyCronNamespace(ptahAPI.cron) },
       logger,
       signal: getRequestAbortSignal(),
     });

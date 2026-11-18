@@ -50,6 +50,13 @@ export interface McpCallerBinding {
   readonly phaseKind?: string;
   /** Exact MCP tool names the phase profile disallows. */
   readonly disallowedTools?: readonly string[];
+  /**
+   * `true` only on a credential whose host asks the user before each cron
+   * write tool call (`ptah_cron_create`, `_update`, `_toggle`, `_delete`,
+   * `_run_now`) and cannot skip that prompt in any permission mode. The MCP
+   * server rejects those five tools for every other caller.
+   */
+  readonly cronWriteApproval?: boolean;
 }
 
 export interface IMcpCallerCredentials {

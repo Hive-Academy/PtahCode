@@ -1,5 +1,5 @@
 /**
- * RunStore — CRUD over `job_runs` (schema 0004_cron.sql).
+ * RunStore — CRUD over `job_runs` (schema 0004_cron.sql + 0076 `session_id`).
  *
  * The store's load-bearing primitive is {@link RunStore.tryClaim}: it inserts
  * a `pending` row with `UNIQUE(job_id, scheduled_for)`. The caller treats a
@@ -30,6 +30,7 @@ interface JobRunRow {
   status: JobRunStatus;
   result_summary: string | null;
   error_message: string | null;
+  session_id: string | null;
 }
 
 /** Thrown when a slot is already claimed by another runner. */
@@ -52,6 +53,11 @@ export interface IRunStore {
   markSucceeded(id: RunId, summary?: string, endedAt?: number): void;
   markFailed(id: RunId, errorMessage: string, endedAt?: number): void;
   markSkipped(id: RunId, reason?: string, endedAt?: number): void;
+  /**
+   * Records the SDK session id that executes a prompt run. Written once, when
+   * the stream reports it; a second call for the same run is ignored.
+   */
+  setSessionId(id: RunId, sessionId: string): void;
   list(jobId: JobId, opts?: { limit?: number; offset?: number }): JobRun[];
   get(id: RunId): JobRun | null;
   /** Returns the most-recent run for a job (any status) or null. */
@@ -92,6 +98,7 @@ export class RunStore implements IRunStore {
       status: 'pending',
       resultSummary: null,
       errorMessage: null,
+      sessionId: null,
     };
   }
 
@@ -146,6 +153,15 @@ export class RunStore implements IRunStore {
       .run(endedAt, reason ?? null, id);
   }
 
+  setSessionId(id: RunId, sessionId: string): void {
+    this.sqlite.db
+      .prepare(
+        `UPDATE job_runs SET session_id = ?
+         WHERE id = ? AND session_id IS NULL`,
+      )
+      .run(sessionId, id);
+  }
+
   list(jobId: JobId, opts?: { limit?: number; offset?: number }): JobRun[] {
     const limit = opts?.limit ?? 50;
     const offset = opts?.offset ?? 0;
@@ -194,5 +210,6 @@ function mapRunRow(row: JobRunRow): JobRun {
     status: row.status,
     resultSummary: row.result_summary,
     errorMessage: row.error_message,
+    sessionId: row.session_id ?? null,
   };
 }

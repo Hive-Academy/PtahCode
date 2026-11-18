@@ -224,9 +224,7 @@ import type {
   PluginsReplaceKeptItemsParams,
   PluginsReplaceKeptItemsResult,
 } from './rpc/rpc-plugin-marketplace.types';
-import type {
-  LibraryPassStatus,
-} from './rpc/rpc-setup-decisions.types';
+import type { LibraryPassStatus } from './rpc/rpc-setup-decisions.types';
 
 import type {
   SubagentQueryParams,
@@ -1346,7 +1344,13 @@ export interface RpcMethodRegistry
   'session:handoffStatus': {
     params: { sessionId: string; tabId: string };
     result: {
-      state: 'absent' | 'starting' | 'recorded' | 'closePending' | 'closeCompleted' | 'unavailable';
+      state:
+        | 'absent'
+        | 'starting'
+        | 'recorded'
+        | 'closePending'
+        | 'closeCompleted'
+        | 'unavailable';
       successorSessionId: string | null;
     };
   };
@@ -3531,7 +3535,18 @@ export interface ScheduledJobDto {
   updatedAt: number;
   lastRunAt: number | null;
   nextRunAt: number | null;
+  /** Who created the job: the user (UI) or an agent session (MCP tool). */
+  createdBy: CronJobCreatorDto;
+  /** Status of the most recent run, or null when the job never ran. */
+  lastRunStatus: JobRunStatusDto | null;
 }
+
+/** Origin of a scheduled job (issue #1400). */
+export type CronJobCreatorDto =
+  { kind: 'user' } | { kind: 'session'; sessionId: string };
+
+export type JobRunStatusDto =
+  'pending' | 'running' | 'succeeded' | 'failed' | 'skipped';
 
 export interface JobRunDto {
   id: string;
@@ -3539,9 +3554,11 @@ export interface JobRunDto {
   scheduledFor: number;
   startedAt: number | null;
   endedAt: number | null;
-  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped';
+  status: JobRunStatusDto;
   resultSummary: string | null;
   errorMessage: string | null;
+  /** SDK session id of the headless run, or null (handler jobs, old rows). */
+  sessionId: string | null;
 }
 
 export interface CronListParams {

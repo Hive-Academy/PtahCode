@@ -11,6 +11,8 @@
 export const CRON_TOKENS = {
   /** CronScheduler — orchestrator: register/list/update/delete/runNow + croner timers. */
   CRON_SCHEDULER: Symbol.for('PtahCronScheduler'),
+  /** CronJobService — validated job CRUD that returns DTOs; shared by the RPC handlers and the agent tools. */
+  CRON_JOB_SERVICE: Symbol.for('PtahCronJobService'),
   /** JobRunner — claims an at-most-once slot via UNIQUE(job_id, scheduled_for) and executes. */
   CRON_JOB_RUNNER: Symbol.for('PtahCronJobRunner'),
   /** CatchupCoordinator — replays missed slots on power resume per per-job catchup policy. */
