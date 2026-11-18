@@ -37,6 +37,7 @@ import type {
   PlanLimitWindow,
   QuotaOwnerRef,
   SessionStatsEntry,
+  UsageSummary,
 } from '@ptah-extension/shared';
 import {
   baseMarketplaceFixtures,
@@ -129,13 +130,33 @@ function ownerRef(
 }
 
 /** The session's own account. */
-export const CLAUDE_A = ownerRef('claude-cli', 'account', '5e0c4f1a9b2da1b2', 'Claude account');
+export const CLAUDE_A = ownerRef(
+  'claude-cli',
+  'account',
+  '5e0c4f1a9b2da1b2',
+  'Claude account',
+);
 /** Same provider, another account: a restored run recorded before an account switch. */
-export const CLAUDE_B = ownerRef('claude-cli', 'account', 'c7d3e8a40f6b9e47', 'Claude account');
+export const CLAUDE_B = ownerRef(
+  'claude-cli',
+  'account',
+  'c7d3e8a40f6b9e47',
+  'Claude account',
+);
 /** Another provider's account. */
-export const CODEX = ownerRef('openai-codex', 'cli-store', '08f2b6d1c3a5c0de', 'Codex account');
+export const CODEX = ownerRef(
+  'openai-codex',
+  'cli-store',
+  '08f2b6d1c3a5c0de',
+  'Codex account',
+);
 /** Identity could not be determined (a proxy route). */
-export const PROXY = ownerRef('unknown', 'unknown', '9a1b7c2e4d6f0e31', 'Unknown owner');
+export const PROXY = ownerRef(
+  'unknown',
+  'unknown',
+  '9a1b7c2e4d6f0e31',
+  'Unknown owner',
+);
 
 // ---------------------------------------------------------------------------
 // Windows
@@ -408,7 +429,12 @@ const SESSION_STATS: SessionStatsEntry = {
   model: 'claude-opus-4-1',
   totalCost: 0.42,
   knownCost: 0.42,
-  tokens: { input: 18_200, output: 2_400, cacheRead: 41_000, cacheCreation: 3_100 },
+  tokens: {
+    input: 18_200,
+    output: 2_400,
+    cacheRead: 41_000,
+    cacheCreation: 3_100,
+  },
   tokenCount: 64_700,
   messageCount: 1,
   status: 'ok',
@@ -568,7 +594,12 @@ export const EXPECTED_LANE_TILES = 5;
  * changes the chat surface's owner-key scope, which is the chat view's only
  * trigger for a new `provider:getPlanLimits` pull (it has no Refresh button).
  */
-const CODEX_SECOND = ownerRef('openai-codex', 'cli-store', '3b8e0a6f2c9d4f19', 'Codex account');
+const CODEX_SECOND = ownerRef(
+  'openai-codex',
+  'cli-store',
+  '3b8e0a6f2c9d4f19',
+  'Codex account',
+);
 
 /** Spawn that makes the chat surface pull once more (the refresh-failed state). */
 export const PULL_TRIGGER_MESSAGE: HostMessage = {
@@ -602,6 +633,22 @@ export const PULL_TRIGGER_MESSAGE: HostMessage = {
  * `failPulls` makes the next pull a failed RPC while the page keeps the
  * snapshot it already holds (the refresh-failed state).
  */
+/**
+ * Empty usage answer for the dashboard. Without it `analytics:spendSummary`
+ * never settles, the usage store stays loading and the page-toolbar Refresh
+ * stays busy (disabled).
+ */
+const EMPTY_USAGE_SUMMARY: UsageSummary = {
+  version: 1,
+  generatedAt: new Date(NOW).toISOString(),
+  timeZone: 'UTC',
+  fromDay: new Date(NOW - 30 * 24 * 60 * MIN).toISOString().slice(0, 10),
+  untilDayExclusive: new Date(NOW + 24 * 60 * MIN).toISOString().slice(0, 10),
+  facts: [],
+  sources: [],
+  pricing: { source: 'bundled', asOf: null },
+};
+
 export interface PlanLimitsRpcControl {
   failPulls: boolean;
 }
@@ -614,6 +661,7 @@ export function planLimitsFixtures(
     ...baseMarketplaceFixtures([WORKSPACE_ROOT]),
     'provider:getPlanLimits': () =>
       control?.failPulls ? rpcError('usage read failed') : snapshot,
+    'analytics:spendSummary': EMPTY_USAGE_SUMMARY,
     'session:list': {
       sessions: [
         {
