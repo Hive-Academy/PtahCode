@@ -57,8 +57,9 @@ export class SkillPickCardComponent {
       const url = new URL(this.skill().url ?? '');
       return url.protocol === 'https:' ? url.href : null;
     } catch {
+      // degradation-audit: optional-capability - a missing or invalid marketing URL only omits the link.
       return null;
-    } // Missing or invalid optional marketing URL: omit the link.
+    }
   });
   protected stopLink(event: Event): void {
     event.stopPropagation();
