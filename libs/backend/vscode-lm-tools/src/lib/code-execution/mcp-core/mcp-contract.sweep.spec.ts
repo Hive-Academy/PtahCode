@@ -2558,9 +2558,8 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       // TASK_2026_584 / TASK_2026_932: session tools description budgets.
       // TASK_2026_932 E2, measured 2026-11-11: 1023 chars (+ the start
       // timeout sentence); raised minimally to 1033.
-      // TASK_2026_1161 Phase 2, measured 2026-11-13: 1126 chars (+ the
-      // attachToSessionId, phase and skills sentence); raised minimally to 1136.
-      ptah_session_start: 1136,
+      // TASK_2026_2281: explicit workKind and phase effort floor, 1253 chars + 10.
+      ptah_session_start: 1263,
       ptah_session_send: 603,
       ptah_session_status: 643,
       ptah_session_read: 312,

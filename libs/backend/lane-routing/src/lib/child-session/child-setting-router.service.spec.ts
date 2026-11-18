@@ -1,6 +1,7 @@
 import { DecisionCaller } from '../decision-model/decision-caller';
 import { runFixedRequest } from '../pipeline/model-refine';
-import { ChildSettingRouterService } from './child-setting-router.service';
+import { rankChildSettings } from './child-setting-rule';
+import { clampChildSettingDecision, ChildSettingRouterService } from './child-setting-router.service';
 
 jest.mock('../pipeline/model-refine', () => ({
   ...jest.requireActual('../pipeline/model-refine'),
@@ -16,6 +17,7 @@ const logger = {
 };
 const input = {
   brief: 'Coordinate CI',
+  workKind: 'coordination' as const,
   models: ['claude-haiku-4', 'claude-opus-4'],
 };
 
@@ -166,8 +168,63 @@ describe('ChildSettingRouterService', () => {
   it('accepts a brief longer than 8000 characters', async () => {
     run.mockResolvedValue(outcome('o2', 'o3') as never);
     await expect(
-      router().route({ ...input, brief: `security ${'x'.repeat(20_000)}` }),
-    ).resolves.toMatchObject({ modelSource: 'model' });
+      router().route({ ...input, workKind: undefined, brief: `security ${'x'.repeat(20_000)}` }),
+    ).resolves.toMatchObject({ modelSource: 'ranking' });
     expect(run.mock.calls[0][0].request).toHaveLength(8000);
   });
+  it('offers only models and efforts at or above the code floor', async () => {
+    run.mockResolvedValue(outcome('o1', 'o1') as never);
+    const result = await router().route({ ...input, workKind: 'code', models: ['claude-haiku-4', 'claude-sonnet-5-5', 'claude-opus-5-5', 'default', 'claude-fable-5-2'] });
+    expect(result).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'high', reason: { rule: 'code-work-kind' } });
+    expect(run.mock.calls[0][0].questions.map((question) => Object.values(question.criteria))).toEqual([
+      ['claude-sonnet-5-5', 'claude-opus-5-5'], ['high', 'xhigh', 'max'],
+    ]);
+  });
+  it('does not offer a reserve 200k model to the decision model, but keeps it last for admission', async () => {
+    run.mockResolvedValue(outcome('o1', 'o1') as never);
+    const result = await router().route({ ...input, workKind: 'code', models: ['claude-3-7-sonnet-20250219', 'claude-sonnet-5-5'] });
+    expect(run.mock.calls[0][0].questions.map((question) => Object.values(question.criteria))[0]).toEqual(['claude-sonnet-5-5']);
+    expect(result.candidates).toEqual(['claude-sonnet-5-5', 'claude-3-7-sonnet-20250219']);
+  });
+
+  it('uses the full brief for ranking and cuts only the decision request', async () => {
+    run.mockResolvedValue(outcome() as never);
+    const result = await router().route({ ...input, workKind: undefined, brief: `${'x'.repeat(8001)} unknown cause` });
+    expect(result).toMatchObject({ model: 'claude-opus-4', effort: 'high', reason: { rule: 'deep-work-text' } });
+    expect(run.mock.calls[0][0].request).toHaveLength(8000);
+  });
+
+  it('preserves both explicit pins including small/low and skips refinement', async () => {
+    await expect(router().route({ ...input, workKind: 'code', model: 'claude-haiku-4', effort: 'low' })).resolves.toMatchObject({ model: 'claude-haiku-4', effort: 'low', modelSource: 'pin', effortSource: 'pin' });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('preserves a model-only pin and applies the missing effort floor', async () => {
+    run.mockResolvedValue(outcome() as never);
+    await expect(router().route({ ...input, workKind: 'code', model: 'claude-haiku-4' })).resolves.toMatchObject({ model: 'claude-haiku-4', effort: 'high', modelSource: 'pin', effortSource: 'ranking' });
+  });
+
+  it('preserves effort-only low while ranking the unpinned model', async () => {
+    run.mockResolvedValue(outcome() as never);
+    await expect(router().route({ ...input, workKind: 'code', effort: 'low' })).resolves.toMatchObject({ model: 'claude-opus-4', effort: 'low', modelSource: 'ranking', effortSource: 'pin' });
+  });
+
+  it.each([
+    { model: 'claude-haiku-4', effort: 'low' as const },
+    { effort: 'low' as const },
+    { model: 'claude-haiku-4' },
+  ])('clamps a valid below-floor selection after refinement: %o', (selected) => {
+    const catalog = ['claude-haiku-4', 'claude-sonnet-5-5'];
+    const fallback = rankChildSettings({ brief: 'code', models: catalog, workKind: 'code' });
+    expect(clampChildSettingDecision(fallback, selected, 1, catalog)).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'high', modelSource: 'ranking', effortSource: 'ranking', reason: { rule: 'decision-model-below-floor' } });
+  });
+
+  it('ranks balanced but offers no model options when deep work has no strong catalog entry', async () => {
+    run.mockResolvedValue(outcome() as never);
+    const result = await router().route({ brief: 'unknown cause', models: ['claude-haiku-4', 'claude-sonnet-5-5'] });
+    expect(result.model).toBe('claude-sonnet-5-5');
+    expect(result.effort).toBe('high');
+    expect(run.mock.calls[0][0].questions.map((question) => question.key)).toEqual(['effort']);
+  });
+
 });

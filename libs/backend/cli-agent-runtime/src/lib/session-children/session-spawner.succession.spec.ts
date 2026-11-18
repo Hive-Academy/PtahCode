@@ -532,6 +532,25 @@ describe('SessionSpawnerService succession', () => {
     expect(h.agents.adoptLanes).toHaveBeenCalledWith(expect.any(Array), PARENT);
   });
 
+  it('keeps the setting sources and reason of the predecessor on the successor', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.markRan(child.childSessionId);
+    const result = await h.spawner.succeed({
+      callerSessionId: child.childSessionId,
+      handoffPath: `${child.worktreePath}/HANDOFF.md`,
+      prompt: 'Continue the parser',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.successor).toMatchObject({
+      effort: 'high',
+      modelSource: 'default',
+      effortSource: 'ranking',
+      settingReason: { rule: 'router-unavailable', input: 'effort floor high' },
+    });
+  });
+
   it('allows a child to request succession and forwards the old id', async () => {
     const h = makeHarness();
     const child = await h.startChild();

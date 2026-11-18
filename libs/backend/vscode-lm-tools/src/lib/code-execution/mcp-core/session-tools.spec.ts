@@ -50,7 +50,6 @@ import {
   applyToolResultBudget,
   getToolResultBudget,
 } from './tool-result-budget';
-
 const PARITY = [
   [buildSessionStartTool, SessionStartArgsSchema, ['branch', 'task']],
   [buildSessionSendTool, SessionSendArgsSchema, ['message', 'sessionId']],
@@ -64,7 +63,6 @@ const PARITY = [
     ['handoffPath', 'prompt'],
   ],
 ] as const;
-
 describe('session tool definitions', () => {
   it('describes child succession and its status', () => {
     expect(buildSessionHandoffTool().description).toContain(
@@ -73,7 +71,6 @@ describe('session tool definitions', () => {
     expect(buildSessionStatusTool().description).toContain('succeededBy');
     expect(buildSessionStartTool().description).toContain('handed-off');
   });
-
   it('tells a parent whose start timed out to check status before starting again', () => {
     expect(buildSessionStartTool().description).toContain(
       'On a timeout, call ptah_session_status first: a queued or starting child on ' +
@@ -97,13 +94,11 @@ describe('session tool definitions', () => {
       expect(tool.inputSchema).not.toHaveProperty('$schema');
     },
   );
-
   it('lists the seven names in order', () => {
     expect(PARITY.map(([build]) => build().name)).toEqual([
       ...SESSION_TOOL_NAMES,
     ]);
   });
-
   it('marks status and read read-only only', () => {
     expect(buildSessionStatusTool().annotations?.readOnlyHint).toBe(true);
     expect(buildSessionReadTool().annotations?.readOnlyHint).toBe(true);
@@ -112,15 +107,30 @@ describe('session tool definitions', () => {
     expect(buildSessionClearFinishedTool().annotations).toBeUndefined();
     expect(buildSessionHandoffTool().annotations).toBeUndefined();
   });
-
   it('is deterministic: two builds serialise byte-identically', () => {
     for (const [build] of PARITY) {
       expect(JSON.stringify(build())).toBe(JSON.stringify(build()));
     }
   });
 });
-
 describe('session tool schemas', () => {
+  it.each(['coordination', 'code', 'investigation', 'design', 'security'])(
+    'advertises and accepts workKind %s',
+    (workKind) => {
+      expect(SessionStartArgsSchema.parse({ task: 't', branch: 'b', workKind }).workKind).toBe(workKind);
+      expect(buildSessionStartTool().inputSchema.properties['workKind']).toEqual({
+        type: 'string', enum: ['coordination', 'code', 'investigation', 'design', 'security'],
+      });
+    },
+  );
+  it.each(['git-only', 'unknown', '', null, 1])('rejects invalid workKind %p', (workKind) => {
+    expect(SessionStartArgsSchema.safeParse({ task: 't', branch: 'b', workKind }).success).toBe(false);
+  });
+  it('describes the phase and work kind floors and explicit coordination opt-in', () => {
+    expect(buildSessionStartTool().description).toContain(
+      'Without model or effort the host ranks by phase.kind or workKind: code work gets a balanced model at high effort, investigation, security and design get the most capable model; set workKind \'coordination\' for Git, CI or status work only.',
+    );
+  });
   it('accepts chat effort values and rejects unsupported effort', () => {
     for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
       expect(
@@ -148,7 +158,6 @@ describe('session tool schemas', () => {
       ).toBe(false);
     }
   });
-
   it('advertises and validates attach and resolved phase skills', () => {
     const input = {
       task: 't',
@@ -173,7 +182,6 @@ describe('session tool schemas', () => {
     expect(buildSessionStartTool().description).toContain('attachToSessionId');
     expect(buildSessionStartTool().description).toContain('skills');
   });
-
   it('bounds the task and the label', () => {
     expect(
       SessionStartArgsSchema.safeParse({
@@ -189,7 +197,6 @@ describe('session tool schemas', () => {
       }).success,
     ).toBe(false);
   });
-
   it.each([
     ['TASK_2026_584', true],
     ['TASK_2026_584_5e7a', true],
@@ -207,7 +214,6 @@ describe('session tool schemas', () => {
         .success,
     ).toBe(ok);
   });
-
   it.each([
     ['.ptah/specs/TASK_2026_584', true],
     ['../outside', false],
@@ -221,7 +227,6 @@ describe('session tool schemas', () => {
         .success,
     ).toBe(ok);
   });
-
   it('caps deliverables at 20', () => {
     const base = { task: 't', branch: 'b' };
     expect(
@@ -237,7 +242,6 @@ describe('session tool schemas', () => {
       }).success,
     ).toBe(false);
   });
-
   it('accepts the three send modes only', () => {
     for (const mode of ['queue', 'steer', 'if-idle']) {
       expect(
@@ -253,10 +257,8 @@ describe('session tool schemas', () => {
       }).success,
     ).toBe(false);
   });
-
   describe('ptah_session_handoff (TASK_2026_655)', () => {
     const ok = { handoffPath: '/repo/HANDOFF.md', prompt: 'Continue' };
-
     it.each([
       ['/repo/HANDOFF.md', true],
       ['D:\\repo\\HANDOFF.md', true],
@@ -270,7 +272,6 @@ describe('session tool schemas', () => {
       const result = SessionHandoffArgsSchema.safeParse({ ...ok, handoffPath });
       expect(result.success).toBe(accepted);
     });
-
     it('names the absolute-path rule in the failure', () => {
       const result = SessionHandoffArgsSchema.safeParse({
         ...ok,
@@ -279,7 +280,6 @@ describe('session tool schemas', () => {
       expect(result.success).toBe(false);
       expect(result.error?.issues[0]?.message).toBe('must be an absolute path');
     });
-
     it('requires a non-empty prompt, bounded like every agent message', () => {
       const { prompt: _omitted, ...withoutPrompt } = ok;
       expect(SessionHandoffArgsSchema.safeParse(withoutPrompt).success).toBe(
@@ -301,7 +301,6 @@ describe('session tool schemas', () => {
         }).success,
       ).toBe(false);
     });
-
     it('bounds the label to 1..60 and keeps it optional', () => {
       expect(SessionHandoffArgsSchema.safeParse(ok).success).toBe(true);
       for (const [label, accepted] of [
@@ -314,7 +313,6 @@ describe('session tool schemas', () => {
         ).toBe(accepted);
       }
     });
-
     it('rejects every caller, cwd or permission key', () => {
       for (const key of [
         'callerSessionId',
@@ -328,7 +326,6 @@ describe('session tool schemas', () => {
       }
     });
   });
-
   it('bounds tailKiB to an integer 1..256', () => {
     for (const [tailKiB, ok] of [
       [1, true],
@@ -342,7 +339,6 @@ describe('session tool schemas', () => {
       ).toBe(ok);
     }
   });
-
   it('validates followHandoff on stop, includeFinished on status, and sessionIds on clear_finished strictly', () => {
     expect(SessionStopArgsSchema.safeParse({ sessionId: 's' }).success).toBe(
       true,
@@ -363,7 +359,6 @@ describe('session tool schemas', () => {
         extra: true,
       }).success,
     ).toBe(false);
-
     expect(
       SessionStatusArgsSchema.safeParse({ includeFinished: true }).success,
     ).toBe(true);
@@ -373,7 +368,6 @@ describe('session tool schemas', () => {
     expect(SessionStatusArgsSchema.safeParse({ extra: true }).success).toBe(
       false,
     );
-
     expect(SessionClearFinishedArgsSchema.safeParse({}).success).toBe(true);
     expect(
       SessionClearFinishedArgsSchema.safeParse({ sessionIds: ['c-1', 'c-2'] })
@@ -395,9 +389,7 @@ describe('session tool schemas', () => {
     ).toBe(false);
   });
 });
-
 /* ------------------------------------------------------------------------- */
-
 const CHILD: SessionChildSnapshot = {
   childSessionId: 'c-1',
   parentSessionId: 'p-1',
@@ -416,16 +408,13 @@ const CHILD: SessionChildSnapshot = {
   reportsDelivered: 0,
   reportsRefused: 0,
 };
-
 describe('queued child replies', () => {
   const queued: SessionChildSnapshot = { ...CHILD, status: 'queued', waitingForMemory: true };
-
   it('reports admission without claiming a tab or worktree exists', () => {
     expect(sessionStartReply({ ok: true, child: queued }).text).toContain('Queued child session');
     expect(sessionStatusReply({ ok: true, children: [queued] }).text).toContain('queued for memory');
     expect(sessionStartReply({ ok: true, child: queued }).text).toContain('no worktree or tab yet');
   });
-
   it('reports queued cancellation and repeated stop', () => {
     const child: SessionChildSnapshot = { ...queued, status: 'stopped',
       endReason: 'cancelled before start' };
@@ -434,14 +423,12 @@ describe('queued child replies', () => {
     expect(sessionStopReply({ ...result, alreadyEnded: true }).text).toContain('already cancelled');
   });
 });
-
 const HELD: SessionChildCompletionEnvelope = {
   childSessionId: 'c-1',
   turn: 2,
   verdict: 'unverified',
   text: '<agent-lane-completed cli="ptah-session" turn="2"/>',
 };
-
 const HANDED_OFF = {
   ok: true,
   tabId: 'tab-new',
@@ -452,11 +439,9 @@ const HANDED_OFF = {
   adoptedLanes: [],
   adoptedChildSessions: [],
 } as const;
-
 function logger(): Logger & { warn: jest.Mock } {
   return { warn: jest.fn() } as unknown as Logger & { warn: jest.Mock };
 }
-
 function fakeSession(
   overrides: Partial<SessionNamespace> = {},
   held: readonly SessionChildCompletionEnvelope[] = [],
@@ -491,15 +476,44 @@ function fakeSession(
     takeHeldCompletions: jest.fn(() => held),
   } as SessionNamespace & { takeHeldCompletions: jest.Mock };
 }
-
 const call = (
   name: SessionToolName,
   args: unknown,
   session: SessionNamespace,
   log = logger(),
 ) => handleSessionToolCall(name, args, session, log);
-
 describe('handleSessionToolCall', () => {
+  it.each(['coordination', 'code', 'investigation', 'design', 'security'])(
+    'forwards workKind %s to the session namespace',
+    async (workKind) => {
+      const session = fakeSession();
+      const input = { task: 't', branch: 'b', workKind };
+      const reply = await call('ptah_session_start', input, session);
+      expect(reply.isError).toBe(false);
+      expect(session.start).toHaveBeenCalledWith(input);
+    },
+  );
+  it('rejects unsupported workKind before starting a session', async () => {
+    const session = fakeSession();
+    const reply = await call('ptah_session_start', { task: 't', branch: 'b', workKind: 'git-only' }, session);
+    expect(reply.isError).toBe(true);
+    expect(session.start).not.toHaveBeenCalled();
+  });
+  it('prints the rule and input in start and status replies', () => {
+    const child: SessionChildSnapshot = {
+      ...CHILD, model: 'claude-sonnet-5-5', effort: 'high',
+      modelSource: 'ranking', effortSource: 'ranking',
+      settingReason: { rule: 'code-work-kind', input: 'phase.kind implement' },
+    };
+    for (const reply of [sessionStartReply({ ok: true, child }), sessionStatusReply({ ok: true, children: [child] })]) {
+      expect(reply.text).toContain('model claude-sonnet-5-5 (ranking); effort high (ranking); code-work-kind: phase.kind implement');
+    }
+  });
+  it('labels legacy records with reason unavailable in start and status', () => {
+    for (const reply of [sessionStartReply({ ok: true, child: CHILD }), sessionStatusReply({ ok: true, children: [CHILD] })]) {
+      expect(reply.text).toContain('model default (default); effort default (default); reason unavailable');
+    }
+  });
   it('start result text shows model and effort with both sources', async () => {
     const child = {
       ...CHILD,
@@ -553,13 +567,11 @@ describe('handleSessionToolCall', () => {
   it('a zod failure is isError naming the field, and the namespace is not called', async () => {
     const session = fakeSession();
     const reply = await call('ptah_session_start', { task: 't' }, session);
-
     expect(reply.isError).toBe(true);
     expect(reply.text).toMatch(/invalid ptah_session_start arguments: branch/);
     expect(reply.text).toMatch(/Required: "task" and "branch"/);
     expect(session.start).not.toHaveBeenCalled();
   });
-
   it('forwards no caller from the arguments (a caller key is rejected)', async () => {
     const session = fakeSession();
     const reply = await call(
@@ -570,7 +582,6 @@ describe('handleSessionToolCall', () => {
     expect(reply.isError).toBe(true);
     expect(session.status).not.toHaveBeenCalled();
   });
-
   it('renders a started child with its handle, branch and worktree', async () => {
     const session = fakeSession();
     const reply = await call(
@@ -590,7 +601,6 @@ describe('handleSessionToolCall', () => {
       'model default (default); effort default (default)',
     );
   });
-
   it('a plain refusal is a plain-text answer with code and detail', async () => {
     const session = fakeSession({
       start: jest.fn().mockResolvedValue({
@@ -609,7 +619,6 @@ describe('handleSessionToolCall', () => {
       text: 'ptah_session_start refused (cap-reached): 3 child sessions are already live',
     });
   });
-
   it.each(['session-start-failed', 'worktree-failed'])(
     '%s is isError with the rollback table',
     async (refusal) => {
@@ -635,7 +644,6 @@ describe('handleSessionToolCall', () => {
       expect(reply.text).toMatch(/\| delete-branch \| FAILED \| locked \|/);
     },
   );
-
   it('defaults nothing itself: send passes mode through (namespace defaults it)', async () => {
     const session = fakeSession();
     await call(
@@ -649,7 +657,6 @@ describe('handleSessionToolCall', () => {
       mode: undefined,
     });
   });
-
   it('a send refusal states the reason verbatim', async () => {
     const session = fakeSession({
       send: jest.fn().mockResolvedValue({
@@ -668,7 +675,6 @@ describe('handleSessionToolCall', () => {
       text: 'Message NOT delivered to c-1 (busy): the child is mid-turn',
     });
   });
-
   it('status with no children says so; a lookup refusal is plain text', async () => {
     const empty = fakeSession({
       status: jest.fn().mockResolvedValue({ ok: true, children: [] }),
@@ -676,7 +682,6 @@ describe('handleSessionToolCall', () => {
     expect((await call('ptah_session_status', {}, empty)).text).toBe(
       'This session has no child sessions.',
     );
-
     const refused = fakeSession({
       status: jest.fn().mockResolvedValue({
         ok: false,
@@ -691,7 +696,6 @@ describe('handleSessionToolCall', () => {
       text: 'ptah_session_status refused (not-a-child-of-caller): c-9 belongs to another session',
     });
   });
-
   it('names the successor of a handed-off child', async () => {
     const session = fakeSession({
       status: jest.fn().mockResolvedValue({
@@ -712,7 +716,6 @@ describe('handleSessionToolCall', () => {
     );
     expect(full.text).toContain('handed-off; succeededBy successor-1');
   });
-
   it('renders an ended record without an end cause as unknown, never a guessed kind', async () => {
     const legacy: SessionChildSnapshot = {
       ...CHILD,
@@ -746,7 +749,6 @@ describe('handleSessionToolCall', () => {
     expect(reply.text).not.toContain('some guessed text');
     expect(reply.text).not.toContain('interrupted');
   });
-
   it('counts every outcome kind, unknown included, and shows the cause when recorded', async () => {
     const kinds = [
       'completed',
@@ -787,7 +789,6 @@ describe('handleSessionToolCall', () => {
         'p-1 (ptah_session_stop) [cause parent-stop]; ended 2026-10-01T13:00:00.000Z',
     );
   });
-
   it('shows an idle child with no settled turn as starting, not idle', async () => {
     const session = fakeSession({
       status: jest.fn().mockResolvedValue({
@@ -811,7 +812,6 @@ describe('handleSessionToolCall', () => {
     expect(reply.text).not.toMatch(/\(c-1\): idle/);
     const read = await call('ptah_session_read', { sessionId: 'c-1' }, session);
     expect(read.text).toContain('starting (first turn not started)');
-
     const settled = fakeSession({
       status: jest.fn().mockResolvedValue({
         ok: true,
@@ -822,7 +822,6 @@ describe('handleSessionToolCall', () => {
       '- parser fix (c-1): idle',
     );
   });
-
   it('lists a pending start with its id, branch and start time', async () => {
     const pending: SessionChildSnapshot = {
       ...CHILD,
@@ -841,7 +840,6 @@ describe('handleSessionToolCall', () => {
     expect(reply.text).not.toContain('worktree ');
     expect(reply.text).not.toContain('Finished:');
   });
-
   it('shows model and effort in status', async () => {
     const session = fakeSession({
       status: jest.fn().mockResolvedValue({
@@ -855,7 +853,6 @@ describe('handleSessionToolCall', () => {
       'model default (default); effort default (default)',
     );
   });
-
   it('stop states that tab, transcript, worktree and branch remain', async () => {
     const reply = await call(
       'ptah_session_stop',
@@ -866,7 +863,6 @@ describe('handleSessionToolCall', () => {
     expect(reply.text).toMatch(/tab, its transcript, the worktree/);
     expect(reply.text).toMatch(/branch feat\/x remain/);
   });
-
   it('stop with followHandoff appends the followed handoff note', async () => {
     const session = fakeSession({
       stop: jest.fn().mockResolvedValue({
@@ -888,7 +884,6 @@ describe('handleSessionToolCall', () => {
       'Stopped "parser fix" (c-2): stopped (followed the handoff from c-1).',
     );
   });
-
   it('stop when alreadyEnded states nothing was stopped with the outcome kind', async () => {
     const session = fakeSession({
       stop: jest.fn().mockResolvedValue({
@@ -922,7 +917,6 @@ describe('handleSessionToolCall', () => {
         'tab closed) [cause user-stop]; ended 2026-10-01T12:30:00.000Z.',
     );
   });
-
   it('stop on a handed-off child without followHandoff refuses in plain text naming the successor id', async () => {
     const session = fakeSession({
       stop: jest.fn().mockResolvedValue({
@@ -946,7 +940,6 @@ describe('handleSessionToolCall', () => {
     );
     expect(reply.text).toContain('c-2');
   });
-
   it('stop of a live child names the stopped session and its outcome', async () => {
     const session = fakeSession({
       stop: jest.fn().mockResolvedValue({
@@ -978,7 +971,6 @@ describe('handleSessionToolCall', () => {
         '(ptah_session_stop) [cause parent-stop]; ended 2026-10-01T12:31:00.000Z.',
     );
   });
-
   it('status default list mode renders live children in full, finished counts, one short line per finished child, and the hint', async () => {
     const finishedCompleted: SessionChildSnapshot = {
       ...CHILD,
@@ -1052,7 +1044,6 @@ describe('handleSessionToolCall', () => {
       'Use includeFinished: true for full records, ptah_session_clear_finished to remove them.',
     );
   });
-
   it('status with includeFinished: true renders full records and outcome details for terminal children', async () => {
     const finishedHandedOff: SessionChildSnapshot = {
       ...CHILD,
@@ -1089,7 +1080,6 @@ describe('handleSessionToolCall', () => {
       'Use includeFinished: true for full records',
     );
   });
-
   it('clear_finished reports cleared and skipped ids with reasons, and returns isError on unattributed-caller', async () => {
     const session = fakeSession({
       clearFinished: jest.fn().mockResolvedValue({
@@ -1122,7 +1112,6 @@ describe('handleSessionToolCall', () => {
     expect(reply.text).toContain(
       'c-5 (held-completion: its completion was not delivered yet',
     );
-
     const unattributed = fakeSession({
       clearFinished: jest.fn().mockResolvedValue({
         ok: false,
@@ -1140,7 +1129,6 @@ describe('handleSessionToolCall', () => {
       'ptah_session_clear_finished refused (unattributed-caller): Caller session id is required.',
     );
   });
-
   describe('held completions', () => {
     it('appends the held block to every tool, once', async () => {
       const args: Record<SessionToolName, unknown> = {
@@ -1160,12 +1148,10 @@ describe('handleSessionToolCall', () => {
         expect(reply.text).toContain(HELD.text);
       }
     });
-
     it('appends nothing when nothing is held', async () => {
       const reply = await call('ptah_session_status', {}, fakeSession());
       expect(reply.text).not.toContain(HELD_COMPLETIONS_HEADING);
     });
-
     it('also appends to an error result', async () => {
       const reply = await call(
         'ptah_session_start',
@@ -1175,7 +1161,6 @@ describe('handleSessionToolCall', () => {
       expect(reply.isError).toBe(true);
       expect(reply.text).toContain(HELD.text);
     });
-
     it('read puts the held block BEFORE the transcript so a prefix cut keeps it', async () => {
       const reply = await call(
         'ptah_session_read',
@@ -1186,7 +1171,6 @@ describe('handleSessionToolCall', () => {
         reply.text.indexOf('TRANSCRIPT'),
       );
     });
-
     it('a failing take is logged by kind only and the reply still goes out', async () => {
       const session = fakeSession();
       session.takeHeldCompletions.mockImplementation(() => {
@@ -1202,7 +1186,6 @@ describe('handleSessionToolCall', () => {
       expect(reply.text).not.toContain('SECRET-CONTINUATION');
     });
   });
-
   it('a thrown namespace error (no spawner) is isError naming the cause', async () => {
     const session = fakeSession({
       start: jest
@@ -1220,19 +1203,15 @@ describe('handleSessionToolCall', () => {
     });
   });
 });
-
 /* ------------------------------------------------------------------------- */
-
 describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () => {
   const PROMPT = 'SECRET-CONTINUATION Continue from /repo/HANDOFF.md';
   const ARGS = { handoffPath: '/repo/HANDOFF.md', prompt: PROMPT };
-
   it('passes the parsed arguments to the namespace (no caller key)', async () => {
     const session = fakeSession();
     await call('ptah_session_handoff', { ...ARGS, label: 'next' }, session);
     expect(session.handoff).toHaveBeenCalledWith({ ...ARGS, label: 'next' });
   });
-
   it('an opened tab names label, tab and cwd, and states tabOpened: true', async () => {
     const reply = await call('ptah_session_handoff', ARGS, fakeSession());
     expect(reply.isError).toBe(false);
@@ -1247,7 +1226,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
     expect(reply.text).toMatch(/Do no further work here\./);
     expect(reply.text).not.toContain(PROMPT);
   });
-
   it('a tab no window took states tabOpened: false and where to find it', async () => {
     const session = fakeSession({
       handoff: jest.fn().mockResolvedValue({ ...HANDED_OFF, tabOpened: false }),
@@ -1266,7 +1244,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
     expect(reply.text).not.toMatch(/Handed off/);
     expect(reply.text).not.toMatch(/tabOpened: true/);
   });
-
   it('lists the lanes and child sessions the new session adopted', async () => {
     const session = fakeSession({
       handoff: jest.fn().mockResolvedValue({
@@ -1280,7 +1257,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       'Adopted by the new session: lanes lane-a, lane-b; child sessions child-c.',
     );
   });
-
   it('names only the kind of work that was adopted, and nothing when none was', async () => {
     const lanesOnly = await call(
       'ptah_session_handoff',
@@ -1295,11 +1271,9 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       'Adopted by the new session: lanes lane-a.',
     );
     expect(lanesOnly.text).not.toContain('child sessions');
-
     const none = await call('ptah_session_handoff', ARGS, fakeSession());
     expect(none.text).not.toContain('Adopted');
   });
-
   it.each([
     'unattributed-caller',
     'child-session',
@@ -1323,7 +1297,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       });
     },
   );
-
   it('session-start-failed is isError and keeps the late-open detail verbatim', async () => {
     const detail =
       'The new session did not confirm its start in time; it may still open ' +
@@ -1341,7 +1314,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       text: `ptah_session_handoff refused (session-start-failed): ${detail}`,
     });
   });
-
   it.each([
     ['a missing prompt', { handoffPath: '/repo/HANDOFF.md' }, /prompt/],
     ['an empty prompt', { ...ARGS, prompt: '' }, /prompt/],
@@ -1361,7 +1333,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       expect(session.handoff).not.toHaveBeenCalled();
     },
   );
-
   it('an oversized prompt is rejected without echoing it', async () => {
     const huge = `SECRET-CONTINUATION ${'x'.repeat(MAX_AGENT_MESSAGE_LENGTH)}`;
     const reply = await call(
@@ -1372,7 +1343,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
     expect(reply.isError).toBe(true);
     expect(reply.text).not.toContain('SECRET-CONTINUATION');
   });
-
   it('the namespace "unavailable" error is isError naming that fixed cause', async () => {
     const log = logger();
     const session = fakeSession({
@@ -1389,7 +1359,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       `[MCP] ptah_session_handoff failed: ${SESSION_HANDOFF_UNAVAILABLE_MESSAGE}`,
     );
   });
-
   it('a thrown error quoting the prompt in message, name and code never reaches the log or the reply', async () => {
     const leak = Object.assign(new Error(`failed for ${ARGS.prompt}`), {
       code: `E_${ARGS.prompt}`,
@@ -1409,7 +1378,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       expect(JSON.stringify(args)).not.toContain('SECRET-CONTINUATION');
     }
   });
-
   it('a thrown error with an allowlisted code is reported by kind only', async () => {
     const log = logger();
     const session = fakeSession({
@@ -1427,7 +1395,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       'SECRET-CONTINUATION',
     );
   });
-
   it('a failing held-completion take after a handoff logs no prompt', async () => {
     const session = fakeSession();
     session.takeHeldCompletions.mockImplementation(() => {
@@ -1441,7 +1408,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
       'SECRET-CONTINUATION',
     );
   });
-
   it('appends held completions after the handoff reply', async () => {
     const reply = await call(
       'ptah_session_handoff',
@@ -1452,7 +1418,6 @@ describe('handleSessionToolCall › ptah_session_handoff (TASK_2026_655)', () =>
     expect(reply.text).toContain(HELD_COMPLETIONS_HEADING);
   });
 });
-
 /* ------------------------------------------------------------------------- */
 
 // TASK_2026_584 F2: the read reply goes through the tool-result budget like

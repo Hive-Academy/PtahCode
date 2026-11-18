@@ -83,9 +83,10 @@ export function buildSessionStartTool(): MCPToolDefinition {
       'with "/" is a slash command. Children cannot start sessions. Succession ' +
       'sets handed-off status with succeededBy. The user owns merge, PR and cleanup; ' +
       'branch and worktree remain. No permission, path or parent argument: you are ' +
-      'the parent. Refusals include a code. Use a small model or low effort ' +
-      'for coordination, Git or CI; a strong model for unknown causes, security ' +
-      'or design. ' +
+      'the parent. Refusals include a code. Without model or effort the host ranks by ' +
+      'phase.kind or workKind: code work gets a balanced model at high effort, ' +
+      'investigation, security and design get the most capable model; set workKind ' +
+      "'coordination' for Git, CI or status work only. " +
       SESSION_START_TIMEOUT_NOTE +
       ' ' +
       HELD_NOTE,

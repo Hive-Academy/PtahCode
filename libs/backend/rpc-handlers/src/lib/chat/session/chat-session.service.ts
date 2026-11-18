@@ -20,6 +20,11 @@
 import { CodexChatOptionError } from '../codex-host/codex-chat-profile-options';
 import { endCauseForAbortSource } from './abort-end-cause';
 import { ChatAdmissionTiming } from './chat-admission-timing';
+import {
+  isNativeChildModelProfile,
+  childModelIds,
+  resolveNativeTierAlias,
+} from './child-model-admission';
 import { injectable, inject } from 'tsyringe';
 import { isAbsolute, resolve } from 'node:path';
 import {
@@ -1357,17 +1362,7 @@ export class ChatSessionService {
           input.workspaceRoot,
           '',
         );
-      const native =
-        profile &&
-        !profile.authEnv.ANTHROPIC_BASE_URL &&
-        !profile.authEnv.ANTHROPIC_API_KEY &&
-        !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
-      const models = native
-        ? await this.childModelCatalog.getNativeClaudeModels()
-        : profile
-          ? await this.childModelCatalog.getModelsForProviderProfile(profile)
-          : await this.childModelCatalog.getSupportedModels();
-      return models.map((item) => item.value);
+      return await childModelIds(this.childModelCatalog, profile);
     } catch (error: unknown) {
       // degradation-audit: reported - routing is optional; an empty catalog keeps the host default model.
       this.logger.warn(
@@ -1429,18 +1424,10 @@ export class ChatSessionService {
           input.workspaceRoot,
           input.model,
         );
-      const native =
-        profile &&
-        !profile.authEnv.ANTHROPIC_BASE_URL &&
-        !profile.authEnv.ANTHROPIC_API_KEY &&
-        !profile.authEnv.ANTHROPIC_AUTH_TOKEN;
+      const native = isNativeChildModelProfile(profile);
       profileProbe = Boolean(profile) && !native;
-      const models = native
-        ? await this.childModelCatalog.getNativeClaudeModels()
-        : profile
-          ? await this.childModelCatalog.getModelsForProviderProfile(profile)
-          : await this.childModelCatalog.getSupportedModels();
-      if (models.length === 0) {
+      const acceptedModels = await childModelIds(this.childModelCatalog, profile);
+      if (acceptedModels.length === 0) {
         this.logger.warn(
           '[ChatSessionService] Provider returned an empty model catalog',
         );
@@ -1450,12 +1437,13 @@ export class ChatSessionService {
           message: 'the provider returned an empty model catalog',
         };
       }
-      const acceptedModels = models.map((item) => item.value);
-      const resolvedModel = this.childModelCatalog.resolveModelId(
-        input.model,
-        profile?.authEnv,
-        profileProbe,
-      );
+      const resolvedModel = native
+        ? resolveNativeTierAlias(input.model)
+        : this.childModelCatalog.resolveModelId(
+            input.model,
+            profile?.authEnv,
+            profileProbe,
+          );
       if (!acceptedModels.includes(resolvedModel)) {
         return {
           accepted: false,

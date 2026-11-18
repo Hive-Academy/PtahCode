@@ -62,7 +62,6 @@ import {
   isLiveAgentStatus,
   normalizeWorkspaceRoot,
   type AgentSessionOpenedPayload,
-  type ChildSettingSource,
   type AIMessageOrigin,
   type IAgentAdapter,
   type PermissionLevel,
@@ -78,6 +77,7 @@ import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import type { AgentProcessManager } from '../cli-agents/agent-process-manager.service';
 import { AgentSpawnEnvironment } from '../cli-agents/agent-spawn-environment.service';
 import { LaneCompletionNotifier } from '../cli-agents/lane-completion-notifier.service';
+import { resolveChildSettings } from './child-setting-resolution';
 import { childSettingSources } from './session-spawner.port';
 import type {
   ChildChatSessionStartOutcome,
@@ -651,77 +651,25 @@ export class SessionSpawnerService implements ISessionSpawner {
   ): Promise<SessionChildStartResult> {
     // After the cheap argument checks, still before any git work: a refused
     // model leaves no worktree, branch or registry record behind.
-    let resolvedModel: string | undefined;
-    let resolvedEffort = request.effort;
-    let modelSource: ChildSettingSource = request.model ? 'pin' : 'default';
-    let effortSource: ChildSettingSource = request.effort ? 'pin' : 'default';
-    if (request.model) {
-      try {
-        const validation = await guard.host.resolveChildModel({
-          model: request.model,
-          workspaceRoot: root,
-          parentSessionId: guard.caller,
-        });
-        if (!validation.accepted) {
-          return this.refuseStart(
-            validation.code,
-            validation.acceptedModels?.length
-              ? `${validation.message} Accepted models: ${validation.acceptedModels.slice(0, 30).join(', ')}${validation.acceptedModels.length > 30 ? ` (+${validation.acceptedModels.length - 30} more)` : ''}`
-              : validation.message,
-          );
-        }
-        resolvedModel = validation.resolvedModel;
-      } catch (error: unknown) {
-        this.logger?.error(
-          '[SessionSpawner] Model catalog validation failed',
-          error instanceof Error ? error : new Error(String(error)),
-        );
-        return this.refuseStart(
-          'model-catalog-unavailable',
-          errorMessage(error),
-        );
-      }
-    }
-
-    const router = this.lookupChildSettingRouter();
-    if (router && (!request.model || !request.effort)) {
-      try {
-        const models = request.model
-          ? []
-          : await guard.host.listChildModels({
-              workspaceRoot: root,
-              parentSessionId: guard.caller,
-            });
-        const routed = await router.route({
-          brief: `${request.label ?? branch}\n${task}`,
-          models,
-          ...(resolvedModel ? { model: resolvedModel } : {}),
-          ...(request.effort ? { effort: request.effort } : {}),
-        });
-        resolvedEffort = routed.effort;
-        effortSource = routed.effortSource;
-        if (!request.model && routed.model) {
-          const admission = await guard.host.resolveChildModel({
-            model: routed.model,
-            workspaceRoot: root,
-            parentSessionId: guard.caller,
-          });
-          if (admission.accepted) {
-            resolvedModel = admission.resolvedModel;
-            modelSource = routed.modelSource;
-          } else {
-            this.logger?.warn(
-              '[SessionSpawner] Routed model was not admitted',
-              { code: admission.code },
-            );
-          }
-        }
-      } catch (error: unknown) {
-        this.logger?.warn('[SessionSpawner] Child setting route unavailable', {
-          message: errorMessage(error),
-        });
-      }
-    }
+    const resolution = await resolveChildSettings(
+      guard.host,
+      this.lookupChildSettingRouter(),
+      request,
+      root,
+      guard.caller,
+      task,
+      branch,
+      this.logger,
+    );
+    if (!resolution.ok)
+      return this.refuseStart(resolution.code, resolution.detail);
+    const {
+      model: resolvedModel,
+      effort: resolvedEffort,
+      modelSource,
+      effortSource,
+      settingReason,
+    } = resolution;
 
     const beforeProvision = cancelled?.();
     if (beforeProvision) return this.refuseStart('session-start-failed', beforeProvision);
@@ -807,6 +755,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       ...(resolvedEffort ? { effort: resolvedEffort } : {}),
       modelSource,
       effortSource,
+      ...(settingReason ? { settingReason } : {}),
       ...(request.taskId ? { taskId: request.taskId } : {}),
       branch,
       baseRef: worktree.baseSha,
@@ -2661,6 +2610,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       label: label?.trim() || child.label,
       ...(child.model ? { model: child.model } : {}),
       ...(child.effort ? { effort: child.effort } : {}),
+      ...childSettingSources(child),
+      ...(child.settingReason ? { settingReason: child.settingReason } : {}),
       ...(child.taskId ? { taskId: child.taskId } : {}),
       branch: child.branch,
       baseRef: child.baseRef,
