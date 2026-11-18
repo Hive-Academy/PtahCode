@@ -15,6 +15,7 @@ import {
   untracked,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
+import { NativePopoverComponent } from '../native/popover/native-popover.component';
 import { PtahFieldControlRef } from './field-control-ref';
 
 /** `floating`: a notch label. It rests in the box and moves onto the top border. `stacked`: the label is above the box. */
@@ -109,8 +110,38 @@ let fieldId = 0;
         </button>
       }
       <ng-content select="[ptahFieldTrailing]" />
+      @if (info()) {
+        <ptah-native-popover
+          [isOpen]="infoOpen()"
+          placement="bottom-end"
+          (closed)="infoOpen.set(false)"
+        >
+          <button
+            trigger
+            type="button"
+            class="ptah-field__action ptah-field__info"
+            [attr.aria-label]="'More about ' + label()"
+            [attr.aria-expanded]="infoOpen()"
+            [attr.aria-controls]="infoOpen() ? infoPanelId : null"
+            aria-haspopup="dialog"
+            (click)="toggleInfo($event)"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="6" />
+              <path d="M8 7v4M8 5h0" />
+            </svg>
+          </button>
+          <div content class="ptah-field__info-panel" [id]="infoPanelId"
+            role="dialog" [attr.aria-label]="'More about ' + label()"
+            >{{ info() }}</div
+          >
+        </ptah-native-popover>
+      }
       <span class="ptah-field__rail" aria-hidden="true"></span>
     </div>
+    @if (info()) {
+      <span class="sr-only" [id]="infoId">{{ info() }}</span>
+    }
     <ng-content select="[ptahFieldBeforeHint]" />
     @if (hint() || error() || counter()) {
       <div class="ptah-field__footer">
@@ -138,11 +169,13 @@ let fieldId = 0;
       >
     </ng-template>
   </div>`,
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, NativePopoverComponent],
 })
 export class PtahFieldComponent {
   readonly label = input.required<string>();
   readonly hint = input<string | null>(null);
+  /** Long help text, available from the trailing info action. */
+  readonly info = input<string | null>(null);
   readonly error = input<string | null>(null);
   readonly errorRole = input<'alert' | 'status' | null>(null);
   readonly errorTestId = input<string | null>(null);
@@ -161,6 +194,9 @@ export class PtahFieldComponent {
   readonly controlId = `ptah-field-control-${++fieldId}`;
   readonly labelId = `ptah-field-label-${fieldId}`;
   readonly descriptionId = `ptah-field-description-${fieldId}`;
+  readonly infoId = `ptah-field-info-${fieldId}`;
+  readonly infoPanelId = `${this.infoId}-panel`;
+  readonly infoOpen = signal(false);
   readonly labelFor = signal(this.controlId);
   readonly revealed = signal(false);
   private readonly length = signal(0);
@@ -177,6 +213,9 @@ export class PtahFieldComponent {
   constructor() {
     inject(DestroyRef).onDestroy(() => this.descriptionObserver?.disconnect());
     effect(() => this.wire());
+    effect(() => {
+      if (!this.info()) this.infoOpen.set(false);
+    });
     afterEveryRender(() => this.readCount());
   }
 
@@ -186,6 +225,13 @@ export class PtahFieldComponent {
     el.value = '';
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.focus();
+  }
+
+  toggleInfo(event: MouseEvent): void {
+    // Some hosts do not focus buttons on pointer click. The shared popover
+    // restores the active element captured on open, so focus the trigger first.
+    if (event.currentTarget instanceof HTMLButtonElement) event.currentTarget.focus();
+    this.infoOpen.update((open) => !open);
   }
 
   toggleReveal(): void {
@@ -233,8 +279,9 @@ export class PtahFieldComponent {
   private syncDescription(control: HTMLElement): void {
     const ids = (control.getAttribute('aria-describedby') ?? '')
       .split(/\s+/)
-      .filter((id) => id && id !== this.descriptionId);
+      .filter((id) => id && id !== this.descriptionId && id !== this.infoId);
     if (this.error() || this.hint()) ids.push(this.descriptionId);
+    if (this.info()) ids.push(this.infoId);
     const next = ids.join(' ');
     if ((control.getAttribute('aria-describedby') ?? '') === next) return;
     if (next) control.setAttribute('aria-describedby', next);

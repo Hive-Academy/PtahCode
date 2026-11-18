@@ -1,5 +1,5 @@
 /**
- * OutputStyleNoticesComponent — the notices above the output-style matrix (TASK_2026_555 Batch 55b CS-2, split out of
+ * OutputStyleNoticesComponent — the compact notices below the output-style grid (TASK_2026_555 Batch 55b CS-2, split out of
  * {@link OutputStyleListComponent} unchanged, A23):
  *  - the list read-failure alert, a fixed sentence (Moderate 4; host error text is never shown, D15). Every other
  *    failed operation (activate, save, delete, open, copy) is a transient outcome and shows as the Settings page
@@ -13,11 +13,11 @@
  */
 
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, input, output, signal, viewChild } from '@angular/core';
-import { LucideAngularModule, AlertCircle, AlertTriangle, RotateCcw } from 'lucide-angular';
+import { LucideAngularModule, AlertCircle, AlertTriangle, RotateCcw, Info } from 'lucide-angular';
 import type { OutputStyleEntry } from '@ptah-extension/shared';
 import type { OutputStyleFailedOperation } from './output-style.store';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahAlertComponent, PtahButtonDirective, NativePopoverComponent, PtahIconButtonDirective } from '@ptah-extension/ui';
 
 /** Moderate 4: the banner is the fixed sentence for the failed list read, never host text. */
 const LIST_READ_FAILED = 'Could not read the output styles.';
@@ -25,7 +25,7 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
 @Component({
   selector: 'ptah-output-style-notices',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahAlertComponent, PtahButtonDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahAlertComponent, PtahButtonDirective, NativePopoverComponent, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- List read failure (a load state; write outcomes are toasts) -->
@@ -64,11 +64,17 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
           aria-hidden="true"
         />
         <div class="flex-1">
-          <p class="text-xs">
+          <p class="text-xs">The selected style <code>{{ activeName() }}</code> is no longer available.</p>
+          <ptah-native-popover [isOpen]="helpOpen() === 'missing'" [keepInViewport]="true" (closed)="helpOpen.set(null)">
+            <button trigger type="button" ptahIconButton variant="ghost" size="xs" label="Why this style is unavailable" (click)="helpOpen.set('missing')">
+              <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+            <div content class="max-w-xs p-[var(--ptah-gap-field)] leading-relaxed"><p class="text-xs">
             The selected style
             <code class="text-base-content-muted">{{ activeName() }}</code>
             {{ missingActiveExplanation() }}
-          </p>
+          </p></div>
+          </ptah-native-popover>
           <button
             type="button"
             ptahButton variant="ghost" size="xs" class="mt-[var(--ptah-gap-label)]"
@@ -94,13 +100,19 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
         class="block mb-[var(--ptah-gap-field)]"
         data-testid="output-style-collision-banner"
       >
-        <p class="text-xs">
+        <p class="text-xs">More than one file uses the name {{ collidingNames().join(', ') }}.</p>
+          <ptah-native-popover [isOpen]="helpOpen() === 'collision'" [keepInViewport]="true" (closed)="helpOpen.set(null)">
+            <button trigger type="button" ptahIconButton variant="ghost" size="xs" label="About style name collisions" (click)="helpOpen.set('collision')">
+              <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+            <div content class="max-w-xs p-[var(--ptah-gap-field)] leading-relaxed"><p class="text-xs">
           More than one file uses the name
           {{ collidingNames().join(', ') }}. A style is selected by name, so the
           higher-priority copy wins: a project file beats a user file, and any
           file beats a built-in of the same name. Rename one of them to remove
           the ambiguity.
-        </p>
+        </p></div>
+          </ptah-native-popover>
       </ptah-alert>
     }
 
@@ -111,13 +123,19 @@ const LIST_READ_FAILED = 'Could not read the output styles.';
         class="block mb-[var(--ptah-gap-field)]"
         data-testid="output-style-fallback-banner"
       >
-        <p class="text-xs">
+        <p class="text-xs">Ptah adds <code>{{ activeName() }}</code> to each new session directly.</p>
+          <ptah-native-popover [isOpen]="helpOpen() === 'fallback'" [keepInViewport]="true" (closed)="helpOpen.set(null)">
+            <button trigger type="button" ptahIconButton variant="ghost" size="xs" label="About provider style support" (click)="helpOpen.set('fallback')">
+              <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+            <div content class="max-w-xs p-[var(--ptah-gap-field)] leading-relaxed"><p class="text-xs">
           This provider does not read style files from your home folder, so Ptah
           adds
           <code class="text-base-content-muted">{{ activeName() }}</code>
           to each new session directly instead. Copying it into this project
           removes the need for that.
-        </p>
+        </p></div>
+          </ptah-native-popover>
         @if (activeName(); as name) {
           <button
             #copyButton
@@ -178,6 +196,8 @@ export class OutputStyleNoticesComponent {
   /** `overwrite` only after the user confirmed replacing a project style of the same name (item 16). */
   readonly copyToProject = output<{ readonly name: string; readonly overwrite: boolean }>();
 
+  readonly helpOpen = signal<'missing' | 'collision' | 'fallback' | null>(null);
+  readonly InfoIcon = Info;
   readonly AlertCircleIcon = AlertCircle;
   readonly AlertTriangleIcon = AlertTriangle;
   readonly RotateCcwIcon = RotateCcw;
