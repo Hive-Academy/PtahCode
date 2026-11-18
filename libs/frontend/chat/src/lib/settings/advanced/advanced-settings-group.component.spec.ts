@@ -26,7 +26,7 @@ jest.mock('@ptah-extension/core', () => {
 type RpcReply = { success: boolean; data?: unknown; error?: string };
 
 const DEFAULTS: Record<string, unknown> = Object.fromEntries(
-  ADVANCED_SETTINGS.map((setting) => [setting.key, setting.default]),
+  ADVANCED_SETTINGS.map((setting) => [setting.key, setting.default ?? undefined]),
 );
 
 const keysOf = (groupId: AdvancedSettingGroupId): string[] =>
@@ -150,6 +150,35 @@ describe('AdvancedSettingsGroupComponent', () => {
   });
 
   afterEach(() => fixture?.destroy());
+
+  it('can undo a threshold back to unset', async () => {
+    await create('context-budgets');
+    const key = 'compaction.threshold';
+    await enter(key, '800000');
+    const undo = lastUndo;
+    expect(undo).not.toBeNull();
+    if (undo) await undo();
+    await settle();
+    expect(field(key).value).toBe('');
+    expect(writes()).toEqual([{ key, value: 800000 }, { key, value: null }]);
+  });
+
+  it('shows the model default, saves a threshold, clears it and supports Undo', async () => {
+    await create('context-budgets');
+    const key = 'compaction.threshold';
+    expect(field(key).value).toBe('');
+    expect(field(key).placeholder).toBe('Model default');
+    await enter(key, '800000');
+    expect(writes()).toEqual([{ key, value: 800000 }]);
+    await enter(key, '');
+    expect(writes()).toEqual([{ key, value: 800000 }, { key, value: null }]);
+    expect(field(key).getAttribute('aria-invalid')).not.toBe('true');
+    const undo = lastUndo;
+    expect(undo).not.toBeNull();
+    if (undo) await undo();
+    await settle();
+    expect(field(key).value).toBe('800000');
+  });
 
   it('omits its own plane when the parent Fine-tuning section supplies one', async () => {
     await create('memory-upkeep');

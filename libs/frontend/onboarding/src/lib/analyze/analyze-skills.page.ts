@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
@@ -44,11 +44,10 @@ import { ProjectSkillDraftComponent } from './project-skill-draft.component';
           </section>
         }
       }
-      @if (state.error() && !summary() && !state.loading()) {
-        <button ptahButton type="button" (click)="retry()">Retry skill search</button>
-      }
+      <button ptahButton variant="ghost" type="button" [disabled]="state.loading() || !canRetry() || leaving()" (click)="retry()">Re-run skill search</button>
+      @if (selectionReset()) { <p role="status">Skill selection was reset to the new recommendations.</p> }
       <ptah-stack-skill-review
-        [showOwnerDecision]="false"
+        [showOwnerDecision]="false" [busy]="leaving()"
         [recommendations]="state.recommendations()" [searchResults]="state.searchResults()" [guidanceFacts]="[]"
         [selectedIds]="state.selectedIds()" [loading]="state.loading()" [searching]="state.searching()"
         [error]="state.error()" [searchError]="state.searchError()" [query]="state.searchQuery()"
@@ -73,6 +72,11 @@ export class AnalyzeSkillsPage implements OnInit {
   readonly state = inject(StackSkillStore);
   private readonly wizardRpc = inject(WizardRpcService);
   readonly summary = signal<WizardRecommendAnalysisSkillsResult | null>(null);
+  private readonly leavingState = signal(false);
+  readonly leaving = this.leavingState.asReadonly();
+  readonly canRetry = computed(() => Boolean(this.analysis.loaded()?.manifest.runId));
+  private readonly selectionResetState = signal(false);
+  readonly selectionReset = this.selectionResetState.asReadonly();
   private version = 0;
   private searchVersion = 0;
   private identity = '\u0000';
@@ -87,6 +91,7 @@ export class AnalyzeSkillsPage implements OnInit {
       this.version++;
       this.searchVersion++;
       this.summary.set(null);
+      this.selectionResetState.set(false);
       this.state.reset();
       if (!runId) this.state.error.set('Choose a completed analysis first.');
       else if (root) void this.load(runId, this.version);
@@ -123,13 +128,14 @@ export class AnalyzeSkillsPage implements OnInit {
       this.state.error.set('That analysis could not be loaded. Choose a completed analysis.');
   }
 
-  private async load(runId: string, version: number): Promise<void> {
+  private async load(runId: string, version: number, rerun = false): Promise<void> {
     this.state.loading.set(true);
     this.state.error.set(null);
     try {
       const response = await this.rpc.call('wizard:recommend-analysis-skills', { runId }, { timeout: 75_000 });
       if (version !== this.version) return;
       if (!response.isSuccess()) throw new Error('Registry unavailable');
+      this.selectionResetState.set(rerun);
       this.summary.set(response.data);
       this.state.recommendations.set(response.data.skills);
       this.state.selectedIds.set(new Set(response.data.skills.map(({ skill }) => `${skill.source}/${skill.skillId}`)));
@@ -143,7 +149,11 @@ export class AnalyzeSkillsPage implements OnInit {
 
   retry(): void {
     const runId = this.analysis.loaded()?.manifest.runId;
-    if (runId) void this.load(runId, ++this.version);
+    if (!runId || this.leaving()) return;
+    this.searchVersion++;
+    this.state.searching.set(false);
+    this.state.searchError.set(null);
+    void this.load(runId, ++this.version, true);
   }
 
   async search(query: string): Promise<void> {
@@ -208,9 +218,15 @@ export class AnalyzeSkillsPage implements OnInit {
   }
 
   async continueToGuidance(): Promise<void> {
-    const tab = this.tabs.createTab('Project guidance');
-    this.tabs.setWorkflow(tab, 'setup-project-prompt');
-    await this.router.navigate(['/onboarding/analyze/guidance'], { queryParams: { analysis: this.route.snapshot.queryParamMap.get('analysis'), tab } });
+    if (this.leaving()) return;
+    this.leavingState.set(true);
+    try {
+      const tab = this.tabs.createTab('Project guidance');
+      this.tabs.setWorkflow(tab, 'setup-project-prompt');
+      await this.router.navigate(['/onboarding/analyze/guidance'], { queryParams: { analysis: this.route.snapshot.queryParamMap.get('analysis'), tab } });
+    } finally {
+      this.leavingState.set(false);
+    }
   }
   async back(): Promise<void> { await this.router.navigate(['/onboarding/analyze']); }
 }

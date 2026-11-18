@@ -269,12 +269,12 @@ export class TeamBuilderStartPage {
 
   async reviewSelection(): Promise<void> {
     if (this.blockForOwnerDecision()) return;
-    if (
-      !this.state.selectedIds().size ||
-      this.state.loading() ||
-      this.starting()
-    )
+    // "Continue without skills": there is nothing to preview, so start the chat.
+    if (!this.state.selectedIds().size) {
+      await this.launchChat();
       return;
+    }
+    if (this.state.loading() || this.starting()) return;
     this.returnFocus =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
