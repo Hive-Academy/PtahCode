@@ -2,12 +2,19 @@ import { getAnthropicProvider } from '@ptah-extension/shared';
 
 export type ChildModelTier = 0 | 1 | 2 | 3;
 
+// Balanced families (Sonnet, Terra, Kimi, GLM) use the tier 1 fallback.
+const TIER_TOKENS: Readonly<Record<Exclude<ChildModelTier, 1>, readonly string[]>> = {
+  3: ['fable', 'astra'], // Claude Fable and OpenAI Astra are pin-only.
+  2: ['opus', 'pro', 'large', 'strong', 'sol', 'aragon'], // Sol is Opus-level; Aragon is assumed strong.
+  0: ['haiku', 'mini', 'nano', 'flash', 'small', 'lite', 'luna'], // Luna is Haiku-level.
+};
+
 export function childModelTier(model: string): ChildModelTier | undefined {
   const tokens = model.toLowerCase().split(/[-_./:\d]+/).filter(Boolean);
   if (tokens.includes('default')) return undefined;
-  if (tokens.includes('fable')) return 3;
-  if (tokens.some((token) => ['opus', 'pro', 'large', 'strong'].includes(token))) return 2;
-  if (tokens.some((token) => ['haiku', 'mini', 'nano', 'flash', 'small', 'lite'].includes(token))) return 0;
+  if (tokens.some((token) => TIER_TOKENS[3].includes(token))) return 3;
+  if (tokens.some((token) => TIER_TOKENS[2].includes(token))) return 2;
+  if (tokens.some((token) => TIER_TOKENS[0].includes(token))) return 0;
   return 1;
 }
 
@@ -43,7 +50,7 @@ export function childModelWindow(model: string): number | undefined {
 
 /**
  * Tiers to try, in order, for a target tier. Code work (1) goes up to strong when no balanced
- * model exists; deep work (2) falls back to balanced, never to small; Fable (3) is pin-only.
+ * model exists; deep work (2) falls back to balanced, never to small; Fable/Astra (3) are pin-only.
  */
 const TIER_ORDER: Readonly<Record<ChildModelTier, readonly ChildModelTier[]>> = {
   0: [0, 1, 2],

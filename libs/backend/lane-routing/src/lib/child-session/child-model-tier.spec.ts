@@ -6,6 +6,50 @@ jest.mock('@ptah-extension/shared', () => {
 import { childModelCandidates, childModelTier, childModelWindow, compareChildModelVersions, preferredChildModels } from './child-model-tier';
 
 describe('child model tiers', () => {
+  it.each([
+    ['gpt-astra-1', 3],
+    ['gpt-sol-1', 2],
+    ['gpt-terra-1', 1],
+    ['gpt-luna-1', 0],
+    ['aragon-1', 2],
+    ['claude-opus-5-5', 2],
+    ['claude-sonnet-5-5', 1],
+    ['claude-haiku-5-5', 0],
+    ['claude-fable-5-2', 3],
+    ['gemini-3-pro', 2],
+    ['gemini-3-flash', 0],
+    ['kimi-k2', 1],
+    ['kimi-k3', 1],
+    ['glm-5', 1],
+    ['glm-4.6', 1],
+    ['glm-4.5-air', 1],
+    ['glm-4-flash', 0],
+    ['gpt-sol-2', 2],
+    ['gpt-5.5-console', 1],
+    ['gpt-solution-1', 1],
+  ])('classifies %s as tier %s', (model, tier) => {
+    expect(childModelTier(model)).toBe(tier);
+  });
+  it('preserves token delimiters, case folding, and check precedence', () => {
+    expect(childModelTier('GPT/ASTRA_1')).toBe(3);
+    expect(childModelTier('gpt.sol:2')).toBe(2);
+    expect(childModelTier('sol2')).toBe(2);
+    expect(childModelTier('default-astra-sol-luna')).toBeUndefined();
+    expect(childModelTier('astra-sol-luna')).toBe(3);
+    expect(childModelTier('sol-luna')).toBe(2);
+  });
+  it.each([0, 1, 2] as const)('never offers Astra or Fable automatically for tier %s', (tier) => {
+    const pinned = ['gpt-astra-1', 'claude-fable-5-2'];
+    const automatic = ['gpt-sol-1', 'gpt-terra-1', 'gpt-luna-1'];
+    const catalog = [...pinned, ...automatic];
+    expect(childModelCandidates(catalog, tier)).toEqual(childModelCandidates(automatic, tier));
+    expect(preferredChildModels(catalog, tier)).toEqual(preferredChildModels(automatic, tier));
+    expect(childModelCandidates(pinned, tier)).toEqual([]);
+    expect(preferredChildModels(pinned, tier)).toEqual([]);
+  });
+  it('keeps tier 3 pin-only even when it is the requested candidate floor', () => {
+    expect(childModelCandidates(['gpt-astra-1', 'claude-fable-5-2'], 3)).toEqual([]);
+  });
   it('orders versions numerically and ignores date suffixes', () => {
     expect(['claude-sonnet-5', 'claude-sonnet-4-6-20261118', 'claude-sonnet-5-5'].sort(compareChildModelVersions)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6-20261118']);
     expect(compareChildModelVersions('claude-sonnet-5-10', 'claude-sonnet-5-9')).toBeLessThan(0);
