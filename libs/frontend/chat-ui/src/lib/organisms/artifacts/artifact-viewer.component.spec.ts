@@ -109,6 +109,18 @@ describe('ArtifactViewerComponent', () => {
     }).compileComponents();
   });
 
+  it('fills a display panel instead of using the page intrinsic height', () => {
+    const fixture = createViewer();
+    fixture.componentRef.setInput('fillAvailable', true);
+    fixture.detectChanges();
+    const frame = frameOf(fixture);
+    expect(frame.style.height).toBe('');
+    expect(frame.classList.contains('flex-1')).toBe(true);
+    expect(frame.classList.contains('min-h-0')).toBe(true);
+    expect((fixture.nativeElement as HTMLElement).classList.contains('h-full')).toBe(true);
+  });
+
+
   afterEach(() => {
     jest.restoreAllMocks();
   });

@@ -7,8 +7,10 @@ import {
 } from '@ptah-extension/core';
 import {
   DISPLAY_WINDOW_STATE_MAX_BYTES,
+  DISPLAY_WINDOW_PUSH_TYPES,
   type ArtifactRecord,
 } from '@ptah-extension/shared';
+import { ActionBannerService } from '../action-banner.service';
 import { ArtifactStore } from '../artifact.store';
 import { DisplayDockState } from '../display-dock/display-dock.state';
 import { DisplayWindowSync, type DisplayWindowSource } from './display-window-sync.service';
@@ -87,6 +89,7 @@ describe('DisplayWindowSync', () => {
   } {
     TestBed.configureTestingModule({
       providers: [
+        { provide: ActionBannerService, useValue: { showError: jest.fn() } },
         { provide: ClaudeRpcService, useValue: { call } },
         { provide: VSCodeService, useValue: { isElectron } },
         {
@@ -110,6 +113,61 @@ describe('DisplayWindowSync', () => {
     const unbind = sync.bindSource(source);
     return { sync, dock, tabId, source, unbind, focusVersion };
   }
+
+  it('honors a native window close during the current streaming turn', async () => {
+    const { dock, sync } = setup();
+    dock.requestAutoOpen('tab-1', 'turn-1', 'id:chart');
+    await flushFrame();
+    sync.handleMessage({ type: DISPLAY_WINDOW_PUSH_TYPES.closed });
+    dock.requestAutoOpen('tab-1', 'turn-1', 'id:chart');
+    await flushFrame();
+    expect(call.mock.calls.filter(([method]) => method === 'displayWindow:open')).toHaveLength(1);
+    dock.openSurface('tab-1', 'id:chart');
+    await flushFrame();
+    expect(call.mock.calls.filter(([method]) => method === 'displayWindow:open')).toHaveLength(2);
+  });
+
+  it('does not replay an old open request after its view was closed and rebound', async () => {
+    const { dock, sync, source, unbind } = setup();
+    dock.open('tab-1');
+    await flushFrame();
+    sync.handleMessage({ type: DISPLAY_WINDOW_PUSH_TYPES.closed });
+    unbind();
+    sync.bindSource(source);
+    await flushFrame();
+    expect(call.mock.calls.filter(([method]) => method === 'displayWindow:open')).toHaveLength(1);
+  });
+
+  it('opens automatically, refreshes without focusing, and focuses an explicit file click', async () => {
+    const { dock } = setup();
+    dock.requestArtifactAutoOpen('tab-1', 'artifact-a');
+    await flushFrame();
+    await flushFrame();
+    expect(call.mock.calls.filter(([method]) => method === 'displayWindow:open')).toHaveLength(1);
+    dock.requestArtifactAutoOpen('tab-1', 'artifact-b');
+    await flushFrame();
+    expect(call.mock.calls.filter(([method]) => method === 'displayWindow:open')).toHaveLength(1);
+    dock.openFile('tab-1', { kind: 'image-file', title: 'Image', path: '/image.png' });
+    await flushFrame();
+    expect(call.mock.calls.filter(([method]) => method === 'displayWindow:open')).toHaveLength(2);
+  });
+
+  it('keeps the inline fallback on hosts without detached display support', async () => {
+    isElectron = false;
+    const { dock } = setup();
+    dock.requestArtifactAutoOpen('tab-1', 'artifact-a');
+    await flushFrame();
+    expect(call).not.toHaveBeenCalledWith('displayWindow:open', {});
+  });
+
+  it('routes a background-tab display without changing the active chat tab', async () => {
+    const { dock, tabId } = setup();
+    dock.openFile('tab-2', { kind: 'image-file', title: 'Image', path: '/image.png' });
+    await flushFrame();
+    await flushFrame();
+    expect(tabId()).toBe('tab-1');
+    expect(call).toHaveBeenCalledWith('displayWindow:publishState', expect.objectContaining({ tabId: 'tab-2' }));
+  });
 
   function publishCalls(): unknown[][] {
     return call.mock.calls.filter(
@@ -170,7 +228,7 @@ describe('DisplayWindowSync', () => {
   it('detach opens the window and publishes the bound tab once per tick, only on change', async () => {
     artifacts.set([artifact]);
     const { sync, dock } = setup();
-    await sync.detach();
+    await sync.focus();
     expect(sync.detached()).toBe(true);
     expect(sync.error()).toBeNull();
 
@@ -208,7 +266,7 @@ describe('DisplayWindowSync', () => {
 
   it('keeps publishing while no animation frame runs (main window minimized)', async () => {
     const { sync, dock } = setup();
-    await sync.detach();
+    await sync.focus();
     TestBed.tick();
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(publishCalls()).toHaveLength(1);
@@ -226,7 +284,7 @@ describe('DisplayWindowSync', () => {
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
     const { sync } = setup();
-    await sync.detach();
+    await sync.focus();
     TestBed.tick();
     await jest.advanceTimersByTimeAsync(16);
     expect(publishCalls()).toHaveLength(1);
@@ -243,7 +301,7 @@ describe('DisplayWindowSync', () => {
     replies['displayWindow:publishState'] = { success: false, error: 'down' };
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { sync } = setup();
-    await sync.detach();
+    await sync.focus();
     TestBed.tick();
     await jest.advanceTimersByTimeAsync(16);
     replies['displayWindow:publishState'] = {
@@ -259,11 +317,12 @@ describe('DisplayWindowSync', () => {
     expect(publishCalls()).toHaveLength(2);
   });
 
-  it('publishes nothing while attached', async () => {
+  it('publishes an artifact request automatically', async () => {
     const { dock } = setup();
     dock.openArtifact('tab-1', artifact.id);
     await flushFrame();
-    expect(publishCalls()).toHaveLength(0);
+    await flushFrame();
+    expect(publishCalls()).toHaveLength(1);
   });
 
   it('reports a host without a window and stays attached', async () => {
@@ -272,7 +331,7 @@ describe('DisplayWindowSync', () => {
       data: { ok: false, reason: 'desktop-only' },
     };
     const { sync } = setup();
-    await sync.detach();
+    await sync.focus();
     expect(sync.detached()).toBe(false);
     expect(sync.error()).toContain('desktop app only');
   });
@@ -282,7 +341,7 @@ describe('DisplayWindowSync', () => {
       { ...artifact, title: 'x'.repeat(DISPLAY_WINDOW_STATE_MAX_BYTES) },
     ]);
     const { sync } = setup();
-    await sync.detach();
+    await sync.focus();
     await flushFrame();
     // The window gets a small notice instead of keeping old content.
     expect(publishCalls()).toHaveLength(1);
@@ -294,7 +353,7 @@ describe('DisplayWindowSync', () => {
   it('publishes a notice when the source unbinds while detached', async () => {
     artifacts.set([artifact]);
     const { sync, tabId } = setup();
-    await sync.detach();
+    await sync.focus();
     await flushFrame();
     expect(lastPublished().state['artifacts']).toEqual([artifact]);
     tabId.set(null);
@@ -307,7 +366,7 @@ describe('DisplayWindowSync', () => {
 
   it('the closed push attaches again', async () => {
     const { sync } = setup();
-    await sync.detach();
+    await sync.focus();
     sync.handleMessage({ type: 'displayWindow:closed' });
     expect(sync.detached()).toBe(false);
   });
@@ -336,7 +395,7 @@ describe('DisplayWindowSync', () => {
 
   it('republishes the current view after dropping a stale-tab action', async () => {
     const { sync } = setup();
-    await sync.detach();
+    await sync.focus();
     await flushFrame();
     expect(publishCalls()).toHaveLength(1);
     sync.handleMessage({
@@ -350,7 +409,7 @@ describe('DisplayWindowSync', () => {
 
   it('the attach action from a stale tab still closes the window', async () => {
     const { sync } = setup();
-    await sync.detach();
+    await sync.focus();
     sync.handleMessage({
       type: 'displayWindow:action',
       payload: { tabId: 'tab-old', action: { type: 'attach' } },
@@ -382,7 +441,7 @@ describe('DisplayWindowSync', () => {
 
   it('the attach action closes the window', async () => {
     const { sync } = setup();
-    await sync.detach();
+    await sync.focus();
     sync.handleMessage({
       type: 'displayWindow:action',
       payload: { tabId: 'tab-1', action: { type: 'attach' } },
@@ -407,7 +466,7 @@ describe('DisplayWindowSync', () => {
       dock: commandDock,
       focusVersion: signal(0),
     });
-    await sync.detach();
+    await sync.focus();
     expect(sync.count()).toBe(1);
     sync.handleMessage({
       type: 'displayWindow:action',
@@ -449,7 +508,7 @@ describe('DisplayWindowSync', () => {
       dock: commandDock,
       focusVersion: commandFocus,
     });
-    await sync.detach();
+    await sync.focus();
     chatFocus.set(1);
     await flushFrame();
     expect(lastPublished().tabId).toBe('chat-focused');
@@ -475,18 +534,17 @@ describe('DisplayWindowSync', () => {
       passive: true,
     };
     const unbindEmbed = sync.bindSource(embed);
-    expect(sync.isBoundSource(embed)).toBe(false);
-    await sync.detach();
+    await sync.focus();
     await flushFrame();
     expect(lastPublished().tabId).toBe('tab-1');
-    sync.selectSource(embed);
+    embed.dock.open('tab-embed');
     await flushFrame();
     expect(lastPublished().tabId).toBe('tab-embed');
     unbindEmbed();
   });
 
   it('keeps an explicitly selected passive embed bound through main view focus', async () => {
-    const { sync, source: mainSource, focusVersion: mainFocus } = setup();
+    const { sync, focusVersion: mainFocus } = setup();
     const embed = {
       tabId: signal<string | null>('tab-embed'),
       dock: new DisplayDockState(),
@@ -494,15 +552,16 @@ describe('DisplayWindowSync', () => {
       passive: true,
     };
     sync.bindSource(embed);
-    expect(sync.selectSource(embed)).toBe(true);
+    embed.dock.open('tab-embed');
+    await flushFrame();
     mainFocus.update((version) => version + 1);
     TestBed.tick();
-    expect(sync.isBoundSource(embed)).toBe(true);
-    expect(sync.isBoundSource(mainSource)).toBe(false);
+    await flushFrame();
+    expect(lastPublished().tabId).toBe('tab-embed');
   });
 
-  it('rebinds to the view that requests Detach and ignores inactive view updates', async () => {
-    const { sync, dock: firstDock, source: mainSource } = setup();
+  it('rebinds to the view that opens a display and ignores inactive view updates', async () => {
+    const { sync, dock: firstDock } = setup();
     const secondDock = new DisplayDockState();
     const second = {
       tabId: signal<string | null>('tab-2'),
@@ -511,23 +570,22 @@ describe('DisplayWindowSync', () => {
       passive: true,
     };
     const unbindSecond = sync.bindSource(second);
-    await sync.detach();
+    await sync.focus();
     await flushFrame();
     expect(lastPublished().tabId).toBe('tab-1');
-    secondDock.openArtifact('tab-2', artifact.id);
+    secondDock.select('tab-2', { kind: 'artifact', artifactId: artifact.id });
     await flushFrame();
     expect(publishCalls()).toHaveLength(1);
-    sync.selectSource(second);
-    await sync.detach();
+    secondDock.open('tab-2');
+    await flushFrame();
     await flushFrame();
     expect(lastPublished().tabId).toBe('tab-2');
-    firstDock.openArtifact('tab-1', artifact.id);
+    firstDock.select('tab-1', { kind: 'artifact', artifactId: artifact.id });
     await flushFrame();
     expect(publishCalls()).toHaveLength(2);
     unbindSecond();
     await flushFrame();
-    expect(sync.isBoundSource(second)).toBe(false);
-    expect(sync.isBoundSource(mainSource)).toBe(true);
+    expect(lastPublished().tabId).toBe('tab-1');
     expect(sync.count()).toBe(0);
     const publishedAfterUnbind = publishCalls().length;
     secondDock.openArtifact('tab-2', 'another');
@@ -538,6 +596,7 @@ describe('DisplayWindowSync', () => {
   it('unbinding stops the actions and the snapshot', async () => {
     TestBed.configureTestingModule({
       providers: [
+        { provide: ActionBannerService, useValue: { showError: jest.fn() } },
         { provide: ClaudeRpcService, useValue: { call } },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {

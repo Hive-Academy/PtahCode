@@ -1,4 +1,3 @@
-import type { DisplayFileItem } from '@ptah-extension/chat-ui';
 /**
  * Workspace-switch transcript keep-alive (TASK_2026_155 Batch 2).
  *
@@ -72,7 +71,6 @@ import { AgentMonitorStore, ExecutionTreeBuilderService, type MonitoredAgent } f
 import { SURFACE_ACTIVE, VSCodeService, AppStateManager, AuthStateService, ClaudeRpcService, PlanLimitsStore, ElectronLayoutService } from '@ptah-extension/core';
 import { provideSurfaceActiveTesting } from '@ptah-extension/core/testing';
 import { SidebarTabComponent } from '@ptah-extension/chat-ui';
-import { DisplayPanelComponent, type DisplaySurface } from '@ptah-extension/chat-ui/display-panel';
 import { ChatTranscriptComponent } from '../organisms/transcript/chat-transcript.component';
 import { MessageBubbleComponent } from '../organisms/message-bubble.component';
 import { ChatEmptyStateComponent } from '../molecules/setup-plugins/chat-empty-state.component';
@@ -86,8 +84,6 @@ import { ActionBannerService } from '../../services/action-banner.service';
 import { SessionHistoryReplayer } from '../../services/chat-store/session-history-replayer.service';
 import { HistoryPagingService } from '../../services/chat-store/history-paging.service';
 import { ChangeSetActionsService } from '../../services/change-set/change-set-actions.service';
-import { DisplaySheetComponent } from '../organisms/display-sheet/display-sheet.component';
-import { DisplayDockState } from '../../services/display-dock/display-dock.state';
 import { ArtifactStore } from '../../services/artifact.store';
 import { DisplayWindowSync } from '../../services/display-window/display-window-sync.service';
 import { SESSION_CARD_ACTIONS, SESSION_VISIBLE } from '../../tokens/session-context.token';
@@ -287,26 +283,6 @@ describe('ChatViewComponent keep-alive — workspace-switch transcript survival'
 });
 
 @Component({
-  selector: 'ptah-display-panel',
-  standalone: true,
-  template: '',
-})
-class StubDisplayPanelComponent {
-  readonly surfaces = input<readonly DisplaySurface[]>([]);
-  readonly files = input<readonly DisplayFileItem[]>([]);
-  readonly artifacts = input<readonly unknown[]>([]);
-  readonly open = input(true);
-  readonly fullscreenArtifactId = input<string | null>(null);
-  readonly fullscreenChange = output<boolean>();
-  readonly selectedKey = input<string | null>(null);
-  readonly scrollToSelectedOnMount = input(false);
-  readonly pinned = input(false);
-  readonly viewStates = input<unknown>(null);
-  readonly selectedKeyChange = output<string>();
-  readonly viewStateChange = output<unknown>();
-}
-
-@Component({
   selector: 'ptah-agent-monitor-panel',
   standalone: true,
   template: `<span>{{ docked() ? 'No agents in this session' : '' }}</span>`,
@@ -428,10 +404,7 @@ function mountRail(
       },
       {
         provide: ElectronLayoutService,
-        useValue: {
-          displaySidebarWidth: signal<number | null>(null),
-          setDisplaySidebarWidth: jest.fn(),
-        },
+        useValue: {},
       },
       {
         provide: DisplayWindowSync,
@@ -593,18 +566,12 @@ function mountRail(
     set: {
       imports: [
         SidebarTabComponent,
-        DisplaySheetComponent,
         StubAgentMonitorPanelComponent,
       ],
       schemas: [NO_ERRORS_SCHEMA],
     },
   });
-  TestBed.overrideComponent(DisplaySheetComponent, {
-    remove: { imports: [DisplayPanelComponent] },
-    add: {
-      imports: [StubDisplayPanelComponent],
-    },
-  });
+
 
   const fixture = TestBed.createComponent(ChatViewComponent);
   fixture.detectChanges();
@@ -640,46 +607,6 @@ describe('Rail ChatView per-pane display dock', () => {
     TestBed.resetTestingModule();
     if (originalResizeObserver) global.ResizeObserver = originalResizeObserver;
     else delete (global as Record<string, unknown>)['ResizeObserver'];
-  });
-
-  const sheet = () => h.fixture.nativeElement.querySelector('ptah-display-sheet') as HTMLElement | null;
-  /** The control that carries `aria-expanded`: the sidebar tab when collapsed, Collapse when open. */
-  const bar = () => h.fixture.nativeElement.querySelector(
-    'ptah-display-sheet [data-testid="display-sheet-tab"] button, ptah-display-sheet [data-testid="display-sheet-close"]',
-  ) as HTMLButtonElement | null;
-  async function openSheet(): Promise<void> {
-    bar()?.click();
-    for (let round = 0; round < 3; round += 1) {
-      h.fixture.detectChanges();
-      await h.fixture.whenStable();
-    }
-    h.fixture.detectChanges();
-  }
-
-  it('Rail ChatView mounts a session sheet at narrow and wide widths', async () => {
-    h = mountRail({ contextual: true });
-    h.fixture.debugElement.injector.get(DisplayDockState).setSurfaces('tab-1', {
-      surfaces: [{ key: 'id:a' } as DisplaySurface], statuses: new Map(),
-    });
-    for (const width of [759, 760, 804, 644, 976, 648]) {
-      h.emitHostWidth(width);
-      expect(sheet()).not.toBeNull();
-      expect(bar()?.getAttribute('aria-expanded')).toBe('false');
-    }
-    await openSheet();
-    expect(bar()?.getAttribute('aria-expanded')).toBe('true');
-    expect(sheet()?.querySelector('[data-testid="display-sheet-region"]')).not.toBeNull();
-  });
-
-  it('Rail ChatView with coordinator keeps the sheet mounted', async () => {
-    h = mountRail({ contextual: true });
-    h.fixture.debugElement.injector.get(DisplayDockState).setSurfaces('tab-1', {
-      surfaces: [{ key: 'id:a' } as DisplaySurface], statuses: new Map(),
-    });
-    h.fixture.detectChanges();
-    await openSheet();
-    expect(h.fixture.debugElement.injector.get(RailTranscriptRetentionCoordinator)).toBeDefined();
-    expect(sheet()).not.toBeNull();
   });
 
   it('two ChatViews share one X transcript after active tab swaps in both directions', () => {

@@ -19,18 +19,13 @@ import { LucideAngularModule, Clock, Pencil, Trash2 } from 'lucide-angular';
 import { ChatTranscriptComponent } from '../organisms/transcript/chat-transcript.component';
 import { ChatEmptyStateComponent } from '../molecules/setup-plugins/chat-empty-state.component';
 import { AgentMonitorPanelComponent } from '../organisms/agent-monitor-panel.component';
-// Sheet chrome is an allowed eager input. The lazy `chat-ui/display-panel`
-// entry stays out of this chunk because the sheet names that panel only
-// inside its own `@defer` (decisions #84, #89, #107).
-import { DisplaySheetComponent } from '../organisms/display-sheet/display-sheet.component';
 import {
   DisplayDockState,
   DisplayDockRegistry,
 } from '../../services/display-dock/display-dock.state';
 import {
-  connectDisplaySidebar,
-  type DisplaySidebarConnection,
-} from './display-sidebar-wiring';
+  connectDisplayWindowSource,
+} from './display-window-wiring';
 import { QueuedFollowUpsComponent } from '../molecules/queued-follow-ups/queued-follow-ups.component';
 import { ChatInputComponent } from '../molecules/chat-input/chat-input.component';
 import { BackgroundTaskTilesContainerComponent } from '../molecules/background-task-tiles/background-task-tiles-container.component';
@@ -163,7 +158,7 @@ export function shouldOverlayDock(
  */
 export const AGENT_PANEL_OVERLAY_BREAKPOINT = 600;
 
-/** The Display dock's default width (design-spec section 2, R1.5). */
+/** The inline agent monitor default width. */
 export const DISPLAY_DOCK_DEFAULT_WIDTH = 400;
 
 /** `PanelResizeService` bounds: 300 px, at most 75% of the host. */
@@ -181,7 +176,6 @@ function motionDurationMs(
 }
 
 /** One separator arrow-key step (design-spec section 8, assertion 11). */
-const DOCK_KEY_STEP = 16;
 
 /**
  * The panel-state key of a view with no per-tab dock: the VS Code webview
@@ -203,7 +197,6 @@ const VIEW_PANEL_KEY = '';
     ChatTranscriptComponent,
     ChatEmptyStateComponent,
     AgentMonitorPanelComponent,
-    DisplaySheetComponent,
     ChatInputComponent,
     BackgroundTaskTilesContainerComponent,
     ChatSessionLayoutComponent,
@@ -232,7 +225,7 @@ const VIEW_PANEL_KEY = '';
     StatsTileExpansionState,
     // Budget banner state belongs to this view's tab and session.
     SessionBudgetActionsService,
-    // The Display dock store, only where the dock mounts: Electron (R1.14,
+    // The detached Display store is provided on Electron (R1.14,
     // decision #108). In VS Code the token resolves to null, so the
     // transcript's live-turn effect and the chips stay inert. A host that
     // shows the display itself supplies the store (SESSION_DISPLAY_DOCK).
@@ -574,36 +567,11 @@ export class ChatViewComponent implements OnDestroy {
     );
   });
 
-  /** The Electron dock store; `null` in VS Code. */
+  /** The Electron display store; `null` in other hosts. */
   private readonly displayDock = inject(DisplayDockState, { optional: true });
   private readonly displayDockRegistry = inject(DisplayDockRegistry);
-  /** Electron: the right-side panel is the display dock. */
+  /** Electron uses the detached display window. */
   protected readonly dockEnabled = this.displayDock !== null;
-  /** A host-supplied dock: the host shows the display, so no sheet here. */
-  protected readonly displaySheetEnabled =
-    this.dockEnabled &&
-    inject(SESSION_DISPLAY_DOCK, { optional: true }) === null;
-  /**
-   * Auto-open, persisted width and the separate window (set in the
-   * constructor, once `resolvedTabId` exists); `null` without a dock.
-   */
-  private readonly displaySidebar: DisplaySidebarConnection | null;
-  /** The main chat view in Electron: the sidebar offers Detach. */
-  protected readonly displayDetachable = computed(
-    () => (this.displaySidebar?.window ?? null) !== null,
-  );
-  /** The panel lives in the separate window: the main view shows the rail. */
-  protected readonly displayDetached = computed(
-    () =>
-      (this.displaySidebar?.window?.detached() ?? false) &&
-      (this.displaySidebar?.bound() ?? false),
-  );
-  protected readonly displayWindowError = computed(
-    () => this.displaySidebar?.window?.error() ?? null,
-  );
-  protected readonly displayWindowCount = computed(
-    () => this.displaySidebar?.window?.count() ?? 0,
-  );
   /**
    * Open state and the agent user-close rule of the right-side panel. The
    * dock store when there is one (per tab); otherwise a view-private instance
@@ -619,11 +587,11 @@ export class ChatViewComponent implements OnDestroy {
   protected readonly panelTab = computed(() =>
     this.panelState.tab(this.panelKey()),
   );
-  /** The right-side panel (dock or monitor) is open. */
+  /** The inline agent monitor state is open. */
   readonly panelOpen = computed(() => this.panelTab().open);
-  /** Raised when the user opens the dock as an overlay: it focuses its close. */
+  /** Raised when the user opens the agent monitor overlay. */
 
-  /** The dock width beside the chat: the user's width or 400 px, clamped. */
+  /** The inline agent monitor width, clamped to the chat host. */
   protected readonly dockWidth = computed(() => {
     const custom = this.panelResizeService.customWidth();
     const width = clampDockWidth(
@@ -743,62 +711,6 @@ export class ChatViewComponent implements OnDestroy {
     this.panelState.close(this.panelKey());
   }
 
-  /**
-   * The dock separator's keys (R1.5, design-spec section 8 assertion 11): the
-   * separator sits on the dock's left edge, so ArrowLeft widens and
-   * ArrowRight narrows by 16 px; Home and End go to the bounds; Enter resets
-   * to the default width. `PanelResizeService` clamps every value.
-   */
-  protected onDockSeparatorKeydown(event: KeyboardEvent): void {
-    const host = this.hostWidth() || window.innerWidth;
-    const width = this.dockWidth();
-    let next: number | null;
-    switch (event.key) {
-      case 'ArrowLeft':
-        next = width + DOCK_KEY_STEP;
-        break;
-      case 'ArrowRight':
-        next = width - DOCK_KEY_STEP;
-        break;
-      case 'Home':
-        next = 0;
-        break;
-      case 'End':
-        next = Number.POSITIVE_INFINITY;
-        break;
-      case 'Enter':
-        next = null;
-        break;
-      default:
-        return;
-    }
-    event.preventDefault();
-    if (next === null) {
-      this.panelResizeService.resetWidth();
-    } else {
-      this.panelResizeService.setCustomWidth(next, host);
-    }
-    this.commitDockWidth();
-  }
-
-  /** Persists the current dock width (drag end, key step, reset only). */
-  private commitDockWidth(): void {
-    this.displaySidebar?.commitWidth(this.panelResizeService.customWidth());
-  }
-
-  protected detachDisplay(): void {
-    if (!this.displaySidebar?.activateWindow()) return;
-    void this.displaySidebar.window?.detach();
-  }
-
-  protected focusDisplayWindow(): void {
-    void this.displaySidebar?.window?.focus();
-  }
-
-  protected attachDisplayWindow(): void {
-    void this.displaySidebar?.window?.attach();
-  }
-
   private resizeHandleEl: HTMLElement | null = null;
   private resizePointerId: number | null = null;
   private _resizeFrame: number | null = null;
@@ -880,7 +792,6 @@ export class ChatViewComponent implements OnDestroy {
   /** Double-click the handle to fall back to the responsive default width. */
   onResizeReset(): void {
     this.panelResizeService.resetWidth();
-    this.commitDockWidth();
   }
 
   ngOnDestroy(): void {
@@ -898,7 +809,6 @@ export class ChatViewComponent implements OnDestroy {
 
   private _endResize(cancel: boolean): void {
     const startWidth = this._startWidth;
-    const dragging = this.resizeHandleEl !== null;
     this._cancelResizeFrame();
     if (cancel && startWidth !== null) {
       this.ngZone.run(() => {
@@ -911,7 +821,6 @@ export class ChatViewComponent implements OnDestroy {
       this._applyResize();
     }
     this._cleanupResizeListeners();
-    if (dragging && !cancel) this.ngZone.run(() => this.commitDockWidth());
   }
 
   private _cleanupResizeListeners(): void {
@@ -1492,16 +1401,14 @@ export class ChatViewComponent implements OnDestroy {
     // `tabs()` lists only the active workspace, so a tab that left it is
     // forgotten only when no workspace still holds it.
     const dock = this.displayDock;
-    this.displaySidebar =
-      dock === null
-        ? null
-        : connectDisplaySidebar({
-            dock,
-            tabId: this.resolvedTabId,
-            main: this.displaySheetEnabled && !this._sessionContext,
-            windowEnabled: this.displaySheetEnabled,
-            resize: this.panelResizeService,
-          });
+    // Binding is released through DestroyRef by the wiring helper.
+    if (dock !== null) {
+      connectDisplayWindowSource({
+        dock,
+        tabId: this.resolvedTabId,
+        main: !this._sessionContext,
+      });
+    }
     if (dock !== null) {
       const openIds = (): ReadonlySet<TabId> =>
         new Set(this._tabManager.tabs().map((tab) => tab.id));

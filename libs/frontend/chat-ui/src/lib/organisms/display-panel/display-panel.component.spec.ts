@@ -121,6 +121,22 @@ describe('DisplayPanelComponent', () => {
     Element.prototype.scrollIntoView = originalScrollIntoView;
   });
 
+  it('places every surface renderer directly under its tabpanel', () => {
+    set({ surfaces: [surface('id:a', 'A', 0), surface('id:b', 'B', 1)] });
+    const renderers = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('ptah-surface-renderer'));
+    expect(renderers).toHaveLength(2);
+    for (const renderer of renderers) expect(renderer.parentElement?.classList.contains('dp-tabpanel')).toBe(true);
+    set({ selectedKey: 'id:b' });
+    expect((fixture.nativeElement as HTMLElement).querySelectorAll('.dp-tabpanel > ptah-surface-renderer')).toHaveLength(2);
+  });
+
+  it('gives the active tabpanel the remaining bounded height', () => {
+    set({ surfaces: [surface('id:chart', 'Chart', 1)] });
+    expect(visiblePanels()[0]?.classList.contains('flex-1')).toBe(true);
+    expect(visiblePanels()[0]?.classList.contains('min-h-0')).toBe(true);
+    expect(visiblePanels()[0]?.classList.contains('overflow-auto')).toBe(true);
+  });
+
   describe('empty state (R1.13)', () => {
     it('explains what appears here and shows no strip', () => {
       set({});

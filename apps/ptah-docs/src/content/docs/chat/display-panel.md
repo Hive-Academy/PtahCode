@@ -7,7 +7,7 @@ sidebar:
 
 # Display Panel
 
-The **Display** panel shows the visual output that the agent sends during a session. It is a sidebar at the right of the chat. Each session has its own Display items.
+The **Display** panel shows the visual output that the agent sends during a session. It opens in a separate Display window by default. Each session has its own Display items.
 
 ## What the panel shows
 
@@ -21,15 +21,11 @@ When the panel has no items, it shows **Nothing to show yet**.
 
 ## Open the panel
 
-The panel shows only when the session has Display items. When the panel is collapsed, a vertical **Display · _N_** tab shows at the right edge. _N_ is the number of items.
+The Display window opens when the agent sends Display items. Automatic updates refresh it without taking focus.
 
-1. Click the **Display · _N_** tab. The panel opens.
-2. Select an item in the **Displays** tab strip. Use the **Left Arrow** and **Right Arrow** keys to move between items.
-3. To close the panel, click **Collapse display**.
+Click a display chip in the transcript to select its item and focus the window. Select other items in the tab strip. Use the **Left Arrow** and **Right Arrow** keys to move between items.
 
 A dot on an item tab tells you that the item is new.
-
-When the window is narrow, the panel opens over the chat.
 
 ## Keep the current view
 
@@ -56,19 +52,13 @@ A Ptah UI block that the agent sends to the panel has a chip in the transcript. 
 
 Click **Open in display** to select the block in the panel. For an updated block, click **Open latest**.
 
-## Open the panel in a separate window
+## The Display window
 
-You can move the Display panel to its own window, **PtahCode - Display**.
+Displays open in a separate **PtahCode - Display** window by default. Automatic updates refresh it without taking focus. Click a display chip to bring it to the front.
 
-1. Open the Display panel.
-2. Click **Detach**. The panel opens in the **PtahCode - Display** window.
+**Keep current view** and **Close** are in that window. Closing it stops automatic reopen for the rest of the current turn. A new turn or session can open it again.
 
-While the panel is in the separate window, the chat shows a narrow rail with **Display · _N_ (separate window)**:
-
-- Click **Focus** to bring the **PtahCode - Display** window to the front.
-- Click **Re-attach** to move the panel back into the chat.
-
-The separate window shows the Display panel of the active session. When you close the Display window, the panel goes back into the chat. When you close the main window, the Display window also closes. PtahCode keeps the size and position of the Display window for the next time.
+The Display window closes when the main window closes. PtahCode remembers its size and position.
 
 ## Next steps
 

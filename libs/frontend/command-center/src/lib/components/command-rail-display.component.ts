@@ -9,7 +9,7 @@ import {
   signal,
 } from '@angular/core';
 // Runtime symbol named only inside `@defer`, so the compiler keeps the
-// display-panel chunk lazy (same rule as chat's `display-sheet.component.ts`).
+// display-panel chunk lazy for hosts using the inline fallback.
 import {
   DisplayPanelComponent,
   type DisplayPanelViewStateChange,
@@ -21,7 +21,7 @@ import {
   type DisplayDockState,
   type DisplayDockTabState,
 } from '@ptah-extension/chat';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 import type { ArtifactRecord } from '@ptah-extension/shared';
 
@@ -29,8 +29,7 @@ const NO_ARTIFACTS: readonly ArtifactRecord[] = Object.freeze([]);
 const NO_SURFACES: DisplayDockTabState['surfaces'] = Object.freeze([]);
 const NO_VIEW_STATES: DisplayDockTabState['viewStates'] = new Map();
 /**
- * The display panel's artifact strip key prefix, duplicated as in chat's
- * display sheet so this component does not value-import the lazy entry.
+ * The display panel's artifact strip key prefix, shared with the display window so this component does not value-import the lazy entry.
  */
 const ARTIFACT_KEY_PREFIX = 'artifact:';
 
@@ -55,8 +54,8 @@ function keyForSelection(selection: DisplayDockSelection): string | null {
 }
 
 /**
- * The rail's Display tab: what the chat display sheet shows for the Live
- * tab — the agent's surfaces and the published artifacts — in the shared
+ * The rail's Display tab uses the detached window on Electron. Other hosts
+ * show the Live tab inline — the agent's surfaces and the published artifacts — in the shared
  * `ptah-display-panel`. Surfaces come from the page's display dock, which the
  * Live embed's chat view feeds (Electron); without a dock only artifacts show.
  */
@@ -67,14 +66,13 @@ function keyForSelection(selection: DisplayDockSelection): string | null {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex h-full min-h-0 flex-col' },
   template: `
-    @if (window && tabId()) {
-      <div class="flex shrink-0 items-center justify-end gap-1 px-2 py-1">
-        @if (window.error(); as error) { <p role="alert" class="mr-auto text-xs text-error">{{ error }}</p> }
-        <button type="button" ptahButton variant="ghost" size="xs" (click)="toggleWindow()">
-          {{ window.detached() ? 'Dock' : 'Detach' }}
-        </button>
+    @if (desktop) {
+      <div class="p-3 text-xs">
+        <p role="status">Displays open in a separate window.</p>
+        @if (window?.error(); as error) { <p role="alert" class="text-error">{{ error }}</p> }
+        <button type="button" ptahButton variant="ghost" size="xs" (click)="openWindow()">Open Display</button>
       </div>
-    }
+    } @else {
     @if (linkError()) {
       <p role="alert" class="px-1 pb-1 text-xs text-error">{{ linkError() }}</p>
     }
@@ -128,6 +126,7 @@ function keyForSelection(selection: DisplayDockSelection): string | null {
         }
       }
     }
+    }
   `,
 })
 export class CommandRailDisplayComponent {
@@ -138,6 +137,7 @@ export class CommandRailDisplayComponent {
   protected readonly artifactStore = inject(ArtifactStore);
   protected readonly window = inject(DisplayWindowSync, { optional: true });
   private readonly rpc = inject(ClaudeRpcService);
+  protected readonly desktop = inject(VSCodeService).isElectron;
 
   /** The Live tab's dock state, when there is a dock and a tab. */
   protected readonly tabState = computed(() => {
@@ -201,10 +201,11 @@ export class CommandRailDisplayComponent {
     this.attempt.update((value) => value + 1);
   }
 
-  protected toggleWindow(): void {
-    const displayWindow = this.window;
-    if (!displayWindow) return;
-    void (displayWindow.detached() ? displayWindow.attach() : displayWindow.detach());
+  protected openWindow(): void {
+    const id = this.tabId();
+    const dock = this.dock();
+    if (dock && id) dock.open(id);
+    else if (this.window) void this.window.focus();
   }
 
   /** The panel's Retry on a missing artifact: list the tab's artifacts again. */
