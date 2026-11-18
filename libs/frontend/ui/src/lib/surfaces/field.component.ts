@@ -132,9 +132,9 @@ let fieldId = 0;
             </svg>
           </button>
           <div content class="ptah-field__info-panel" [id]="infoPanelId"
-            role="dialog" [attr.aria-label]="'More about ' + label()">
-            {{ info() }}
-          </div>
+            role="dialog" [attr.aria-label]="'More about ' + label()"
+            >{{ info() }}</div
+          >
         </ptah-native-popover>
       }
       <span class="ptah-field__rail" aria-hidden="true"></span>
