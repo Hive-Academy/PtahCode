@@ -153,9 +153,9 @@ describe('StackSkillReviewComponent coverage board', () => {
     fixture.componentRef.setInput('selectionReset', true);
     fixture.detectChanges();
     const panel = root.querySelector('ptah-stack-coverage-strip section');
-    expect(panel?.querySelector('[data-coverage-count]')?.textContent).toContain(
-      '1 of 2 stack items covered',
-    );
+    expect(
+      panel?.querySelector('[data-coverage-count]')?.textContent,
+    ).toContain('1 of 2 stack items covered');
     expect(
       root.querySelector('[data-recommendation-count]')?.textContent?.trim(),
     ).toBe('2');
@@ -167,7 +167,9 @@ describe('StackSkillReviewComponent coverage board', () => {
     const dismissed = jest.fn();
     fixture.componentInstance.selectionResetDismissed.subscribe(dismissed);
     panel
-      ?.querySelector<HTMLButtonElement>('[aria-label="Dismiss selection reset message"]')
+      ?.querySelector<HTMLButtonElement>(
+        '[aria-label="Dismiss selection reset message"]',
+      )
       ?.click();
     expect(dismissed).toHaveBeenCalledTimes(1);
     fixture.componentRef.setInput(
@@ -175,9 +177,9 @@ describe('StackSkillReviewComponent coverage board', () => {
       new Set(['owner/repo/angular', 'owner/repo/jest']),
     );
     fixture.detectChanges();
-    expect(panel?.querySelector('[data-coverage-count]')?.textContent).toContain(
-      '2 of 2 stack items covered',
-    );
+    expect(
+      panel?.querySelector('[data-coverage-count]')?.textContent,
+    ).toContain('2 of 2 stack items covered');
     fixture.componentRef.setInput('detectedItems', []);
     fixture.detectChanges();
     expect(root.querySelector('ptah-stack-coverage-strip')).toBeNull();
@@ -223,7 +225,9 @@ describe('StackSkillReviewComponent coverage board', () => {
     const cards = [...root.querySelectorAll('ptah-skill-pick-card')];
     expect(cards).toHaveLength(3);
     expect(cards[0]?.textContent).toContain('Extra result');
-    const headings = [...root.querySelectorAll('h2')].map((heading) => heading.id);
+    const headings = [...root.querySelectorAll('h2')].map(
+      (heading) => heading.id,
+    );
     expect(headings.indexOf('search-results-title')).toBeGreaterThanOrEqual(0);
     expect(headings.indexOf('search-results-title')).toBeLessThan(
       headings.indexOf('recommended-title'),
