@@ -20,6 +20,7 @@ import {
 } from './gallery-form-controls.data';
 import { GalleryProviderFormComponent } from './gallery-provider-form.component';
 import { GallerySectionComponent } from './gallery-section.component';
+import { GallerySettingsControlsComponent } from './gallery-settings-controls.component';
 
 interface TintPanel {
   readonly id: 'base-200' | 'base-300';
@@ -36,6 +37,7 @@ interface TintPanel {
     GallerySectionComponent,
     NgTemplateOutlet,
     GalleryProviderFormComponent,
+    GallerySettingsControlsComponent,
     PtahFieldComponent,
     PtahInputDirective,
     PtahTextareaDirective,
@@ -61,7 +63,7 @@ interface TintPanel {
       <div data-testid="form-controls-field-states" class="grid grid-cols-1 gap-ptah-field sm:grid-cols-2 lg:grid-cols-3">
         <ptah-field label="Workspace name"><input ptahInput /></ptah-field>
         <ptah-field label="Workspace name" hint="Filled"><input ptahInput value="ptah-extension" /></ptah-field>
-        <ptah-field label="Branch prefix" hint="A real placeholder floats the label">
+        <ptah-field label="Branch prefix" hint="The placeholder shows on focus only">
           <input ptahInput placeholder="feat/" />
         </ptah-field>
         <ptah-field label="Search sessions" clearable>
@@ -133,7 +135,13 @@ interface TintPanel {
           <span class="text-ptah-label text-base-content-muted">Standalone in a toolbar</span>
           <ptah-select label="Sort order" [options]="regions" [value]="'us'" />
         </div>
+        <div data-testid="form-controls-select-compact" class="flex items-center justify-between gap-ptah-controls">
+          <span id="gallery-compact-select-title" class="text-ptah-label">Compact: the row title is the label</span>
+          <ptah-select size="xs" labelledBy="gallery-compact-select-title" [options]="regions" [value]="'eu'" />
+        </div>
       </div>
+
+      <ptah-gallery-settings-controls />
 
       <div data-testid="form-controls-select-sizes" class="flex flex-wrap items-center gap-ptah-controls">
         <span class="text-ptah-label text-base-content-muted">Select, inline sizes</span>

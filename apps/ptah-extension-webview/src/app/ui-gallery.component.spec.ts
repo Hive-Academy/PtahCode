@@ -372,8 +372,13 @@ describe('UiGalleryComponent', () => {
     for (const control of Array.from(
       ref.querySelectorAll<HTMLElement>('[data-ptah-control]'),
     )) {
+      const labelledBy = control.getAttribute('aria-labelledby');
       const named =
         control.hasAttribute('aria-label') ||
+        (labelledBy !== null &&
+          labelledBy
+            .split(' ')
+            .every((id) => root.querySelector(`[id="${id}"]`) !== null)) ||
         control.closest('label') !== null ||
         (control.id !== '' &&
           root.querySelector(`label[for="${control.id}"]`) !== null);

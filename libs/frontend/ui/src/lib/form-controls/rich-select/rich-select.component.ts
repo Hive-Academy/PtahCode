@@ -77,6 +77,14 @@ export class PtahRichSelectComponent<T = unknown>
   readonly value = model<T | null>(null);
   /** The accessible name when the select is not inside `ptah-field`. */
   readonly label = input<string | undefined>(undefined);
+  /**
+   * Compact variant (no floating label, for `ptah-setting-row` and table
+   * cells): the id (or ids) of the visible element that names the select, for
+   * example the row title or the column header. It wins over `label`. Use
+   * `label` when no visible element has an id. One of the two is required
+   * outside `ptah-field`.
+   */
+  readonly labelledBy = input<string | undefined>(undefined);
   readonly placeholder = input('Select');
   /**
    * Shows the search input in the panel. Unset (default): automatic, on from
@@ -140,6 +148,12 @@ export class PtahRichSelectComponent<T = unknown>
   readonly isDisabled = computed(() => this.disabled() || this.formDisabled());
   readonly ariaInvalid = computed(() => (this.invalid() || this.fieldInvalid() ? 'true' : null));
   readonly searchLabel = computed(() => `Search ${this.label() ?? 'options'}`);
+  /** `aria-label` of the trigger: `label`, unless `labelledBy` names the select. */
+  readonly triggerAriaLabel = computed(() => (this.labelledBy() ? null : (this.label() ?? null)));
+  /** `aria-labelledby` of the listbox: `labelledBy`, else the field label when no `label`. */
+  readonly listboxLabelledBy = computed(
+    () => this.labelledBy() ?? (this.label() ? null : this.fieldLabelId()),
+  );
   readonly statusText = computed(() => {
     const n = this.items().length;
     return n === 1 ? '1 option' : `${n} options`;
@@ -278,7 +292,8 @@ export class PtahRichSelectComponent<T = unknown>
     const panel = this.panelRef()?.nativeElement;
     if (!panel) return;
     const anchor = this.host.nativeElement.closest<HTMLElement>('.ptah-field__box') ?? this.host.nativeElement;
-    panel.style.minWidth = `${anchor.getBoundingClientRect().width}px`;
+    // As wide as the anchor, but never wider than the viewport (min-width wins over max-width).
+    panel.style.minWidth = `min(${anchor.getBoundingClientRect().width}px, calc(100vw - var(--ptah-space-4)))`;
     void this.floating.position(anchor, panel, { placement: 'bottom-start', offset: 6 });
     this.searchRef()?.nativeElement.focus();
     this.scrollActive();
