@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bots, phase 1: list and editor prototype (TASK_2026_2274_eb79)</title>
+<style>
+/* Token values copied from apps/ptah-extension-webview/tailwind.config.js (ptah-glass, ptah-glass-light),
+   apps/ptah-extension-webview/src/styles.css (--surface-*, --glass-*) and
+   libs/frontend/ui/src/lib/tokens/ptah-tokens.css (--ptah-*). Hex/oklch only. No network requests. */
+:root{
+  --ptah-space-1:.25rem;--ptah-space-2:.5rem;--ptah-space-3:.75rem;--ptah-space-4:1rem;--ptah-space-6:1.5rem;--ptah-space-8:2rem;
+  --ptah-gap-inline:var(--ptah-space-2);--ptah-gap-label:var(--ptah-space-1);--ptah-gap-controls:var(--ptah-space-2);
+  --ptah-gap-field:var(--ptah-space-4);--ptah-gap-group:var(--ptah-space-6);--ptah-gap-section:var(--ptah-space-8);
+  --ptah-gap-heading:var(--ptah-space-3);--ptah-page-gutter:var(--ptah-space-6);--ptah-surface-pad:var(--ptah-space-4);--ptah-dialog-pad:var(--ptah-space-6);
+  --ptah-control-h-xs:1.5rem;--ptah-control-h-sm:2rem;--ptah-control-h-md:2.5rem;--ptah-field-h-md:3rem;
+  --rounded-btn:9999px;--rounded-badge:9999px;--glass-radius:22px;--glass-radius-inner:14px;--glass-radius-sm:10px;
+  --ptah-radius-field:.625rem;
+  --ptah-focus-ring-width:2px;--ptah-focus-ring-offset:2px;--ptah-btn-disabled-opacity:.48;
+  --font-sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+}
+[data-theme="ptah-glass"]{
+  color-scheme:dark;
+  --p:#e4b94a;--pc:#1b1403;--a:#45d0be;--b1:#17191d;--b2:#202329;--b3:#2a2e35;--bc:#f2f2f1;--bcm:oklch(90.05% .0071 268.54);
+  --er:#ff6b6b;--erc:#2a0505;
+  --ink-run:#93bdff;--ink-need:#ffb066;--ink-err:#ff9696;--ink-done:#5fe0a0;--ink-idle:#dcdee3;
+  --surface-1:#1f2227;--surface-2:#202329;--surface-3:#292c33;
+  --glass-fill-raised:rgb(23 25 29 / .72);--glass-fill-input:rgb(23 25 29 / .58);
+  --line:rgb(255 255 255 / .12);--line-strong:rgb(242 242 241 / .28);
+  --backdrop:radial-gradient(1200px 700px at 15% -10%,#2b3140 0%,transparent 60%),radial-gradient(900px 600px at 110% 20%,#2a2416 0%,transparent 55%),#111316;
+  --scrim:rgb(0 0 0 / .55);--shadow-2:0 12px 32px rgb(0 0 0 / .45);
+}
+[data-theme="ptah-glass-light"]{
+  color-scheme:light;
+  --p:#7c5700;--pc:#fff8e6;--a:#0b7f77;--b1:#f7f3fd;--b2:#eee8f8;--b3:#e2daf1;--bc:#1e1936;--bcm:oklch(46.559% .0614 293.53);
+  --er:#cf3a3a;--erc:#ffffff;
+  --ink-run:#2449b0;--ink-need:#8f5200;--ink-err:#a31f26;--ink-done:#0f6434;--ink-idle:#5f5878;
+  --surface-1:#efe9f9;--surface-2:#eee8f8;--surface-3:#e4dcf2;
+  --glass-fill-raised:rgb(247 243 253 / .85);--glass-fill-input:rgb(255 255 255 / .8);
+  --line:rgb(30 25 54 / .12);--line-strong:rgb(30 25 54 / .26);
+  --backdrop:radial-gradient(1200px 700px at 15% -10%,#e9defc 0%,transparent 60%),radial-gradient(900px 600px at 110% 20%,#fbeccc 0%,transparent 55%),#f3eefb;
+  --scrim:rgb(30 25 54 / .35);--shadow-2:0 12px 32px rgb(30 25 54 / .18);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--font-sans);font-size:.875rem;line-height:1.25rem;background:#0b0c0e;min-height:100vh}
+.window{color:var(--bc);background:var(--backdrop)}
+button,input,textarea,select{font:inherit;color:inherit}
+:focus-visible{outline:var(--ptah-focus-ring-width) solid var(--bc);outline-offset:var(--ptah-focus-ring-offset)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.mono{font-family:var(--font-mono);font-size:.8125rem}
+.muted{color:var(--bcm)}
+
+/* Prototype controls (not part of the design) */
+.proto-bar{position:sticky;top:0;z-index:80;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:8px 16px;background:#0b0c0e;color:#e6e6e6;font:12px/1.4 var(--font-sans);border-bottom:1px solid #333}
+.proto-bar b{font-weight:600;color:#bbb;margin-right:4px}
+.proto-bar .grp{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.proto-bar button{background:#22252b;border:1px solid #3a3e46;color:#e6e6e6;border-radius:6px;padding:3px 9px;cursor:pointer;font-size:12px}
+.proto-bar button[aria-pressed="true"]{background:#e4b94a;color:#1b1403;border-color:#e4b94a}
+
+/* Window frame: Electron content width */
+.window{position:relative;margin:16px auto;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgb(0 0 0 / .35)}
+.titlebar{height:38px;display:flex;align-items:center;justify-content:center;gap:2px;padding:0 12px;background:var(--glass-fill-raised);border-bottom:1px solid var(--line);font-size:12px}
+.titlebar .tab{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:9999px;color:var(--bcm)}
+.titlebar .tab[aria-selected="true"]{background:var(--b3);color:var(--bc);font-weight:600}
+.titlebar .ico{width:12px;height:12px;border:1.5px solid currentColor;border-radius:3px;display:inline-block}
+.scroller{height:var(--vp-h,760px);overflow:auto;position:relative}
+.root{container-type:inline-size;container-name:bots}
+
+/* Page */
+.page{padding:var(--ptah-space-6) var(--ptah-page-gutter) 0;display:flex;flex-direction:column;gap:var(--ptah-space-4);min-height:100%}
+.ph{display:flex;align-items:flex-start;gap:var(--ptah-space-4)}
+.ph h1{margin:0;font-size:1.25rem;line-height:1.75rem;font-weight:600}
+.ph p{margin:2px 0 0;color:var(--bcm)}
+.ph .grow{flex:1}
+
+/* Buttons (button[ptahButton]) */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--ptah-control-h-sm);padding:0 1rem;border-radius:var(--rounded-btn);border:1px solid var(--line-strong);background:var(--surface-2);font-weight:500;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--b3)}
+.btn.primary{background:var(--p);color:var(--pc);border-color:var(--p);font-weight:600}
+.btn.ghost{background:transparent;border-color:transparent}
+.btn.ghost:hover{background:var(--b3)}
+.btn.danger{background:var(--er);color:var(--erc);border-color:var(--er);font-weight:600}
+.btn.ghost.danger-text{color:var(--ink-err);background:transparent;border-color:transparent}
+.btn[disabled]{opacity:var(--ptah-btn-disabled-opacity);cursor:not-allowed}
+.btn.xs{height:var(--ptah-control-h-xs);padding:0 .625rem;font-size:.75rem}
+.ibtn{width:var(--ptah-control-h-sm);height:var(--ptah-control-h-sm);display:inline-grid;place-items:center;border-radius:9999px;border:1px solid transparent;background:transparent;cursor:pointer;color:var(--bc)}
+.ibtn:hover{background:var(--b3)}
+.spin{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .72s linear infinite}
+@keyframes spin{to{transform:rotate(1turn)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}.skel{animation:none!important}}
+
+/* Alert (ptah-alert) */
+.alert{display:flex;gap:var(--ptah-space-3);align-items:flex-start;padding:var(--ptah-space-3) var(--ptah-space-4);border-radius:var(--glass-radius-inner);border:1px solid var(--line);background:var(--surface-1)}
+.alert .bar{width:3px;align-self:stretch;border-radius:3px;background:var(--ink-run);flex:none}
+.alert.err .bar{background:var(--ink-err)} .alert.warn .bar{background:var(--ink-need)} .alert.ok .bar{background:var(--ink-done)} .alert.idle .bar{background:var(--ink-idle)}
+.alert .t{font-weight:600}
+.alert .b{color:var(--bcm)}
+.alert .acts{display:flex;flex-wrap:wrap;gap:var(--ptah-gap-controls);margin-top:var(--ptah-space-2)}
+.alert .grow{flex:1;min-width:0}
+
+/* Status (ptah-status) and badge (span[ptahBadge]) */
+.status{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;line-height:1rem;font-weight:500;padding:1px 8px;border-radius:9999px;background:var(--surface-2);white-space:nowrap}
+.status::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.status.ok{color:var(--ink-done)} .status.idle{color:var(--ink-idle)} .status.warn{color:var(--ink-need)} .status.err{color:var(--ink-err)} .status.run{color:var(--ink-run)}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:.6875rem;line-height:1rem;font-weight:500;padding:0 7px;border-radius:9999px;border:1px solid var(--line);color:var(--bcm);white-space:nowrap}
+
+/* List-detail (ptah-list-detail) */
+.ld{display:grid;grid-template-columns:20rem minmax(0,1fr);gap:var(--ptah-space-4);flex:1;min-height:0}
+.list{display:flex;flex-direction:column;gap:var(--ptah-space-2);min-width:0;position:sticky;top:var(--ptah-space-4);align-self:start}
+.detail{min-width:0;border-left:1px solid var(--line);padding-left:var(--ptah-space-4);display:flex;flex-direction:column}
+.back{display:none}
+@container bots (max-width: 960px){
+  .ld{grid-template-columns:minmax(0,1fr)}
+  .detail{border-left:0;padding-left:0}
+  .ld[data-selected="true"] .list{display:none}
+  .ld[data-selected="false"] .detail{display:none}
+  .back{display:inline-flex}
+}
+
+/* Toolbar (ptah-toolbar) */
+.tbar{display:flex;flex-wrap:wrap;gap:var(--ptah-space-2);align-items:center}
+.search{flex:1 1 10rem;display:flex;align-items:center;gap:6px;height:var(--ptah-control-h-sm);padding:0 .75rem;border-radius:9999px;border:1px solid var(--line-strong);background:var(--glass-fill-input);color:var(--bcm)}
+.search input{flex:1;min-width:0;border:0;background:transparent;outline:0;color:var(--bc)}
+.search input::placeholder{color:var(--bcm)}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;color:var(--bcm);cursor:pointer}
+.chk input{accent-color:var(--p)}
+.cselect{display:inline-flex;align-items:center;gap:6px;height:var(--ptah-control-h-sm);padding:0 .75rem;border-radius:9999px;border:1px solid var(--line-strong);background:var(--glass-fill-input);cursor:pointer;font-size:.8125rem}
+.chev{width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg) translateY(-2px);display:inline-block;margin-left:4px}
+
+/* Rows (div[ptahListRow]) */
+.rows{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px;width:100%;text-align:left;padding:10px 12px;border-radius:var(--glass-radius-inner);border:1px solid transparent;background:transparent;cursor:pointer;position:relative}
+.row:hover{background:var(--surface-1)}
+.row[aria-current="true"]{background:var(--surface-2);border-color:var(--line)}
+.row[aria-current="true"]::before{content:"";position:absolute;left:-1px;top:10px;bottom:10px;width:3px;border-radius:3px;background:var(--p)}
+.row .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .d{grid-column:1/-1;color:var(--bcm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .m{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:.75rem;color:var(--bcm)}
+.row .m .mono{font-size:.75rem}
+.row.archived .n,.row.archived .d{color:var(--bcm)}
+.import{margin-top:auto;padding:10px 12px;border:1px dashed var(--line-strong);border-radius:var(--glass-radius-inner);color:var(--bcm);font-size:.75rem;display:flex;gap:8px;align-items:center;justify-content:space-between}
+
+/* Skeleton (ptah-skeleton) */
+.skel{border-radius:8px;background:var(--surface-2);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.55}}
+
+/* State panel (ptah-state-panel) */
+.state{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:var(--ptah-space-2);padding:var(--ptah-space-12,3rem) var(--ptah-space-6);border:1px dashed var(--line-strong);border-radius:var(--glass-radius);color:var(--bcm);flex:1}
+.state h2{margin:0;font-size:1rem;line-height:1.5rem;color:var(--bc);font-weight:600}
+.state p{margin:0;max-width:34rem}
+.state .acts{display:flex;gap:var(--ptah-gap-controls);margin-top:var(--ptah-space-2)}
+
+/* Editor header */
+.eh{display:flex;flex-wrap:wrap;align-items:center;gap:var(--ptah-space-2) var(--ptah-space-3);padding-bottom:var(--ptah-space-3);border-bottom:1px solid var(--line)}
+.eh h2{margin:0;font-size:1rem;line-height:1.5rem;font-weight:600}
+.eh .grow{flex:1}
+.toggle{background:transparent;border:0;padding:0 4px;display:inline-flex;align-items:center;gap:8px;font-size:.8125rem;cursor:pointer}
+.toggle .tr{width:34px;height:20px;border-radius:9999px;background:var(--b3);border:1px solid var(--line-strong);position:relative;flex:none}
+.toggle .tr::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--bcm);transition:left .12s}
+.toggle[aria-checked="true"] .tr{background:var(--p);border-color:var(--p)}
+.toggle[aria-checked="true"] .tr::after{left:16px;background:var(--pc)}
+.toggle[aria-disabled="true"]{opacity:var(--ptah-btn-disabled-opacity);cursor:not-allowed}
+
+/* Form sections (ptah-form-section) */
+.form{display:flex;flex-direction:column;padding-bottom:var(--ptah-space-4)}
+.fsec{display:grid;grid-template-columns:12rem minmax(0,36rem);gap:var(--ptah-space-6);padding:var(--ptah-space-6) 0;border-bottom:1px solid var(--line)}
+.fsec:last-child{border-bottom:0}
+.fsec .aside h3{margin:0;font-size:.875rem;line-height:1.25rem;font-weight:600}
+.fsec .aside p{margin:2px 0 0;color:var(--bcm);font-size:.75rem;line-height:1rem}
+.fsec .aside .status{margin-top:var(--ptah-space-2)}
+.fsec .fields{display:flex;flex-direction:column;gap:var(--ptah-gap-field);min-width:0}
+@container bots (max-width: 760px){.fsec{grid-template-columns:minmax(0,1fr);gap:var(--ptah-space-3)}}
+
+/* Field (ptah-field with floating label) */
+.field{position:relative;display:flex;flex-direction:column;gap:var(--ptah-gap-label)}
+.box{position:relative;min-height:var(--ptah-field-h-md);border-radius:var(--ptah-radius-field);border:1px solid var(--line-strong);background:var(--glass-fill-input);display:flex;align-items:center;padding:18px 12px 6px}
+.box:focus-within{border-color:var(--p);box-shadow:inset 0 -2px 0 var(--p)}
+.box .fl{position:absolute;left:12px;top:5px;font-size:.6875rem;line-height:1rem;font-weight:500;color:var(--bcm);pointer-events:none}
+.box.rest .fl{top:14px;font-size:.875rem;line-height:1.25rem}
+.box input,.box textarea{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--bc)}
+.box textarea{resize:vertical;min-height:9.5rem;line-height:1.375rem}
+.box.multi{align-items:flex-start;padding-top:22px}
+.box .trail{margin-left:8px;color:var(--bcm);display:inline-flex;align-items:center}
+.field .hint{font-size:.75rem;line-height:1rem;color:var(--bcm);display:flex;justify-content:space-between;gap:8px}
+.field.invalid .box{border-color:var(--ink-err);box-shadow:inset 0 -2px 0 var(--ink-err)}
+.field.invalid .hint .e{color:var(--ink-err);font-weight:500}
+.field.readonly .box{background:var(--surface-2);border-style:dashed}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--ptah-gap-field)}
+.grid3{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,.8fr);gap:var(--ptah-space-3)}
+@container bots (max-width: 760px){.grid3{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.grid3 .eff{grid-column:1/-1}}
+
+/* Tiles (ptah-surface-tile) used as a radio group */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));gap:var(--ptah-space-2)}
+.tile{text-align:left;padding:10px 12px 10px 36px;border-radius:var(--glass-radius-inner);border:1px solid var(--line-strong);background:var(--surface-1);cursor:pointer;position:relative;display:flex;flex-direction:column;gap:2px}
+.tile::before{content:"";position:absolute;left:12px;top:13px;width:14px;height:14px;border-radius:50%;border:1.5px solid var(--line-strong);background:var(--b1)}
+.tile[aria-checked="true"]{border-color:var(--p);background:var(--surface-2)}
+.tile[aria-checked="true"]::before{border-color:var(--p);background:var(--p);box-shadow:inset 0 0 0 3px var(--b1)}
+.tile .tt{font-weight:600}
+.tile .td{font-size:.75rem;line-height:1rem;color:var(--bcm)}
+.tile .mono{font-size:.75rem}
+.group-label{font-size:.75rem;font-weight:500;color:var(--bcm);margin-bottom:6px}
+
+/* Chips */
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 4px 0 10px;border-radius:9999px;background:var(--surface-2);border:1px solid var(--line);font-size:.8125rem}
+.chip .x{width:18px;height:18px;border-radius:50%;border:0;background:transparent;cursor:pointer;color:var(--bcm);display:grid;place-items:center;font-size:12px;line-height:1}
+.chip .x:hover{background:var(--b3);color:var(--bc)}
+.chip.flag{border-color:var(--ink-need)}
+.chip .warnmark{color:var(--ink-need);font-weight:700}
+.empty-note{font-size:.75rem;color:var(--bcm);padding:8px 12px;border-radius:var(--glass-radius-sm);background:var(--surface-1)}
+
+/* Setting row (ptah-setting-row) */
+.srow{display:flex;align-items:center;gap:var(--ptah-space-4);padding:10px 0;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:0}
+.srow .l{flex:1;min-width:0}
+.srow .l .t{font-weight:500}
+.srow .l .h{font-size:.75rem;line-height:1rem;color:var(--bcm)}
+
+/* Form actions (ptah-form-actions, sticky) */
+.factions{position:sticky;bottom:0;margin-top:auto;display:flex;flex-wrap:wrap;align-items:center;gap:var(--ptah-space-3);padding:10px 14px;margin-bottom:var(--ptah-space-4);border-radius:var(--glass-radius-inner);border:1px solid var(--line);background:var(--glass-fill-raised);backdrop-filter:blur(14px);box-shadow:var(--shadow-2);z-index:5}
+.factions .msg{flex:1;min-width:12rem;font-size:.8125rem;color:var(--bcm);display:flex;align-items:center;gap:8px}
+.factions .msg.err{color:var(--ink-err);font-weight:500}
+.factions .msg.ok{color:var(--ink-done);font-weight:500}
+
+/* Menu (ptah-native-dropdown) */
+.menuwrap{position:relative}
+.menu{position:absolute;right:0;top:calc(100% + 4px);min-width:13rem;padding:4px;border-radius:var(--glass-radius-inner);border:1px solid var(--line-strong);background:var(--b2);box-shadow:var(--shadow-2);z-index:20;display:none}
+.menu[data-open="true"]{display:block}
+.menu button{display:block;width:100%;text-align:left;padding:7px 10px;border:0;border-radius:8px;background:transparent;cursor:pointer}
+.menu button:hover,.menu button:focus-visible{background:var(--b3)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.menu .danger{color:var(--ink-err)}
+
+/* Modal (ptah-native-modal) */
+.scrim{position:absolute;inset:0;background:var(--scrim);display:grid;place-items:center;z-index:60;padding:24px}
+.modal{width:min(34rem,100%);max-height:100%;overflow:auto;border-radius:var(--glass-radius);border:1px solid var(--line-strong);background:var(--b2);box-shadow:var(--shadow-2);padding:var(--ptah-dialog-pad);display:flex;flex-direction:column;gap:var(--ptah-space-4)}
+.modal h2{margin:0;font-size:1rem;line-height:1.5rem;font-weight:600}
+.modal p{margin:0;color:var(--bcm)}
+.modal .foot{display:flex;justify-content:flex-end;gap:var(--ptah-gap-controls);padding-top:var(--ptah-space-2);border-top:1px solid var(--line)}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:9999px;padding:2px;background:var(--surface-1)}
+.seg button{border:0;background:transparent;border-radius:9999px;padding:3px 12px;cursor:pointer;font-size:.8125rem}
+.seg button[aria-checked="true"]{background:var(--b3);font-weight:600;box-shadow:inset 0 0 0 1px var(--line-strong)}
+.ret{display:flex;flex-direction:column;gap:var(--ptah-space-3);padding:var(--ptah-space-3) var(--ptah-space-4);border-radius:var(--glass-radius-inner);background:var(--surface-1);border:1px solid var(--line)}
+.ret .r{display:flex;align-items:center;gap:var(--ptah-space-3)}
+.ret .r .l{flex:1}
+.ret .r .l .h{font-size:.75rem;color:var(--bcm)}
+</style>
+</head>
+<body>
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <div class="grp"><b>Theme</b><button data-theme-btn="ptah-glass" aria-pressed="true">Dark</button><button data-theme-btn="ptah-glass-light" aria-pressed="false">Light</button></div>
+  <div class="grp"><b>Width</b><button data-w="1280" aria-pressed="true">1280</button><button data-w="900" aria-pressed="false">900</button></div>
+  <div class="grp"><b>State</b>
+    <button data-s="empty">Empty</button><button data-s="loading">Loading</button><button data-s="loaderror">Load error</button>
+    <button data-s="populated">Populated</button><button data-s="form" aria-pressed="true">Form pristine</button><button data-s="new">New bot</button>
+    <button data-s="dirty">Dirty</button><button data-s="errors">Errors</button><button data-s="saving">Saving</button><button data-s="saved">Saved</button>
+    <button data-s="conflict">Revision conflict</button><button data-s="saveerror">Save error</button><button data-s="disabled">Disabled bot</button>
+    <button data-s="archived">Archived bot</button><button data-s="delete">Delete dialog</button>
+  </div>
+</div>
+
+<div class="window" id="win" data-theme="ptah-glass" style="width:1280px">
+  <div class="titlebar" role="tablist" aria-label="Surfaces">
+    <span class="tab" role="tab" aria-selected="false"><i class="ico"></i>Chat</span>
+    <span class="tab" role="tab" aria-selected="false"><i class="ico"></i>Voice</span>
+    <span class="tab" role="tab" aria-selected="false"><i class="ico"></i>Apps</span>
+    <span class="tab" role="tab" aria-selected="false"><i class="ico"></i>Tasks</span>
+    <span class="tab" role="tab" aria-selected="true"><i class="ico"></i>Bots</span>
+    <span class="tab" role="tab" aria-selected="false"><i class="ico"></i>Machines</span>
+    <span class="tab" role="tab" aria-selected="false"><i class="ico"></i>Reviews</span>
+    <span class="tab" role="tab" aria-selected="false"><i class="ico"></i>Analytics</span>
+    <span class="tab" role="tab" aria-selected="false"><i class="ico"></i>Setup</span>
+  </div>
+  <div class="scroller" id="scroller"><div class="root" id="root"></div></div>
+  <div id="overlay"></div>
+  <div id="live" class="sr-only" aria-live="polite"></div>
+  <div id="assertive" class="sr-only" aria-live="assertive"></div>
+</div>
+
+<script>
+const WS = 'ptah-extension';
+const BOTS = [
+  {id:'b1',name:'Release notes writer',desc:'Drafts release notes from the pull requests merged since the last tag.',scope:'workspace',enabled:true,provider:'Anthropic',model:'claude-sonnet-5-5',effort:'',edited:'Edited 2 h ago',rev:4,archived:false},
+  {id:'b2',name:'Dependency watcher',desc:'Lists outdated packages and proposes one task for each upgrade.',scope:'workspace',enabled:false,provider:'Codex',model:'gpt-5.2-codex',effort:'medium',edited:'Edited yesterday',rev:2,archived:false},
+  {id:'b3',name:'Review buddy',desc:'Reads a diff and asks the questions a careful reviewer asks.',scope:'user',enabled:true,provider:'Anthropic',model:'claude-opus-5-5',effort:'high',edited:'Edited 3 days ago',rev:7,archived:false},
+  {id:'b4',name:'Old triage bot',desc:'Sorted new issues by area. Replaced by the Tasks board.',scope:'workspace',enabled:false,provider:'Anthropic',model:'claude-haiku-5-5',effort:'',edited:'Archived 12 days ago',rev:3,archived:true},
+];
+let state='form', theme='ptah-glass', width=1280, menuOpen=false, delMode='archive', keepMem=true, keepRuns=true;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function scopeLabel(b){return b.scope==='user'?'<span class="badge">User</span>':'<span class="badge">Workspace</span>'}
+function statusOf(b){return b.archived?'<span class="status idle">Archived</span>':b.enabled?'<span class="status ok">Enabled</span>':'<span class="status idle">Disabled</span>'}
+
+function header(){
+  return `<header class="ph"><div class="grow"><h1>Bots</h1><p>Saved bots: instructions, model, skills, memory and approval rules.</p></div>
+  <button class="btn primary" id="newbot">New bot</button></header>
+  <div class="alert" role="note" aria-label="Bots cannot start yet"><span class="bar" aria-hidden="true"></span><div class="grow"><div class="t">Bots cannot start yet</div>
+  <div class="b">You can create and edit bots now. Starting a bot, and triggers such as schedules and messages, come in later updates.</div></div></div>`;
+}
+
+function selectedId(){
+  if(['empty','loading','loaderror','populated'].includes(state))return null;
+  if(state==='new'||state==='errors')return 'new';
+  if(state==='archived')return 'b4';
+  if(state==='disabled')return 'b2';
+  return 'b1';
+}
+
+function listCol(){
+  const sel=selectedId();
+  const showArch=state==='archived';
+  let body;
+  if(state==='loading'){
+    body=`<div aria-busy="true" aria-label="Loading bots" style="display:flex;flex-direction:column;gap:10px;padding:4px 12px">`+
+      [1,2,3].map(()=>`<div><div class="skel" style="height:14px;width:60%"></div><div class="skel" style="height:12px;width:90%;margin-top:8px"></div><div class="skel" style="height:10px;width:70%;margin-top:8px"></div></div>`).join('')+`</div>`;
+  }else if(state==='loaderror'){
+    body=`<div class="alert err" role="alert"><span class="bar" aria-hidden="true"></span><div class="grow"><div class="t">Could not load bots</div><div class="b">The bot store did not answer.</div><div class="acts"><button class="btn xs">Retry</button></div></div></div>`;
+  }else{
+    const items=BOTS.filter(b=>showArch||!b.archived);
+    const newRow=sel==='new'?`<li><button class="row" aria-current="true"><span class="n">New bot</span><span class="badge">Not saved</span><span class="d">No description yet</span></button></li>`:'';
+    body=`<ul class="rows" aria-label="Bots">${newRow}`+items.map(b=>`<li><button class="row${b.archived?' archived':''}" data-open="${b.id}" ${sel===b.id?'aria-current="true"':''}
+      aria-label="${esc(b.name)}, ${b.archived?'archived':b.enabled?'enabled':'disabled'}, ${b.scope} scope, ${esc(b.provider)} ${esc(b.model)}, ${esc(b.edited)}">
+      <span class="n">${esc(b.name)}</span>${statusOf(b)}
+      <span class="d">${esc(b.desc)}</span>
+      <span class="m">${scopeLabel(b)}<span>${esc(b.provider)} · <span class="mono">${esc(b.model)}</span></span><span>${esc(b.edited)}</span></span></button></li>`).join('')+`</ul>`;
+  }
+  const archCount=BOTS.filter(b=>b.archived).length;
+  return `<section class="list" aria-label="Bot list">
+    <div class="tbar" role="toolbar" aria-label="Filter bots">
+      <label class="search"><span class="sr-only">Search bots</span><span aria-hidden="true">⌕</span><input placeholder="Search bots" ${state==='loading'?'disabled':''}></label>
+      <button class="cselect" aria-haspopup="listbox" aria-label="Scope filter: All scopes">All scopes<i class="chev" aria-hidden="true"></i></button>
+    </div>
+    <label class="chk"><input type="checkbox" ${showArch?'checked':''}> Show archived (${archCount})</label>
+    ${body}
+    <div class="import"><span>Import saved custom agents</span><span class="badge" title="Open decision for the user">Preview later</span></div>
+  </section>`;
+}
+
+function field({id,label,value='',hint='',err='',mono=false,ro=false,multi=false,count='',trail=''}){
+  const rest=!value;
+  const ctl=multi?`<textarea id="${id}" ${ro?'readonly':''} aria-describedby="${id}-h" ${err?'aria-invalid="true"':''}>${esc(value)}</textarea>`
+    :`<input id="${id}" value="${esc(value)}" ${ro?'readonly':''} class="${mono?'mono':''}" aria-describedby="${id}-h" ${err?'aria-invalid="true"':''}>`;
+  return `<div class="field${err?' invalid':''}${ro?' readonly':''}"><div class="box${rest?' rest':''}${multi?' multi':''}"><label class="fl" for="${id}">${label}</label>${ctl}${trail?`<span class="trail">${trail}</span>`:''}</div>
+  <div class="hint" id="${id}-h">${err?`<span class="e">${err}</span>`:`<span>${hint}</span>`}${count?`<span>${count}</span>`:''}</div></div>`;
+}
+function selectField({id,label,value,hint='',mono=false,ro=false}){
+  return `<div class="field${ro?' readonly':''}"><div class="box"><span class="fl" id="${id}-l">${label}</span><button id="${id}" class="${mono?'mono':''}" aria-haspopup="listbox" aria-labelledby="${id}-l ${id}" style="flex:1;text-align:left;border:0;background:transparent;padding:0;cursor:pointer" ${ro?'disabled':''}>${esc(value)}</button><span class="trail"><i class="chev" aria-hidden="true"></i></span></div>${hint?`<div class="hint"><span>${hint}</span></div>`:''}</div>`;
+}
+function tiles(name,opts,checked,ro){
+  return `<div class="tiles" role="radiogroup" aria-label="${name}">`+opts.map(o=>`<button class="tile" role="radio" aria-checked="${o.v===checked}" ${ro?'aria-disabled="true"':''} tabindex="${o.v===checked?0:-1}"><span class="tt">${o.t}</span><span class="td">${o.d}</span></button>`).join('')+`</div>`;
+}
+
+function editor(){
+  const sel=selectedId();
+  if(!sel){
+    if(state==='empty') return '';
+    return `<div class="state" role="status"><h2>Select a bot</h2><p>Pick a bot in the list to edit it, or create a new one.</p></div>`;
+  }
+  const isNew=sel==='new';
+  const b=isNew?{name:'',desc:'',scope:'workspace',enabled:true,provider:'Anthropic',model:'claude-sonnet-5-5',effort:'',rev:0}:BOTS.find(x=>x.id===sel);
+  const ro=b.archived;
+  const errs=state==='errors';
+  const dirty=['dirty','saving','conflict','saveerror'].includes(state);
+  const rev=state==='saved'?5:b.rev;
+  const instr=isNew?'':'Read the pull requests merged since the last release tag. Group them by user-visible change. Write one short line for each change, in plain words. Leave out internal refactors.'+(dirty?' Link each line to its pull request.':'');
+
+  let banner='';
+  if(state==='conflict') banner=`<div class="alert err" role="alert" id="conflict"><span class="bar" aria-hidden="true"></span><div class="grow">
+    <div class="t">A newer revision exists</div>
+    <div class="b">Revision 5 was saved after you opened revision 4. Your changes are not saved yet. Revision 5 changed: Instructions, Model.</div>
+    <div class="acts"><button class="btn xs">Compare with revision 5</button><button class="btn xs">Save mine as revision 6</button><button class="btn xs ghost">Discard mine and load revision 5</button></div></div></div>`;
+  if(state==='saveerror') banner=`<div class="alert err" role="alert"><span class="bar" aria-hidden="true"></span><div class="grow"><div class="t">Could not save</div><div class="b">The bot store did not answer. Your changes are still here.</div><div class="acts"><button class="btn xs">Retry save</button></div></div></div>`;
+  if(ro) banner=`<div class="alert idle" role="note"><span class="bar" aria-hidden="true"></span><div class="grow"><div class="t">This bot is archived</div><div class="b">It keeps its memory and history. Restore it to edit it.</div><div class="acts"><button class="btn xs">Restore</button></div></div></div>`;
+  if(state==='disabled') banner=`<div class="alert idle" role="note"><span class="bar" aria-hidden="true"></span><div class="grow"><div class="t">This bot is disabled</div><div class="b">You can still edit it. A disabled bot will not start from any trigger.</div></div></div>`;
+
+  const memChecked=errs?'workspace':'private';
+  const head=`<div class="eh">
+    <button class="btn ghost xs back" id="back">← Bots</button>
+    <h2 id="ed-title">${isNew?'New bot':esc(b.name)}</h2>${isNew?'<span class="badge">Not saved</span>':statusOf(b)}
+    ${isNew?'':`<span class="mono muted" title="Current saved revision">Revision ${rev}</span>`}
+    <span class="grow"></span>
+    ${isNew||ro?'':`<button class="toggle" role="switch" aria-checked="${b.enabled}" aria-describedby="en-h"><span class="tr" aria-hidden="true"></span>Enabled</button><span id="en-h" class="sr-only">Applies at once. Does not save other edits.</span>`}
+    ${isNew?'':`<div class="menuwrap"><button class="ibtn" id="more" aria-haspopup="menu" aria-expanded="${menuOpen}" aria-label="More actions for ${esc(b.name)}">⋯</button>
+      <div class="menu" role="menu" data-open="${menuOpen}">${ro?`<button role="menuitem">Restore</button>`:`<button role="menuitem" id="m-rename">Rename</button><button role="menuitem">${b.enabled?'Disable':'Enable'}</button><button role="menuitem">Archive</button>`}<hr><button role="menuitem" class="danger" id="m-del">Delete…</button></div></div>`}
+  </div>`;
+
+  const sec=(title,desc,content,extra='')=>`<section class="fsec" aria-labelledby="s-${title.replace(/\W/g,'')}"><div class="aside"><h3 id="s-${title.replace(/\W/g,'')}">${title}</h3><p>${desc}</p>${extra}</div><div class="fields">${content}</div></section>`;
+
+  const form=`<form class="form" novalidate aria-labelledby="ed-title">
+  ${sec('Identity','Name, purpose and where the bot is available.',
+    field({id:'f-name',label:'Name',value:b.name,hint:'Shown in the list. You can rename the bot at any time.',err:errs?'Enter a name.':'',ro})+
+    field({id:'f-desc',label:'Description',value:b.desc,hint:'One line about what the bot does.',ro})+
+    `<div><div class="group-label" id="scope-l">Available in</div>${tiles('Available in',[{v:'workspace',t:'This workspace',d:`Only in <span class="mono">${WS}</span>`},{v:'user',t:'All my workspaces',d:'Each run picks one workspace.'}],b.scope,ro)}</div>`)}
+  ${sec('Instructions','What the bot does and how. Sent at the start of each session.',
+    field({id:'f-instr',label:'Instructions',value:instr,multi:true,hint:'Plain text. Markdown is kept as written.',count:`${instr.length} characters`,ro}))}
+  ${sec('Model','The provider and model that run the bot.',
+    `<div class="grid3">${selectField({id:'f-prov',label:'Provider',value:b.provider,ro})}${selectField({id:'f-model',label:'Model',value:b.model,mono:true,ro})}<div class="eff">${selectField({id:'f-eff',label:'Effort',value:b.effort||'Default',ro})}</div></div>
+    <div class="field"><div class="hint"><span>Uses the account that Ptah selects for this provider. Effort is optional.</span></div></div>`)}
+  ${sec('Skills','Installed skills the bot loads.',
+    (isNew?`<div class="empty-note">No skills selected. The bot finds matching installed skills when it runs.</div>`:
+    `<div class="chips" aria-label="Selected skills"><span class="chip">release-notes<button type="button" class="x" aria-label="Remove skill release-notes" ${ro?'disabled':''}>✕</button></span><span class="chip">git-history<button type="button" class="x" aria-label="Remove skill git-history" ${ro?'disabled':''}>✕</button></span></div>`)+
+    `<div><button type="button" class="btn xs" ${ro?'disabled':''}>Add skills</button></div>`)}
+  ${sec('Memory','What the bot remembers between sessions.',
+    tiles('Memory',[{v:'private',t:'Private to this bot',d:'Only this bot reads and writes it.'},{v:'none',t:'No memory',d:'Each session starts fresh.'},{v:'workspace',t:'Workspace memory',d:'Shared with other sessions in one workspace.'}],memChecked,ro)+
+    (errs?`<div class="field invalid">${'' }<div class="box"><span class="fl" id="f-root-l">Workspace memory root</span><button id="f-root" class="mono" aria-labelledby="f-root-l f-root" aria-invalid="true" aria-describedby="f-root-h" style="flex:1;text-align:left;border:0;background:transparent;padding:0">other-repo</button><span class="trail"><i class="chev" aria-hidden="true"></i></span></div><div class="hint" id="f-root-h"><span class="e">Use the workspace of this bot: ${WS}.</span></div></div>`:''))}
+  ${sec('Tools','Tools the bot needs. A run is refused if one is missing.',
+    `<div class="chips" aria-label="Required tools">${isNew?'':'<span class="chip mono">Read<button type="button" class="x" aria-label="Remove tool Read">✕</button></span><span class="chip mono">Grep<button type="button" class="x" aria-label="Remove tool Grep">✕</button></span><span class="chip mono">mcp__github__list_pull_requests<button type="button" class="x" aria-label="Remove tool mcp__github__list_pull_requests">✕</button></span>'}</div>
+    ${field({id:'f-tool',label:'Add a tool id',value:'',hint:'Type a tool id and press Enter. Ptah checks it against the installed tools.',ro})}`)}
+  ${sec('Approvals','When the bot must ask you first. Deny wins over allow.',
+    selectField({id:'f-perm',label:'Permission level',value:'Ask before each change',hint:'Ask is the default.',ro})+
+    `<div><div class="group-label">Always allowed</div><div class="chips" aria-label="Always allowed tools">${isNew?'<span class="muted" style="font-size:.75rem">None</span>':'<span class="chip mono">Read<button type="button" class="x" aria-label="Remove Read from allowed">✕</button></span><span class="chip mono flag" aria-describedby="both-h"><span class="warnmark" aria-hidden="true">!</span>Bash<button type="button" class="x" aria-label="Remove Bash from allowed">✕</button></span><button type="button" class="btn xs ghost">Add</button>'}</div></div>
+    <div><div class="group-label">Always denied</div><div class="chips" aria-label="Always denied tools">${isNew?'<span class="muted" style="font-size:.75rem">None</span>':'<span class="chip mono flag" aria-describedby="both-h"><span class="warnmark" aria-hidden="true">!</span>Bash<button type="button" class="x" aria-label="Remove Bash from denied">✕</button></span><span class="chip mono">WebFetch<button type="button" class="x" aria-label="Remove WebFetch from denied">✕</button></span><button type="button" class="btn xs ghost">Add</button>'}</div></div>
+    ${isNew?'':'<div class="field"><div class="hint" id="both-h"><span>Bash is in both lists. Deny wins, so Bash is denied.</span></div></div>'}`)}
+  ${sec('Triggers','How a bot starts. Not available yet.',
+    `<div class="srow"><div class="l"><div class="t">Start by hand</div><div class="h">Comes with bot sessions in a later update.</div></div><span class="status idle">Not available yet</span></div>
+     <div class="srow"><div class="l"><div class="t">Schedule</div><div class="h">Comes in a later update.</div></div><span class="status idle">Not available yet</span></div>
+     <div class="srow"><div class="l"><div class="t">Message from Slack, Discord or Telegram</div><div class="h">Comes in a later update.</div></div><span class="status idle">Not available yet</span></div>`)}
+  </form>`;
+
+  let msg='',acts='';
+  if(ro){msg='';}
+  else if(state==='form'||state==='disabled'||state==='delete'){msg=`<span class="msg">Revision ${rev} · saved 2 h ago</span>`;acts=`<button class="btn ghost" disabled>Discard changes</button><button class="btn primary" disabled>Save</button>`;}
+  else if(state==='new'){msg=`<span class="msg">Not saved yet</span>`;acts=`<button class="btn ghost">Cancel</button><button class="btn primary">Create bot</button>`;}
+  else if(state==='errors'){msg=`<span class="msg err" role="alert">Fix 2 fields before you save.</span>`;acts=`<button class="btn ghost">Cancel</button><button class="btn primary">Create bot</button>`;}
+  else if(state==='dirty'){msg=`<span class="msg">Unsaved changes</span>`;acts=`<button class="btn ghost">Discard changes</button><button class="btn primary">Save</button>`;}
+  else if(state==='saving'){msg=`<span class="msg" role="status">Saving…</span>`;acts=`<button class="btn ghost" disabled>Discard changes</button><button class="btn primary" aria-busy="true" disabled><span class="spin" aria-hidden="true"></span>Saving</button>`;}
+  else if(state==='saved'){msg=`<span class="msg ok" role="status">Saved as revision 5.</span>`;acts=`<button class="btn ghost" disabled>Discard changes</button><button class="btn primary" disabled>Save</button>`;}
+  else if(state==='conflict'){msg=`<span class="msg err">Not saved: a newer revision exists.</span>`;acts=`<button class="btn ghost">Discard changes</button><button class="btn primary" disabled>Save</button>`;}
+  else if(state==='saveerror'){msg=`<span class="msg err">Not saved.</span>`;acts=`<button class="btn ghost">Discard changes</button><button class="btn primary">Save</button>`;}
+  const bar=ro?'':`<div class="factions" role="region" aria-label="Form actions">${msg}${acts}</div>`;
+  return head+(banner?`<div style="margin-top:12px">${banner}</div>`:'')+form+bar;
+}
+
+function deleteModal(){
+  const b=BOTS[0];
+  const hard=delMode==='delete';
+  return `<div class="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-t" aria-describedby="dlg-d">
+    <h2 id="dlg-t">Remove “${esc(b.name)}”?</h2>
+    <p id="dlg-d">Archive hides the bot and keeps everything. You can restore it later.</p>
+    <div class="tiles" role="radiogroup" aria-label="How to remove">
+      <button class="tile" role="radio" data-del="archive" aria-checked="${!hard}"><span class="tt">Archive</span><span class="td">Recommended. Keeps memory and run history.</span></button>
+      <button class="tile" role="radio" data-del="delete" aria-checked="${hard}"><span class="tt">Delete permanently</span><span class="td">Removes the bot. Choose what to keep below.</span></button>
+    </div>
+    ${hard?`<div class="ret" role="group" aria-label="What to keep">
+      <div class="r"><div class="l"><div id="mem-l">Bot memory</div><div class="h">Private memory of this bot. Shared workspace memory is never deleted.</div></div>
+        <div class="seg" role="radiogroup" aria-labelledby="mem-l"><button role="radio" data-mem="1" aria-checked="${keepMem}">Keep</button><button role="radio" data-mem="0" aria-checked="${!keepMem}">Delete</button></div></div>
+      <div class="r"><div class="l"><div id="run-l">Run history</div><div class="h">Records of past runs and the revisions they used. No runs yet.</div></div>
+        <div class="seg" role="radiogroup" aria-labelledby="run-l"><button role="radio" data-run="1" aria-checked="${keepRuns}">Keep</button><button role="radio" data-run="0" aria-checked="${!keepRuns}">Delete</button></div></div>
+      <p style="font-size:.75rem">Chat sessions stay in your session history in all cases. Kept memory stays private to the removed bot.</p>
+    </div>`:''}
+    <div class="foot"><button class="btn ghost" id="dlg-cancel">Cancel</button>${hard?`<button class="btn danger">Delete bot</button>`:`<button class="btn primary">Archive bot</button>`}</div>
+  </div></div>`;
+}
+
+function render(){
+  const win=document.getElementById('win');
+  win.dataset.theme=theme; win.style.width=width+'px';
+  const root=document.getElementById('root');
+  const sel=selectedId();
+  let main;
+  if(state==='empty'){
+    main=`<div class="state" role="status"><h2>No bots yet</h2><p>A bot keeps a name, instructions, a model, skills, memory and approval rules in one place. Create one to get started.</p><div class="acts"><button class="btn primary">New bot</button></div></div>`;
+    root.innerHTML=`<div class="page">${header().replace('<button class="btn primary" id="newbot">New bot</button>','')}${main}</div>`;
+  }else{
+    root.innerHTML=`<div class="page">${header()}<div class="ld" data-selected="${!!sel}">${listCol()}<section class="detail" aria-label="Bot editor">${editor()}</section></div></div>`;
+  }
+  document.getElementById('overlay').innerHTML=state==='delete'?deleteModal():'';
+  document.querySelectorAll('[data-s]').forEach(x=>x.setAttribute('aria-pressed',x.dataset.s===state));
+  document.querySelectorAll('[data-theme-btn]').forEach(x=>x.setAttribute('aria-pressed',x.dataset.themeBtn===theme));
+  document.querySelectorAll('[data-w]').forEach(x=>x.setAttribute('aria-pressed',+x.dataset.w===width));
+  if(state==='errors') document.getElementById('assertive').textContent='Fix 2 fields before you save.';
+  if(state==='saved') document.getElementById('live').textContent='Saved as revision 5.';
+}
+
+document.addEventListener('click',e=>{
+  const t=e.target.closest('button,input');
+  if(!t)return;
+  if(t.dataset.s){state=t.dataset.s;menuOpen=false;delMode='archive';render();if(state==='errors'){const f=document.getElementById('f-name');f&&f.focus();}return;}
+  if(t.dataset.themeBtn){theme=t.dataset.themeBtn;render();return;}
+  if(t.dataset.w){width=+t.dataset.w;render();return;}
+  if(t.dataset.open){state=t.dataset.open==='b4'?'archived':t.dataset.open==='b2'?'disabled':'form';render();return;}
+  if(t.id==='back'){state='populated';render();return;}
+  if(t.id==='newbot'){state='new';render();document.getElementById('f-name').focus();return;}
+  if(t.id==='more'){menuOpen=!menuOpen;render();return;}
+  if(t.id==='m-del'){state='delete';menuOpen=false;render();return;}
+  if(t.id==='m-rename'){menuOpen=false;render();document.getElementById('f-name').focus();return;}
+  if(t.id==='dlg-cancel'){state='form';render();return;}
+  if(t.dataset.del){delMode=t.dataset.del;render();return;}
+  if(t.dataset.mem){keepMem=t.dataset.mem==='1';render();return;}
+  if(t.dataset.run){keepRuns=t.dataset.run==='1';render();return;}
+  if(t.getAttribute('role')==='switch'){t.setAttribute('aria-checked',t.getAttribute('aria-checked')!=='true');return;}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&(state==='delete'||menuOpen)){menuOpen=false;if(state==='delete')state='form';render();}});
+const qs=new URLSearchParams(location.search);
+if(qs.get('state'))state=qs.get('state');
+if(qs.get('theme'))theme=qs.get('theme')==='light'?'ptah-glass-light':'ptah-glass';
+if(qs.get('w'))width=+qs.get('w');
+if(qs.get('clean')){document.querySelector('.proto-bar').style.display='none';document.getElementById('win').style.margin='0';document.getElementById('win').style.borderRadius='0';}
+render();
+</script>
+</body>
+</html>
