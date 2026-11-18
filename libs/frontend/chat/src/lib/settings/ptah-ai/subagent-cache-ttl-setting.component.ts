@@ -19,13 +19,13 @@ import {
   settingNotSavedMessage,
   type SettingsSaveResult,
 } from '../feedback/settings-save-feedback.service';
-import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
   PtahAlertComponent,
   PtahButtonDirective,
   PtahFieldComponent,
+  PtahFieldGridDirective,
   PtahFormSectionComponent,
-  PtahSelectDirective,
+  PtahRichSelectComponent,
 } from '@ptah-extension/ui';
 
 const ENV_VAR = 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL';
@@ -55,48 +55,36 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
   selector: 'ptah-subagent-cache-ttl-setting',
   standalone: true,
   imports: [
-    SettingsBusyDisabledDirective,
     PtahButtonDirective,
-    PtahSelectDirective,
+    PtahRichSelectComponent,
     PtahAlertComponent,
     PtahFieldComponent,
+    PtahFieldGridDirective,
     PtahFormSectionComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section>
-      <ptah-form-section
+      <ptah-form-section wide
         heading="Subagent prompt cache"
         description="How long the prompt cache of subagent requests stays valid."
         data-testid="subagent-cache-ttl-setting"
         data-glass-surface="content"
       >
-        <ptah-field label="Subagent prompt-cache TTL" appearance="stacked">
-          <select
-            ptahSelect
-            size="sm"
-            id="subagent-cache-ttl"
-            [value]="shown() ?? ''"
-            [ptahBusyDisabled]="saving() || needsRecheck() || feedback.saving()"
-            [attr.aria-describedby]="
-              envNotice() ? 'subagent-cache-ttl-env' : null
-            "
-            (change)="select($event)"
-            data-testid="subagent-cache-ttl"
-          >
-            @if (shown() === null) {
-              <option value="" disabled selected>Unknown</option>
-            }
-            @for (option of options; track option.value) {
-              <option
-                [value]="option.value"
-                [selected]="option.value === shown()"
-              >
-                {{ option.label }}
-              </option>
-            }
-          </select>
-        </ptah-field>
+        <div ptahFieldGrid>
+          <ptah-field label="Subagent prompt-cache TTL" [hint]="envHint()">
+            <ptah-select #cacheSelect
+              triggerId="subagent-cache-ttl"
+              [options]="options"
+              [value]="shown()"
+              placeholder="Unknown"
+              [disabled]="saving() || needsRecheck() || feedback.saving()"
+              [attr.aria-describedby]="envNotice() ? 'subagent-cache-ttl-env' : null"
+              (valueChange)="cacheSelect.value.set(shown()); select($event)"
+              data-testid="subagent-cache-ttl"
+            />
+          </ptah-field>
+        </div>
         @if (envNotice(); as notice) {
           <ptah-alert
             tone="info"
@@ -123,15 +111,17 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
           </p>
         }
         @if (needsRecheck()) {
-          <button
-            type="button"
-            ptahButton
-            [busy]="saving()"
-            (click)="recheck()"
-            data-testid="subagent-cache-ttl-recheck"
-          >
-            Check saved setting again
-          </button>
+          <div>
+            <button
+              type="button"
+              ptahButton
+              [busy]="saving()"
+              (click)="recheck()"
+              data-testid="subagent-cache-ttl-recheck"
+            >
+              Check saved setting again
+            </button>
+          </div>
         }
       </ptah-form-section>
     </section>
@@ -143,6 +133,13 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
   `,
 })
 export class SubagentCacheTtlSettingComponent {
+  protected readonly envHint = computed(() => {
+    const notice = this.envNotice();
+    if (!notice) return null;
+    return notice.invalid
+      ? 'Your environment override is invalid and ignored by Ptah.'
+      : 'Your environment sets this value to ' + notice.value + '.';
+  });
   protected readonly envVar = ENV_VAR;
   protected readonly options = SUBAGENT_PROMPT_CACHE_TTL_SETTINGS.map(
     (value) => ({ value, label: LABELS[value] }),
@@ -173,14 +170,12 @@ export class SubagentCacheTtlSettingComponent {
     this.unconfirmed() ? null : this.saved(),
   );
 
-  async select(event: Event): Promise<void> {
-    const input = event.target as HTMLSelectElement;
+  async select(value: SubagentPromptCacheTtlSetting | null): Promise<void> {
     const saved = this.saved();
     const next = SUBAGENT_PROMPT_CACHE_TTL_SETTINGS.find(
-      (value) => value === input.value,
+      (option) => option === value,
     );
     // The select keeps showing the saved value; the read-back after the write moves it.
-    input.value = this.shown() ?? '';
     const context = this.state.reviewContext();
     if (
       saved === null ||

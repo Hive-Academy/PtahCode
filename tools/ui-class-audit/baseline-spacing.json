@@ -1,13 +1,9 @@
 {
   "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
-    "gap-1": 1,
-    "gap-2": 1,
-    "gap-3": 1,
     "mt-0.5": 1,
     "mt-1": 1,
     "pb-7": 1,
-    "px-2": 2,
-    "px-3": 1,
+    "px-2": 1,
     "py-1": 1,
     "space-y-1.5": 1
   },
@@ -44,8 +40,6 @@
     "space-y-3": 1
   },
   "libs/frontend/chat/src/lib/settings/output-style/output-style-parity-section.component.ts": {
-    "gap-2": 3,
-    "mb-1": 1,
     "mt-0.5": 4,
     "mt-1": 1,
     "mt-2": 4,
@@ -313,45 +307,34 @@
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/go-vet-consent-config.component.ts": {
     "gap-1": 1,
-    "mb-2": 1,
-    "mt-1": 1,
-    "pb-7": 1
+    "mt-1": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/host-routing-setting.component.ts": {
     "gap-3": 1,
-    "mt-0.5": 1,
-    "pb-2": 1,
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-guards-settings.component.ts": {
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts": {
-    "gap-2": 2,
+    "gap-2": 1,
     "gap-3": 1,
-    "mt-0.5": 1,
-    "mt-1": 1,
-    "mt-2": 2,
+    "mt-2": 1,
     "mt-3": 1,
-    "p-2": 1,
-    "pb-2": 1,
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts": {
     "gap-1": 5,
     "gap-2": 2,
-    "mb-3": 1,
-    "mt-1": 1,
-    "px-1": 1
+    "mt-1": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-tts-panel.component.ts": {
     "gap-1": 6,
     "gap-1.5": 1,
     "gap-2": 2,
-    "mb-3": 2,
+    "mb-3": 1,
     "mt-1": 1,
-    "p-2": 1,
-    "px-1": 1
+    "p-2": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.html": {
     "gap-1": 5,
@@ -381,16 +364,8 @@
     "space-y-3": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
-    "gap-1": 1,
     "px-2": 1,
     "py-1": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
-    "gap-1": 1,
-    "gap-1.5": 1,
-    "mb-3": 1,
-    "p-2": 1,
-    "pb-7": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-details-drawer.component.ts": {
     "-mx-2": 1,
@@ -400,13 +375,6 @@
     "px-2": 2
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-config.component.ts": {
-    "mt-2": 1,
     "pb-7": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/web-search-key-editor.component.ts": {
-    "gap-2": 1,
-    "p-3": 1,
-    "pr-9": 1,
-    "space-y-2": 1
   }
 }

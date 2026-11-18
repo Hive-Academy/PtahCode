@@ -16,7 +16,13 @@ class Host {
   readFails = false;
   readonly call = jest.fn(async (method: string, params?: unknown) => {
     if (method === 'agent:getCapabilityMatrix') {
-      return rpcSuccess({ profiles: [], lastPicks: [{ key: 'implement|implement', candidateId: 'codex' }] });
+      return rpcSuccess({
+        profiles: [],
+        lastPicks: [
+          { key: 'plan|plan', candidateId: 'claude' },
+          { key: 'implement|implement', candidateId: 'codex' },
+        ],
+      });
     }
     if (method === 'settings:get') {
       return this.readFails
@@ -56,7 +62,11 @@ describe('LaneRotationSettingComponent', () => {
         { provide: ClaudeRpcService, useValue: { call: host.call } },
         {
           provide: ProvidersSettingsStateService,
-          useValue: { commit: signal({ status: 'idle' }), cliAgents: signal({ status: 'ready', data: [] }), cliModels: signal({ status: 'ready', data: {} }) },
+          useValue: {
+            commit: signal({ status: 'idle' }),
+            cliAgents: signal({ status: 'ready', data: [] }),
+            cliModels: signal({ status: 'ready', data: {} }),
+          },
         },
         SettingsSaveFeedbackService,
       ],
@@ -76,10 +86,24 @@ describe('LaneRotationSettingComponent', () => {
 
   it('reads a missing value as on', async () => {
     await create();
-    expect(host.call).toHaveBeenCalledWith('settings:get', { key: KEY }, TIMEOUT);
+    expect(host.call).toHaveBeenCalledWith(
+      'settings:get',
+      { key: KEY },
+      TIMEOUT,
+    );
     expect(toggle()?.checked).toBe(true);
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Last pick (Implement · implement)');
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Codex');
+    const chips = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      '[data-testid="lane-rotation-last-picks"] span',
+    );
+    expect(chips[0].textContent?.trim()).toBe('Implement: Codex');
+    expect(chips[1].textContent?.trim()).toBe('Plan: Claude');
+    expect(chips[0].getAttribute('title')).toBe(
+      'Implement \u00b7 implement: codex',
+    );
+    expect(chips[1].getAttribute('title')).toBe('Plan \u00b7 plan: claude');
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('details'),
+    ).toBeNull();
   });
 
   it('writes the opposite value through settings:set', async () => {
@@ -110,4 +134,15 @@ describe('LaneRotationSettingComponent', () => {
       TIMEOUT,
     );
   });
+  it('announces that recent picks remain unavailable after retry', async () => {
+    host.call.mockImplementation(async (method: string) => method === 'agent:getCapabilityMatrix'
+      ? rpcError('unavailable') : rpcSuccess({ success: true, value: true }));
+    await create();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('ptah-alert [role="status"]')).not.toBeNull();
+    root.querySelector<HTMLButtonElement>('ptah-alert button')?.click();
+    await settle();
+    expect(root.querySelector('ptah-alert [role="status"]')?.textContent).toContain('Recent picks unavailable');
+  });
+
 });

@@ -54,10 +54,10 @@ The session that changes the state of a phase updates its row in the same pull r
 | 2 | Executor neutrality | TASK_2026_1161_9efb | #1174 | merged |
 | 3 | Setup skills by stack | - | #1185 | merged |
 | 4 | Retire role subagents | TASK_2026_1175_2690 | #1267 (step 0a, merged), #1290 (step 0b, merged), #1307 (step 1, merged), #1320 (step 2, merged), #1323 (step 3, merged), #1331 (step 4, merged) | done |
-| 5 | Remove agent generation | - | - | not started |
-| 6 | General workflow | TASK_2026_2192_c8b8 | #1332 | in review (skeleton, packs, software pack) |
+| 5 | Remove agent generation | - | #1333 | merged |
+| 6 | General workflow | TASK_2026_2192_c8b8 | #1332 | merged |
 
-Bots (Phase 7) is a separate task after the program (U-D8).
+Bots (Phase 7) is a separate task after the program (U-D8): TASK_2026_2261_63e3, definition in review.
 
 ## CLI Lanes
 

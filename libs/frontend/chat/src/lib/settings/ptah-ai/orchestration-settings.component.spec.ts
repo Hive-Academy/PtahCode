@@ -11,9 +11,13 @@ import {
 } from '@angular/core/testing';
 import {
   ProvidersSettingsStateService,
+  ClaudeRpcService,
   VSCodeService,
   type ProvidersSettingsCommit,
 } from '@ptah-extension/core';
+import { rpcSuccess, rpcError } from '@ptah-extension/core/testing';
+import { By } from '@angular/platform-browser';
+import { PtahInstrumentBandComponent } from '@ptah-extension/ui';
 import { OrchestrationSettingsComponent } from './orchestration-settings.component';
 import { SubagentCacheTtlSettingComponent } from './subagent-cache-ttl-setting.component';
 import { SessionBudgetSettingsComponent } from './session-budget-settings.component';
@@ -92,6 +96,13 @@ const idle: ProvidersSettingsCommit = {
 
 /** The container's own reads (its children are stubs). */
 class StateStub {
+  readonly orchestration = signal({
+    status: 'ready',
+    data: {
+      subagentPromptCacheTtl: '5m',
+      subagentPromptCacheTtlEnvOverride: '1h',
+    },
+  });
   readonly commit = signal<ProvidersSettingsCommit>(idle);
   readonly open = jest.fn(async () => undefined);
 }
@@ -101,13 +112,28 @@ describe('OrchestrationSettingsComponent', () => {
   let fixture: ComponentFixture<OrchestrationSettingsComponent>;
   let element: HTMLElement;
   let state: StateStub;
+  let call: jest.Mock;
 
   async function setup(isElectron: boolean): Promise<void> {
     state = new StateStub();
+    call = jest.fn(async (method: string, params?: { key: string }) => {
+      if (method === 'agent:getConfig')
+        return rpcSuccess({ laneRepeatCallStopAt: 8 });
+      const values: Record<string, unknown> = {
+        'sessionBudget.enabled': true,
+        'sessionBudget.unit': 'tokens',
+        'sessionBudget.tokens': 4_000_000,
+        'sessionBudget.handoffPercent': 85,
+        'agentOrchestration.hostRouting': false,
+        'agentOrchestration.laneRotation': true,
+      };
+      return rpcSuccess({ success: true, value: values[params?.key ?? ''] });
+    });
     await TestBed.configureTestingModule({
       imports: [OrchestrationSettingsComponent],
       providers: [
         { provide: ProvidersSettingsStateService, useValue: state },
+        { provide: ClaudeRpcService, useValue: { call } },
         { provide: VSCodeService, useValue: { isElectron } },
       ],
     })
@@ -160,6 +186,137 @@ describe('OrchestrationSettingsComponent', () => {
     expect(state.open).toHaveBeenCalledTimes(1);
   });
 
+  it('renders six summaries from real sources above the deferred sections', async () => {
+    await render();
+    const band = fixture.debugElement.query(
+      By.directive(PtahInstrumentBandComponent),
+    ).componentInstance as PtahInstrumentBandComponent;
+    expect(band.loading()).toBe(false);
+    expect(band.segments()).toEqual([
+      expect.objectContaining({
+        id: 'prompt-cache',
+        label: 'Prompt cache',
+        value: '1 hour',
+        meta: 'From environment',
+      }),
+      expect.objectContaining({
+        id: 'session-budget',
+        label: 'Session budget',
+        value: 'On',
+        meta: '4,000,000 tokens',
+      }),
+      expect.objectContaining({
+        id: 'lane-guards',
+        label: 'Lane guards',
+        value: 'Stop at 8',
+      }),
+      expect.objectContaining({
+        id: 'routing',
+        label: 'Routing',
+        value: 'Off',
+      }),
+      expect.objectContaining({
+        id: 'close-rotation',
+        label: 'Close rotation',
+        value: 'On',
+      }),
+      expect.objectContaining({ id: 'limits', label: 'Limits', value: '85%' }),
+    ]);
+    expect(element.querySelectorAll('ptah-instrument-band li')).toHaveLength(6);
+    expect(
+      element
+        .querySelector('ptah-instrument-band')
+        ?.compareDocumentPosition(
+          element.querySelector('[data-testid="lane-guards-settings"]') as Node,
+        ),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(element.querySelector('ptah-subagent-cache-ttl-setting')).toBeNull();
+    expect(call).toHaveBeenCalledWith(
+      'settings:get',
+      { key: 'sessionBudget.tokens' },
+      { timeout: 10_000 },
+    );
+  });
+
+  it('shows cost units and an off budget from saved replies', async () => {
+    call.mockImplementation(async (method: string, params?: { key: string }) =>
+      method === 'agent:getConfig'
+        ? rpcSuccess({})
+        : rpcSuccess({
+            success: true,
+            value: (
+              {
+                'sessionBudget.enabled': false,
+                'sessionBudget.unit': 'cost',
+                'sessionBudget.usd': 12.5,
+              } as Record<string, unknown>
+            )[params?.key ?? ''],
+          }),
+    );
+    await render();
+    expect(
+      element.querySelector('ptah-instrument-band')?.textContent,
+    ).toContain('12.5 USD');
+    const band = fixture.debugElement.query(
+      By.directive(PtahInstrumentBandComponent),
+    ).componentInstance as PtahInstrumentBandComponent;
+    expect(band.segments()[1].value).toBe('Off');
+    expect(band.segments()[2].value).toBe('Stop at 20');
+  });
+
+  it('uses warning segments when RPC reads fail', async () => {
+    call.mockResolvedValue(rpcError('Unavailable'));
+    await render();
+    const band = fixture.debugElement.query(
+      By.directive(PtahInstrumentBandComponent),
+    ).componentInstance as PtahInstrumentBandComponent;
+    expect(band.loading()).toBe(false);
+    expect(band.segments().slice(1)).toEqual(
+      Array.from({ length: 5 }, () =>
+        expect.objectContaining({ value: 'Unavailable', tone: 'warn' }),
+      ),
+    );
+  });
+
+  it('shows loading until page reads settle and warns on a rejected read', async () => {
+    let reject!: (reason: Error) => void;
+    // Only one pending operation: the others fail immediately.
+    call.mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    );
+    call.mockResolvedValue(rpcError('Unavailable'));
+    fixture.detectChanges();
+    const band = fixture.debugElement.query(
+      By.directive(PtahInstrumentBandComponent),
+    ).componentInstance as PtahInstrumentBandComponent;
+    expect(band.loading()).toBe(true);
+    reject(new Error('offline'));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(band.loading()).toBe(false);
+    expect(band.segments()[1]).toEqual(
+      expect.objectContaining({ value: 'Unavailable', tone: 'warn' }),
+    );
+  });
+
+  it('follows shared cache state and warns when its read fails', async () => {
+    await render();
+    state.orchestration.set({
+      status: 'error',
+      data: state.orchestration().data,
+    });
+    fixture.detectChanges();
+    const band = fixture.debugElement.query(
+      By.directive(PtahInstrumentBandComponent),
+    ).componentInstance as PtahInstrumentBandComponent;
+    expect(band.segments()[0]).toEqual(
+      expect.objectContaining({ value: 'Unavailable', tone: 'warn' }),
+    );
+  });
+
   // The CLI matrix and the background roles moved to the Providers tab (AgentsRoutingSettingsComponent).
   it('holds no CLI matrix, no background roles and no deep-link focus section', async () => {
     await render();
@@ -167,7 +324,9 @@ describe('OrchestrationSettingsComponent', () => {
     expect(
       element.querySelector('[data-testid="cli-matrix-placeholder"]'),
     ).toBeNull();
-    expect(element.querySelector('ptah-provider-consumer-assignments')).toBeNull();
+    expect(
+      element.querySelector('ptah-provider-consumer-assignments'),
+    ).toBeNull();
     expect(
       element.querySelector('[data-testid="background-roles-details"]'),
     ).toBeNull();
@@ -270,64 +429,26 @@ describe('OrchestrationSettingsComponent', () => {
       '[data-testid="group-background-queries"]',
     );
     expect(sandbox()).toBeNull();
-    expect(element.querySelector('[data-testid="group-codex-agents"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="group-codex-agents"]'),
+    ).toBeNull();
     expect(backgroundQueries).not.toBeNull();
   });
 
-  it('mounts Routing suggestions in Electron, directly after Lane guards and before the advanced groups', async () => {
-    await render();
-    const routing = element.querySelector('[data-testid="host-routing-setting"]');
-    expect(routing).not.toBeNull();
-    const guards = element.querySelector('[data-testid="lane-guards-settings"]');
-    expect(guards?.compareDocumentPosition(routing as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    // Not deferred: the defer block count is unchanged.
-    expect(await fixture.getDeferBlocks()).toHaveLength(3);
-    const blocks = await fixture.getDeferBlocks();
-    await blocks[2].render(DeferBlockState.Complete);
-    const firstGroup = element.querySelector(
-      '[data-testid="group-context-budgets"]',
-    );
-    expect(routing?.compareDocumentPosition(firstGroup as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    const rotation = element.querySelector(
-      '[data-testid="lane-rotation-setting"]',
-    );
-    const matrix = element.querySelector(
-      '[data-testid="capability-matrix-setting"]',
-    );
-    expect(rotation).not.toBeNull();
-    expect(matrix).toBeNull();
-    expect(routing?.compareDocumentPosition(rotation as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(rotation?.compareDocumentPosition(firstGroup as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-  });
-
-  it('does not mount Routing suggestions outside Electron (VS Code has no routing coordinator)', async () => {
-    fixture.destroy();
-    TestBed.resetTestingModule();
-    await setup(false);
-    await render();
-    expect(element.querySelector('ptah-host-routing-setting')).toBeNull();
-    expect(
-      element.querySelector('[data-testid="host-routing-setting"]'),
-    ).toBeNull();
-    expect(element.querySelector('ptah-lane-rotation-setting')).toBeNull();
-    expect(
-      element.querySelector('[data-testid="lane-rotation-setting"]'),
-    ).toBeNull();
-    expect(element.querySelector('ptah-capability-matrix-setting')).toBeNull();
-    expect(
-      element.querySelector('[data-testid="capability-matrix-setting"]'),
-    ).toBeNull();
-    expect(
-      element.querySelector('[data-testid="lane-guards-settings"]'),
-    ).not.toBeNull();
+  it('mounts neither routing suggestions nor lane rotation in Context, in Electron and outside it', async () => {
+    for (const electron of [true, false]) {
+      fixture.destroy();
+      TestBed.resetTestingModule();
+      await setup(electron);
+      await render();
+      for (const block of await fixture.getDeferBlocks())
+        await block.render(DeferBlockState.Complete);
+      expect(element.querySelector('ptah-host-routing-setting')).toBeNull();
+      expect(element.querySelector('ptah-lane-rotation-setting')).toBeNull();
+      expect(
+        element.querySelector('[data-testid="lane-guards-settings"]'),
+      ).not.toBeNull();
+    }
   });
 
   it('shows no inline commit panel: the TTL save reports through the page toast', async () => {

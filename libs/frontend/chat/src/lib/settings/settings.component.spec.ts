@@ -280,7 +280,7 @@ describe('SettingsComponent deep-link', () => {
     expect(page.providersTarget()).toBeNull();
   });
 
-  it.each(['capability-matrix', 'decision-matrix', 'matrix'] as const)(
+  it.each(['capability-matrix', 'decision-matrix', 'matrix', 'host-routing', 'routing-suggestions', 'lane-rotation'] as const)(
     'routes the old %s section deep link to the Decision matrix child page',
     async (section) => {
       vscodeServiceStub.isElectron = true;
