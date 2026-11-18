@@ -149,6 +149,32 @@ describe('explicit storage repair and async validation', () => {
     await recovered.clear('owner', NOW);
     expect(await recovered.readSpend('other', NOW)).toMatchObject({ cumulative: { knownCostMicroUsd: 100 }, creditEvidence: [{ kind: 'rate-limited' }] });
   });
+  it.each([
+    { totalCostAuthority: 'unpriced' as const, totalCostMicroUsd: null },
+    { totalCostAuthority: 'provider-reported' as const, totalCostMicroUsd: null },
+    { totalCostAuthority: 'unpriced' as const, totalCostMicroUsd: 100 },
+  ])('prices covered unpriced usage with an absolute snapshot: %o', async (cost) => {
+    const { ledger } = setup();
+    await ledger.recordUsage(event({ occurredAtMs: NOW - 1, ...cost }));
+    await ledger.recordUsage(event({ eventKey: 'snapshot', runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    expect(await ledger.readSpend('owner', NOW)).toMatchObject({ coverage: 'complete',
+      cumulative: { knownCostMicroUsd: 5_000_000, pricedEvents: 2, unpricedEvents: 0 } });
+  });
+  it('completes model-priced coverage with missing cache TTL when an absolute snapshot covers it', async () => {
+    const { ledger } = setup();
+    await ledger.recordUsage(event({ occurredAtMs: NOW - 1, totalCostAuthority: 'model-priced' }));
+    await ledger.recordUsage(event({ eventKey: 'snapshot', runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    expect(await ledger.readSpend('owner', NOW)).toMatchObject({ coverage: 'complete',
+      cumulative: { knownCostMicroUsd: 5_000_000, pricedEvents: 2, unpricedEvents: 0 } });
+  });
+  it('retains partial coverage for a later uncovered unpriced delta', async () => {
+    const { ledger } = setup();
+    await ledger.recordUsage(event({ occurredAtMs: NOW - 2, totalCostAuthority: 'unpriced', totalCostMicroUsd: null }));
+    await ledger.recordUsage(event({ eventKey: 'snapshot', occurredAtMs: NOW - 1, runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    await ledger.recordUsage(event({ eventKey: 'later', totalCostAuthority: 'unpriced', totalCostMicroUsd: null }));
+    expect(await ledger.readSpend('owner', NOW)).toMatchObject({ coverage: 'partial',
+      cumulative: { knownCostMicroUsd: 5_000_000, pricedEvents: 2, unpricedEvents: 1 } });
+  });
   it('retains later deltas after an absolute snapshot', async () => {
     const { ledger } = setup();
     await ledger.recordUsage(event({ occurredAtMs: NOW - 2, totalCostMicroUsd: 2_000_000 }));

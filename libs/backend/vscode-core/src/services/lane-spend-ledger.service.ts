@@ -13,6 +13,9 @@ import { SpendEventSchema, SpendLedgerSchema, type SpendLedger } from './lane-sp
 export const LANE_SPEND_STORAGE_KEY = 'ptah.laneSpend.v1';
 export const LANE_SPEND_CORRUPT_BACKUP_KEY = 'ptah.laneSpend.corruptBackup.v1';
 const DAY = 86_400_000;
+function rowCost(row: SpendLedger['events'][number]): number | null {
+  return !row.runCostSnapshot && row.totalCostAuthority !== 'unpriced' ? row.totalCostMicroUsd : null;
+}
 export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink {
   private state: SpendLedger = { version: 1, events: [], owners: [], credits: [] };
   private available = true;
@@ -105,8 +108,9 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
     if (!this.available) return { ...base, availability: 'unavailable', periods: null, cumulative: null, coverage: 'none', creditEvidence: [] };
     const reset = owner?.resetAtMs ?? 0;
     const events = this.state.events.filter((event) => event.ownerKey === ownerKey && event.occurredAtMs >= reset && event.occurredAtMs <= nowMs);
-    const period = (startAt: number): LaneSpendPeriod => {
+    const period = (startAt: number): { spend: LaneSpendPeriod; coveredRows: Set<SpendLedger['events'][number]> } => {
       const rows = events.filter((event) => event.occurredAtMs >= startAt);
+      const coveredRows = new Set<SpendLedger['events'][number]>();
       let knownCostMicroUsd = 0, pricedEvents = 0, unpricedEvents = 0;
       let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreationTokens = 0;
       for (const row of rows) {
@@ -114,7 +118,7 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
           inputTokens += model.inputTokens ?? 0; outputTokens += model.outputTokens ?? 0;
           cacheReadTokens += model.cacheReadTokens ?? 0; cacheCreationTokens += model.cacheCreationTokens ?? 0;
         }
-        const cost = !row.runCostSnapshot && row.totalCostAuthority !== 'unpriced' ? row.totalCostMicroUsd : null;
+        const cost = rowCost(row);
         if (cost === null) unpricedEvents++; else { pricedEvents++; knownCostMicroUsd += cost; }
       }
       // Absolute run snapshots replace earlier run costs, never add to them.
@@ -129,19 +133,21 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
         if (!crossesBoundary && snapshot.totalCostAuthority !== 'unpriced' && snapshot.totalCostMicroUsd !== null) {
           const covered = run.filter((row) => row.occurredAtMs < snapshot.occurredAtMs ||
             (row.occurredAtMs === snapshot.occurredAtMs && rows.indexOf(row) <= rows.indexOf(snapshot)));
-          knownCostMicroUsd -= covered.reduce((sum, row) => sum + (!row.runCostSnapshot && row.totalCostAuthority !== 'unpriced' ? row.totalCostMicroUsd ?? 0 : 0), 0);
+          knownCostMicroUsd -= covered.reduce((sum, row) => sum + (rowCost(row) ?? 0), 0);
           knownCostMicroUsd += snapshot.totalCostMicroUsd;
-          unpricedEvents -= covered.filter((row) => row.runCostSnapshot).length;
-          pricedEvents += covered.filter((row) => row.runCostSnapshot).length;
+          const newlyPriced = covered.filter((row) => rowCost(row) === null).length;
+          unpricedEvents -= newlyPriced;
+          pricedEvents += newlyPriced;
+          for (const row of covered) coveredRows.add(row);
         }
       }
-      return { startAt, endAt: nowMs, knownCostMicroUsd, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, pricedEvents, unpricedEvents };
+      return { spend: { startAt, endAt: nowMs, knownCostMicroUsd, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, pricedEvents, unpricedEvents }, coveredRows };
     };
-    const cumulative = period(reset);
+    const { spend: cumulative, coveredRows } = period(reset);
     const today = Math.floor(nowMs / DAY) * DAY;
     return { ...base, availability: 'available', cumulative,
-      periods: { today: period(Math.max(reset, today)), '7d': period(Math.max(reset, nowMs - 7 * DAY)), '30d': period(Math.max(reset, nowMs - 30 * DAY)) },
-      coverage: cumulative.unpricedEvents || events.some((row) => row.totalCostAuthority === 'model-priced' && row.models.some((model) => (model.cacheCreationTokens ?? 0) > 0 && model.cacheCreation1hTokens == null)) ? (cumulative.pricedEvents ? 'partial' : 'none') : (cumulative.pricedEvents ? 'complete' : 'none'),
+      periods: { today: period(Math.max(reset, today)).spend, '7d': period(Math.max(reset, nowMs - 7 * DAY)).spend, '30d': period(Math.max(reset, nowMs - 30 * DAY)).spend },
+      coverage: cumulative.unpricedEvents || events.some((row) => !coveredRows.has(row) && row.totalCostAuthority === 'model-priced' && row.models.some((model) => (model.cacheCreationTokens ?? 0) > 0 && model.cacheCreation1hTokens == null)) ? (cumulative.pricedEvents ? 'partial' : 'none') : (cumulative.pricedEvents ? 'complete' : 'none'),
       creditEvidence: this.state.credits.filter((entry) => entry.ownerKey === ownerKey && entry.occurredAtMs >= reset && entry.occurredAtMs <= nowMs).map(({ occurredAtMs, kind }) => ({ occurredAtMs, kind })),
     };
   }
