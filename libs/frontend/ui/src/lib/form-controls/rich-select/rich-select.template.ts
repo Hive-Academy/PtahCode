@@ -10,7 +10,8 @@ export const RICH_SELECT_TEMPLATE = `<button
     [attr.aria-expanded]="open()"
     [attr.aria-controls]="open() ? listboxId : null"
     [attr.aria-activedescendant]="open() && !isSearchable() ? activeId() : null"
-    [attr.aria-label]="label() ?? null"
+    [attr.aria-label]="triggerAriaLabel()"
+    [attr.aria-labelledby]="labelledBy() ?? null"
     [attr.aria-invalid]="ariaInvalid()"
     [disabled]="isDisabled()"
     (click)="toggle()"
@@ -23,7 +24,7 @@ export const RICH_SELECT_TEMPLATE = `<button
         [ngTemplateOutlet]="iconSlot"
         [ngTemplateOutletContext]="{ $implicit: option, place: 'trigger' }"
       />
-      <span class="ptah-select__value">{{ option.label }}</span>
+      <span class="ptah-select__value" [attr.title]="option.label">{{ option.label }}</span>
     } @else {
       <span class="ptah-select__placeholder">{{ placeholder() }}</span>
     }
@@ -76,8 +77,8 @@ export const RICH_SELECT_TEMPLATE = `<button
         role="listbox"
         tabindex="-1"
         [id]="listboxId"
-        [attr.aria-label]="label() ?? null"
-        [attr.aria-labelledby]="label() ? null : fieldLabelId()"
+        [attr.aria-label]="triggerAriaLabel()"
+        [attr.aria-labelledby]="listboxLabelledBy()"
       >
         @for (group of groups(); track group.headerId) {
           @if (group.name) {

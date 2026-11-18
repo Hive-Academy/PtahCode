@@ -196,6 +196,7 @@
   --ptah-field-h-sm: 2.5rem; /* 40px compact floating box */
   --ptah-field-h-md: 3rem;
   --ptah-field-h-lg: 3.5rem;
+  --ptah-setting-row-control-w: 13rem; /* compact control in a setting row (prototype .srow .ctl .field) */
   --ptah-field-pad-x: var(--ptah-space-3);
   --ptah-field-pad-top: 1.25rem;
   --ptah-field-pad-bottom: 0.375rem;
