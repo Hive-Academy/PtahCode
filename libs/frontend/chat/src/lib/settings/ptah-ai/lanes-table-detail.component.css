@@ -81,13 +81,13 @@ ptah-lanes-table-detail .capability-value {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-@container lane-detail (min-width: 785px) and (max-width: 1400px) {
+@container lane-detail (min-width: 600px) and (max-width: 1400px) {
   ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas: 'facts actions' 'chips chips' 'body body';
   }
 }
-@container lane-detail (max-width: 784px) {
+@container lane-detail (max-width: 599px) {
   ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: 'facts' 'chips' 'actions' 'body';

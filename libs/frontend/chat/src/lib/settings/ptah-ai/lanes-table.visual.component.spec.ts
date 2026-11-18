@@ -383,6 +383,38 @@ describe('LanesTableComponent visual presentation', () => {
     expect(triggers?.[0].getAttribute('aria-expanded')).toBe('true');
   });
 
+  it('keeps compact names and kind together before the separate model line', async () => {
+    const { fixture, host } = await mount([
+      system('codex', { name: 'Antigravity' }),
+      system('copilot', { name: 'OpenCode' }),
+      instance('synthetic', { name: 'Synthetic Lane', selectedModel: '' }),
+    ]);
+    narrow(fixture);
+    const identities = host.querySelectorAll('ptah-lane-row-identity');
+    expect(identities).toHaveLength(3);
+    expect(
+      Array.from(identities).map((identity) => {
+        const title = identity.querySelector('ptah-table-row-title');
+        expect(identity.getAttribute('data-collapsed')).toBe('true');
+        expect(
+          title?.querySelector('.ptah-table-row-title-secondary'),
+        ).toBeNull();
+        const primary = title?.querySelector('.ptah-table-row-title-primary');
+        expect(
+          primary?.querySelector('.ptah-table-row-title-kind'),
+        ).not.toBeNull();
+        expect(
+          identity.nextElementSibling?.classList.contains('lane-model-value'),
+        ).toBe(true);
+        return primary?.querySelector('.ptah-table-row-title-name')
+          ?.textContent;
+      }),
+    ).toEqual(['Antigravity', 'OpenCode', 'Synthetic Lane']);
+    expect(identities[2].nextElementSibling?.textContent).toContain(
+      'Provider default',
+    );
+  });
+
   it('shows Model / Effort at every tier and other row defaults when collapsed', async () => {
     const { fixture, host } = await mount([system('codex')]);
     q(host, 'ptah-table-row-expander button')?.click();

@@ -115,6 +115,16 @@ describe('LanesTableDetailComponent', () => {
     ).toBe('wide');
     expect(host.querySelectorAll('ptah-description-list')).toHaveLength(1);
     expect(host.querySelector('[ptahDetailChips]')).not.toBeNull();
+    const layout = host.querySelector('ptah-table-detail-layout');
+    expect(
+      host.querySelector('[ptahDetailFacts]')?.parentElement?.parentElement,
+    ).toBe(layout);
+    expect(
+      host.querySelector('[ptahDetailChips]')?.parentElement?.parentElement,
+    ).toBe(layout);
+    expect(
+      host.querySelector('[ptahDetailActions]')?.parentElement?.parentElement,
+    ).toBe(layout);
     const actions = Array.from(
       host.querySelectorAll('[ptahDetailActions] button'),
     );

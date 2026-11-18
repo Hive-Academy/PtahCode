@@ -207,6 +207,7 @@ ptah-lanes-table
   .ptah-table-row-actions
   button[data-ptah-button]:is(.btn, #ptah-button) {
   width: 1.5rem;
+  min-width: 1.5rem;
 }
 
 ptah-lanes-table
@@ -268,4 +269,83 @@ ptah-lanes-table
 /* Reserve the recovery action as well as the fixed menu anchor. */
 ptah-lanes-table [data-lane-status]:has(.lane-row-actions > button) {
   padding-inline-end: 6rem;
+}
+
+/* Compact rows keep identity, kind and model in normal flow. */
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-order {
+  width: 2.5rem;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-status {
+  width: 7.25rem;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] [data-lane-status] {
+  padding-inline: 0.25rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  > ptah-lanes-table-status {
+  display: block;
+  max-width: calc(100% - 1.75rem);
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .ptah-status-text {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: normal;
+  min-width: 0;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  > .lane-row-actions {
+  display: contents;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .lane-row-actions
+  > button {
+  display: block;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  ptah-table-row-actions {
+  position: absolute;
+  inset-inline-end: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  th[scope='row']
+  .lane-model-value {
+  margin-block-start: var(--ptah-space-1);
+  flex-wrap: wrap;
+  overflow: visible;
+  white-space: normal;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  th[scope='row']
+  .lane-model-value
+  > ptah-native-popover {
+  overflow: visible;
+  max-width: 100%;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  th[scope='row']
+  .lane-model-value
+  :is(button, span) {
+  height: auto;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: start;
 }
