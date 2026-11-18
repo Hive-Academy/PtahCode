@@ -15,8 +15,8 @@ Part of the design epic that moves screens to the shared components of `@ptah-ex
 
 ## Phases
 
-| Phase | Content                                            | PR  | State                           |
-| ----- | -------------------------------------------------- | --- | ------------------------------- |
-| 1     | Design spec + prototype (docs/design-system/thoth) | —   | approved 2026-11-18; PR pending |
-| 2     | Memory panel + `memory:graph` RPC                  | —   | not started                     |
-| 3     | Skills panel                                       | —   | not started                     |
+| Phase | Content                                            | PR    | State                                  |
+| ----- | -------------------------------------------------- | ----- | -------------------------------------- |
+| 1     | Design spec + prototype (docs/design-system/thoth) | #1427 | in review (design approved 2026-11-18) |
+| 2     | Memory panel + `memory:graph` RPC                  | —     | not started                            |
+| 3     | Skills panel                                       | —     | not started                            |
