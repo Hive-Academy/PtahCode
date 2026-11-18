@@ -327,8 +327,8 @@ describe('isFileBasedSettingKey', () => {
 
   describe('idle compaction keys (TASK_2026_692)', () => {
     it.each([
-      ['compaction.idleCompactionEnabled', false],
-      ['compaction.idleCompactionMinTokens', 150_000],
+      ['compaction.idleCompactionEnabled', true],
+      ['compaction.idleCompactionMinTokens', 750_000],
     ] as const)('registers and defaults %s to %s', (key, expected) => {
       expect(FILE_BASED_SETTINGS_KEYS.has(key)).toBe(true);
       expect(isFileBasedSettingKey(key)).toBe(true);
@@ -905,8 +905,8 @@ describe('isFileBasedSettingKey', () => {
       'agentBudget.stopWeightedTokens': 3000000,
       'agentBudget.handoffContextTokens': 150000,
       'agentBudget.maxDurationMin': 90,
-      'compaction.idleCompactionEnabled': false,
-      'compaction.idleCompactionMinTokens': 150000,
+      'compaction.idleCompactionEnabled': true,
+      'compaction.idleCompactionMinTokens': 750000,
       'agentOrchestration.codexWebSearch': true,
       'internalQuery.maxConcurrent': 3,
       'internalQuery.maxConcurrentPerLane': 1,

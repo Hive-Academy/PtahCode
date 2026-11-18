@@ -159,33 +159,33 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
     values['compaction.idleCompactionMinTokens'] = 99_999;
     expect(() => provider.getIdleCompactionConfig()).not.toThrow();
     expect(provider.getIdleCompactionConfig()).toEqual({
-      enabled: false,
-      minTokens: 150_000,
+      enabled: true,
+      minTokens: 750_000,
     });
     values['compaction.idleCompactionMinTokens'] = 100_000.5;
-    expect(provider.getIdleCompactionConfig().minTokens).toBe(150_000);
+    expect(provider.getIdleCompactionConfig().minTokens).toBe(750_000);
   });
 
   it('uses the shared defaults when settings are unset or null', () => {
     const { provider, warn } = makeProvider({});
     expect(provider.getIdleCompactionConfig()).toEqual({
-      enabled: false,
-      minTokens: 150_000,
+      enabled: true,
+      minTokens: 750_000,
     });
     const withNulls = makeProvider({
       'compaction.idleCompactionEnabled': null,
       'compaction.idleCompactionMinTokens': null,
     });
     expect(withNulls.provider.getIdleCompactionConfig()).toEqual({
-      enabled: false,
-      minTokens: 150_000,
+      enabled: true,
+      minTokens: 750_000,
     });
     expect(
       FILE_BASED_SETTINGS_DEFAULTS['compaction.idleCompactionEnabled'],
-    ).toBe(false);
+    ).toBe(true);
     expect(
       FILE_BASED_SETTINGS_DEFAULTS['compaction.idleCompactionMinTokens'],
-    ).toBe(150_000);
+    ).toBe(750_000);
     expect(warn).not.toHaveBeenCalled();
     expect(withNulls.warn).not.toHaveBeenCalled();
   });
@@ -198,7 +198,7 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
       });
       expect(provider.getIdleCompactionConfig()).toEqual({
         enabled,
-        minTokens: 150_000,
+        minTokens: 750_000,
       });
       expect(warn).not.toHaveBeenCalled();
     },
@@ -231,10 +231,10 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
       const { provider, warn } = makeProvider({
         'compaction.idleCompactionEnabled': value,
       });
-      expect(provider.getIdleCompactionConfig().enabled).toBe(false);
+      expect(provider.getIdleCompactionConfig().enabled).toBe(true);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('Invalid compaction.idleCompactionEnabled'),
-        expect.objectContaining({ defaultValue: false }),
+        expect.objectContaining({ defaultValue: true }),
       );
     },
   );
@@ -245,10 +245,10 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
       const { provider, warn } = makeProvider({
         'compaction.idleCompactionMinTokens': value,
       });
-      expect(provider.getIdleCompactionConfig().minTokens).toBe(150_000);
+      expect(provider.getIdleCompactionConfig().minTokens).toBe(750_000);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('Invalid compaction.idleCompactionMinTokens'),
-        expect.objectContaining({ defaultValue: 150_000 }),
+        expect.objectContaining({ defaultValue: 750_000 }),
       );
     },
   );
@@ -274,7 +274,7 @@ describe('CompactionConfigProvider.getIdleCompactionConfig', () => {
     ).toBe('boolean');
     const { provider, warn } = makeProvider({});
     expect(provider.getConfig().toolOutputBudgetTokens).toBe(2500);
-    expect(provider.getIdleCompactionConfig().enabled).toBe(false);
+    expect(provider.getIdleCompactionConfig().enabled).toBe(true);
     expect(warn).not.toHaveBeenCalled();
   });
 });
