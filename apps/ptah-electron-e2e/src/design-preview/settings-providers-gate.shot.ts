@@ -491,10 +491,13 @@ test('captures populated Settings Providers gate shots on the real backend', asy
           'Requests go to this URL plus /v1/systemone. With an API key it must use https, unless the endpoint is on this machine (localhost, [::1] or 127.x.x.x).',
         );
         await shot('base-url-info-open', width);
-        await info.click();
+        await page.keyboard.press('Escape');
         await expect(info).toHaveAttribute('aria-expanded', 'false');
         await expect(panel).toBeHidden();
-        await page.getByTestId('consumer-close-decision').click();
+        const editor = page.getByTestId('consumer-editor-decision');
+        if (await editor.isVisible())
+          await page.getByTestId('consumer-close-decision').click();
+        await expect(editor).toBeHidden();
       }
 
       // 6. Ptah CLI defaults and Background models.

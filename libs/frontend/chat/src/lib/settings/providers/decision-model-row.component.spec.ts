@@ -724,6 +724,22 @@ describe('DecisionModelRowComponent', () => {
       expect(body?.contains(byTestId('decision-footer'))).toBe(false);
     });
 
+    it('keeps the kind and provider chevrons in the shared select grid cell', async () => {
+      await create();
+      await open();
+      await pickKind('structured');
+      for (const id of ['decision-kind', 'decision-provider']) {
+        const select = byTestId(id);
+        const trigger = select?.querySelector('[role="combobox"]');
+        const actions = select?.querySelector('.ptah-select__actions');
+        expect(select?.classList.contains('ptah-select')).toBe(true);
+        expect(select?.classList.contains('block')).toBe(false);
+        expect(trigger?.parentElement).toBe(select);
+        expect(actions?.parentElement).toBe(select);
+        expect(actions?.querySelector('.ptah-select__chevron')).not.toBeNull();
+      }
+    });
+
     it('keeps Save and its footer text in a fixed footer after the scrolling body (P4 re-review 8)', async () => {
       await create();
       await open();
@@ -772,14 +788,21 @@ describe('DecisionModelRowComponent', () => {
       await pickKind('ollama');
       const close = byTestId<HTMLButtonElement>('consumer-close-decision');
       const timeout = byTestId<HTMLInputElement>('decision-timeout');
-      if (!close || !timeout) throw new Error('editor controls missing');
-      // Save is disabled with an empty model, so the request timeout field (below the model) is the last stop.
-      const forward = tab(timeout);
+      const timeoutInfo = timeout
+        ?.closest('ptah-field')
+        ?.querySelector<HTMLButtonElement>(
+          'button[aria-label="More about Request timeout (seconds)"]',
+        );
+      if (!close || !timeout || !timeoutInfo)
+        throw new Error('editor controls missing');
+      // Save is disabled with an empty model; the timeout info action follows its input.
+      expect(tab(timeout).defaultPrevented).toBe(false);
+      const forward = tab(timeoutInfo);
       expect(forward.defaultPrevented).toBe(true);
       expect(document.activeElement).toBe(close);
       const back = tab(close, true);
       expect(back.defaultPrevented).toBe(true);
-      expect(document.activeElement).toBe(timeout);
+      expect(document.activeElement).toBe(timeoutInfo);
       const inside = tab(byTestId<HTMLSelectElement>('decision-kind') ?? close);
       expect(inside.defaultPrevented).toBe(false);
     });

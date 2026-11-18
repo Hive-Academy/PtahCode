@@ -112,7 +112,7 @@
             <ptah-select
               triggerId="decision-model-kind"
               label="Decision model kind"
-              class="block w-full"
+              class="w-full"
               [options]="kindOptions"
               [value]="draft().kind"
               [disabled]="busy() || disabled()"
@@ -148,7 +148,7 @@
                 <ptah-select
                   triggerId="decision-model-provider"
                   label="Provider"
-                  class="block w-full"
+                  class="w-full"
                   [options]="providerSelectOptions()"
                   [value]="draft().providerId"
                   placeholder="Choose a provider"
