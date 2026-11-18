@@ -328,9 +328,8 @@ export class BotsPageComponent {
         if (key === this.workspaceKey) return;
         if (this.workspaceKey !== null) {
           const dirty = this.store.dirty();
-          // Existing public methods clear selection and invalidate pending editor requests without persistence.
-          this.store.newDraft({ kind: 'user' });
-          this.store.discard();
+          this.store.clearList();
+          this.store.clearSelection();
           this.detailOpen.set(false);
           this.workspaceNotice.set(
             dirty
@@ -439,6 +438,7 @@ export class BotsPageComponent {
   }
   protected async selectBot(id: string): Promise<void> {
     if (this.busy()) return;
+    this.workspaceNotice.set('');
     if (id === this.store.selected()?.id) {
       this.detailOpen.set(true);
       return;
@@ -459,6 +459,7 @@ export class BotsPageComponent {
   }
   protected async newBot(): Promise<void> {
     if (this.busy()) return;
+    this.workspaceNotice.set('');
     this.navigating.set(true);
     const generation = this.workspaceGeneration;
     try {

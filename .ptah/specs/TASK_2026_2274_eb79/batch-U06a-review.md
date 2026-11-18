@@ -169,3 +169,34 @@ Items 7 and 8 stay open for R01 as decided.
 ### Safe to carry forward
 
 Yes. The public API is unchanged (`BotsPageComponent` only). U07 can start. Fix A before R01 if the coordinator agrees.
+
+## Re-review 2
+
+Review family: claude (implementer: codex)
+Score: 9/10
+Verdict: APPROVED
+
+### Defect status
+
+- **A (old rows visible during reload): FIXED.** `bots.store.ts:190` `clearList` increments `listSequence`, nulls `_list`, `_listError` and `listParams`, and clears `_loading`. `load` checks `token !== listSequence` after the await (`:214`). A stale success or stale failure returns early. It cannot fill rows or set an error. The page calls `clearList` before `load` (`bots-page.component.ts:331`), so the skeleton shows and no old row is clickable. Specs `bots.store.spec.ts:151` and `:168` cover a stale success and a stale failure.
+- **B (notice never clears): FIXED.** `selectBot` (`:441`) and `newBot` (`:462`) clear `workspaceNotice` after the busy guard. Spec at `bots-page.component.spec.ts:693`.
+
+### Checks requested
+
+- **Same-workspace refresh keeps rows.** `refresh` calls `load`. `load` does not clear `_list`. Defect 4 stays fixed.
+- **`clearSelection` equals the old pair.** It increments `selectionSequence`, calls `invalidateEditor` (resets select, write, upload sequences, saving, upload, conflict, diagnostics, error, saveState), nulls `selected` and `draft`, and bumps `draftEpoch` once. It makes no RPC call. Spec `:182` checks this.
+- **Pending select.** `invalidateEditor` increments `selectRequestSequence`, so a late `get` result is dropped. Spec `:201` covers it.
+- **Refresh after a save in flight.** The stale write takes the `selection !== selectionSequence` branch and calls `refresh`. With `listParams` null this does nothing. If the new workspace already set `listParams`, it reloads the new workspace. This is harmless and no stale row appears.
+- **`deepEqual` move.** The code is identical in `bots-store-helpers.ts`. The store imports it. No behaviour change.
+
+### New defects
+
+None. One note (not a defect): `loadLaneChoices` has no clear on workspace change. It is outside A and B, and its own sequence guards it.
+
+### Command results
+
+- `npx jest ... bots.store.spec.ts bots-page.component.spec.ts`: 2 suites, 82 tests passed.
+- `npx ngc --noEmit --project libs/frontend/bots-ui/tsconfig.lib.json`: exit 0.
+- `npx eslint bots.store.ts bots-store-helpers.ts bots-page.component.ts`: exit 0.
+
+Safe to carry forward to U07: yes.

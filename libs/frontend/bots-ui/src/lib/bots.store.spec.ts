@@ -148,6 +148,74 @@ describe('BotsStore', () => {
     store.discard();
     expect(store.draftEpoch()).toBe(3);
   });
+  it('clearList removes cached rows and ignores an outstanding response', async () => {
+    await store.load({ workspaceRoot: 'D:/one' });
+    expect(store.list()).toEqual(listing);
+    const late = deferred<RpcResult<BotsListResult>>();
+    client.list.mockReturnValueOnce(late.promise);
+    const pending = store.refresh();
+    store.clearList();
+    expect(store.list()).toBeNull();
+    expect(store.summaries()).toEqual([]);
+    expect(store.loading()).toBe(false);
+    expect(store.listError()).toBeNull();
+    late.resolve(new RpcResult(true, listing));
+    await pending;
+    expect(store.list()).toBeNull();
+    await store.load({ workspaceRoot: 'D:/two' });
+    expect(store.list()).toEqual(listing);
+  });
+  it('clearList also ignores stale failures after the next workspace loads', async () => {
+    const late = deferred<RpcResult<BotsListResult>>();
+    client.list.mockReturnValueOnce(late.promise);
+    const pending = store.load({ workspaceRoot: 'D:/one' });
+    store.clearList();
+    await store.load({ workspaceRoot: 'D:/two' });
+    late.resolve(
+      new RpcResult<BotsListResult>(false, undefined, 'Old workspace failure'),
+    );
+    await pending;
+    expect(store.list()).toEqual(listing);
+    expect(store.listError()).toBeNull();
+    expect(store.loading()).toBe(false);
+  });
+  it('clearSelection clears dirty editor state and advances the draft epoch once', async () => {
+    await store.select(record.id);
+    store.patchDraft({ name: 'Unsaved' });
+    const epoch = store.draftEpoch();
+    store.clearSelection();
+    expect(store.selected()).toBeNull();
+    expect(store.draft()).toBeNull();
+    expect(store.dirty()).toBe(false);
+    expect(store.draftEpoch()).toBe(epoch + 1);
+    expect(store.saveState()).toBe('pristine');
+    expect(store.error()).toBeNull();
+    expect(store.conflict()).toBeNull();
+    expect(store.diagnostics()).toEqual([]);
+    expect(store.avatarUpload()).toBeNull();
+    expect(store.selecting()).toBe(false);
+    expect(store.saving()).toBe(false);
+    expect(client.create).not.toHaveBeenCalled();
+    expect(client.update).not.toHaveBeenCalled();
+  });
+  it('clearSelection invalidates a pending selection', async () => {
+    const late = deferred<Awaited<ReturnType<BotsClient['get']>>>();
+    client.get.mockReturnValueOnce(late.promise);
+    const pending = store.select(record.id);
+    store.clearSelection();
+    late.resolve(
+      new RpcResult(true, {
+        record,
+        diagnostics: [],
+        executionAvailable: false,
+      }),
+    );
+    await pending;
+    expect(store.selected()).toBeNull();
+    expect(store.draft()).toBeNull();
+    expect(store.selecting()).toBe(false);
+    expect(store.draftEpoch()).toBe(1);
+  });
   it('ignores stale list responses', async () => {
     const first = deferred<RpcResult<BotsListResult>>();
     client.list.mockReturnValueOnce(first.promise);

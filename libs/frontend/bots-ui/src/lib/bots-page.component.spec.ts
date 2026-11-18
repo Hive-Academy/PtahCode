@@ -654,4 +654,63 @@ describe('Bots page', () => {
     expect(root.textContent).not.toContain('Other user');
     expect(root.textContent).toContain('Show archived (1)');
   });
+  it('removes old workspace rows during reload and after reload failure', async () => {
+    await setup();
+    expect(root.querySelector('.bot-row')).not.toBeNull();
+    let resolve: (value: RpcResult<BotsListResult>) => void = () => undefined;
+    list.mockReturnValueOnce(
+      new Promise<RpcResult<BotsListResult>>((done) => {
+        resolve = done;
+      }),
+    );
+    folders.set([{ path: '/next', name: 'Next' }]);
+    fixture.detectChanges();
+    expect(store.list()).toBeNull();
+    expect(root.querySelector('.bot-row')).toBeNull();
+    expect(root.textContent).not.toContain('User helper');
+    expect(root.querySelector('ptah-skeleton')).not.toBeNull();
+    expect(
+      root.querySelector<HTMLInputElement>('input[type=search]')?.disabled,
+    ).toBe(true);
+    expect(get).not.toHaveBeenCalled();
+    resolve(
+      new RpcResult<BotsListResult>(
+        false,
+        undefined,
+        'Unavailable',
+        'PERSISTENCE_UNAVAILABLE',
+      ),
+    );
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Could not load bots');
+    expect(root.querySelector('.bot-row')).toBeNull();
+    expect(root.textContent).not.toContain('User helper');
+    expect(store.list()).toBeNull();
+    expect(root.querySelector('ptah-skeleton')).toBeNull();
+    expect(get).not.toHaveBeenCalled();
+  });
+  it.each(['select', 'new'])(
+    'clears the discarded-changes notice when the user chooses %s',
+    async (action) => {
+      await setup();
+      await store.select(record.id);
+      store.patchDraft({ name: 'Unsaved' });
+      folders.set([{ path: '/next', name: 'Next' }]);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const notice =
+        'Unsaved changes were discarded because the workspace changed.';
+      expect(root.textContent).toContain(notice);
+      if (action === 'new') await click('New bot');
+      else {
+        root.querySelector<HTMLButtonElement>('.bot-row')?.click();
+        await fixture.whenStable();
+        fixture.detectChanges();
+      }
+      expect(store.draft()).not.toBeNull();
+      expect(root.textContent).not.toContain(notice);
+    },
+  );
 });

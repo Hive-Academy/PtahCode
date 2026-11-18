@@ -116,3 +116,46 @@ All remain below 700 lines. Prettier --write was run on both changed implementat
 - **Review item 7, OPEN for R01:** keep avatar recovery once per mounted image. No change to recovery, request deduplication or row output handling in this revision. R01 must assess the visible fallback after a second eviction.
 - **Review item 8, OPEN for R01:** keep WORKSPACE_COORDINATOR.confirm and its existing dialog copy. No change to the shared confirmation boundary or modal-versus-inline presentation in this revision.
 - **Existing R01 design questions remain:** approve 32-row pagination versus virtualization, shared-confirm presentation, header composition, new-bot scope selector and final Electron visual appearance. Revision 1 resolves pager correctness without deciding those visual questions.
+
+## Revision 2
+
+Fixed re-review 1 defects A and B, following the coordinator's explicit store API decision. Changed only `bots.store.ts`, `bots.store.spec.ts`, `bots-page.component.ts`, `bots-page.component.spec.ts`, the permitted new `bots-store-helpers.ts`, and this report. Review items C, 7 and 8 remain unchanged for R01. The coordinator's boolean compact bindings remain intact.
+
+### Fixes and specs
+
+File references below are relative to `libs/frontend/bots-ui/src/lib/`.
+
+- **A: old workspace rows during reload or after failure.** `bots.store.ts:190` adds public clearList: increments listSequence, drops the list, clears the prior list error/loading state and clears obsolete refresh parameters. Late responses from the old request cannot repopulate rows or replace the new workspace error state. `bots-page.component.ts:331` calls it synchronously on workspace change before the next load. The existing firstLoading computation consequently shows the initial skeleton, and no old row stays mounted/clickable. The normal same-workspace refresh behavior is preserved.
+- **A: explicit selection reset.** `bots.store.ts:199` adds public clearSelection: advances selectionSequence, calls invalidateEditor, clears selected/draft and advances draftEpoch exactly once. `bots-page.component.ts:332` replaces the newDraft(User)+discard pair with this method. It performs no persistence and invalidates pending editor requests while preserving the coordinator-approved workspace-change behavior and dirty notice.
+- **Store regressions.** `bots.store.spec.ts:151` checks cached rows disappear and a stale successful list response stays ignored. `:168` checks a stale failed response cannot overwrite the next workspace's successful list. `:182` checks dirty selection reset, epoch increment, pristine/cleared editor state and no create/update RPC. `:201` checks an outstanding select cannot restore cleared selection.
+- **Page regression for A.** `bots-page.component.spec.ts:657` defers the workspace reload: old rows disappear, skeleton appears, initial-load search is disabled and no old row can invoke get. On a failed response, error shows while old rows remain absent and the skeleton ends.
+- **B: stale discard notice.** `bots-page.component.ts:441` clears workspaceNotice when selecting a bot after the busy guard, including reopening the selected bot. `:462` does the same when starting a new bot. `bots-page.component.spec.ts:693` covers both actions after a dirty workspace switch and verifies the notice disappears while the new draft/editor becomes available.
+- **Store size.** Moved the existing pure deepEqual function unchanged into `bots-store-helpers.ts:2`; `bots.store.ts:18` imports it. This is a private-folder helper, with no public barrel change. Existing dirty-draft comparisons retain their behavior, covered by the store/editor suites.
+
+### Final line counts
+
+| File                                                        | Lines |
+| ----------------------------------------------------------- | ----: |
+| `libs/frontend/bots-ui/src/lib/bots.store.ts`               |   678 |
+| `libs/frontend/bots-ui/src/lib/bots.store.spec.ts`          |  1153 |
+| `libs/frontend/bots-ui/src/lib/bots-page.component.ts`      |   521 |
+| `libs/frontend/bots-ui/src/lib/bots-page.component.spec.ts` |   716 |
+| `libs/frontend/bots-ui/src/lib/bots-store-helpers.ts`       |    30 |
+
+Production files stay below 700 lines; spec files use the explicit Revision 2 exemption. Prettier --write was run on all five changed TypeScript files and this report.
+
+### Command results
+
+Working directory: `D:/projects/ptah-extension/.claude-worktrees/bots-phase-1`.
+
+- `npx ngc --noEmit --project libs/frontend/bots-ui/tsconfig.lib.json`: exit 0.
+- `npx eslint libs/frontend/bots-ui/src/lib/bots.store.ts libs/frontend/bots-ui/src/lib/bots.store.spec.ts libs/frontend/bots-ui/src/lib/bots-page.component.ts libs/frontend/bots-ui/src/lib/bots-page.component.spec.ts libs/frontend/bots-ui/src/lib/bots-store-helpers.ts`: exit 0, no warnings.
+- `npx ts-node --transpile-only tools/ui-class-audit/check-ui-classes.ts`: exit 0; 1462 files scanned; controls and raw spacing each report 0 token counts over baseline; no bots-ui FAIL. Baseline unchanged.
+- `npx jest --config libs/frontend/bots-ui/jest.config.ts --runInBand --coverage=false --runTestsByPath libs/frontend/bots-ui/src/lib/bots-page.component.spec.ts libs/frontend/bots-ui/src/lib/bots.store.spec.ts libs/frontend/bots-ui/src/lib/bot-editor.component.spec.ts`: exit 0; 3 suites, 109 tests passed in the final run.
+- Final scoped ptah_get_diagnostics: no diagnostics in all five changed TypeScript files. The same five shared-file BigInt target diagnostics remain outside this write set. Intermediate diagnostics found missing RpcResult generic arguments in two new failure fixtures; those were corrected and the final diagnostics/test run is clean for changed files.
+- No npm run verify, Nx, git writes or forbidden build/serve/dev/e2e/package target was run. No raw DaisyUI control class or chat import was added. Actual Electron visual review remains for R01; this revision adds no layout or design choice.
+
+### Decisions carried forward
+
+- The explicit clearList/clearSelection APIs supersede Revision 1's temporary public-method reset sequence, as directed by the coordinator. The small helper extraction keeps store size within the hard limit without changing its comparisons.
+- C (an already-open confirmation dialog across a switch), 7 (avatar recovery once) and 8 (shared confirmation presentation) are still OPEN for R01. No behavior change was made to them.

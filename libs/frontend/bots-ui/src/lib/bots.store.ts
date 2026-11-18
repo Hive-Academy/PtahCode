@@ -15,6 +15,7 @@ import {
   type BotsWriteResult,
 } from '@ptah-extension/shared';
 import { BotsClient } from './bots-client';
+import { deepEqual } from './bots-store-helpers';
 import { BotAvatarCache, type AvatarState } from './bot-avatar-cache';
 import {
   avatarErrorMessage,
@@ -52,36 +53,6 @@ export interface BotLaneChoice {
 }
 export type BotBlockedReason =
   'selecting' | 'saving' | 'conflict' | 'archived' | null;
-/** JSON-shaped values: object key order is irrelevant; array order is meaningful. */
-function deepEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((value: unknown, index: number) =>
-        deepEqual(value, right[index]),
-      )
-    );
-  }
-  if (!left || !right || typeof left !== 'object' || typeof right !== 'object')
-    return false;
-  const a = left as Record<string, unknown>;
-  const b = right as Record<string, unknown>;
-  const keys = Object.keys(a)
-    .filter((key) => a[key] !== undefined)
-    .sort();
-  const otherKeys = Object.keys(b)
-    .filter((key) => b[key] !== undefined)
-    .sort();
-  return (
-    keys.length === otherKeys.length &&
-    keys.every(
-      (key, index) => key === otherKeys[index] && deepEqual(a[key], b[key]),
-    )
-  );
-}
 function editable(record: BotRecord): BotEditable {
   const {
     name,
@@ -213,6 +184,24 @@ export class BotsStore {
 
   public setWorkspaceRoots(roots: readonly string[]): void {
     this._roots.set([...new Set(roots)]);
+  }
+
+  /** Drop workspace-bound data and invalidate any outstanding list request. */
+  public clearList(): void {
+    ++this.listSequence;
+    this.listParams = null;
+    this._list.set(null);
+    this._listError.set(null);
+    this._loading.set(false);
+  }
+
+  /** Clear editor state and prevent outstanding requests from restoring the old selection. */
+  public clearSelection(): void {
+    ++this.selectionSequence;
+    this.invalidateEditor();
+    this._selected.set(null);
+    this._draft.set(null);
+    this._draftEpoch.update((epoch) => epoch + 1);
   }
 
   public async load(
