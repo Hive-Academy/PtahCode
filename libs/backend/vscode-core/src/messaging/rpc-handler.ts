@@ -70,6 +70,7 @@ export const ALLOWED_METHOD_PREFIXES = [
   'quality:', // Quality Dashboard (assessment, history, export)
   'plugins:', // Plugin configuration (list, get-config, save-config)
   'agent:', // Agent orchestration (getConfig, setConfig, detectClis)
+  'bots:', // Bot management
   'ptahCli:', // Ptah CLI agent management (list, create, update, delete, testConnection, listModels)
   'skillsSh:', // Skills.sh marketplace (search, install, recommend)
   'settings:', // Settings export/import (Electron desktop)
