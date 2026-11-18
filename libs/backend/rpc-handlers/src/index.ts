@@ -201,3 +201,8 @@ export {
   type LegacyCodexSessionSettingsDeps,
 } from './lib/chat/codex-host/codex-legacy-session-settings';
 
+export { registerBotAdapters } from './lib/bots/register-bot-adapters';
+export {
+  BotsRpcHandlers,
+  type BotApplicationResolver,
+} from './lib/handlers/bots-rpc.handlers';

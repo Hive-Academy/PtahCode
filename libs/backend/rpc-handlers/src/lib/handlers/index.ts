@@ -103,3 +103,5 @@ export {
 } from './file-link-root-policy';
 
 export { ConfigScopeRpcHandlers } from './config-scope-rpc.handlers';
+
+export * from './bots-rpc.handlers';

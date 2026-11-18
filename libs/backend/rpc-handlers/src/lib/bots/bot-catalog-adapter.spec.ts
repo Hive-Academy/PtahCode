@@ -86,6 +86,20 @@ const selection: Pick<BotEditable, 'runtime' | 'skills' | 'toolRequirements'> =
   };
 
 describe('BotCatalogAdapter', () => {
+  it('keeps the first duplicate lane ID and reports the ignored entry', async () => {
+    const { deps, adapter } = setup();
+    jest.mocked(deps.config.getWithDefault).mockReturnValue([
+      { id: 'lane', name: 'First', enabled: true },
+      { id: 'lane', name: 'Second', enabled: false },
+    ]);
+    const result = await adapter.read({ kind: 'user' });
+    expect(
+      result.lanes.filter((lane) => lane.target.kind === 'ptah-cli'),
+    ).toEqual([expect.objectContaining({ label: 'First', available: true })]);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'LANE_ENTRY_DUPLICATE' }),
+    );
+  });
   beforeEach(() => jest.mocked(getAllAnthropicProviders).mockReset());
   beforeEach(() =>
     jest

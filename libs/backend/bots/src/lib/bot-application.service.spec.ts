@@ -229,17 +229,17 @@ describe('BotApplicationService', () => {
       schemaVersion: 2,
       definition: editable(first.record),
     };
-    expect((await service.update(params, ROOT)).record.revision).toBe(1);
+    expect((await service.update(params, [ROOT])).record.revision).toBe(1);
     expect(repository.writes).toBe(1);
     expect(
       (
         await service.update(
           { ...params, definition: { ...params.definition, name: 'New' } },
-          ROOT,
+          [ROOT],
         )
       ).record.revision,
     ).toBe(2);
-    await expect(service.update(params, ROOT)).rejects.toMatchObject({
+    await expect(service.update(params, [ROOT])).rejects.toMatchObject({
       code: 'BOT_REVISION_CONFLICT',
     });
     expect(repository.writes).toBe(2);
@@ -248,7 +248,7 @@ describe('BotApplicationService', () => {
     const { service } = setup();
     const created = await service.create(createInput);
     expect(
-      (await service.archive({ id: ID, expectedRevision: 1 }, ROOT)).record,
+      (await service.archive({ id: ID, expectedRevision: 1 }, [ROOT])).record,
     ).toMatchObject({ enabled: false, archivedAt: 10, revision: 2 });
     await expect(
       service.update(
@@ -258,14 +258,16 @@ describe('BotApplicationService', () => {
           schemaVersion: 2,
           definition: editable(created.record),
         },
-        ROOT,
+        [ROOT],
       ),
     ).rejects.toMatchObject({ code: 'BOT_ARCHIVED' });
     await expect(
-      service.setEnabled({ id: ID, expectedRevision: 2, enabled: true }, ROOT),
+      service.setEnabled({ id: ID, expectedRevision: 2, enabled: true }, [
+        ROOT,
+      ]),
     ).rejects.toMatchObject({ code: 'BOT_ARCHIVED' });
     expect(
-      (await service.restore({ id: ID, expectedRevision: 2 }, ROOT)).record,
+      (await service.restore({ id: ID, expectedRevision: 2 }, [ROOT])).record,
     ).toMatchObject({ enabled: false, archivedAt: null, revision: 3 });
   });
   it.each([
@@ -281,15 +283,14 @@ describe('BotApplicationService', () => {
       await service.create(createInput);
       await service.setEnabled(
         { id: ID, expectedRevision: 1, enabled: false },
-        ROOT,
+        [ROOT],
       );
-      await service.setEnabled(
-        { id: ID, expectedRevision: 2, enabled: true },
+      await service.setEnabled({ id: ID, expectedRevision: 2, enabled: true }, [
         ROOT,
-      );
+      ]);
       const result = await service.delete(
         { id: ID, expectedRevision: 3, retention },
-        ROOT,
+        [ROOT],
       );
       expect(result.removed).toEqual({
         memory: 0,
@@ -298,7 +299,7 @@ describe('BotApplicationService', () => {
       });
       expect(repository.history.has(ID)).toBe(history === 'keep');
       await expect(
-        service.get({ id: ID, revision: 1 }, ROOT),
+        service.get({ id: ID, revision: 1 }, [ROOT]),
       ).rejects.toMatchObject({ code: 'BOT_NOT_FOUND' });
     },
   );
@@ -317,7 +318,7 @@ describe('BotApplicationService', () => {
           expectedRevision: 1,
           retention: { memory: 'purge', history: 'purge' },
         },
-        ROOT,
+        [ROOT],
       ),
     ).rejects.toBeInstanceOf(BotDomainError);
     expect(repository.writes).toBe(1);
@@ -334,7 +335,7 @@ describe('BotApplicationService', () => {
     expect(result.diagnostics.map((d) => d.code)).toEqual(
       expect.arrayContaining(['RUNTIME_UNRESOLVED', 'TOOL_UNRESOLVED']),
     );
-    const loaded = await service.get({ id: ID }, ROOT);
+    const loaded = await service.get({ id: ID }, [ROOT]);
     expect(loaded.record.runtime).toEqual(result.record.runtime);
     expect(loaded.diagnostics.length).toBeGreaterThan(0);
   });
@@ -353,7 +354,7 @@ describe('BotApplicationService', () => {
         diagnostics: [],
       });
       repository.writes = 0;
-      const loaded = await service.get({ id: ID }, ROOT);
+      const loaded = await service.get({ id: ID }, [ROOT]);
       expect(loaded.record).toMatchObject({
         schemaVersion: 2,
         revision: 1,
@@ -370,7 +371,7 @@ describe('BotApplicationService', () => {
         expect(listed.summaries[0].revision).toBe(1);
         const updated = await service.update(
           updateInput(loaded.record, { name: 'Changed' }),
-          ROOT,
+          [ROOT],
         );
         expect(updated.record).toMatchObject({
           schemaVersion: 2,
@@ -437,7 +438,7 @@ describe('BotApplicationService', () => {
     });
     expect(repository.images.get(IMAGE)?.image.ownerBotId).toBe(ID);
     expect(
-      await service.getAvatar({ botId: ID, imageId: IMAGE }, ROOT),
+      await service.getAvatar({ botId: ID, imageId: IMAGE }, [ROOT]),
     ).toEqual({ mediaType: 'image/png', dataBase64 });
   });
   it('previews source definitions repeatedly without writes and marks duplicate tuples ambiguous', async () => {
@@ -487,12 +488,12 @@ describe('BotApplicationService', () => {
       updateInput(created.record, {
         avatar: { kind: 'image', imageId: IMAGE },
       }),
-      ROOT,
+      [ROOT],
     );
     expect(repository.images.get(IMAGE)?.image.ownerBotId).toBe(ID);
     const { avatar, ...withoutAvatar } = updated.record;
     expect(avatar?.kind).toBe('image');
-    const removed = await service.update(updateInput(withoutAvatar), ROOT);
+    const removed = await service.update(updateInput(withoutAvatar), [ROOT]);
     expect(removed.record.avatar).toBeUndefined();
     expect(removed.record.revision).toBe(3);
     expect(repository.images.has(IMAGE)).toBe(true);
@@ -568,14 +569,14 @@ describe('BotApplicationService', () => {
     await service.create(createInput);
     const save = jest.spyOn(repository, 'save');
     expect(
-      (await service.restore({ id: ID, expectedRevision: 1 }, ROOT)).record
+      (await service.restore({ id: ID, expectedRevision: 1 }, [ROOT])).record
         .revision,
     ).toBe(1);
     expect(save).not.toHaveBeenCalled();
-    await service.archive({ id: ID, expectedRevision: 1 }, ROOT);
+    await service.archive({ id: ID, expectedRevision: 1 }, [ROOT]);
     save.mockClear();
     expect(
-      (await service.archive({ id: ID, expectedRevision: 2 }, ROOT)).record
+      (await service.archive({ id: ID, expectedRevision: 2 }, [ROOT])).record
         .revision,
     ).toBe(2);
     expect(save).not.toHaveBeenCalled();
@@ -607,7 +608,7 @@ describe('BotApplicationService', () => {
           expectedRevision: 1,
           retention: { memory: 'purge', history: 'purge' },
         },
-        ROOT,
+        [ROOT],
       ),
     ).rejects.toMatchObject({
       code: 'BOT_RETENTION_UNAVAILABLE',
@@ -645,7 +646,7 @@ describe('BotApplicationService', () => {
       });
       failed = true;
       const input = updateInput(created.record, { name: 'Renamed' });
-      const renamed = await service.update(input, ROOT);
+      const renamed = await service.update(input, [ROOT]);
       expect(renamed.record.name).toBe('Renamed');
       expect(
         renamed.diagnostics.some(
@@ -657,7 +658,7 @@ describe('BotApplicationService', () => {
       await expect(
         service.update(
           updateInput(renamed.record, { skills: [{ id: 'new' }] }),
-          ROOT,
+          [ROOT],
         ),
       ).rejects.toMatchObject({
         code: mode === 'removed' ? 'INVALID_PARAMS' : 'PERSISTENCE_UNAVAILABLE',
@@ -683,7 +684,7 @@ describe('BotApplicationService', () => {
       expect(
         (await service.list({ workspaceRoot: ROOT })).unreadable,
       ).toHaveLength(1);
-      await expect(service.get({ id: ID }, ROOT)).rejects.toMatchObject({
+      await expect(service.get({ id: ID }, [ROOT])).rejects.toMatchObject({
         code: 'BOT_SCHEMA_UNSUPPORTED',
         message: 'Invalid or unsupported bot snapshot.',
       });

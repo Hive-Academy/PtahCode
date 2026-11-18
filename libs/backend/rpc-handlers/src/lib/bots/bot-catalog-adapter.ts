@@ -151,6 +151,7 @@ export class BotCatalogAdapter implements BotCatalogPort {
             [],
           ),
         );
+      const seenLaneIds = new Set<string>();
       for (const [index, raw] of registry.entries()) {
         const parsed = RegistryEntrySchema.safeParse(raw);
         if (!parsed.success) {
@@ -161,6 +162,14 @@ export class BotCatalogAdapter implements BotCatalogPort {
           continue;
         }
         const entry = parsed.data;
+        if (seenLaneIds.has(entry.id)) {
+          failure(
+            'LANE_ENTRY_DUPLICATE',
+            `Duplicate Ptah CLI registry entry ${index}.`,
+          );
+          continue;
+        }
+        seenLaneIds.add(entry.id);
         lanes.push({
           target: { kind: 'ptah-cli', ptahCliId: entry.id },
           label: entry.name,

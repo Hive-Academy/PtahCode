@@ -144,9 +144,12 @@ export class BotApplicationService {
     };
   }
 
-  async get(input: unknown, workspaceRoot: string): Promise<BotsGetResult> {
+  async get(
+    input: unknown,
+    workspaceRoots: readonly string[] | string = [],
+  ): Promise<BotsGetResult> {
     const params = this.parse(BotsGetParamsSchema, input);
-    const current = await this.find(params.id, workspaceRoot);
+    const current = await this.find(params.id, workspaceRoots);
     let record = current;
     if (params.revision !== undefined && params.revision !== current.revision) {
       const rows = this.repository(() =>
@@ -241,10 +244,10 @@ export class BotApplicationService {
 
   async update(
     input: unknown,
-    workspaceRoot: string,
+    workspaceRoots: readonly string[] | string = [],
   ): Promise<BotsWriteResult> {
     const params = this.parse(BotsUpdateParamsSchema, input);
-    const current = await this.current(params, workspaceRoot);
+    const current = await this.current(params, workspaceRoots);
     this.writable(current);
     const editable = await this.editable(params.definition);
     if (JSON.stringify(editable.scope) !== JSON.stringify(current.scope))
@@ -268,10 +271,10 @@ export class BotApplicationService {
 
   async setEnabled(
     input: unknown,
-    workspaceRoot: string,
+    workspaceRoots: readonly string[] | string = [],
   ): Promise<BotsWriteResult> {
     const params = this.parse(BotsSetEnabledParamsSchema, input);
-    const current = await this.current(params, workspaceRoot);
+    const current = await this.current(params, workspaceRoots);
     this.writable(current);
     return this.save(
       { ...current, enabled: params.enabled },
@@ -283,10 +286,10 @@ export class BotApplicationService {
 
   async archive(
     input: unknown,
-    workspaceRoot: string,
+    workspaceRoots: readonly string[] | string = [],
   ): Promise<BotsWriteResult> {
     const params = this.parse(BotsArchiveParamsSchema, input);
-    const current = await this.current(params, workspaceRoot);
+    const current = await this.current(params, workspaceRoots);
     if (current.archivedAt !== null)
       return { record: current, diagnostics: await this.diagnostics(current) };
     return this.save(
@@ -302,10 +305,10 @@ export class BotApplicationService {
 
   async restore(
     input: unknown,
-    workspaceRoot: string,
+    workspaceRoots: readonly string[] | string = [],
   ): Promise<BotsWriteResult> {
     const params = this.parse(BotsRestoreParamsSchema, input);
-    const current = await this.current(params, workspaceRoot);
+    const current = await this.current(params, workspaceRoots);
     if (current.archivedAt === null)
       return { record: current, diagnostics: await this.diagnostics(current) };
     return this.save(
@@ -321,10 +324,10 @@ export class BotApplicationService {
 
   async delete(
     input: unknown,
-    workspaceRoot: string,
+    workspaceRoots: readonly string[] | string = [],
   ): Promise<BotsDeleteResult> {
     const params = this.parse(BotsDeleteParamsSchema, input);
-    const current = await this.current(params, workspaceRoot);
+    const current = await this.current(params, workspaceRoots);
     for (const participant of this.deps.retentionParticipants) {
       let ownership;
       try {
@@ -397,10 +400,10 @@ export class BotApplicationService {
 
   async getAvatar(
     input: unknown,
-    workspaceRoot: string,
+    workspaceRoots: readonly string[] | string = [],
   ): Promise<BotAvatarGetResult> {
     const params = this.parse(BotAvatarGetParamsSchema, input);
-    const current = await this.find(params.botId, workspaceRoot);
+    const current = await this.find(params.botId, workspaceRoots);
     const image = this.repository(() =>
       this.deps.repository.readAvatar(params.imageId, current.scope),
     );
@@ -441,20 +444,43 @@ export class BotApplicationService {
       { kind: 'user' },
     ];
   }
-  private async find(id: string, workspaceRoot: string): Promise<BotRecord> {
-    for (const scope of await this.scopes(workspaceRoot)) {
-      const row = this.repository(() => this.deps.repository.get(id, scope));
-      if (row) {
-        return readStoredBot(row, scope, id);
+  private async find(
+    id: string,
+    workspaceRoots: readonly string[] | string,
+  ): Promise<BotRecord> {
+    const roots =
+      typeof workspaceRoots === 'string' ? [workspaceRoots] : workspaceRoots;
+    const scopes: BotScope[] = [{ kind: 'user' }];
+    const authorizedRoots = new Set<string>();
+    for (const workspaceRoot of roots) {
+      const scope = await this.authorize({ kind: 'workspace', workspaceRoot });
+      if (
+        scope.kind === 'workspace' &&
+        !authorizedRoots.has(scope.workspaceRoot)
+      ) {
+        authorizedRoots.add(scope.workspaceRoot);
+        scopes.push(scope);
       }
     }
+    let match: BotRecord | undefined;
+    for (const scope of scopes) {
+      const row = this.repository(() => this.deps.repository.get(id, scope));
+      if (!row) continue;
+      if (match)
+        throw new BotDomainError(
+          'BOT_REVISION_CONFLICT',
+          'Bot identity is ambiguous across open scopes.',
+        );
+      match = readStoredBot(row, scope, id);
+    }
+    if (match) return match;
     throw new BotDomainError('BOT_NOT_FOUND', 'Bot not found.');
   }
   private async current(
     key: { id: string; expectedRevision: number },
-    workspaceRoot: string,
+    workspaceRoots: readonly string[] | string = [],
   ): Promise<BotRecord> {
-    const current = await this.find(key.id, workspaceRoot);
+    const current = await this.find(key.id, workspaceRoots);
     if (current.revision !== key.expectedRevision)
       throw new BotDomainError(
         'BOT_REVISION_CONFLICT',

@@ -172,6 +172,7 @@ import type {
   AgentGetLanePlanLimitsResult,
 } from './rpc/rpc-lane-plan-limits.types';
 import type { ProviderAccountRpcMethodRegistry } from './rpc/rpc-provider-accounts.types';
+import type { BotsRpcMethods } from './rpc-bots.types';
 import type { MachinesRpcMethodRegistry } from './rpc/rpc-machines.types';
 export type {
   ReviewRpcMethodRegistry,
@@ -224,9 +225,7 @@ import type {
   PluginsReplaceKeptItemsParams,
   PluginsReplaceKeptItemsResult,
 } from './rpc/rpc-plugin-marketplace.types';
-import type {
-  LibraryPassStatus,
-} from './rpc/rpc-setup-decisions.types';
+import type { LibraryPassStatus } from './rpc/rpc-setup-decisions.types';
 
 import type {
   SubagentQueryParams,
@@ -1164,6 +1163,7 @@ export interface RpcMethodRegistry
   extends
     ProviderAccountRpcMethodRegistry,
     MachinesRpcMethodRegistry,
+    BotsRpcMethods,
     ReviewRpcMethodRegistry,
     ReviewP2RpcMethodRegistry,
     Pick<
@@ -1346,7 +1346,13 @@ export interface RpcMethodRegistry
   'session:handoffStatus': {
     params: { sessionId: string; tabId: string };
     result: {
-      state: 'absent' | 'starting' | 'recorded' | 'closePending' | 'closeCompleted' | 'unavailable';
+      state:
+        | 'absent'
+        | 'starting'
+        | 'recorded'
+        | 'closePending'
+        | 'closeCompleted'
+        | 'unavailable';
       successorSessionId: string | null;
     };
   };
@@ -3728,6 +3734,18 @@ export type RpcMethodName = keyof RpcMethodRegistry;
  * verifyRpcRegistration uses set-membership checks only.
  */
 const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
+  'bots:list': true,
+  'bots:get': true,
+  'bots:create': true,
+  'bots:update': true,
+  'bots:set-enabled': true,
+  'bots:archive': true,
+  'bots:restore': true,
+  'bots:delete': true,
+  'bots:preview-import': true,
+  'bots:upload-avatar': true,
+  'bots:get-avatar': true,
+
   'artifacts:list': true,
   'artifacts:openLink': true,
   'displayWindow:open': true,
