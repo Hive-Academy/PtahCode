@@ -25,6 +25,11 @@ import type {
   PhaseSkillV1,
 } from '@ptah-extension/shared';
 
+import type {
+  ChildSettingReason,
+  ChildWorkKind,
+} from './child-setting-router.port';
+
 export type SessionChildStatus =
   | 'starting'
   | 'queued'
@@ -73,6 +78,7 @@ export interface SessionChildSnapshot {
   readonly effort?: EffortLevel;
   readonly modelSource?: ChildSettingSource;
   readonly effortSource?: ChildSettingSource;
+  readonly settingReason?: ChildSettingReason;
   readonly taskId?: string;
   readonly branch: string;
   /** Resolved commit sha the branch was created from. */
@@ -138,6 +144,20 @@ export function childSettingSources(
   };
 }
 
+/** Human-readable settings, including provenance for older records. */
+export function describeChildSetting(
+  child: Pick<
+    SessionChildSnapshot,
+    'model' | 'effort' | 'modelSource' | 'effortSource' | 'settingReason'
+  >,
+): string {
+  const sources = childSettingSources(child);
+  const reason = child.settingReason
+    ? `${child.settingReason.rule}: ${child.settingReason.input}`
+    : 'reason unavailable';
+  return `model ${child.model ?? 'default'} (${sources.modelSource}); effort ${child.effort ?? 'default'} (${sources.effortSource}); ${reason}`;
+}
+
 export interface SessionChildStartRequest {
   /** Transport-derived only — never a tool argument. */
   readonly callerSessionId: string | undefined;
@@ -150,6 +170,7 @@ export interface SessionChildStartRequest {
   readonly deliverables?: readonly string[];
   readonly model?: string;
   readonly effort?: SessionChildSnapshot['effort'];
+  readonly workKind?: ChildWorkKind;
   /** Host-resolved phase contract delivered through the selected executor. */
   readonly phase?: PhaseDispatchV1;
   readonly skills?: readonly PhaseSkillV1[];
@@ -179,7 +200,11 @@ export type SessionSpawnRefusalCode =
 /** Read-only checks shared with start before request-specific checks. */
 export type SessionChildEligibility =
   | { readonly ok: true }
-  | { readonly ok: false; readonly code: SessionSpawnRefusalCode; readonly reason: string };
+  | {
+      readonly ok: false;
+      readonly code: SessionSpawnRefusalCode;
+      readonly reason: string;
+    };
 
 export type SessionChildRollbackStepName =
   | 'remove-worktree'
@@ -454,7 +479,10 @@ export type SessionChildCompletionDelivery =
 
 export interface ISessionSpawner {
   /** Notify once when a queued admission actually creates a child worktree. */
-  onQueuedStart?(childSessionId: string, listener: (child: SessionChildSnapshot) => void): void;
+  onQueuedStart?(
+    childSessionId: string,
+    listener: (child: SessionChildSnapshot) => void,
+  ): void;
   canStart(callerSessionId: string | undefined): SessionChildEligibility;
   start(request: SessionChildStartRequest): Promise<SessionChildStartResult>;
   /** Replace a live child with a successor in its existing worktree. */

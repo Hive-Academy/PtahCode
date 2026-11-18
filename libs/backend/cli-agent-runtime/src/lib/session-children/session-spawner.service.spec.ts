@@ -70,7 +70,6 @@ import type {
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { SessionHandoffService } from './session-handoff.service';
 import { SessionHandoffAckStore } from './session-handoff-ack.store';
-
 /** In-memory storage for the handoff acknowledgement store. */
 function memoryAckStorage() {
   const stored = new Map<string, unknown>();
@@ -82,7 +81,6 @@ function memoryAckStorage() {
     keys: () => [...stored.keys()],
   };
 }
-
 export const PARENT = '11111111-2222-4333-8444-555555555555';
 const PARENT_SDK = '22222222-3333-4444-8555-666666666666';
 const PARENT_NEW_TAB = '33333333-4444-4555-8666-777777777777';
@@ -93,7 +91,6 @@ const BRANCH = 'feat/child-1';
 const WORKTREE = resolveWorktreePath(ROOT, BRANCH);
 const SHA = 'b'.repeat(40);
 const PROVISIONED_AT = Date.UTC(2026, 9, 1, 12, 0, 0);
-
 function envelope(turn: number): SessionChildCompletionEnvelope {
   return {
     childSessionId: 'child',
@@ -102,7 +99,6 @@ function envelope(turn: number): SessionChildCompletionEnvelope {
     text: `<agent-lane-completed turn="${turn}"/>`,
   };
 }
-
 export function makeHarness(
   options: {
     root?: string;
@@ -261,7 +257,6 @@ export function makeHarness(
       ? (options.recorder ?? null)
       : { recordAgentStartedSession: jest.fn() };
   const sessionBudget = { release: jest.fn() };
-
   /** A real child container holding `hostValue` (none when `null`). */
   const containerWith = (hostValue: unknown): DependencyContainer => {
     const scope = rootContainer.createChildContainer();
@@ -277,7 +272,6 @@ export function makeHarness(
     }
     return scope;
   };
-
   const build = (
     overrides: {
       host?: unknown;
@@ -314,9 +308,7 @@ export function makeHarness(
       ('router' in overrides ? overrides.router : null) as never,
       options.memoryProbe ?? ampleFreeMemory,
     );
-
   const spawner = build();
-
   const request = (
     overrides: Partial<SessionChildStartRequest> = {},
   ): SessionChildStartRequest => ({
@@ -326,7 +318,6 @@ export function makeHarness(
     label: 'parser fix',
     ...overrides,
   });
-
   async function startChild(overrides: Partial<SessionChildStartRequest> = {}) {
     const result = await spawner.start(request(overrides));
     if (!result.ok)
@@ -334,7 +325,6 @@ export function makeHarness(
     if (!('child' in result)) throw new Error('expected a child start');
     return result.child;
   }
-
   function turnEnded(
     sessionId: string,
     overrides: Partial<SdkAdapterTurnEndedEvent> = {},
@@ -350,7 +340,6 @@ export function makeHarness(
       ...overrides,
     });
   }
-
   /**
    * Bind a fresh SDK id to a child: it ran its first turn, so the first-turn
    * watchdog and the failed-start path of a session end leave it alone.
@@ -362,11 +351,9 @@ export function makeHarness(
       timestamp: 1,
     });
   }
-
   function emitPermission(event: PermissionPromptLifecycleEvent): void {
     for (const listener of permissionListeners) listener(event);
   }
-
   return {
     spawner,
     build,
@@ -405,15 +392,12 @@ export function makeHarness(
     markRan,
   };
 }
-
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 };
-
 beforeEach(() => {
   jest.useFakeTimers({ now: Date.UTC(2026, 9, 1, 11, 0, 0) });
 });
-
 describe('registered same-task attach', () => {
   it('starts an ordinary child without a phase when none is requested', async () => {
     const h = makeHarness();
@@ -561,7 +545,6 @@ describe('registered same-task attach', () => {
     expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
     h.spawner.dispose();
   });
-
   it('retains an attached worktree after host failure and rolls back an owned one', async () => {
     const h = makeHarness();
     const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
@@ -591,7 +574,6 @@ describe('registered same-task attach', () => {
     expect(h.provisioner.rollback).toHaveBeenCalledTimes(1);
     h.spawner.dispose();
   });
-
   it('refuses a different task or unrelated branch', async () => {
     const h = makeHarness();
     const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
@@ -614,7 +596,6 @@ describe('registered same-task attach', () => {
     expect(h.provisioner.attach).not.toHaveBeenCalled();
     h.spawner.dispose();
   });
-
   it('refuses another caller attaching to an owned child', async () => {
     const h = makeHarness();
     const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
@@ -630,11 +611,9 @@ describe('registered same-task attach', () => {
     h.spawner.dispose();
   });
 });
-
 afterEach(() => {
   jest.useRealTimers();
 });
-
 describe('SessionSpawnerService.start — guards in order', () => {
   it('does not reserve a slot when checking an eligible caller', () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
@@ -676,83 +655,65 @@ describe('SessionSpawnerService.start — guards in order', () => {
         };
       },
     );
-
     await h.startChild();
-
     expect(h.host.startChildSession.mock.calls[0][0].permissionLevel).toBe(
       'yolo',
     );
   });
-
   it('passes the level the parent holds when each child starts (TASK_2026_660)', async () => {
     const h = makeHarness();
-
     await h.startChild();
     // The user changes the parent's autopilot level between two starts.
     h.parentLevel.value = 'auto-edit';
     await h.startChild({ branch: 'feat/second-child', label: 'second' });
-
     const levels = h.host.startChildSession.mock.calls.map(
       ([input]) => input.permissionLevel,
     );
     expect(levels).toEqual(['yolo', 'auto-edit']);
   });
-
   it('refuses chat-runtime-unavailable first, even for an unattributed caller', async () => {
     const h = makeHarness();
     const spawner = h.build({ host: null });
-
     const result = await spawner.start(
       h.request({ callerSessionId: undefined }),
     );
-
     expect(result).toMatchObject({
       ok: false,
       refusal: 'chat-runtime-unavailable',
     });
     expect(h.provisioner.create).not.toHaveBeenCalled();
   });
-
   describe('lazy chat host lookup (Task 6.6)', () => {
     it('reaches a host registered AFTER the spawner was constructed', async () => {
       const h = makeHarness();
       const scope = h.containerWith(null);
       const spawner = h.build({ container: scope });
-
       scope.register(CLI_AGENT_RUNTIME_TOKENS.CHILD_CHAT_SESSION_HOST, {
         useValue: h.host,
       });
       const result = await spawner.start(h.request());
-
       expect(result.ok).toBe(true);
       expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
     });
-
     it('refuses chat-runtime-unavailable while the host is still unregistered at start()', async () => {
       const h = makeHarness();
       const spawner = h.build({ container: h.containerWith(null) });
-
       const result = await spawner.start(h.request());
-
       expect(result).toMatchObject({
         ok: false,
         refusal: 'chat-runtime-unavailable',
       });
       expect(h.provisioner.create).not.toHaveBeenCalled();
     });
-
     it('refuses chat-runtime-unavailable without a container', async () => {
       const h = makeHarness();
       const spawner = h.build({ container: null });
-
       const result = await spawner.start(h.request());
-
       expect(result).toMatchObject({
         ok: false,
         refusal: 'chat-runtime-unavailable',
       });
     });
-
     it('refuses chat-runtime-unavailable and logs when the host fails to construct', async () => {
       const h = makeHarness();
       const scope = h.containerWith(null);
@@ -762,9 +723,7 @@ describe('SessionSpawnerService.start — guards in order', () => {
         },
       });
       const spawner = h.build({ container: scope });
-
       const result = await spawner.start(h.request());
-
       expect(result).toMatchObject({
         ok: false,
         refusal: 'chat-runtime-unavailable',
@@ -774,7 +733,6 @@ describe('SessionSpawnerService.start — guards in order', () => {
       ).toBe(true);
     });
   });
-
   it.each([
     ['absent', undefined],
     ['not a UUID (gateway id)', 'gw-telegram-1'],
@@ -786,46 +744,36 @@ describe('SessionSpawnerService.start — guards in order', () => {
     );
     expect(result).toMatchObject({ ok: false, refusal: 'unattributed-caller' });
   });
-
   it('refuses a child calling start as depth-exceeded', async () => {
     const h = makeHarness();
     const child = await h.startChild();
     expect(h.spawner.canStart(child.childSessionId)).toMatchObject({ ok: false, code: 'depth-exceeded' });
-
     const result = await h.spawner.start(
       h.request({
         callerSessionId: child.childSessionId,
         branch: 'feat/grandchild',
       }),
     );
-
     expect(result).toMatchObject({ ok: false, refusal: 'depth-exceeded' });
   });
-
   it('refuses mcp-unavailable when the server has no port, before reserving', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     h.mcpStatus.getPort.mockReturnValue(null);
     expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'mcp-unavailable' });
-
     const result = await h.spawner.start(h.request());
-
     expect(result).toMatchObject({ ok: false, refusal: 'mcp-unavailable' });
     expect(h.registry.reserveSlot(1)).not.toBeNull();
   });
-
   it('reserves synchronously: two concurrent starts against cap 1 → one cap-reached', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
-
     const [first, second] = await Promise.all([
       h.spawner.start(h.request()),
       h.spawner.start(h.request({ branch: 'feat/child-2' })),
     ]);
-
     expect(first.ok).toBe(true);
     expect(second).toMatchObject({ ok: false, refusal: 'cap-reached' });
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
   });
-
   it('reads a full cap without reserving another slot', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     await h.startChild();
@@ -833,7 +781,6 @@ describe('SessionSpawnerService.start — guards in order', () => {
     expect(h.registry.liveCount()).toBe(1);
     expect(h.registry.reserveSlot(1)).toBeNull();
   });
-
   it('starts more than five live children with the default unlimited setting', async () => {
     const h = makeHarness();
     for (let index = 0; index < 6; index++) {
@@ -842,19 +789,15 @@ describe('SessionSpawnerService.start — guards in order', () => {
     expect(h.registry.liveCount()).toBe(6);
     expect(h.provisioner.create).toHaveBeenCalledTimes(6);
   });
-
   it('names the caller own live children in the cap-reached detail', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     const child = await h.startChild();
-
     const result = await h.spawner.start(h.request({ branch: 'feat/child-2' }));
-
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.refusal).toBe('cap-reached');
     expect(result.detail).toContain(`parser fix (${child.childSessionId})`);
   });
-
   it.each([
     ['no root', () => undefined],
     [
@@ -867,14 +810,11 @@ describe('SessionSpawnerService.start — guards in order', () => {
   ])('refuses no-workspace for %s and frees the slot', async (_label, impl) => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     h.environment.scopedWorkspaceRoot.mockImplementation(impl as () => string);
-
     const result = await h.spawner.start(h.request());
-
     expect(result).toMatchObject({ ok: false, refusal: 'no-workspace' });
     expect(h.provisioner.create).not.toHaveBeenCalled();
     expect(h.registry.reserveSlot(1)).not.toBeNull();
   });
-
   it.each([
     ['an escaping deliverable', { deliverables: ['../../etc/passwd'] }],
     ['an absolute task folder', { taskFolder: resolve('/tmp/x') }],
@@ -916,17 +856,21 @@ describe('SessionSpawnerService.start — success', () => {
   it('uses the routed model and effort and stores their sources on the snapshot', async () => {
     const h = makeHarness();
     const router = {
-      route: jest.fn().mockResolvedValue({
+      route: jest.fn().mockResolvedValue({ 
+        reason: { rule: 'code-work-kind', input: 'workKind: code' },
+        candidates: [],
         model: 'claude-opus-4',
         effort: 'high',
         modelSource: 'model',
         effortSource: 'ranking',
       }),
     };
-    const result = await h.build({ router }).start(h.request());
+    const result = await h.build({ router }).start(h.request({ workKind: 'code' }));
+    expect(router.route).toHaveBeenCalledWith(expect.objectContaining({ workKind: 'code' }));
     expect(result).toMatchObject({
       ok: true,
       child: {
+        settingReason: { rule: 'code-work-kind', input: 'workKind: code' },
         model: 'claude-opus-4',
         effort: 'high',
         modelSource: 'model',
@@ -944,7 +888,9 @@ describe('SessionSpawnerService.start — success', () => {
       message: 'not admitted',
     });
     const router = {
-      route: jest.fn().mockResolvedValue({
+      route: jest.fn().mockResolvedValue({ 
+        reason: { rule: 'code-work-kind', input: 'workKind: code' },
+        candidates: [],
         model: 'claude-opus-4',
         effort: 'low',
         modelSource: 'ranking',
@@ -984,7 +930,9 @@ describe('SessionSpawnerService.start — success', () => {
     const scope = h.containerWith(h.host);
     const spawner = h.build({ container: scope });
     const router = {
-      route: jest.fn().mockResolvedValue({
+      route: jest.fn().mockResolvedValue({ 
+        reason: { rule: 'code-work-kind', input: 'workKind: code' },
+        candidates: [],
         model: 'claude-opus-4',
         effort: 'high',
         modelSource: 'model',
@@ -1019,12 +967,13 @@ describe('SessionSpawnerService.start — success', () => {
     ).toBe(true);
   });
 
-  it('starts with the old behavior when no router is bound', async () => {
+  it('starts with the host default model and the effort floor when no router is bound', async () => {
     const h = makeHarness();
     const child = await h.startChild();
     expect(child).toMatchObject({
       modelSource: 'default',
-      effortSource: 'default',
+      effort: 'high',
+      effortSource: 'ranking',
     });
     expect(h.host.listChildModels).not.toHaveBeenCalled();
   });
@@ -1034,7 +983,9 @@ describe('SessionSpawnerService.start — success', () => {
     const router = {
       route: jest
         .fn()
-        .mockResolvedValue({ modelSource: 'default', effortSource: 'default' }),
+        .mockResolvedValue({ 
+        reason: { rule: 'code-work-kind', input: 'workKind: code' },
+        candidates: [], modelSource: 'default', effortSource: 'default' }),
     };
     await h.build({ router }).start(h.request());
     expect(router.route.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1045,7 +996,9 @@ describe('SessionSpawnerService.start — success', () => {
   it('opened payload carries model, effort, modelSource and effortSource', async () => {
     const h = makeHarness();
     const router = {
-      route: jest.fn().mockResolvedValue({
+      route: jest.fn().mockResolvedValue({ 
+        reason: { rule: 'code-work-kind', input: 'workKind: code' },
+        candidates: [],
         model: 'claude-opus-4',
         effort: 'high',
         modelSource: 'model',
@@ -1149,12 +1102,12 @@ describe('SessionSpawnerService.start — success', () => {
     expect(h.host.resolveChildModel).not.toHaveBeenCalled();
   });
 
-  it('makes no catalog call and passes no model when model is omitted', async () => {
+  it('makes no catalog call and passes no model but the effort floor when no router is bound', async () => {
     const h = makeHarness();
     const child = await h.startChild({});
     expect(h.host.resolveChildModel).not.toHaveBeenCalled();
     expect(child.model).toBeUndefined();
-    expect(child.effort).toBeUndefined();
+    expect(child.effort).toBe('high');
   });
 
   it('passes resolved model and effort into the child record and host launch', async () => {
@@ -1239,8 +1192,9 @@ describe('SessionSpawnerService.start — success', () => {
       displayPrompt: 'Fix the parser',
       startedAt: PROVISIONED_AT,
       model: 'claude-x',
+      effort: 'high',
       modelSource: 'pin',
-      effortSource: 'default',
+      effortSource: 'ranking',
     });
   });
 

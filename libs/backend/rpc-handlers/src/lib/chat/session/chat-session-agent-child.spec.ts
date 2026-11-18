@@ -26,9 +26,7 @@ import { join } from 'node:path';
  *     failure by its kind only, so the prompt never reaches a log, Sentry or
  *     the returned error.
  */
-
 import 'reflect-metadata';
-
 // Same stub as `chat-session-auth.spec`: `ChatSessionService` imports
 // `cli-agent-runtime`, whose barrel reaches `workspace-intelligence`'s
 // TreeSitter module (`import.meta.url`, unparseable by ts-jest's CJS transform).
@@ -59,7 +57,6 @@ jest.mock('@ptah-extension/workspace-intelligence', () => ({
   ContextSizeOptimizerService: class ContextSizeOptimizerServiceStub {},
   ContextEnrichmentService: class ContextEnrichmentServiceStub {},
 }));
-
 import type {
   Logger,
   ConfigManager,
@@ -70,7 +67,6 @@ import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import { createMockWorkspaceProvider } from '@ptah-extension/platform-core/testing';
 import type { ModelSettings } from '@ptah-extension/settings-core';
-
 import { createMockModelSettings } from '../../../test-utils/mock-settings';
 import {
   ChatSessionService,
@@ -78,7 +74,6 @@ import {
   type HandoffSessionStartParams,
 } from './chat-session.service';
 import { SessionMcpStatusRegistry } from './session-mcp-status.registry';
-
 const mockCodexChatAdapterError = class LocalCodexChatAdapterError extends Error {
   constructor(
     readonly code: import('@ptah-extension/agent-sdk').CodexChatAdapterErrorCode,
@@ -89,7 +84,6 @@ const mockCodexChatAdapterError = class LocalCodexChatAdapterError extends Error
     this.name = 'CodexChatAdapterError';
   }
 };
-
 jest.mock('@ptah-extension/agent-sdk', () => ({
   ...jest.requireActual<typeof import('@ptah-extension/agent-sdk')>(
     '@ptah-extension/agent-sdk',
@@ -97,7 +91,6 @@ jest.mock('@ptah-extension/agent-sdk', () => ({
   isCodexChatAdapterError: (error: unknown) =>
     error instanceof mockCodexChatAdapterError,
 }));
-
 const TEST_ROOT = mkdtempSync(join(tmpdir(), 'ptah-session-policy-'));
 afterAll(() => rmSync(TEST_ROOT, { recursive: true, force: true }));
 for (const part of [
@@ -111,7 +104,6 @@ const ROOT = join(TEST_ROOT, 'my-repo');
 const WORKTREE = join(ROOT, '.ptah', 'worktrees', 'child-1');
 const APP_PATH = join(TEST_ROOT, 'ptah-app');
 const CHILD_TAB = '0f1e2d3c-4b5a-4968-8776-655443322110';
-
 interface Harness {
   service: ChatSessionService;
   modelCatalog: {
@@ -134,7 +126,6 @@ interface Harness {
   logger: ReturnType<typeof createMockLogger>;
   metadataGet: jest.Mock;
 }
-
 function makeHarness(
   opts: {
     folders?: string[];
@@ -171,11 +162,9 @@ function makeHarness(
   const resolveSessionFields = jest.fn().mockResolvedValue({});
   const captureException = jest.fn();
   const stub = { then: undefined } as unknown;
-
   const workspaceProvider = createMockWorkspaceProvider({
     folders: opts.folders ?? [ROOT],
   }) as unknown as IWorkspaceProvider;
-
   const logger = createMockLogger();
   const modelCatalog = {
     getSupportedModels: jest
@@ -256,7 +245,6 @@ function makeHarness(
     undefined,
     modelCatalog as never,
   );
-
   // The Smithery / OAuth override resolvers read installed manifests from
   // disk; neither is under test here, so the merge contributes nothing.
   jest
@@ -267,7 +255,6 @@ function makeHarness(
       'buildMcpServersOverride',
     )
     .mockImplementation(async (caller: unknown) => caller);
-
   return {
     service,
     modelCatalog,
@@ -286,11 +273,9 @@ function makeHarness(
     metadataGet,
   };
 }
-
 const HANDOFF_TAB = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const HANDOFF_CWD = join(ROOT, 'packages', 'parser');
 const HANDOFF_PROMPT = 'SECRET-CONTINUATION continue the parser work';
-
 function handoffParams(
   overrides: Partial<HandoffSessionStartParams> = {},
 ): HandoffSessionStartParams {
@@ -305,7 +290,6 @@ function handoffParams(
     ...overrides,
   };
 }
-
 function childParams(
   overrides: Partial<AgentChildSessionStartParams> = {},
 ): AgentChildSessionStartParams {
@@ -319,16 +303,13 @@ function childParams(
     ...overrides,
   };
 }
-
 function startConfig(h: Harness): Record<string, unknown> {
   expect(h.startChatSession).toHaveBeenCalledTimes(1);
   return h.startChatSession.mock.calls[0][0] as Record<string, unknown>;
 }
-
 describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
   describe('resolveAgentChildModel', () => {
     const input = { workspaceRoot: ROOT, parentSessionId: '', model: 'opus' };
-
     it('returns an empty list for a named account', async () => {
       const h = makeHarness();
       Object.defineProperty(h.service, 'gateAccount', {
@@ -337,7 +318,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       await expect(h.service.listAgentChildModels(input)).resolves.toEqual([]);
       expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
     });
-
     it('returns an empty list when the catalog throws', async () => {
       const h = makeHarness();
       h.modelCatalog.getSupportedModels.mockRejectedValueOnce(
@@ -345,7 +325,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       );
       await expect(h.service.listAgentChildModels(input)).resolves.toEqual([]);
     });
-
     it('accepts a concrete ID or a tier alias resolved into the catalog', async () => {
       const h = makeHarness();
       await expect(h.service.resolveAgentChildModel(input)).resolves.toEqual({
@@ -359,7 +338,88 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         }),
       ).resolves.toEqual({ accepted: true, resolvedModel: 'claude-sonnet-4' });
     });
-
+    it.each([
+      ['claude-opus-5-5', 'claude-opus-5-5'],
+      ['claude-sonnet-5-5', 'claude-sonnet-5-5'],
+      ['claude-haiku-5-5', 'claude-haiku-5-5'],
+      ['claude-fable-5-2', 'claude-fable-5-2'],
+      ['opus', 'claude-opus-5-5'],
+      ['sonnet', 'claude-sonnet-5-5'],
+      ['haiku', 'claude-haiku-5-5'],
+      ['fable', 'claude-fable-5-2'],
+    ])(
+      'admits native %s as %s despite an old SDK catalog',
+      async (model, resolvedModel) => {
+        const h = makeHarness();
+        h.resolveProviderProfileForWorkspace.mockResolvedValue({
+          providerId: 'claude-cli',
+          authEnv: {},
+        });
+        await expect(
+          h.service.resolveAgentChildModel({ ...input, model }),
+        ).resolves.toEqual({ accepted: true, resolvedModel });
+        expect(h.modelCatalog.getNativeClaudeModels).toHaveBeenCalled();
+        expect(h.modelCatalog.resolveModelId).not.toHaveBeenCalled();
+        expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
+        expect(
+          h.modelCatalog.getModelsForProviderProfile,
+        ).not.toHaveBeenCalled();
+      },
+    );
+    it('lists both discovered and verified native IDs without duplicates', async () => {
+      const h = makeHarness();
+      h.resolveProviderProfileForWorkspace.mockResolvedValue({
+        providerId: 'claude-cli',
+        authEnv: {},
+      });
+      h.modelCatalog.getNativeClaudeModels.mockResolvedValue([
+        { value: 'claude-opus-4' },
+        { value: 'claude-opus-5-5' },
+      ]);
+      const models = await h.service.listAgentChildModels(input);
+      expect(models).toEqual(
+        expect.arrayContaining([
+          'claude-opus-4',
+          'claude-opus-5-5',
+          'claude-sonnet-5-5',
+          'claude-haiku-5-5',
+          'claude-fable-5-2',
+        ]),
+      );
+      expect(new Set(models).size).toBe(models.length);
+    });
+    it('admits verified native models with an empty SDK catalog', async () => {
+      const h = makeHarness();
+      h.resolveProviderProfileForWorkspace.mockResolvedValue({
+        providerId: 'claude-cli',
+        authEnv: {},
+      });
+      h.modelCatalog.getNativeClaudeModels.mockResolvedValue([]);
+      await expect(h.service.resolveAgentChildModel(input)).resolves.toEqual({
+        accepted: true,
+        resolvedModel: 'claude-opus-5-5',
+      });
+    });
+    it('does not add native models or aliases to a third-party profile', async () => {
+      const h = makeHarness();
+      h.resolveProviderProfileForWorkspace.mockResolvedValue({
+        providerId: 'workspace-provider',
+        authEnv: { ANTHROPIC_API_KEY: 'test-key' },
+      });
+      await expect(h.service.listAgentChildModels(input)).resolves.toEqual([
+        'workspace-model',
+      ]);
+      for (const model of ['opus', 'claude-opus-5-5', 'fable']) {
+        await expect(
+          h.service.resolveAgentChildModel({ ...input, model }),
+        ).resolves.toMatchObject({
+          accepted: false,
+          code: 'invalid-model',
+          acceptedModels: ['workspace-model'],
+        });
+      }
+      expect(h.modelCatalog.getNativeClaudeModels).not.toHaveBeenCalled();
+    });
     it('refuses an unknown ID with the account catalog', async () => {
       const h = makeHarness();
       await expect(
@@ -370,7 +430,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         acceptedModels: ['claude-opus-4', 'claude-sonnet-4'],
       });
     });
-
     it('admits only workspace provider models when the ambient provider differs', async () => {
       const h = makeHarness();
       const profile = {
@@ -385,7 +444,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       h.modelCatalog.getSupportedModels.mockResolvedValue([
         { value: 'ambient-only-model' },
       ]);
-
       await expect(
         h.service.resolveAgentChildModel({
           ...input,
@@ -407,7 +465,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       );
       expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
     });
-
     it('keeps provider text out of logs and errors for a workspace profile', async () => {
       const h = makeHarness();
       const sentinel = 'sk-sentinel-credential';
@@ -420,7 +477,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         model: 'workspace-model',
       };
       h.resolveProviderProfileForWorkspace.mockResolvedValue(profile);
-
       await h.service.resolveAgentChildModel({
         ...input,
         model: 'workspace-model',
@@ -430,7 +486,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         profile.authEnv,
         true,
       );
-
       h.modelCatalog.getModelsForProviderProfile.mockRejectedValue(
         new Error(`provider echoed ${sentinel}`),
       );
@@ -457,7 +512,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         );
       expect(logged.join(' ')).not.toContain(sentinel);
     });
-
     it('refuses an unavailable catalog', async () => {
       const h = makeHarness();
       h.modelCatalog.getSupportedModels.mockRejectedValueOnce(
@@ -471,7 +525,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         message: 'catalog offline',
       });
     });
-
     it('refuses an explicit model on a named account without reading the ambient catalog', async () => {
       const h = makeHarness();
       Object.defineProperty(h.service, 'gateAccount', {
@@ -506,17 +559,14 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         error: 'Codex chat could not complete the operation.',
       });
     });
-
     it('passes workspaceId === projectPath === the workspace path, without a permission level', async () => {
       const h = makeHarness();
-
       const result = await h.service.startSession({
         tabId: 'tab-1',
         prompt: 'Hello',
         workspacePath: ROOT,
         options: { model: 'claude-picked' },
       });
-
       expect(result).toEqual({ success: true });
       const config = startConfig(h);
       expect(config['workspaceId']).toBe(ROOT);
@@ -528,17 +578,14 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       expect(config['enhancedPromptsContent']).toBe('enhanced prompt body');
       expect('permissionLevel' in config).toBe(false);
     });
-
     it('resolves prompts, provider profile and output style for the workspace path', async () => {
       const h = makeHarness();
-
       await h.service.startSession({
         tabId: 'tab-1',
         prompt: 'Hello',
         workspacePath: ROOT,
         options: { model: 'claude-picked' },
       });
-
       expect(h.resolveEnhancedPromptsContent).toHaveBeenCalledWith(ROOT);
       expect(h.resolveProviderProfileForWorkspace).toHaveBeenCalledWith(
         ROOT,
@@ -548,34 +595,28 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         workspaceRoot: ROOT,
       });
     });
-
     it('still reads the .mcp.json registration and downgrades MCP when it is absent', async () => {
       const h = makeHarness();
       h.ensureRegisteredForSubagents.mockResolvedValueOnce({
         registered: false,
         reason: 'lock contended',
       });
-
       await h.service.startSession({
         tabId: 'tab-1',
         prompt: 'Hello',
         workspacePath: ROOT,
       });
-
       expect(h.ensureRegisteredForSubagents).toHaveBeenCalledTimes(1);
       expect(startConfig(h)['mcpServerRunning']).toBe(false);
     });
-
     it('still runs the slash-command intercept and streams under the tab id with the surface mode', async () => {
       const h = makeHarness();
-
       await h.service.startSession({
         tabId: 'tab-1',
         prompt: 'Hello',
         workspacePath: ROOT,
         surfaceMode: true,
       });
-
       expect(h.intercept).toHaveBeenCalledWith('Hello');
       const stream = await h.startChatSession.mock.results[0].value;
       expect(h.streamEventsToWebview).toHaveBeenCalledWith(
@@ -586,12 +627,10 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       );
     });
   });
-
   describe('startAgentChildSession', () => {
     it('reports only the tool profile evidence returned by the SDK start', async () => {
       const h = makeHarness();
       expect(await h.service.startAgentChildSession(childParams())).toEqual({ success: true });
-
       const observed = makeHarness();
       observed.startChatSession.mockResolvedValueOnce({
         [Symbol.asyncIterator]: jest.fn(),
@@ -602,7 +641,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         toolProfileApplied: true,
       });
     });
-
     it('puts explicit effort into SDK launch options', async () => {
       const h = makeHarness();
       await h.service.startAgentChildSession(childParams({ effort: 'high' }));
@@ -665,7 +703,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         join(ROOT, 'parent'),
       ]);
     });
-
     it('refuses an unresolved or mismatched source before SDK launch', async () => {
       const h = makeHarness();
       expect(
@@ -699,13 +736,11 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       ).toBe(false);
       expect(h.startChatSession).not.toHaveBeenCalled();
     });
-
     it('uses only the validated immediate root without a source', async () => {
       const h = makeHarness();
       await h.service.startAgentChildSession(childParams());
       expect(startConfig(h)['pluginConfigAncestorRoots']).toEqual([ROOT]);
     });
-
     it('uses the live pre-bind source chain for a nested child', async () => {
       const h = makeHarness();
       await h.service.startAgentChildSession(childParams());
@@ -723,11 +758,9 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
     });
     it('passes workspaceId = root, projectPath = worktree and the parent permission level', async () => {
       const h = makeHarness();
-
       const result = await h.service.startAgentChildSession(
         childParams({ permissionLevel: 'yolo' }),
       );
-
       expect(result).toEqual({ success: true });
       const config = startConfig(h);
       expect(config['workspaceId']).toBe(ROOT);
@@ -738,73 +771,55 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       expect(config['name']).toBe('child: fix the parser');
       expect(config['model']).toBe('claude-child-model');
     });
-
     describe('permission level (TASK_2026_660)', () => {
       it('starts the child of a full-autopilot parent at yolo, even when the saved level is lower', async () => {
         const h = makeHarness({
           autopilot: { enabled: true, permissionLevel: 'auto-edit' },
         });
-
         await h.service.startAgentChildSession(
           childParams({ permissionLevel: 'yolo' }),
         );
-
         expect(startConfig(h)['permissionLevel']).toBe('yolo');
       });
-
       it.each(['ask', 'auto-edit'] as const)(
         'starts the child of a %s parent at %s, not a fixed default',
         async (level) => {
           const h = makeHarness({
             autopilot: { enabled: true, permissionLevel: 'yolo' },
           });
-
           await h.service.startAgentChildSession(
             childParams({ permissionLevel: level }),
           );
-
           expect(startConfig(h)['permissionLevel']).toBe(level);
         },
       );
-
       it('starts the child of a plan-mode parent at ask: plan mode is unavailable unattended', async () => {
         const h = makeHarness();
-
         await h.service.startAgentChildSession(
           childParams({ permissionLevel: 'plan' }),
         );
-
         expect(startConfig(h)['permissionLevel']).toBe('ask');
       });
-
       it('starts the child at ask when the parent record is missing, even with a saved yolo level', async () => {
         // No parent level reached the service (no lifecycle record, or it
         // vanished between lookups): the saved global level must not escalate.
         const h = makeHarness({
           autopilot: { enabled: true, permissionLevel: 'yolo' },
         });
-
         await h.service.startAgentChildSession(childParams());
-
         expect(startConfig(h)['permissionLevel']).toBe('ask');
       });
-
       it('starts the child at ask when the parent level is unknown and autopilot is off', async () => {
         const h = makeHarness({
           autopilot: { enabled: false, permissionLevel: 'auto-edit' },
         });
-
         await h.service.startAgentChildSession(childParams());
-
         expect(startConfig(h)['permissionLevel']).toBe('ask');
       });
     });
-
     it('resolves prompts, provider profile and output style for the workspace root, not the worktree', async () => {
       const h = makeHarness();
-
       await h.service.startAgentChildSession(childParams());
-
       expect(h.resolveEnhancedPromptsContent).toHaveBeenCalledWith(ROOT);
       expect(h.resolveProviderProfileForWorkspace).toHaveBeenCalledWith(
         ROOT,
@@ -814,39 +829,27 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         workspaceRoot: ROOT,
       });
     });
-
     it('derives mcpServerRunning from the server port and never consults the active-root .mcp.json', async () => {
       const h = makeHarness({ port: 4321 });
       h.isMcpServerRunning.mockReturnValue(false);
-
       await h.service.startAgentChildSession(childParams());
-
       expect(startConfig(h)['mcpServerRunning']).toBe(true);
       expect(h.ensureRegisteredForSubagents).not.toHaveBeenCalled();
     });
-
     it('starts without MCP when the server has no port', async () => {
       const h = makeHarness({ port: null });
-
       await h.service.startAgentChildSession(childParams());
-
       expect(startConfig(h)['mcpServerRunning']).toBe(false);
     });
-
     it('skips the slash-command intercept and the Ptah-CLI branch', async () => {
       const h = makeHarness();
-
       await h.service.startAgentChildSession(childParams());
-
       expect(h.intercept).not.toHaveBeenCalled();
       expect(h.handleStart).not.toHaveBeenCalled();
     });
-
     it('streams the child under its own tab id, outside any surface mode', async () => {
       const h = makeHarness();
-
       await h.service.startAgentChildSession(childParams());
-
       const stream = await h.startChatSession.mock.results[0].value;
       expect(h.streamEventsToWebview).toHaveBeenCalledWith(
         CHILD_TAB,
@@ -855,26 +858,20 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         undefined,
       );
     });
-
     it('refuses a worktree outside every open folder without starting', async () => {
       const h = makeHarness();
-
       const result = await h.service.startAgentChildSession(
         childParams({ worktreePath: '/tmp/elsewhere/child-1' }),
       );
-
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/Access denied/);
       expect(h.startChatSession).not.toHaveBeenCalled();
     });
-
     it('refuses a workspace root outside every open folder before any launch work', async () => {
       const h = makeHarness();
-
       const result = await h.service.startAgentChildSession(
         childParams({ workspaceRoot: '/tmp/elsewhere' }),
       );
-
       expect(result).toEqual({
         success: false,
         error: 'Access denied: workspace root is not inside an open folder.',
@@ -884,25 +881,19 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       expect(h.resolveProviderProfileForWorkspace).not.toHaveBeenCalled();
       expect(h.getPort).not.toHaveBeenCalled();
     });
-
     it('refuses an unsafe worktree path without starting', async () => {
       const h = makeHarness({ folders: [`${TEST_ROOT}`] });
-
       const result = await h.service.startAgentChildSession(
         childParams({ workspaceRoot: `${TEST_ROOT}`, worktreePath: APP_PATH }),
       );
-
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/Cannot start a session in this folder/);
       expect(h.startChatSession).not.toHaveBeenCalled();
     });
-
     it('result-shapes an SDK start failure instead of throwing', async () => {
       const h = makeHarness();
       h.startChatSession.mockRejectedValueOnce(new Error('sdk exploded'));
-
       const result = await h.service.startAgentChildSession(childParams());
-
       expect(result).toEqual({ success: false, error: 'sdk exploded' });
       expect(h.streamEventsToWebview).not.toHaveBeenCalled();
       expect(h.captureException).toHaveBeenCalledWith(expect.any(Error), {
@@ -910,7 +901,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       });
     });
   });
-
   it('preserves a source chain on a same-root handoff', async () => {
     const h = makeHarness({
       metadata: {
@@ -928,7 +918,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
     expect(result.success).toBe(true);
     expect(startConfig(h)['pluginConfigAncestorRoots']).toEqual([ROOT]);
   });
-
   describe('startHandoffSession (TASK_2026_655)', () => {
     function loggedText(h: Harness): string {
       return JSON.stringify([
@@ -938,12 +927,9 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         h.logger.error.mock.calls,
       ]);
     }
-
     it('starts a top-level session in the caller cwd with its permission level and model', async () => {
       const h = makeHarness();
-
       const result = await h.service.startHandoffSession(handoffParams());
-
       expect(result).toEqual({ success: true });
       const config = startConfig(h);
       expect(config['tabId']).toBe(HANDOFF_TAB);
@@ -971,45 +957,33 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       );
       expect(loggedText(h)).not.toContain('SECRET-CONTINUATION');
     });
-
     it.each(['yolo', 'plan', 'ask', 'auto-edit'] as const)(
       'starts the new session at the caller level %s',
       async (level) => {
         const h = makeHarness();
-
         await h.service.startHandoffSession(
           handoffParams({ permissionLevel: level }),
         );
-
         expect(startConfig(h)['permissionLevel']).toBe(level);
       },
     );
-
     it('keeps the global default level when the caller had none, never forcing auto-edit', async () => {
       const h = makeHarness();
-
       await h.service.startHandoffSession(
         handoffParams({ permissionLevel: undefined }),
       );
-
       expect(startConfig(h)).not.toHaveProperty('permissionLevel');
     });
-
     it('derives mcpServerRunning from the server port', async () => {
       const h = makeHarness({ port: null });
-
       await h.service.startHandoffSession(handoffParams());
-
       expect(startConfig(h)['mcpServerRunning']).toBe(false);
     });
-
     it('refuses a workspace root outside every open folder before any launch work', async () => {
       const h = makeHarness();
-
       const result = await h.service.startHandoffSession(
         handoffParams({ workspaceRoot: '/tmp/elsewhere' }),
       );
-
       expect(result).toEqual({
         success: false,
         error: 'Access denied: workspace root is not inside an open folder.',
@@ -1018,33 +992,26 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       expect(h.resolveEnhancedPromptsContent).not.toHaveBeenCalled();
       expect(h.getPort).not.toHaveBeenCalled();
     });
-
     it('refuses a cwd outside every open folder without starting', async () => {
       const h = makeHarness();
-
       const result = await h.service.startHandoffSession(
         handoffParams({ cwd: '/tmp/elsewhere/parser' }),
       );
-
       expect(result).toEqual({
         success: false,
         error: 'Access denied: working directory is not inside an open folder.',
       });
       expect(h.startChatSession).not.toHaveBeenCalled();
     });
-
     it('refuses an unsafe cwd without starting', async () => {
       const h = makeHarness({ folders: [`${TEST_ROOT}`] });
-
       const result = await h.service.startHandoffSession(
         handoffParams({ workspaceRoot: `${TEST_ROOT}`, cwd: APP_PATH }),
       );
-
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/Cannot start a session in this folder/);
       expect(h.startChatSession).not.toHaveBeenCalled();
     });
-
     it('reports a launch failure by its kind only, never its message', async () => {
       const h = makeHarness();
       const failure = Object.assign(
@@ -1052,7 +1019,6 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         { code: 'ENOENT' },
       );
       h.startChatSession.mockRejectedValueOnce(failure);
-
       const result = await h.service.startHandoffSession(handoffParams());
 
       expect(result).toEqual({

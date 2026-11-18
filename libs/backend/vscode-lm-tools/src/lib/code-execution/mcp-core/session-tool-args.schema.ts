@@ -65,6 +65,7 @@ export const SessionStartArgsSchema = z
       .optional(),
     model: z.string().min(1).max(200).optional(),
     effort: z.enum(EFFORT_LEVELS).optional(),
+    workKind: z.enum(['coordination', 'code', 'investigation', 'design', 'security']).optional(),
     phase: PhaseDispatchSchema.optional(),
     skills: z.array(phaseSkill).optional(),
     attachToSessionId: sessionId.optional(),

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { childModelCandidates, childModelTier } from './child-model-tier';
 import type { EffortLevel } from '@ptah-extension/shared';
 import type { DecisionModelConfig } from '../decision-model/decision-model.config';
 import { DecisionCaller } from '../decision-model/decision-caller';
@@ -15,8 +16,13 @@ import {
 } from './child-setting-rule';
 
 const Input = z.object({
-  brief: z.string().transform((brief) => brief.slice(0, 8000)),
-  models: z.array(z.string().min(1).max(200)),
+  brief: z.string(),
+  phaseKind: z.string().optional(),
+  workKind: z.enum(['coordination', 'code', 'investigation', 'design', 'security']).optional(),
+  // One malformed catalog id must not drop the whole route (and with it the effort floor).
+  models: z
+    .array(z.string())
+    .transform((ids) => ids.filter((id) => id.length >= 1 && id.length <= 200)),
   model: z.string().optional(),
   effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
 });
@@ -39,8 +45,10 @@ export class ChildSettingRouterService {
 
   async route(raw: unknown): Promise<ChildSettingChoice> {
     const input = Input.parse(raw);
-    const fallback = rankChildSettings(input.brief, input.models);
+    const fallback = rankChildSettings(input);
     const result: ChildSettingChoice = {
+      reason: fallback.reason,
+      candidates: fallback.candidates,
       ...(input.model
         ? { model: input.model }
         : fallback.model
@@ -55,8 +63,15 @@ export class ChildSettingRouterService {
       effortSource: input.effort ? 'pin' : fallback.effortSource,
     };
     if (input.model && input.effort) return result;
-    const modelOptions = input.model ? [] : [...new Set(input.models)];
-    const effortOptions = input.effort ? [] : [...EFFORTS];
+    const floor = fallback.effort === 'low' ? 0
+      : ['deep-work-kind', 'deep-work-text'].includes(fallback.reason.rule) ? 2 : 1;
+    const modelOptions = input.model ? [] : [...new Set(input.models)].filter((model) => {
+      const tier = childModelTier(model);
+      return tier !== undefined && tier !== 3 && tier >= floor && childModelCandidates(input.models, tier).includes(model);
+    });
+    const effortOptions = input.effort ? [] : EFFORTS.filter((effort) =>
+      EFFORTS.indexOf(effort) >= EFFORTS.indexOf(fallback.effort ?? 'high'),
+    );
     const questions = [
       ...(modelOptions.length
         ? [
@@ -101,7 +116,7 @@ export class ChildSettingRouterService {
         return result;
       }
       const outcome = await runFixedRequest({
-        request: input.brief,
+        request: input.brief.slice(0, 8000),
         questions,
         maxRequestBytes: REQUEST_SIZE_LIMIT_BYTES,
         dispatch: this.caller.dispatchFor(opened),
@@ -142,12 +157,7 @@ export class ChildSettingRouterService {
       const effort = effortOptions.length
         ? (choice('effort', effortOptions) as EffortLevel | undefined)
         : undefined;
-      return {
-        ...(model || result.model ? { model: model ?? result.model } : {}),
-        ...(effort || result.effort ? { effort: effort ?? result.effort } : {}),
-        modelSource: model ? 'model' : result.modelSource,
-        effortSource: effort ? 'model' : result.effortSource,
-      };
+      return clampChildSettingDecision(result, { model, effort }, floor, input.models);
     };
     const pending = request();
     pending.catch((error: unknown) => {
@@ -166,4 +176,30 @@ export class ChildSettingRouterService {
       if (deadline) clearTimeout(deadline);
     }
   }
+}
+
+/** Defense in depth after refinement; pins are absent from the selected fields. */
+export function clampChildSettingDecision(
+  result: ChildSettingChoice,
+  selected: { model?: string; effort?: EffortLevel },
+  floor: number,
+  models: readonly string[],
+): ChildSettingChoice {
+  const { model, effort } = selected;
+  const modelBelowFloor = !!model && (childModelTier(model) ?? -1) < floor;
+  const effortBelowFloor = !!effort && EFFORTS.indexOf(effort) < EFFORTS.indexOf(result.effort ?? 'high');
+  const chosenModel = modelBelowFloor ? result.model : model;
+  const chosenEffort = effortBelowFloor ? result.effort : effort;
+  const tier = chosenModel ? childModelTier(chosenModel) : undefined;
+  const candidates = tier === undefined ? result.candidates : childModelCandidates(models, tier);
+  return {
+    reason: modelBelowFloor || effortBelowFloor
+      ? { rule: 'decision-model-below-floor', input: result.reason.input }
+      : result.reason,
+    candidates: chosenModel ? [chosenModel, ...candidates.filter((candidate) => candidate !== chosenModel)] : result.candidates,
+    ...(chosenModel || result.model ? { model: chosenModel ?? result.model } : {}),
+    ...(chosenEffort || result.effort ? { effort: chosenEffort ?? result.effort } : {}),
+    modelSource: modelBelowFloor ? 'ranking' : model ? 'model' : result.modelSource,
+    effortSource: effortBelowFloor ? 'ranking' : effort ? 'model' : result.effortSource,
+  };
 }

@@ -30,7 +30,7 @@ import {
   type SessionChildOutcomeKind,
 } from '@ptah-extension/shared';
 import {
-  childSettingSources,
+  describeChildSetting,
   safeErrorKind,
   type SessionChildClearSkipReason,
   type SessionChildCompletionEnvelope,
@@ -249,13 +249,12 @@ function formatChild(child: SessionChildSnapshot): string {
   if (child.status === 'queued')
     return formatQueuedChild(child);
   if (child.status === 'starting') return formatStartingChild(child);
-  const sources = childSettingSources(child);
   const successor = child.outcome?.successorId ?? child.succeededBy;
   const lines = [
     `- ${child.label} (${child.childSessionId}): ${displayStatus(child)}` +
       (successor ? `; succeededBy ${successor}` : ''),
     `  branch ${child.branch} from ${child.baseRef}; worktree ${child.worktreePath}`,
-    `  model ${child.model ?? 'default'} (${sources.modelSource}); effort ${child.effort ?? 'default'} (${sources.effortSource})`,
+    `  ${describeChildSetting(child)}`,
     `  started ${child.startedAt}${endedSuffix(child)}`,
     `  turns settled ${child.turnsSettled}; reports delivered ` +
       `${child.reportsDelivered}, refused ${child.reportsRefused}`,

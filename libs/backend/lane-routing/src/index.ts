@@ -9,6 +9,7 @@
  */
 export { LANE_ROUTING_TOKENS, type LaneRoutingDIToken } from './lib/di/tokens';
 export { ChildSettingRouterService } from './lib/child-session/child-setting-router.service';
+export type { ChildSettingInput, ChildSettingChoice, ChildSettingRuleId, ChildWorkKind } from './lib/child-session/child-setting-rule';
 export { rankChildSettings } from './lib/child-session/child-setting-rule';
 export type {
   LaneRoutingLogMeta,

@@ -40,7 +40,7 @@ export type {
   SessionSendMode,
   SessionSpawnRefusalCode,
 } from './session-spawner.port';
-export { childSettingSources } from './session-spawner.port';
+export { childSettingSources, describeChildSetting } from './session-spawner.port';
 export type {
   ChildChatSessionStartInput,
   ChildChatSessionStartOutcome,
@@ -49,6 +49,8 @@ export type {
 } from './child-chat-session-host.port';
 export type {
   ChildSettingRoute,
+  ChildSettingReason,
+  ChildWorkKind,
   IChildSettingRouter,
 } from './child-setting-router.port';
 export type {
