@@ -49,6 +49,8 @@ export interface HarnessLlmExecuteParams {
   cwd: string;
   /** Resolve provider/model for this workspace while executing outside its tree. */
   workspaceRoot?: string;
+  // Ranking executes in scratch space to avoid workspace files, but must still
+  // resolve the workspace's provider/model and disable every tool for that query.
   toolAccess?: 'none';
   /**
    * Optional model the caller wants. Kept only when the workspace's provider
@@ -141,7 +143,9 @@ export class HarnessLlmRunner {
         mcpServerRunning: args.execute.mcpServerRunning,
         maxTurns: args.execute.maxTurns,
         outputFormat: args.execute.outputFormat,
-        ...(args.execute.toolAccess ? { toolAccess: args.execute.toolAccess } : {}),
+        ...(args.execute.toolAccess
+          ? { toolAccess: args.execute.toolAccess }
+          : {}),
         abortController,
         ...(auth ? { auth } : {}),
       });

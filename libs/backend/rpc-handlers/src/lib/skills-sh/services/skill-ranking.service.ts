@@ -6,6 +6,7 @@ import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   DECISION_REQUEST_TIMEOUT_MS,
   LANE_ROUTING_TOKENS,
+  skillRankingText,
 } from '@ptah-extension/lane-routing';
 import type { SkillRankingCallerService } from '@ptah-extension/lane-routing';
 import type { HarnessLlmRunner } from '../../harness/ai/harness-llm-runner.service';
@@ -55,6 +56,27 @@ export class SkillRankingService {
   ) {}
 
   async rank(request: SkillRankingRequest): Promise<SkillRankingResult> {
+    // Copy only ranking metadata; evidence and workspace details never enter prompts.
+    request = {
+      workspaceRoot: request.workspaceRoot,
+      items: Object.fromEntries(
+        Object.entries(request.items).map(([key, item]) => [
+          key,
+          {
+            kind: skillRankingText(item.kind),
+            name: skillRankingText(item.name),
+            candidates: item.candidates.map((candidate) => ({
+              label: candidate.label,
+              name: skillRankingText(candidate.name),
+              source: skillRankingText(candidate.source),
+              skillId: skillRankingText(candidate.skillId),
+              installs: candidate.installs,
+              description: skillRankingText(candidate.description),
+            })),
+          },
+        ]),
+      ),
+    };
     const items: SkillRankingResult['items'] = Object.fromEntries(
       Object.entries(request.items).map(([key, item]) => [
         key,

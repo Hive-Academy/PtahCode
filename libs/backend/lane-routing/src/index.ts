@@ -9,6 +9,7 @@
  */
 export { LANE_ROUTING_TOKENS, type LaneRoutingDIToken } from './lib/di/tokens';
 export { DECISION_REQUEST_TIMEOUT_MS } from './lib/routing-constants';
+export { skillRankingText } from './lib/decision-model/skill-ranking-caller.types';
 export { SkillRankingCallerService } from './lib/decision-model/skill-ranking-caller.service';
 export type {
   SkillRankingCandidate,

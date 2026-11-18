@@ -10,12 +10,15 @@ export function skillRankingItemSchema(labels: readonly string[]) {
   const allowed = new Set(labels);
   return z
     .object({
-      order: z.array(z.string().refine((label) => allowed.has(label))).min(1),
-      // Decision: cap explanations at 140 characters; excessive text does not lose a ranking.
+      order: z
+        .array(z.string().refine((label) => allowed.has(label)))
+        .min(1)
+        .refine((order) => new Set(order).size === order.length),
+      // Decision: keep explanations below 140 characters; excessive text does not lose a ranking.
       reason: z
         .string()
-        .transform((reason) => reason.slice(0, 140))
-        .optional(),
+        .transform((reason) => reason.slice(0, 139))
+        .default('Ranked by relevance to the detected technology.'),
     })
     .transform(({ order, reason }) => ({
       order: [...new Set([...order, ...labels])],
