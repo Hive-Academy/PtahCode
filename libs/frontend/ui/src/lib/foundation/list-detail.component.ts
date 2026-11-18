@@ -6,10 +6,10 @@ import { PtahButtonDirective } from '../button/button.directive';
   selector: 'ptah-list-detail', standalone: true, imports: [PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block [container-type:inline-size]' },
-  template: `<div class="surface-1 min-h-0 overflow-hidden rounded-ptah-surface [@container(min-width:768px)]:grid " [class]="gridColumns()">
-    <section #list class="min-w-0 overflow-auto border-surface-border [@container(min-width:768px)]:!block [@container(min-width:768px)]:border-r" [class.hidden]="hasSelection()"><ng-content select="[list]" /></section>
-    <section class="min-w-0 overflow-auto [@container(min-width:768px)]:!block" [class.hidden]="!hasSelection()">
-      @if (hasSelection()) { <div class="px-ptah-surface pt-ptah-controls [@container(min-width:768px)]:hidden"><button #backButton ptahButton variant="ghost" size="xs" type="button" (click)="goBack()">{{ backLabel() }}</button></div><ng-content select="[detail]" /> }
+  template: `<div class="surface-1 min-h-0 overflow-hidden rounded-ptah-surface" [class]="splitClasses().grid + ' ' + gridColumns()">
+    <section #list class="min-w-0 overflow-auto border-surface-border" [class]="splitClasses().pane + ' ' + splitClasses().border" [class.hidden]="hasSelection()"><ng-content select="[list]" /></section>
+    <section class="min-w-0 overflow-auto" [class]="splitClasses().pane" [class.hidden]="!hasSelection()">
+      @if (hasSelection()) { <div class="px-ptah-surface pt-ptah-controls" [class]="splitClasses().back"><button #backButton ptahButton variant="ghost" size="xs" type="button" (click)="goBack()">{{ backLabel() }}</button></div><ng-content select="[detail]" /> }
       @else { <ng-content select="[empty]" /> }
     </section>
     @if (withMeta()) {
@@ -19,6 +19,23 @@ import { PtahButtonDirective } from '../button/button.directive';
   </div>`,
 })
 export class PtahListDetailComponent {
+  /** Supported container split widths; literals keep Tailwind queries discoverable. */
+  readonly splitAt = input<768 | 960>(768);
+  protected readonly splitClasses = computed(() => this.splitAt() === 960 ? {
+    grid: '[@container(min-width:960px)]:grid',
+    pane: '[@container(min-width:960px)]:!block',
+    border: '[@container(min-width:960px)]:border-r',
+    back: '[@container(min-width:960px)]:hidden',
+    columns: '[@container(min-width:960px)]:grid-cols-[320px_minmax(0,1fr)]',
+    metaColumns: '[@container(min-width:960px)_and_(max-width:1199.98px)]:grid-cols-[320px_minmax(0,1fr)]',
+  } : {
+    grid: '[@container(min-width:768px)]:grid',
+    pane: '[@container(min-width:768px)]:!block',
+    border: '[@container(min-width:768px)]:border-r',
+    back: '[@container(min-width:768px)]:hidden',
+    columns: '[@container(min-width:768px)]:grid-cols-[320px_minmax(0,1fr)]',
+    metaColumns: '[@container(min-width:768px)_and_(max-width:1199.98px)]:grid-cols-[320px_minmax(0,1fr)]',
+  });
   readonly selectedId = input<string | null>(null);
   readonly hasSelection = computed(() => this.selectedId() !== null && this.selectedId() !== '');
   readonly backLabel = input('Back to list');
@@ -26,8 +43,8 @@ export class PtahListDetailComponent {
   readonly withMeta = input(false);
   protected readonly gridColumns = computed(() =>
     this.withMeta()
-      ? '[@container(min-width:768px)_and_(max-width:1199.98px)]:grid-cols-[320px_minmax(0,1fr)] [@container(min-width:1200px)]:grid-cols-[320px_minmax(0,1fr)_280px]'
-      : '[@container(min-width:768px)]:grid-cols-[320px_minmax(0,1fr)]',
+      ? this.splitClasses().metaColumns + ' [@container(min-width:1200px)]:grid-cols-[320px_minmax(0,1fr)_280px]'
+      : this.splitClasses().columns,
   );
   readonly back = output<void>();
   private readonly list = viewChild<ElementRef<HTMLElement>>('list');
@@ -43,7 +60,7 @@ export class PtahListDetailComponent {
       const observer = new ResizeObserver(([entry]) => {
         if (!entry) return;
         const width = entry.contentRect.width;
-        if (previousWidth >= 768 && width < 768 && this.hasSelection()) {
+        if (previousWidth >= this.splitAt() && width < this.splitAt() && this.hasSelection()) {
           const list = this.list()?.nativeElement;
           if (list?.contains(document.activeElement)) {
             this.backButton()?.nativeElement.focus();
@@ -61,7 +78,7 @@ export class PtahListDetailComponent {
       if (this.previousSelection === selected) return;
       const oldSelection = this.previousSelection;
       this.previousSelection = selected;
-      if (!list || (list.parentElement?.clientWidth ?? 0) >= 768) return;
+      if (!list || (list.parentElement?.clientWidth ?? 0) >= this.splitAt()) return;
       if (selected) {
         this.previousOption = list.querySelector<HTMLElement>('[aria-selected="true"]') ?? list.querySelector<HTMLElement>(':focus');
         backButton?.focus();
