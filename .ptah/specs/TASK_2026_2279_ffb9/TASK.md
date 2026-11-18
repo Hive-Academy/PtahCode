@@ -2,7 +2,7 @@
 
 **Type**: BUGFIX  
 **Branch**: fix/subagent-budget-handoff  
-**Status**: Implementation in progress (codex lane running)  
+**Status**: in_review (PR #1426)  
 **Priority**: HIGH (prevents subagents from stopping when they exceed the configured budget)
 
 ## Problem Statement
