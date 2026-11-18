@@ -1,9 +1,17 @@
-import { calculateExactMessageCost, findModelPricing, registerProviderPricing, resetPricingMapForTesting } from './pricing.utils';
+import { calculateExactMessageCost, findModelPricing, hasUnknownCacheCreationTtl, registerProviderPricing, resetPricingMapForTesting } from './pricing.utils';
 import { seedStaticModelPricing } from '../providers/provider-registry';
 
 beforeEach(() => resetPricingMapForTesting());
 afterEach(() => resetPricingMapForTesting());
 const rate = { inputCostPerToken: 1e-6, outputCostPerToken: 2e-6 };
+it('shares TTL uncertainty with analytics while preserving explicit zero and no writes', () => {
+  const pricing = { ...rate, cacheCreationCostPerToken: 3e-6, cacheCreation1hCostPerToken: 4e-6 };
+  const tokens = { input: 1, output: 1, cacheCreation: 10 };
+  expect(hasUnknownCacheCreationTtl('claude-custom', tokens, pricing)).toBe(true);
+  expect(hasUnknownCacheCreationTtl('claude-custom', { ...tokens, cacheCreation1h: 0 }, pricing)).toBe(false);
+  expect(hasUnknownCacheCreationTtl('claude-custom', { ...tokens, cacheCreation: 0 }, pricing)).toBe(false);
+  expect(hasUnknownCacheCreationTtl('other', tokens, rate)).toBe(false);
+});
 it('resolves a tagged dotted catalog entry before the bundled dashed base', () => {
   registerProviderPricing({ 'claude-sonnet-5.5[1m]': rate });
   expect(findModelPricing('claude-sonnet-5-5[1m]')).toEqual(rate);

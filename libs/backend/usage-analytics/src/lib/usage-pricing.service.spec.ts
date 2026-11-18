@@ -10,7 +10,7 @@ const row: UsageContribution = {
 };
 
 describe('UsagePricingService', () => {
-  const router = { getPricing: jest.fn<Promise<null | { inputCostPerToken: number; outputCostPerToken: number; cacheReadCostPerToken?: number }>, [string]>() };
+  const router = { getPricing: jest.fn<Promise<null | { inputCostPerToken: number; outputCostPerToken: number; cacheReadCostPerToken?: number; cacheCreationCostPerToken?: number }>, [string]>() };
   const service = new UsagePricingService(router);
 
   beforeEach(() => router.getPricing.mockReset());
@@ -25,6 +25,19 @@ describe('UsagePricingService', () => {
   it('marks unknown models unpriced', async () => {
     router.getPricing.mockResolvedValue(null);
     expect(await service.price(row)).toMatchObject({ costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced' });
+  });
+  it('marks bundled Claude writes with an unknown TTL split unpriced', async () => {
+    router.getPricing.mockResolvedValue(null);
+    expect(await service.price({ ...row, modelId: 'claude-sonnet-5-5', cacheWriteTokens: 10 })).toMatchObject({
+      costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced',
+    });
+    expect(await service.price({ ...row, modelId: 'claude-sonnet-5-5' })).toMatchObject({ costSource: 'model-priced' });
+  });
+  it('keeps catalog-hydrated Claude writes unpriced unless provider cost is reported', async () => {
+    router.getPricing.mockResolvedValue({ inputCostPerToken: 0.01, outputCostPerToken: 0.02, cacheCreationCostPerToken: 0.03 });
+    const usage = { ...row, modelId: 'claude-sonnet-5-5', cacheWriteTokens: 10 };
+    expect(await service.price(usage)).toMatchObject({ costUsd: null, costSource: 'unpriced' });
+    expect(await service.price({ ...usage, reportedCostUsd: 0.42 })).toMatchObject({ costUsd: 0.42, costSource: 'provider-reported' });
   });
 
   it('computes cache savings for priced reported usage', async () => {

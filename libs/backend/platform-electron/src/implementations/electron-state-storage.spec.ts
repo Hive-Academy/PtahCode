@@ -63,6 +63,28 @@ describe('ElectronStateStorage — Electron-specific behaviour', () => {
     await next;
     expect(new ElectronStateStorage(storage, 'state.json').get('kept')).toBe(1);
   });
+  it.each([2, undefined])('preserves queued same-key update %s after an earlier flush fails', async (newValue) => {
+    let rejectFirst: (error: Error) => void = () => { throw new Error('write not started'); };
+    let started: () => void = () => { throw new Error('start not initialized'); };
+    const firstStarted = new Promise<void>((resolve) => { started = resolve; });
+    let writes = 0;
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async (filePath, contents) => {
+      if (++writes === 1) {
+        started();
+        await new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+      }
+      await fs.writeFile(filePath, contents, 'utf8');
+    });
+    const firstUpdate = expect(provider.update('key', 1)).rejects.toThrow('first failed');
+    const firstFlush = expect(provider.flush()).rejects.toThrow('first failed');
+    await firstStarted;
+    const secondUpdate = provider.update('key', newValue);
+    const secondFlush = provider.flush();
+    rejectFirst(new Error('first failed'));
+    await Promise.all([firstUpdate, firstFlush, secondUpdate, secondFlush]);
+    expect(provider.get('key')).toBe(newValue);
+    expect(new ElectronStateStorage(storage, 'state.json').get('key')).toBe(newValue);
+  });
   it('writes within one second during continuous updates', async () => {
     jest.useFakeTimers();
     try {

@@ -77,6 +77,11 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
       return Promise.reject(error);
     }
     return this.enqueue((next) => {
+      const owner = next.owners.find((entry) => entry.ownerKey === accepted.ownerKey);
+      if (owner && accepted.occurredAtMs <= owner.resetAtMs) {
+        if (!owner.resetRunIds.includes(accepted.runId)) owner.resetRunIds.push(accepted.runId);
+        return;
+      }
       const index = next.events.findIndex((old) => old.ownerKey === accepted.ownerKey && old.runId === accepted.runId && old.eventKey === accepted.eventKey);
       if (index >= 0 && next.events[index].revision >= accepted.revision) return;
       if (index >= 0) next.events[index] = accepted;
@@ -107,7 +112,7 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
     const base = { kind: 'api-spend' as const, revision: owner?.revision ?? 0, asOf: nowMs, budget: null };
     if (!this.available) return { ...base, availability: 'unavailable', periods: null, cumulative: null, coverage: 'none', creditEvidence: [] };
     const reset = owner?.resetAtMs ?? 0;
-    const events = this.state.events.filter((event) => event.ownerKey === ownerKey && event.occurredAtMs >= reset && event.occurredAtMs <= nowMs);
+    const events = this.state.events.filter((event) => event.ownerKey === ownerKey && (!owner || event.occurredAtMs > reset) && event.occurredAtMs <= nowMs);
     const period = (startAt: number): { spend: LaneSpendPeriod; coveredRows: Set<SpendLedger['events'][number]> } => {
       const rows = events.filter((event) => event.occurredAtMs >= startAt);
       const coveredRows = new Set<SpendLedger['events'][number]>();

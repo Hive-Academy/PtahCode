@@ -7,6 +7,8 @@ import type {
 } from '../types/rpc/rpc-session.types';
 import { ANTHROPIC_RATE_CARD, findAnthropicRate } from './anthropic-rate-card';
 import { CODEX_RATE_CARD } from './codex-rate-card';
+import { hasUnknownCacheCreationTtl } from './cache-creation-pricing.utils';
+export { hasUnknownCacheCreationTtl } from './cache-creation-pricing.utils';
 /**
  * Pricing information for a single model
  */
@@ -485,8 +487,7 @@ export function calculateExactMessageCost(
     // Rounding to 6 decimals must not turn real non-zero usage into $0.
     totalCost: rounded === 0 && unrounded > 0 ? unrounded : rounded,
     costBasis: availableBasis,
-    pricingCoverage: (tokens.cacheCreation ?? 0) > 0 && tokens.cacheCreation1h === undefined &&
-      (pricing.cacheCreation1hCostPerToken !== undefined || /claude-/.test(modelId) || pricing.provider === 'anthropic') ? 'partial' : 'full',
+    pricingCoverage: hasUnknownCacheCreationTtl(modelId, tokens, pricing) ? 'partial' : 'full',
     priceProvenance: provenance,
   };
 }

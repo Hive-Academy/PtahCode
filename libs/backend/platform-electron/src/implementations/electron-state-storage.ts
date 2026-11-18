@@ -58,6 +58,7 @@ export class ElectronStateStorage
   private maxWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly previousValues = new Map<string, JsonValue | undefined>();
   private readonly changedKeys = new Set<string>();
+  private readonly keyGenerations = new Map<string, number>();
   private pendingWrite: Promise<void> | null = null;
   private resolvePendingWrite: (() => void) | null = null;
   private rejectPendingWrite: ((error: Error) => void) | null = null;
@@ -178,6 +179,7 @@ export class ElectronStateStorage
     }
 
     if (!this.previousValues.has(key)) this.previousValues.set(key, this.data[key]);
+    this.keyGenerations.set(key, (this.keyGenerations.get(key) ?? 0) + 1);
     if (value === undefined) delete this.data[key];
     else this.data[key] = value as JsonValue;
     this.changedKeys.add(key);
@@ -213,6 +215,7 @@ export class ElectronStateStorage
         'updateSync is unavailable for worker-backed workspace storage',
       );
     }
+    this.keyGenerations.set(key, (this.keyGenerations.get(key) ?? 0) + 1);
     if (value === undefined) delete this.data[key];
     else this.data[key] = value as JsonValue;
     if (this.writeTimer !== null) {
@@ -341,6 +344,7 @@ export class ElectronStateStorage
     this.resolvePendingWrite = null;
     this.rejectPendingWrite = null;
     const previousValues = new Map(this.previousValues);
+    const generations = new Map([...this.changedKeys].map((key) => [key, this.keyGenerations.get(key)]));
     this.previousValues.clear();
     const changedCount = this.changedKeys.size;
     this.changedKeys.clear();
@@ -355,8 +359,11 @@ export class ElectronStateStorage
       resolve?.();
     } catch (error: unknown) {
       for (const [key, previous] of previousValues) {
-        if (this.changedKeys.has(key)) this.previousValues.set(key, previous);
-        else if (previous === undefined) delete this.data[key];
+        if (this.keyGenerations.get(key) !== generations.get(key)) {
+          if (this.changedKeys.has(key)) this.previousValues.set(key, previous);
+          continue;
+        }
+        if (previous === undefined) delete this.data[key];
         else this.data[key] = previous;
       }
       reject?.(error instanceof Error ? error : new Error(String(error)));

@@ -127,8 +127,8 @@ describe('explicit storage repair and async validation', () => {
     expect(storage.get(LANE_SPEND_CORRUPT_BACKUP_KEY)).toEqual(corrupt);
     expect(SpendLedgerSchema.safeParse(storage.get(LANE_SPEND_STORAGE_KEY)).success).toBe(true);
     expect(await ledger.readSpend('owner', NOW)).toMatchObject({ availability: 'available', cumulative: { knownCostMicroUsd: 0 } });
-    await ledger.recordUsage(event());
-    expect((await new LaneSpendLedgerService(storage, logger).readSpend('owner', NOW)).cumulative?.knownCostMicroUsd).toBe(100);
+    await ledger.recordUsage(event({ occurredAtMs: NOW + 1 }));
+    expect((await new LaneSpendLedgerService(storage, logger).readSpend('owner', NOW + 1)).cumulative?.knownCostMicroUsd).toBe(100);
   });
   it('does not overwrite corruption if the backup fails and allows a later repair', async () => {
     const corrupt = { version: 99 };
@@ -205,6 +205,17 @@ describe('explicit storage repair and async validation', () => {
     const restored = new LaneSpendLedgerService(storage, logger);
     await restored.recordUsage(event({ eventKey: 'snapshot', runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
     expect(await restored.readSpend('owner', NOW)).toMatchObject({ coverage: 'none', cumulative: { knownCostMicroUsd: 0, unpricedEvents: 1 } });
+  });
+  it('drops late events at or before reset and remembers their runs across restart', async () => {
+    const { ledger, storage, logger } = setup();
+    await ledger.clear('owner', NOW);
+    await ledger.recordUsage(event({ occurredAtMs: NOW - 1 }));
+    await ledger.recordUsage(event({ eventKey: 'equal', occurredAtMs: NOW }));
+    expect(SpendLedgerSchema.parse(storage.get(LANE_SPEND_STORAGE_KEY)).events).toEqual([]);
+    expect((await ledger.readSpend('owner', NOW)).cumulative?.knownCostMicroUsd).toBe(0);
+    const restored = new LaneSpendLedgerService(storage, logger);
+    await restored.recordUsage(event({ eventKey: 'snapshot', occurredAtMs: NOW + 1, runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    expect(await restored.readSpend('owner', NOW + 1)).toMatchObject({ coverage: 'none', cumulative: { knownCostMicroUsd: 0, unpricedEvents: 1 } });
   });
   it('reports partial model-priced coverage when the cache TTL subset is missing', async () => {
     const { ledger } = setup();
