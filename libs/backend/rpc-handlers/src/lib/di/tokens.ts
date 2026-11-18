@@ -17,6 +17,9 @@ export const SKILL_RECOMMENDATION_SERVICE = Symbol.for(
   'SkillRecommendationService',
 );
 
+/** SkillRankingService - model ranking with heuristic fallback. */
+export const SKILL_RANKING_SERVICE = Symbol.for('SkillRankingService');
+
 /** ProjectGuidanceService - labeled project facts and owner decision prompt */
 export const SKILL_PROJECT_GUIDANCE_SERVICE = Symbol.for(
   'ProjectGuidanceService',

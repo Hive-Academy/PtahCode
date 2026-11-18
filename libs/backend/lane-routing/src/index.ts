@@ -8,6 +8,13 @@
  * matrix diagnostics and the failure classifier stay inside the library.
  */
 export { LANE_ROUTING_TOKENS, type LaneRoutingDIToken } from './lib/di/tokens';
+export { DECISION_REQUEST_TIMEOUT_MS } from './lib/routing-constants';
+export { SkillRankingCallerService } from './lib/decision-model/skill-ranking-caller.service';
+export type {
+  SkillRankingCandidate,
+  SkillRankingCallerItem,
+  SkillRankingCallerResult,
+} from './lib/decision-model/skill-ranking-caller.types';
 export { ChildSettingRouterService } from './lib/child-session/child-setting-router.service';
 export { rankChildSettings } from './lib/child-session/child-setting-rule';
 export type {
@@ -65,7 +72,14 @@ export {
   RouteDecideArgsSchema,
   type RouteDecideArgs,
 } from './lib/contracts/route-decide-args.schema';
-export { resolvePhaseDefinition, resolvePhaseDispatch, parsePhaseDispatch, effectiveMachineCapabilities, PhaseDefinitionError, type PhaseDefinitionErrorCode } from './lib/contracts/phase-definition-resolver';
+export {
+  resolvePhaseDefinition,
+  resolvePhaseDispatch,
+  parsePhaseDispatch,
+  effectiveMachineCapabilities,
+  PhaseDefinitionError,
+  type PhaseDefinitionErrorCode,
+} from './lib/contracts/phase-definition-resolver';
 export {
   EXCLUSION_RULES,
   FALLBACK_CAUSES,
