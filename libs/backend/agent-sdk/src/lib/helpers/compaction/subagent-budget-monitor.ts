@@ -637,7 +637,7 @@ export class SubagentBudgetMonitor {
         });
       }
     }
-    this.count(session, toolCallId, state, msg, usage, settings, policy);
+    const handoff = this.count(session, toolCallId, state, msg, usage, settings, policy);
     if (state.stopFired || state.stopInFlight) {
       return;
     }
@@ -654,7 +654,10 @@ export class SubagentBudgetMonitor {
     const subagentHandoffTokens = settings.handoffContextTokens;
     const subagentStopWeightedTokens = settings.stopWeightedTokens;
     this.warnNearBudget(session, toolCallId, state, subagentHandoffTokens);
-    const reason: StopReason | undefined = state.policySnapshot.stopped ? 'safety' : undefined;
+    const safetyReached = Math.max(state.policySnapshot.rawTokens, state.weightedUsed) >= subagentStopWeightedTokens
+      || state.policySnapshot.elapsedMs >= settings.maxDurationMin * 60_000;
+    const reason: StopReason | undefined = handoff && !safetyReached ? 'handoff'
+      : state.policySnapshot.stopped ? 'safety' : undefined;
     if (!reason) {
       return;
     }
@@ -838,7 +841,7 @@ export class SubagentBudgetMonitor {
             const fallback = handoffMessage(
               { agentId, agentType: record?.agentType ?? started?.subagentType ?? 'subagent', taskId: taskId ?? 'unknown' },
               { reason: 'handoff', contextTokens: state.contextTokens, weightedUsed: state.weightedUsed,
-                handoffTokens: config.handoffContextTokens, stopWeightedTokens: config.stopWeightedTokens },
+                handoffTokens: config.handoffContextTokens, stopWeightedTokens: config.stopWeightedTokens, warnRatio: config.warnRatio },
               session.tasks.get(toolCallId)?.text,
               { paths: undefined, taskSaved: false, notesWritten: false, notesInferred: false, unavailable: true },
             );
@@ -1446,7 +1449,7 @@ export class SubagentBudgetMonitor {
     usage: SubagentRequestUsage,
     settings: AgentBudgetSettings,
     policy: AgentBudgetPolicy,
-  ): void {
+  ): boolean {
     const messageId = asObject(msg['message'])?.['id'];
     const sameRequest = typeof messageId === 'string' && messageId === state.lastMessageId;
     if (!sameRequest) state.requestSequence += 1;
@@ -1493,6 +1496,7 @@ export class SubagentBudgetMonitor {
         this.logger.warn('[SubagentBudgetMonitor] Turn cost unavailable', { sessionId: session.sessionId, taskId, model: modelId ?? 'unavailable' });
       }
     }
+    return transition.handoff;
   }
 
   /**
@@ -1602,6 +1606,7 @@ export class SubagentBudgetMonitor {
       weightedUsed: preparedState.weightedUsed,
       handoffTokens: limits.handoffTokens,
       stopWeightedTokens: limits.stopWeightedTokens,
+      warnRatio: this.config.getAgentBudgetSettings().warnRatio,
     };
     if (prepared.record) {
       this.records.markInvoked(toolCallId);
@@ -1793,6 +1798,7 @@ export class SubagentBudgetMonitor {
       weightedUsed: state.weightedUsed,
       handoffTokens: limits.handoffTokens,
       stopWeightedTokens: limits.stopWeightedTokens,
+      warnRatio: this.config.getAgentBudgetSettings().warnRatio,
     };
     if (who.agentId && !state.transcriptPath) {
       const workspace = this.records.workspaceOf(durableSession.sessionId);

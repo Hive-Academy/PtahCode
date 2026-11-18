@@ -107,7 +107,7 @@ export class AgentBudgetPolicy {
         total + Math.max(nextTurnTokens, snapshot.largestTurnTokens ?? 0) >= this.settings.stopWeightedTokens || contextWarning);
     const stopReason = snapshot.stopped ? undefined
       : elapsedMs >= this.settings.maxDurationMin * 60_000 ? 'duration' as const
-      : total >= this.settings.stopWeightedTokens || (contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * 2) ? 'budget' as const
+      : total >= this.settings.stopWeightedTokens || (contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens) ? 'budget' as const
       : undefined;
     return { warning, stopReason, handoff: contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens };
   }
@@ -115,7 +115,7 @@ export class AgentBudgetPolicy {
   private decideTurn(snapshot: AgentBudgetSnapshot, previousWeightedTokens: number, elapsedMs: number, duplicate: boolean,
     contextTokens?: number, turnTokens = 0): { warning: boolean; stopReason?: AgentBudgetStopReason; handoff: boolean } {
     const decision = this.assess(snapshot, elapsedMs, contextTokens, turnTokens);
-    const contextCeiling = contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * 2;
+    const contextCeiling = contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens;
     const deferTokenStop = !duplicate && previousWeightedTokens < this.settings.stopWeightedTokens &&
       snapshot.weightedTokens >= this.settings.stopWeightedTokens && decision.stopReason === 'budget' && !contextCeiling;
     return {

@@ -28,6 +28,7 @@ export interface HandoffSubject {
 /** The stopped subagent's usage and the limit it reached. */
 export interface HandoffUsage {
   readonly reason: StopReason;
+  readonly warnRatio?: number;
   readonly contextTokens: number;
   readonly weightedUsed: number;
   readonly handoffTokens: number;
@@ -64,6 +65,18 @@ export function nearBudgetWarning(
   );
 }
 
+/** Name the threshold that caused this stop, including notes-gate handoffs. */
+function stopThreshold(usage: HandoffUsage): string {
+  if (usage.reason === 'safety') {
+    return `under the safety policy (safety limit ${usage.stopWeightedTokens}; ${Math.round(usage.weightedUsed)} of ${usage.stopWeightedTokens} tokens)`;
+  }
+  if (usage.contextTokens < usage.handoffTokens) {
+    const ratio = usage.warnRatio ?? 0.85;
+    return `after the warning threshold (${Math.round(ratio * 100)}%; ${usage.contextTokens} context tokens; handoff limit ${usage.handoffTokens} tokens)`;
+  }
+  return `at the handoff threshold (100%; ${usage.contextTokens} of ${usage.handoffTokens} tokens; handoff limit ${usage.handoffTokens} tokens)`;
+}
+
 /** Summary for the SDK task notification when Ptah invoked the stop. */
 export function stopNotice(
   subject: HandoffSubject,
@@ -73,10 +86,7 @@ export function stopNotice(
   const name = subject.teammateName
     ? `\`${subject.agentType}\` ('${subject.teammateName}')`
     : `\`${subject.agentType}\``;
-  const why =
-    usage.reason === 'handoff'
-      ? `context reached the handoff size (${usage.contextTokens} of ${usage.handoffTokens} tokens)`
-      : `weighted tokens reached the safety limit (${Math.round(usage.weightedUsed)} of ${usage.stopWeightedTokens} tokens)`;
+  const why = stopThreshold(usage);
   return (
     `Ptah's budget monitor stopped ${name} at its budget: ${why}. ` +
     `Usage: ${usage.contextTokens} context tokens of ${usage.handoffTokens}; ` +
@@ -107,12 +117,7 @@ export function handoffMessage(
   const name = subject.teammateName
     ? `\`${subject.agentType}\` ('${subject.teammateName}')`
     : `\`${subject.agentType}\``;
-  const why =
-    usage.reason === 'handoff'
-      ? `at ${usage.contextTokens} context tokens (handoff limit ${usage.handoffTokens} tokens)`
-      : usage.contextTokens >= usage.handoffTokens * 2
-        ? `after ${usage.contextTokens} context tokens (2x handoff ceiling ${usage.handoffTokens * 2})`
-        : `after ${Math.round(usage.weightedUsed)} weighted tokens (safety limit ${usage.stopWeightedTokens})`;
+  const why = stopThreshold(usage);
   const { paths, taskSaved, notesWritten, notesInferred, unavailable } = files;
   const lines = [
     `Ptah's subagent budget monitor handed off subagent ${name} ${why}. ` +
