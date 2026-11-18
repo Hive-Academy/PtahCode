@@ -602,4 +602,37 @@ describe('LanesTableComponent visual presentation', () => {
       );
     }
   });
+  it('contracts compact wrapping, content-sized chips and full-cell model hit targets', () => {
+    // CSS contracts complement the DOM/click tests: jsdom has no line boxes.
+    const css = readFileSync(
+      join(__dirname, 'lanes-table.component.css'),
+      'utf8',
+    );
+    const compact = css.slice(
+      css.indexOf('/* Compact identity uses intrinsic tracks'),
+    );
+    expect(compact).toContain(":not([data-model-column='true'])");
+    expect(compact).toMatch(
+      /grid-template-columns: 1rem minmax\(0, max-content\) max-content/,
+    );
+    expect(compact).toMatch(
+      /kind\s*\{[^}]*width: max-content;[^}]*flex: none;/,
+    );
+    expect(compact).toMatch(
+      /ptah-status-text\s*\{[^}]*white-space: normal;[^}]*overflow: visible;/,
+    );
+    expect(compact).toMatch(
+      /:has\(\[data-popover-kind='model'\]\)\s*\{[^}]*flex: 0 1 100%;[^}]*width: 100%;/,
+    );
+    const triggerRules = css.match(
+      /[^{}]*th\[scope='row'\][^{}]*button[^{}]*\{[^}]*\}/g,
+    );
+    expect(triggerRules?.length).toBeGreaterThan(0);
+    for (const rule of triggerRules ?? []) {
+      expect(rule).not.toContain('overflow-wrap: anywhere');
+      expect(rule).toContain('overflow-wrap: normal');
+      expect(rule).toContain('word-break: normal');
+    }
+    expect(css).toMatch(/popover-trigger\s*\{[^}]*max-width: 100%;/);
+  });
 });

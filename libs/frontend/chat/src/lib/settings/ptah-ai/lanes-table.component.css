@@ -219,7 +219,8 @@ ptah-lanes-table
   height: auto;
   white-space: normal;
   overflow: visible;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
   text-overflow: clip;
   text-align: start;
 }
@@ -303,7 +304,8 @@ ptah-lanes-table
   button[data-ptah-button]:is(.btn, #ptah-button) {
   height: auto;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 /* The Status cell owns the menu anchor in every tier. The action wrapper has
@@ -376,4 +378,75 @@ ptah-lanes-table
   > button {
   display: block;
   margin: 0;
+}
+
+/* Compact identity uses intrinsic tracks: the name stays beside its mark,
+   while the spanning chip cannot distribute spare width between those tracks. */
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']:not([data-model-column='true']) {
+  & ptah-lane-row-identity .ptah-table-row-title-primary[class] {
+    display: grid;
+    grid-template-columns: 1rem minmax(0, max-content) max-content;
+    justify-content: start;
+    align-items: start;
+    column-gap: 0.25rem;
+    row-gap: 0.1875rem;
+  }
+  & ptah-lane-row-identity [ptahRowMark] {
+    grid-column: 1;
+    grid-row: 1;
+    width: 1rem;
+  }
+  & ptah-lane-row-identity .ptah-table-row-title-name {
+    grid-column: 2;
+    grid-row: 1;
+    white-space: nowrap;
+  }
+  & ptah-lane-row-identity ptah-lane-default-warning {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  & ptah-lane-row-identity .ptah-table-row-title-kind {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: max-content;
+    flex: none;
+    justify-self: start;
+  }
+  & th[scope='row'] .lane-model-value {
+    margin-block-start: 0.1875rem;
+  }
+  &
+    th[scope='row']
+    .lane-model-value
+    > ptah-native-popover:has([data-popover-kind='model']) {
+    flex: 0 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+  &
+    th[scope='row']
+    [data-popover-kind='model'][data-ptah-button]:is(.btn, #ptah-button) {
+    width: 100%;
+    text-align: start;
+    line-height: 0.75rem;
+    border-block-width: 0;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  &
+    [data-lane-status]
+    .lane-row-actions
+    > button[data-ptah-button]:is(.btn, #ptah-button) {
+    height: auto;
+    min-height: 1.5rem;
+    line-height: 1rem;
+  }
+  & [data-lane-status] .ptah-status-text {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
 }
