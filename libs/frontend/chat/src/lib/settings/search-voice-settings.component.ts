@@ -26,7 +26,12 @@ import { SearchVoiceSummaryStore } from './ptah-ai/search-voice-summary.store';
   ],
   providers: [SearchVoiceSummaryStore],
   template: `
-    <div class="flex flex-col gap-ptah-group" data-testid="search-voice-page">
+    <!-- Each glass section is its own stacking context. The section with focus (an open select
+         panel) is raised, so the next section cannot cover the panel. -->
+    <div
+      class="flex flex-col gap-ptah-group [&>*]:relative [&>*:focus-within]:z-[var(--ptah-z-raised)]"
+      data-testid="search-voice-page"
+    >
       <ptah-instrument-band
         [segments]="summary.segments()"
         ariaLabel="Search and voice overview"

@@ -77,6 +77,10 @@ describe('LaneGuardsSettingsComponent', () => {
   it('preserves threshold row DOM', async () => {
     await create();
     const row = input('lane-guards-repeat').closest('ptah-field');
+    expect(row?.querySelector('button[aria-label="More about Repeat-call stop at"]')).not.toBeNull();
+    expect(byTestId('lane-guards-intro')?.classList.contains('sr-only')).toBe(true);
+    expect(input('lane-guards-repeat').getAttribute('aria-describedby')?.split(' ')).toContain('lane-guards-intro');
+
     expect(row).not.toBeNull();
     expect(
       row

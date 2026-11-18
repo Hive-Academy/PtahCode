@@ -1,0 +1,20 @@
+{
+  "phase": "after",
+  "autoHandoffHintLines1168": 1,
+  "budgetLongHelpInfo": true,
+  "routingHintLines1168": 1,
+  "stacking": {
+    "page-stt-1824": "on-top",
+    "page-tts-1824": "on-top",
+    "page-stt-1168": "on-top",
+    "page-tts-1168": "on-top",
+    "page-stt-784": "on-top",
+    "page-tts-784": "on-top",
+    "drawer-stt-1824": "on-top",
+    "drawer-tts-1824": "on-top",
+    "drawer-stt-1168": "on-top",
+    "drawer-tts-1168": "on-top",
+    "drawer-stt-784": "on-top",
+    "drawer-tts-784": "on-top"
+  }
+}

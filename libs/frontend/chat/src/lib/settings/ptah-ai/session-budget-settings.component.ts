@@ -84,6 +84,9 @@ interface NumberField {
   readonly key: NumberKey;
   readonly label: string;
   readonly help: string;
+  readonly info?: boolean;
+  /** Label (with unit and info icon) too long for one two-column track: the field spans both columns there. */
+  readonly wide?: boolean;
 }
 
 const NUMBER_FIELDS: readonly NumberField[] = [
@@ -101,26 +104,34 @@ const NUMBER_FIELDS: readonly NumberField[] = [
     key: 'fallbackWeightedTokens',
     label: 'Fallback weighted tokens',
     help: 'Used when model pricing is unavailable.',
+    info: true,
+    wide: true,
   },
   {
     key: 'tightenPercent',
     label: 'Tighten at (%)',
     help: 'Starts tightening; stays below Handoff.',
+    info: true,
   },
   {
     key: 'handoffPercent',
     label: 'Handoff at (%)',
     help: 'Offers to wrap up and hand off to a new session.',
+    info: true,
+  },
+  {
+    key: 'tightenWindowTokens',
+    label: 'Compact window (tokens)',
+    help: 'Advisory only until set; then lowers the compact window.',
+    info: true,
+    wide: true,
   },
   {
     key: 'handoffAfterCompactions',
     label: 'Handoff after compactions',
     help: 'Handoff after repeated compactions leave context at least half full.',
-  },
-  {
-    key: 'tightenWindowTokens',
-    label: 'Tighten auto-compact window (tokens)',
-    help: 'Advisory only until set; then lowers the compact window.',
+    info: true,
+    wide: true,
   },
 ];
 
@@ -132,7 +143,7 @@ const BOOLEAN_LABELS: Readonly<Record<BooleanKey, string>> = {
 const BOOLEAN_HELP: Readonly<Record<BooleanKey, string>> = {
   enabled: 'Enable this limit for the current chat.',
   autoHandoffAtLimit:
-    'Hand off once per session after the current turn; cancel from the banner.',
+    'Hands off once per session, after the current turn.',
 };
 
 const LABELS: Readonly<Record<BudgetKey, string>> = {
@@ -257,8 +268,8 @@ function storedNumberIsValid(
             }
 
             <div class="session-budget-fields">
-              <div ptahFieldGrid minColumn="md">
-                <ptah-field label="Budget unit" hint="Tokens use chat usage; Cost uses priced models.">
+              <div ptahFieldGrid minColumn="md" class="session-budget-grid">
+                <ptah-field label="Budget unit" hint="Tokens or priced cost.">
                   <ptah-select #unitSelect
                     triggerId="session-budget-unit"
                     label="Budget unit"
@@ -278,7 +289,7 @@ function storedNumberIsValid(
                   }
                 </ptah-field>
 
-                <ptah-field label="Token measure" hint="Weighted discounts cache reads; raw counts all tokens.">
+                <ptah-field label="Token measure" hint="Weighted discounts cache reads.">
                   <ptah-select #measureSelect
                     triggerId="session-budget-token-measure"
                     label="Token measure"
@@ -314,20 +325,21 @@ function storedNumberIsValid(
                 @for (field of numberFields; track field.key) {
                   <ptah-field
                     class="w-full min-w-0"
+                    [class.session-budget-wide]="field.wide"
                     [label]="field.label"
-                    [hint]="field.help + ' Range: ' + range(field.key) + '.'"
+                    [hint]="'Range: ' + range(field.key) + '.'"
+                    [info]="field.info ? field.help : null"
                     [error]="errors()[field.key] ?? null"
                     [errorTestId]="'session-budget-' + field.key + '-error'"
                   >
                     <input
                       ptahInput
-                      size="sm"
                       type="text"
                       [id]="'session-budget-' + field.key"
                       [attr.inputmode]="
                         settings[field.key].integer ? 'numeric' : 'decimal'
                       "
-                      class="join-item min-w-0 flex-1 tabular-nums"
+                      class="tabular-nums"
                       [invalid]="!!errors()[field.key]"
                       [value]="numberText(field.key)"
                       [attr.aria-describedby]="
@@ -342,14 +354,16 @@ function storedNumberIsValid(
                       (blur)="blurred(field.key)"
                       [attr.data-testid]="'session-budget-' + field.key"
                     />
-                    <span ptahFieldTrailing aria-hidden="true">{{
-                      unitSuffix(field.key)
-                    }}</span>
+                    @if (unitSuffix(field.key); as unit) {
+                      <span ptahFieldTrailing
+                        class="shrink-0 whitespace-nowrap pr-[var(--ptah-gap-heading)] text-xs text-base-content-muted"
+                        aria-hidden="true">{{ unit }}</span>
+                    }
                     @if (errors()[field.key]) {
                       <span
                         ptahFieldBeforeHint
                         class="text-xs text-base-content-muted"
-                        >{{ field.help }} Range: {{ range(field.key) }}.</span
+                        >Range: {{ range(field.key) }}.</span
                       >
                     }
                     @if (storedNotice(field.key); as notice) {
@@ -380,6 +394,17 @@ function storedNumberIsValid(
     .session-budget-fields {
       container-type: inline-size;
       min-width: 0;
+    }
+    /* Every field has one real hint line; the row gap also gives the next notch label
+       its half-line above the box. */
+    .session-budget-grid {
+      row-gap: calc(var(--ptah-gap-field) + var(--ptah-field-label-float-leading) / 2);
+    }
+    /* Two columns (14rem tracks, 1rem gap): a field whose label or hint needs more than one track spans both. */
+    @container (min-width: 29rem) and (max-width: 43.99rem) {
+      .session-budget-wide {
+        grid-column: 1 / -1;
+      }
     }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;

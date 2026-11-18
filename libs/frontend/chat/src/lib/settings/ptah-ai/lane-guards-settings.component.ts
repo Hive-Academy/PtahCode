@@ -100,7 +100,10 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
               <ptah-field
                 class="w-full min-w-0"
                 [label]="field.label"
-                [hint]="field.help + ' Range: ' + field.min + ' or greater.'"
+                [hint]="'Range: ' + field.min + ' or greater.'"
+                [info]="field.info"
+                infoTextId="lane-guards-intro"
+                infoTestId="lane-guards-intro"
                 [error]="fieldMessage(field.key)"
                 errorRole="alert"
                 [errorTestId]="field.testId + '-error'"
@@ -124,26 +127,12 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
                   <span
                     ptahFieldBeforeHint
                     class="text-xs text-base-content-muted"
-                    >{{ field.help }} Range: {{ field.min }} or greater.</span
+                    >Range: {{ field.min }} or greater.</span
                   >
                 }
               </ptah-field>
             }
             </div>
-            <p
-              id="lane-guards-intro"
-              class="px-[var(--ptah-field-pad-x)] text-xs text-base-content-muted"
-              data-testid="lane-guards-intro"
-            >
-              This guard stops a lane when it repeats the same call this many
-              times. Lanes also have a weighted token budget and a duration
-              limit. A lane gets an early warning when it reaches the budget
-              warning ratio, or when one more turn of its largest size would
-              cross the limit. The first turn that crosses the token limit is a
-              grace turn: the lane is warned again, and its next turn stops it.
-              A lane stopped by its budget does not resume; start a fresh lane
-              for the remaining work.
-            </p>
           }
         }
       </ptah-form-section>
