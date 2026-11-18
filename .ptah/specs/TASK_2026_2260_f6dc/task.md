@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_2260_f6dc
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix the skills step of the setup wizard
 depends_on: []
-created: "2026-11-17T21:43:22.059Z"
-updated: "2026-11-17T21:43:22.059Z"
-description: "Skills step offers empty skills, duplicate skills for one need, no Nx skill, and has no button to continue."
+created: '2026-11-17T21:43:22.059Z'
+updated: '2026-11-18T07:52:18.232Z'
+description: >-
+  Skills step offers empty skills, duplicate skills for one need, no Nx skill,
+  and has no button to continue.
 executor: codex
 estimate: M
 relates_to:
