@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2272_7f01
-status: in_progress
+status: in_review
 type: FEATURE
 title: Let agents manage scheduled jobs and redesign Schedules
 depends_on: []
