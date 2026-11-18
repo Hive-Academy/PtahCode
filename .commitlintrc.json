@@ -70,6 +70,8 @@
         "skill-synthesis",
         "lane-outcomes",
         "lane-routing",
+        "bots",
+        "bots-ui",
         "usage-analytics",
         "harness-sync",
         "thoth-runtime",
