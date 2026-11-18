@@ -15,6 +15,7 @@
  */
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
+import type { MemoryWire } from '@ptah-extension/shared';
 import { AppStateManager } from '@ptah-extension/core';
 import { MemoryRpcService } from './memory-rpc.service';
 import {
@@ -22,6 +23,114 @@ import {
   MemoryStateService,
   memoryFailureMessage,
 } from './memory-state.service';
+
+describe('MemoryStateService pagination', () => {
+  const memory = (id: string): MemoryWire => ({
+    id,
+    sessionId: null,
+    workspaceRoot: null,
+    tier: 'core',
+    kind: 'fact',
+    subject: id,
+    content: id,
+    sourceMessageIds: [],
+    salience: 0.5,
+    decayRate: 0,
+    hits: 0,
+    pinned: false,
+    createdAt: 0,
+    updatedAt: 0,
+    lastUsedAt: 0,
+    expiresAt: null,
+  });
+  let service: MemoryStateService;
+  let list: jest.Mock;
+  let pin: jest.Mock;
+  let unpin: jest.Mock;
+  let forget: jest.Mock;
+
+  beforeEach(() => {
+    list = jest.fn();
+    pin = jest.fn();
+    unpin = jest.fn();
+    forget = jest.fn();
+    TestBed.configureTestingModule({
+      providers: [
+        MemoryStateService,
+        { provide: MemoryRpcService, useValue: { list, pin, unpin, forget } },
+        {
+          provide: AppStateManager,
+          useValue: { workspaceInfo: signal({ path: '/ws' }) },
+        },
+      ],
+    });
+    service = TestBed.inject(MemoryStateService);
+  });
+
+  it('loads beyond row 200, deduplicates ids, and clears hasMore at the total', async () => {
+    list.mockResolvedValueOnce({
+      memories: Array.from({ length: 200 }, (_, i) => memory(String(i))),
+      total: 201,
+    });
+    list.mockResolvedValueOnce({
+      memories: [memory('199'), memory('200')],
+      total: 201,
+    });
+    await service.refresh();
+    expect(service.hasMore()).toBe(true);
+    await service.loadMore();
+    expect(list.mock.calls[1][0]).toMatchObject({
+      workspaceRoot: '/ws',
+      offset: 200,
+      limit: 200,
+    });
+    expect(service.entries()).toHaveLength(201);
+    expect(service.hasMore()).toBe(false);
+    expect(service.loadingMore()).toBe(false);
+  });
+
+  it('drops a stale page when refresh completes first', async () => {
+    let resolvePage: (value: {
+      memories: MemoryWire[];
+      total: number;
+    }) => void = () => undefined;
+    list.mockResolvedValueOnce({ memories: [memory('old')], total: 2 });
+    list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePage = resolve;
+        }),
+    );
+    list.mockResolvedValueOnce({ memories: [memory('new')], total: 1 });
+    await service.refresh();
+    const page = service.loadMore();
+    expect(service.loadingMore()).toBe(true);
+    await service.refresh();
+    resolvePage({ memories: [memory('stale')], total: 2 });
+    await page;
+    expect(service.entries().map((entry) => entry.id)).toEqual(['new']);
+    expect(service.loadingMore()).toBe(false);
+    expect(service.hasMore()).toBe(false);
+  });
+  it('returns action failures and decrements total only after a successful forget', async () => {
+    pin.mockResolvedValue({ success: false });
+    unpin.mockResolvedValue({ success: false });
+    forget
+      .mockResolvedValueOnce({ success: false })
+      .mockResolvedValueOnce({ success: true });
+    list.mockResolvedValue({ memories: [memory('a')], total: 1 });
+    await service.refresh();
+    expect(await service.pin('a')).toBe(false);
+    expect(service.error()).toBeTruthy();
+    expect(await service.unpin('a')).toBe(false);
+    expect(service.error()).toBeTruthy();
+    expect(await service.forget('a')).toBe(false);
+    expect(service.total()).toBe(1);
+    expect(await service.forget('a')).toBe(true);
+    expect(service.total()).toBe(0);
+    expect(service.entries()).toEqual([]);
+  });
+});
 
 describe('MemoryStateService — scopeFilter', () => {
   let service: MemoryStateService;
@@ -498,12 +607,20 @@ describe('MemoryStateService — rebuildIndex', () => {
         MemoryStateService,
         {
           provide: MemoryRpcService,
-          useValue: { rebuildIndex: rebuildMock, list: listMock, stats: statsMock },
+          useValue: {
+            rebuildIndex: rebuildMock,
+            list: listMock,
+            stats: statsMock,
+          },
         },
         {
           provide: AppStateManager,
           useValue: {
-            workspaceInfo: signal({ path: 'D:/ws', name: 'ws', type: 'workspace' }),
+            workspaceInfo: signal({
+              path: 'D:/ws',
+              name: 'ws',
+              type: 'workspace',
+            }),
           },
         },
       ],
@@ -573,7 +690,9 @@ describe('MemoryStateService — rebuildIndex', () => {
   });
 
   it('shows a fixed sentence for a list failure and logs the detail', async () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     try {
       listMock.mockRejectedValue(new Error('ECONNRESET raw'));
       await service.refresh();

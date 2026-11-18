@@ -18,9 +18,7 @@ export interface TriggerToggleChange {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PtahCheckboxDirective, PtahInputDirective],
   template: `
-    <div
-      class="flex items-center justify-between gap-2 rounded-md border border-base-300 bg-base-100 px-3 py-2"
-    >
+    <div class="flex items-center justify-between gap-2 py-3">
       <label class="flex flex-1 cursor-pointer items-center gap-2">
         <input
           ptahCheckbox

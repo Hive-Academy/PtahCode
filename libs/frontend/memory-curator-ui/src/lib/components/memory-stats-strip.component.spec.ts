@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { MemoryStatsStripComponent } from './memory-stats-strip.component';
 
 describe('MemoryStatsStripComponent', () => {
-  it('uses a container-sized grid for its five tiles', () => {
+  it('renders five instrument segments with the existing test ids and values', () => {
     TestBed.configureTestingModule({ imports: [MemoryStatsStripComponent] });
     const fixture = TestBed.createComponent(MemoryStatsStripComponent);
     fixture.componentRef.setInput('counts', {
@@ -14,32 +14,35 @@ describe('MemoryStatsStripComponent', () => {
     });
     fixture.detectChanges();
 
-    const grid = fixture.nativeElement.querySelector(
-      '[aria-label="Memory tier statistics"]',
+    const band = fixture.nativeElement.querySelector(
+      'ptah-instrument-band',
     ) as HTMLElement;
-    expect(grid.classList.contains('grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))]')).toBe(true);
-    expect(grid.className).not.toContain('xl:grid-cols-');
-    expect(grid.children).toHaveLength(5);
-    for (const [id, label, value, tone] of [
-      ['memory-stat-core', 'Core', '1', 'text-primary'],
-      ['memory-stat-archival', 'Archival', '3', 'text-base-content-muted'],
-      ['memory-stat-code-index', 'Code index', '4', 'text-secondary'],
-      ['memory-stat-last-curated', 'Last curated', 'never', 'text-base-content-muted'],
+    expect(band.querySelector('nav')?.getAttribute('aria-label')).toBe(
+      'Memory tier statistics',
+    );
+    expect(band.querySelectorAll('li')).toHaveLength(5);
+    for (const [id, label, value] of [
+      ['memory-stat-core', 'Core', '1'],
+      ['memory-stat-recall-tile', 'Recall', '2'],
+      ['memory-stat-archival', 'Archival', '3'],
+      ['memory-stat-code-index', 'Code index', '4'],
+      ['memory-stat-last-curated', 'Last curated', 'never'],
     ]) {
-      const stat = grid.querySelector(`ptah-stat[data-testid="${id}"]`);
-      expect(stat?.textContent).toContain(label);
-      expect(stat?.querySelector('.tabular-nums')?.textContent?.trim()).toBe(value);
-      expect(stat?.querySelector('.tabular-nums')?.classList.contains(tone)).toBe(true);
-      if (id !== 'memory-stat-code-index') {
-        expect(stat?.getAttribute('title')).toBeNull();
-      }
+      const segment = band.querySelector(`[data-testid="${id}"]`);
+      expect(segment?.textContent).toContain(label);
+      expect(segment?.textContent).toContain(value);
     }
-    const code = grid.querySelector('[data-testid="memory-stat-code-index"]');
-    expect(code?.getAttribute('title')).toBe('Indexed code symbols (functions, classes, methods) — shown separately from curated memory');
-    const recall = grid.querySelector('[data-testid="memory-stat-recall-tile"]');
-    expect(recall?.textContent).toContain('Recall');
-    expect(recall?.textContent).toContain('2');
-    expect(recall?.querySelector('.stat-value')?.classList.contains('text-info')).toBe(true);
-    expect(recall?.getAttribute('title')).toBeNull();
+    expect(
+      band
+        .querySelector('[data-testid="memory-stat-recall"]')
+        ?.textContent?.trim(),
+    ).toBe('2');
+    expect(
+      band
+        .querySelector('[data-testid="memory-stat-code-index"]')
+        ?.getAttribute('title'),
+    ).toBe(
+      'Indexed code symbols (functions, classes, methods) — shown separately from curated memory',
+    );
   });
 });

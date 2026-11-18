@@ -196,9 +196,9 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
       root.querySelector('[data-testid="last-curator-run"]'),
     ).not.toBeNull();
     expect(root.textContent ?? '').toContain('Triggers');
-    expect(root.textContent ?? '').toContain('Recent events');
-    expect(root.textContent ?? '').toContain('DB Health');
-    expect(root.textContent ?? '').toContain('Storage and Retention');
+    expect(root.textContent ?? '').toContain('Live events');
+    expect(root.textContent ?? '').toContain('Index health');
+    expect(root.textContent ?? '').toContain('Storage and retention');
     expect(root.querySelector('ptah-storage-health-panel')).not.toBeNull();
     expect(
       root.querySelector('[data-testid="run-curator-now"]'),
@@ -294,7 +294,7 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     const panel = root.querySelector('ptah-storage-health-panel');
     expect(panel).not.toBeNull();
-    expect(panel?.textContent ?? '').toContain('Storage and Retention');
+    expect(panel?.textContent ?? '').toContain('Storage and retention');
     expect(panel?.textContent ?? '').toContain(
       'No retention run recorded yet.',
     );
@@ -320,17 +320,28 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
   });
 
   it('advances child ages without new events and releases the coarse interval on destroy', () => {
-    jest.useFakeTimers({
-      doNotFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'],
-    }).setSystemTime(1_700_000_000_000);
+    jest
+      .useFakeTimers({
+        doNotFake: [
+          'setTimeout',
+          'clearTimeout',
+          'requestAnimationFrame',
+          'cancelAnimationFrame',
+        ],
+      })
+      .setSystemTime(1_700_000_000_000);
     TestBed.overrideProvider(WallClockService, {
       useFactory: () => new WallClockService(),
       deps: [],
     });
     const setIntervalSpy = jest.spyOn(globalThis, 'setInterval');
     const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
-    recentEvents.set([{ kind: 'curator-error', timestamp: Date.now() - 30_000 }]);
-    const fixture = TestBed.createComponent(MemoryDiagnosticsAccordionComponent);
+    recentEvents.set([
+      { kind: 'curator-error', timestamp: Date.now() - 30_000 },
+    ]);
+    const fixture = TestBed.createComponent(
+      MemoryDiagnosticsAccordionComponent,
+    );
 
     try {
       fixture.detectChanges();
@@ -347,13 +358,19 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
       ).componentInstance as StorageHealthPanelComponent;
       expect(feed.now()).toBe(Date.now());
       expect(panel.now()).toBe(Date.now());
-      expect((fixture.nativeElement as HTMLElement).querySelector('ptah-event-feed')?.textContent).toContain('30s ago');
+      expect(
+        (fixture.nativeElement as HTMLElement).querySelector('ptah-event-feed')
+          ?.textContent,
+      ).toContain('30s ago');
 
       jest.advanceTimersByTime(WALL_CLOCK_COARSE_MS);
       fixture.detectChanges();
       expect(feed.now()).toBe(Date.now());
       expect(panel.now()).toBe(Date.now());
-      expect((fixture.nativeElement as HTMLElement).querySelector('ptah-event-feed')?.textContent).toContain('1m ago');
+      expect(
+        (fixture.nativeElement as HTMLElement).querySelector('ptah-event-feed')
+          ?.textContent,
+      ).toContain('1m ago');
       expect(recentEvents()).toHaveLength(1);
 
       fixture.destroy();
@@ -778,9 +795,7 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
     });
 
     it('reports learned and merged counts for a ran pass', () => {
-      lastManualRun.set(
-        manualRun({ created: 3, merged: 2, extracted: 6 }),
-      );
+      lastManualRun.set(manualRun({ created: 3, merged: 2, extracted: 6 }));
       const status = statusOf(render());
       expect(status?.getAttribute('role')).toBe('status');
       expect(textOf(status)).toBe(
@@ -800,7 +815,8 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
         manualRun({
           outcome: 'stalled',
           reason: 'provider-cooling-down',
-          error: "The curator's provider is rate-limited, so this pass did not run.",
+          error:
+            "The curator's provider is rate-limited, so this pass did not run.",
         }),
       );
       const status = statusOf(render());
@@ -847,14 +863,19 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
           created: 0,
         },
       });
-      expect(textOf(render().querySelector('[data-testid="last-curator-run"]'))).toBe(
-        'Failed · The curator run failed. See the logs for details.',
-      );
-      lastRun.set({ at: AT, stats: { outcome: 'ran', created: 1, merged: 0, extracted: 2 } });
       expect(
         textOf(render().querySelector('[data-testid="last-curator-run"]')),
       ).toBe(
-        `Learned 1 new, merged 0 (extracted 2) · ${formatDate(AT, 'short', 'en-US').replace(/\s+/g, ' ')}`,
+        'Last run: Failed · The curator run failed. See the logs for details.',
+      );
+      lastRun.set({
+        at: AT,
+        stats: { outcome: 'ran', created: 1, merged: 0, extracted: 2 },
+      });
+      expect(
+        textOf(render().querySelector('[data-testid="last-curator-run"]')),
+      ).toBe(
+        `Last run: Learned 1 new, merged 0 (extracted 2) · ${formatDate(AT, 'short', 'en-US').replace(/\s+/g, ' ')}`,
       );
     });
 
@@ -911,7 +932,9 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
         },
       ]);
       const root = render();
-      expect(root.querySelector('[data-testid="curator-error"]')).not.toBeNull();
+      expect(
+        root.querySelector('[data-testid="curator-error"]'),
+      ).not.toBeNull();
       expect(
         root.querySelector('[data-testid="curator-error-open-settings"]'),
       ).toBeNull();
@@ -922,7 +945,9 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
         { kind: 'curator-error', timestamp: AT - 5_000, error: 'old' },
         { kind: 'curator-run', timestamp: AT - 1_000 },
       ]);
-      expect(render().querySelector('[data-testid="curator-error"]')).toBeNull();
+      expect(
+        render().querySelector('[data-testid="curator-error"]'),
+      ).toBeNull();
     });
 
     it('renders the how-it-works text verbatim', () => {

@@ -43,6 +43,18 @@ describe('MemoryRpcService', () => {
     error,
   });
 
+  it.each([
+    ['success', true],
+    ['failure', false],
+  ])('graph() %s', async (_name, succeeds) => {
+    const payload = { nodes: [], edges: [], totalMatching: 0, capped: false, semanticAvailable: true, edgeCap: 900 };
+    rpcCall.mockResolvedValue(succeeds ? okResult(payload) : errResult('graph failed'));
+    const params = { scope: 'all' as const, minSimilarity: 0.5 };
+    if (succeeds) expect(await service.graph(params)).toEqual(payload);
+    else await expect(service.graph(params)).rejects.toThrow('graph failed');
+    expect(rpcCall).toHaveBeenCalledWith('memory:graph', params, { timeout: 15_000 });
+  });
+
   it('list() calls memory:list with workspaceRoot null by default and returns data', async () => {
     const payload = { items: [], total: 0 };
     rpcCall.mockResolvedValue(okResult(payload));

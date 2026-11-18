@@ -14,3 +14,4 @@ export {
   VecEmbedderRecoveryService,
   type RecoveryToast,
 } from './lib/services/vec-embedder-recovery.service';
+export { MemoryGraphViewComponent } from './lib/components/graph/memory-graph-view.component';

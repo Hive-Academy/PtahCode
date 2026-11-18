@@ -107,10 +107,15 @@ const RUN_TONE: Record<MemoryRetentionRunDto['outcome'], NativeCardTone> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NativeCardComponent, PtahBadgeDirective],
   template: `
-    <section class="flex flex-col gap-[var(--ptah-gap-heading)]" aria-label="Storage and retention">
-      <header class="flex items-center justify-between gap-[var(--ptah-gap-controls)]">
-        <h3 class="text-sm font-semibold text-base-content">
-          Storage and Retention
+    <section
+      class="flex flex-col gap-[var(--ptah-gap-heading)]"
+      aria-label="Storage and retention"
+    >
+      <header
+        class="flex items-center justify-between gap-[var(--ptah-gap-controls)]"
+      >
+        <h3 class="text-base font-semibold text-base-content">
+          Storage and retention
         </h3>
         @if (vm(); as v) {
           <span
@@ -382,12 +387,14 @@ export class StorageHealthPanelComponent {
       quarantineLedgerRowsText: formatCount(
         s.observations.quarantineLedgerRows,
       ),
-      processedRowsText: s.observations.processedRows === null
-        ? 'Not measured'
-        : formatCount(s.observations.processedRows),
-      processedBytesText: s.observations.processedBytesEstimate === null
-        ? 'Not measured'
-        : formatBytes(s.observations.processedBytesEstimate),
+      processedRowsText:
+        s.observations.processedRows === null
+          ? 'Not measured'
+          : formatCount(s.observations.processedRows),
+      processedBytesText:
+        s.observations.processedBytesEstimate === null
+          ? 'Not measured'
+          : formatBytes(s.observations.processedBytesEstimate),
       retentionEnabled: s.retention.enabled,
       processedDaysText: formatCount(s.retention.processedDays),
       stuckDaysText: formatCount(s.retention.stuckDays),

@@ -11,7 +11,8 @@ import {
   PtahButtonDirective,
   PtahFieldComponent,
   PtahInputDirective,
-  PtahSelectDirective,
+  PtahRichSelectComponent,
+  type PtahSelectOption,
 } from '@ptah-extension/ui';
 
 export type MemoryPurgeMode = 'substring' | 'like';
@@ -29,7 +30,7 @@ export interface MemoryPurgeRequest {
     PtahButtonDirective,
     PtahFieldComponent,
     PtahInputDirective,
-    PtahSelectDirective,
+    PtahRichSelectComponent,
     CommonModule,
   ],
   template: `
@@ -44,7 +45,11 @@ export interface MemoryPurgeRequest {
         class="mt-[var(--ptah-gap-group)] flex flex-col gap-[var(--ptah-gap-field)] md:flex-row md:items-end"
         aria-label="Purge memory entries by subject pattern"
       >
-        <ptah-field label="Purge by subject pattern" hint="Match memory subjects in this workspace" class="flex-1">
+        <ptah-field
+          label="Purge by subject pattern"
+          hint="Match memory subjects in this workspace"
+          class="flex-1"
+        >
           <input
             ptahInput
             size="md"
@@ -59,20 +64,14 @@ export interface MemoryPurgeRequest {
           />
         </ptah-field>
         <ptah-field label="Mode" hint="Substring or SQL LIKE pattern">
-          <select
-            ptahSelect
-            size="md"
+          <ptah-select
             id="memory-purge-mode"
-            [value]="mode()"
-            (change)="onModeChange($event)"
-            [disabled]="purging()"
             aria-label="Pattern match mode"
-          >
-            <option value="substring" [selected]="mode() === 'substring'">
-              substring
-            </option>
-            <option value="like" [selected]="mode() === 'like'">like</option>
-          </select>
+            [options]="modeOptions"
+            [value]="mode()"
+            (valueChange)="onModeChange($event)"
+            [disabled]="purging()"
+          />
         </ptah-field>
         <button
           type="button"
@@ -144,6 +143,11 @@ export class MemoryDangerZoneComponent {
 
   protected readonly pattern = signal<string>('');
   protected readonly mode = signal<MemoryPurgeMode>('substring');
+  protected readonly modeOptions: readonly PtahSelectOption<MemoryPurgeMode>[] =
+    [
+      { value: 'substring', label: 'substring' },
+      { value: 'like', label: 'like' },
+    ];
 
   protected readonly purgeDisabled = computed(
     () =>
@@ -162,11 +166,8 @@ export class MemoryDangerZoneComponent {
     this.inputChanged.emit();
   }
 
-  protected onModeChange(event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
-    if (value === 'substring' || value === 'like') {
-      this.mode.set(value);
-    }
+  protected onModeChange(value: MemoryPurgeMode | null): void {
+    if (value === 'substring' || value === 'like') this.mode.set(value);
     this.inputChanged.emit();
   }
 

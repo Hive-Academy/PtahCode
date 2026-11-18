@@ -54,7 +54,14 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
     <div class="flex flex-col gap-4">
       <section class="flex flex-col gap-2" aria-label="Database health">
         <header class="flex items-center justify-between gap-2">
-          <h3 class="text-sm font-semibold text-base-content">DB Health</h3>
+          <div>
+            <h3 class="text-base font-semibold text-base-content">
+              Index health
+            </h3>
+            <p class="text-sm text-base-content-muted">
+              Search index, vector engine and embedder.
+            </p>
+          </div>
           @if (health(); as h) {
             <span
               class="inline-flex items-center gap-1.5 text-xs text-base-content-muted"
@@ -175,7 +182,7 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
               </dd>
               @if (d.error?.message) {
                 <dt class="font-medium text-error">Error</dt>
-                <dd class="text-error">{{ d.error?.message }}</dd>
+                <dd class="text-error">{{ d.error.message }}</dd>
               }
             </dl>
             @if (d.errorChain && d.errorChain.length > 0) {
@@ -251,8 +258,7 @@ const VEC_REASON_COPY: Record<VecLoadDiagnosticWire['reason'], string> = {
                 ? 'ok'
                 : embedderDownloading()
                   ? 'warn'
-                  : $safeNavigationMigration(embedderStatus()?.error) !==
-                      undefined
+                  : embedderStatus()?.error !== undefined
                     ? 'err'
                     : 'neutral'
             "
@@ -453,7 +459,7 @@ export class DbHealthPanelComponent implements OnInit {
     return 'neutral';
   });
 
-  ngOnInit(): void {
+  public ngOnInit(): void {
     void this.recovery.prime();
   }
 

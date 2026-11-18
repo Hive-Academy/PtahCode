@@ -58,20 +58,16 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
     CorpusSuggestionsComponent,
   ],
   template: `
-    <div class="flex h-full w-full flex-col gap-3">
-      <ptah-corpus-suggestions
-        [suggestions]="visibleSuggestions()"
-        [loading]="suggestLoading()"
-        [busyName]="busyName()"
-        (create)="onCreateSuggestion($event)"
-        (dismiss)="onDismissSuggestion($event)"
-      />
-
-      <header class="flex flex-wrap items-center gap-2">
-        <span class="text-sm font-semibold">Knowledge corpora</span>
-        <span class="text-xs text-base-content-muted">
-          {{ corpora().length }} corpora
-        </span>
+    <section
+      class="flex h-full w-full flex-col gap-5 rounded-xl border border-surface-border bg-base-100 p-4"
+    >
+      <header class="flex flex-wrap items-start gap-3">
+        <div>
+          <h2 class="text-base font-semibold">Knowledge boards</h2>
+          <p class="text-sm text-base-content-muted">
+            Named, primeable bundles of memories. {{ corpora().length }} boards.
+          </p>
+        </div>
         <div class="ml-auto flex gap-1">
           <button
             type="button"
@@ -93,7 +89,7 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
             (click)="onOpenBuild()"
             aria-label="Open build corpus dialog"
           >
-            Build corpus
+            Build board
           </button>
         </div>
       </header>
@@ -128,22 +124,20 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
         </div>
       } @else if (corpora().length === 0) {
         <div class="flex flex-col items-center gap-2 px-6 py-12 text-center">
-          <p class="text-sm font-medium">No corpora yet</p>
+          <p class="text-sm font-medium">No boards yet</p>
           <p class="text-xs text-base-content-muted">
-            Click Build corpus to snapshot a memory filter into a named,
+            Click Build board to snapshot a memory filter into a named,
             primeable bundle.
           </p>
         </div>
       } @else {
-        <ul
-          class="divide-y divide-surface-border overflow-hidden surface-2 rounded-xl"
-        >
+        <ul class="divide-y divide-surface-border">
           @for (corpus of corpora(); track corpus.id) {
             <li
-              class="group flex flex-col gap-2 px-4 py-3 transition-colors duration-150 hover:bg-surface-3 md:flex-row md:items-center"
+              class="group flex flex-col gap-2 py-4 transition-colors duration-150 hover:bg-surface-2 md:flex-row md:items-center"
             >
               <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <div class="flex flex-col gap-0.5">
                   <span class="text-sm font-medium">{{ corpus.name }}</span>
                   <span class="text-xs text-base-content-muted">
                     {{ corpus.count }} memories · built
@@ -156,9 +150,7 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
                   }
                 </div>
               </div>
-              <div
-                class="flex shrink-0 flex-wrap gap-1 opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-              >
+              <div class="flex shrink-0 flex-wrap items-center gap-1">
                 <button
                   type="button"
                   ptahButton
@@ -209,13 +201,25 @@ export const CORPUS_CHAT_NAVIGATOR = new InjectionToken<CorpusChatNavigator>(
         </ul>
       }
 
+      @if (suggestLoading() || visibleSuggestions().length > 0) {
+        <div class="border-t border-surface-border pt-4">
+          <ptah-corpus-suggestions
+            [suggestions]="visibleSuggestions()"
+            [loading]="suggestLoading()"
+            [busyName]="busyName()"
+            (create)="onCreateSuggestion($event)"
+            (dismiss)="onDismissSuggestion($event)"
+          />
+        </div>
+      }
+
       @if (buildOpen()) {
         <ptah-corpus-build-dialog
           (submitParams)="onSubmitBuild($event)"
           (cancelDialog)="onCloseBuild()"
         />
       }
-    </div>
+    </section>
   `,
 })
 export class CorpusListComponent implements OnInit {

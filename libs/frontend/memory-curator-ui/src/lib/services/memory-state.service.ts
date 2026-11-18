@@ -70,6 +70,8 @@ export class MemoryStateService {
   private readonly _scopeFilter = signal<MemoryScopeFilter>('workspace');
   private readonly _stats = signal<MemoryStatsResult | null>(null);
   private readonly _loading = signal<boolean>(false);
+  private readonly _loadingMore = signal<boolean>(false);
+  private readonly _total = signal<number>(0);
   private readonly _error = signal<string | null>(null);
   private readonly _rebuilding = signal<boolean>(false);
   private readonly _rebuildResult = signal<MemoryRebuildOutcome | null>(null);
@@ -102,6 +104,11 @@ export class MemoryStateService {
   public readonly scopeFilter = this._scopeFilter.asReadonly();
   public readonly stats = this._stats.asReadonly();
   public readonly loading = this._loading.asReadonly();
+  public readonly loadingMore = this._loadingMore.asReadonly();
+  public readonly total = this._total.asReadonly();
+  public readonly hasMore = computed(
+    () => this._entries().length < this._total(),
+  );
   public readonly error = this._error.asReadonly();
   /** True while `memory:rebuildIndex` is in flight (separate from `loading`). */
   public readonly rebuilding = this._rebuilding.asReadonly();
@@ -200,10 +207,12 @@ export class MemoryStateService {
     const scoped = this.resolveScopedWorkspaceRoot();
     if (!scoped.ok) {
       this._entries.set([]);
+      this._total.set(0);
       this._error.set(scoped.error);
       return;
     }
     const seq = ++this.entriesReqSeq;
+    this._loadingMore.set(false);
     this._loading.set(true);
     this._error.set(null);
     try {
@@ -217,11 +226,58 @@ export class MemoryStateService {
       });
       if (seq !== this.entriesReqSeq) return;
       this._entries.set(result.memories);
+      this._total.set(result.total ?? result.memories.length);
     } catch (err) {
       if (seq !== this.entriesReqSeq) return;
       this._error.set(failureMessage('list', err));
     } finally {
       if (seq === this.entriesReqSeq) this._loading.set(false);
+    }
+  }
+
+  /** Append the next page of the current list, ignoring stale responses. */
+  public async loadMore(): Promise<void> {
+    if (
+      this._loading() ||
+      this._loadingMore() ||
+      !this.hasMore() ||
+      this._query().trim()
+    )
+      return;
+    const scoped = this.resolveScopedWorkspaceRoot();
+    if (!scoped.ok) {
+      this._error.set(scoped.error);
+      return;
+    }
+    const seq = ++this.entriesReqSeq;
+    const offset = this._entries().length;
+    this._loadingMore.set(true);
+    this._error.set(null);
+    try {
+      const tier = this._tierFilter();
+      const { workspaceRoot } = scoped;
+      const result = await this.rpcService.list({
+        ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+        ...(tier !== 'all' ? { tier } : {}),
+        limit: 200,
+        offset,
+      });
+      if (seq !== this.entriesReqSeq) return;
+      const ids = new Set(this._entries().map((entry) => entry.id));
+      this._entries.update((entries) => [
+        ...entries,
+        ...result.memories.filter((entry) => {
+          if (ids.has(entry.id)) return false;
+          ids.add(entry.id);
+          return true;
+        }),
+      ]);
+      this._total.set(result.total ?? this._entries().length);
+    } catch (err) {
+      if (seq !== this.entriesReqSeq) return;
+      this._error.set(failureMessage('list', err));
+    } finally {
+      if (seq === this.entriesReqSeq) this._loadingMore.set(false);
     }
   }
 
@@ -244,6 +300,7 @@ export class MemoryStateService {
       return;
     }
     const seq = ++this.entriesReqSeq;
+    this._loadingMore.set(false);
     this._loading.set(true);
     this._error.set(null);
     try {
@@ -254,6 +311,7 @@ export class MemoryStateService {
       );
       if (seq !== this.entriesReqSeq) return;
       this._entries.set(result.hits.map((hit) => hit.memory));
+      this._total.set(result.hits.length);
     } catch (err) {
       if (seq !== this.entriesReqSeq) return;
       this._error.set(failureMessage('search', err));
@@ -262,7 +320,7 @@ export class MemoryStateService {
     }
   }
 
-  public async pin(id: string): Promise<void> {
+  public async pin(id: string): Promise<boolean> {
     this._error.set(null);
     try {
       const res = await this.rpcService.pin(id);
@@ -271,12 +329,15 @@ export class MemoryStateService {
           list.map((m) => (m.id === id ? { ...m, pinned: res.pinned } : m)),
         );
       }
+      if (!res.success) this._error.set(memoryFailureMessage('pin'));
+      return res.success;
     } catch (err) {
       this._error.set(failureMessage('pin', err));
+      return false;
     }
   }
 
-  public async unpin(id: string): Promise<void> {
+  public async unpin(id: string): Promise<boolean> {
     this._error.set(null);
     try {
       const res = await this.rpcService.unpin(id);
@@ -285,20 +346,27 @@ export class MemoryStateService {
           list.map((m) => (m.id === id ? { ...m, pinned: res.pinned } : m)),
         );
       }
+      if (!res.success) this._error.set(memoryFailureMessage('pin'));
+      return res.success;
     } catch (err) {
       this._error.set(failureMessage('pin', err));
+      return false;
     }
   }
 
-  public async forget(id: string): Promise<void> {
+  public async forget(id: string): Promise<boolean> {
     this._error.set(null);
     try {
       const res = await this.rpcService.forget(id);
       if (res.success) {
         this._entries.update((list) => list.filter((m) => m.id !== id));
+        this._total.update((total) => Math.max(0, total - 1));
       }
+      if (!res.success) this._error.set(memoryFailureMessage('forget'));
+      return res.success;
     } catch (err) {
       this._error.set(failureMessage('forget', err));
+      return false;
     }
   }
 
