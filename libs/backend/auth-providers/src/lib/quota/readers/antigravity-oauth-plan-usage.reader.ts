@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type { PlanLimitWindow, PlanWindowKind } from '@ptah-extension/shared';
 import type { PlanUsageReading, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
 
@@ -64,8 +65,8 @@ export function antigravityFailure(
   httpStatus?: number,
 ): AntigravityUsageReading {
   const reason: UsageFailureReason = cause === 'missing-token-file' ? 'no-oauth'
-    : cause === 'invalid-grant' || cause === 'http-rejection' ? 'usage-auth-rejected'
-    : cause === 'schema-mismatch' ? 'cli-parse-failed'
+    : cause === 'invalid-grant' || (cause === 'http-rejection' && (httpStatus === 401 || httpStatus === 403)) ? 'usage-auth-rejected'
+    : cause === 'schema-mismatch' || cause === 'http-rejection' ? 'balance-unavailable'
     : cause === 'timeout' ? 'usage-budget-exhausted'
     : cause === 'missing-local-server' ? 'no-local-server'
     : cause === 'account-mismatch' ? 'account-unverified' : 'cli-unavailable';
@@ -109,9 +110,10 @@ export async function readAntigravityOAuthQuota(
   signal?: AbortSignal,
   now: () => number = Date.now,
   fetcher: typeof fetch = fetch,
-  readAuth: (path: string, encoding: 'utf8') => Promise<string> = readFile,
+  readAuth: (path: string, options: { encoding: 'utf8'; signal: AbortSignal }) => Promise<string> = readFile,
   env: NodeJS.ProcessEnv = process.env,
   retryUnauthorized = true,
+  logger?: Pick<Logger, 'debug'>,
 ): Promise<AntigravityUsageReading> {
   const failure = (cause: AntigravitySourceFailure['cause'], status?: number) =>
     antigravityFailure('provider-api', cause, status);
@@ -125,21 +127,21 @@ export async function readAntigravityOAuthQuota(
     if (controller.signal.aborted) return failure('timeout');
     const profile = env['ANTIGRAVITY_HOME']?.trim() ||
       join(env['HOME'] || env['USERPROFILE'] || homedir(), '.gemini');
-    let raw: string;
-    try {
-      raw = await bounded(readAuth(join(profile, 'antigravity-acp', 'acp_token.json'), 'utf8'));
-    } catch (error: unknown) {
-      if (controller.signal.aborted) return failure('timeout');
-      return failure(error instanceof Error && 'code' in error && error.code === 'ENOENT'
-        ? 'missing-token-file' : 'request-failed');
-    }
-    let token: z.infer<typeof TokenSchema>;
-    try { token = TokenSchema.parse(JSON.parse(raw)); }
-    catch (error: unknown) {
-      return failure(error instanceof Error ? 'schema-mismatch' : 'request-failed');
-    }
     let lastFailure = failure('schema-mismatch');
     for (let attempt = 0; attempt < (retryUnauthorized ? 2 : 1); attempt++) {
+      let raw: string;
+      try {
+        raw = await bounded(readAuth(join(profile, 'antigravity-acp', 'acp_token.json'), { encoding: 'utf8', signal: controller.signal }));
+      } catch (error: unknown) {
+        if (controller.signal.aborted) return failure('timeout');
+        return failure(error instanceof Error && 'code' in error && error.code === 'ENOENT'
+          ? 'missing-token-file' : 'request-failed');
+      }
+      let token: z.infer<typeof TokenSchema>;
+      try { token = TokenSchema.parse(JSON.parse(raw)); }
+      catch (error: unknown) {
+        return failure(error instanceof Error ? 'schema-mismatch' : 'request-failed');
+      }
       let accessToken = cachedAccess?.refreshToken === token.refresh_token &&
         cachedAccess.fetcher === fetcher ? cachedAccess : undefined;
       if (!accessToken || accessToken.expiresAt <= now()) {
@@ -150,7 +152,13 @@ export async function readAntigravityOAuthQuota(
         }));
         if (!refreshed.ok) {
           if (refreshed.status === 400) {
-            const body = await bounded(boundedJson(refreshed));
+            let body: unknown;
+            try { body = await bounded(boundedJson(refreshed)); }
+            catch (error: unknown) {
+              if (controller.signal.aborted) return failure('timeout');
+              // degradation-audit: reported — retain the known HTTP status when its body is unreadable.
+              logger?.debug('[PlanUsage] OAuth refresh error body unavailable', { cause: error instanceof SyntaxError ? 'schema-mismatch' : 'request-failed', httpStatus: 400 });
+            }
             if (z.object({ error: z.string() }).safeParse(body).data?.error === 'invalid_grant') {
               cachedAccess = undefined;
               return failure('invalid-grant', 400);
@@ -167,24 +175,31 @@ export async function readAntigravityOAuthQuota(
       let unauthorized = false;
       for (const operation of ['retrieveUserQuotaSummary', 'fetchAvailableModels'] as const) {
         for (const endpoint of ENDPOINTS) {
-          const response = await bounded(fetcher(`${endpoint}/v1internal:${operation}`, {
-            method: 'POST', headers: { Authorization: `Bearer ${accessToken.token}`,
-              'Content-Type': 'application/json' },
-            body: JSON.stringify(token.project_id ? { project: token.project_id } : {}),
-            redirect: 'error', signal: controller.signal,
-          }));
-          if (!response.ok) {
-            lastFailure = failure('http-rejection', response.status);
-            if (response.status === 401) { cachedAccess = undefined; unauthorized = true; break; }
-            continue;
+          try {
+            const observedAt = now();
+            const response = await bounded(fetcher(`${endpoint}/v1internal:${operation}`, {
+              method: 'POST', headers: { Authorization: `Bearer ${accessToken.token}`,
+                'Content-Type': 'application/json' },
+              body: JSON.stringify(token.project_id ? { project: token.project_id } : {}),
+              redirect: 'error', signal: controller.signal,
+            }));
+            if (!response.ok) {
+              lastFailure = failure('http-rejection', response.status);
+              if (response.status === 401) { cachedAccess = undefined; unauthorized = true; break; }
+              continue;
+            }
+            const body = await bounded(boundedJson(response));
+            const windows = operation === 'retrieveUserQuotaSummary'
+              ? summaryWindows(body, observedAt) : modelWindows(body, observedAt);
+            if (windows.length) return { status: 'available', fetchedAt: now(),
+              windowSetEstablished: true, windows };
+            lastFailure = failure('schema-mismatch');
+          } catch (error: unknown) {
+            if (controller.signal.aborted || (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError'))) return failure('timeout');
+            lastFailure = failure(error instanceof SyntaxError || error instanceof z.ZodError ? 'schema-mismatch' : 'request-failed');
+            // degradation-audit: reported — another endpoint may still provide quota.
+            logger?.debug('[PlanUsage] OAuth endpoint failed; trying next endpoint', { cause: lastFailure.sourceFailures?.[0]?.cause });
           }
-          const body = await bounded(boundedJson(response));
-          const observedAt = now();
-          const windows = operation === 'retrieveUserQuotaSummary'
-            ? summaryWindows(body, observedAt) : modelWindows(body, observedAt);
-          if (windows.length) return { status: 'available', fetchedAt: observedAt,
-            windowSetEstablished: true, windows };
-          lastFailure = failure('schema-mismatch');
         }
         if (unauthorized) break;
       }

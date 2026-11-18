@@ -12,3 +12,4 @@
 | 8 | Show the account email for the main Claude account too, and a masked email label on each Claude limits row (pull request 3) | User request 2026-11-18 | PR #1368 reveals the email only for named accounts |
 | 9 | This task and its branch deliver pull request 1a only. The PTY probe (1b), the Claude API pricing and spend (2) and the named-account limits with the account email (3) become separate tasks with `relatesTo` this task; their plans stay in this folder | Coordinator; reversible | The host sets a task to done when its pull request merges; one task for four pull requests would close too early |
 | 10 | Keep `antigravity-usage-json.parser.ts` and `antigravity-usage-window.ts` without a production caller | Coordinator; reversible | Re-review minor 1; part 1b parses the same usage rows |
+| 11 | The email label on each Claude limits row is masked as `a***@domain` (pull request 3) | User answer 2026-11-18 | Refines decision 8 |

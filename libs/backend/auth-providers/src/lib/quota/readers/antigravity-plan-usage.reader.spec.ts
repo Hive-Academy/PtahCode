@@ -26,6 +26,31 @@ function setup(oauth: AntigravityUsageReading = antigravityFailure('provider-api
 }
 
 describe('Antigravity source chain', () => {
+  it('does not consult the account store for the disabled CLI', async () => {
+    const readStore = jest.fn(() => owner);
+    const reader = createAntigravityPlanUsageReader(createMockLogger() as Partial<Logger> as Logger, () => 1,
+      async () => processOutput, async () => ({}), () => owner.key,
+      async () => antigravityFailure('provider-api', 'missing-token-file'), readStore);
+    const result = await reader({ target: { providerId: 'antigravity',
+      ownerRef: quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'fixture')) }, refresh: true, allowCliFallback: true });
+    expect(readStore).not.toHaveBeenCalled();
+    expect(result.statusReason).toBe('balance-unavailable');
+    expect(result.sourceFailures).toContainEqual(expect.objectContaining({ source: 'cli-command', cause: 'source-unavailable' }));
+  });
+  it('reports timeout when lsof exhausts discovery with no extension port', async () => {
+    jest.useFakeTimers();
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    try {
+      const reader = createAntigravityPlanUsageReader(createMockLogger() as Partial<Logger> as Logger, () => 1,
+        async (command) => command === 'lsof' ? new Promise<string>(() => undefined)
+          : 'P 123 /opt/antigravity/language_server --csrf_token fixture',
+        async () => ({}), () => owner.key, async () => antigravityFailure('provider-api', 'missing-token-file'));
+      const work = reader({ target, refresh: true });
+      await jest.advanceTimersByTimeAsync(3_000);
+      expect((await work).sourceFailures).toContainEqual(expect.objectContaining({ source: 'local-rpc', cause: 'timeout' }));
+    } finally { if (platform) Object.defineProperty(process, 'platform', platform); jest.useRealTimers(); }
+  });
   it('preserves both absent direct sources and explicitly disables CLI without pausing later reads', async () => {
     const { reader, readOAuth, run } = setup();
     for (let attempt = 0; attempt < 2; attempt++) {

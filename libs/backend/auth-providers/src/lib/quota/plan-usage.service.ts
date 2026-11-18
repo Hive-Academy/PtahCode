@@ -517,6 +517,7 @@ export class PlanUsageService {
         {
           ...staleFrom,
           status: 'stale',
+          ...(reading.statusReason && { statusReason: reading.statusReason }),
           ...(reading.localUsage && { localUsage: reading.localUsage }),
         },
         since,

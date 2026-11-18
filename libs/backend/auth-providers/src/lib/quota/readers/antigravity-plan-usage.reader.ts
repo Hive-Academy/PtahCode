@@ -15,7 +15,6 @@ import {
 } from '@ptah-extension/shared';
 import {
   currentAntigravityStoreOwner,
-  matchesAntigravityStoreAccount,
   observeAntigravityAccount,
 } from '../provider-owner.resolver';
 import {
@@ -76,8 +75,8 @@ export function createAntigravityPlanUsageReader(
   run: ProbeCommandRunner = defaultRun,
   requestStatus: StatusRequest = defaultRequest,
   observeAccount: (email: string | null) => string = observeAntigravityAccount,
-  readOAuth: (signal?: AbortSignal, now?: () => number) => Promise<AntigravityUsageReading | undefined> = readAntigravityOAuthQuota,
-  readStoreOwner: typeof currentAntigravityStoreOwner = currentAntigravityStoreOwner,
+  readOAuth: (signal?: AbortSignal, now?: () => number) => Promise<AntigravityUsageReading | undefined> = (signal, clock) => readAntigravityOAuthQuota(signal, clock, undefined, undefined, undefined, true, logger),
+  _readStoreOwner: typeof currentAntigravityStoreOwner = currentAntigravityStoreOwner,
 ): (request: PlanUsageReadRequest) => Promise<AntigravityUsageReading> {
   return async (request) => {
     const { target } = request;
@@ -118,10 +117,6 @@ export function createAntigravityPlanUsageReader(
         if (!stage.allowCliFallback) return sourceFailure('cli-command', 'source-not-applicable');
         if (!['cli-store', 'unknown', 'account'].includes(target.ownerRef.identityKind))
           return sourceFailure('cli-command', 'source-not-applicable');
-        const storeOwner = readStoreOwner();
-        if (target.ownerRef.identityKind === 'account' &&
-          !matchesAntigravityStoreAccount(target.ownerRef, storeOwner))
-          return record(antigravityFailure('cli-command', 'account-mismatch'), 'cli-command');
         return record(antigravityFailure('cli-command', 'source-unavailable'), 'cli-command');
       } },
     ];
@@ -150,6 +145,10 @@ export function createAntigravityPlanUsageReader(
     const timeout = setTimeout(abort, probeBudget);
     try {
       const server = await discoverServer(run, controller.signal);
+      if (controller.signal.aborted) {
+        observeAccount(null);
+        return antigravityFailure('local-rpc', 'timeout');
+      }
       if (!server) {
         observeAccount(null);
         return antigravityFailure('local-rpc', 'missing-local-server');

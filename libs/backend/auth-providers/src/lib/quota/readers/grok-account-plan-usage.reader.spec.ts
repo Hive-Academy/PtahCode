@@ -326,6 +326,15 @@ describe('Grok account plan reader', () => {
 
 describe('Grok direct reader rejection diagnostics', () => {
   it.each([
+    [new TypeError('body disconnected'), 'cli-unavailable'],
+    [Object.assign(new Error('body timed out'), { name: 'TimeoutError' }), 'cli-timeout'],
+  ])('classifies body read failure %s as %s', async (error, reason) => {
+    const response = new Response('{}');
+    jest.spyOn(response, 'json').mockRejectedValue(error);
+    const result = await createGrokAccountPlanUsageReader(() => 1, async () => response, auth as never, {})(request);
+    expect(result.statusReason).toBe(reason);
+  });
+  it.each([
     [401, 'balance-auth-rejected'],
     [403, 'balance-auth-rejected'],
     [402, 'balance-unavailable'],
@@ -417,7 +426,7 @@ describe('Grok direct reader rejection diagnostics', () => {
         {},
         logger,
       )(request);
-      expect(result.statusReason).toBe('cli-parse-failed');
+      expect(result.statusReason).toBe('balance-unavailable');
       expect(logger.debug).toHaveBeenCalled();
     },
   );

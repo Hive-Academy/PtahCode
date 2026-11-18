@@ -17,8 +17,9 @@ describe('Antigravity OAuth quota', () => {
   it.each([
     [400, { error: 'invalid_grant' }, 'invalid-grant', 'usage-auth-rejected'],
     [403, {}, 'http-rejection', 'usage-auth-rejected'],
-    [429, {}, 'http-rejection', 'usage-auth-rejected'],
-    [200, { invalid: true }, 'schema-mismatch', 'cli-parse-failed'],
+    [429, {}, 'http-rejection', 'balance-unavailable'],
+    [503, {}, 'http-rejection', 'balance-unavailable'],
+    [200, { invalid: true }, 'schema-mismatch', 'balance-unavailable'],
   ])('preserves refresh failure %s %s', async (status, body, cause, statusReason) => {
     const fetcher = jest.fn(async () => json(body, status));
     const result = await readAntigravityOAuthQuota(undefined, Date.now, fetcher, token, {});
@@ -28,7 +29,7 @@ describe('Antigravity OAuth quota', () => {
   it.each([401, 403, 503])('preserves quota HTTP status %i', async (status) => {
     const fetcher: typeof fetch = jest.fn(async (url) => String(url).endsWith('/token') ? json(access) : json({}, status));
     const result = await readAntigravityOAuthQuota(undefined, Date.now, fetcher, token, {});
-    expect(result.sourceFailures).toEqual([{ source: 'provider-api', reason: 'usage-auth-rejected',
+    expect(result.sourceFailures).toEqual([{ source: 'provider-api', reason: status === 503 ? 'balance-unavailable' : 'usage-auth-rejected',
       cause: 'http-rejection', httpStatus: status }]);
   });
   it('maps a valid OAuth response into complete windows and reuses the token', async () => {
@@ -185,11 +186,90 @@ describe('restored OAuth coverage', () => {
 });
 
 describe('OAuth payload variants', () => {
+  it('uses a neutral reason for malformed OAuth credentials', async () => {
+    expect(await readAntigravityOAuthQuota(undefined, () => 1, jest.fn(), async () => '{', {}))
+      .toMatchObject({ statusReason: 'balance-unavailable', sourceFailures: [{ cause: 'schema-mismatch' }] });
+  });
+  it.each(['', '{'])('keeps HTTP 400 when the refresh error body is %s', async (body) => {
+    expect(await readAntigravityOAuthQuota(undefined, () => 1, async () => new Response(body, { status: 400 }), token, {}))
+      .toMatchObject({ sourceFailures: [{ cause: 'http-rejection', httpStatus: 400 }] });
+  });
+  it('keeps timeout when cancellation interrupts a refresh error body', async () => {
+    jest.useFakeTimers();
+    try {
+      const response = new Response('', { status: 400 });
+      jest.spyOn(response, 'text').mockImplementation(() => new Promise<string>(() => undefined));
+      const work = readAntigravityOAuthQuota(undefined, () => 1, async () => response, token, {});
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect((await work).sourceFailures?.[0]?.cause).toBe('timeout');
+    } finally { jest.useRealTimers(); }
+  });
+  it('passes cancellation to the token file read', async () => {
+    const readAuth = jest.fn(token);
+    await readAntigravityOAuthQuota(undefined, () => 1, async () => json(access, 503), readAuth, {});
+    expect(readAuth).toHaveBeenCalledWith(expect.any(String), { encoding: 'utf8', signal: expect.any(AbortSignal) });
+  });
+  it('reloads replacement credentials before the single 401 retry', async () => {
+    const readAuth = jest.fn().mockResolvedValueOnce(await token()).mockResolvedValue(JSON.stringify({
+      client_id: 'id', client_secret: 'secret', refresh_token: 'replacement',
+    }));
+    const refreshTokens: (string | null)[] = [];
+    const fetcher: typeof fetch = jest.fn(async (url, init) => {
+      if (String(url).endsWith('/token')) {
+        if (!(init?.body instanceof URLSearchParams)) throw new Error('expected refresh body');
+        refreshTokens.push(init.body.get('refresh_token'));
+        return json(access);
+      }
+      return refreshTokens.length === 1 ? json({}, 401) : json(summary);
+    });
+    expect((await readAntigravityOAuthQuota(undefined, () => 1, fetcher, readAuth, {})).status).toBe('available');
+    expect(refreshTokens).toEqual(['refresh', 'replacement']);
+    expect(readAuth).toHaveBeenCalledTimes(2);
+  });
+  it('timestamps evidence before dispatch while retaining completion time', async () => {
+    let clock = 1;
+    const fetcher: typeof fetch = jest.fn(async (url) => {
+      if (String(url).endsWith('/token')) return json(access);
+      clock = 20;
+      return json(summary);
+    });
+    const result = await readAntigravityOAuthQuota(undefined, () => clock, fetcher, token, {});
+    expect(result.windows[0]).toMatchObject({ observedAt: 1, usedObservedAt: 1 });
+    expect(result.fetchedAt).toBe(20);
+  });
+  it.each(['network', 'json', 'http'] as const)('tries the next endpoint after a %s failure', async (kind) => {
+    const fetcher = jest.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/token')) return json(access);
+      if (String(url).includes('daily-cloudcode-pa')) {
+        if (kind === 'network') throw new Error('network unavailable');
+        return kind === 'json' ? new Response('{') : json({}, 503);
+      }
+      return json(summary);
+    });
+    const result = await readAntigravityOAuthQuota(undefined, () => 1, fetcher, token, {});
+    expect(result.status).toBe('available');
+    expect(fetcher.mock.calls).toHaveLength(3);
+  });
+  it.each(['abort', 'timeout'] as const)('ends the quota stage on %s without trying another endpoint', async (kind) => {
+    jest.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const fetcher = jest.fn(async (url: string | URL | Request) => {
+        if (String(url).endsWith('/token')) return json(access);
+        if (kind === 'abort') controller.abort();
+        return new Promise<Response>(() => undefined);
+      });
+      const work = readAntigravityOAuthQuota(controller.signal, () => 1, fetcher, token, {});
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect((await work).sourceFailures?.[0]?.cause).toBe('timeout');
+      expect(fetcher.mock.calls).toHaveLength(2);
+    } finally { jest.useRealTimers(); }
+  });
   it('caps an oversized quota response after a successful token refresh', async () => {
     const fetcher = jest.fn(async (url) => String(url).endsWith('/token') ? json(access) : new Response(' '.repeat(300_000)));
     expect(await readAntigravityOAuthQuota(undefined, () => 1, fetcher, token, {}))
       .toMatchObject({ status: 'service-unavailable', windows: [], sourceFailures: [{ cause: 'request-failed' }] });
-    expect(fetcher.mock.calls).toHaveLength(2);
+    expect(fetcher.mock.calls).toHaveLength(5);
   });
   it('maps grouped summary buckets and skips disabled buckets', async () => {
     const fetcher = jest.fn(async (url) => String(url).endsWith('/token') ? json(access) : json({ groups: [{ buckets: [

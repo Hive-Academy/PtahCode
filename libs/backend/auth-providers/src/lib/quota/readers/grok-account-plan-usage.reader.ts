@@ -1,5 +1,6 @@
 /** Default grok.com login billing, separate from local session accounting. */
 import { readFile } from 'node:fs/promises';
+import { types } from 'node:util';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -178,12 +179,12 @@ export function createGrokAccountPlanUsageReader(
         try {
           payload = await response.json();
         } catch (error: unknown) {
-          if (error instanceof Error && controller.signal.aborted) throw error;
-          return reject('service-unavailable', 'cli-parse-failed');
+          if (!(error instanceof SyntaxError || (types.isNativeError(error) && error.name === 'SyntaxError')) || controller.signal.aborted) throw error;
+          return reject('service-unavailable', 'balance-unavailable');
         }
         const parsed = BillingSchema.safeParse(payload);
         if (!parsed.success)
-          return reject('service-unavailable', 'cli-parse-failed');
+          return reject('service-unavailable', 'balance-unavailable');
         const observedAt = now();
         const percent = parsed.data.config?.creditUsagePercent;
         const rawBalance = parsed.data.config?.prepaidBalance;
