@@ -32,7 +32,6 @@ export class SkillRankingCallerService {
     const timedOut = new Promise<null>((resolve) => {
       deadline = setTimeout(() => {
         expired = true;
-        // degradation-audit: reported - the caller owns deterministic fallback.
         resolve(null);
       }, DECISION_REQUEST_TIMEOUT_MS);
     });
@@ -42,7 +41,6 @@ export class SkillRankingCallerService {
         expired ||
         (opened.kind !== 'system-one' && opened.kind !== 'structured')
       ) {
-        // degradation-audit: reported - unavailable models leave ranking to the caller.
         this.logger.debug('[SkillRankingCaller] Decision model unavailable');
         return null;
       }
@@ -129,7 +127,6 @@ export class SkillRankingCallerService {
           },
         ]);
       });
-      // degradation-audit: reported - invalid answers leave each item to caller fallback.
       if (entries.length === 0) {
         this.logger.debug('[SkillRankingCaller] No valid ranking answers');
         return null;

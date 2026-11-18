@@ -71,3 +71,19 @@ The session that owned this worktree ended. The coordinator of PR #1421 took ove
   "1 task: 1 succeeded" (test), exit code 0.
 - User decisions (2026-11-18): F1 = keep the sanitized catalog descriptions. Merge = squash,
   which also removes the invalid commit scopes from `main`.
+
+## Coordinator correction (2026-11-18, 14:00 UTC)
+
+- CI of `962b1307a` failed in `checks` (and `main`, which depends on it). Two causes:
+  1. `test-report.md:98` held a home path with a user name. The user segment is now `<user>`.
+  2. The degradation audit found four orphaned `degradation-audit:` markers in
+     `skill-ranking-caller.service.ts` and `skill-ranking.service.ts`. Record:
+     `audit-marker-fix-report.md`. The markers were removed, and the scratch cleanup `catch`
+     now writes a `debug` log and carries the marker.
+- Local checks: `node scripts/check-home-paths.mjs --all` exit 0;
+  `npx ts-node --transpile-only tools/degradation-audit/check-degradation.ts` exit 0.
+- Local gate `npm run verify -- -p lane-routing,rpc-handlers`: lint and typecheck
+  "4 tasks: 4 succeeded". The first `rpc-handlers` test run failed with 128 configuration
+  errors because the worktree had no `node_modules` junction. After the junction was made,
+  `npm run verify -- -t test -p rpc-handlers` gave "1 task: 1 succeeded", exit code 0
+  (log `.ptah/tmp/gate-audit2.log`). The `lane-routing` test passed in the first run.

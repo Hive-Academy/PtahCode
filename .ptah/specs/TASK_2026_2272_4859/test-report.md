@@ -95,7 +95,7 @@ EXIT_CODE=1; SIGNAL=null
 ### `D:\projects\ptah-extension\.claude-worktrees\feat-skill-ranking-decision-model-dec49e44aa6c\.ptah\specs\TASK_2026_2272_4859\verification\queue-status.log`
 
 ```text
-lock dir: C:\Users\abdal\AppData\Local\Temp\ptah-verify-lock
+lock dir: C:\Users\<user>\AppData\Local\Temp\ptah-verify-lock
 slots: 3, free memory: 2.1 GB (a second run needs 5.0 GB)
 slot 0: pid 32732 [verify lint,typecheck (ui,chat) then verify test (ui,chat)] in D:\projects\ptah-extension\.claude-worktrees\feat-settings-advanced-page-5b3618ab7e1d since 2026-11-18T10:40:39.461Z
 slot 1: pid 35764 [verify lint,typecheck (chat,core) then verify test (chat,core)] in D:\projects\ptah-extension\.claude-worktrees\feat-settings-decision-matrix-context-d1634ac04677 since 2026-11-18T10:40:08.857Z

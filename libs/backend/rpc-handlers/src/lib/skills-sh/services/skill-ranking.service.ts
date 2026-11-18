@@ -106,7 +106,6 @@ export class SkillRankingService {
         const parsed = skillRankingItemSchema(
           item.candidates.map((candidate) => candidate.label),
         ).safeParse(envelope.data.items[key]);
-        // degradation-audit: reported - invalid or missing items alone retain heuristic provenance.
         if (parsed.success) items[key] = { ...parsed.data, rankedBy: method };
         else
           this.logger.debug(`[SkillRanking] Item ${key} kept heuristic order`, {
@@ -177,7 +176,12 @@ export class SkillRankingService {
       } finally {
         if (cwd)
           await rm(cwd, { recursive: true, force: true }).catch(
-            () => undefined,
+            (error: unknown) => {
+              // degradation-audit: reported - scratch cleanup failure must not block ranking results.
+              this.logger.debug('[SkillRanking] Scratch cleanup failed', {
+                error: String(error),
+              });
+            },
           );
       }
     }
