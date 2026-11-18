@@ -20,8 +20,8 @@
               type="button"
               variant="secondary"
               size="sm"
-              [disabled]="searching()"
-              (click)="searchRequested.emit(item.name)"
+              [attr.aria-disabled]="searching()"
+              (click)="!searching() && searchRequested.emit(item.name)"
             >
               Search for {{ item.name }}
             </button>

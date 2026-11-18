@@ -35,6 +35,14 @@ export class SkillPickCardComponent {
   public readonly highlightItem = input<string | null>(null);
   public readonly disabled = input(false);
   public readonly toggled = output<void>();
+  protected readonly visibleCoveredItems = computed(() => {
+    const items = this.coveredItems();
+    const active = this.highlightItem();
+    const first = items.slice(0, 3);
+    return active && items.includes(active) && !first.includes(active)
+      ? [...first.slice(0, 2), active]
+      : first;
+  });
   protected readonly download = Download;
   protected readonly externalLink = ExternalLink;
   protected readonly installs = computed(() =>

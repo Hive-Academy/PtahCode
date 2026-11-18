@@ -67,6 +67,7 @@ import { AnalysisStepStore } from './analysis-step.store';
           [busy]="leaving()"
           [recommendations]="state.recommendations()"
           [searchResults]="state.searchResults()"
+          [retainedSearchResults]="state.retainedSearchResults()"
           [guidanceFacts]="[]"
           [selectedIds]="state.selectedIds()"
           [loading]="state.loading()"
@@ -146,7 +147,10 @@ export class AnalyzeSkillsPage implements OnInit {
   private readonly leavingState = signal(false);
   public readonly leaving = this.leavingState.asReadonly();
   public readonly canRetry = computed(() =>
-    Boolean(this.analysis.loaded()?.manifest.runId),
+    Boolean(
+      this.analysis.loaded()?.manifest.runId &&
+      this.workspace.config().workspaceRoot,
+    ),
   );
   private readonly selectionResetState = signal(false);
   public readonly selectionReset = this.selectionResetState.asReadonly();
@@ -166,9 +170,11 @@ export class AnalyzeSkillsPage implements OnInit {
       this.summary.set(null);
       this.selectionResetState.set(false);
       this.state.reset();
+      this.loadErrorState.set(true);
       this.skillsInstalledState.set(false);
       if (!runId) this.state.setError('Choose a completed analysis first.');
       else if (root) void this.load(runId, this.version);
+      else this.state.setError('Open a workspace to find skills.');
     });
     this.destroyRef.onDestroy(() => this.version++);
   }
@@ -271,7 +277,7 @@ export class AnalyzeSkillsPage implements OnInit {
 
   public retry(): void {
     const runId = this.analysis.loaded()?.manifest.runId;
-    if (!runId || this.leaving()) return;
+    if (!runId || !this.canRetry() || this.leaving()) return;
     this.searchVersion++;
     this.state.setSearching(false);
     this.state.setSearchError(null);
@@ -288,6 +294,7 @@ export class AnalyzeSkillsPage implements OnInit {
   public async search(query: string): Promise<void> {
     const version = this.version;
     const searchVersion = ++this.searchVersion;
+    this.state.setSearchResults([]);
     this.state.setSearching(true);
     this.state.setSearchError(null);
     try {
@@ -410,11 +417,22 @@ export class AnalyzeSkillsPage implements OnInit {
     );
   }
 
+  private pendingGuidanceTab: { identity: string; tab: string } | null = null;
+
+  private guidanceIdentity(): string {
+    return `${this.identity}:${this.route.snapshot.queryParamMap.get('analysis') ?? ''}:${this.route.snapshot.queryParamMap.get('run') ?? ''}`;
+  }
+
   public async continueToGuidance(): Promise<void> {
     if (this.leaving()) return;
     this.leavingState.set(true);
+    const identity = this.guidanceIdentity();
     try {
-      const tab = this.tabs.createTab('Project guidance');
+      const tab =
+        this.pendingGuidanceTab?.identity === identity
+          ? this.pendingGuidanceTab.tab
+          : this.tabs.createTab('Project guidance');
+      this.pendingGuidanceTab = { identity, tab };
       this.tabs.setWorkflow(tab, 'setup-project-prompt');
       const navigated = await this.router.navigate(
         ['/onboarding/analyze/guidance'],
@@ -427,7 +445,7 @@ export class AnalyzeSkillsPage implements OnInit {
       );
       if (!navigated) throw new Error('Navigation cancelled');
     } catch {
-      if (!this.destroyRef.destroyed) {
+      if (!this.destroyRef.destroyed && identity === this.guidanceIdentity()) {
         this.loadErrorState.set(false);
         this.state.setError(
           this.skillsInstalled()

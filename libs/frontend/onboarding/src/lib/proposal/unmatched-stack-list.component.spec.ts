@@ -32,7 +32,19 @@ describe('UnmatchedStackListComponent', () => {
     expect(emitted).toHaveBeenCalledWith('framework');
     fixture.componentRef.setInput('searching', true);
     fixture.detectChanges();
-    expect(search.every((button) => button.disabled)).toBe(true);
+    expect(
+      search.every(
+        (button) =>
+          !button.disabled && button.getAttribute('aria-disabled') === 'true',
+      ),
+    ).toBe(true);
+    emitted.mockClear();
+    search[0]?.focus();
+    search[0]?.click();
+    expect(emitted).not.toHaveBeenCalled();
+    fixture.componentRef.setInput('searching', false);
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(search[0]);
   });
   it('hides the section when no unmatched items exist', () => {
     const fixture = TestBed.createComponent(UnmatchedStackListComponent);

@@ -84,4 +84,17 @@ describe('SkillPickCardComponent', () => {
     expect(root.querySelector('img')).toBeNull();
     expect(root.textContent).toContain('<img src=x>');
   });
+  it('includes the active fourth badge while retaining the first two', () => {
+    const { fixture, root } = setup();
+    fixture.componentRef.setInput('coveredItems', ['A', 'B', 'C', 'D']);
+    fixture.componentRef.setInput('highlightItem', 'D');
+    fixture.detectChanges();
+    expect(root.querySelector('[data-tone="accent"]')?.textContent).toContain(
+      'D',
+    );
+    expect(root.textContent).toContain('+1');
+    fixture.componentRef.setInput('highlightItem', null);
+    fixture.detectChanges();
+    expect(root.querySelector('[data-tone="accent"]')).toBeNull();
+  });
 });

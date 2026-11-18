@@ -179,7 +179,7 @@ describe('StackSkillReviewComponent coverage board', () => {
     fixture.detectChanges();
     expect(
       panel?.querySelector('[data-coverage-count]')?.textContent,
-    ).toContain('2 of 2 stack items covered');
+    ).toContain('1 of 2 stack items covered');
     fixture.componentRef.setInput('detectedItems', []);
     fixture.detectChanges();
     expect(root.querySelector('ptah-stack-coverage-strip')).toBeNull();
@@ -352,5 +352,36 @@ describe('StackSkillReviewComponent coverage board', () => {
         .querySelector('input[name="skill-search"]')
         ?.getAttribute('placeholder'),
     ).toBe('Search the skill registry');
+  });
+  it('announces empty current matches while retaining selected names in the rail', () => {
+    const { fixture, root } = setup();
+    fixture.componentRef.setInput('retainedSearchResults', [
+      {
+        source: 'owner/repo',
+        skillId: 'eslint',
+        name: 'ESLint',
+        description: '',
+        installs: 0,
+        isInstalled: false,
+      },
+    ]);
+    fixture.componentRef.setInput(
+      'selectedIds',
+      new Set(['owner/repo/eslint']),
+    );
+    fixture.componentRef.setInput('query', 'pytest');
+    fixture.componentInstance.submitSearch(new Event('submit'));
+    fixture.detectChanges();
+    expect(
+      root.querySelector('[aria-label="Search results skills"]')?.textContent,
+    ).not.toContain('ESLint');
+    expect(
+      [...root.querySelectorAll('[role="status"]')].some((item) =>
+        item.textContent?.includes('No other skills found for "pytest"'),
+      ),
+    ).toBe(true);
+    expect(
+      root.querySelector('ptah-skill-selection-rail')?.textContent,
+    ).toContain('ESLint');
   });
 });

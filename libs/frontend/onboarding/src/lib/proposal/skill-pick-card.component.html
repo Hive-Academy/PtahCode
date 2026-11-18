@@ -53,7 +53,7 @@
           ><span class="text-xs font-medium text-base-content-muted"
             >Covers</span
           >
-          @for (item of coveredItems().slice(0, 3); track item) {
+          @for (item of visibleCoveredItems(); track item) {
             <span
               ptahBadge
               [tone]="item === highlightItem() ? 'accent' : 'neutral'"

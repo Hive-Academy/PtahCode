@@ -1,4 +1,8 @@
 import {
+  afterNextRender,
+  ElementRef,
+  Injector,
+  viewChild,
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
@@ -10,7 +14,7 @@ import {
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Users } from 'lucide-angular';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import type { DeepProjectAnalysis } from '@ptah-extension/shared';
 import {
   AttachmentTrayComponent,
@@ -55,10 +59,14 @@ export class TeamBuilderStartPage {
   protected readonly launcher = inject(HarnessChatLauncherService);
   private readonly router = inject(Router);
   private readonly rpc = inject(ClaudeRpcService);
+  private readonly logger = inject(LoggingService);
   private readonly destroyRef = inject(DestroyRef);
   public readonly state = inject(StackSkillStore);
   /** Cancels a pending launch when the user leaves this page. */
   private launch: AbortController | null = null;
+  private readonly injector = inject(Injector);
+  private readonly recoveryContinue =
+    viewChild<ElementRef<HTMLButtonElement>>('recoveryContinue');
   public readonly intent = this.state.intent;
   public readonly touched = signal(false);
   public readonly submitted = signal(false);
@@ -263,6 +271,7 @@ export class TeamBuilderStartPage {
       this.state.setSearching(false);
       return;
     }
+    this.state.setSearchResults([]);
     this.state.setSearching(true);
     const root = this.launcher.workspaceRoot();
     this.searchTimer = setTimeout(async () => {
@@ -440,6 +449,12 @@ export class TeamBuilderStartPage {
     this.state.setError(null);
     const launch = new AbortController();
     this.launch = launch;
+    const root = this.launcher.workspaceRoot();
+    const isActive = (): boolean =>
+      this.launch === launch &&
+      !launch.signal.aborted &&
+      !this.destroyRef.destroyed &&
+      root === this.launcher.workspaceRoot();
     const snapshot = this.attachments.snapshotForSend();
     try {
       const ownerDecision = this.state.ownerDecision();
@@ -449,13 +464,23 @@ export class TeamBuilderStartPage {
             analysis: this.guidanceAnalysis,
             ownerDecision,
           });
-          if (!recorded.isSuccess() || !recorded.data.recordPath)
+          if (
+            isActive() &&
+            (!recorded.isSuccess() || !recorded.data.recordPath)
+          )
             this.state.setGuidanceNote('Guidance record was not written.');
-        } catch {
-          this.state.setGuidanceNote('Guidance record was not written.');
+        } catch (error: unknown) {
+          // degradation-audit: reported - optional guidance persistence failure is shown for the active launch.
+          this.logger.debug(
+            'TeamBuilderStartPage',
+            'Guidance record was not written.',
+            { error: error instanceof Error ? error.message : String(error) },
+          );
+          if (isActive())
+            this.state.setGuidanceNote('Guidance record was not written.');
         }
       }
-      if (launch.signal.aborted || this.destroyRef.destroyed) return;
+      if (!isActive()) return;
       await this.launcher.launchTeamBuilder(
         teamBuilderGuidanceBrief(
           this.intent().trim(),
@@ -467,18 +492,22 @@ export class TeamBuilderStartPage {
           signal: launch.signal,
         },
       );
-      if (this.launch === launch && !this.destroyRef.destroyed)
-        this.launched.set(true);
-    } catch (cause) {
+      if (isActive()) this.launched.set(true);
+    } catch (cause: unknown) {
       // degradation-audit: optional-capability - Back cancels this launch without an error.
       if (cause instanceof HarnessChatLaunchCancelledError) return;
-      if (this.launch === launch && !this.destroyRef.destroyed) {
+      if (isActive()) {
         this.state.setError(
           this.skillsInstalled()
             ? 'Skills are installed. Could not start the team builder. Try again.'
             : 'Could not start the team builder. Try again.',
         );
         this.state.setStage('review');
+        if (this.skillsInstalled())
+          afterNextRender(
+            () => this.recoveryContinue()?.nativeElement.focus(),
+            { injector: this.injector },
+          );
       }
     } finally {
       if (this.launch === launch) this.launch = null;

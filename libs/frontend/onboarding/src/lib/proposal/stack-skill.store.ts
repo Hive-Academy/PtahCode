@@ -30,6 +30,9 @@ export class StackSkillStore {
   public readonly recommendations = this.recommendationsState.asReadonly();
   private readonly searchResultsState = signal<SkillShEntry[]>([]);
   public readonly searchResults = this.searchResultsState.asReadonly();
+  private readonly retainedSearchResultsState = signal<SkillShEntry[]>([]);
+  public readonly retainedSearchResults =
+    this.retainedSearchResultsState.asReadonly();
   private readonly searchQueryState = signal('');
   public readonly searchQuery = this.searchQueryState.asReadonly();
   private readonly searchingState = signal(false);
@@ -89,17 +92,18 @@ export class StackSkillStore {
   }
 
   public setSearchResults(value: SkillShEntry[]): void {
-    const retained = this.searchResults().filter((skill) =>
+    const retained = [
+      ...this.retainedSearchResults(),
+      ...this.searchResults(),
+    ].filter((skill) =>
       this.selectedIds().has(`${skill.source}/${skill.skillId}`),
     );
-    this.searchResultsState.set([
+    this.retainedSearchResultsState.set([
       ...new Map(
-        [...retained, ...value].map((skill) => [
-          `${skill.source}/${skill.skillId}`,
-          skill,
-        ]),
+        retained.map((skill) => [`${skill.source}/${skill.skillId}`, skill]),
       ).values(),
     ]);
+    this.searchResultsState.set(value);
   }
 
   public setSearchQuery(value: string): void {
@@ -151,6 +155,7 @@ export class StackSkillStore {
     this.errorState.set(null);
     this.recommendationsState.set([]);
     this.searchResultsState.set([]);
+    this.retainedSearchResultsState.set([]);
     this.searchQueryState.set('');
     this.searchingState.set(false);
     this.searchErrorState.set(null);

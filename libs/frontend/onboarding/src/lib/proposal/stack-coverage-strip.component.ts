@@ -1,4 +1,8 @@
 import {
+  afterNextRender,
+  ElementRef,
+  Injector,
+  inject,
   ChangeDetectionStrategy,
   Component,
   computed,
@@ -26,7 +30,7 @@ export class StackCoverageStripComponent {
   public readonly loading = input(false);
   public readonly filterChanged = output<string | null>();
   protected readonly coveredCount = computed(
-    () => this.items().filter((item) => item.selectedCount > 0).length,
+    () => this.items().filter((item) => item.state === 'covered').length,
   );
   private readonly expandedState = signal(false);
   protected readonly expanded = this.expandedState.asReadonly();
@@ -35,7 +39,21 @@ export class StackCoverageStripComponent {
       ? this.items()
       : this.items().slice(0, 11),
   );
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
   protected expand(): void {
+    const firstNew = this.items()[11];
+    afterNextRender(
+      () => {
+        if (firstNew)
+          this.host.nativeElement
+            .querySelector<HTMLButtonElement>(
+              `button[aria-describedby="${this.descriptionId(firstNew)}"]`,
+            )
+            ?.focus();
+      },
+      { injector: this.injector },
+    );
     this.expandedState.set(true);
   }
   protected readonly skeletons = [1, 2, 3, 4, 5, 6];

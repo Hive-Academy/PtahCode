@@ -77,6 +77,10 @@ describe('StackCoverageStripComponent', () => {
     fixture.detectChanges();
     expect(root.querySelectorAll('button[aria-label]')).toHaveLength(14);
     expect(root.textContent).not.toContain('+3 more');
+    TestBed.tick();
+    expect(document.activeElement?.getAttribute('aria-label')).toContain(
+      'Framework 11',
+    );
   });
   it('distinguishes filter keys for equal names of different kinds', () => {
     const fixture = TestBed.createComponent(StackCoverageStripComponent);
@@ -110,5 +114,22 @@ describe('StackCoverageStripComponent', () => {
     expect(chips[1]?.getAttribute('aria-pressed')).toBe('false');
     chips[1]?.click();
     expect(changed).toHaveBeenCalledWith('library:TypeScript');
+  });
+  it('excludes selected matches with failed searches from the covered count', () => {
+    const fixture = TestBed.createComponent(StackCoverageStripComponent);
+    fixture.componentRef.setInput('items', [
+      {
+        name: 'Jest',
+        kind: 'framework',
+        evidence: '',
+        state: 'failed',
+        selectedCount: 1,
+        totalCount: 1,
+      },
+    ]);
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      '0 of 1 stack items covered',
+    );
   });
 });

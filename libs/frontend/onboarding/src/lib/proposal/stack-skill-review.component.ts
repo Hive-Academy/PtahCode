@@ -59,6 +59,7 @@ import { buildStackCoverage, splitStackEvidence } from './stack-coverage';
 export class StackSkillReviewComponent {
   public readonly recommendations = input.required<SkillRecommendation[]>();
   public readonly searchResults = input.required<SkillShEntry[]>();
+  public readonly retainedSearchResults = input<SkillShEntry[]>([]);
   public readonly guidanceFacts = input.required<ProjectGuidance[]>();
   public readonly ownerDecisionPrompt = input('');
   public readonly decisionRequired = input(false);
@@ -137,7 +138,7 @@ export class StackSkillReviewComponent {
     ),
   );
   protected readonly coveredCount = computed(
-    () => this.coverage().filter((item) => item.selectedCount > 0).length,
+    () => this.coverage().filter((item) => item.state === 'covered').length,
   );
   protected readonly filteredRecommendations = computed(() =>
     [...this.recommendations()]
@@ -159,6 +160,7 @@ export class StackSkillReviewComponent {
     const skills = new Map(
       [
         ...this.recommendations().map((row) => row.skill),
+        ...this.retainedSearchResults(),
         ...this.searchResults(),
       ].map((skill) => [this.key(skill), skill]),
     );
@@ -188,6 +190,7 @@ export class StackSkillReviewComponent {
     this.searchInput()?.nativeElement.focus();
   }
   protected searchItem(name: string): void {
+    if (this.searching()) return;
     this.queryChange.emit(name);
     this.submittedQueryState.set(name);
     this.searchRequested.emit(name);

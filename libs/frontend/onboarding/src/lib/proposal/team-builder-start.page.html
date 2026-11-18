@@ -100,7 +100,13 @@
     <button ptahButton variant="ghost" type="button" (click)="backToIntent()">
       Back
     </button>
-    <button ptahButton variant="primary" type="button" (click)="launchChat()">
+    <button
+      #recoveryContinue
+      ptahButton
+      variant="primary"
+      type="button"
+      (click)="launchChat()"
+    >
       Continue to team builder
     </button>
     } @else { @if (state.stage() === 'installing') {
@@ -110,6 +116,7 @@
       <ptah-stack-skill-review
         [recommendations]="state.recommendations()"
         [searchResults]="state.searchResults()"
+        [retainedSearchResults]="state.retainedSearchResults()"
         [guidanceFacts]="state.guidanceFacts()"
         [ownerDecisionPrompt]="state.ownerDecisionPrompt()"
         [decisionRequired]="ownerDecisionRequired()"

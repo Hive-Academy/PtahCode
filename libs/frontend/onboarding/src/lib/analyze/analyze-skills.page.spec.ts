@@ -413,7 +413,7 @@ describe('AnalyzeSkillsPage', () => {
     fixture.detectChanges();
     expect(element.textContent).not.toContain('Skill selection was reset');
   });
-  it('keeps selected search cards visible and removable after a new search and Clear in bar layout', async () => {
+  it('keeps selected metadata editable in the compact disclosure across searches and Clear', async () => {
     const fixture = TestBed.createComponent(AnalyzeSkillsPage);
     fixture.detectChanges();
     await fixture.whenStable();
@@ -441,23 +441,26 @@ describe('AnalyzeSkillsPage', () => {
     );
     const selection = rail.injector.get(SkillSelectionRailComponent);
     jest.spyOn(selection, 'responsive').mockReturnValue(false);
-    jest.spyOn(selection, 'layout').mockReturnValue('bar');
+    jest.spyOn(selection, 'layout').mockReturnValue('rail');
     rail.injector.get(ChangeDetectorRef).markForCheck();
     fixture.detectChanges();
-    expect(root.querySelector('[data-selected-list]')).toBeNull();
+    expect(root.querySelector('[data-selected-list]')?.textContent).toContain(
+      'First search skill',
+    );
     expect(
       root.querySelector('[aria-label="Search results skills"]')?.textContent,
-    ).toContain('First search skill');
-    expect(root.textContent?.replace(/\s+/g, ' ')).toContain('1 of 2 selected');
+    ).not.toContain('First search skill');
     page.clearSearch();
     fixture.detectChanges();
     expect(
-      root.querySelector('[aria-label="Search results skills"]')?.textContent,
-    ).toContain('First search skill');
-    expect(root.textContent?.replace(/\s+/g, ' ')).toContain('1 of 1 selected');
+      root.querySelector('[aria-label="Search results skills"]'),
+    ).toBeNull();
+    expect(root.querySelector('[data-selected-list]')?.textContent).toContain(
+      'First search skill',
+    );
     root
-      .querySelector<HTMLInputElement>(
-        '[aria-label="Search results skills"] input[type="checkbox"]',
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Remove First search skill"]',
       )
       ?.click();
     expect(page.state.selectedIds().size).toBe(0);
@@ -621,5 +624,76 @@ describe('AnalyzeSkillsPage', () => {
     expect('set' in state.searchResults).toBe(false);
     state.setIntent('A team');
     expect(state.intent()).toBe('A team');
+  });
+  it('requires a workspace and loads automatically when one becomes available', async () => {
+    root.set({ workspaceRoot: '' });
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.canRetry()).toBe(false);
+    expect(fixture.componentInstance.state.error()).toBe(
+      'Open a workspace to find skills.',
+    );
+    fixture.componentInstance.retry();
+    expect(call).not.toHaveBeenCalled();
+    root.set({ workspaceRoot: '/ws' });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(call).toHaveBeenCalledWith(
+      'wizard:recommend-analysis-skills',
+      { runId: 'run-1' },
+      { timeout: 75000 },
+    );
+  });
+  it('clears old matches on failed searches and retains selected metadata separately', async () => {
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const page = fixture.componentInstance;
+    const skill: SkillShEntry = {
+      source: 'owner/repo',
+      skillId: 'eslint',
+      name: 'ESLint',
+      description: '',
+      installs: 0,
+      isInstalled: false,
+    };
+    page.state.setSearchResults([skill]);
+    page.state.toggle('owner/repo/eslint');
+    call.mockRejectedValueOnce(new Error('offline'));
+    await page.search('pytest');
+    expect(page.state.searchResults()).toEqual([]);
+    expect(page.state.retainedSearchResults()).toEqual([skill]);
+    page.state.toggle('owner/repo/eslint');
+    page.state.setSearchResults([]);
+    expect(page.state.retainedSearchResults()).toEqual([]);
+  });
+  it('reuses a guidance tab after navigation fails and ignores stale failures', async () => {
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const router = TestBed.inject(Router);
+    const tabs = TestBed.inject(TabManagerService);
+    jest.spyOn(tabs, 'createTab').mockReturnValue('guidance-tab');
+    jest.spyOn(router, 'navigate').mockResolvedValue(false);
+    await fixture.componentInstance.continueToGuidance();
+    await fixture.componentInstance.continueToGuidance();
+    expect(tabs.createTab).toHaveBeenCalledTimes(1);
+    let finish: (value: boolean) => void = () => {
+      throw new Error('navigation not started');
+    };
+    jest.spyOn(router, 'navigate').mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = fixture.componentInstance.continueToGuidance();
+    loaded.set({ manifest: { runId: 'run-2' } });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    finish(false);
+    await pending;
+    expect(fixture.componentInstance.state.error()).toBeNull();
   });
 });

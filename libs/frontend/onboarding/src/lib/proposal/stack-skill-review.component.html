@@ -186,6 +186,16 @@
           </ul>
         </section>
       }
+      <p role="status" aria-live="polite" class="sr-only">
+        @if (
+          !searching() &&
+          !searchError() &&
+          !otherResults().length &&
+          submittedQuery()
+        ) {
+          No other skills found for "{{ submittedQuery() }}".
+        }
+      </p>
       <section
         aria-labelledby="recommended-title"
         class="space-y-3"

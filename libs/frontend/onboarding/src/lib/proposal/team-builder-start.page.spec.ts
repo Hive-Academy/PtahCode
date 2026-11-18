@@ -5,7 +5,7 @@ import {
   ComposerAttachmentsService,
   FilePickerService,
 } from '@ptah-extension/chat';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import {
   HarnessChatLaunchCancelledError,
   HarnessChatLauncherService,
@@ -67,6 +67,7 @@ describe('TeamBuilderStartPage', () => {
           },
         },
         { provide: Router, useValue: { navigate } },
+        { provide: LoggingService, useValue: { debug: jest.fn() } },
         ComposerAttachmentsService,
         StackSkillStore,
         {
@@ -566,5 +567,89 @@ describe('TeamBuilderStartPage', () => {
         .querySelector('[role="status"]')
         ?.textContent?.trim(),
     ).toBe('Launching chat…');
+  });
+  it.each(['response', 'throw'])(
+    'ignores stale guidance %s failures after a workspace switch',
+    async (failure) => {
+      const fixture = TestBed.createComponent(TeamBuilderStartPage);
+      fixture.detectChanges();
+      const page = fixture.componentInstance;
+      page.state.setOwnerDecision('match');
+      let finish: () => void = () => {
+        throw new Error('guidance not started');
+      };
+      call.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = () =>
+              failure === 'throw'
+                ? reject(new Error('offline'))
+                : resolve({ isSuccess: () => false });
+          }),
+      );
+      const pending = page.launchChat();
+      workspaceRoot.set('/next');
+      fixture.detectChanges();
+      finish();
+      await pending;
+      expect(page.state.guidanceNote()).toBe('');
+      expect(page.state.error()).toBeNull();
+      expect(launchTeamBuilder).not.toHaveBeenCalled();
+    },
+  );
+  it('ignores launcher failures from an aborted workspace', async () => {
+    const fixture = TestBed.createComponent(TeamBuilderStartPage);
+    fixture.detectChanges();
+    const page = fixture.componentInstance;
+    let fail: () => void = () => {
+      throw new Error('launch not started');
+    };
+    launchTeamBuilder.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = () => reject(new Error('offline'));
+        }),
+    );
+    const pending = page.launchChat();
+    workspaceRoot.set('/next');
+    fixture.detectChanges();
+    fail();
+    await pending;
+    expect(page.state.error()).toBeNull();
+    expect(page.state.stage()).toBe('intent');
+  });
+  it('focuses installed recovery after launch failure and retry failure', async () => {
+    const fixture = TestBed.createComponent(TeamBuilderStartPage);
+    fixture.detectChanges();
+    const page = fixture.componentInstance;
+    page.state.setPreview([
+      {
+        skillName: 'owner/repo/skill',
+        files: [],
+        scriptFiles: [],
+        hasScripts: false,
+        contentHash: 'hash',
+      },
+    ]);
+    call.mockResolvedValueOnce({
+      isSuccess: () => true,
+      data: { success: true, installed: ['owner/repo/skill'] },
+    });
+    launchTeamBuilder.mockRejectedValue(new Error('offline'));
+    await page.install();
+    fixture.detectChanges();
+    TestBed.tick();
+    const root = fixture.nativeElement as HTMLElement;
+    const button = [...root.querySelectorAll('button')].find((item) =>
+      item.textContent?.includes('Continue to team builder'),
+    );
+    expect(button).toBeDefined();
+    expect(document.activeElement).toBe(button);
+    await page.launchChat();
+    fixture.detectChanges();
+    TestBed.tick();
+    expect(document.activeElement?.textContent).toContain(
+      'Continue to team builder',
+    );
   });
 });

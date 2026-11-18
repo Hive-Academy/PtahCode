@@ -3,6 +3,10 @@
 }
 [data-selection-frame] {
   background: var(--surface-1);
+  overflow-y: auto;
+}
+[data-selected-list] {
+  min-height: 3rem;
 }
 :host(:not(.responsive)[data-layout='rail']) [data-selection-frame] {
   max-height: calc(var(--skill-rail-height, 100dvh) - var(--ptah-space-4));
@@ -54,10 +58,6 @@
 :host([data-layout='bar']) [data-selection-notes] > p + p {
   margin-top: var(--ptah-space-1);
 }
-:host(.responsive) [data-selection-skip],
-:host([data-layout='bar']) [data-selection-skip] {
-  order: -1;
-}
 @container skills (min-width: 960px) {
   :host(.responsive) {
     top: var(--ptah-space-6);
@@ -68,7 +68,7 @@
     gap: var(--ptah-gap-field);
     padding-block: var(--ptah-surface-pad);
     max-height: calc(var(--skill-rail-height, 100dvh) - var(--ptah-space-4));
-    overflow: hidden;
+    overflow-y: auto;
     align-items: stretch;
   }
   :host(.responsive) [data-selection-title],
@@ -89,9 +89,6 @@
   :host(.responsive) [data-selection-notes] {
     margin-top: var(--ptah-space-2);
     text-align: start;
-  }
-  :host(.responsive) [data-selection-skip] {
-    order: initial;
   }
   :host(.responsive) button {
     width: 100%;
