@@ -96,24 +96,32 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
       data-glass-surface="content"
       description="Select a score to see where it came from."
     >
+      <p
+        aside
+        class="text-xs tabular-nums text-base-content-muted"
+        data-testid="decision-matrix-result-count"
+      >
+        {{ visibleCount() }}
+        {{ visibleCount() === 1 ? 'result' : 'results' }}
+      </p>
       <div class="min-w-0 space-y-[var(--ptah-gap-controls)]">
-        <div class="grid min-w-0 gap-[var(--ptah-gap-field)]">
-          <ptah-field label="Search models">
-            <input
-              ptahInput
-              type="search"
-              aria-label="Search models"
-              [value]="search()"
-              (input)="setSearch($event)"
-            />
-          </ptah-field>
-          <div ptahFieldGrid>
+        <div class="flex min-w-0 items-end gap-[var(--ptah-gap-field)]">
+          <div ptahFieldGrid class="min-w-0 flex-1">
             <ptah-field label="Family">
               <ptah-select
                 label="Filter by family"
                 [options]="familyOptions()"
                 [value]="family()"
                 (valueChange)="family.set($event ?? '')"
+              />
+            </ptah-field>
+            <ptah-field label="Search models">
+              <input
+                ptahInput
+                type="search"
+                aria-label="Search models"
+                [value]="search()"
+                (input)="setSearch($event)"
               />
             </ptah-field>
             <ptah-field label="Sort by">
@@ -125,33 +133,23 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
               />
             </ptah-field>
           </div>
-        </div>
-        <div
-          class="flex items-center justify-between gap-[var(--ptah-gap-controls)]"
-        >
           <button
-            ptahButton
-            variant="ghost"
-            size="xs"
+            ptahIconButton
             type="button"
-            (click)="descending.set(!descending())"
-            [attr.aria-pressed]="descending()"
-            [attr.aria-label]="
+            class="shrink-0"
+            [label]="
               descending()
                 ? 'Sort descending; switch to ascending'
                 : 'Sort ascending; switch to descending'
             "
+            [selected]="descending()"
+            (click)="descending.set(!descending())"
           >
             <lucide-angular
               [img]="descending() ? SortDescIcon : SortAscIcon"
               aria-hidden="true"
             />
-            {{ descending() ? 'Descending' : 'Ascending' }}
           </button>
-          <span class="text-xs tabular-nums text-base-content-muted"
-            >{{ visibleCount() }}
-            {{ visibleCount() === 1 ? 'result' : 'results' }}</span
-          >
         </div>
         <ptah-capability-matrix-setting
           [headingLevel]="2"

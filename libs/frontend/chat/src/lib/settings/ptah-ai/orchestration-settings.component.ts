@@ -5,6 +5,8 @@ import {
   inject,
 } from '@angular/core';
 import { ProvidersSettingsStateService } from '@ptah-extension/core';
+import { PtahInstrumentBandComponent } from '@ptah-extension/ui';
+import { ContextOverviewStore } from './context-overview.store';
 import { SubagentCacheTtlSettingComponent } from './subagent-cache-ttl-setting.component';
 import { SessionBudgetSettingsComponent } from './session-budget-settings.component';
 import { LaneGuardsSettingsComponent } from './lane-guards-settings.component';
@@ -26,8 +28,13 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
   selector: 'ptah-orchestration-settings',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { style: '--ptah-field-grid-min-sm: 14.5rem; --ptah-field-grid-min-md: 14.5rem' },
+  providers: [ContextOverviewStore],
+  host: {
+    style:
+      '--ptah-field-grid-min-sm: 14.5rem; --ptah-field-grid-min-md: 14.5rem',
+  },
   imports: [
+    PtahInstrumentBandComponent,
     SubagentCacheTtlSettingComponent,
     SessionBudgetSettingsComponent,
     LaneGuardsSettingsComponent,
@@ -35,7 +42,14 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
   ],
   template: `
     <!-- Same box and rhythm as the Providers page: the Settings shell sets the width, centring and side padding. -->
-    <div class="flex flex-col gap-[var(--ptah-gap-section)] py-[var(--ptah-gap-heading)] font-sans text-sm text-base-content">
+    <div
+      class="flex flex-col gap-[var(--ptah-gap-section)] py-[var(--ptah-gap-heading)] font-sans text-sm text-base-content"
+    >
+      <ptah-instrument-band
+        [segments]="overview.segments()"
+        [loading]="overview.loading()"
+        ariaLabel="Context management overview"
+      />
       <!-- Subagent prompt-cache TTL (TASK_2026_597 N1): its own chunk, loaded when scrolled into view. -->
       @defer (on viewport) {
         <ptah-subagent-cache-ttl-setting />
@@ -64,8 +78,14 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
       <!-- Advanced orchestration values (TASK_2026_658): one chunk, loaded when scrolled into view, below the session
            budget and the always-available Lane guards; the placeholder is one row. -->
       @defer (on viewport) {
-        <ptah-advanced-settings-group groupId="context-budgets" headingStyle="section" />
-        <ptah-advanced-settings-group groupId="background-queries" headingStyle="section" />
+        <ptah-advanced-settings-group
+          groupId="context-budgets"
+          headingStyle="section"
+        />
+        <ptah-advanced-settings-group
+          groupId="background-queries"
+          headingStyle="section"
+        />
       } @placeholder {
         <div
           class="min-h-[2.75rem] border-b border-base-content/10"
@@ -77,8 +97,10 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
 })
 export class OrchestrationSettingsComponent implements OnInit {
   private readonly state = inject(ProvidersSettingsStateService);
+  protected readonly overview = inject(ContextOverviewStore);
 
   ngOnInit(): void {
     void this.state.open();
+    void this.overview.reload();
   }
 }

@@ -327,7 +327,7 @@ function storedNumberIsValid(
                       [attr.inputmode]="
                         settings[field.key].integer ? 'numeric' : 'decimal'
                       "
-                      class="join-item min-w-0 flex-1 text-right tabular-nums"
+                      class="join-item min-w-0 flex-1 tabular-nums"
                       [invalid]="!!errors()[field.key]"
                       [value]="numberText(field.key)"
                       [attr.aria-describedby]="

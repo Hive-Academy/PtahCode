@@ -111,7 +111,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
                   [id]="field.testId"
                   ptahInput
                   size="sm"
-                  class="w-full min-w-0 flex-1 text-right tabular-nums"
+                  class="w-full min-w-0 flex-1 tabular-nums"
                   [invalid]="!!fieldMessage(field.key)"
                   [value]="drafts()[field.key]"
                   [ptahBusyDisabled]="busy() || feedback.saving()"
