@@ -3,7 +3,7 @@ jest.mock('@ptah-extension/shared', () => {
   const actual = jest.requireActual<typeof import('@ptah-extension/shared')>('@ptah-extension/shared');
   return { ...actual, getAnthropicProvider: jest.fn(actual.getAnthropicProvider) };
 });
-import { childModelCandidates, childModelTier, childModelWindow, compareChildModelVersions } from './child-model-tier';
+import { childModelCandidates, childModelTier, childModelWindow, compareChildModelVersions, preferredChildModels } from './child-model-tier';
 
 describe('child model tiers', () => {
   it('orders versions numerically and ignores date suffixes', () => {
@@ -20,9 +20,13 @@ describe('child model tiers', () => {
     expect(childModelWindow('claude-3-7-sonnet-20250219')).toBe(200_000);
     expect(childModelWindow('claude-haiku-5-5')).toBeUndefined();
   });
-  it('drops known 200k candidates only when that tier has a known 1M candidate', () => {
-    expect(childModelCandidates(['claude-3-7-sonnet', 'claude-sonnet-5-5', 'claude-sonnet-5'], 1)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5']);
-    expect(childModelCandidates(['claude-haiku-4-5', 'claude-haiku-5-5'], 0)).toContain('claude-haiku-4-5');
+  it('holds known 200k candidates in reserve only when that tier has a known 1M candidate', () => {
+    expect(preferredChildModels(['claude-3-7-sonnet', 'claude-sonnet-5-5', 'claude-sonnet-5'], 1)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5']);
+    expect(childModelCandidates(['claude-3-7-sonnet', 'claude-sonnet-5-5', 'claude-sonnet-5'], 1)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-3-7-sonnet']);
+    expect(preferredChildModels(['claude-haiku-4-5', 'claude-haiku-5-5'], 0)).toContain('claude-haiku-4-5');
+  });
+  it('puts reserve 200k models after the preferred models of every fallback tier', () => {
+    expect(childModelCandidates(['claude-3-7-sonnet', 'claude-sonnet-5-5', 'claude-opus-5-5'], 1)).toEqual(['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-3-7-sonnet']);
   });
   it('ignores default and reserves Fable for explicit selection', () => {
     expect(childModelTier('default')).toBeUndefined();
@@ -46,7 +50,8 @@ describe('child model tiers', () => {
       { id: 'claude-haiku-4-0', name: '1M Haiku fixture', description: 'Test context capacity', contextLength: 1_000_000, supportsToolUse: true },
     ] });
     try {
-      expect(childModelCandidates(['claude-haiku-4-5', 'claude-haiku-4-0'], 0)).toEqual(['claude-haiku-4-0']);
+      expect(preferredChildModels(['claude-haiku-4-5', 'claude-haiku-4-0'], 0)).toEqual(['claude-haiku-4-0']);
+      expect(childModelCandidates(['claude-haiku-4-5', 'claude-haiku-4-0'], 0)).toEqual(['claude-haiku-4-0', 'claude-haiku-4-5']);
     } finally {
       jest.mocked(getAnthropicProvider).mockReturnValue(provider);
     }

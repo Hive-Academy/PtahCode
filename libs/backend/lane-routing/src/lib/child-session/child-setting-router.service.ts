@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { childModelCandidates, childModelTier } from './child-model-tier';
+import { childModelCandidates, childModelTier, preferredChildModels } from './child-model-tier';
 import type { EffortLevel } from '@ptah-extension/shared';
 import type { DecisionModelConfig } from '../decision-model/decision-model.config';
 import { DecisionCaller } from '../decision-model/decision-caller';
@@ -67,7 +67,7 @@ export class ChildSettingRouterService {
       : ['deep-work-kind', 'deep-work-text'].includes(fallback.reason.rule) ? 2 : 1;
     const modelOptions = input.model ? [] : [...new Set(input.models)].filter((model) => {
       const tier = childModelTier(model);
-      return tier !== undefined && tier !== 3 && tier >= floor && childModelCandidates(input.models, tier).includes(model);
+      return tier !== undefined && tier !== 3 && tier >= floor && preferredChildModels(input.models, tier).includes(model);
     });
     const effortOptions = input.effort ? [] : EFFORTS.filter((effort) =>
       EFFORTS.indexOf(effort) >= EFFORTS.indexOf(fallback.effort ?? 'high'),

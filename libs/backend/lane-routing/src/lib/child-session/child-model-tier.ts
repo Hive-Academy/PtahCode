@@ -53,15 +53,29 @@ const TIER_ORDER: Readonly<Record<ChildModelTier, readonly ChildModelTier[]>> = 
 };
 
 /**
- * Return the candidates of every tier in {@link TIER_ORDER}, in that order. Admission can refuse
- * a whole tier, so the next allowed tier must stay in the list.
+ * Split the models of one tier: a known 200k model is held in reserve when the tier has a known
+ * 1M model, so it is never preferred to that model.
+ */
+function splitTier(models: readonly string[], tier: ChildModelTier): { preferred: string[]; reserve: string[] } {
+  const candidates = [...new Set(models)].filter((model) => childModelTier(model) === tier).sort(compareChildModelVersions);
+  if (!candidates.some((model) => (childModelWindow(model) ?? 0) >= 1_000_000)) return { preferred: candidates, reserve: [] };
+  return {
+    preferred: candidates.filter((model) => childModelWindow(model) !== 200_000),
+    reserve: candidates.filter((model) => childModelWindow(model) === 200_000),
+  };
+}
+
+/** The preferred models of one tier: the options a decision model may choose from. */
+export function preferredChildModels(models: readonly string[], tier: ChildModelTier): string[] {
+  return splitTier(models, tier).preferred;
+}
+
+/**
+ * Admission order for a target tier: the preferred models of every tier in {@link TIER_ORDER},
+ * then the reserve 200k models in the same tier order. Admission can refuse a whole tier or a 1M
+ * model, so the next choice must stay in the list; a reserve model still beats the host default.
  */
 export function childModelCandidates(models: readonly string[], floor: ChildModelTier): string[] {
-  const unique = [...new Set(models)];
-  return TIER_ORDER[floor].flatMap((tier) => {
-    const candidates = unique.filter((model) => childModelTier(model) === tier);
-    const hasMillion = candidates.some((model) => (childModelWindow(model) ?? 0) >= 1_000_000);
-    const eligible = hasMillion ? candidates.filter((model) => childModelWindow(model) !== 200_000) : candidates;
-    return eligible.sort(compareChildModelVersions);
-  });
+  const tiers = TIER_ORDER[floor].map((tier) => splitTier(models, tier));
+  return [...tiers.flatMap((tier) => tier.preferred), ...tiers.flatMap((tier) => tier.reserve)];
 }
