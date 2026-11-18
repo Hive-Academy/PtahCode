@@ -1,12 +1,15 @@
 ---
 id: TASK_2026_2276_af6c
-status: backlog
+status: in_review
 type: FEATURE
 title: Give the dashboard provider and plan-limit section a clear visual hierarchy
 depends_on: []
-created: "2026-11-18T13:02:05.319Z"
-updated: "2026-11-18T13:02:05.319Z"
-description: "Redesign the provider accounts and usage limits area of the analytics dashboard with a main/other provider hierarchy, using shared UI foundation components."
+created: '2026-11-18T13:02:05.319Z'
+updated: '2026-11-18T14:36:03.081Z'
+description: >-
+  Redesign the provider accounts and usage limits area of the analytics
+  dashboard with a main/other provider hierarchy, using shared UI foundation
+  components.
 estimate: M
 labels:
   - ui-design-system
