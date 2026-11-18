@@ -566,6 +566,7 @@ export class BotsStore {
       this._lanes.set(choices);
       this._catalogDiagnostics.set(diagnostics);
     } catch (error: unknown) {
+      // degradation-audit: reported - the failure is shown to the user in catalogDiagnostics.
       if (token !== this.catalogSequence) return;
       const reason =
         error instanceof Error
