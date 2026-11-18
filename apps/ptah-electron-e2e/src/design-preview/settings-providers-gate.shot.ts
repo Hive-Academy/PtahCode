@@ -281,20 +281,33 @@ test('captures populated Settings Providers gate shots on the real backend', asy
       await openDetail(page, claude, 'Claude');
       const claudeDetail = page.locator('#lane-detail-claude');
       await expect(claudeDetail).toBeVisible();
-      await claudeDetail.getByRole('button', { name: /^Test/ }).first().click();
-      // The run ends when the detail shows a result: neither "Not run yet" nor "Running".
-      await expect
-        .poll(
-          async () => {
-            const text = await claudeDetail.innerText();
-            return text.includes('Not run yet') || /Running/.test(text);
-          },
-          { timeout: 45_000 },
-        )
-        .toBe(false);
-      await expect(page.getByText(/This instance was not found/)).toHaveCount(
-        0,
-      );
+      const detailTest = claudeDetail
+        .getByRole('button', { name: /^Test/ })
+        .first();
+      if (SUFFIX === 'before' && !(await detailTest.isVisible())) {
+        // The before build (main) offers Test as a row action and shows the old defect.
+        await rowAction(page, claude, 'Claude', /^Test/);
+        await expect
+          .poll(() => page.getByText(/connection test/i).count(), {
+            timeout: 45_000,
+          })
+          .toBeGreaterThan(0);
+      } else {
+        await detailTest.click();
+        // The run ends when the detail shows a result: neither "Not run yet" nor "Running".
+        await expect
+          .poll(
+            async () => {
+              const text = await claudeDetail.innerText();
+              return text.includes('Not run yet') || /Running/.test(text);
+            },
+            { timeout: 45_000 },
+          )
+          .toBe(false);
+        await expect(
+          page.getByText(/This instance was not found/),
+        ).toHaveCount(0);
+      }
       await claudeDetail.scrollIntoViewIfNeeded();
       await shot('claude-test', width);
 
@@ -328,9 +341,11 @@ test('captures populated Settings Providers gate shots on the real backend', asy
       await permission.focus();
       await shot('select-focus', width);
       await permission.click();
-      await expect(
-        page.getByRole('listbox').or(page.getByRole('menu')).first(),
-      ).toBeVisible();
+      // The before build (main) may still use a native select, which has no DOM menu.
+      if (SUFFIX !== 'before')
+        await expect(
+          page.getByRole('listbox').or(page.getByRole('menu')).first(),
+        ).toBeVisible();
       await shot('select-open', width);
       await page.keyboard.press('Escape');
 
