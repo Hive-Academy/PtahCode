@@ -1,13 +1,15 @@
 ---
 id: TASK_2026_2269_0334
-status: backlog
+status: in_review
 type: FEATURE
 title: Redesign the skills page of the setup wizard
 depends_on:
   - TASK_2026_2260_f6dc
-created: "2026-11-18T07:57:06.115Z"
-updated: "2026-11-18T07:57:06.115Z"
-description: "Redesign layout, skill cards, actions and page concept of the skills step. Design proposal first, then implementation."
+created: '2026-11-18T07:57:06.115Z'
+updated: '2026-11-18T12:17:25.051Z'
+description: >-
+  Redesign layout, skill cards, actions and page concept of the skills step.
+  Design proposal first, then implementation.
 estimate: L
 ---
 
