@@ -126,6 +126,7 @@ export class BotsStore {
   private readonly _list = signal<BotsListResult | null>(null);
   private readonly _selected = signal<BotRecord | null>(null);
   private readonly _draft = signal<BotDraft | null>(null);
+  private readonly _draftEpoch = signal(0);
   private readonly _conflict = signal<BotConflict | null>(null);
   private readonly _error = signal<BotFailure | null>(null);
   private readonly _listError = signal<BotFailure | null>(null);
@@ -163,6 +164,7 @@ export class BotsStore {
   );
   public readonly selected = this._selected.asReadonly();
   public readonly draft = this._draft.asReadonly();
+  public readonly draftEpoch = this._draftEpoch.asReadonly();
   public readonly conflict = this._conflict.asReadonly();
   public readonly error = this._error.asReadonly();
   public readonly listError = this._listError.asReadonly();
@@ -247,6 +249,7 @@ export class BotsStore {
       ++this.selectionSequence;
       this.invalidateEditor();
       this.accept(result.data.record);
+      this._draftEpoch.update((epoch) => epoch + 1);
       this._diagnostics.set(result.data.diagnostics);
     } else this.fail(result);
   }
@@ -280,6 +283,7 @@ export class BotsStore {
       revision: 0,
       ...(source ? { source } : {}),
     });
+    this._draftEpoch.update((epoch) => epoch + 1);
     return true;
   }
   public patchDraft(patch: Partial<BotEditable>): void {
@@ -317,6 +321,7 @@ export class BotsStore {
     this.invalidateEditor();
     const record = this._selected();
     this._draft.set(record ? asDraft(record) : null);
+    this._draftEpoch.update((epoch) => epoch + 1);
   }
   public async save(): Promise<void> {
     const draft = this._draft();
@@ -378,6 +383,7 @@ export class BotsStore {
     if (conflict) {
       this.invalidateEditor();
       this.accept(conflict.latest);
+      this._draftEpoch.update((epoch) => epoch + 1);
     }
   }
   public async archive(): Promise<void> {

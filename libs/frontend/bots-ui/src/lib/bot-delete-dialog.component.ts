@@ -10,7 +10,7 @@ import {
   viewChildren,
 } from '@angular/core';
 import type { BotRetention } from '@ptah-extension/shared';
-import { NativeModalComponent } from '@ptah-extension/ui';
+import { NativeModalComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import { BotsStore } from './bots.store';
 
 export type BotRemovalIntent =
@@ -21,7 +21,7 @@ export type BotRemovalIntent =
   selector: 'ptah-bot-delete-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NativeModalComponent],
+  imports: [NativeModalComponent, PtahButtonDirective],
   template: `<ptah-native-modal
     [isOpen]="isOpen()"
     [ariaLabel]="'Remove “' + name() + '”?'"
@@ -99,11 +99,17 @@ export type BotRemovalIntent =
       </p>
     }
     <div modal-footer class="flex justify-end gap-2 mt-6">
-      <button type="button" class="btn btn-ghost" (click)="cancelled.emit()">
+      <button
+        type="button"
+        ptahButton
+        variant="ghost"
+        (click)="cancelled.emit()"
+      >
         Cancel</button
       ><button
         type="button"
-        [class]="method() === 'archive' ? 'btn btn-primary' : 'btn btn-error'"
+        ptahButton
+        [variant]="method() === 'archive' ? 'primary' : 'danger'"
         [disabled]="disabled()"
         (click)="confirm()"
       >

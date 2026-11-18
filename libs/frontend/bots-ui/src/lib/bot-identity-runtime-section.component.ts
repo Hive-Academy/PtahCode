@@ -493,13 +493,13 @@ export class BotIdentityRuntimeSectionComponent {
     }
   }
   public setEffort(value: string | null): void {
-    if (value === null) return;
+    const effort = value?.trim();
     const runtime = this.definition()?.runtime;
     if (runtime && runtime.kind !== 'default') {
       const rest = { ...runtime };
       delete rest.effort;
       this.patch({
-        runtime: { ...rest, ...(value.trim() ? { effort: value.trim() } : {}) },
+        runtime: { ...rest, ...(effort ? { effort } : {}) },
       });
     }
   }
@@ -574,6 +574,8 @@ export class BotIdentityRuntimeSectionComponent {
         mediaType !== 'image/webp') ||
       file.size > 2 * 1024 * 1024
     ) {
+      // Re-patching the current avatar invalidates an older pending upload.
+      this.store.patchDraft({ avatar: this.definition()?.avatar });
       this.avatarReadError.set(avatarErrorMessage('INVALID_PARAMS', 'upload'));
       return;
     }

@@ -135,6 +135,19 @@ describe('BotsStore', () => {
     store = TestBed.inject(BotsStore);
     store.setWorkspaceRoots(['D:/one']);
   });
+  it('advances draftEpoch for replacement but not patchDraft', async () => {
+    expect(store.draftEpoch()).toBe(0);
+    expect(store.newDraft()).toBe(true);
+    expect(store.draftEpoch()).toBe(1);
+    store.patchDraft({ name: 'Mine' });
+    expect(store.draftEpoch()).toBe(1);
+    await store.select(record.id);
+    expect(store.draftEpoch()).toBe(2);
+    store.patchDraft({ instructions: 'Changed' });
+    expect(store.draftEpoch()).toBe(2);
+    store.discard();
+    expect(store.draftEpoch()).toBe(3);
+  });
   it('ignores stale list responses', async () => {
     const first = deferred<RpcResult<BotsListResult>>();
     client.list.mockReturnValueOnce(first.promise);

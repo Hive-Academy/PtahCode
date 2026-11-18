@@ -5,6 +5,7 @@ import {
   inject,
 } from '@angular/core';
 import {
+  PtahBadgeDirective,
   PtahFieldComponent,
   PtahRichSelectComponent,
 } from '@ptah-extension/ui';
@@ -14,7 +15,7 @@ import { BotsStore } from './bots.store';
   selector: 'ptah-bot-memory-approval-section',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahFieldComponent, PtahRichSelectComponent],
+  imports: [PtahBadgeDirective, PtahFieldComponent, PtahRichSelectComponent],
   styles: [
     `
       section {
@@ -88,7 +89,7 @@ import { BotsStore } from './bots.store';
         @for (trigger of triggers; track trigger) {
           <div>
             <span>{{ trigger }}</span
-            ><span class="badge ml-2">Not available yet</span>
+            ><span ptahBadge class="ml-2">Not available yet</span>
           </div>
         }
         <p>Comes in a later update. Bots cannot start yet.</p>
