@@ -210,7 +210,7 @@ function formatValue(
               >
                 @for (setting of booleanSettings(); track setting.key) {
                   <div
-                    class="min-w-0 py-[var(--ptah-gap-controls)] first:pt-0"
+                    class="min-w-0 py-[var(--ptah-gap-controls)] first:pt-[calc(var(--ptah-gap-controls)*0)]"
                     [attr.data-testid]="
                       'advanced-setting-' + setting.key + '-field'
                     "
@@ -309,7 +309,7 @@ function formatValue(
                       @if (setting.unit) {
                         <span
                           ptahFieldTrailing
-                          class="shrink-0 whitespace-nowrap pr-3 text-xs text-base-content-muted"
+                          class="shrink-0 whitespace-nowrap pr-[var(--ptah-gap-heading)] text-xs text-base-content-muted"
                           aria-hidden="true"
                           >{{ setting.unit }}</span
                         >
@@ -325,7 +325,7 @@ function formatValue(
                             tone="info"
                             size="xs"
                             data-restart-badge
-                            class="mr-1 align-middle"
+                            class="mr-[var(--ptah-gap-label)] align-middle"
                             aria-hidden="true"
                             >Restart</span
                           >

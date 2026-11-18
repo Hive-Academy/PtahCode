@@ -318,7 +318,7 @@ const LOGOUT_FAILED = 'Could not log out.';
           @if (userEmail()) {
             <button
               #logoutButton
-              class="ml-auto"
+              class="[margin-inline-start:auto]"
               type="button"
               ptahButton
               variant="ghost"

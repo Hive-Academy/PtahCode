@@ -10,7 +10,8 @@ export type AdvancedOverviewId =
   | 'agent-behaviour'
   | 'output-style'
   | 'mcp-server'
-  | 'claude-tools';
+  | 'claude-tools'
+  | 'setup';
 
 /** What one section reports about itself. Only loaded data is reported (spec 2a). */
 export interface AdvancedOverviewEntry {
@@ -38,6 +39,7 @@ const SEGMENTS: readonly {
     label: 'Claude Code tools',
     targetId: 'advanced-claude-tools',
   },
+  { id: 'setup', label: 'Setup', targetId: 'advanced-setup' },
 ];
 
 /**

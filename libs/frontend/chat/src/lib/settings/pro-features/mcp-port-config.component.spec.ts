@@ -254,6 +254,9 @@ describe('McpPortConfigComponent', () => {
 
       const select = byTestId<HTMLElement>('mcp-external-caller-access');
       expect(select.textContent).toContain('Read-only (recommended)');
+      const info = element.querySelector('[aria-label="About external MCP caller access"]');
+      expect(info).not.toBeNull();
+      expect(info?.closest('ptah-field')).toBeNull();
       expect(element.textContent).toContain('External MCP callers');
       expect(element.textContent).toContain('Read-only (recommended)');
       component.callerInfoOpen.set(true);

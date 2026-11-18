@@ -456,6 +456,14 @@ describe('ClaudeBuiltinsConfigComponent', () => {
   });
 
   describe('Dependency blocked', () => {
+    it('omits dependency text and accessible references for skills without a dependency', async () => {
+      await render();
+      const checkbox = skillBox('keybindings-help');
+      expect(checkbox.getAttribute('aria-describedby')).toBeNull();
+      expect(queryTestId('claude-skill-dependency-keybindings-help')).toBeNull();
+      expect(checkbox.parentElement?.parentElement?.textContent).not.toContain('None');
+    });
+
     it('badges a skill that is on while its tool is off; turning the tool on clears it and never changes the skill', async () => {
       stored.skills = ['code-review'];
       await render();

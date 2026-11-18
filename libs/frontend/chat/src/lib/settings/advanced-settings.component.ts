@@ -4,12 +4,18 @@ import {
   ElementRef,
   Injector,
   afterNextRender,
+  effect,
   inject,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
-import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
+import {
+  AuthStateService,
+  ClaudeRpcService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import {
   ADVANCED_SETTINGS,
   ADVANCED_SETTING_GROUPS,
@@ -174,7 +180,7 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
               >
                 <span
                   ptahDisclosureMeta
-                  class="ml-auto shrink-0 text-xs text-base-content-muted"
+                  class="[margin-inline-start:auto] shrink-0 text-xs text-base-content-muted"
                   >{{ group.count }} settings</span
                 >
                 <div class="pt-[var(--ptah-gap-controls)]">
@@ -222,6 +228,7 @@ export class AdvancedSettingsComponent {
 
   /** The summary of each section for the instrument band. */
   protected readonly overview = inject(AdvancedOverviewStore);
+  private readonly authState = inject(AuthStateService);
   /** One Fine-tuning row per upkeep group: its title and its number of settings. */
   protected readonly fineTuningGroups = FINE_TUNING_GROUPS.map((id) => ({
     id,
@@ -233,6 +240,27 @@ export class AdvancedSettingsComponent {
   readonly isImporting = signal(false);
   /** The inline import confirm is open (S-confirm, P8). */
   readonly confirmingImport = signal(false);
+
+  constructor() {
+    // Setup segment: the Setup block renders in the Settings shell, outside this store's
+    // provider, so the page reports it from the auth status (Claude Code install check).
+    effect(() => {
+      const loaded = this.authState.isLoaded();
+      const found = this.authState.claudeCliInstalled();
+      untracked(() => {
+        if (!loaded) {
+          this.overview.clear('setup');
+          return;
+        }
+        this.overview.report(
+          'setup',
+          found
+            ? { value: 'Ready', meta: 'Claude Code found', tone: 'ok' }
+            : { value: 'Check needed', meta: 'Claude Code not found', tone: 'warn' },
+        );
+      });
+    });
+  }
 
   /**
    * Export settings to a JSON file.

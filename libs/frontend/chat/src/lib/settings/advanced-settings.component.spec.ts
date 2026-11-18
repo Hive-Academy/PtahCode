@@ -3,6 +3,7 @@ import {
   Component,
   input,
   output,
+  signal,
 } from '@angular/core';
 import {
   DeferBlockState,
@@ -10,7 +11,11 @@ import {
   type ComponentFixture,
 } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
+import {
+  AuthStateService,
+  ClaudeRpcService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import {
   createMockRpcService,
   rpcError,
@@ -101,9 +106,15 @@ describe('AdvancedSettingsComponent', () => {
     return call ? { message: call[0], tone: call[1] } : undefined;
   };
 
+  /** Auth status the Setup band segment reads (not loaded by default). */
+  const authLoaded = signal(false);
+  const claudeFound = signal(false);
+
   beforeEach(() => {
     rpc = createMockRpcService();
     announce = jest.fn();
+    authLoaded.set(false);
+    claudeFound.set(false);
   });
   afterEach(() => {
     fixture?.destroy();
@@ -118,6 +129,13 @@ describe('AdvancedSettingsComponent', () => {
         { provide: ClaudeRpcService, useValue: rpc },
         { provide: VSCodeService, useValue: { isElectron } },
         { provide: SettingsSaveFeedbackService, useValue: { announce } },
+        {
+          provide: AuthStateService,
+          useValue: {
+            isLoaded: authLoaded.asReadonly(),
+            claudeCliInstalled: claudeFound.asReadonly(),
+          },
+        },
       ],
     }).overrideComponent(AdvancedSettingsComponent, {
       remove: {
@@ -254,7 +272,25 @@ describe('AdvancedSettingsComponent', () => {
       'Output style Not loaded',
       'MCP server Not loaded',
       'Claude Code tools Not loaded',
+      'Setup Not loaded',
     ]);
+  });
+
+  it('reports the Setup segment from the Claude Code install check once auth status loads', async () => {
+    authLoaded.set(true);
+    claudeFound.set(true);
+    await render(false);
+    const label = (): string | null | undefined =>
+      Array.from(
+        element.querySelectorAll('[data-testid="advanced-overview"] button'),
+      )
+        .map((button) => button.getAttribute('aria-label'))
+        .find((text) => text?.startsWith('Setup'));
+    expect(label()).toContain('Ready');
+    claudeFound.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(label()).toContain('Check needed');
   });
 
   it('keeps the Export settings aria-label and calls ptah.exportSettings in VS Code', async () => {

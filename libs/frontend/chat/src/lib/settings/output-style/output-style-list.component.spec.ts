@@ -384,13 +384,13 @@ describe('OutputStyleListComponent — CLI parity control', () => {
     });
   });
 
-  it('F4 (Batch 55b): the Edit and Delete icons of a built-in row dim to 50% (about 3:1 in light), not 40%', () => {
+  it('keeps built-in edit and delete hooks hidden from display and interaction', () => {
     const row = fixture.nativeElement.querySelector('[data-testid="output-style-row-default"]') as HTMLElement;
     for (const id of ['output-style-edit-button', 'output-style-delete-button']) {
       const button = row.querySelector('[data-testid="' + id + '"]') as HTMLButtonElement;
       expect(button.disabled).toBe(true);
-      expect(button.className).toContain('disabled:opacity-50');
-      expect(button.className).not.toContain('disabled:opacity-40');
+      expect(button.hidden).toBe(true);
+      expect(button.style.display).toBe('none');
     }
   });
 

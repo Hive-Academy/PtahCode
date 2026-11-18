@@ -38,6 +38,7 @@ import type { McpExternalCallerAccess } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahCheckboxDirective,
   PtahIconButtonDirective,
@@ -46,7 +47,6 @@ import {
   PtahRichSelectComponent,
   type PtahSelectOption,
   PtahFormSectionComponent,
-  PtahSettingRowComponent,
   PtahFieldComponent,
   PtahInlineConfirmComponent,
   PtahAlertComponent,
@@ -70,6 +70,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
     SettingsBusyDisabledDirective,
     LucideAngularModule,
     FormsModule,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahCheckboxDirective,
     PtahIconButtonDirective,
@@ -77,7 +78,6 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
     PtahInputDirective,
     PtahRichSelectComponent,
     PtahFormSectionComponent,
-    PtahSettingRowComponent,
     PtahFieldComponent,
     PtahInlineConfirmComponent,
     PtahAlertComponent,
@@ -182,56 +182,58 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             [disabled]="saving() || !loaded()"
             data-testid="mcp-external-caller-access"
           />
-          <p
-            ptahFieldAfterError
-            data-testid="mcp-external-caller-access-hint"
+        </ptah-field>
+        <div class="flex items-center gap-ptah-controls text-xs">
+          <p data-testid="mcp-external-caller-access-hint"
             [class.text-warning]="externalCallerAccess() === 'full'"
-            [class.text-base-content-muted]="
-              externalCallerAccess() === 'read-only'
-            "
-          >
+            [class.text-base-content-muted]="externalCallerAccess() === 'read-only'">
             External tools stay read-only until you select Full access.
           </p>
-          <ptah-native-popover ptahFieldTrailing [isOpen]="callerInfoOpen()" [keepInViewport]="true" (closed)="callerInfoOpen.set(false)">
+          <ptah-native-popover [isOpen]="callerInfoOpen()" [keepInViewport]="true" (closed)="callerInfoOpen.set(false)">
             <button trigger type="button" ptahIconButton size="xs" label="About external MCP caller access" aria-label="About external MCP caller access" (click)="callerInfoOpen.set(!callerInfoOpen())"><lucide-angular [img]="InfoIcon" /></button>
             <p content class="max-w-xs text-sm">Full access lets other local tools call privileged Ptah tools, including execute_code, but cannot cross workspaces.</p>
           </ptah-native-popover>
-        </ptah-field>
+        </div>
         @for (ns of namespaceOptions; track ns.id) {
-          <ptah-setting-row [label]="ns.label" [hint]="ns.description">
-            <span meta
-              ><ptah-status status="online" [label]="ns.toolCount + ' tools'"
-            /></span>
+          <div class="flex min-h-12 items-start gap-ptah-controls border-b border-surface-border py-ptah-controls">
             <input
               type="checkbox"
-              ptahToggle
+              ptahCheckbox size="xs"
               [checked]="isNamespaceEnabled(ns.id)"
               (change)="toggleNamespace(ns.id)"
               [ptahBusyDisabled]="saving() || !loaded()"
               [attr.aria-label]="'Toggle ' + ns.label + ' namespace'"
               [attr.data-testid]="'settings-toggle-mcp-namespace-' + ns.id"
             />
-          </ptah-setting-row>
+            <div class="min-w-0 flex-1 text-xs">
+              <span class="font-semibold text-base-content">{{ ns.label }}</span>
+              <span class="ml-[var(--ptah-gap-inline)] text-base-content-muted">{{ ns.description }}</span>
+            </div>
+            <span ptahBadge appearance="outline" size="xs" class="shrink-0">{{ ns.toolCount }} tools</span>
+          </div>
         }
-        <ptah-setting-row
-          label="Allow localhost"
-          hint="Allow browser tools to navigate to localhost URLs."
-        >
-          <ptah-native-popover meta [isOpen]="localhostInfoOpen()" [keepInViewport]="true" (closed)="localhostInfoOpen.set(false)">
-            <button trigger type="button" ptahIconButton size="xs" label="About localhost access" aria-label="About localhost access" (click)="localhostInfoOpen.set(!localhostInfoOpen())"><lucide-angular [img]="InfoIcon" /></button>
-            <p content class="max-w-xs text-sm">Enables AI agents to access local network services, development servers, and local APIs.</p>
-          </ptah-native-popover>
+        <div class="flex min-h-12 items-start gap-ptah-controls border-b border-surface-border py-ptah-controls">
           <input
             #allowLocalhostToggle
             type="checkbox"
-            ptahToggle
+            ptahCheckbox size="xs"
             [checked]="browserAllowLocalhost()"
             (change)="onAllowLocalhostToggle($event)"
             [disabled]="saving() || !loaded() || confirmingAllowLocalhost()"
             aria-label="Allow localhost access for browser tools"
             data-testid="settings-toggle-browser-allow-localhost"
           />
-        </ptah-setting-row>
+          <div class="min-w-0 flex-1 text-xs">
+            <div class="flex items-center gap-ptah-controls">
+              <span class="font-semibold text-base-content">Allow localhost</span>
+              <ptah-native-popover [isOpen]="localhostInfoOpen()" [keepInViewport]="true" (closed)="localhostInfoOpen.set(false)">
+                <button trigger type="button" ptahIconButton size="xs" label="About localhost access" aria-label="About localhost access" (click)="localhostInfoOpen.set(!localhostInfoOpen())"><lucide-angular [img]="InfoIcon" /></button>
+                <p content class="max-w-xs text-sm">Enables AI agents to access local network services, development servers, and local APIs.</p>
+              </ptah-native-popover>
+            </div>
+            <p class="text-base-content-muted">Allow browser tools to navigate to localhost URLs.</p>
+          </div>
+        </div>
         @if (confirmingAllowLocalhost()) {
           <ptah-inline-confirm
             ariaLabel="Confirm allow localhost access"

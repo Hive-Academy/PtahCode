@@ -43,6 +43,18 @@ async function shoot(page: Page, target: Locator, name: string): Promise<void> {
   await target.screenshot({ ...jpeg, path: join(OUT, `${name}-${PHASE}.jpg`) });
 }
 
+/** Element shot with a margin, so a floated label above the box border is not cut. */
+async function shootPadded(page: Page, target: Locator, name: string, pad = 12): Promise<void> {
+  await settled(page);
+  const box = await target.boundingBox();
+  if (!box) throw new Error(`Missing bounds for ${name}`);
+  await page.screenshot({
+    ...jpeg,
+    path: join(OUT, `${name}-${PHASE}.jpg`),
+    clip: { x: Math.max(0, box.x - pad), y: Math.max(0, box.y - pad), width: box.width + pad * 2, height: box.height + pad * 2 },
+  });
+}
+
 async function fieldStates(page: Page, field: Locator, target: Locator, prefix: string, theme: string): Promise<void> {
   await target.scrollIntoViewIfNeeded();
   const value = await field.inputValue();
@@ -77,12 +89,26 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
   await expect(page.locator('ptah-output-style-config')).toContainText('Team concise');
   const details = page.getByTestId('fine-tuning-details');
   // Before: one disclosure for all groups. After: one closed row per group. Open every closed row.
-  const closed = details.locator('button[aria-expanded="false"]');
-  for (let opened = 0; opened < 6 && (await closed.count()) > 0; opened += 1) {
-    await closed.first().click();
+  const rows = details.locator('[data-testid^="fine-tuning-row-"]');
+  if ((await rows.count()) === 0) {
+    const closed = details.locator('button[aria-expanded="false"]');
+    if ((await closed.count()) > 0) await closed.first().click();
+  }
+  for (const row of await rows.all()) {
+    const toggle = row.locator('button[aria-expanded]').first();
+    if ((await toggle.getAttribute('aria-expanded')) === 'false') {
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    }
+  }
+  // Each open row loads its group on viewport entry: bring every placeholder into view.
+  const placeholders = page.getByTestId('fine-tuning-placeholder');
+  for (let loaded = 0; loaded < 6 && (await placeholders.count()) > 0; loaded += 1) {
+    await placeholders.first().scrollIntoViewIfNeeded();
+    await settled(page);
   }
   await details.scrollIntoViewIfNeeded();
-  await expect(page.getByTestId('fine-tuning-placeholder')).toHaveCount(0);
+  await expect(placeholders).toHaveCount(0);
   const groups = details.locator('ptah-advanced-settings-group');
   await expect(groups).toHaveCount(3);
   const numberGroup = groups.first();
@@ -132,7 +158,8 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
       await mcp.scrollIntoViewIfNeeded();
       const caller = page.getByTestId('mcp-external-caller-access');
       const native = await caller.evaluate((element) => element.tagName === 'SELECT');
-      await caller.click();
+      // A rich select host has no box of its own: click its trigger button.
+      await (native ? caller : page.locator('#mcp-external-caller-access')).click();
       if (native) {
         await page.keyboard.press('Escape');
         await blur(page);
@@ -157,6 +184,30 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
       }
     }
     writeFileSync(join(OUT, 'metrics.json'), JSON.stringify(metrics, null, 2) + '\n');
+
+    // Null default ('Model default'): the context-budgets group of the same group component is
+    // on the Context management page. Empty at rest; on focus the label floats and the
+    // placeholder shows, so label and placeholder never overlap.
+    await resize(1824);
+    await page.getByRole('navigation', { name: 'Settings sections' })
+      .getByRole('button', { name: /context management/i }).click();
+    const modelDefault = page.getByTestId('advanced-setting-compaction.threshold');
+    const modelDefaultField = page.getByTestId('advanced-setting-compaction.threshold-field');
+    for (let tries = 0; tries < 8 && (await modelDefault.count()) === 0; tries += 1) {
+      await scroll.evaluate((element) => { element.scrollTop += element.clientHeight; });
+      await settled(page);
+    }
+    for (const theme of ['dark', 'light'] as const) {
+      await setTheme(page, theme);
+      await modelDefaultField.scrollIntoViewIfNeeded();
+      await expect(modelDefault).toHaveValue('');
+      await expect(modelDefault).toHaveAttribute('placeholder', 'Model default');
+      await blur(page);
+      await shootPadded(page, modelDefaultField, `advanced-model-default-rest-${theme}-1824`);
+      await modelDefault.focus();
+      await shootPadded(page, modelDefaultField, `advanced-model-default-focus-${theme}-1824`);
+      await blur(page);
+    }
   } finally {
     await cdp.send('Emulation.clearDeviceMetricsOverride');
     await cdp.detach();

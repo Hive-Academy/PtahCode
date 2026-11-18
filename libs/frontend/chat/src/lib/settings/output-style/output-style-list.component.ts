@@ -152,7 +152,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                 </div>
 
                 <!-- Name Column -->
-                <div class="pr-6 font-semibold text-base-content">
+                <div class="pr-[var(--ptah-gap-group)] font-semibold text-base-content">
                   <div class="flex items-center gap-[var(--ptah-gap-inline)]">
                     @if (isActive(style)) {
                       <lucide-angular
@@ -214,8 +214,8 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                         <button trigger type="button" ptahButton variant="ghost" size="xs" (click)="previewName.set(style.name)">Preview</button>
                         <div content class="max-w-xs p-[var(--ptah-gap-field)] text-xs leading-relaxed">
                           <p class="font-semibold">{{ style.name }}</p>
-                          <p class="mt-2">{{ style.description }}</p>
-                          <p class="mt-2 text-base-content-muted">{{ builtInNote }}</p>
+                          <p class="mt-[var(--ptah-gap-controls)]">{{ style.description }}</p>
+                          <p class="mt-[var(--ptah-gap-controls)] text-base-content-muted">{{ builtInNote }}</p>
                         </div>
                       </ptah-native-popover>
                     }
@@ -223,7 +223,8 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                     <button
                       type="button"
                       ptahButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
-                      [class.hidden]="style.tier === 'builtin'"
+                      [hidden]="style.tier === 'builtin'"
+                      [style.display]="style.tier === 'builtin' ? 'none' : null"
                       [disabled]="!style.editable || saving()"
                       [attr.aria-label]="'Edit ' + style.name"
                       [attr.title]="actionTitle(style, 'Edit')"
@@ -241,7 +242,8 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                       #deleteBtn
                       type="button"
                       ptahButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
-                      [class.hidden]="style.tier === 'builtin'"
+                      [hidden]="style.tier === 'builtin'"
+                      [style.display]="style.tier === 'builtin' ? 'none' : null"
                       [disabled]="!style.deletable || saving()"
                       [attr.aria-label]="'Delete ' + style.name"
                       [attr.title]="actionTitle(style, 'Delete')"
@@ -298,11 +300,27 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
           
         </div>
       </div>
-      @if (hasBuiltIn()) {
-        <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-label)]" data-testid="output-style-builtin-note">
-          Built-in styles are part of the agent — Ptah can select them but not change them.
-        </p>
-      }
+      <!-- The built-in note and the output-style help share one line (no lone help icon row). -->
+      <div class="mt-[var(--ptah-gap-label)] flex items-center gap-[var(--ptah-gap-label)]">
+        @if (hasBuiltIn()) {
+          <p class="text-xs text-base-content-muted" data-testid="output-style-builtin-note">
+            Built-in styles are part of the agent — Ptah can select them but not change them.
+          </p>
+        }
+        <ptah-native-popover [isOpen]="helpOpen()" [keepInViewport]="true" (closed)="helpOpen.set(false)">
+          <button trigger type="button" ptahIconButton variant="ghost" size="xs" label="About output styles" (click)="helpOpen.set(true)">
+            <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+          <div content class="max-w-xs p-[var(--ptah-gap-field)]">
+            <!-- Footer Note (Req 2.5) -->
+            <p class="text-xs text-base-content-muted leading-relaxed">
+              A style applies from your next session onwards — a conversation that is
+              already running keeps the style it started with. Styles influence tone and
+              structure; Ptah's own engineering instructions still apply on top.
+            </p>
+          </div>
+        </ptah-native-popover>
+      </div>
 
       <!-- Invalid Files List (A23) -->
       @if (invalid().length > 0) {
@@ -319,7 +337,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                     class="w-3.5 h-3.5 text-warning shrink-0"
                     aria-hidden="true"
                   />
-                  <span class="pr-6 font-semibold text-base-content">{{ entry.fileName }}</span>
+                  <span class="pr-[var(--ptah-gap-group)] font-semibold text-base-content">{{ entry.fileName }}</span>
                   <span ptahBadge appearance="outline" size="xs" class="text-base-content">
                     {{ tierLabel(entry.tier) }}
                   </span>
@@ -380,19 +398,6 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
       (dismissParity)="dismissParity.emit()"
     />
 
-    <ptah-native-popover [isOpen]="helpOpen()" [keepInViewport]="true" (closed)="helpOpen.set(false)">
-      <button trigger type="button" ptahIconButton variant="ghost" size="xs" label="About output styles" (click)="helpOpen.set(true)">
-        <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
-      </button>
-      <div content class="max-w-xs p-[var(--ptah-gap-field)]">
-    <!-- Footer Note (Req 2.5) -->
-    <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-controls)] leading-relaxed">
-      A style applies from your next session onwards — a conversation that is
-      already running keeps the style it started with. Styles influence tone and
-      structure; Ptah's own engineering instructions still apply on top.
-    </p>
-      </div>
-    </ptah-native-popover>
   `,
 })
 export class OutputStyleListComponent {

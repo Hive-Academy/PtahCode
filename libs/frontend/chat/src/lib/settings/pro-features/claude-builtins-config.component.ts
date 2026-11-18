@@ -171,7 +171,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
             
               @if (loaded()) {
                 @for (skill of terminalSkills(); track skill.id) {
-                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]">
+                  <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-ptah-controls gap-y-[var(--ptah-gap-label)] border-b border-surface-border py-ptah-controls">
                     <div class="align-top">
                       <input
                         type="checkbox"
@@ -184,23 +184,25 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                         [attr.data-testid]="'settings-toggle-claude-skill-' + skill.id"
                       />
                     </div>
-                    <div class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ skill.id }}</div>
+                    <div class="min-w-0 font-semibold text-xs text-base-content break-words">{{ skill.id }}</div>
                     <div class="align-top">
                       <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(skill.approxTokens) }}</span>
                     </div>
-                    <div class="w-full text-xs text-base-content-muted">{{ skill.description }}</div>
-                    <div class="w-full text-xs text-base-content-muted">
-                      {{ skill.needsTool ?? 'None' }}
-                      @if (isDependencyBlocked(skill)) {
-                        <span ptahBadge appearance="outline" size="xs" tone="warn" class="block mt-[var(--ptah-gap-label)] whitespace-nowrap"
-                          [attr.data-testid]="'claude-skill-dependency-' + skill.id">
-                          {{ skill.needsTool }} tool is off
-                        </span>
-                        <span [id]="'claude-skill-dep-' + skill.id" class="block mt-[var(--ptah-gap-label)]">
-                          This skill is on but unavailable until the {{ skill.needsTool }} tool is on.
-                        </span>
-                      }
-                    </div>
+                    <div class="col-start-2 col-span-2 text-xs text-base-content-muted">{{ skill.description }}</div>
+                    @if (skill.needsTool) {
+                      <div class="col-start-2 col-span-2 text-xs text-base-content-muted">
+                        {{ skill.needsTool }}
+                        @if (isDependencyBlocked(skill)) {
+                          <span ptahBadge appearance="outline" size="xs" tone="warn" class="block mt-[var(--ptah-gap-label)] whitespace-nowrap"
+                            [attr.data-testid]="'claude-skill-dependency-' + skill.id">
+                            {{ skill.needsTool }} tool is off
+                          </span>
+                          <span [id]="'claude-skill-dep-' + skill.id" class="block mt-[var(--ptah-gap-label)]">
+                            This skill is on but unavailable until the {{ skill.needsTool }} tool is on.
+                          </span>
+                        }
+                      </div>
+                    }
                   </div>
                 }
               } @else {
@@ -239,7 +241,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
               
                 @if (loaded()) {
                   @for (skill of syncedSkills(); track skill.id) {
-                    <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]">
+                    <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-ptah-controls gap-y-[var(--ptah-gap-label)] border-b border-surface-border py-ptah-controls">
                       <div class="align-top">
                         <input
                           type="checkbox"
@@ -251,13 +253,13 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                           [attr.data-testid]="'settings-toggle-claude-skill-' + skill.id"
                         />
                       </div>
-                      <div class="align-top font-medium text-xs text-base-content whitespace-nowrap">
+                      <div class="min-w-0 font-semibold text-xs text-base-content break-words">
                         {{ skillName(skill) }}
                       </div>
                       <div class="align-top">
                         <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(skill.approxTokens) }}</span>
                       </div>
-                      <div class="w-full text-xs text-base-content-muted">{{ skill.description }}</div>
+                      <div class="col-start-2 col-span-2 text-xs text-base-content-muted">{{ skill.description }}</div>
                     </div>
                   }
                 } @else {
