@@ -105,8 +105,12 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
         {{ visibleCount() === 1 ? 'result' : 'results' }}
       </p>
       <div class="min-w-0 space-y-[var(--ptah-gap-controls)]">
-        <div class="flex min-w-0 items-end gap-[var(--ptah-gap-field)]">
-          <div ptahFieldGrid class="min-w-0 flex-1">
+        <div class="flex min-w-0 items-center gap-[var(--ptah-gap-field)]">
+          <div
+            ptahFieldGrid
+            class="min-w-0 flex-1"
+            style="--ptah-field-grid-min-sm: 8rem"
+          >
             <ptah-field label="Family">
               <ptah-select
                 label="Filter by family"
