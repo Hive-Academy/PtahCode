@@ -203,6 +203,18 @@ describe('MemoryGraphStateService', () => {
     await service.refresh();
     expect(service.sessions()).toEqual(['s1']);
   });
+  it('removes selected ids that a new result does not contain', async () => {
+    graph
+      .mockResolvedValueOnce(result)
+      .mockResolvedValueOnce({ ...result, nodes: [node('b')], edges: [] });
+    await service.refresh();
+    service.select('a');
+    service.select('b', true);
+    service.patchFilters({ pinnedOnly: true });
+    await service.refresh();
+    expect(service.selectedIds()).toEqual(['b']);
+    expect(service.selectedNodes().map((n) => n.id)).toEqual(['b']);
+  });
   it('debounces server filters and sends explicit scope', async () => {
     service.patchFilters({ scope: 'all' });
     service.patchFilters({ pinnedOnly: true });

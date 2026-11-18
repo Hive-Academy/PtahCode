@@ -173,6 +173,13 @@ export class MemoryGraphStateService {
       if (seq === this.requestSeq) {
         this._result.set(result);
         this.resultContext = context;
+        // A selected memory that is not in the new result is not on the
+        // screen: a bulk action must not include it.
+        const shown = new Set(result.nodes.map((node) => node.id));
+        this._selectedIds.update((ids) => {
+          const kept = ids.filter((id) => shown.has(id));
+          return kept.length === ids.length ? ids : kept;
+        });
         await this.updateSessions(result, filters, root, seq);
       }
     } catch {
