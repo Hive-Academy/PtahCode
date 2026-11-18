@@ -40,3 +40,13 @@ Against rev2-context-dark-784.jpg (Context Management):
 - The TTL setting can show a short "could not be read" state on first load.
 - Base worktree `D:\projects\ptah-extension\.claude-worktrees\e1-before-base-867a8a3e8` was created by this task for the before shots. The user should remove it.
 - The claude lane on the second login failed once; codex lanes were used.
+
+## Report — review fixes and CodeRabbit triage (head 9d89fb348ceb14812f4c0c05314d0c0e96021352)
+
+- Commit 9d89fb348 `fix(chat): address matrix band review and CodeRabbit findings`, pushed (pre-push hook passed). PR body updated (filter row text).
+- Gate: `npm run verify -- -p chat,core` PASS (lint+typecheck 4/4, test 2/2); `typecheck-templates -p ptah-extension-webview` PASS; ui-class-audit 0 over baseline.
+- Shots refreshed in `docs/design-system/settings/gate/1414/`: matrix band 4 segments, gap below band, no ISO line; context band at 1168 has no cut caption.
+- Coordinator findings: ISO "Last rating" line removed; band margin `mb-[var(--ptah-gap-heading)]`; captions "From environment" / "Invalid override".
+- CodeRabbit: 13 FIXED (4612414813, 4612414820, 4612414830, 4612414839, 4612414848, 4612414854, 4612414865, 4612414873, 4612414883, 4612414893, 4612414911, 4612414925, 4612414961); 4 REJECTED (4612414901 and 4612414948 shared rich-select limits; 4612414935 duplicate of the "Unknown" placeholder; 4612414802 see below). One line per id: `coderabbit-triage.md`.
+- 4612414802 (Advanced group note): confirmed regression from this PR's section mode in `advanced-settings-group.component.ts`. That file may not get more edits in this PR. Coordinator decision needed: allow a one-line fix here, or let it land with #1417.
+- main did not move; #1417 is still open.

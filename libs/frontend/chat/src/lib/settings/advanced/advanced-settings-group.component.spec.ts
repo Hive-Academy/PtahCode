@@ -232,6 +232,17 @@ describe('AdvancedSettingsGroupComponent', () => {
       expect(host().querySelector('ptah-form-section')?.textContent).toContain(group?.description);
     });
 
+    it("'section' keeps the agent-limits note of the context-budgets group", async () => {
+      fixture = TestBed.createComponent(AdvancedSettingsGroupComponent);
+      fixture.componentRef.setInput('groupId', 'context-budgets');
+      fixture.componentRef.setInput('headingStyle', 'section');
+      fixture.detectChanges();
+      await settle();
+      expect(host().querySelector('ptah-form-section [aside]')?.textContent).toContain(
+        'Agent limits apply even when compaction is off.',
+      );
+    });
+
     it('reads only the group keys, in parallel with a 5 s timeout, and shows the saved values', async () => {
       await create('memory-upkeep');
       expect(

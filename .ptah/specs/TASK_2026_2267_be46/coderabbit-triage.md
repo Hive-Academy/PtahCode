@@ -1,6 +1,6 @@
 CodeRabbit triage against current working code; older-head comments were treated as untrusted claims.
 
-4612414802 REJECTED (coordinator) advanced-settings-group.component.ts - No more edits to that file in this PR (owned by PR #1417); the note returns when #1417 merges with the section mode.
+4612414802 FIXED (coordinator decision) advanced-settings-group.component.ts - Section mode shows the "Agent limits apply even when compaction is off." note of context-budgets in the form-section aside slot; spec assertion added.
 4612414813 FIXED libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts - Close the active rating when its column changes placement and focus a surviving control after rendering; unrelated reflow keeps it open.
 4612414820 FIXED libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts - Give both rating detail panels named dialog roles matching their existing triggers.
 4612414830 FIXED libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts - Describe both rating buttons with the numeric score and stale state, preserving their accessible names.

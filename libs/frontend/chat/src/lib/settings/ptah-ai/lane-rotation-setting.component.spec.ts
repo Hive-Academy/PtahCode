@@ -95,8 +95,8 @@ describe('LaneRotationSettingComponent', () => {
     const chips = (fixture.nativeElement as HTMLElement).querySelectorAll(
       '[data-testid="lane-rotation-last-picks"] span',
     );
-    expect(chips[0].textContent).toContain('Implement \u00b7 implement: Codex');
-    expect(chips[1].textContent).toContain('Plan \u00b7 plan: Claude');
+    expect(chips[0].textContent?.trim()).toBe('Implement: Codex');
+    expect(chips[1].textContent?.trim()).toBe('Plan: Claude');
     expect(chips[0].getAttribute('title')).toBe(
       'Implement \u00b7 implement: codex',
     );

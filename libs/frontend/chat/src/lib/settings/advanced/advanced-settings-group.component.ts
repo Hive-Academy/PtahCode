@@ -123,6 +123,9 @@ function formatValue(
           <ptah-form-section wide [heading]="group.title" [description]="group.description"
             >
             <span class="sr-only" [id]="idPrefix() + '-heading'">{{ group.title }}</span>
+            @if (group.id === 'context-budgets') {
+              <p aside class="text-xs text-base-content-muted">Agent limits apply even when compaction is off.</p>
+            }
             <ng-container [ngTemplateOutlet]="body" />
           </ptah-form-section>
         } @else {

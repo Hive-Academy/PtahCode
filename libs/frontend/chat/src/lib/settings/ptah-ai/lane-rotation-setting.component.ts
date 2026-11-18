@@ -103,7 +103,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
                 <span
                   ptahBadge
                   [title]="names.route(pick.key).text + ': ' + pick.candidateId"
-                  >{{ names.route(pick.key).text }}: {{ names.executor(pick.candidateId).text }}</span
+                  >{{ chipRoute(pick.key) }}: {{ names.executor(pick.candidateId).text }}</span
                 >
               </li>
             }
@@ -177,6 +177,13 @@ export class LaneRotationSettingComponent implements OnInit {
   protected readonly names = inject(RoutingDisplayNamesStore);
 
   protected readonly label = LABEL;
+
+  /** Chip label: "Research" for 'research|research' (task kind once); the title keeps the full route. */
+  protected chipRoute(key: string): string {
+    const text = this.names.route(key).text;
+    const [first, second] = text.split(' · ');
+    return second !== undefined && first.toLowerCase() === second.toLowerCase() ? first : text;
+  }
   protected readonly stored = signal<boolean | null>(null);
   protected readonly load = signal<'loading' | 'ready' | 'error'>('loading');
   protected readonly saving = signal(false);
