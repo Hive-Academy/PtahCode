@@ -148,9 +148,9 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                 />
               </ptah-field>
             } @else {
-              <div class="flex flex-col items-start gap-[var(--ptah-gap-field)]">
+              <div class="flex items-start gap-[var(--ptah-gap-field)]">
                 <ptah-field
-                  class="flex-1"
+                  class="min-w-0 flex-1"
                   label="Custom model id or folder"
                   hint="Use owner/name or an absolute folder path."
                   ><input
@@ -172,18 +172,21 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                     (input)="onCustomModelInput($event)"
                     data-testid="local-stt-custom-input"
                 /></ptah-field>
-                <button
-                  type="button"
-                  ptahButton
-                  variant="primary"
-                  size="xs"
-                  [busy]="saving()"
-                  [disabled]="!customModelValid()"
-                  (click)="saveCustomSource()"
-                  data-testid="local-stt-custom-save"
-                >
-                  Save
-                </button>
+                <!-- Save centred on the field box (not the box plus hint). -->
+                <div class="flex h-[var(--ptah-field-h-md)] shrink-0 items-center">
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="primary"
+                    size="xs"
+                    [busy]="saving()"
+                    [disabled]="!customModelValid()"
+                    (click)="saveCustomSource()"
+                    data-testid="local-stt-custom-save"
+                  >
+                    Save
+                  </button>
+                </div>
               </div>
               @if (customModel().length > 0 && !customModelValid()) {
                 <p

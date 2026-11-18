@@ -97,7 +97,7 @@ describe('LocalSttPanelComponent', () => {
     expect(byTestId('local-stt-panel-table').tagName).toBe('PTAH-FORM-SECTION');
     expect(byTestId('local-stt-source-curated').closest('ptah-setting-row')).not.toBeNull();
   });
-  it('keeps short model help below full-width custom fields', () => {
+  it('keeps short model help below a full-row custom field with Save at the end', () => {
     rpc.call.mockResolvedValue(rpcSuccess({ ok: true }));
     mount(localConfig());
     const curated = byTestId('local-stt-model-select').closest('ptah-field');
@@ -109,7 +109,10 @@ describe('LocalSttPanelComponent', () => {
     expect(custom?.querySelector('.ptah-field__info')).toBeNull();
     expect(custom?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe('Use owner/name or an absolute folder path.');
     expect(custom?.closest('.col-span-full')).not.toBeNull();
-    expect(custom?.parentElement?.classList.contains('flex-col')).toBe(true);
+    // Field and Save share one row: the field takes the free width, Save sits at the end.
+    expect(custom?.parentElement?.classList.contains('flex-col')).toBe(false);
+    expect(custom?.classList.contains('flex-1')).toBe(true);
+    expect(custom?.nextElementSibling?.querySelector('[data-testid="local-stt-custom-save"]')).not.toBeNull();
   });
   it('places download progress text in one polite status region', () => {
     rpc.call.mockResolvedValue(rpcSuccess({ ok: true }));

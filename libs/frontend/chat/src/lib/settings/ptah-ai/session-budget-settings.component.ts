@@ -86,6 +86,8 @@ interface NumberField {
   readonly help: string;
   readonly hint?: string;
   readonly info?: boolean;
+  /** Label or hint too long for one two-column track: the field spans both columns there. */
+  readonly wide?: boolean;
 }
 
 const NUMBER_FIELDS: readonly NumberField[] = [
@@ -104,6 +106,7 @@ const NUMBER_FIELDS: readonly NumberField[] = [
     label: 'Fallback weighted tokens',
     help: 'Used when model pricing is unavailable.',
     hint: 'Without pricing.',
+    wide: true,
   },
   {
     key: 'tightenPercent',
@@ -117,16 +120,18 @@ const NUMBER_FIELDS: readonly NumberField[] = [
     help: 'Offers to wrap up and hand off to a new session.',
   },
   {
-    key: 'handoffAfterCompactions',
-    label: 'Handoff after compactions',
-    help: 'Handoff after repeated compactions leave context at least half full.',
-    info: true,
-  },
-  {
     key: 'tightenWindowTokens',
     label: 'Compact window (tokens)',
     help: 'Advisory only until set; then lowers the compact window.',
     hint: 'Advisory until set.',
+    wide: true,
+  },
+  {
+    key: 'handoffAfterCompactions',
+    label: 'Handoff after compactions',
+    help: 'Handoff after repeated compactions leave context at least half full.',
+    info: true,
+    wide: true,
   },
 ];
 
@@ -320,6 +325,7 @@ function storedNumberIsValid(
                 @for (field of numberFields; track field.key) {
                   <ptah-field
                     class="w-full min-w-0"
+                    [class.session-budget-wide]="field.wide"
                     [label]="field.label"
                     [hint]="(field.hint ? field.hint + ' ' : '') + 'Range: ' + range(field.key) + '.'"
                     [info]="field.info ? field.help : null"
@@ -389,11 +395,16 @@ function storedNumberIsValid(
       container-type: inline-size;
       min-width: 0;
     }
-    /* Wider local tracks keep long values intact. Every field has one real hint line;
-       allow the next notch label its half-line above the box as well. */
+    /* Every field has one real hint line; the row gap also gives the next notch label
+       its half-line above the box. */
     .session-budget-grid {
-      grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
       row-gap: calc(var(--ptah-gap-field) + var(--ptah-field-label-float-leading) / 2);
+    }
+    /* Two columns (14rem tracks, 1rem gap): a field whose label or hint needs more than one track spans both. */
+    @container (min-width: 29rem) and (max-width: 43.99rem) {
+      .session-budget-wide {
+        grid-column: 1 / -1;
+      }
     }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;

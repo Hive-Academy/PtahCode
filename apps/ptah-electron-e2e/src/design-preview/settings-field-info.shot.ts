@@ -189,6 +189,24 @@ async function assertBudgetRowGaps(budget: Locator): Promise<void> {
   }
 }
 
+/** Custom source row: Save sits on the field row, centred on the box; a TTS Voice select spans the field width. */
+async function assertCustomRow(page: Page, direction: 'stt' | 'tts'): Promise<void> {
+  const input = page.locator('ptah-field').filter({ has: page.getByTestId(`local-${direction}-custom-input`) })
+    .locator('.ptah-field__box');
+  const box = await input.boundingBox();
+  const save = await page.getByTestId(`local-${direction}-custom-save`).boundingBox();
+  if (!box || !save) throw new Error('Custom source field or Save has no bounds');
+  const centre = save.y + save.height / 2;
+  expect(Math.abs(centre - (box.y + box.height / 2)), 'Save centred on the custom field box').toBeLessThanOrEqual(2);
+  expect(save.x >= box.x + box.width, 'Save after the custom field').toBe(true);
+  if (direction === 'tts') {
+    const voice = await page.locator('ptah-field').filter({ has: page.getByTestId('local-tts-voice-select') })
+      .boundingBox();
+    if (!voice) throw new Error('Voice field has no bounds');
+    expect(voice.width, 'Voice select spans the custom row width').toBeGreaterThanOrEqual(save.x + save.width - box.x - 2);
+  }
+}
+
 /**
  * Opens a select, and checks that the lowest option is the top element at its centre
  * (a glass section painted above the panel fails this). Closes the panel again.
@@ -271,6 +289,11 @@ test('captures field info hints on Context Management and the voice drawers', as
         if (PHASE === 'after') {
           await assertUncutFields(budget);
           await assertBudgetRowGaps(budget);
+          if (width === 1168) {
+            const columns = await budget.locator('.session-budget-grid').evaluate((grid) =>
+              getComputedStyle(grid).gridTemplateColumns.split(' ').length);
+            expect(columns, 'Session budget grid columns at 1168').toBe(2);
+          }
         }
         await capture(page, `context-fields-${theme}-${width}-${PHASE}.jpg`, await clipAround(page, [budget, guards]));
         if (width === 1168 && theme === 'dark') {
@@ -348,7 +371,10 @@ test('captures field info hints on Context Management and the voice drawers', as
           await page.getByTestId(`local-${direction}-source-hf`).click();
           await expect(page.getByTestId(`local-${direction}-custom-input`)).toBeVisible();
           await blur(page);
-          if (PHASE === 'after') await assertUncutFields(drawerPanel);
+          if (PHASE === 'after') {
+            await assertUncutFields(drawerPanel);
+            await assertCustomRow(page, direction);
+          }
           await capture(page, `voice-${direction}-custom-${theme}-${width}-${PHASE}.jpg`, await clipAround(page, [drawerPanel], 0));
           if (PHASE === 'after') {
             await page.getByTestId(`local-${direction}-source-dir`).click();
