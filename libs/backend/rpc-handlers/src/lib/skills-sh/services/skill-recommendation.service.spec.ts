@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SkillShEntry } from '@ptah-extension/shared';
+import type { SkillRankingService } from './skill-ranking.service';
 import { SkillRecommendationService } from './skill-recommendation.service';
 
 const entry: SkillShEntry = { source: 'owner/repo', skillId: 'angular', name: 'Angular', description: 'Angular patterns', installs: 10, isInstalled: false };
@@ -174,5 +175,149 @@ describe('SkillRecommendationService.recommendAnalysis', () => {
     });
     expect(result.skills).toHaveLength(1);
     expect(result.unmatchedItems).toEqual([]);
+  });
+});
+
+describe('SkillRecommendationService ranking integration', () => {
+  const workspaceRoot = 'D:\\fake-workspace';
+  const items = [
+    {
+      kind: 'framework' as const,
+      name: 'Angular',
+      evidence: 'private evidence',
+      sourcePhase: 'project-profile',
+    },
+    {
+      kind: 'language' as const,
+      name: 'TypeScript',
+      evidence: 'private evidence',
+      sourcePhase: 'project-profile',
+    },
+  ];
+  const shared = {
+    ...entry,
+    name: 'Angular TypeScript',
+    skillId: 'angular-typescript',
+    installs: 100,
+  };
+  const angular = {
+    ...entry,
+    name: 'Angular alternative',
+    skillId: 'angular-alternative',
+    installs: 1,
+  };
+  const typescript = {
+    ...entry,
+    name: 'TypeScript alternative',
+    skillId: 'typescript-alternative',
+    installs: 1,
+  };
+  const search = async (query: string) => [
+    shared,
+    query === 'angular' ? angular : typescript,
+  ];
+
+  it('preserves selection when the optional ranker is explicitly undefined', async () => {
+    const input = {
+      workspaceRoot,
+      items,
+      search,
+      summarySource: 'structured' as const,
+    };
+    const baseline = await service.recommendAnalysis(input);
+    const result = await new SkillRecommendationService(
+      logger as Logger,
+      undefined,
+    ).recommendAnalysis(input);
+    expect(result).toEqual(baseline);
+    expect(result.skills.map((skill) => skill.skill.skillId)).toEqual([
+      'angular-typescript',
+      'typescript-alternative',
+    ]);
+    expect(result.skills.map((skill) => skill.rank)).toEqual([1, 2]);
+    expect(result.skills.every((skill) => skill.rankedBy === 'heuristic')).toBe(
+      true,
+    );
+  });
+  it.each(['decision-model', 'session-model', 'heuristic'] as const)(
+    'uses %s order and chooses one best free candidate per item',
+    async (rankedBy) => {
+      const rank = jest.fn().mockResolvedValue({
+        rankedBy,
+        items: {
+          '0': {
+            order: ['1', '0'],
+            rankedBy,
+            reason: 'More relevant Angular guidance',
+          },
+          '1': {
+            order: ['1', '0'],
+            rankedBy,
+            reason: 'More relevant TypeScript guidance',
+          },
+        },
+      });
+      const subject = new SkillRecommendationService(
+        logger as Logger,
+        { rank } as unknown as SkillRankingService,
+      );
+      const result = await subject.recommendAnalysis({
+        workspaceRoot,
+        items,
+        search,
+        summarySource: 'structured',
+      });
+      expect(result.skills).toHaveLength(2);
+      expect(result.skills.map((skill) => skill.skill.skillId).sort()).toEqual([
+        'angular-alternative',
+        'typescript-alternative',
+      ]);
+      expect(result.rankedBy).toBe(rankedBy);
+      for (const [index, recommendation] of result.skills.entries()) {
+        expect(recommendation.rank).toBe(index + 1);
+        expect(recommendation.rankedBy).toBe(rankedBy);
+        expect(['decision-model', 'session-model', 'heuristic']).toContain(
+          recommendation.rankedBy,
+        );
+        if (rankedBy !== 'heuristic') {
+          expect(recommendation.reason).toBeTruthy();
+          expect(recommendation.reason?.length).toBeLessThan(140);
+        }
+      }
+    },
+  );
+  it('skips an already selected candidate and picks the next free candidate', async () => {
+    const rank = jest.fn().mockResolvedValue({
+      rankedBy: 'decision-model',
+      items: {
+        '0': {
+          order: ['0', '1'],
+          rankedBy: 'decision-model',
+          reason: 'Best match',
+        },
+        '1': {
+          order: ['0', '1'],
+          rankedBy: 'decision-model',
+          reason: 'Best match',
+        },
+      },
+    });
+    const subject = new SkillRecommendationService(
+      logger as Logger,
+      { rank } as unknown as SkillRankingService,
+    );
+    const result = await subject.recommendAnalysis({
+      workspaceRoot,
+      items,
+      search,
+      summarySource: 'structured',
+    });
+    expect(result.skills.map((skill) => skill.skill.skillId)).toEqual([
+      'angular-typescript',
+      'typescript-alternative',
+    ]);
+    expect(
+      new Set(result.skills.map((skill) => skill.skill.skillId)).size,
+    ).toBe(2);
   });
 });
