@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2274_eb79
-status: in_progress
+status: in_review
 type: FEATURE
 title: "Bots phase 1: audit, record store and manual editor"
 depends_on: []

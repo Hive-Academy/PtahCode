@@ -1,0 +1,13 @@
+# Carry-forward notes for later batches (coordinator)
+
+Items from batch reviews that a later batch must handle. Put each item into the brief of the
+named batch.
+
+| From | Item | Owner batch |
+| --- | --- | --- |
+| B01 review | `BotsGetResultSchema.record` is V2 only. Upgrade a V1 stored snapshot before the `bots:get` reply. | B06 (upgrade), B05/B08 (reply) |
+| B04 review #1 | The repository compares `workspace_root` exactly and case-sensitively. Always pass the stored / open-folder spelling (resolve through the same helper that saved it). Add a test for a changed-case Windows root. | B05 (authorizer), B06 |
+| B04 review #2 | The repository hides tombstones from `list`/`get`/`revisions` (after the B04 revision). `bots:get` with a revision after delete returns BOT_NOT_FOUND. Add RPC-level tests. | B06, B08 |
+| B04 review #7 | The 20 MiB quota covers staged images only. Claimed images have no total bound. Record the limit in the B06 design and think about a per-bot image cap at claim. | B06 |
+| B04 decision 6 | `SqliteBotRepository.configure({ now })` sets the clock. Composition uses the default `Date.now`. | B10, B11 |
+| B04 re-review N1 | `revisions()` returns `BotRevision | InvalidBotRevision`. Narrow with `'definitionJson' in row` before reading. | B06 |

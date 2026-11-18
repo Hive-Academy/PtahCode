@@ -8,6 +8,8 @@
  * - Frozen `as const` so consumer types narrow on the symbol values.
  */
 export const PERSISTENCE_TOKENS = {
+  /** Atomic bot snapshots and avatar storage. */
+  BOT_REPOSITORY: Symbol.for('PtahBotRepository'),
   /** SqliteConnectionService — owns the single ~/.ptah/ptah.db handle. */
   SQLITE_CONNECTION: Symbol.for('PtahSqliteConnection'),
   /** SqliteMigrationRunner — applies numbered SQL migrations on open. */
