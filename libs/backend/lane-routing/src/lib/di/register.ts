@@ -23,6 +23,8 @@ import type { LaneOutcomeReader } from '@ptah-extension/shared';
 
 import { DecisionModelCatalog } from '../decision-model/decision-model.catalog';
 import { DecisionModelConfig } from '../decision-model/decision-model.config';
+import { DecisionCaller } from '../decision-model/decision-caller';
+import { SkillRankingCallerService } from '../decision-model/skill-ranking-caller.service';
 import type { StructuredDecisionCompleter } from '../decision-model/structured-decision.port';
 import { DecisionModelFailureClassifier } from '../failure-class/decision-model-failure-classifier';
 import type { LaneModelListing } from '../lane-model-listing.port';
@@ -61,12 +63,44 @@ export function registerLaneRoutingServices(
   logger: LaneRoutingLogger,
 ): void {
   container.registerInstance(LANE_ROUTING_TOKENS.LOGGER, logger);
+  container.register(LANE_ROUTING_TOKENS.DECISION_CALLER, {
+    useFactory: instanceCachingFactory((c) => {
+      const structured = optional<StructuredDecisionCompleter>(
+        c,
+        LANE_ROUTING_TOKENS.STRUCTURED_DECISION,
+      );
+      return new DecisionCaller({
+        config: c.resolve<DecisionModelConfig>(
+          LANE_ROUTING_TOKENS.DECISION_MODEL_CONFIG,
+        ),
+        logger: c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+        ...(structured !== undefined ? { structured } : {}),
+      });
+    }),
+  });
+  container.register(LANE_ROUTING_TOKENS.SKILL_RANKING_CALLER, {
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new SkillRankingCallerService(
+          c.resolve<DecisionCaller>(LANE_ROUTING_TOKENS.DECISION_CALLER),
+          c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+        ),
+    ),
+  });
   container.register(LANE_ROUTING_TOKENS.CHILD_SETTING_ROUTER, {
-    useFactory: instanceCachingFactory((c) => new ChildSettingRouterService(
-      c.resolve<DecisionModelConfig>(LANE_ROUTING_TOKENS.DECISION_MODEL_CONFIG),
-      c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
-      optional<StructuredDecisionCompleter>(c, LANE_ROUTING_TOKENS.STRUCTURED_DECISION),
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new ChildSettingRouterService(
+          c.resolve<DecisionModelConfig>(
+            LANE_ROUTING_TOKENS.DECISION_MODEL_CONFIG,
+          ),
+          c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+          optional<StructuredDecisionCompleter>(
+            c,
+            LANE_ROUTING_TOKENS.STRUCTURED_DECISION,
+          ),
+        ),
+    ),
   });
 
   container.register(LANE_ROUTING_TOKENS.ROTATION_STORE, {
@@ -183,7 +217,10 @@ export function registerLaneRoutingServices(
         LANE_ROUTING_TOKENS.STRUCTURED_DECISION,
       );
       return new RouteDecideService({
-        rotationSetting: new LaneRotationSetting(c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER), c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER)),
+        rotationSetting: new LaneRotationSetting(
+          c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+          c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+        ),
         config: c.resolve<DecisionModelConfig>(
           LANE_ROUTING_TOKENS.DECISION_MODEL_CONFIG,
         ),
@@ -197,7 +234,9 @@ export function registerLaneRoutingServices(
         ),
         ...(listing !== undefined ? { listing } : {}),
         ...(structured !== undefined ? { structured } : {}),
-        ...(phaseDefinitionReader !== undefined ? { phaseDefinitionReader } : {}),
+        ...(phaseDefinitionReader !== undefined
+          ? { phaseDefinitionReader }
+          : {}),
       });
     }),
   });

@@ -1,3 +1,5 @@
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -51,6 +53,8 @@ describe('SessionBudgetSettingsComponent', () => {
   ): T | null => host().querySelector<T>(`[data-testid="${id}"]`);
   const field = (key: Key): HTMLInputElement =>
     byTestId<HTMLInputElement>(`session-budget-${key}`) as HTMLInputElement;
+  const rich = (key: string) => fixture.debugElement.query(By.css(`[data-testid="session-budget-${key}"]`)).componentInstance as PtahRichSelectComponent<string>;
+  const choose = (key: string, value: string) => fixture.debugElement.query(By.css(`[data-testid="session-budget-${key}"]`)).triggerEventHandler('valueChange', value);
   const writes = (): Array<{ key: string; value: unknown }> =>
     mockRpcCall.mock.calls
       .filter((call) => call[1] === 'settings:set')
@@ -171,14 +175,14 @@ describe('SessionBudgetSettingsComponent', () => {
     }
   });
 
-  it('uses stacked labels in a container based field grid', async () => {
+  it('uses floating labels and rich selects in one shared field grid', async () => {
     await create();
     const grid = host().querySelector('.session-budget-fields');
     expect(grid).not.toBeNull();
     const fields = host().querySelectorAll('.ptah-field[data-appearance]');
-    expect(fields).toHaveLength(NUMBER_KEYS.length);
+    expect(fields).toHaveLength(NUMBER_KEYS.length + 2);
     for (const field of fields) {
-      expect(field.getAttribute('data-appearance')).toBe('stacked');
+      expect(field.getAttribute('data-appearance')).toBe('floating');
       expect(field.closest('.session-budget-fields')).toBe(grid);
     }
   });
@@ -189,13 +193,13 @@ describe('SessionBudgetSettingsComponent', () => {
       byTestId('session-budget-token-measure-resolved')?.textContent,
     ).toContain('Weighted session tokens');
     expect(host().textContent).toContain(
-      'cached reads at 10% and output at 5x',
+      'Weighted discounts cache reads',
     );
     expect(host().textContent).toContain(
-      'every token of every request, including cache reads',
+      'raw counts all tokens',
     );
     expect(host().textContent).toContain(
-      '50% or more of the auto-compact window',
+      'context at least half full',
     );
   });
 
@@ -204,7 +208,7 @@ describe('SessionBudgetSettingsComponent', () => {
     stored['sessionBudget.tokens'] = 30_000_000;
     await create();
     expect(
-      byTestId<HTMLSelectElement>('session-budget-token-measure')?.value,
+      rich('token-measure').value(),
     ).toBe('weighted');
     expect(byTestId('session-budget-token-measure-recommendation')).toBeNull();
   });
@@ -214,7 +218,7 @@ describe('SessionBudgetSettingsComponent', () => {
     stored['sessionBudget.tokens'] = 30_000_000;
     await create();
     expect(
-      byTestId<HTMLSelectElement>('session-budget-token-measure')?.value,
+      rich('token-measure').value(),
     ).toBe('raw');
     expect(
       byTestId('session-budget-token-measure-resolved')?.textContent,
@@ -233,11 +237,7 @@ describe('SessionBudgetSettingsComponent', () => {
 
   it('saves the selected raw measure and lets the recommendation be dismissed', async () => {
     await create();
-    const select = byTestId<HTMLSelectElement>(
-      'session-budget-token-measure',
-    ) as HTMLSelectElement;
-    select.value = 'raw';
-    select.dispatchEvent(new Event('change'));
+    choose('token-measure', 'raw');
     await settle();
     expect(writes()).toEqual([
       { key: 'sessionBudget.tokenMeasure', value: 'raw' },
@@ -278,6 +278,74 @@ describe('SessionBudgetSettingsComponent', () => {
     ).toBeNull();
   });
 
+  it('keeps the full help in popovers and a range-only hint below each number field', async () => {
+    await create();
+    const fields = [
+      {
+        key: 'tokens',
+        label: 'Token budget',
+        help: 'Chat token limit.',
+      },
+      {
+        key: 'usd',
+        label: 'Cost budget (USD)',
+        help: 'Session cost limit.',
+      },
+      {
+        key: 'fallbackWeightedTokens',
+        label: 'Fallback weighted tokens',
+        help: 'Used when model pricing is unavailable.',
+      },
+      {
+        key: 'tightenPercent',
+        label: 'Tighten at (%)',
+        help: 'Starts tightening; stays below Handoff.',
+      },
+      {
+        key: 'handoffPercent',
+        label: 'Handoff at (%)',
+        help: 'Offers to wrap up and hand off to a new session.',
+      },
+      {
+        key: 'handoffAfterCompactions',
+        label: 'Handoff after compactions',
+        help: 'Handoff after repeated compactions leave context at least half full.',
+      },
+      {
+        key: 'tightenWindowTokens',
+        label: 'Compact window (tokens)',
+        help: 'Advisory only until set; then lowers the compact window.',
+      },
+    ] as const;
+    for (const setting of fields) {
+      const row = field(setting.key).closest('ptah-field');
+      // Token and cost help only repeats the label; every other field keeps its full help in the popover.
+      const longHelp = setting.key !== 'tokens' && setting.key !== 'usd';
+      expect(row?.querySelector(`button[aria-label="More about ${setting.label}"]`) !== null).toBe(longHelp);
+      if (longHelp) {
+        const info = row?.querySelector<HTMLElement>('.sr-only[id^="ptah-field-info-"]');
+        expect(info?.textContent).toBe(setting.help);
+        expect(field(setting.key).getAttribute('aria-describedby')?.split(' ')).toContain(info?.id);
+        row?.querySelector<HTMLButtonElement>(`button[aria-label="More about ${setting.label}"]`)?.click();
+        fixture.detectChanges();
+        expect(row?.querySelector('.ptah-field__info-panel')?.textContent?.trim()).toBe(setting.help);
+      }
+      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(`Range: ${SESSION_BUDGET_SETTINGS[setting.key].min.toLocaleString('en-US')} to ${SESSION_BUDGET_SETTINGS[setting.key].max.toLocaleString('en-US')}.`);
+      const suffix = row?.querySelector('[ptahFieldTrailing]');
+      expect(suffix?.classList.contains('shrink-0')).toBe(true);
+      expect(suffix?.getAttribute('aria-hidden')).toBe('true');
+    }
+    for (const key of ['unit', 'token-measure']) {
+      const row = byTestId(`session-budget-${key}`)?.closest('ptah-field');
+      expect(row?.querySelector('.ptah-field__info')).toBeNull();
+      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(
+        key === 'unit' ? 'Tokens or priced cost.' : 'Weighted discounts cache reads.',
+      );
+      const help = row?.querySelector<HTMLElement>(`#session-budget-${key}-help`);
+      expect(help).not.toBeNull();
+    }
+  });
+
   describe('load', () => {
     it('reads all sessionBudget keys and shows the saved values (TOKENS, 50M default)', async () => {
       await create();
@@ -298,13 +366,15 @@ describe('SessionBudgetSettingsComponent', () => {
       expect(read).toHaveLength(Object.keys(SESSION_BUDGET_SETTINGS).length);
       expect(field('tokens').value).toBe('50000000');
       expect(field('tokens').className).toContain('input-sm');
-      expect(field('tokens').className).toContain('flex-1');
-      expect(field('tokens').className).toContain('join-item');
-      expect(host().textContent).toContain('50M tokens');
+      expect(field('tokens').hasAttribute('size')).toBe(false);
+      expect(field('tokens').className).not.toContain('flex-1');
+      expect(field('tokens').className).not.toContain('join-item');
+      expect(field('tokens').classList.contains('tabular-nums')).toBe(true);
+      expect(host().textContent).toContain('Range: 1,000,000 to 2,000,000,000');
       expect(field('tightenPercent').value).toBe('50');
       expect(field('handoffPercent').value).toBe('80');
       expect(field('tightenWindowTokens').value).toBe('');
-      expect(byTestId<HTMLSelectElement>('session-budget-unit')?.value).toBe(
+      expect(rich('unit').value()).toBe(
         'tokens',
       );
       expect(field('enabled').checked).toBe(true);
@@ -533,7 +603,7 @@ describe('SessionBudgetSettingsComponent', () => {
   });
 
   describe('tightenWindowTokens', () => {
-    it('explains "advisory only until set", and an empty field writes null', async () => {
+    it('explains the unset advisory state, and an empty field writes null', async () => {
       stored['sessionBudget.tightenWindowTokens'] = 400_000;
       await create();
       expect(
@@ -542,9 +612,9 @@ describe('SessionBudgetSettingsComponent', () => {
             field('tightenWindowTokens')
               .getAttribute('aria-describedby')
               ?.split(' ')
-              .find((id) => id.startsWith('ptah-field-description-')),
+              .find((id) => id.startsWith('ptah-field-info-')),
         )?.textContent,
-      ).toMatch(/advisory only until set/i);
+      ).toBe('Advisory only until set; then lowers the compact window.');
       await enter('tightenWindowTokens', '');
       expect(writes()).toEqual([
         { key: 'sessionBudget.tightenWindowTokens', value: null },
@@ -699,14 +769,18 @@ describe('SessionBudgetSettingsComponent', () => {
 
     it('writes the unit', async () => {
       await create();
-      const select = byTestId<HTMLSelectElement>(
-        'session-budget-unit',
-      ) as HTMLSelectElement;
-      select.value = 'cost';
-      select.dispatchEvent(new Event('change'));
+      choose('unit', 'cost');
       await settle();
       expect(writes()).toEqual([{ key: 'sessionBudget.unit', value: 'cost' }]);
-      expect(select.value).toBe('cost');
+      expect(rich('unit').value()).toBe('cost');
     });
   });
+  it('describes the focused budget triggers with their help', async () => {
+    await create();
+    const description = (id: string) => (host().querySelector(`#${id}`)?.getAttribute('aria-describedby') ?? '')
+      .split(' ').map((value) => host().querySelector(`[id="${value}"]`)?.textContent).join(' ');
+    expect(description('session-budget-unit')).toContain('Tokens or priced cost.');
+    expect(description('session-budget-token-measure')).toContain('Weighted discounts cache reads.');
+  });
+
 });

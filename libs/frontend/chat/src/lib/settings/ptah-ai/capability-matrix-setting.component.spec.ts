@@ -79,13 +79,23 @@ describe('CapabilityMatrixSettingComponent', () => {
       { timeout: 5_000 },
     );
     expect(
-      root().querySelector('[data-testid="matrix-row-sample-*-plan"]')
-        ?.textContent,
-    ).toContain('Unrated');
+      root()
+        .querySelector('[data-testid="matrix-row-sample-*-plan"]')
+        ?.querySelector('[aria-label="Unrated"]'),
+    ).not.toBeNull();
+    expect(root().querySelector('[data-testid="matrix-row-sample-*-plan"]')?.textContent).toContain('Unrated');
     expect(
       root().querySelector('[data-testid="matrix-row-sample-*-implement"]')
         ?.textContent,
     ).toContain('55');
+    expect(
+      root().querySelector('[title="Stale: rated 2026-11-01"]'),
+    ).not.toBeNull();
+    expect(
+      root().querySelector(
+        '[data-testid="matrix-row-sample-*-implement"] button',
+      )?.textContent,
+    ).not.toContain('Details');
     expect(root().textContent).toContain('Family default');
     expect(root().textContent).toContain('Recent picks are unavailable');
     expect(root().querySelectorAll('thead th')).toHaveLength(7);
@@ -102,6 +112,8 @@ describe('CapabilityMatrixSettingComponent', () => {
       ) as HTMLButtonElement
     ).click();
     fixture.detectChanges();
+    expect(root().querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Details for Implement for Family default');
+    expect(root().querySelector('[data-testid="matrix-row-sample-*-implement"] button')?.getAttribute('aria-description')).toBe('Score: 55. Stale.');
     expect(root().textContent).toContain('Samples: 2');
     expect(root().textContent).toContain('Source: local');
     expect(root().querySelector('#capability-matrix-heading')?.tagName).toBe(
@@ -110,7 +122,7 @@ describe('CapabilityMatrixSettingComponent', () => {
   });
   it('keeps colliding names and punctuation distinct across popovers', async () => {
     const profiles = [
-      { ...profile('c', 20), family: 'a-b' },
+      { ...profile('c', 0), family: 'a-b' },
       { ...profile('b-c', 30), family: 'a' },
       { ...profile('model !? /', 40), family: 'family !? /' },
     ];
@@ -125,6 +137,8 @@ describe('CapabilityMatrixSettingComponent', () => {
     ];
     const ids = triggers.map((button) => button.getAttribute('aria-controls'));
     expect(triggers).toHaveLength(3);
+    expect(triggers[0].getAttribute('aria-description')).toBe('Score: 0. Stale.');
+    expect(triggers[0].textContent).not.toContain('Unrated');
     expect(new Set(ids).size).toBe(3);
     expect(
       root().querySelectorAll('[data-testid="matrix-row-a-b-c-implement"]'),
@@ -171,11 +185,28 @@ describe('CapabilityMatrixSettingComponent', () => {
       const trigger = root().querySelector(
         'tr.ptah-table-detail-row button[aria-label="Details for Implement for Family default"]',
       ) as HTMLButtonElement;
+      expect(root().querySelector('tr.ptah-table-detail-row')?.textContent).toContain('Unrated');
+      expect(trigger.getAttribute('aria-description')).toBe('Score: 55. Stale.');
       const id = trigger.getAttribute('aria-controls');
       expect(id).toMatch(/^detail-/);
       trigger.click();
       fixture.detectChanges();
-      expect(root().querySelector(`[id="${id}"]`)).not.toBeNull();
+      expect(root().querySelector(`[id="${id}"]`)?.getAttribute("role")).toBe("dialog");
+      resize([{ contentRect: { width: 520 } } as ResizeObserverEntry], {} as ResizeObserver);
+      fixture.detectChanges();
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      resize([{ contentRect: { width: 1600 } } as ResizeObserverEntry], {} as ResizeObserver);
+      fixture.detectChanges();
+      fixture.detectChanges();
+      expect(root().querySelector('button[aria-expanded="true"][aria-controls^="detail-"]')).toBeNull();
+      const wideTrigger = root().querySelector<HTMLButtonElement>('button[aria-controls^="detail-"]');
+      wideTrigger?.click();
+      fixture.detectChanges();
+      resize([{ contentRect: { width: 500 } } as ResizeObserverEntry], {} as ResizeObserver);
+      fixture.detectChanges();
+      fixture.detectChanges();
+      expect(root().querySelector('button[aria-expanded="true"][aria-controls^="detail-"]')).toBeNull();
+      expect(root().contains(document.activeElement)).toBe(true);
     } finally {
       globalThis.ResizeObserver = original;
     }
@@ -259,24 +290,43 @@ describe('CapabilityMatrixSettingComponent', () => {
     fixture.componentRef.setInput('familyFilter', 'missing');
     fixture.detectChanges();
     await settle();
-    expect(root().querySelector('[data-testid="capability-matrix-empty"]')).toBeNull();
-    expect(root().querySelector('[data-testid="capability-matrix-table"]')).not.toBeNull();
-    expect(root().querySelector('[data-testid="capability-matrix-filtered-empty"]')?.textContent).toContain('No models match the filters.');
+    expect(
+      root().querySelector('[data-testid="capability-matrix-empty"]'),
+    ).toBeNull();
+    expect(
+      root().querySelector('[data-testid="capability-matrix-table"]'),
+    ).not.toBeNull();
+    expect(
+      root().querySelector('[data-testid="capability-matrix-filtered-empty"]')
+        ?.textContent,
+    ).toContain('No models match the filters.');
   });
   it('ignores an older request that resolves after a newer reload', async () => {
     let resolveFirst!: (value: unknown) => void;
-    call.mockImplementationOnce(() => new Promise((done) => { resolveFirst = done; }))
+    call
+      .mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolveFirst = done;
+          }),
+      )
       .mockResolvedValueOnce(rpcSuccess(result));
     fixture = TestBed.createComponent(CapabilityMatrixSettingComponent);
     const emitted: (AgentGetCapabilityMatrixResult | null)[] = [];
-    fixture.componentInstance.resultChange.subscribe((value) => emitted.push(value));
+    fixture.componentInstance.resultChange.subscribe((value) =>
+      emitted.push(value),
+    );
     fixture.detectChanges();
     await fixture.componentInstance.reload();
     await settle();
     resolveFirst(rpcError('old failure'));
     await settle();
     expect(emitted).toEqual([result]);
-    expect(root().querySelector('[data-testid="capability-matrix-error"]')).toBeNull();
-    expect(root().querySelector('[data-testid="matrix-row-sample-*-implement"]')).not.toBeNull();
+    expect(
+      root().querySelector('[data-testid="capability-matrix-error"]'),
+    ).toBeNull();
+    expect(
+      root().querySelector('[data-testid="matrix-row-sample-*-implement"]'),
+    ).not.toBeNull();
   });
 });

@@ -15,7 +15,7 @@ import {
   PtahSettingRowComponent,
   PtahButtonDirective,
   PtahToggleDirective,
-  PtahSelectDirective,
+  PtahRichSelectComponent,
   PtahInputDirective,
 } from '@ptah-extension/ui';
 import {
@@ -26,6 +26,7 @@ import {
   type SessionBudgetUnit,
   type SessionBudgetTokenMeasure,
 } from '@ptah-extension/shared';
+import { SessionBudgetMeasureAdviceComponent } from './session-budget-measure-advice.component';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
@@ -83,6 +84,9 @@ interface NumberField {
   readonly key: NumberKey;
   readonly label: string;
   readonly help: string;
+  readonly info?: boolean;
+  /** Label (with unit and info icon) too long for one two-column track: the field spans both columns there. */
+  readonly wide?: boolean;
 }
 
 const NUMBER_FIELDS: readonly NumberField[] = [
@@ -100,26 +104,34 @@ const NUMBER_FIELDS: readonly NumberField[] = [
     key: 'fallbackWeightedTokens',
     label: 'Fallback weighted tokens',
     help: 'Used when model pricing is unavailable.',
+    info: true,
+    wide: true,
   },
   {
     key: 'tightenPercent',
     label: 'Tighten at (%)',
     help: 'Starts tightening; stays below Handoff.',
+    info: true,
   },
   {
     key: 'handoffPercent',
     label: 'Handoff at (%)',
     help: 'Offers to wrap up and hand off to a new session.',
+    info: true,
+  },
+  {
+    key: 'tightenWindowTokens',
+    label: 'Compact window (tokens)',
+    help: 'Advisory only until set; then lowers the compact window.',
+    info: true,
+    wide: true,
   },
   {
     key: 'handoffAfterCompactions',
     label: 'Handoff after compactions',
-    help: 'Offers a handoff after this many compactions, only if the compaction leaves the context at 50% or more of the auto-compact window.',
-  },
-  {
-    key: 'tightenWindowTokens',
-    label: 'Tighten auto-compact window (tokens)',
-    help: 'Advisory only until set; then lowers the compact window.',
+    help: 'Handoff after repeated compactions leave context at least half full.',
+    info: true,
+    wide: true,
   },
 ];
 
@@ -131,7 +143,7 @@ const BOOLEAN_LABELS: Readonly<Record<BooleanKey, string>> = {
 const BOOLEAN_HELP: Readonly<Record<BooleanKey, string>> = {
   enabled: 'Enable this limit for the current chat.',
   autoHandoffAtLimit:
-    'On by default. Queues /session-handoff after the current turn, once per session; cancel it from the banner.',
+    'Hands off once per session, after the current turn.',
 };
 
 const LABELS: Readonly<Record<BudgetKey, string>> = {
@@ -188,6 +200,7 @@ function storedNumberIsValid(
   selector: 'ptah-session-budget-settings',
   standalone: true,
   imports: [
+    SessionBudgetMeasureAdviceComponent,
     SettingsBusyDisabledDirective,
     PtahFieldGridDirective,
     PtahFieldComponent,
@@ -195,13 +208,13 @@ function storedNumberIsValid(
     PtahSettingRowComponent,
     PtahButtonDirective,
     PtahToggleDirective,
-    PtahSelectDirective,
+    PtahRichSelectComponent,
     PtahInputDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section>
-      <ptah-form-section
+      <ptah-form-section wide
         heading="Session budget"
         description="Set per-chat limits and when Ptah should intervene."
         data-glass-surface="content"
@@ -240,7 +253,6 @@ function storedNumberIsValid(
                 [hint]="booleanHelp[key]"
                 [controlId]="'session-budget-' + key"
               >
-                <div>
                   <input
                     type="checkbox"
                     ptahToggle
@@ -252,152 +264,84 @@ function storedNumberIsValid(
                     [attr.aria-describedby]="'session-budget-' + key + '-hint'"
                     [attr.data-testid]="'session-budget-' + key"
                   />
-                  <span class="ms-[var(--ptah-gap-label)] text-sm"
-                    >Enabled</span
-                  >
-                </div>
               </ptah-setting-row>
             }
 
             <div class="session-budget-fields">
-              <div ptahFieldGrid minColumn="md">
-                <div class="flex min-w-0 flex-col gap-1">
-                  <label
-                    for="session-budget-unit"
-                    class="text-sm font-medium text-base-content"
-                    >{{ labels.unit }}</label
-                  >
-                  <select
-                    ptahSelect
-                    size="sm"
-                    id="session-budget-unit"
-                    class="w-full text-sm"
-                    [value]="unitValue()"
-                    [ptahBusyDisabled]="busy()"
+              <div ptahFieldGrid minColumn="md" class="session-budget-grid">
+                <ptah-field label="Budget unit" hint="Tokens or priced cost.">
+                  <ptah-select #unitSelect
+                    triggerId="session-budget-unit"
+                    label="Budget unit"
+                    [options]="unitOptions" [value]="unitValue()" [disabled]="busy()"
                     aria-describedby="session-budget-unit-help"
-                    (change)="selectUnit($event)"
+                    (valueChange)="unitSelect.value.set(unitValue()); selectUnit($event)"
                     data-testid="session-budget-unit"
-                  >
-                    @for (unit of units; track unit) {
-                      <option [value]="unit" [selected]="unit === unitValue()">
-                        {{ unitLabels[unit] }}
-                      </option>
-                    }
-                  </select>
-                  <p
+                  />
+                  <p ptahFieldAfterError
                     id="session-budget-unit-help"
-                    class="text-xs text-base-content-muted"
+                    class="sr-only"
                   >
                     Tokens use chat usage; Cost uses priced models.
                   </p>
                   @if (errors()['unit']; as message) {
-                    <p data-testid="session-budget-unit-error">{{ message }}</p>
+                    <p ptahFieldAfterError class="px-[var(--ptah-field-pad-x)] text-xs text-error" data-testid="session-budget-unit-error">{{ message }}</p>
                   }
-                </div>
+                </ptah-field>
 
-                <div class="flex min-w-0 flex-col gap-[var(--ptah-space-1)]">
-                  <label
-                    for="session-budget-token-measure"
-                    class="text-sm font-medium text-base-content"
-                    >Token measure</label
-                  >
-                  <select
-                    ptahSelect
-                    size="sm"
-                    id="session-budget-token-measure"
-                    class="w-full text-sm"
-                    [value]="tokenMeasureValue()"
-                    [ptahBusyDisabled]="busy()"
+                <ptah-field label="Token measure" hint="Weighted discounts cache reads.">
+                  <ptah-select #measureSelect
+                    triggerId="session-budget-token-measure"
+                    label="Token measure"
+                    [options]="tokenMeasureOptions" [value]="tokenMeasureValue()" [disabled]="busy()"
                     aria-describedby="session-budget-token-measure-help session-budget-token-measure-resolved"
-                    (change)="selectTokenMeasure($event)"
+                    (valueChange)="measureSelect.value.set(tokenMeasureValue()); selectTokenMeasure($event)"
                     data-testid="session-budget-token-measure"
-                  >
-                    @for (measure of tokenMeasures; track measure) {
-                      <option
-                        [value]="measure"
-                        [selected]="measure === tokenMeasureValue()"
-                      >
-                        {{ tokenMeasureLabels[measure] }}
-                      </option>
-                    }
-                  </select>
-                  <p
+                  />
+                  <p ptahFieldAfterError
                     id="session-budget-token-measure-help"
-                    class="text-xs text-base-content-muted"
+                    class="sr-only"
                   >
-                    Weighted counts cached reads at 10% and output at 5x. Raw
-                    counts every token of every request, including cache reads.
+                    Weighted discounts cache reads; raw counts all tokens.
                   </p>
-                  <p
+                  <p ptahFieldAfterError
                     id="session-budget-token-measure-resolved"
-                    class="text-xs text-base-content-muted"
+                    class="sr-only"
                     data-testid="session-budget-token-measure-resolved"
                   >
                     Current measure:
                     {{ tokenMeasureLabels[tokenMeasureValue()] }}.
                   </p>
-                  @if (
-                    tokenMeasureValue() === 'raw' && !recommendationDismissed()
-                  ) {
-                    <div
-                      class="rounded-md border border-info/30 bg-info/10 px-[var(--ptah-space-2)] py-[var(--ptah-space-1)] text-xs"
-                      data-testid="session-budget-token-measure-recommendation"
-                    >
-                      <p>
-                        Weighted session tokens are recommended for a session
-                        budget. Switching keeps your saved token budget number
-                        unchanged.
-                      </p>
-                      <button
-                        type="button"
-                        ptahButton
-                        variant="ghost"
-                        size="xs"
-                        [ptahBusyDisabled]="busy()"
-                        (click)="selectWeighted()"
-                        data-testid="session-budget-token-measure-switch"
-                      >
-                        Switch to weighted
-                      </button>
-                      <button
-                        type="button"
-                        ptahButton
-                        variant="ghost"
-                        size="xs"
-                        (click)="dismissRecommendation()"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  }
                   @if (errors()['tokenMeasure']; as message) {
-                    <p role="alert" class="text-xs text-error">{{ message }}</p>
+                    <p ptahFieldAfterError role="alert" class="px-[var(--ptah-field-pad-x)] text-xs text-error">{{ message }}</p>
                   }
-                </div>
+                </ptah-field>
 
+                @if (tokenMeasureValue() === 'raw' && !recommendationDismissed()) {
+                  <ptah-session-budget-measure-advice class="col-span-full"
+                    [busy]="busy()" (switchMeasure)="selectWeighted()"
+                    (dismissAdvice)="dismissRecommendation()" />
+                }
                 @for (field of numberFields; track field.key) {
                   <ptah-field
-                    appearance="stacked"
                     class="w-full min-w-0"
+                    [class.session-budget-wide]="field.wide"
                     [label]="field.label"
-                    [hint]="field.help + ' Range: ' + range(field.key) + '.'"
+                    [hint]="'Range: ' + range(field.key) + '.'"
+                    [info]="field.info ? field.help : null"
                     [error]="errors()[field.key] ?? null"
                     [errorTestId]="'session-budget-' + field.key + '-error'"
                   >
                     <input
                       ptahInput
-                      size="sm"
                       type="text"
                       [id]="'session-budget-' + field.key"
                       [attr.inputmode]="
                         settings[field.key].integer ? 'numeric' : 'decimal'
                       "
-                      class="join-item min-w-0 flex-1 text-right tabular-nums"
+                      class="tabular-nums"
                       [invalid]="!!errors()[field.key]"
                       [value]="numberText(field.key)"
-                      [attr.placeholder]="
-                        settings[field.key].nullable ? 'Advisory only' : null
-                      "
                       [attr.aria-describedby]="
                         storedNotice(field.key)
                           ? 'session-budget-' + field.key + '-stored'
@@ -410,21 +354,16 @@ function storedNumberIsValid(
                       (blur)="blurred(field.key)"
                       [attr.data-testid]="'session-budget-' + field.key"
                     />
-                    <span ptahFieldTrailing aria-hidden="true">{{
-                      unitSuffix(field.key)
-                    }}</span>
+                    @if (unitSuffix(field.key); as unit) {
+                      <span ptahFieldTrailing
+                        class="shrink-0 whitespace-nowrap pr-[var(--ptah-gap-heading)] text-xs text-base-content-muted"
+                        aria-hidden="true">{{ unit }}</span>
+                    }
                     @if (errors()[field.key]) {
                       <span
                         ptahFieldBeforeHint
                         class="text-xs text-base-content-muted"
-                        >{{ field.help }} Range: {{ range(field.key) }}.</span
-                      >
-                    }
-                    @if (humanReadable(field.key); as readable) {
-                      <span
-                        ptahFieldBeforeHint
-                        class="whitespace-nowrap text-xs text-base-content-muted"
-                        >{{ readable }}</span
+                        >Range: {{ range(field.key) }}.</span
                       >
                     }
                     @if (storedNotice(field.key); as notice) {
@@ -456,12 +395,25 @@ function storedNumberIsValid(
       container-type: inline-size;
       min-width: 0;
     }
+    /* Every field has one real hint line; the row gap also gives the next notch label
+       its half-line above the box. */
+    .session-budget-grid {
+      row-gap: calc(var(--ptah-gap-field) + var(--ptah-field-label-float-leading) / 2);
+    }
+    /* Two columns (14rem tracks, 1rem gap): a field whose label or hint needs more than one track spans both. */
+    @container (min-width: 29rem) and (max-width: 43.99rem) {
+      .session-budget-wide {
+        grid-column: 1 / -1;
+      }
+    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
   `,
 })
 export class SessionBudgetSettingsComponent implements OnInit {
+  protected readonly unitOptions = Object.entries(UNIT_LABELS).map(([value, label]) => ({ value: value as SessionBudgetUnit, label }));
+  protected readonly tokenMeasureOptions = Object.entries(TOKEN_MEASURE_LABELS).map(([value, label]) => ({ value: value as SessionBudgetTokenMeasure, label }));
   private readonly vscode = inject(VSCodeService);
   private readonly logger = inject(LoggingService);
   private readonly tabManager = inject(TabManagerService);
@@ -476,7 +428,6 @@ export class SessionBudgetSettingsComponent implements OnInit {
   ];
   protected readonly booleanHelp = BOOLEAN_HELP;
   protected readonly units = SESSION_BUDGET_SETTINGS.unit.values;
-  protected readonly unitLabels = UNIT_LABELS;
   protected readonly tokenMeasures =
     SESSION_BUDGET_SETTINGS.tokenMeasure.values;
   protected readonly tokenMeasureLabels = TOKEN_MEASURE_LABELS;
@@ -573,16 +524,6 @@ export class SessionBudgetSettingsComponent implements OnInit {
     return 'tokens';
   }
 
-  protected humanReadable(key: NumberKey): string | null {
-    if (
-      !['tokens', 'fallbackWeightedTokens', 'tightenWindowTokens'].includes(key)
-    )
-      return null;
-    const value = Number(this.numberText(key).replace(/[,_\s]/g, ''));
-    if (!Number.isFinite(value) || value < 1_000) return null;
-    return `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 1, notation: 'compact' }).format(value)} tokens`;
-  }
-
   /** A stored value the backend ignores (out of bounds, wrong type, or a broken percent pair) says what applies instead. */
   protected storedNotice(key: NumberKey): string | null {
     const setting: SessionBudgetNumberSetting = this.settings[key];
@@ -659,18 +600,14 @@ export class SessionBudgetSettingsComponent implements OnInit {
     await this.write(key, next);
   }
 
-  async selectUnit(event: Event): Promise<void> {
-    const input = event.target as HTMLSelectElement;
-    const next = this.units.find((unit) => unit === input.value);
-    input.value = this.unitValue();
+  async selectUnit(value: SessionBudgetUnit | null): Promise<void> {
+    const next = this.units.find((unit) => unit === value);
     if (this.busy() || next === undefined || next === this.unitValue()) return;
     await this.write('unit', next);
   }
 
-  async selectTokenMeasure(event: Event): Promise<void> {
-    const input = event.target as HTMLSelectElement;
-    const next = this.tokenMeasures.find((measure) => measure === input.value);
-    input.value = this.tokenMeasureValue();
+  async selectTokenMeasure(value: SessionBudgetTokenMeasure | null): Promise<void> {
+    const next = this.tokenMeasures.find((measure) => measure === value);
     if (this.busy() || next === undefined || next === this.tokenMeasureValue())
       return;
     await this.write('tokenMeasure', next);

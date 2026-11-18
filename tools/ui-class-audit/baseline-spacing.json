@@ -329,22 +329,16 @@
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/host-routing-setting.component.ts": {
     "gap-3": 1,
-    "mt-0.5": 1,
-    "pb-2": 1,
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-guards-settings.component.ts": {
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts": {
-    "gap-2": 2,
+    "gap-2": 1,
     "gap-3": 1,
-    "mt-0.5": 1,
-    "mt-1": 1,
-    "mt-2": 2,
+    "mt-2": 1,
     "mt-3": 1,
-    "p-2": 1,
-    "pb-2": 1,
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts": {
@@ -391,7 +385,6 @@
     "space-y-3": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
-    "gap-1": 1,
     "px-2": 1,
     "py-1": 1
   },

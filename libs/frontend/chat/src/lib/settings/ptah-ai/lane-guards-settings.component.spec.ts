@@ -68,15 +68,25 @@ describe('LaneGuardsSettingsComponent', () => {
     fixture?.destroy();
   });
 
+  it('uses a wide section and a floating field in the shared grid', async () => {
+    await create();
+    expect(host().querySelector('ptah-form-section[wide]')).not.toBeNull();
+    expect(host().querySelector('[ptahFieldGrid] ptah-field [data-appearance]')?.getAttribute('data-appearance')).toBe('floating');
+  });
+
   it('preserves threshold row DOM', async () => {
     await create();
     const row = input('lane-guards-repeat').closest('ptah-field');
+    expect(row?.querySelector('button[aria-label="More about Repeat-call stop at"]')).not.toBeNull();
+    expect(byTestId('lane-guards-intro')?.classList.contains('sr-only')).toBe(true);
+    expect(input('lane-guards-repeat').getAttribute('aria-describedby')?.split(' ')).toContain('lane-guards-intro');
+
     expect(row).not.toBeNull();
     expect(
       row
         ?.querySelector('.ptah-field[data-appearance]')
         ?.getAttribute('data-appearance'),
-    ).toBe('stacked');
+    ).toBe('floating');
     const field = input('lane-guards-repeat');
     expect(field.classList.contains('input')).toBe(true);
     expect(field.classList.contains('input-sm')).toBe(true);

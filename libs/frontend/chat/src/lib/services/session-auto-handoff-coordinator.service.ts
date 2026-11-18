@@ -12,6 +12,7 @@ import {
   QueuedFollowUpStore,
   TabManagerService,
   TabWorkspacePartitionService,
+  SessionTurnActivityStore,
   type QueuedFollowUpRef,
 } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
@@ -55,7 +56,9 @@ const LOG_CONTEXT = '[SessionAutoHandoff]';
  * only the SHOWN tab and its visible banner, so a background tab â€” or a
  * background workspace partition â€” that reached its limit never fired. This
  * coordinator watches the budget state of EVERY mounted tab, in the active
- * workspace and every background partition:
+ * workspace and every background partition. Only sessions with renderer or backend-confirmed turn activity in
+ * this page lifetime qualify, even if their budget reaches the limit after the
+ * turn ends: a reopened idle session at its limit does not fire.
  *
  * - The effect depends on the active tab-set signal and the background
  *   revision, so any tab update in any partition re-evaluates every candidate.
@@ -79,6 +82,7 @@ const LOG_CONTEXT = '[SessionAutoHandoff]';
 export class SessionAutoHandoffCoordinatorService {
   private readonly tabManager = inject(TabManagerService);
   private readonly partition = inject(TabWorkspacePartitionService);
+  private readonly turnActivity = inject(SessionTurnActivityStore);
   private readonly messageDispatch = inject(MessageDispatchService);
   private readonly followUpStore = inject(QueuedFollowUpStore);
   /** Resolved on first use: the queue service has its own construction-time wiring. */
@@ -91,8 +95,11 @@ export class SessionAutoHandoffCoordinatorService {
   private readonly retryRevision = signal(0);
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly reconcileTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Delivered turns still streaming when the bounded status poll expires. */
-  private readonly awaitingSettlement = new Map<string, string>();
+  /** Delivery alone does not prove a turn started; retain observations past polling. */
+  private readonly awaitingSettlement = new Map<string, {
+    tabId: string;
+    state: 'waiting' | 'streaming' | 'settled';
+  }>();
   private readonly deferralTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Sessions with a probe or send in flight; guarded synchronously, so a re-run cannot double-fire. */
@@ -122,12 +129,15 @@ export class SessionAutoHandoffCoordinatorService {
       this.retryRevision();
       const candidates = this.candidates();
       const stale = this.staleQueued();
-      for (const [sessionId, tabId] of this.awaitingSettlement) {
+      for (const [sessionId, delivery] of this.awaitingSettlement) {
+        const { tabId } = delivery;
         const tab = this.budgetTabs().find((item) => item.id === tabId);
         if (!tab || tab.claudeSessionId !== sessionId || this.autoHandoff.entry(sessionId)?.state !== 'delivered') {
           this.awaitingSettlement.delete(sessionId);
-        } else if (tab.status !== 'streaming') {
-          this.awaitingSettlement.delete(sessionId);
+        } else if (tab.status === 'streaming') {
+          delivery.state = 'streaming';
+        } else if (delivery.state === 'streaming') {
+          delivery.state = 'settled';
           this.scheduleReconcile(tabId, sessionId, 0);
         }
       }
@@ -141,8 +151,8 @@ export class SessionAutoHandoffCoordinatorService {
   }
 
   /**
-   * Every session that must fire now, one tab each: a limit budget with the
-   * setting on, not yet claimed, cancelled, wrapped up by hand, marked without
+   * Sessions with turn activity this page that must fire now, one tab each: at the
+   * limit with the setting on, not yet claimed, cancelled, wrapped up by hand, marked without
    * the skill, in flight, rate-gated or given up â€” and with no pending
    * permission prompt on its tab. Called inside the effect: every read here
    * that can change (tab state in both partitions, the permission prompts)
@@ -153,9 +163,9 @@ export class SessionAutoHandoffCoordinatorService {
     const found: HandoffCandidate[] = [];
     const sessions = new Set<string>();
     for (const tab of this.budgetTabs()) {
+      const sessionId = tab.claudeSessionId;
       const budget = tab.sessionBudget;
       if (!budget || budget.stage !== 'limit') continue;
-      const sessionId = tab.claudeSessionId;
       if (typeof sessionId !== 'string') continue;
       if (budget.sessionId !== sessionId) {
         this.logSkip(sessionId, 'session id mismatch', tab.id);
@@ -163,6 +173,10 @@ export class SessionAutoHandoffCoordinatorService {
       }
       if (budget.autoHandoff !== true) {
         this.logSkip(sessionId, 'auto handoff off', tab.id);
+        continue;
+      }
+      if (!this.turnActivity.hasTurnActivity(sessionId)) {
+        this.logSkip(sessionId, 'no turn in this page lifetime', tab.id);
         continue;
       }
       if (sessions.has(sessionId)) continue; // the first tab per session sends
@@ -366,6 +380,8 @@ export class SessionAutoHandoffCoordinatorService {
       this.autoHandoff.recordQueued(sessionId, queued);
       this.sentAttempts.set(sessionId, (this.sentAttempts.get(sessionId) ?? 0) + 1);
       if (!queued) {
+        // A send that already ran to its end streams nothing afterwards.
+        this.awaitingSettlement.set(sessionId, { tabId, state: outcome.settled === true ? 'settled' : 'waiting' });
         this.autoHandoff.transition(sessionId, 'delivered');
       }
       this.scheduleReconcile(tabId, sessionId, 0);
@@ -392,6 +408,7 @@ export class SessionAutoHandoffCoordinatorService {
   private watchQueued(sessionId: string, queued: QueuedFollowUpRef): void {
     this.followUpStore.onSettled(queued.clientMessageId, (outcome) => {
       if (outcome === 'delivered' || outcome === 'steered') {
+        this.awaitingSettlement.set(sessionId, { tabId: queued.tabId, state: 'waiting' });
         this.autoHandoff.transition(sessionId, 'delivered');
         this.scheduleReconcile(queued.tabId, sessionId, 0);
         return;
@@ -424,6 +441,7 @@ export class SessionAutoHandoffCoordinatorService {
     if (tab.claudeSessionId !== sessionId) return null;
     if (budget.sessionId !== sessionId) return null;
     if (budget.autoHandoff !== true) return null;
+    if (!this.turnActivity.hasTurnActivity(sessionId)) return null;
     if (tab.status === 'resuming') return null;
     return budget.stage === 'limit' ? { budget } : null;
   }
@@ -445,7 +463,7 @@ export class SessionAutoHandoffCoordinatorService {
       clearTimeout(timer);
       this.reconcileTimers.delete(sessionId);
     }
-    for (const [sessionId, tabId] of this.awaitingSettlement) {
+    for (const [sessionId, { tabId }] of this.awaitingSettlement) {
       if (!this.budgetTabs().some((tab) => tab.id === tabId && tab.claudeSessionId === sessionId)) {
         this.awaitingSettlement.delete(sessionId);
       }
@@ -529,7 +547,8 @@ export class SessionAutoHandoffCoordinatorService {
         this.autoHandoff.release(sessionId);
         this.retryRevision.update((value) => value + 1);
         return;
-      } else if (status.state === 'absent' && current.state === 'delivered' && currentTab.status !== 'streaming') {
+      } else if (status.state === 'absent' && current.state === 'delivered' &&
+        this.awaitingSettlement.get(sessionId)?.state === 'settled' && currentTab.status !== 'streaming') {
         if ((this.sentAttempts.get(sessionId) ?? current.attempts) >= MAX_FAILED_ATTEMPTS) {
           this.autoHandoff.transition(sessionId, 'failed');
           return;
@@ -548,10 +567,6 @@ export class SessionAutoHandoffCoordinatorService {
       }
     }
     if (step < 12) this.scheduleReconcile(tabId, sessionId, step + 1);
-    else if (this.autoHandoff.entry(sessionId)?.state === 'delivered' &&
-      this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab?.status === 'streaming') {
-      this.awaitingSettlement.set(sessionId, tabId);
-    }
   }
 
   /**

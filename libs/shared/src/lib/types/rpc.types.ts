@@ -29,6 +29,12 @@ export interface SkillRecommendation {
   skill: SkillShEntry;
   evidence: string;
   score: number;
+  /** Omitted by older clients and servers. */
+  rankedBy?: 'decision-model' | 'session-model' | 'heuristic';
+  /** Optional explanation supplied only by the session model. */
+  reason?: string;
+  /** One-based position in the ranked recommendations (1 is first). */
+  rank?: number;
 }
 
 export interface ProjectGuidance {

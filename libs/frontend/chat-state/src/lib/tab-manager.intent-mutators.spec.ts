@@ -7,6 +7,7 @@
  * path through `updateTabInternal`.
  */
 
+import { computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   StreamingState,
@@ -84,6 +85,7 @@ import {
   MODEL_REFRESH_CONTROL,
   type ModelRefreshControl,
 } from './model-refresh-control';
+import { SessionTurnActivityStore } from './session-turn-activity.store';
 import { TabManagerService } from './tab-manager.service';
 import { TabWorkspacePartitionService } from './tab-workspace-partition.service';
 import { TabId } from './identity/ids';
@@ -139,6 +141,110 @@ describe('TabManagerService — intent-named mutators', () => {
       ],
     });
     service = TestBed.inject(TabManagerService);
+  });
+
+  describe('page-lifetime turn activity', () => {
+    const activity = () => TestBed.inject(SessionTurnActivityStore);
+    const terminal: SessionTurnState = {
+      phase: 'idle', revision: 2, backgroundTasks: [], sessionCrons: [],
+      terminalReason: 'completed', timestamp: 1,
+    };
+
+    it('records streaming immediately and remains sticky after the turn ends', () => {
+      const id = service.createTab('turn');
+      service.attachSession(id, SESS_123);
+      expect(activity().hasTurnActivity(SESS_123)).toBe(false);
+      service.markStreaming(id);
+      expect(activity().hasTurnActivity(SESS_123)).toBe(true);
+      service.markLoaded(id);
+      expect(activity().hasTurnActivity(SESS_123)).toBe(true);
+    });
+
+    it('retains generating and idle accepted in the same tick', () => {
+      const id = service.createTab('short turn');
+      service.attachSession(id, SESS_123);
+      service.applyTurnState(id, { ...terminal, phase: 'generating', revision: 1, terminalReason: null }, SESS_123);
+      service.applyTurnState(id, terminal, SESS_123);
+      expect(service.tabs().find((tab) => tab.id === id)?.status).toBe('loaded');
+      expect(activity().hasTurnActivity(SESS_123)).toBe(true);
+    });
+
+    it('does not infer activity from idle bind, resume, attachment or history load', () => {
+      const id = service.createTab('old session');
+      service.attachSession(id, SESS_123);
+      service.markLoaded(id);
+      service.markTabAttached(id, { bindingId: 'binding', platform: 'telegram' });
+      service.markSessionActive(id);
+      service.applyResumingSession(id, {
+        sessionId: SESS_123, name: 'old', title: 'old', streamingState: createEmptyStreamingState(),
+      });
+      service.applyFinalizedHistory(id, []);
+      expect(activity().hasTurnActivity(SESS_123)).toBe(false);
+    });
+
+    it('does not treat accepted terminal or hidden status-only state as turn activity', () => {
+      const id = service.createTab('idle terminal');
+      service.attachSession(id, SESS_123);
+      service.applyHiddenTurnStateStatus(id, terminal, SESS_123);
+      service.applyTurnState(id, terminal, SESS_123);
+      expect(activity().hasTurnActivity(SESS_123)).toBe(false);
+    });
+
+    // An event with no session id is not accepted, as before: it records nothing.
+    it.each([true, false])('records hidden activity only for an accepted event (session given: %s)', (explicitSession) => {
+      const id = service.createTab('hidden turn');
+      service.attachSession(id, SESS_123);
+      service.applyHiddenTurnStateStatus(id, terminal, explicitSession ? SESS_123 : undefined, { turnRan: true });
+      expect(activity().hasTurnActivity(SESS_123)).toBe(explicitSession);
+    });
+
+    it('rejects stale and unowned hidden activity', () => {
+      const id = service.createTab('hidden stale');
+      service.attachSession(id, SESS_123);
+      service.applyTurnState(id, { ...terminal, revision: terminal.revision + 1 }, SESS_123);
+      service.applyHiddenTurnStateStatus(id, terminal, SESS_123, { turnRan: true });
+      service.applyHiddenTurnStateStatus(id, terminal, SESS_XYZ, { turnRan: true });
+      expect(activity().hasTurnActivity(SESS_123)).toBe(false);
+      expect(activity().hasTurnActivity(SESS_XYZ)).toBe(false);
+    });
+
+    it('records an id first bound mid-turn and a replacement id while streaming', () => {
+      const id = service.createTab('unbound turn');
+      service.markStreaming(id);
+      expect(activity().hasTurnActivity(SESS_123)).toBe(false);
+      service.attachSession(id, SESS_123);
+      service.attachSession(id, SESS_XYZ);
+      service.markLoaded(id);
+      expect(activity().hasTurnActivity(SESS_123)).toBe(true);
+      expect(activity().hasTurnActivity(SESS_XYZ)).toBe(true);
+    });
+
+    it('records background streaming without a budget', () => {
+      const id = service.createTab('background');
+      service.attachSession(id, SESS_123);
+      const background = service.tabs().find((tab) => tab.id === id);
+      if (!background) throw new Error('Missing fixture tab');
+      service.forceCloseTab(id);
+      partitionMock.findTabByIdAcrossWorkspaces?.mockReturnValue({
+        tab: { ...background, sessionBudget: null }, workspacePath: '/background',
+      });
+      service.markStreaming(id);
+      expect(activity().hasTurnActivity(SESS_123)).toBe(true);
+    });
+
+    it('exposes a tracked read and does not invalidate it for repeated activity', () => {
+      let reads = 0;
+      const seen = computed(() => {
+        reads++;
+        return activity().hasTurnActivity(SESS_123);
+      });
+      expect(seen()).toBe(false);
+      activity().recordTurnActivity(SESS_123);
+      expect(seen()).toBe(true);
+      activity().recordTurnActivity(SESS_123);
+      expect(seen()).toBe(true);
+      expect(reads).toBe(2);
+    });
   });
 
   describe('status transitions', () => {

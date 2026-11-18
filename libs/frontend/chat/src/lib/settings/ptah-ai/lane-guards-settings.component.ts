@@ -12,6 +12,7 @@ import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directi
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
   PtahFieldComponent,
+  PtahFieldGridDirective,
   PtahFormSectionComponent,
   PtahButtonDirective,
   PtahInputDirective,
@@ -53,6 +54,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
   imports: [
     SettingsBusyDisabledDirective,
     PtahFieldComponent,
+  PtahFieldGridDirective,
     PtahFormSectionComponent,
     PtahButtonDirective,
     PtahInputDirective,
@@ -60,7 +62,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section>
-      <ptah-form-section
+      <ptah-form-section wide
         heading="Lane guards"
         description="Stop background lanes that are stuck in a loop."
         data-glass-surface="content"
@@ -93,26 +95,15 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
             </div>
           }
           @default {
-            <p
-              id="lane-guards-intro"
-              class="text-xs text-base-content-muted"
-              data-testid="lane-guards-intro"
-            >
-              This guard stops a lane when it repeats the same call this many
-              times. Lanes also have a weighted token budget and a duration
-              limit. A lane gets an early warning when it reaches the budget
-              warning ratio, or when one more turn of its largest size would
-              cross the limit. The first turn that crosses the token limit is a
-              grace turn: the lane is warned again, and its next turn stops it.
-              A lane stopped by its budget does not resume; start a fresh lane
-              for the remaining work.
-            </p>
+            <div ptahFieldGrid>
             @for (field of fields; track field.key) {
               <ptah-field
-                appearance="stacked"
                 class="w-full min-w-0"
                 [label]="field.label"
-                [hint]="field.help + ' Range: ' + field.min + ' or greater.'"
+                [hint]="'Range: ' + field.min + ' or greater.'"
+                [info]="field.info"
+                infoTextId="lane-guards-intro"
+                infoTestId="lane-guards-intro"
                 [error]="fieldMessage(field.key)"
                 errorRole="alert"
                 [errorTestId]="field.testId + '-error'"
@@ -123,7 +114,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
                   [id]="field.testId"
                   ptahInput
                   size="sm"
-                  class="w-full min-w-0 flex-1 text-right tabular-nums"
+                  class="w-full min-w-0 flex-1 tabular-nums"
                   [invalid]="!!fieldMessage(field.key)"
                   [value]="drafts()[field.key]"
                   [ptahBusyDisabled]="busy() || feedback.saving()"
@@ -136,11 +127,12 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
                   <span
                     ptahFieldBeforeHint
                     class="text-xs text-base-content-muted"
-                    >{{ field.help }} Range: {{ field.min }} or greater.</span
+                    >Range: {{ field.min }} or greater.</span
                   >
                 }
               </ptah-field>
             }
+            </div>
           }
         }
       </ptah-form-section>

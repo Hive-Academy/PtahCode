@@ -7,7 +7,11 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  ClaudeRpcService,
+  LoggingService,
+} from '@ptah-extension/core';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
   SettingsSaveFeedbackService,
@@ -20,10 +24,10 @@ import {
   PtahButtonDirective,
   PtahSettingRowComponent,
   PtahSkeletonComponent,
+  PtahToggleDirective,
+  PtahFormSectionComponent,
 } from '@ptah-extension/ui';
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const RPC_TIMEOUT_MS = 5_000;
 const SETTING_KEY = 'agentOrchestration.hostRouting';
 /** The visible label; the checkbox's `aria-label` is the same text. */
@@ -59,23 +63,33 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
     PtahAlertComponent,
     PtahSettingRowComponent,
     PtahSkeletonComponent,
+    PtahToggleDirective,
+    PtahFormSectionComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section
+    <ptah-form-section
+      wide
+      level="2"
+      heading="Routing suggestions"
+      description="Ptah suggests a lane for each task from its kind and size."
       data-glass-surface="content"
       class="flex flex-col gap-3 text-sm text-base-content"
       aria-labelledby="host-routing-heading"
       data-testid="host-routing-setting"
     >
-      <div class="border-b border-base-content/10 pb-2">
+      <div>
         <span id="host-routing-heading" hidden>{{ label }}</span>
-        <ptah-setting-row [label]="label" controlId="host-routing-toggle">
+        <ptah-setting-row
+          label="Suggest a lane for each task"
+          hint="Suggestions appear before a lane starts."
+          controlId="host-routing-toggle"
+        >
           @if (load() === 'ready') {
             <input
               id="host-routing-toggle"
               type="checkbox"
-              [class]="'toggle toggle-xs toggle-success ' + focusRing"
+              ptahToggle
               [checked]="effective()"
               [disabled]="!modelConfigured()"
               [ptahBusyDisabled]="saving() || feedback.saving()"
@@ -86,10 +100,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
             />
           }
         </ptah-setting-row>
-        <p
-          id="host-routing-help"
-          class="mt-0.5 text-xs text-base-content-muted"
-        >
+        <p id="host-routing-help" class="sr-only">
           Before planning, Ptah checks whether the engineering task is agreed
           and suggests a task type, depth and available executors. Uses one
           decision-model call per message.
@@ -130,25 +141,28 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
         }
         @default {
           @if (!modelConfigured()) {
-            <p
+            <ptah-alert
+              tone="warning"
+              [compact]="true"
               id="host-routing-needs-model"
-              class="text-xs text-base-content-muted"
               data-testid="host-routing-needs-model"
             >
-              Off: set a decision model in Providers to use this.
-            </p>
+              Suggestions need a routing model. Choose one in Background models.
+              <button
+                alertAction
+                ptahButton
+                variant="ghost"
+                tone="warning"
+                type="button"
+                (click)="chooseModel()"
+              >
+                Choose model
+              </button>
+            </ptah-alert>
           }
         }
       }
-      <button
-        type="button"
-        ptahButton
-        variant="ghost"
-        (click)="openMatrix.emit()"
-      >
-        See decision matrix
-      </button>
-    </section>
+    </ptah-form-section>
   `,
   styles: `
     :host-context([data-glass='on']) [data-glass-surface='content'] {
@@ -157,12 +171,19 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
   `,
 })
 export class HostRoutingSettingComponent implements OnInit {
-  readonly openMatrix = output<void>();
+  readonly modelConfiguredChange = output<boolean | null>();
   private readonly rpc = inject(ClaudeRpcService);
+  private readonly appState = inject(AppStateManager);
+
+  protected chooseModel(): void {
+    this.appState.requestSettingsTab({
+      tab: 'providers',
+      section: 'background-models',
+    });
+  }
   private readonly logger = inject(LoggingService);
   protected readonly feedback = inject(SettingsSaveFeedbackService);
 
-  protected readonly focusRing = FOCUS;
   protected readonly label = LABEL;
 
   /** The stored flag as last read; `null` when it could not be read. */
@@ -199,6 +220,7 @@ export class HostRoutingSettingComponent implements OnInit {
       ]);
       this.stored.set(stored);
       this.modelConfigured.set(model);
+      this.modelConfiguredChange.emit(model);
       this.load.set(stored !== null && model !== null ? 'ready' : 'error');
     } finally {
       this.saving.set(false);

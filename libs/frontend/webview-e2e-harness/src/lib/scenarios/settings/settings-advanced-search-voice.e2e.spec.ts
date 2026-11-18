@@ -303,6 +303,12 @@ for (const host of HOSTS) {
       await dismissToast(page);
       await closeDrawers(page).catch(() => undefined);
       await attempt(findings, 'TTS voice ({ok:false})', async () => {
+        // The TTS provider panel opens over the Go vet section: a trial click on the lowest
+        // option fails if that section covers the panel (pointer hit-target check, no write).
+        await richTrigger(page.locator('[data-testid="voice-provider-btn-tts"]')).click();
+        await page.getByRole('listbox').getByRole('option').last().click({ trial: true });
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('listbox')).toHaveCount(0);
         await chooseVoiceProvider(page, 'tts', 'local');
         await dismissToast(page, 'Saved text-to-speech provider.');
         await openVoiceDrawer(page, 'tts');
