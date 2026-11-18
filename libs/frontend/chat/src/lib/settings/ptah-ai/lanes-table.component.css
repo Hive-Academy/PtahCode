@@ -155,22 +155,6 @@ ptah-lanes-table
   padding-inline: 0;
   text-align: start;
 }
-
-/* Keep status recovery and the existing menu beside the status in every layout. */
-ptah-lanes-table [data-lane-status] > ptah-lanes-table-status,
-ptah-lanes-table [data-lane-status] > .lane-row-actions {
-  display: inline-flex;
-  vertical-align: middle;
-  max-width: 100%;
-  width: auto;
-}
-ptah-lanes-table [data-lane-status] {
-  white-space: nowrap;
-}
-ptah-lanes-table [data-lane-status] .lane-row-actions > button {
-  padding-inline: 0;
-  font-size: 0.75rem;
-}
 ptah-lanes-table .ptah-table-grid > tbody > tr:not([ptahDetailRow]) {
   height: 49px;
 }
@@ -183,46 +167,6 @@ ptah-lanes-table
   ptah-lane-row-identity
   .lane-install-guide[data-ptah-button]:is(.btn, #ptah-button) {
   display: none;
-}
-
-/* The 358px settings pane must leave room for the lane icon and name. */
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  > ptah-lanes-table-status {
-  max-width: calc(100% - 2rem);
-  margin-inline-end: 0.25rem;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  .ptah-status-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  > .lane-row-actions {
-  gap: 0;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  .ptah-table-row-actions
-  button[data-ptah-button]:is(.btn, #ptah-button) {
-  width: 1.5rem;
-  min-width: 1.5rem;
-}
-
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  .lane-row-actions
-  > button[data-ptah-button]:is(.btn, #ptah-button) {
-  padding-inline: 0;
-  font-size: 0.75rem;
 }
 
 /* Detail values are editable facts and may occupy several lines. */
@@ -242,40 +186,6 @@ ptah-lanes-table .lane-default-value .lane-model-value button {
   height: auto;
   text-overflow: clip;
 }
-/* Anchor menus to the cell edge, independent of status/recovery label length. */
-ptah-lanes-table [data-lane-status] {
-  position: relative;
-  padding-inline-end: 2.5rem;
-}
-ptah-lanes-table [data-lane-status] > .lane-row-actions {
-  position: absolute;
-  width: auto;
-  inset-inline-end: var(--ptah-gap-inline);
-  top: 50%;
-  transform: translateY(-50%);
-}
-ptah-lanes-table [data-lane-status] > ptah-lanes-table-status {
-  white-space: normal;
-}
-ptah-lanes-table .ptah-table[data-collapsed='true'] [data-lane-status] {
-  padding-inline-end: 2.5rem;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  > ptah-lanes-table-status {
-  max-width: 100%;
-}
-ptah-lanes-table
-  [data-lane-status]:has(.lane-row-actions > button)
-  > ptah-lanes-table-status {
-  display: block;
-}
-
-/* Reserve the recovery action as well as the fixed menu anchor. */
-ptah-lanes-table [data-lane-status]:has(.lane-row-actions > button) {
-  padding-inline-end: 6rem;
-}
 
 /* Compact rows keep identity, kind and model in normal flow. */
 ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-order {
@@ -283,48 +193,6 @@ ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-order {
 }
 ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-status {
   width: 7.25rem;
-}
-ptah-lanes-table .ptah-table[data-collapsed='true'] [data-lane-status] {
-  padding-inline: 0.25rem;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  > ptah-lanes-table-status {
-  display: block;
-  max-width: calc(100% - 1.75rem);
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  .ptah-status-text {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: normal;
-  min-width: 0;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  > .lane-row-actions {
-  display: contents;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  .lane-row-actions
-  > button {
-  display: block;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  ptah-table-row-actions {
-  position: absolute;
-  inset-inline-end: 0.25rem;
-  top: 50%;
-  transform: translateY(-50%);
 }
 ptah-lanes-table
   .ptah-table[data-collapsed='true']
@@ -375,27 +243,6 @@ ptah-lanes-table
   > :first-child {
   padding-inline: var(--ptah-space-2);
 }
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  .ptah-status-text {
-  white-space: nowrap;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]
-  > ptah-lanes-table-status {
-  max-width: 100%;
-  margin: 0;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  [data-lane-status]:has(.lane-row-actions > button)
-  ptah-table-row-actions {
-  top: auto;
-  bottom: var(--ptah-space-1);
-  transform: none;
-}
 ptah-lanes-table td[hidden],
 ptah-lanes-table th[hidden] {
   display: none;
@@ -411,7 +258,7 @@ ptah-lanes-table
   width: 10rem;
 }
 ptah-lanes-table
-  .ptah-table[data-model-column='true']
+  .ptah-table[data-collapsed='true'][data-model-column='true']
   ptah-lane-row-identity[data-collapsed='true']
   .ptah-table-row-title-primary {
   display: flex;
@@ -419,44 +266,11 @@ ptah-lanes-table
   justify-content: start;
 }
 ptah-lanes-table
-  .ptah-table[data-model-column='true']
+  .ptah-table[data-collapsed='true'][data-model-column='true']
   ptah-lane-row-identity[data-collapsed='true']
   .ptah-table-row-title-kind {
-  grid-column: auto;
-  grid-row: auto;
-}
-ptah-lanes-table
-  .ptah-table[data-model-column='true']
-  [data-lane-status]
-  > ptah-lanes-table-status {
-  display: inline-flex;
-}
-ptah-lanes-table
-  .ptah-table[data-model-column='true']
-  [data-lane-status]
-  .lane-row-actions
-  > button {
-  display: inline-block;
-}
-ptah-lanes-table
-  .ptah-table[data-model-column='true']
-  [data-lane-status]
-  > .lane-row-actions {
-  display: inline-flex;
-  position: static;
-  transform: none;
-  /* Keep the recovery action apart from the status text on one line. */
-  margin-inline-start: var(--ptah-space-2);
-}
-ptah-lanes-table
-  .ptah-table[data-model-column='true']
-  [data-lane-status]
-  .lane-row-actions
-  ptah-table-row-actions {
-  position: absolute;
-  top: 50%;
-  bottom: auto;
-  transform: translateY(-50%);
+  flex-basis: auto;
+  order: 0;
 }
 ptah-lanes-table
   .lane-default-value
@@ -490,4 +304,76 @@ ptah-lanes-table
   height: auto;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* The Status cell owns the menu anchor in every tier. The action wrapper has
+   no box (and no transform), so recovery labels cannot move the menu. */
+ptah-lanes-table [data-lane-status] {
+  position: relative;
+  padding-inline-end: 2.5rem;
+  white-space: nowrap;
+}
+ptah-lanes-table [data-lane-status] > ptah-lanes-table-status {
+  display: inline-flex;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+ptah-lanes-table [data-lane-status] .ptah-status-text {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+ptah-lanes-table [data-lane-status] > .lane-row-actions {
+  display: contents;
+}
+ptah-lanes-table [data-lane-status] .lane-row-actions > button {
+  display: inline-block;
+  vertical-align: middle;
+  padding-inline: 0;
+  margin-inline-start: var(--ptah-space-2);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+ptah-lanes-table [data-lane-status] .lane-row-actions > ptah-table-row-actions {
+  position: absolute;
+  inset-inline-end: var(--ptah-gap-inline);
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > tbody
+  > tr
+  > [data-lane-status] {
+  padding-inline: 0.25rem 2rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .lane-row-actions
+  > ptah-table-row-actions {
+  inset-inline-end: 0.25rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .ptah-table-row-actions
+  button[data-ptah-button]:is(.btn, #ptah-button) {
+  width: 1.5rem;
+  min-width: 1.5rem;
+}
+/* Only compact stacks recovery under status; the menu stays at row center. */
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']:not([data-model-column='true'])
+  [data-lane-status]
+  > ptah-lanes-table-status,
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']:not([data-model-column='true'])
+  [data-lane-status]
+  .lane-row-actions
+  > button {
+  display: block;
+  margin: 0;
 }

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { Component, input, output } from '@angular/core';
 import { By } from '@angular/platform-browser';
@@ -538,5 +540,66 @@ describe('LanesTableComponent visual presentation', () => {
       q(host, '[ptahDetailFacts] [data-testid="cli-matrix-tier-summary"]')
         ?.textContent,
     ).toContain('0 of 3 set');
+  });
+  it.each([
+    ['wide', 1400, true],
+    ['middle', 742, true],
+    ['compact', 358, false],
+  ] as const)(
+    'keeps the kebab after recovery in the %s Status cell',
+    async (_tier, width, modelColumn) => {
+      const { fixture, host } = await mount([
+        instance('ready'),
+        system('copilot', {
+          status: {
+            kind: 'needs-key',
+            label: 'Sign in needed',
+            tone: 'warning',
+          },
+        }),
+        uninstalled('codex'),
+      ]);
+      const table = fixture.debugElement.query(By.directive(PtahTableComponent))
+        .componentInstance as PtahTableComponent;
+      table['width'].set(width);
+      fixture.componentInstance['modelColumn'].set(modelColumn);
+      fixture.detectChanges();
+      const cells = host.querySelectorAll('[data-lane-status]');
+      expect(cells).toHaveLength(3);
+      for (const cell of Array.from(cells)) {
+        const actions = cell.querySelector('.lane-row-actions');
+        expect(actions?.previousElementSibling?.tagName).toBe(
+          'PTAH-LANES-TABLE-STATUS',
+        );
+        const menu = actions?.querySelector('ptah-table-row-actions');
+        expect(menu).not.toBeNull();
+        expect(actions?.lastElementChild).toBe(menu);
+        const recovery = actions?.querySelector(':scope > button');
+        if (recovery) expect(recovery.nextElementSibling).toBe(menu);
+        expect(
+          menu?.querySelector('button[aria-label^="More actions for "]'),
+        ).not.toBeNull();
+      }
+    },
+  );
+
+  it('scopes every model-column tier selector to collapsed tables', () => {
+    // jsdom can guard the cascade contract; it cannot measure layout or pixels.
+    const css = readFileSync(
+      join(__dirname, 'lanes-table.component.css'),
+      'utf8',
+    );
+    const selectors = css.match(/[^{}]+(?=\{)/g) ?? [];
+    const middle = selectors.filter(
+      (selector) =>
+        selector.includes(".ptah-table[data-model-column='true']") ||
+        selector.includes("[data-collapsed='true'][data-model-column='true']"),
+    );
+    expect(middle.length).toBeGreaterThan(0);
+    for (const selector of middle) {
+      expect(selector).toContain(
+        "[data-collapsed='true'][data-model-column='true']",
+      );
+    }
   });
 });

@@ -82,8 +82,8 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
     }
     ptah-lane-row-identity[data-collapsed='true'] .ptah-table-row-title-kind {
       position: static;
-      grid-column: 1 / -1;
-      grid-row: 2;
+      flex-basis: 100%;
+      order: 1;
       justify-self: start;
       line-height: 1rem;
       font-family: var(--ptah-font-sans);
@@ -103,14 +103,14 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
     }
     ptah-lane-row-identity[data-collapsed='true']
       .ptah-table-row-title-primary[class] {
-      display: grid;
-      grid-template-columns: auto auto auto;
+      /* Keep icon/name/info gaps intrinsic; kind takes its own flex line. */
+      display: flex;
+      flex-wrap: wrap;
       justify-content: start;
       align-items: center;
     }
     ptah-lane-row-identity[data-collapsed='true'] ptah-lane-default-warning {
-      grid-column: 3;
-      grid-row: 1;
+      flex: 0 0 auto;
     }
     ptah-lane-row-identity[data-collapsed='true']
       .ptah-table-row-title-secondary[class] {

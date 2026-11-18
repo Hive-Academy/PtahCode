@@ -86,6 +86,52 @@ async function settle(page: Page): Promise<void> {
   });
 }
 
+/** Guard every lane, including recovery rows, before capturing each width. */
+async function assertLaneMenuGeometry(table: Locator): Promise<void> {
+  const rows = table.locator('tr[data-testid]:has([data-lane-status])');
+  expect(
+    await rows.count(),
+    'Lanes geometry requires populated rows',
+  ).toBeGreaterThan(0);
+  let menuLeft: number | undefined;
+  for (const row of await rows.all()) {
+    const name = (await row.getAttribute('data-testid')) ?? 'unknown lane';
+    const status = row.locator('[data-lane-status]');
+    const menu = status.getByRole('button', { name: /^More actions for / });
+    const box = await menu.boundingBox();
+    const rowBox = await row.boundingBox();
+    expect(box, `${name}: missing kebab box`).not.toBeNull();
+    expect(rowBox, `${name}: missing row box`).not.toBeNull();
+    if (!box || !rowBox) continue;
+    menuLeft ??= box.x;
+    expect(
+      Math.abs(box.x - menuLeft),
+      `${name}: kebab x differs from other rows`,
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(box.y + box.height / 2 - rowBox.y - rowBox.height / 2),
+      `${name}: kebab is not at row center`,
+    ).toBeLessThanOrEqual(1);
+    const labels = status.locator(
+      '.ptah-status-text, .lane-row-actions > button',
+    );
+    for (const label of await labels.all()) {
+      const labelBox = await label.boundingBox();
+      expect(labelBox, `${name}: missing status/recovery box`).not.toBeNull();
+      if (!labelBox) continue;
+      const intersects =
+        box.x < labelBox.x + labelBox.width &&
+        box.x + box.width > labelBox.x &&
+        box.y < labelBox.y + labelBox.height &&
+        box.y + box.height > labelBox.y;
+      expect(
+        intersects,
+        `${name}: kebab overlaps ${await label.innerText()}`,
+      ).toBe(false);
+    }
+  }
+}
+
 /** Clicks a row action inline, or through the row's More actions menu when the narrow layout moved it there. */
 async function rowAction(
   page: Page,
@@ -274,6 +320,8 @@ test('captures populated Settings Providers gate shots on the real backend', asy
       await ((await header.count()) ? header : matrix).evaluate((el) =>
         el.scrollIntoView({ block: 'start' }),
       );
+      await settle(page);
+      await assertLaneMenuGeometry(table);
       await shot('lanes', width);
 
       if (SUFFIX !== 'before') {
