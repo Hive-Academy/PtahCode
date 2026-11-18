@@ -436,7 +436,7 @@ export class SqliteBotRepository implements BotRepository {
         try {
           db.exec('ROLLBACK');
         } catch (rollbackError: unknown) {
-          // degradation-audit: reported ? retain the original operation error.
+          // degradation-audit: reported - retain the original operation error.
           this.logger.debug(
             '[bots] rollback failed; preserving original error',
             {

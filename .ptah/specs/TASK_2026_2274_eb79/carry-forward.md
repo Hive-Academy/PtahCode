@@ -10,4 +10,4 @@ named batch.
 | B04 review #2 | The repository hides tombstones from `list`/`get`/`revisions` (after the B04 revision). `bots:get` with a revision after delete returns BOT_NOT_FOUND. Add RPC-level tests. | B06, B08 |
 | B04 review #7 | The 20 MiB quota covers staged images only. Claimed images have no total bound. Record the limit in the B06 design and think about a per-bot image cap at claim. | B06 |
 | B04 decision 6 | `SqliteBotRepository.configure({ now })` sets the clock. Composition uses the default `Date.now`. | B10, B11 |
-| B04 re-review N1 | `revisions()` returns `BotRevision | InvalidBotRevision`. Narrow with `'definitionJson' in row` before reading. | B06 |
+| B04 re-review N1 | `revisions()` returns `BotRevision \| InvalidBotRevision`. Narrow with `'definitionJson' in row` before reading. | B06 |
