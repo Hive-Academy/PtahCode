@@ -248,7 +248,7 @@ function formatValue(
                         >
                       }
                       @if (headingStyle() === 'section') {
-                        <p ptahFieldAfterError [id]="'advanced-setting-' + setting.key + '-help'" class="text-xs text-base-content-muted">{{ helpText(setting) }}</p>
+                        <p ptahFieldAfterError [id]="'advanced-setting-' + setting.key + '-help'" class="px-[var(--ptah-field-pad-x)] text-xs text-base-content-muted">{{ helpText(setting) }}</p>
                       }
                     </ptah-field>
                   }

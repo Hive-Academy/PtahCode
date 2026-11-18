@@ -132,7 +132,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
             </div>
             <p
               id="lane-guards-intro"
-              class="text-xs text-base-content-muted"
+              class="px-[var(--ptah-field-pad-x)] text-xs text-base-content-muted"
               data-testid="lane-guards-intro"
             >
               This guard stops a lane when it repeats the same call this many

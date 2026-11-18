@@ -269,12 +269,12 @@ function storedNumberIsValid(
                   />
                   <p ptahFieldAfterError
                     id="session-budget-unit-help"
-                    class="text-xs text-base-content-muted"
+                    class="px-[var(--ptah-field-pad-x)] text-xs text-base-content-muted"
                   >
                     Tokens use chat usage; Cost uses priced models.
                   </p>
                   @if (errors()['unit']; as message) {
-                    <p ptahFieldAfterError data-testid="session-budget-unit-error">{{ message }}</p>
+                    <p ptahFieldAfterError class="px-[var(--ptah-field-pad-x)] text-xs text-error" data-testid="session-budget-unit-error">{{ message }}</p>
                   }
                 </ptah-field>
 
@@ -289,7 +289,7 @@ function storedNumberIsValid(
                   />
                   <p ptahFieldAfterError
                     id="session-budget-token-measure-help"
-                    class="text-xs text-base-content-muted"
+                    class="px-[var(--ptah-field-pad-x)] text-xs text-base-content-muted"
                   >
                     Weighted discounts cache reads; raw counts all tokens.
                   </p>
@@ -302,7 +302,7 @@ function storedNumberIsValid(
                     {{ tokenMeasureLabels[tokenMeasureValue()] }}.
                   </p>
                   @if (errors()['tokenMeasure']; as message) {
-                    <p ptahFieldAfterError role="alert" class="text-xs text-error">{{ message }}</p>
+                    <p ptahFieldAfterError role="alert" class="px-[var(--ptah-field-pad-x)] text-xs text-error">{{ message }}</p>
                   }
                 </ptah-field>
 
