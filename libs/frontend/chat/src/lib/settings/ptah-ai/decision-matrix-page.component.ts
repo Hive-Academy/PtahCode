@@ -97,15 +97,7 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
       description="Select a score to see where it came from."
     >
       <div class="min-w-0 space-y-[var(--ptah-gap-controls)]">
-        <div ptahFieldGrid>
-          <ptah-field label="Family">
-            <ptah-select
-              label="Filter by family"
-              [options]="familyOptions()"
-              [value]="family()"
-              (valueChange)="family.set($event ?? '')"
-            />
-          </ptah-field>
+        <div class="grid min-w-0 gap-[var(--ptah-gap-field)]">
           <ptah-field label="Search models">
             <input
               ptahInput
@@ -115,14 +107,24 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
               (input)="setSearch($event)"
             />
           </ptah-field>
-          <ptah-field label="Sort by">
-            <ptah-select
-              label="Sort by task kind"
-              [options]="taskOptions"
-              [value]="sortKind()"
-              (valueChange)="setSort($event)"
-            />
-          </ptah-field>
+          <div ptahFieldGrid>
+            <ptah-field label="Family">
+              <ptah-select
+                label="Filter by family"
+                [options]="familyOptions()"
+                [value]="family()"
+                (valueChange)="family.set($event ?? '')"
+              />
+            </ptah-field>
+            <ptah-field label="Sort by">
+              <ptah-select
+                label="Sort by task kind"
+                [options]="taskOptions"
+                [value]="sortKind()"
+                (valueChange)="setSort($event)"
+              />
+            </ptah-field>
+          </div>
         </div>
         <div
           class="flex items-center justify-between gap-[var(--ptah-gap-controls)]"
@@ -147,7 +149,8 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
             {{ descending() ? 'Descending' : 'Ascending' }}
           </button>
           <span class="text-xs tabular-nums text-base-content-muted"
-            >{{ visibleCount() }} {{ visibleCount() === 1 ? 'result' : 'results' }}</span
+            >{{ visibleCount() }}
+            {{ visibleCount() === 1 ? 'result' : 'results' }}</span
           >
         </div>
         <ptah-capability-matrix-setting

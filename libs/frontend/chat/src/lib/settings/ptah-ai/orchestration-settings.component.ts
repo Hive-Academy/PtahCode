@@ -17,11 +17,16 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
  *
  * Contains prompt caching, session budgets, lane guards and deferred context budget / background query groups.
  * Routing suggestions and executor rotation live on the Decision matrix page. Saves use the page toast.
+ *
+ * The field grids of this page use a wider column minimum (14.5rem): the long field labels and unit suffixes
+ * do not fit a half column of the 470px content column at 1168px, so that width shows one field per row, and
+ * 1440px and wider still show three columns.
  */
 @Component({
   selector: 'ptah-orchestration-settings',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: '[--ptah-field-grid-min-sm:14.5rem]' },
   imports: [
     SubagentCacheTtlSettingComponent,
     SessionBudgetSettingsComponent,
