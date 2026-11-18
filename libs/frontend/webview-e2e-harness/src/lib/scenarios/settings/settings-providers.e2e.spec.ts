@@ -231,7 +231,7 @@ for (const host of HOSTS) {
       const before = getFixtureState(page).calls.length;
       await choosePtahSelect(
         popover.locator('[data-testid="main-agent-provider"]'),
-        'Kimi Code',
+        'Kimi Code \u00b7 API key',
       );
       await expect(
         popover.locator('[data-testid="main-agent-provider-copy"]'),

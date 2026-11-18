@@ -94,6 +94,12 @@
             [collapsed]="table.collapsed()"
             (installGuideRequested)="recover(row)"
           />
+          @if (table.collapsed()) {
+            <ng-container
+              [ngTemplateOutlet]="modelEffort"
+              [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
+            />
+          }
         </th>
         <td data-lane-status>
           <ptah-lanes-table-status
@@ -343,10 +349,12 @@
               <span class="sr-only" data-testid="lanes-effort-na"></span>
             </span>
           </ng-template>
-          <ng-container
-            [ngTemplateOutlet]="modelEffort"
-            [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
-          />
+          @if (!table.collapsed()) {
+            <ng-container
+              [ngTemplateOutlet]="modelEffort"
+              [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
+            />
+          }
         </td>
         <td ptahControlCell>
           <input

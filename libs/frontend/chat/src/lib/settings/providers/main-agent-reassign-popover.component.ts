@@ -1,6 +1,7 @@
 import { PtahFieldComponent } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
   Component,
   viewChild,
   ElementRef,
@@ -101,6 +102,13 @@ export class MainAgentReassignPopoverComponent {
   private readonly loader = inject(PROVIDER_MODELS_LOADER);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
+  private readonly changeDetector = inject(ChangeDetectorRef);
+
+  /** Commit the child select's open state in the activating event, including its options. */
+  protected renderSelectOptions(): void {
+    this.changeDetector.detectChanges();
+  }
+
   private readonly scopeLabels = saveTargetLabels(injectAppScopeName());
   protected readonly providerSelectOptions = computed(() =>
     this.providers().map((option) => ({

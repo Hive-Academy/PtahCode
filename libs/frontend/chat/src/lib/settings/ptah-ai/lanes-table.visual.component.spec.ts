@@ -364,6 +364,25 @@ describe('LanesTableComponent visual presentation', () => {
     expect(secondary).toBeNull();
   });
 
+  it('keeps the full missing-key status and a single reachable row model at compact width', async () => {
+    const { fixture, host } = await mount([
+      system('codex', {
+        status: { kind: 'needs-key', label: 'Needs API key', tone: 'warning' },
+      }),
+    ]);
+    narrow(fixture);
+    const row = q(host, '[data-testid="cli-provider-card-codex"]');
+    expect(row?.textContent).toContain('Needs API key');
+    const triggers = row?.querySelectorAll<HTMLButtonElement>(
+      '[data-popover-kind="model"]',
+    );
+    expect(triggers).toHaveLength(1);
+    expect(triggers?.[0].closest('th[scope="row"]')).not.toBeNull();
+    triggers?.[0].click();
+    fixture.detectChanges();
+    expect(triggers?.[0].getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('shows Model / Effort at every tier and other row defaults when collapsed', async () => {
     const { fixture, host } = await mount([system('codex')]);
     q(host, 'ptah-table-row-expander button')?.click();

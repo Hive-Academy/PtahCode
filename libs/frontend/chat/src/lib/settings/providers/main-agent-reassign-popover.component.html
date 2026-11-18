@@ -323,6 +323,7 @@
           [options]="targetSelectOptions()"
           [value]="target()"
           (valueChange)="onTarget(asScope($event ?? ''))"
+          (click)="renderSelectOptions()"
           data-testid="main-agent-save-to"
         />
       </div>

@@ -355,6 +355,28 @@ describe('ProviderConnectionCardComponent', () => {
       expect(surface(fixture).getAttribute('title')).not.toContain('Used for:');
     });
 
+    it('exposes full usage when the shared provenance clamp overflows', () => {
+      const fixture = createComponent({
+        ...KIMI_CODE,
+        usedByCount: 2,
+        usedByLabels: ['Main agent'],
+      });
+      const provenance = query(fixture, 'used-by-segment')?.parentElement;
+      Object.defineProperties(provenance, {
+        scrollHeight: { get: () => 60 },
+        clientHeight: { get: () => 32 },
+      });
+      fixture.componentRef.setInput('usedByLabels', [
+        'Main agent',
+        'Memory curator',
+      ]);
+      fixture.detectChanges();
+      fixture.detectChanges();
+      expect(query(fixture, 'used-for')?.getAttribute('title')).toBe(
+        'Main agent, Memory curator',
+      );
+    });
+
     it('keeps text at the 12 px floor; the card frame is the surface card own frame (no second glass frame on the host)', () => {
       const fixture = createComponent({
         ...KIMI_CODE,

@@ -1086,6 +1086,18 @@ describe('MainAgentReassignPopoverComponent', () => {
       await flush();
     });
 
+    it('renders all three Save to choices in the opening click without another render turn', () => {
+      const select = query('main-agent-save-to');
+      select
+        ?.querySelector<HTMLButtonElement>('button[role="combobox"]')
+        ?.click();
+      expect(
+        Array.from(select?.querySelectorAll('[role="option"]') ?? []).map(
+          (option) => option.textContent?.trim(),
+        ),
+      ).toEqual(['Global \u00b7 all apps', label, 'This workspace']);
+    });
+
     it(`lists "Global · all apps", "${label}", "This workspace"; never "${other}"`, () => {
       expect(
         options('main-agent-save-to').map((option) => [

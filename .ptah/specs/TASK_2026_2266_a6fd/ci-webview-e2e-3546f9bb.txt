@@ -1,0 +1,1173 @@
+  1) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:246:5 › webview > settings > orchestration scenes (vscode) › cell pick: the Codex model cell, then a model, sends one agent:setConfig; Undo writes the previous model back 
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('#lane-detail-codex [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+        - waiting 20ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+      - retrying click action
+        - waiting 100ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <ptah-table-detail-layout mode="wide" data-mode="wide" class="ptah-table-detail-layout">…</ptah-table-detail-layout> intercepts pointer events
+      - retrying click action
+        - waiting 100ms
+        4 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <ptah-table-detail-layout mode="wide" data-mode="wide" class="ptah-table-detail-layout">…</ptah-table-detail-layout> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+        3 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+      255 |         '#lane-detail-codex [data-popover-kind="model"]',
+      256 |       );
+    > 257 |       await cell.click();
+          |                  ^
+      258 |       const popover = page.locator('[data-testid="cli-matrix-popover"]');
+      259 |       const search = popover.locator('input[role="combobox"]');
+      260 |       await expect(search).toBeFocused();
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:257:18
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-7dd4a-tes-the-previous-model-back-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-7dd4a-tes-the-previous-model-back-chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-7dd4a-tes-the-previous-model-back-chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-7dd4a-tes-the-previous-model-back-chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('#lane-detail-codex [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+        - waiting 20ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+      - retrying click action
+        - waiting 100ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <ptah-table-detail-layout mode="wide" data-mode="wide" class="ptah-table-detail-layout">…</ptah-table-detail-layout> intercepts pointer events
+      - retrying click action
+        - waiting 100ms
+        4 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <ptah-table-detail-layout mode="wide" data-mode="wide" class="ptah-table-detail-layout">…</ptah-table-detail-layout> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+        3 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+      255 |         '#lane-detail-codex [data-popover-kind="model"]',
+      256 |       );
+    > 257 |       await cell.click();
+          |                  ^
+      258 |       const popover = page.locator('[data-testid="cli-matrix-popover"]');
+      259 |       const search = popover.locator('input[role="combobox"]');
+      260 |       await expect(search).toBeFocused();
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:257:18
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-7dd4a-tes-the-previous-model-back-chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-7dd4a-tes-the-previous-model-back-chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-7dd4a-tes-the-previous-model-back-chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-7dd4a-tes-the-previous-model-back-chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  2) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:382:5 › webview > settings > orchestration scenes (vscode) › More actions (visual re-check N1): the open menu's items sit inside the panel box and the viewport 
+    Error: expect(received).toContain(expected) // indexOf
+    Expected value: 6
+    Received array: [2, 4]
+      398 |       // The detail menu has four items for an instance; viewport rules can hide two.
+      399 |       const items = menu.locator('button:visible');
+    > 400 |       expect([2, 4]).toContain(await items.count());
+          |                      ^
+      401 |       for (const item of await items.all()) {
+      402 |         const box = await item.boundingBox();
+      403 |         if (!box) throw new Error('No More actions item box');
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:400:22
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-11107--panel-box-and-the-viewport-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-11107--panel-box-and-the-viewport-chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-11107--panel-box-and-the-viewport-chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-11107--panel-box-and-the-viewport-chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(received).toContain(expected) // indexOf
+    Expected value: 6
+    Received array: [2, 4]
+      398 |       // The detail menu has four items for an instance; viewport rules can hide two.
+      399 |       const items = menu.locator('button:visible');
+    > 400 |       expect([2, 4]).toContain(await items.count());
+          |                      ^
+      401 |       for (const item of await items.all()) {
+      402 |         const box = await item.boundingBox();
+      403 |         if (!box) throw new Error('No More actions item box');
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:400:22
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-11107--panel-box-and-the-viewport-chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-11107--panel-box-and-the-viewport-chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-11107--panel-box-and-the-viewport-chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-11107--panel-box-and-the-viewport-chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  3) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:246:5 › webview > settings > orchestration scenes (electron) › cell pick: the Codex model cell, then a model, sends one agent:setConfig; Undo writes the previous model back 
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('#lane-detail-codex [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+        - waiting 20ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+      - retrying click action
+        - waiting 100ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <ptah-table-detail-layout mode="wide" data-mode="wide" class="ptah-table-detail-layout">…</ptah-table-detail-layout> intercepts pointer events
+      - retrying click action
+        - waiting 100ms
+        4 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <ptah-table-detail-layout mode="wide" data-mode="wide" class="ptah-table-detail-layout">…</ptah-table-detail-layout> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+        3 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+      255 |         '#lane-detail-codex [data-popover-kind="model"]',
+      256 |       );
+    > 257 |       await cell.click();
+          |                  ^
+      258 |       const popover = page.locator('[data-testid="cli-matrix-popover"]');
+      259 |       const search = popover.locator('input[role="combobox"]');
+      260 |       await expect(search).toBeFocused();
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:257:18
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-b6d1e-tes-the-previous-model-back-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-b6d1e-tes-the-previous-model-back-chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-b6d1e-tes-the-previous-model-back-chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-b6d1e-tes-the-previous-model-back-chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('#lane-detail-codex [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+        - waiting 20ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+      - retrying click action
+        - waiting 100ms
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - <ptah-table-detail-layout mode="wide" data-mode="wide" class="ptah-table-detail-layout">…</ptah-table-detail-layout> intercepts pointer events
+      - retrying click action
+        - waiting 100ms
+        4 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+          - waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <ptah-table-detail-layout mode="wide" data-mode="wide" class="ptah-table-detail-layout">…</ptah-table-detail-layout> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+        3 × waiting for element to be visible, enabled and stable
+          - element is visible, enabled and stable
+          - scrolling into view if needed
+          - done scrolling
+          - <dl aria-label="Codex details" class="flex flex-col gap-[var(--ptah-gap-controls)]">…</dl> intercepts pointer events
+        - retrying click action
+          - waiting 500ms
+      255 |         '#lane-detail-codex [data-popover-kind="model"]',
+      256 |       );
+    > 257 |       await cell.click();
+          |                  ^
+      258 |       const popover = page.locator('[data-testid="cli-matrix-popover"]');
+      259 |       const search = popover.locator('input[role="combobox"]');
+      260 |       await expect(search).toBeFocused();
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:257:18
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-b6d1e-tes-the-previous-model-back-chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-b6d1e-tes-the-previous-model-back-chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-b6d1e-tes-the-previous-model-back-chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-b6d1e-tes-the-previous-model-back-chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  4) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:382:5 › webview > settings > orchestration scenes (electron) › More actions (visual re-check N1): the open menu's items sit inside the panel box and the viewport 
+    Error: expect(received).toContain(expected) // indexOf
+    Expected value: 6
+    Received array: [2, 4]
+      398 |       // The detail menu has four items for an instance; viewport rules can hide two.
+      399 |       const items = menu.locator('button:visible');
+    > 400 |       expect([2, 4]).toContain(await items.count());
+          |                      ^
+      401 |       for (const item of await items.all()) {
+      402 |         const box = await item.boundingBox();
+      403 |         if (!box) throw new Error('No More actions item box');
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:400:22
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-c1fb2--panel-box-and-the-viewport-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-c1fb2--panel-box-and-the-viewport-chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-c1fb2--panel-box-and-the-viewport-chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-c1fb2--panel-box-and-the-viewport-chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(received).toContain(expected) // indexOf
+    Expected value: 6
+    Received array: [2, 4]
+      398 |       // The detail menu has four items for an instance; viewport rules can hide two.
+      399 |       const items = menu.locator('button:visible');
+    > 400 |       expect([2, 4]).toContain(await items.count());
+          |                      ^
+      401 |       for (const item of await items.all()) {
+      402 |         const box = await item.boundingBox();
+      403 |         if (!box) throw new Error('No More actions item box');
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:400:22
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-c1fb2--panel-box-and-the-viewport-chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-c1fb2--panel-box-and-the-viewport-chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-c1fb2--panel-box-and-the-viewport-chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-c1fb2--panel-box-and-the-viewport-chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  5) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:516:5 › webview > settings > orchestration scenes, changed reads (electron) › Cursor key (Batch 36d.b): save, then remove; the row moves within the table, the detail and popover stay open, and Esc returns focus to the credentials trigger 
+    Error: expect(locator).toContainText(expected) failed
+    Locator: locator('[data-testid="cli-provider-card-cursor"]')
+    Expected substring: "Needs API key"
+    Received string:    "—CursorCLI agent Key Sign in UnavailableNo verified mode is available. Confirm full access  Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.  Cancel Confirm UnavailableNo verified mode is available. Confirm full access  Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.  Cancel Confirm  CLI default "
+    Timeout: 5000ms
+    Call log:
+      - Expect "toContainText" locator('[data-testid="cli-provider-card-cursor"]') with timeout 5000ms
+      - waiting for locator('[data-testid="cli-provider-card-cursor"]')
+        14 × locator resolved to <tr data-state="muted" class="ptah-table-row-state" data-testid="cli-provider-card-cursor">…</tr>
+           - unexpected value "—CursorCLI agent Key Sign in UnavailableNo verified mode is available. Confirm full access  Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.  Cancel Confirm UnavailableNo verified mode is available. Confirm full access  Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.  Cancel Confirm  CLI default "
+      585 |       await expect(
+      586 |         page.locator('[data-testid="cli-provider-card-cursor"]'),
+    > 587 |       ).toContainText('Needs API key');
+          |         ^
+      588 |       await expect(
+      589 |         page.locator('[data-testid="cli-provider-card-cursor"]'),
+      590 |       ).toHaveAttribute('data-state', 'muted');
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:587:9
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-bfded--to-the-credentials-trigger-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-bfded--to-the-credentials-trigger-chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-bfded--to-the-credentials-trigger-chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-bfded--to-the-credentials-trigger-chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(locator).toContainText(expected) failed
+    Locator: locator('[data-testid="cli-provider-card-cursor"]')
+    Expected substring: "Needs API key"
+    Received string:    "—CursorCLI agent Key Sign in UnavailableNo verified mode is available. Confirm full access  Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.  Cancel Confirm UnavailableNo verified mode is available. Confirm full access  Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.  Cancel Confirm  CLI default "
+    Timeout: 5000ms
+    Call log:
+      - Expect "toContainText" locator('[data-testid="cli-provider-card-cursor"]') with timeout 5000ms
+      - waiting for locator('[data-testid="cli-provider-card-cursor"]')
+        14 × locator resolved to <tr data-state="muted" class="ptah-table-row-state" data-testid="cli-provider-card-cursor">…</tr>
+           - unexpected value "—CursorCLI agent Key Sign in UnavailableNo verified mode is available. Confirm full access  Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.  Cancel Confirm UnavailableNo verified mode is available. Confirm full access  Full auto can approve every action. Network access may let the lane reach external services. Choose this only for runs you trust.  Cancel Confirm  CLI default "
+      585 |       await expect(
+      586 |         page.locator('[data-testid="cli-provider-card-cursor"]'),
+    > 587 |       ).toContainText('Needs API key');
+          |         ^
+      588 |       await expect(
+      589 |         page.locator('[data-testid="cli-provider-card-cursor"]'),
+      590 |       ).toHaveAttribute('data-state', 'muted');
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:587:9
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-bfded--to-the-credentials-trigger-chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-bfded--to-the-credentials-trigger-chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-bfded--to-the-credentials-trigger-chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-bfded--to-the-credentials-trigger-chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  6) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-providers.e2e.spec.ts:227:5 › webview > settings > providers scenes (vscode) › popover provider: a change asks first (D6 copy) and writes nothing until confirmed 
+    Error: expect(locator).not.toHaveAttribute(expected) failed
+    Locator: locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) })
+    Expected: not "true"
+    Timeout: 5000ms
+    Error: element(s) not found
+    Call log:
+      - Expect "not toHaveAttribute" locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) }) with timeout 5000ms
+      - waiting for locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) })
+       at lib/choose-ptah-select.ts:20
+      18 |     has: control.page().getByText(label, { exact: true }),
+      19 |   });
+    > 20 |   await expect(option).not.toHaveAttribute('aria-disabled', 'true');
+         |                            ^
+      21 |   await option.click();
+      22 |   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      23 | }
+        at choosePtahSelect (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/choose-ptah-select.ts:20:28)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-providers.e2e.spec.ts:232:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-d91a8-tes-nothing-until-confirmed-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-d91a8-tes-nothing-until-confirmed-chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-d91a8-tes-nothing-until-confirmed-chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-d91a8-tes-nothing-until-confirmed-chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(locator).not.toHaveAttribute(expected) failed
+    Locator: locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) })
+    Expected: not "true"
+    Timeout: 5000ms
+    Error: element(s) not found
+    Call log:
+      - Expect "not toHaveAttribute" locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) }) with timeout 5000ms
+      - waiting for locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) })
+       at lib/choose-ptah-select.ts:20
+      18 |     has: control.page().getByText(label, { exact: true }),
+      19 |   });
+    > 20 |   await expect(option).not.toHaveAttribute('aria-disabled', 'true');
+         |                            ^
+      21 |   await option.click();
+      22 |   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      23 | }
+        at choosePtahSelect (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/choose-ptah-select.ts:20:28)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-providers.e2e.spec.ts:232:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-d91a8-tes-nothing-until-confirmed-chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-d91a8-tes-nothing-until-confirmed-chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-d91a8-tes-nothing-until-confirmed-chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-d91a8-tes-nothing-until-confirmed-chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  7) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-providers.e2e.spec.ts:227:5 › webview > settings > providers scenes (electron) › popover provider: a change asks first (D6 copy) and writes nothing until confirmed 
+    Error: expect(locator).not.toHaveAttribute(expected) failed
+    Locator: locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) })
+    Expected: not "true"
+    Timeout: 5000ms
+    Error: element(s) not found
+    Call log:
+      - Expect "not toHaveAttribute" locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) }) with timeout 5000ms
+      - waiting for locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) })
+       at lib/choose-ptah-select.ts:20
+      18 |     has: control.page().getByText(label, { exact: true }),
+      19 |   });
+    > 20 |   await expect(option).not.toHaveAttribute('aria-disabled', 'true');
+         |                            ^
+      21 |   await option.click();
+      22 |   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      23 | }
+        at choosePtahSelect (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/choose-ptah-select.ts:20:28)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-providers.e2e.spec.ts:232:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-aff69-tes-nothing-until-confirmed-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-aff69-tes-nothing-until-confirmed-chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-aff69-tes-nothing-until-confirmed-chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-aff69-tes-nothing-until-confirmed-chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(locator).not.toHaveAttribute(expected) failed
+    Locator: locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) })
+    Expected: not "true"
+    Timeout: 5000ms
+    Error: element(s) not found
+    Call log:
+      - Expect "not toHaveAttribute" locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) }) with timeout 5000ms
+      - waiting for locator('[id="ptah-select-1-listbox"]').getByRole('option').filter({ has: getByText('Kimi Code', { exact: true }) })
+       at lib/choose-ptah-select.ts:20
+      18 |     has: control.page().getByText(label, { exact: true }),
+      19 |   });
+    > 20 |   await expect(option).not.toHaveAttribute('aria-disabled', 'true');
+         |                            ^
+      21 |   await option.click();
+      22 |   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      23 | }
+        at choosePtahSelect (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/choose-ptah-select.ts:20:28)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-providers.e2e.spec.ts:232:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-aff69-tes-nothing-until-confirmed-chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-aff69-tes-nothing-until-confirmed-chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-aff69-tes-nothing-until-confirmed-chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-aff69-tes-nothing-until-confirmed-chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  8) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:900:5 › baseline smoke — Orchestration matrix popovers (vscode, anubis) 
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        19 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+      427 |       '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+      428 |     )
+    > 429 |     .click();
+          |      ^
+      430 |   const search = page.locator(`${popover} input[role="combobox"]`);
+      431 |   await expect(search).toBeEnabled();
+      432 |   await expect(search).toBeFocused();
+        at captureMatrixPopovers (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:429:6)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:906:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-66235-rix-popovers-vscode-anubis--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-66235-rix-popovers-vscode-anubis--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-66235-rix-popovers-vscode-anubis--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-66235-rix-popovers-vscode-anubis--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        19 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+      427 |       '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+      428 |     )
+    > 429 |     .click();
+          |      ^
+      430 |   const search = page.locator(`${popover} input[role="combobox"]`);
+      431 |   await expect(search).toBeEnabled();
+      432 |   await expect(search).toBeFocused();
+        at captureMatrixPopovers (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:429:6)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:906:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-66235-rix-popovers-vscode-anubis--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-66235-rix-popovers-vscode-anubis--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-66235-rix-popovers-vscode-anubis--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-66235-rix-popovers-vscode-anubis--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  9) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:900:5 › baseline smoke — Orchestration matrix popovers (vscode, anubis-light) 
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        19 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+      427 |       '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+      428 |     )
+    > 429 |     .click();
+          |      ^
+      430 |   const search = page.locator(`${popover} input[role="combobox"]`);
+      431 |   await expect(search).toBeEnabled();
+      432 |   await expect(search).toBeFocused();
+        at captureMatrixPopovers (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:429:6)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:906:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-3ec30-povers-vscode-anubis-light--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-3ec30-povers-vscode-anubis-light--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-3ec30-povers-vscode-anubis-light--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-3ec30-povers-vscode-anubis-light--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        19 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+      427 |       '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+      428 |     )
+    > 429 |     .click();
+          |      ^
+      430 |   const search = page.locator(`${popover} input[role="combobox"]`);
+      431 |   await expect(search).toBeEnabled();
+      432 |   await expect(search).toBeFocused();
+        at captureMatrixPopovers (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:429:6)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:906:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-3ec30-povers-vscode-anubis-light--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-3ec30-povers-vscode-anubis-light--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-3ec30-povers-vscode-anubis-light--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-3ec30-povers-vscode-anubis-light--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  10) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:887:5 › baseline smoke — Orchestration order strip, fold, roles and order popover (electron, anubis) 
+    Error: policy bar is one row
+    expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 48
+    Received:    80
+      790 |     `B33 policy bar ${host}/${theme}: ${Math.round(barBox?.width ?? 0)}x${Math.round(barBox?.height ?? 0)}`,
+      791 |   );
+    > 792 |   expect(barBox?.height ?? 0, 'policy bar is one row').toBeLessThanOrEqual(48);
+          |                                                        ^
+      793 |   const trigger = bar.locator('[data-testid="policy-order-edit"]');
+      794 |   const triggerBox = await trigger.boundingBox();
+      795 |   expect(
+        at captureOrderPopover (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:792:56)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:897:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-49cde-er-popover-electron-anubis--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-49cde-er-popover-electron-anubis--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-49cde-er-popover-electron-anubis--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-49cde-er-popover-electron-anubis--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: policy bar is one row
+    expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 48
+    Received:    80
+      790 |     `B33 policy bar ${host}/${theme}: ${Math.round(barBox?.width ?? 0)}x${Math.round(barBox?.height ?? 0)}`,
+      791 |   );
+    > 792 |   expect(barBox?.height ?? 0, 'policy bar is one row').toBeLessThanOrEqual(48);
+          |                                                        ^
+      793 |   const trigger = bar.locator('[data-testid="policy-order-edit"]');
+      794 |   const triggerBox = await trigger.boundingBox();
+      795 |   expect(
+        at captureOrderPopover (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:792:56)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:897:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-49cde-er-popover-electron-anubis--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-49cde-er-popover-electron-anubis--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-49cde-er-popover-electron-anubis--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-49cde-er-popover-electron-anubis--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  11) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:900:5 › baseline smoke — Orchestration matrix popovers (electron, anubis) 
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        19 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+      427 |       '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+      428 |     )
+    > 429 |     .click();
+          |      ^
+      430 |   const search = page.locator(`${popover} input[role="combobox"]`);
+      431 |   await expect(search).toBeEnabled();
+      432 |   await expect(search).toBeFocused();
+        at captureMatrixPopovers (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:429:6)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:906:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-14607-x-popovers-electron-anubis--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-14607-x-popovers-electron-anubis--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-14607-x-popovers-electron-anubis--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-14607-x-popovers-electron-anubis--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        19 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+      427 |       '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+      428 |     )
+    > 429 |     .click();
+          |      ^
+      430 |   const search = page.locator(`${popover} input[role="combobox"]`);
+      431 |   await expect(search).toBeEnabled();
+      432 |   await expect(search).toBeFocused();
+        at captureMatrixPopovers (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:429:6)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:906:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-14607-x-popovers-electron-anubis--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-14607-x-popovers-electron-anubis--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-14607-x-popovers-electron-anubis--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-14607-x-popovers-electron-anubis--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  12) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:909:5 › baseline smoke — Providers fold and Main agent section (electron, anubis) › fold 
+    Error: expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 80
+    Received:    94
+      272 |     'widest descendant past the page box or viewport (px, 1 px rounding tolerance)',
+      273 |   ).toBeLessThanOrEqual(1);
+    > 274 |   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
+          |                                                ^
+      275 |   for (const region of budget.regions)
+      276 |     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
+      277 |       region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
+        at assertProvidersFold (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:274:48)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:915:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-8b505-nt-section-electron-anubis--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-8b505-nt-section-electron-anubis--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-8b505-nt-section-electron-anubis--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-8b505-nt-section-electron-anubis--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 80
+    Received:    94
+      272 |     'widest descendant past the page box or viewport (px, 1 px rounding tolerance)',
+      273 |   ).toBeLessThanOrEqual(1);
+    > 274 |   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
+          |                                                ^
+      275 |   for (const region of budget.regions)
+      276 |     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
+      277 |       region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
+        at assertProvidersFold (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:274:48)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:915:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-8b505-nt-section-electron-anubis--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-8b505-nt-section-electron-anubis--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-8b505-nt-section-electron-anubis--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-8b505-nt-section-electron-anubis--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  13) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:887:5 › baseline smoke — Orchestration order strip, fold, roles and order popover (electron, anubis-light) 
+    Error: policy bar is one row
+    expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 48
+    Received:    80
+      790 |     `B33 policy bar ${host}/${theme}: ${Math.round(barBox?.width ?? 0)}x${Math.round(barBox?.height ?? 0)}`,
+      791 |   );
+    > 792 |   expect(barBox?.height ?? 0, 'policy bar is one row').toBeLessThanOrEqual(48);
+          |                                                        ^
+      793 |   const trigger = bar.locator('[data-testid="policy-order-edit"]');
+      794 |   const triggerBox = await trigger.boundingBox();
+      795 |   expect(
+        at captureOrderPopover (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:792:56)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:897:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-cd5d4-over-electron-anubis-light--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-cd5d4-over-electron-anubis-light--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-cd5d4-over-electron-anubis-light--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-cd5d4-over-electron-anubis-light--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: policy bar is one row
+    expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 48
+    Received:    80
+      790 |     `B33 policy bar ${host}/${theme}: ${Math.round(barBox?.width ?? 0)}x${Math.round(barBox?.height ?? 0)}`,
+      791 |   );
+    > 792 |   expect(barBox?.height ?? 0, 'policy bar is one row').toBeLessThanOrEqual(48);
+          |                                                        ^
+      793 |   const trigger = bar.locator('[data-testid="policy-order-edit"]');
+      794 |   const triggerBox = await trigger.boundingBox();
+      795 |   expect(
+        at captureOrderPopover (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:792:56)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:897:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-cd5d4-over-electron-anubis-light--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-cd5d4-over-electron-anubis-light--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-cd5d4-over-electron-anubis-light--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-cd5d4-over-electron-anubis-light--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  14) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:900:5 › baseline smoke — Orchestration matrix popovers (electron, anubis-light) 
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        19 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+      427 |       '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+      428 |     )
+    > 429 |     .click();
+          |      ^
+      430 |   const search = page.locator(`${popover} input[role="combobox"]`);
+      431 |   await expect(search).toBeEnabled();
+      432 |   await expect(search).toBeFocused();
+        at captureMatrixPopovers (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:429:6)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:906:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-547f2-vers-electron-anubis-light--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-547f2-vers-electron-anubis-light--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-547f2-vers-electron-anubis-light--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-547f2-vers-electron-anubis-light--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    TimeoutError: locator.click: Timeout 10000ms exceeded.
+    Call log:
+      - waiting for locator('[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]')
+        - locator resolved to <button size="xs" trigger="" nopadding="" type="button" ptahbutton="" variant="ghost" density="compact" data-ptah-button="" title="gpt-5.5-codex" aria-expanded="false" data-density="compact" data-popover-kind="model" aria-label="Model default for Codex" class="btn min-w-0 lane-model-trigger font-mono btn-ghost btn-xs"> gpt-5.5-codex </button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        19 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+      427 |       '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+      428 |     )
+    > 429 |     .click();
+          |      ^
+      430 |   const search = page.locator(`${popover} input[role="combobox"]`);
+      431 |   await expect(search).toBeEnabled();
+      432 |   await expect(search).toBeFocused();
+        at captureMatrixPopovers (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:429:6)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:906:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-547f2-vers-electron-anubis-light--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-547f2-vers-electron-anubis-light--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-547f2-vers-electron-anubis-light--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-547f2-vers-electron-anubis-light--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  15) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:909:5 › baseline smoke — Providers fold and Main agent section (electron, anubis-light) › fold 
+    Error: expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 80
+    Received:    94
+      272 |     'widest descendant past the page box or viewport (px, 1 px rounding tolerance)',
+      273 |   ).toBeLessThanOrEqual(1);
+    > 274 |   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
+          |                                                ^
+      275 |   for (const region of budget.regions)
+      276 |     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
+      277 |       region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
+        at assertProvidersFold (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:274:48)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:915:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a0067-tion-electron-anubis-light--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a0067-tion-electron-anubis-light--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a0067-tion-electron-anubis-light--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a0067-tion-electron-anubis-light--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 80
+    Received:    94
+      272 |     'widest descendant past the page box or viewport (px, 1 px rounding tolerance)',
+      273 |   ).toBeLessThanOrEqual(1);
+    > 274 |   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
+          |                                                ^
+      275 |   for (const region of budget.regions)
+      276 |     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
+      277 |       region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
+        at assertProvidersFold (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:274:48)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:915:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a0067-tion-electron-anubis-light--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a0067-tion-electron-anubis-light--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a0067-tion-electron-anubis-light--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a0067-tion-electron-anubis-light--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  16) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1345:5 › live-shaped values — Batch 52 (electron, anubis) 
+    Error: expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 80
+    Received:    94
+      272 |     'widest descendant past the page box or viewport (px, 1 px rounding tolerance)',
+      273 |   ).toBeLessThanOrEqual(1);
+    > 274 |   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
+          |                                                ^
+      275 |   for (const region of budget.regions)
+      276 |     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
+      277 |       region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
+        at assertProvidersFold (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:274:48)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1403:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-de31d-—-Batch-52-electron-anubis--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-de31d-—-Batch-52-electron-anubis--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-de31d-—-Batch-52-electron-anubis--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-de31d-—-Batch-52-electron-anubis--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 80
+    Received:    94
+      272 |     'widest descendant past the page box or viewport (px, 1 px rounding tolerance)',
+      273 |   ).toBeLessThanOrEqual(1);
+    > 274 |   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
+          |                                                ^
+      275 |   for (const region of budget.regions)
+      276 |     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
+      277 |       region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
+        at assertProvidersFold (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:274:48)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1403:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-de31d-—-Batch-52-electron-anubis--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-de31d-—-Batch-52-electron-anubis--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-de31d-—-Batch-52-electron-anubis--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-de31d-—-Batch-52-electron-anubis--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  17) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1345:5 › live-shaped values — Batch 52 (electron, anubis-light) 
+    Error: expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 80
+    Received:    94
+      272 |     'widest descendant past the page box or viewport (px, 1 px rounding tolerance)',
+      273 |   ).toBeLessThanOrEqual(1);
+    > 274 |   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
+          |                                                ^
+      275 |   for (const region of budget.regions)
+      276 |     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
+      277 |       region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
+        at assertProvidersFold (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:274:48)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1403:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a79f1-h-52-electron-anubis-light--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a79f1-h-52-electron-anubis-light--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a79f1-h-52-electron-anubis-light--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a79f1-h-52-electron-anubis-light--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+    Error: expect(received).toBeLessThanOrEqual(expected)
+    Expected: <= 80
+    Received:    94
+      272 |     'widest descendant past the page box or viewport (px, 1 px rounding tolerance)',
+      273 |   ).toBeLessThanOrEqual(1);
+    > 274 |   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
+          |                                                ^
+      275 |   for (const region of budget.regions)
+      276 |     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
+      277 |       region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
+        at assertProvidersFold (/home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:274:48)
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1403:7
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a79f1-h-52-electron-anubis-light--chromium-retry1/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a79f1-h-52-electron-anubis-light--chromium-retry1/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a79f1-h-52-electron-anubis-light--chromium-retry1/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-a79f1-h-52-electron-anubis-light--chromium-retry1/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  18) [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1047:5 › baseline smoke — Providers Main Agent popover, model search and Save to (electron, anubis-light) 
+    Error: expect(received).toEqual(expected) // deep equality
+    - Expected  - 5
+    + Received  + 1
+    - Array [
+    -   "Global · all apps",
+    -   "Desktop app",
+    -   "This workspace",
+    - ]
+    + Array []
+      1156 |         `B27b save-to ${host}/${theme}: ${saveToOptions.map((text) => text.trim()).join(' | ')}`,
+      1157 |       );
+    > 1158 |       expect(saveToOptions.map((text) => text.trim())).toEqual([
+           |                                                        ^
+      1159 |         'Global · all apps',
+      1160 |         appLabel,
+      1161 |         'This workspace',
+        at /home/runner/work/PtahCode/PtahCode/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1158:56
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-5f7be-e-to-electron-anubis-light--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    Error Context: libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-5f7be-e-to-electron-anubis-light--chromium/error-context.md
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-5f7be-e-to-electron-anubis-light--chromium/trace.zip
+    Usage:
+        npx playwright show-trace libs/frontend/webview-e2e-harness/test-results/lib-scenarios-settings-set-5f7be-e-to-electron-anubis-light--chromium/trace.zip
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+  17 failed
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:246:5 › webview > settings > orchestration scenes (vscode) › cell pick: the Codex model cell, then a model, sends one agent:setConfig; Undo writes the previous model back 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:382:5 › webview > settings > orchestration scenes (vscode) › More actions (visual re-check N1): the open menu's items sit inside the panel box and the viewport 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:246:5 › webview > settings > orchestration scenes (electron) › cell pick: the Codex model cell, then a model, sends one agent:setConfig; Undo writes the previous model back 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:382:5 › webview > settings > orchestration scenes (electron) › More actions (visual re-check N1): the open menu's items sit inside the panel box and the viewport 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-orchestration.e2e.spec.ts:516:5 › webview > settings > orchestration scenes, changed reads (electron) › Cursor key (Batch 36d.b): save, then remove; the row moves within the table, the detail and popover stay open, and Esc returns focus to the credentials trigger 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-providers.e2e.spec.ts:227:5 › webview > settings > providers scenes (vscode) › popover provider: a change asks first (D6 copy) and writes nothing until confirmed 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-providers.e2e.spec.ts:227:5 › webview > settings > providers scenes (electron) › popover provider: a change asks first (D6 copy) and writes nothing until confirmed 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:900:5 › baseline smoke — Orchestration matrix popovers (vscode, anubis) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:900:5 › baseline smoke — Orchestration matrix popovers (vscode, anubis-light) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:887:5 › baseline smoke — Orchestration order strip, fold, roles and order popover (electron, anubis) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:900:5 › baseline smoke — Orchestration matrix popovers (electron, anubis) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:909:5 › baseline smoke — Providers fold and Main agent section (electron, anubis) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:887:5 › baseline smoke — Orchestration order strip, fold, roles and order popover (electron, anubis-light) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:900:5 › baseline smoke — Orchestration matrix popovers (electron, anubis-light) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:909:5 › baseline smoke — Providers fold and Main agent section (electron, anubis-light) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1345:5 › live-shaped values — Batch 52 (electron, anubis) 
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1345:5 › live-shaped values — Batch 52 (electron, anubis-light) 
+  1 flaky
+    [chromium] › libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings-visual.e2e.spec.ts:1047:5 › baseline smoke — Providers Main Agent popover, model search and Save to (electron, anubis-light) 
+  22 skipped
+  360 passed (11.2m)

@@ -245,7 +245,7 @@ describe('LanesTableComponent', () => {
     ) as HTMLButtonElement;
     const cellTrigger = q(
       host,
-      '[data-testid="cli-matrix-model"] [aria-label="Model default for Codex"]',
+      '[data-testid="cli-provider-card-codex"] [aria-label="Model default for Codex"]',
     ) as HTMLButtonElement;
     detailTrigger.click();
     fixture.detectChanges();

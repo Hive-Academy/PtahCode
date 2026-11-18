@@ -52,7 +52,6 @@ export class LanesTableStatusComponent {
     const status = this.row().status;
     if (this.collapsed()) {
       if (status.kind === 'not-installed') return 'Missing';
-      if (status.kind === 'needs-key') return 'Key';
     }
     return status.label;
   });

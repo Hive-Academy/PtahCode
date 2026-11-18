@@ -73,9 +73,19 @@ const DETECT_FAILED =
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
+    .policy-bar {
+      flex-wrap: nowrap;
+    }
+    .policy-bar > div:first-child {
+      flex: 0 1 12rem;
+      min-width: 0;
+    }
+    .policy-bar ptah-field {
+      width: 100%;
+    }
     .policy-trailing {
       display: flex;
-      flex: 1 1 20rem;
+      flex: 1 1 0;
       min-width: 0;
       align-items: center;
       gap: var(--ptah-gap-inline);
@@ -91,9 +101,6 @@ const DETECT_FAILED =
       }
       .policy-max-input {
         width: 3.5rem;
-      }
-      .policy-trailing {
-        flex-basis: 100%;
       }
       .policy-redetect {
         width: var(--ptah-control-h-sm);

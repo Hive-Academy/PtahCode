@@ -81,6 +81,23 @@ interface InlineAction {
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block min-w-0 self-start' },
+  styles: `
+    .connection-face {
+      display: grid;
+      grid-template-columns: auto minmax(7rem, 1fr) minmax(0, auto);
+      gap: var(--ptah-gap-inline);
+    }
+    .connection-provenance > span,
+    .connection-provenance [data-testid='card-subtitle'] {
+      display: inline;
+    }
+    .connection-provenance {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
+    }
+  `,
   template: `
     <ptah-surface-card
       class="block [&>div]:hover:bg-base-200/70 [&>div]:hover:border-base-content/20"
@@ -100,7 +117,7 @@ interface InlineAction {
         data-testid="provider-card-details-trigger"
       ></button>
       <div
-        class="pointer-events-none relative z-10 flex min-h-[40px] flex-wrap items-center gap-ptah-controls"
+        class="connection-face pointer-events-none relative z-10 min-h-[40px] items-center"
       >
         <span
           [class]="avatarClass()"
@@ -120,7 +137,7 @@ interface InlineAction {
           <!-- Usage wraps into the available column width, capped at two lines.
                The full text is added to hover titles only when measurement finds overflow. -->
           <div
-            class="flex min-w-0 flex-wrap items-center gap-x-ptah-inline text-xs leading-snug text-base-content-muted"
+            class="connection-provenance min-w-0 text-xs leading-snug text-base-content-muted"
           >
             @if (subtitle(); as text) {
               <span
@@ -268,13 +285,18 @@ export class ProviderConnectionCardComponent {
       const measure = () =>
         this.usageOverflows.set(
           !!element &&
-            (element.scrollHeight > element.clientHeight ||
-              element.scrollWidth > element.clientWidth),
+            [element, element.parentElement].some(
+              (node) =>
+                node &&
+                (node.scrollHeight > node.clientHeight ||
+                  node.scrollWidth > node.clientWidth),
+            ),
         );
       measure();
       if (!element || typeof ResizeObserver === 'undefined') return;
       const observer = new ResizeObserver(measure);
       observer.observe(element);
+      if (element.parentElement) observer.observe(element.parentElement);
       cleanup(() => observer.disconnect());
     });
   }

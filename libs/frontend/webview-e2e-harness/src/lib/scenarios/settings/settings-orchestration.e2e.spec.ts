@@ -395,9 +395,9 @@ for (const host of HOSTS) {
       await expect(menu).toBeVisible();
       const panel = await menu.boundingBox();
       if (!panel) throw new Error('No More actions panel box');
-      // The detail menu has four items for an instance; viewport rules can hide two.
+      // The Status-cell menu owns all six instance actions at every table tier.
       const items = menu.locator('button:visible');
-      expect([2, 4]).toContain(await items.count());
+      await expect(items).toHaveCount(6);
       for (const item of await items.all()) {
         const box = await item.boundingBox();
         if (!box) throw new Error('No More actions item box');

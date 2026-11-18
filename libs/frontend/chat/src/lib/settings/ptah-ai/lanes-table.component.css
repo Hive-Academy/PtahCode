@@ -242,6 +242,7 @@ ptah-lanes-table [data-lane-status] {
 }
 ptah-lanes-table [data-lane-status] > .lane-row-actions {
   position: absolute;
+  width: auto;
   inset-inline-end: var(--ptah-gap-inline);
   top: 50%;
   transform: translateY(-50%);
@@ -262,4 +263,9 @@ ptah-lanes-table
   [data-lane-status]:has(.lane-row-actions > button)
   > ptah-lanes-table-status {
   display: block;
+}
+
+/* Reserve the recovery action as well as the fixed menu anchor. */
+ptah-lanes-table [data-lane-status]:has(.lane-row-actions > button) {
+  padding-inline-end: 6rem;
 }
