@@ -41,6 +41,9 @@ import {
 } from '@ptah-extension/auth-providers';
 import {
   ownerRelation,
+  applicableLimits,
+  classifyLaneState,
+  type CliOutputSegment,
   type AgentId,
   type CliSessionReference,
   type QuotaOwnerRef,
@@ -314,6 +317,124 @@ describe('Owner lifecycle (F55 backend legs, G2 per-turn account, G3 restart)', 
     await world.store.flushForShutdown();
   });
 
+  it.each([
+    { code: 1, mode: 'output', limited: true },
+    { code: 0, mode: 'stderr', limited: true },
+    { code: 0, mode: 'raw-json', limited: true },
+    { code: 0, mode: 'raw-json-direct', limited: true },
+    { code: 0, mode: 'output', limited: false },
+    { code: 0, mode: 'quoted', limited: false },
+    { code: 0, mode: 'prose', limited: false },
+    { code: 0, mode: 'bare', limited: false },
+    { code: 0, mode: 'unrelated', limited: false },
+  ])(
+    'Grok exit $code mode=$mode preserves provider error gating',
+    async ({ code, mode, limited }) => {
+      const text =
+        'API error (status 402 Payment Required): Grok Build usage balance exhausted';
+      let finish: ((code: number) => void) | undefined;
+      const done = new Promise<number>((resolve) => {
+        finish = resolve;
+      });
+      let output: ((data: string) => void) | undefined;
+      let segment: ((data: CliOutputSegment) => void) | undefined;
+      const handle: SdkHandle = {
+        abort: new AbortController(),
+        done,
+        onOutput: (callback) => {
+          output = callback;
+        },
+        onSegment: (callback) => {
+          segment = callback;
+        },
+        getSessionId: () => 'grok-limit',
+      };
+      const { agentId } = await world.manager.spawnFromSdkHandle(handle, {
+        task: 'billing regression',
+        cli: 'grok',
+        workingDirectory: ROOT,
+        parentSessionId: SESSION_ID,
+        expectsMcp: false,
+      });
+      const owner: QuotaOwnerRef = {
+        providerId: 'grok',
+        identityKind: 'account',
+        key: 'grok#account:regression',
+        label: 'Grok',
+      };
+      world.manager.recordQuotaOwner(agentId, owner);
+      output?.(text);
+      if (mode === 'stderr') {
+        segment?.({ type: 'error', content: 'Error: Internal error: {' });
+        segment?.({ type: 'error', content: `  "message": "${text}",` });
+        segment?.({ type: 'info', content: '  "http_status": 402' });
+        segment?.({ type: 'info', content: '}' });
+      } else if (mode === 'raw-json' || mode === 'raw-json-direct') {
+        segment?.({
+          type: 'error',
+          content: JSON.stringify({
+            type: 'error',
+            message:
+              mode === 'raw-json'
+                ? `Internal error: {\n  "message": "${text}",\n  "http_status": 402\n}`
+                : text,
+          }),
+        });
+      } else if (mode === 'quoted') {
+        output?.(`Documentation example: ${text}`);
+        segment?.({ type: 'info', content: `Documentation example: ${text}` });
+      } else if (mode === 'prose') {
+        segment?.({
+          type: 'error',
+          content: `The documentation mentions a 402 payment problem: ${text}`,
+        });
+      } else if (mode === 'bare') {
+        segment?.({ type: 'error', content: '402' });
+      } else if (mode === 'unrelated') {
+        segment?.({
+          type: 'error',
+          content: 'API error (status 402 Payment Required): payment declined',
+        });
+      }
+      const exited = new Promise<void>((resolve) =>
+        world.manager.events.once('agent:exited', () => resolve()),
+      );
+      finish?.(code);
+      await exited;
+      expect(world.manager.findAgentInfo(agentId)?.stopReason).toBe(
+        limited ? 'usage-limit' : undefined,
+      );
+      const snapshot = world.ledger.snapshotFor(owner.key);
+      expect(snapshot?.ownerEvidence.length ?? 0).toBe(limited ? 1 : 0);
+      if (limited) {
+        expect(snapshot?.ownerEvidence[0]).toMatchObject({
+          pattern: 'grok-balance-exhausted',
+          source: 'error-derived',
+        });
+        expect(snapshot?.ownerEvidence[0]).not.toHaveProperty('resetsAt');
+        if (!snapshot) throw new Error('expected owner evidence');
+        const state = classifyLaneState(
+          applicableLimits(
+            {
+              ...snapshot,
+              owner,
+              status: 'available',
+              windowSetEstablished: false,
+            },
+            null,
+          ),
+          {
+            now: Date.now(),
+            freshnessMs: 60_000,
+            nearLimitPercent: 90,
+          },
+        );
+        expect(state.state).toBe('at-limit');
+      }
+    },
+    EXIT_TEST_TIMEOUT_MS,
+  );
+
   it(
     'moves the session from A to B across turns while each run keeps its own owner',
     async () => {
@@ -424,10 +545,15 @@ describe('Owner lifecycle (F55 backend legs, G2 per-turn account, G3 restart)', 
       try {
         // Both UI read paths call the store, then hand the refs to the manager.
         const [read] = await world.store.getCliSessionsForRestore(SESSION_ID);
-        expect(read).toMatchObject({ cliSessionId: 'cli-live', status: 'running' });
+        expect(read).toMatchObject({
+          cliSessionId: 'cli-live',
+          status: 'running',
+        });
         expect(read.stopReason).toBeUndefined();
         world.manager.restoreAgents([read], ROOT);
-        expect(world.manager.findAgentInfo(run.agentId)?.status).toBe('running');
+        expect(world.manager.findAgentInfo(run.agentId)?.status).toBe(
+          'running',
+        );
 
         await world.store.flush();
         const reloaded = new SessionMetadataStore(world.storage, world.logger);

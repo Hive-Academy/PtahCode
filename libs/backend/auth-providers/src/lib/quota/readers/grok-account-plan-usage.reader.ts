@@ -1,8 +1,10 @@
 /** Default grok.com login billing, separate from local session accounting. */
 import { readFile } from 'node:fs/promises';
+import { types } from 'node:util';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type { PlanLimitWindow } from '@ptah-extension/shared';
 import type {
   PlanUsageReader,
@@ -31,23 +33,15 @@ const BillingSchema = z.object({
     .optional(),
 });
 const PrepaidBalanceSchema = z.object({
-  val: z.union([z.number(), z.string().regex(/^\d+(?:\.\d+)?$/).transform(Number)])
+  val: z
+    .union([
+      z.number(),
+      z
+        .string()
+        .regex(/^\d+(?:\.\d+)?$/)
+        .transform(Number),
+    ])
     .pipe(z.number().finite().nonnegative()),
-});
-const noPlan = (): PlanUsageReading => ({
-  status: 'no-usage-source',
-  windowSetEstablished: false,
-  windows: [],
-});
-/** API-key login: no subscription quota exists; local usage is all there is. */
-const apiKeyNoPlan = (): PlanUsageReading => ({
-  ...noPlan(),
-  statusReason: 'api-key-no-subscription-quota',
-});
-const unavailable = (): PlanUsageReading => ({
-  status: 'service-unavailable',
-  windowSetEstablished: false,
-  windows: [],
 });
 const CUSTOM_ENV = [
   'GROK_OIDC_ISSUER',
@@ -69,12 +63,35 @@ export function createGrokAccountPlanUsageReader(
   fetcher: typeof fetch = fetch,
   readAuth: typeof readFile = readFile,
   env: NodeJS.ProcessEnv = process.env,
+  logger?: Pick<Logger, 'debug'>,
 ): PlanUsageReader {
+  const reject = (
+    status: PlanUsageReading['status'],
+    reason:
+      | NonNullable<PlanUsageReading['statusReason']>
+      | 'owner-not-applicable'
+      | 'custom-auth-config',
+  ): PlanUsageReading => {
+    const statusReason =
+      reason === 'owner-not-applicable' || reason === 'custom-auth-config'
+        ? undefined
+        : reason;
+    logger?.debug('[GrokPlanUsage] direct reader rejected', { status, reason });
+    return {
+      status,
+      ...(statusReason !== undefined && { statusReason }),
+      windowSetEstablished: false,
+      windows: [],
+    };
+  };
   return async ({ signal, target }) => {
-    if (signal?.aborted) return unavailable();
-    if (target.ownerRef.identityKind !== 'cli-store') return noPlan();
-    if (env['XAI_API_KEY']?.trim()) return apiKeyNoPlan();
-    if (CUSTOM_ENV.some((name) => env[name]?.trim())) return noPlan();
+    if (signal?.aborted) return reject('service-unavailable', 'cli-timeout');
+    if (target.ownerRef.identityKind !== 'cli-store')
+      return reject('no-usage-source', 'owner-not-applicable');
+    if (env['XAI_API_KEY']?.trim())
+      return reject('no-usage-source', 'api-key-no-subscription-quota');
+    if (CUSTOM_ENV.some((name) => env[name]?.trim()))
+      return reject('no-usage-source', 'custom-auth-config');
     const home =
       env['GROK_HOME']?.trim() ||
       join(env['HOME'] || env['USERPROFILE'] || homedir(), '.grok');
@@ -90,29 +107,38 @@ export function createGrokAccountPlanUsageReader(
         let config = '';
         try {
           config = await readAuth(path, 'utf8');
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-            return unavailable();
+        } catch (error: unknown) {
+          if (
+            !(error instanceof Error) ||
+            !('code' in error) ||
+            error.code !== 'ENOENT'
+          )
+            return reject('service-unavailable', 'cli-unavailable');
         }
         if (
           /^\s*(?:\[\[?\s*)?["']?(?:auth|grok_com_config|endpoints)["']?\s*[.\]=]/m.test(
             config,
           )
         )
-          return noPlan();
+          return reject('no-usage-source', 'custom-auth-config');
       }
       let contents = env['GROK_AUTH']?.trim();
       if (!contents) {
         try {
           contents = await readAuth(join(home, 'auth.json'), 'utf8');
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-            return unavailable();
+        } catch (error: unknown) {
+          if (
+            !(error instanceof Error) ||
+            !('code' in error) ||
+            error.code !== 'ENOENT'
+          )
+            return reject('service-unavailable', 'cli-unavailable');
           contents = '{}';
         }
       }
       const credentials = CredentialSchema.safeParse(JSON.parse(contents));
-      if (!credentials.success) return unavailable();
+      if (!credentials.success)
+        return reject('service-unavailable', 'cli-parse-failed');
       const credential =
         credentials.data[
           'https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828'
@@ -122,7 +148,12 @@ export function createGrokAccountPlanUsageReader(
           ? undefined
           : credential?.key?.trim();
       if (!key) {
-        return credential?.auth_mode === 'api_key' ? apiKeyNoPlan() : noPlan();
+        return reject(
+          'no-usage-source',
+          credential?.auth_mode === 'api_key'
+            ? 'api-key-no-subscription-quota'
+            : 'cli-not-signed-in',
+        );
       }
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5_000);
@@ -135,24 +166,37 @@ export function createGrokAccountPlanUsageReader(
           redirect: 'error',
           signal: controller.signal,
         });
-        if (response.status === 401)
-          return {
-            status: 'unsupported-auth',
-            windowSetEstablished: false,
-            windows: [],
-          };
-        if (response.status === 403) return noPlan();
-        if (!response.ok) return unavailable();
-        const parsed = BillingSchema.safeParse(await response.json());
-        if (!parsed.success) return unavailable();
+        if (response.status === 401 || response.status === 403)
+          return reject(
+            response.status === 401 ? 'unsupported-auth' : 'no-usage-source',
+            'balance-auth-rejected',
+          );
+        if (response.status === 402)
+          return reject('service-unavailable', 'balance-unavailable');
+        if (!response.ok)
+          return reject('service-unavailable', 'cli-unavailable');
+        let payload: unknown;
+        try {
+          payload = await response.json();
+        } catch (error: unknown) {
+          if (!(error instanceof SyntaxError || (types.isNativeError(error) && error.name === 'SyntaxError')) || controller.signal.aborted) throw error;
+          return reject('service-unavailable', 'balance-unavailable');
+        }
+        const parsed = BillingSchema.safeParse(payload);
+        if (!parsed.success)
+          return reject('service-unavailable', 'balance-unavailable');
         const observedAt = now();
         const percent = parsed.data.config?.creditUsagePercent;
         const rawBalance = parsed.data.config?.prepaidBalance;
-        const parsedBalance = rawBalance == null
-          ? undefined
-          : PrepaidBalanceSchema.safeParse(rawBalance);
-        const balance = parsedBalance?.success ? parsedBalance.data.val : undefined;
-        const malformedBalance = parsedBalance !== undefined && !parsedBalance.success;
+        const parsedBalance =
+          rawBalance == null
+            ? undefined
+            : PrepaidBalanceSchema.safeParse(rawBalance);
+        const balance = parsedBalance?.success
+          ? parsedBalance.data.val
+          : undefined;
+        const malformedBalance =
+          parsedBalance !== undefined && !parsedBalance.success;
         const period = parsed.data.config?.currentPeriod;
         const type = period?.type?.replace(/^USAGE_PERIOD_TYPE_/, '');
         const kind =
@@ -163,7 +207,9 @@ export function createGrokAccountPlanUsageReader(
               : 'other';
         const resetsAt = Date.parse(period?.end ?? '');
         const windows: PlanLimitWindow[] =
-          percent === undefined || (percent >= 100 && (malformedBalance || (balance !== undefined && balance > 0)))
+          percent === undefined ||
+          (percent >= 100 &&
+            (malformedBalance || (balance !== undefined && balance > 0)))
             ? []
             : [
                 {
@@ -193,19 +239,40 @@ export function createGrokAccountPlanUsageReader(
           source: 'provider-api',
           fetchedAt: observedAt,
           requestedAt,
-          windowSetEstablished: !(malformedBalance && percent !== undefined && percent >= 100),
+          windowSetEstablished: !(
+            malformedBalance &&
+            percent !== undefined &&
+            percent >= 100
+          ),
           windows,
-          ...(malformedBalance && { statusReason: 'prepaid-balance-unavailable' as const }),
+          ...(malformedBalance && {
+            statusReason: 'prepaid-balance-unavailable' as const,
+          }),
           ...(balance !== undefined && {
-            credits: { balance: String(balance), hasCredits: balance > 0, unlimited: false },
+            credits: {
+              balance: String(balance),
+              hasCredits: balance > 0,
+              unlimited: false,
+            },
           }),
         };
+      } catch (error: unknown) {
+        return reject(
+          'service-unavailable',
+          controller.signal.aborted ||
+            (error instanceof Error && error.name === 'TimeoutError')
+            ? 'cli-timeout'
+            : 'cli-unavailable',
+        );
       } finally {
         clearTimeout(timeout);
         signal?.removeEventListener('abort', abort);
       }
-    } catch {
-      return unavailable();
+    } catch (error: unknown) {
+      return reject(
+        'service-unavailable',
+        error instanceof SyntaxError ? 'cli-parse-failed' : 'cli-unavailable',
+      );
     }
   };
 }

@@ -161,18 +161,38 @@ describe('classifyLaneLimit', () => {
     });
 
     it('classifies Grok HTTP 402 balance exhaustion as owner evidence', () => {
-      const result = classify('grok', 'API error (status 402 Payment Required): Grok Build usage balance exhausted');
-      expect(result).toMatchObject({ failureKind: 'quota', pattern: 'grok-balance-exhausted' });
+      const result = classify(
+        'grok',
+        'API error (status 402 Payment Required): Grok Build usage balance exhausted',
+      );
+      expect(result).toMatchObject({
+        failureKind: 'quota',
+        pattern: 'grok-balance-exhausted',
+      });
       if (!result) throw new Error('expected a classification');
       expect(laneLimitEvidence(result, NOON)).toMatchObject({
-        kind: 'owner', evidence: { source: 'error-derived', pattern: 'grok-balance-exhausted' },
+        kind: 'owner',
+        evidence: {
+          source: 'error-derived',
+          pattern: 'grok-balance-exhausted',
+        },
       });
       expect(result && laneLimitEvidence(result, 1)).toEqual({
-        kind: 'owner', evidence: { observedAt: 1, source: 'error-derived', pattern: 'grok-balance-exhausted' },
+        kind: 'owner',
+        evidence: {
+          observedAt: 1,
+          source: 'error-derived',
+          pattern: 'grok-balance-exhausted',
+        },
       });
       expect(classify('grok', 'Grok Build usage balance exhausted')).toBeNull();
     });
     it.each([
+      JSON.stringify({
+        type: 'error',
+        message:
+          'Internal error: {\n  "message": "API error (status 402 Payment Required): Grok Build usage balance exhausted",\n  "http_status": 402\n}',
+      }),
       '"status":402 Grok Build usage balance exhausted',
       'status=402 Grok Build usage balance exhausted',
       'statusCode: 402 Grok Build usage balance exhausted',
@@ -182,7 +202,14 @@ describe('classifyLaneLimit', () => {
       expect(classify('grok', text)?.pattern).toBe('grok-balance-exhausted');
       expect(classify('anthropic', text)).toBeNull();
     });
-    it.each(['402 usage balance exhausted', 'status=403 usage balance exhausted', 'status=402 balance low'])('rejects unrelated balance wording: %s', (text) => {
+    it.each([
+      '402',
+      '402 Payment Required: payment declined',
+      'repository says: 402 Payment Required: Grok Build usage balance exhausted',
+      '402 usage balance exhausted',
+      'status=403 usage balance exhausted',
+      'status=402 balance low',
+    ])('rejects unrelated balance wording: %s', (text) => {
       expect(classify('grok', text)).toBeNull();
     });
     it('rejects 16 KB of whitespace after a status prefix in linear time', () => {
