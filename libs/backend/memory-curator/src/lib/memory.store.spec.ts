@@ -2671,4 +2671,32 @@ describe('MemoryStore.graphSnapshot', () => {
       (await withoutWorker.graphSnapshot({ maxNodes: 1 })).semanticAvailable,
     ).toBe(false);
   });
+
+  it('does not run the fallback after the deadline', async () => {
+    const { stub, getMock } = makeDb({ getResult: { total: 0 } });
+    const logger = makeLogger();
+    const worker = {
+      graphMemories: jest.fn().mockResolvedValue(null),
+    } as unknown as ISqliteSearchWorker;
+    const store = new MemoryStore(
+      logger,
+      stub,
+      makeEmbedder(),
+      makeVecStatus(),
+      worker,
+    );
+    getMock.mockClear();
+    await expect(
+      store.graphSnapshot({ maxNodes: 1 }, performance.now() - 1),
+    ).rejects.toMatchObject({
+      name: 'RpcUserError',
+      errorCode: 'PERSISTENCE_UNAVAILABLE',
+    });
+    expect(getMock).not.toHaveBeenCalled();
+    const early = await store.graphSnapshot(
+      { maxNodes: 1 },
+      performance.now() + 60_000,
+    );
+    expect(early.semanticAvailable).toBe(false);
+  });
 });
