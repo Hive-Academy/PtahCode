@@ -1,3 +1,9 @@
+/* The ResizeObserver of the Model column tier measures this host. An inline
+   custom element reports a zero content width, so the host must be a block. */
+ptah-lanes-table {
+  display: block;
+  min-width: 0;
+}
 ptah-lanes-table .ptah-table-grid {
   table-layout: fixed;
 }
