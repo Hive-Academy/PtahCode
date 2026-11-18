@@ -277,7 +277,7 @@ export class SkillRecommendationService {
           evidence: best.evidence,
           score: best.score,
           rankedBy: itemRanking?.rankedBy ?? 'heuristic',
-          ...(itemRanking?.reason === undefined
+          ...(best !== ordered[0] || itemRanking?.reason === undefined
             ? {}
             : { reason: itemRanking.reason }),
         });

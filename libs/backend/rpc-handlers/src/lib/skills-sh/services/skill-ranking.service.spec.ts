@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { rm } from 'node:fs/promises';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SkillRankingCallerService } from '@ptah-extension/lane-routing';
 import type { HarnessLlmRunner } from '../../harness/ai/harness-llm-runner.service';
@@ -32,13 +33,11 @@ const request: SkillRankingRequest = {
 };
 function setup(decision = false, session = true) {
   const rankSkillCandidates = jest.fn().mockResolvedValue(null);
-  const run = jest
-    .fn()
-    .mockResolvedValue({
-      structuredOutput: {
-        items: { angular: { order: ['b', 'a'], reason: 'Better relevance' } },
-      },
-    });
+  const run = jest.fn().mockResolvedValue({
+    structuredOutput: {
+      items: { angular: { order: ['b', 'a'], reason: 'Better relevance' } },
+    },
+  });
   const service = new SkillRankingService(
     { debug: jest.fn() } as unknown as Logger,
     decision
@@ -49,7 +48,10 @@ function setup(decision = false, session = true) {
   return { service, rankSkillCandidates, run };
 }
 describe('SkillRankingService.rank', () => {
-  beforeEach(() => jest.useFakeTimers());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+  });
   afterEach(() => {
     jest.clearAllTimers();
     jest.useRealTimers();
@@ -73,6 +75,11 @@ describe('SkillRankingService.rank', () => {
       expect(run).toHaveBeenCalledTimes(1);
       expect(result.items['angular'].order).toEqual(['b', 'a']);
       expect(result.items['angular'].rankedBy).toBe('session-model');
+      expect(rm).toHaveBeenCalledTimes(1);
+      expect(rm).toHaveBeenCalledWith('D:\\fake-scratch', {
+        recursive: true,
+        force: true,
+      });
     },
   );
   it('continues to the session model after a decision error', async () => {
@@ -146,7 +153,9 @@ describe('SkillRankingService.rank', () => {
       expect(run.mock.calls[1][0].execute.prompt).not.toMatch(
         /<img|onerror|<script|javascript:/i,
       );
-      expect(result.items['angular'].order).toEqual(baseline.items['angular'].order);
+      expect(result.items['angular'].order).toEqual(
+        baseline.items['angular'].order,
+      );
     },
   );
   it('constrains prompt metadata and requests a tool-free item-scoped JSON schema', async () => {
@@ -210,9 +219,43 @@ describe('SkillRankingService.rank', () => {
   });
   it('retains heuristic order without either model', async () => {
     expect(
-      (await setup(false, false).service.rank(request)).items['angular'].rankedBy,
+      (await setup(false, false).service.rank(request)).items['angular']
+        .rankedBy,
     ).toBe('heuristic');
   });
+  it.each(['resolve', 'reject'])(
+    'defers scratch removal after the deadline until the runner settles (%s)',
+    async (outcome) => {
+      const { service, run } = setup();
+      let settle: () => void = () => {
+        throw new Error('Runner has not started');
+      };
+      run.mockImplementation(
+        () =>
+          new Promise((resolve, reject) => {
+            settle = () => {
+              if (outcome === 'reject')
+                reject(new Error('Late runner failure'));
+              else resolve({ structuredOutput: { items: {} } });
+            };
+          }),
+      );
+      const pending = service.rank(request);
+      await jest.advanceTimersByTimeAsync(15_000);
+      const result = await pending;
+      expect(result.items['angular'].rankedBy).toBe('heuristic');
+      expect(rm).not.toHaveBeenCalled();
+
+      settle();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(rm).toHaveBeenCalledTimes(1);
+      expect(rm).toHaveBeenCalledWith('D:\\fake-scratch', {
+        recursive: true,
+        force: true,
+      });
+      expect(result.items['angular'].rankedBy).toBe('heuristic');
+    },
+  );
   it('caps nonheuristic reasons below 140 characters', async () => {
     const { service, run } = setup();
     run.mockResolvedValue({

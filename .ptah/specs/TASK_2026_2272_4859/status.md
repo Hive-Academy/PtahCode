@@ -87,3 +87,19 @@ The session that owned this worktree ended. The coordinator of PR #1421 took ove
   errors because the worktree had no `node_modules` junction. After the junction was made,
   `npm run verify -- -t test -p rpc-handlers` gave "1 task: 1 succeeded", exit code 0
   (log `.ptah/tmp/gate-audit2.log`). The `lane-routing` test passed in the first run.
+
+## Coordinator correction (2026-11-18, 14:50 UTC)
+
+Two bot review threads were still valid at `b725452e0`. Record: `review-thread-fix-report.md`.
+
+- Major: the scratch directory of the session model was removed at the deadline while the runner
+  could still run. The removal now waits for the runner to settle. `rank()` still returns at the
+  deadline.
+- Minor: after deduplication skipped the first choice of the model, the reason of that choice went
+  to a different skill. The reason is now kept only for the first choice.
+- Implementer: codex lane. Review: the coordinator (Claude family) read the production diff; no
+  separate review lane ran. The spec file of the recommendation service was also formatted with
+  prettier, which makes its diff large.
+- Local gate `npm run verify -- -p rpc-handlers`: "2 tasks: 2 succeeded" and
+  "1 task: 1 succeeded", exit code 0 (log `.ptah/tmp/gate-threads.log`). The two repository
+  guards exit 0.
