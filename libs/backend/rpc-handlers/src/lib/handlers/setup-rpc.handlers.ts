@@ -91,6 +91,7 @@ import {
   SKILL_PROJECT_GUIDANCE_SERVICE,
 } from '../di/tokens';
 import type { SkillRecommendationService } from '../skills-sh/services/skill-recommendation.service';
+export { SkillRankingService } from '../skills-sh/services/skill-ranking.service';
 import type { SkillSelectionService } from '../skills-sh/services/skill-selection.service';
 import type { ProjectGuidanceService } from '../skills-sh/services/project-guidance.service';
 
@@ -672,6 +673,7 @@ export class SetupRpcHandlers {
           'SkillRecommendationService',
         );
         return await recommendation.recommendAnalysis({
+          workspaceRoot,
           items: summary.items,
           summarySource: summary.source,
           search: (query) => this.skillsShApi.search(query),

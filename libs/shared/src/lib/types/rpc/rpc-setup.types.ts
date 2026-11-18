@@ -232,6 +232,8 @@ export interface WizardRecommendAnalysisSkillsParams {
 }
 export interface WizardRecommendAnalysisSkillsResult {
   skills: import('../rpc.types').SkillRecommendation[];
+  /** Ranking source for the result set; omitted by older servers. */
+  rankedBy?: 'decision-model' | 'session-model' | 'heuristic';
   detectedItems: StackSummaryItem[];
   unmatchedItems: StackSummaryItem[];
   searchFailures: { item: string; reason: string }[];

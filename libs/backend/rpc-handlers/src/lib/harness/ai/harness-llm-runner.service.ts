@@ -47,6 +47,11 @@ import { HarnessStreamBroadcaster } from '../streaming/harness-stream-broadcaste
  */
 export interface HarnessLlmExecuteParams {
   cwd: string;
+  /** Resolve provider/model for this workspace while executing outside its tree. */
+  workspaceRoot?: string;
+  // Ranking executes in scratch space to avoid workspace files, but must still
+  // resolve the workspace's provider/model and disable every tool for that query.
+  toolAccess?: 'none';
   /**
    * Optional model the caller wants. Kept only when the workspace's provider
    * offers it; by default the model saved for `cwd`'s provider is used.
@@ -126,7 +131,7 @@ export class HarnessLlmRunner {
       // workspace — never the process-wide auth env (which belongs to whichever
       // workspace was configured last) and never the active workspace's model.
       const { model, auth } = await this.workspaceLlm.resolveForPath(
-        args.execute.cwd,
+        args.execute.workspaceRoot ?? args.execute.cwd,
         { requestedModel: args.execute.model },
       );
 
@@ -138,6 +143,9 @@ export class HarnessLlmRunner {
         mcpServerRunning: args.execute.mcpServerRunning,
         maxTurns: args.execute.maxTurns,
         outputFormat: args.execute.outputFormat,
+        ...(args.execute.toolAccess
+          ? { toolAccess: args.execute.toolAccess }
+          : {}),
         abortController,
         ...(auth ? { auth } : {}),
       });

@@ -19,6 +19,10 @@ import type {
   WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 
+import type { SkillRankingService } from './skill-ranking.service';
+import { SKILL_RANKING_SERVICE } from '../../di/tokens';
+import type { SkillRankingRequest } from './skill-ranking.types';
+
 /** Search function for the skills.sh catalog. */
 export type SkillCatalogSearch = (query: string) => Promise<SkillShEntry[]>;
 
@@ -30,6 +34,7 @@ export interface SkillRecommendationInput {
 }
 
 export interface AnalysisSkillRecommendationInput {
+  workspaceRoot?: string;
   items: readonly StackSummaryItem[];
   search: SkillCatalogSearch;
   summarySource: 'structured' | 'legacy' | 'none';
@@ -54,23 +59,44 @@ const recommendationEntrySchema = z.object({
 
 /** Use the primary technology in composite names, without version annotations. */
 function technologyName(name: string): string {
-  return name.split(/\s+\+\s+|\s+\/\s+|,/)[0]
+  return name
+    .split(/\s+\+\s+|\s+\/\s+|,/)[0]
     .replace(/\([^)]*\)/g, '')
     .replace(/\s+[~^v]?\d[\w.*+~-]*(?=\s|$)/gi, '')
-    .trim().toLowerCase();
+    .trim()
+    .toLowerCase();
 }
 
-function compareRecommendations(a: SkillRecommendation, b: SkillRecommendation): number {
-  return b.score - a.score || a.skill.skillId.localeCompare(b.skill.skillId) ||
-    a.skill.source.localeCompare(b.skill.source) || a.skill.name.localeCompare(b.skill.name);
+function compareRecommendations(
+  a: SkillRecommendation,
+  b: SkillRecommendation,
+): number {
+  return (
+    b.score - a.score ||
+    a.skill.skillId.localeCompare(b.skill.skillId) ||
+    a.skill.source.localeCompare(b.skill.source) ||
+    a.skill.name.localeCompare(b.skill.name)
+  );
 }
 
-function searchWithTimeout(search: SkillCatalogSearch, query: string): Promise<SkillShEntry[]> {
+function searchWithTimeout(
+  search: SkillCatalogSearch,
+  query: string,
+): Promise<SkillShEntry[]> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Search timed out')), SEARCH_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => reject(new Error('Search timed out')),
+      SEARCH_TIMEOUT_MS,
+    );
     search(query).then(
-      (entries) => { clearTimeout(timer); resolve(entries); },
-      (error: unknown) => { clearTimeout(timer); reject(error); },
+      (entries) => {
+        clearTimeout(timer);
+        resolve(entries);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
     );
   });
 }
@@ -94,9 +120,15 @@ function tokenize(value: string): string[] {
 
 @injectable()
 export class SkillRecommendationService {
-  constructor(@inject(TOKENS.LOGGER) private readonly logger: Logger) {}
+  constructor(
+    @inject(TOKENS.LOGGER) private readonly logger: Logger,
+    @inject(SKILL_RANKING_SERVICE, { isOptional: true })
+    private readonly ranker?: SkillRankingService,
+  ) {}
 
-  async recommendAnalysis(input: AnalysisSkillRecommendationInput): Promise<WizardRecommendAnalysisSkillsResult> {
+  async recommendAnalysis(
+    input: AnalysisSkillRecommendationInput,
+  ): Promise<WizardRecommendAnalysisSkillsResult> {
     const needs = new Map<string, StackSummaryItem>();
     for (const item of input.items) {
       const term = dependencyKeyword(technologyName(item.name));
@@ -106,55 +138,132 @@ export class SkillRecommendationService {
     const results: SkillShEntry[][] = new Array(detectedItems.length);
     const failures: { item: string; reason: string }[] = [];
     let next = 0;
-    await Promise.all(Array.from({ length: Math.min(4, detectedItems.length) }, async () => {
-      while (next < detectedItems.length) {
-        const index = next++;
-        const item = detectedItems[index];
-        try {
-          results[index] = await searchWithTimeout(input.search, dependencyKeyword(technologyName(item.name)));
-        } catch (error: unknown) {
-          const reason = error instanceof Error && error.message === 'Search timed out'
-            ? 'Search timed out' : 'Search failed';
-          failures.push({ item: item.name, reason });
-          this.logger.warn('[SkillRecommendation] skills.sh search failed', { item: item.name, reason });
-          results[index] = [];
+    await Promise.all(
+      Array.from({ length: Math.min(4, detectedItems.length) }, async () => {
+        while (next < detectedItems.length) {
+          const index = next++;
+          const item = detectedItems[index];
+          try {
+            results[index] = await searchWithTimeout(
+              input.search,
+              dependencyKeyword(technologyName(item.name)),
+            );
+          } catch (error: unknown) {
+            const reason =
+              error instanceof Error && error.message === 'Search timed out'
+                ? 'Search timed out'
+                : 'Search failed';
+            failures.push({ item: item.name, reason });
+            this.logger.warn('[SkillRecommendation] skills.sh search failed', {
+              item: item.name,
+              reason,
+            });
+            results[index] = [];
+          }
         }
-      }
-    }));
+      }),
+    );
 
     const usedIds = new Set<string>();
     const usedNames = new Set<string>();
     const skills: SkillRecommendation[] = [];
     const unmatchedItems: StackSummaryItem[] = [];
+    const collected: (SkillRecommendation & { described: boolean })[][] = [];
     for (const [index, item] of detectedItems.entries()) {
       const term = dependencyKeyword(technologyName(item.name));
       const candidates: (SkillRecommendation & { described: boolean })[] = [];
       for (const rawEntry of results[index] ?? []) {
         const parsed = recommendationEntrySchema.safeParse(rawEntry);
         if (!parsed.success) {
-          this.logger.debug('[SkillRecommendation] Invalid registry row dropped', { item: item.name });
+          this.logger.debug(
+            '[SkillRecommendation] Invalid registry row dropped',
+            { item: item.name },
+          );
           continue;
         }
         const entry = parsed.data;
         const words = [...tokenize(entry.skillId), ...tokenize(entry.name)];
-        const pairs = words.slice(0, -1).map((word, position) => word + words[position + 1]);
-        const complete = [entry.skillId, entry.name].some((value) => dependencyKeyword(value) === term);
-        if (term.length < 2 || (!complete && !words.includes(term) && (term.length < 3 || !pairs.includes(term)))) continue;
+        const pairs = words
+          .slice(0, -1)
+          .map((word, position) => word + words[position + 1]);
+        const complete = [entry.skillId, entry.name].some(
+          (value) => dependencyKeyword(value) === term,
+        );
+        if (
+          term.length < 2 ||
+          (!complete &&
+            !words.includes(term) &&
+            (term.length < 3 || !pairs.includes(term)))
+        )
+          continue;
         const score = 100 + Math.log10(1 + Math.max(0, entry.installs));
-        candidates.push({ skill: {
-          ...entry,
-          description: entry.description.trim() || `${entry.source} - ${entry.installs} installs`,
-        }, evidence: item.name, score, described: Boolean(entry.description.trim()) });
+        candidates.push({
+          skill: {
+            ...entry,
+            description:
+              entry.description.trim() ||
+              `${entry.source} - ${entry.installs} installs`,
+          },
+          evidence: item.name,
+          score,
+          described: Boolean(entry.description.trim()),
+        });
       }
+      candidates.sort(
+        (a, b) =>
+          Number(b.described) - Number(a.described) ||
+          compareRecommendations(a, b),
+      );
+      collected.push(candidates);
+    }
+    const rankingItems: SkillRankingRequest['items'] = Object.fromEntries(
+      detectedItems.map((item, index) => [
+        String(index),
+        {
+          kind: item.kind,
+          name: item.name,
+          candidates: collected[index].map((candidate, candidateIndex) => ({
+            label: String(candidateIndex),
+            name: candidate.skill.name,
+            source: candidate.skill.source,
+            skillId: candidate.skill.skillId,
+            installs: candidate.skill.installs,
+            description: candidate.described ? candidate.skill.description : '',
+          })),
+        },
+      ]),
+    );
+    let ranking: Awaited<ReturnType<SkillRankingService['rank']>> | undefined;
+    if (this.ranker && input.workspaceRoot) {
+      try {
+        ranking = await this.ranker.rank({
+          workspaceRoot: input.workspaceRoot,
+          items: rankingItems,
+        });
+      } catch (error: unknown) {
+        // degradation-audit: reported - unexpected ranker failures preserve the existing selection flow.
+        this.logger.debug('[SkillRecommendation] Ranking unavailable', {
+          error: String(error),
+        });
+      }
+    }
+    for (const [index, item] of detectedItems.entries()) {
+      const candidates = collected[index];
+      const order = ranking?.items[String(index)]?.order;
+      const ordered = order
+        ? order
+            .map((label) => candidates[Number(label)])
+            .filter(
+              (candidate): candidate is (typeof candidates)[number] =>
+                candidate !== undefined,
+            )
+        : candidates;
       const identity = (candidate: SkillRecommendation) => ({
         id: `${candidate.skill.source}/${candidate.skill.skillId}`.toLowerCase(),
         name: candidate.skill.name.toLowerCase(),
       });
-      // Best candidate that an earlier item did not take: an item whose top
-      // hit is already used falls back to its next free candidate.
-      const best = candidates.sort((a, b) =>
-        Number(b.described) - Number(a.described) ||
-        compareRecommendations(a, b)).find((candidate) => {
+      // Use the highest-ranked candidate not already selected for an earlier item.
+      const best = ordered.find((candidate) => {
         const { id, name } = identity(candidate);
         return !usedIds.has(id) && !usedNames.has(name);
       });
@@ -162,13 +271,24 @@ export class SkillRecommendationService {
         const { id, name } = identity(best);
         usedIds.add(id);
         usedNames.add(name);
-        skills.push({ skill: best.skill, evidence: best.evidence, score: best.score });
+        const itemRanking = ranking?.items[String(index)];
+        skills.push({
+          skill: best.skill,
+          evidence: best.evidence,
+          score: best.score,
+          rankedBy: itemRanking?.rankedBy ?? 'heuristic',
+          ...(best !== ordered[0] || itemRanking?.reason === undefined
+            ? {}
+            : { reason: itemRanking.reason }),
+        });
       } else if (candidates.length) {
-        const covering = skills.find((chosen) => candidates.some((candidate) => {
-          const left = identity(chosen);
-          const right = identity(candidate);
-          return left.id === right.id || left.name === right.name;
-        }));
+        const covering = skills.find((chosen) =>
+          candidates.some((candidate) => {
+            const left = identity(chosen);
+            const right = identity(candidate);
+            return left.id === right.id || left.name === right.name;
+          }),
+        );
         if (covering) covering.evidence += `, ${item.name}`;
       } else if (
         candidates.length === 0 &&
@@ -178,8 +298,17 @@ export class SkillRecommendationService {
       }
     }
     skills.sort(compareRecommendations);
-    return { skills, detectedItems, unmatchedItems, searchFailures: failures,
-      summarySource: input.summarySource };
+    skills.forEach((skill, index) => {
+      skill.rank = index + 1;
+    });
+    return {
+      skills,
+      detectedItems,
+      unmatchedItems,
+      searchFailures: failures,
+      rankedBy: ranking?.rankedBy ?? 'heuristic',
+      summarySource: input.summarySource,
+    };
   }
 
   async recommend(
@@ -220,7 +349,10 @@ export class SkillRecommendationService {
       for (const rawEntry of entries) {
         const parsed = recommendationEntrySchema.safeParse(rawEntry);
         if (!parsed.success) {
-          this.logger.debug('[SkillRecommendation] Invalid registry row dropped', { keyword });
+          this.logger.debug(
+            '[SkillRecommendation] Invalid registry row dropped',
+            { keyword },
+          );
           continue;
         }
         const entry = parsed.data;

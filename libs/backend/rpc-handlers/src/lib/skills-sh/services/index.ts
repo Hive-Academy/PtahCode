@@ -6,6 +6,8 @@
  */
 
 export { SkillRecommendationService } from './skill-recommendation.service';
+export { SkillRankingService } from './skill-ranking.service';
+export type { SkillRankingRequest, SkillRankingResult, SkillRankingMethod } from './skill-ranking.types';
 export { ProjectGuidanceService } from './project-guidance.service';
 export { SkillSelectionService } from './skill-selection.service';
 export { SkillConsentService } from './skill-consent.service';

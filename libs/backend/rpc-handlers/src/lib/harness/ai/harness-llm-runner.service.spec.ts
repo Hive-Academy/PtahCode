@@ -148,3 +148,40 @@ describe('HarnessLlmRunner — workspace provider and model', () => {
     clearSpy.mockRestore();
   });
 });
+
+describe('HarnessLlmRunner isolated skill ranking execution', () => {
+  it('resolves workspace credentials while forwarding scratch cwd, tool prohibition, schema and turn budget', async () => {
+    const { runner, execute, resolveForPath } = makeRunner({
+      providerId: 'fake',
+      model: 'workspace-model',
+      auth: { env: {} },
+    });
+    const schema = {
+      type: 'object',
+      properties: { items: { type: 'object' } },
+    };
+    await runner.run({
+      ...ARGS,
+      operation: 'generate-skills',
+      timeoutMs: 15000,
+      execute: {
+        ...ARGS.execute,
+        cwd: 'D:\\fake-scratch',
+        workspaceRoot: 'D:\\fake-workspace',
+        toolAccess: 'none',
+        maxTurns: 2,
+        outputFormat: { type: 'json_schema', schema },
+      },
+    });
+    expect(resolveForPath).toHaveBeenCalledWith('D:\\fake-workspace', {
+      requestedModel: undefined,
+    });
+    const config = execute.mock.calls[0][0];
+    expect(config.cwd).toBe('D:\\fake-scratch');
+    expect(config.model).toBe('workspace-model');
+    expect(config.toolAccess).toBe('none');
+    expect(config.maxTurns).toBe(2);
+    expect(config.outputFormat).toEqual({ type: 'json_schema', schema });
+    expect(config.mcpServerRunning).toBe(false);
+  });
+});
