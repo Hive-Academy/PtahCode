@@ -209,7 +209,7 @@ export class SettingsComponent implements OnInit {
           'Choose which models and CLI agents do the work, and in which order lanes run.',
         orchestration:
           'Limits that keep chats and lanes inside your budget and plan limits.',
-        matrix: 'The routing model uses these ratings to suggest a lane.',
+        matrix: 'Routing suggestions, executor rotation and the ratings behind them.',
         'pro-features':
           'Membership, agent behaviour, the MCP server, tools and setup.',
         tools: 'Web search providers, voice engines and workspace checks.',
@@ -315,6 +315,9 @@ export class SettingsComponent implements OnInit {
       this.isElectron &&
       (section === 'capability-matrix' ||
         section === 'decision-matrix' ||
+        section === 'host-routing' ||
+        section === 'routing-suggestions' ||
+        section === 'lane-rotation' ||
         section === 'matrix')
     ) {
       this.setActiveTab('matrix');

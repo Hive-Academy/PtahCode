@@ -1,3 +1,5 @@
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -51,6 +53,8 @@ describe('SessionBudgetSettingsComponent', () => {
   ): T | null => host().querySelector<T>(`[data-testid="${id}"]`);
   const field = (key: Key): HTMLInputElement =>
     byTestId<HTMLInputElement>(`session-budget-${key}`) as HTMLInputElement;
+  const rich = (key: string) => fixture.debugElement.query(By.css(`[data-testid="session-budget-${key}"]`)).componentInstance as PtahRichSelectComponent<string>;
+  const choose = (key: string, value: string) => fixture.debugElement.query(By.css(`[data-testid="session-budget-${key}"]`)).triggerEventHandler('valueChange', value);
   const writes = (): Array<{ key: string; value: unknown }> =>
     mockRpcCall.mock.calls
       .filter((call) => call[1] === 'settings:set')
@@ -171,14 +175,14 @@ describe('SessionBudgetSettingsComponent', () => {
     }
   });
 
-  it('uses stacked labels in a container based field grid', async () => {
+  it('uses floating labels and rich selects in one shared field grid', async () => {
     await create();
     const grid = host().querySelector('.session-budget-fields');
     expect(grid).not.toBeNull();
     const fields = host().querySelectorAll('.ptah-field[data-appearance]');
-    expect(fields).toHaveLength(NUMBER_KEYS.length);
+    expect(fields).toHaveLength(NUMBER_KEYS.length + 2);
     for (const field of fields) {
-      expect(field.getAttribute('data-appearance')).toBe('stacked');
+      expect(field.getAttribute('data-appearance')).toBe('floating');
       expect(field.closest('.session-budget-fields')).toBe(grid);
     }
   });
@@ -189,13 +193,13 @@ describe('SessionBudgetSettingsComponent', () => {
       byTestId('session-budget-token-measure-resolved')?.textContent,
     ).toContain('Weighted session tokens');
     expect(host().textContent).toContain(
-      'cached reads at 10% and output at 5x',
+      'Weighted discounts cache reads',
     );
     expect(host().textContent).toContain(
-      'every token of every request, including cache reads',
+      'raw counts all tokens',
     );
     expect(host().textContent).toContain(
-      '50% or more of the auto-compact window',
+      'context at least half full',
     );
   });
 
@@ -204,7 +208,7 @@ describe('SessionBudgetSettingsComponent', () => {
     stored['sessionBudget.tokens'] = 30_000_000;
     await create();
     expect(
-      byTestId<HTMLSelectElement>('session-budget-token-measure')?.value,
+      rich('token-measure').value(),
     ).toBe('weighted');
     expect(byTestId('session-budget-token-measure-recommendation')).toBeNull();
   });
@@ -214,7 +218,7 @@ describe('SessionBudgetSettingsComponent', () => {
     stored['sessionBudget.tokens'] = 30_000_000;
     await create();
     expect(
-      byTestId<HTMLSelectElement>('session-budget-token-measure')?.value,
+      rich('token-measure').value(),
     ).toBe('raw');
     expect(
       byTestId('session-budget-token-measure-resolved')?.textContent,
@@ -233,11 +237,7 @@ describe('SessionBudgetSettingsComponent', () => {
 
   it('saves the selected raw measure and lets the recommendation be dismissed', async () => {
     await create();
-    const select = byTestId<HTMLSelectElement>(
-      'session-budget-token-measure',
-    ) as HTMLSelectElement;
-    select.value = 'raw';
-    select.dispatchEvent(new Event('change'));
+    choose('token-measure', 'raw');
     await settle();
     expect(writes()).toEqual([
       { key: 'sessionBudget.tokenMeasure', value: 'raw' },
@@ -300,11 +300,11 @@ describe('SessionBudgetSettingsComponent', () => {
       expect(field('tokens').className).toContain('input-sm');
       expect(field('tokens').className).toContain('flex-1');
       expect(field('tokens').className).toContain('join-item');
-      expect(host().textContent).toContain('50M tokens');
+      expect(host().textContent).toContain('Range: 1,000,000 to 2,000,000,000');
       expect(field('tightenPercent').value).toBe('50');
       expect(field('handoffPercent').value).toBe('80');
       expect(field('tightenWindowTokens').value).toBe('');
-      expect(byTestId<HTMLSelectElement>('session-budget-unit')?.value).toBe(
+      expect(rich('unit').value()).toBe(
         'tokens',
       );
       expect(field('enabled').checked).toBe(true);
@@ -699,14 +699,10 @@ describe('SessionBudgetSettingsComponent', () => {
 
     it('writes the unit', async () => {
       await create();
-      const select = byTestId<HTMLSelectElement>(
-        'session-budget-unit',
-      ) as HTMLSelectElement;
-      select.value = 'cost';
-      select.dispatchEvent(new Event('change'));
+      choose('unit', 'cost');
       await settle();
       expect(writes()).toEqual([{ key: 'sessionBudget.unit', value: 'cost' }]);
-      expect(select.value).toBe('cost');
+      expect(rich('unit').value()).toBe('cost');
     });
   });
 });

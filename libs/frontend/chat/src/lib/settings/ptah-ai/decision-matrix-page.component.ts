@@ -2,11 +2,12 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  inject,
   output,
   signal,
   viewChild,
 } from '@angular/core';
-import { LucideAngularModule, RefreshCw } from 'lucide-angular';
+import { ArrowLeft, LucideAngularModule, RefreshCw } from 'lucide-angular';
 import {
   OUTCOME_TASK_KINDS,
   type AgentGetCapabilityMatrixResult,
@@ -16,11 +17,17 @@ import {
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahInstrumentBandComponent,
-  PtahSelectDirective,
-  PtahToolbarComponent,
+  PtahRichSelectComponent,
+  PtahInputDirective,
+  PtahFieldComponent,
+  PtahFieldGridDirective,
+  PtahFormSectionComponent,
   type PtahInstrumentBandSegment,
 } from '@ptah-extension/ui';
+import { HostRoutingSettingComponent } from './host-routing-setting.component';
+import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
 import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
+import { RoutingDisplayNamesStore } from './routing-display-names.store';
 
 @Component({
   selector: 'ptah-decision-matrix-page',
@@ -32,11 +39,18 @@ import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.co
     PtahButtonDirective,
     PtahIconButtonDirective,
     PtahInstrumentBandComponent,
-    PtahSelectDirective,
-    PtahToolbarComponent,
+    PtahRichSelectComponent,
+    PtahInputDirective,
+    PtahFieldComponent,
+    PtahFieldGridDirective,
+    PtahFormSectionComponent,
+    HostRoutingSettingComponent,
+    LaneRotationSettingComponent,
   ],
   template: `
-    <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
+    <div
+      class="flex flex-wrap items-center justify-between gap-[var(--ptah-gap-controls)]"
+    >
       <button
         ptahButton
         variant="ghost"
@@ -44,87 +58,112 @@ import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.co
         (click)="back.emit()"
         aria-label="Context management"
       >
+        <lucide-angular [img]="BackIcon" aria-hidden="true" />
         Context management
       </button>
-      <span class="text-xs text-base-content-muted">{{ ratedMeta() }}</span>
-      <button
-        ptahIconButton
-        type="button"
-        label="Refresh ratings"
-        [busy]="busy()"
-        (click)="refresh()"
-      >
-        <lucide-angular [img]="RefreshIcon" aria-hidden="true" />
-      </button>
+      <div class="flex items-center gap-[var(--ptah-gap-controls)]">
+        <span class="text-xs text-base-content-muted">{{ ratedMeta() }}</span>
+        <button
+          ptahIconButton
+          type="button"
+          label="Refresh ratings"
+          [busy]="busy()"
+          (click)="refresh()"
+        >
+          <lucide-angular [img]="RefreshIcon" aria-hidden="true" />
+        </button>
+      </div>
     </div>
     <ptah-instrument-band
       [segments]="segments()"
       [loading]="busy()"
       ariaLabel="Decision matrix overview"
     />
-    <ptah-toolbar
-      [query]="search()"
-      placeholder="Search models"
-      (queryChange)="search.set($event)"
-    >
-      <select
-        sort
-        ptahSelect
-        aria-label="Sort by task kind"
-        [value]="sortKind()"
-        (change)="setSort($event)"
-      >
-        @for (kind of tasks; track kind) {
-          <option [value]="kind">{{ labels[kind] }}</option>
-        }
-      </select>
-      <select
-        filters
-        ptahSelect
-        aria-label="Filter by family"
-        [value]="family()"
-        (change)="setFamily($event)"
-      >
-        <option value="">All families</option>
-        @for (name of families(); track name) {
-          <option [value]="name">{{ name }}</option>
-        }
-      </select>
-      <button
-        filters
-        ptahButton
-        variant="ghost"
-        size="xs"
-        type="button"
-        (click)="descending.set(!descending())"
-        [attr.aria-pressed]="descending()"
-        [attr.aria-label]="
-          descending()
-            ? 'Sort descending; switch to ascending'
-            : 'Sort ascending; switch to descending'
-        "
-      >
-        {{ descending() ? 'Descending' : 'Ascending' }}
-      </button>
-      <span filters class="text-xs tabular-nums text-base-content-muted"
-        >{{ visibleCount() }} results</span
-      >
-    </ptah-toolbar>
-    <ptah-capability-matrix-setting
-      [headingLevel]="2"
-      [familyFilter]="family()"
-      [modelSearch]="search()"
-      [sortKind]="sortKind()"
-      [sortDescending]="descending()"
-      (resultChange)="onResult($event)"
-      (loadingChange)="busy.set($event)"
-      (visibleCountChange)="visibleCount.set($event)"
+    <ptah-host-routing-setting
+      (modelConfiguredChange)="routingModelConfigured.set($event)"
     />
+    <ptah-lane-rotation-setting />
+    <ptah-form-section
+      wide
+      level="2"
+      heading="Model ratings"
+      data-glass-surface="content"
+      description="Select a score to see where it came from."
+    >
+      <div class="min-w-0 space-y-[var(--ptah-gap-controls)]">
+        <div ptahFieldGrid>
+          <ptah-field label="Family">
+            <ptah-select
+              label="Filter by family"
+              [options]="familyOptions()"
+              [value]="family()"
+              (valueChange)="family.set($event ?? '')"
+            />
+          </ptah-field>
+          <ptah-field label="Search models">
+            <input
+              ptahInput
+              type="search"
+              aria-label="Search models"
+              [value]="search()"
+              (input)="setSearch($event)"
+            />
+          </ptah-field>
+          <ptah-field label="Sort by">
+            <ptah-select
+              label="Sort by task kind"
+              [options]="taskOptions"
+              [value]="sortKind()"
+              (valueChange)="setSort($event)"
+            />
+          </ptah-field>
+        </div>
+        <div
+          class="flex items-center justify-between gap-[var(--ptah-gap-controls)]"
+        >
+          <button
+            ptahButton
+            variant="ghost"
+            size="xs"
+            type="button"
+            (click)="descending.set(!descending())"
+            [attr.aria-pressed]="descending()"
+            [attr.aria-label]="
+              descending()
+                ? 'Sort descending; switch to ascending'
+                : 'Sort ascending; switch to descending'
+            "
+          >
+            {{ descending() ? 'Descending' : 'Ascending' }}
+          </button>
+          <span class="text-xs tabular-nums text-base-content-muted"
+            >{{ visibleCount() }} {{ visibleCount() === 1 ? 'result' : 'results' }}</span
+          >
+        </div>
+        <ptah-capability-matrix-setting
+          [headingLevel]="2"
+          [familyFilter]="family()"
+          [modelSearch]="search()"
+          [sortKind]="sortKind()"
+          [sortDescending]="descending()"
+          (resultChange)="onResult($event)"
+          (loadingChange)="busy.set($event)"
+          (visibleCountChange)="visibleCount.set($event)"
+        />
+      </div>
+    </ptah-form-section>
+  `,
+  styles: `
+    :host-context([data-glass='on']) [data-glass-surface='content'] {
+      padding: 1.25rem;
+    }
   `,
 })
 export class DecisionMatrixPageComponent {
   readonly back = output<void>();
   protected readonly RefreshIcon = RefreshCw;
+  protected readonly BackIcon = ArrowLeft;
+  private readonly names = inject(RoutingDisplayNamesStore);
   private readonly matrix = viewChild(CapabilityMatrixSettingComponent);
   protected readonly tasks = OUTCOME_TASK_KINDS;
   protected readonly labels: Record<OutcomeTaskKind, string> = {
@@ -135,6 +174,18 @@ export class DecisionMatrixPageComponent {
     tests: 'Tests',
     docs: 'Docs',
   };
+  protected readonly routingModelConfigured = signal<boolean | null>(null);
+  protected readonly taskOptions = OUTCOME_TASK_KINDS.map((value) => ({
+    value,
+    label: this.labels[value],
+  }));
+  protected readonly familyOptions = computed(() => [
+    { value: '', label: 'All families' },
+    ...this.families().map((value) => ({
+      value,
+      label: this.names.executor(value).text,
+    })),
+  ]);
   protected readonly family = signal('');
   protected readonly search = signal('');
   protected readonly sortKind = signal<OutcomeTaskKind>('plan');
@@ -174,6 +225,12 @@ export class DecisionMatrixPageComponent {
       );
       const latest = this.latest();
       return [
+        {
+          id: 'routing-model',
+          label: 'Routing model',
+          value: this.routingModelConfigured() ? 'On' : 'Needs a model',
+          tone: this.routingModelConfigured() ? 'ok' : 'warn',
+        },
         {
           id: 'families',
           label: 'Families',
@@ -222,13 +279,11 @@ export class DecisionMatrixPageComponent {
     this.busy.set(true);
     void this.matrix()?.reload();
   }
-  protected setFamily(event: Event): void {
-    if (event.target instanceof HTMLSelectElement)
-      this.family.set(event.target.value);
+  protected setSearch(event: Event): void {
+    if (event.target instanceof HTMLInputElement)
+      this.search.set(event.target.value);
   }
-  protected setSort(event: Event): void {
-    if (!(event.target instanceof HTMLSelectElement)) return;
-    const value = event.target.value;
+  protected setSort(value: string | null): void {
     const kind = OUTCOME_TASK_KINDS.find((k) => k === value);
     if (kind) this.sortKind.set(kind);
   }

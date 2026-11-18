@@ -1,3 +1,5 @@
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -91,7 +93,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
   let feedback: SettingsSaveFeedbackService;
   const el = () => fixture.nativeElement as HTMLElement;
   const select = () =>
-    el().querySelector<HTMLSelectElement>('[data-testid="subagent-cache-ttl"]');
+    el().querySelector<HTMLButtonElement>('#subagent-cache-ttl');
   const envNotice = () =>
     el()
       .querySelector('[data-testid="subagent-cache-ttl-env"]')
@@ -109,11 +111,9 @@ describe('SubagentCacheTtlSettingComponent', () => {
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
     fixture.detectChanges();
   }
+  const rich = () => fixture.debugElement.query(By.directive(PtahRichSelectComponent)).componentInstance as PtahRichSelectComponent<string>;
   function choose(value: string) {
-    const node = select();
-    if (!node) throw new Error('Missing select');
-    node.value = value;
-    node.dispatchEvent(new Event('change'));
+    fixture.debugElement.query(By.directive(PtahRichSelectComponent)).triggerEventHandler('valueChange', value);
   }
 
   beforeEach(() => {
@@ -139,16 +139,13 @@ describe('SubagentCacheTtlSettingComponent', () => {
       (fixture.nativeElement as HTMLElement).querySelector('[data-glass-surface]')?.getAttribute('data-glass-surface'),
     ).toBe('content');
     expect(
-      Array.from(select()?.options ?? []).map((option) => [
-        option.value,
-        option.textContent?.trim(),
-      ]),
+      rich().options().map((option) => [option.value, option.label]),
     ).toEqual([
       ['auto', 'Auto (1 hour for sessions with subagents)'],
       ['5m', '5 minutes'],
       ['1h', '1 hour'],
     ]);
-    expect(select()?.value).toBe('auto');
+    expect(rich().value() ?? '').toBe('auto');
     expect(
       el()
         .querySelector('label[for="subagent-cache-ttl"]')
@@ -165,7 +162,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
       { orchestration: { subagentPromptCacheTtl: '1h' } },
       CONTEXT,
     );
-    expect(select()?.value).toBe('1h');
+    expect(rich().value() ?? '').toBe('1h');
     expect(error()).toBeNull();
     expect(feedback.toast()).toEqual({
       tone: 'status',
@@ -178,7 +175,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
       { orchestration: { subagentPromptCacheTtl: 'auto' } },
       CONTEXT,
     );
-    expect(select()?.value).toBe('auto');
+    expect(rich().value() ?? '').toBe('auto');
   });
 
   it('reconciles an Undo like a save: an unconfirmed Undo shows no value and offers the re-read', async () => {
@@ -192,7 +189,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
       { orchestration: { subagentPromptCacheTtl: 'auto' } },
       CONTEXT,
     );
-    expect(select()?.value).toBe('');
+    expect(rich().value() ?? '').toBe('');
     expect(isDisabledControl(select())).toBe(true);
     expect(recheck()).not.toBeNull();
     expect(feedback.toast()?.tone).toBe('alert');
@@ -204,7 +201,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
     state.ignoresWrite = true;
     await feedback.undo();
     await flush();
-    expect(select()?.value).toBe('1h');
+    expect(rich().value() ?? '').toBe('1h');
     expect(feedback.toast()).toEqual({
       tone: 'alert',
       message:
@@ -222,9 +219,8 @@ describe('SubagentCacheTtlSettingComponent', () => {
       expect(envNotice()).toBe(
         `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=${value} is set in your environment and takes precedence.`,
       );
-      expect(select()?.getAttribute('aria-describedby')).toBe(
-        'subagent-cache-ttl-env',
-      );
+      expect(el().querySelector('ptah-select')?.getAttribute('aria-describedby')).toBe('subagent-cache-ttl-env');
+      expect(select()?.getAttribute('aria-describedby')).toBeTruthy();
       expect(isDisabledControl(select())).toBe(false);
       choose('5m');
       await flush();
@@ -232,7 +228,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
         { orchestration: { subagentPromptCacheTtl: '5m' } },
         CONTEXT,
       );
-      expect(select()?.value).toBe('5m');
+      expect(rich().value() ?? '').toBe('5m');
     },
   );
 
@@ -250,7 +246,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
     state.next = 'rejected';
     choose('5m');
     await flush();
-    expect(select()?.value).toBe('auto');
+    expect(rich().value() ?? '').toBe('auto');
     expect(error()).toBeNull();
     expect(feedback.toast()).toEqual(
       expect.objectContaining({
@@ -266,7 +262,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
     state.ignoresWrite = true;
     choose('1h');
     await flush();
-    expect(select()?.value).toBe('auto');
+    expect(rich().value() ?? '').toBe('auto');
     expect(error()).toBeNull();
     expect(feedback.toast()).toEqual({
       tone: 'alert',
@@ -280,7 +276,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
     state.next = 'unconfirmed';
     choose('1h');
     await flush();
-    expect(select()?.value).toBe('');
+    expect(rich().value() ?? '').toBe('');
     expect(isDisabledControl(select())).toBe(true);
     expect(error()).toBeNull();
     expect(feedback.toast()?.tone).toBe('alert');
@@ -288,13 +284,11 @@ describe('SubagentCacheTtlSettingComponent', () => {
       'Could not save Subagent prompt-cache TTL.',
     );
     state.saveSettings.mockClear();
-    await fixture.componentInstance.select({
-      target: select(),
-    } as unknown as Event);
+    await fixture.componentInstance.select('1h');
     expect(state.saveSettings).not.toHaveBeenCalled();
     recheck()?.click();
     await flush();
-    expect(select()?.value).toBe('1h');
+    expect(rich().value() ?? '').toBe('1h');
     expect(isDisabledControl(select())).toBe(false);
     expect(error()).toBeNull();
     expect(recheck()).toBeNull();
@@ -321,6 +315,6 @@ describe('SubagentCacheTtlSettingComponent', () => {
     await flush();
     expect(state.refreshOrchestration).toHaveBeenCalled();
     expect(isDisabledControl(select())).toBe(false);
-    expect(select()?.value).toBe('auto');
+    expect(rich().value() ?? '').toBe('auto');
   });
 });

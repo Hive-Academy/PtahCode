@@ -1,13 +1,46 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  signal,
+  output,
+} from '@angular/core';
 import {
   ClaudeRpcService,
   ProvidersSettingsStateService,
 } from '@ptah-extension/core';
 import { rpcError, rpcSuccess } from '@ptah-extension/core/testing';
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { DecisionMatrixPageComponent } from './decision-matrix-page.component';
+import { HostRoutingSettingComponent } from './host-routing-setting.component';
+import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
+@Component({
+  selector: 'ptah-host-routing-setting',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '',
+})
+class HostRoutingStubComponent {
+  readonly modelConfiguredChange = output<boolean | null>();
+}
+@Component({
+  selector: 'ptah-lane-rotation-setting',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '',
+})
+class LaneRotationStubComponent {}
 
 describe('DecisionMatrixPageComponent', () => {
+  beforeEach(() =>
+    TestBed.overrideComponent(DecisionMatrixPageComponent, {
+      remove: {
+        imports: [HostRoutingSettingComponent, LaneRotationSettingComponent],
+      },
+      add: { imports: [HostRoutingStubComponent, LaneRotationStubComponent] },
+    }),
+  );
   it('shows the back action and RPC-backed band', async () => {
     const call = jest
       .fn()
@@ -47,6 +80,19 @@ describe('DecisionMatrixPageComponent', () => {
     ) as HTMLButtonElement;
     expect(refresh.querySelector('lucide-angular')).not.toBeNull();
     expect(refresh.textContent).not.toContain('?');
+    expect(root.querySelector('ptah-host-routing-setting')).not.toBeNull();
+    expect(root.querySelector('ptah-lane-rotation-setting')).not.toBeNull();
+    expect(root.textContent).toContain('Needs a model');
+    const routing = fixture.debugElement.query(
+      By.directive(HostRoutingStubComponent),
+    ).componentInstance as HostRoutingStubComponent;
+    routing.modelConfiguredChange.emit(true);
+    fixture.detectChanges();
+    expect(
+      root.querySelector(
+        'ptah-instrument-band button[aria-label="Routing model On"]',
+      ),
+    ).not.toBeNull();
     expect(call).toHaveBeenCalledTimes(1);
     fixture.destroy();
     TestBed.resetTestingModule();
@@ -218,20 +264,15 @@ describe('DecisionMatrixPageComponent', () => {
     expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain(
       '4 ratings loaded.',
     );
-    expect(root.querySelector('ptah-toolbar')?.textContent).toContain(
-      '3 results',
-    );
-    const familyFilter = root.querySelector(
-      'select[aria-label="Filter by family"]',
-    ) as HTMLSelectElement;
-    familyFilter.value = 'one';
-    familyFilter.dispatchEvent(new Event('change'));
+    expect(root.textContent).toContain('3 results');
+    const familyFilter = fixture.debugElement.queryAll(
+      By.directive(PtahRichSelectComponent),
+    )[0].componentInstance as PtahRichSelectComponent<string>;
+    familyFilter.value.set('one');
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(root.querySelector('ptah-toolbar')?.textContent).toContain(
-      '2 results',
-    );
+    expect(root.textContent).toContain('2 results');
     fixture.destroy();
     TestBed.resetTestingModule();
   });

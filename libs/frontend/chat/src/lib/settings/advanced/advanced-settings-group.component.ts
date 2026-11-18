@@ -21,6 +21,7 @@ import {
 } from '@ptah-extension/shared';
 import { NgTemplateOutlet } from '@angular/common';
 import {
+  PtahFormSectionComponent,
   PtahButtonDirective,
   PtahFieldGridDirective,
   PtahFieldComponent,
@@ -83,7 +84,8 @@ function formatValue(
   standalone: true,
   imports: [
     NgTemplateOutlet,
-    PtahButtonDirective,
+    PtahFormSectionComponent,
+  PtahButtonDirective,
     PtahFieldGridDirective,
     PtahFieldComponent,
     PtahSettingRowComponent,
@@ -96,7 +98,7 @@ function formatValue(
     @if (group(); as group) {
       <section
         [attr.data-glass-surface]="contentSurface() ? 'content' : null"
-        class="flex flex-col gap-3 border-b border-base-content/10 pb-7 text-sm text-base-content"
+        [class]="headingStyle() === 'section' ? 'text-sm text-base-content' : 'flex flex-col gap-3 border-b border-base-content/10 pb-7 text-sm text-base-content'"
         [attr.aria-labelledby]="idPrefix() + '-heading'"
         [attr.data-testid]="'settings-section-' + group.id"
       >
@@ -113,18 +115,11 @@ function formatValue(
         <!-- 'section': the sentence-case heading of the sibling setting sections (session budget); 'caps': the
              small uppercase group label of the Advanced tab and the Codex drawer. -->
         @if (headingStyle() === 'section') {
-          <div
-            section-header
-            class="border-b border-base-content/10 pb-[var(--ptah-space-2)]"
-          >
-            <h3
-              [id]="idPrefix() + '-heading'"
-              class="text-base font-semibold text-base-content"
+          <ptah-form-section wide [heading]="group.title" [description]="group.description"
             >
-              {{ group.title }}
-            </h3>
-            <ng-container [ngTemplateOutlet]="description" />
-          </div>
+            <span class="sr-only" [id]="idPrefix() + '-heading'">{{ group.title }}</span>
+            <ng-container [ngTemplateOutlet]="body" />
+          </ptah-form-section>
         } @else {
           <div section-header class="mb-[var(--ptah-gap-heading)]">
             <h3
@@ -137,6 +132,7 @@ function formatValue(
           </div>
         }
 
+        <ng-template #body>
         @switch (load()) {
           @case ('loading') {
             <p
@@ -170,12 +166,14 @@ function formatValue(
               @for (setting of settings(); track setting.key) {
                 <div
                   class="flex min-w-0 flex-col gap-1"
+                  [class.col-span-full]="headingStyle() === 'section' && setting.kind === 'boolean'"
                   [attr.data-testid]="
                     'advanced-setting-' + setting.key + '-field'
                   "
                 >
                   @if (setting.kind === 'boolean') {
                     <ptah-setting-row
+                      [hint]="headingStyle() === 'section' ? helpText(setting) : null"
                       [label]="setting.label"
                       [controlId]="'advanced-setting-' + setting.key"
                     >
@@ -185,7 +183,7 @@ function formatValue(
                         >
                       }
                       <div
-                        class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2"
+                        [class]="headingStyle() === 'section' ? 'flex items-center' : 'flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2'"
                       >
                         <input
                           type="checkbox"
@@ -203,7 +201,7 @@ function formatValue(
                           [attr.data-testid]="'advanced-setting-' + setting.key"
                         />
                         <span
-                          class="text-sm"
+                          [class]="headingStyle() === 'section' ? 'sr-only' : 'text-sm'"
                           [attr.data-testid]="
                             'advanced-setting-' + setting.key + '-state'
                           "
@@ -214,7 +212,7 @@ function formatValue(
                       </div>
                     </ptah-setting-row>
                   } @else {
-                    <ptah-field [label]="setting.label" appearance="stacked">
+                    <ptah-field [label]="setting.label" [appearance]="headingStyle() === 'section' ? 'floating' : 'stacked'">
                       <input
                         type="text"
                         ptahInput
@@ -249,14 +247,19 @@ function formatValue(
                           >Restart</span
                         >
                       }
+                      @if (headingStyle() === 'section') {
+                        <p ptahFieldAfterError [id]="'advanced-setting-' + setting.key + '-help'" class="text-xs text-base-content-muted">{{ helpText(setting) }}</p>
+                      }
                     </ptah-field>
                   }
+                  @if (headingStyle() !== 'section' || setting.kind === 'boolean') {
                   <p
                     [id]="'advanced-setting-' + setting.key + '-help'"
-                    class="text-xs text-base-content-muted"
+                    [class]="headingStyle() === 'section' && setting.kind === 'boolean' ? 'sr-only' : 'text-xs text-base-content-muted'"
                   >
                     {{ helpText(setting) }}
                   </p>
+                  }
                   @if (errors()[setting.key]; as message) {
                     <p
                       role="alert"
@@ -285,6 +288,8 @@ function formatValue(
             </div>
           }
         }
+        </ng-template>
+        @if (headingStyle() !== 'section') { <ng-container [ngTemplateOutlet]="body" /> }
       </section>
     }
   `,

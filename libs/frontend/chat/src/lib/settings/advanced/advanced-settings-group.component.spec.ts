@@ -94,6 +94,23 @@ describe('AdvancedSettingsGroupComponent', () => {
     await settle();
   }
 
+  it('uses wide sections and floating fields only on the Context rendering path', async () => {
+    await create('context-budgets');
+    expect(host().querySelector('ptah-form-section')).toBeNull();
+    fixture.componentRef.setInput('headingStyle', 'section');
+    fixture.detectChanges();
+    expect(host().querySelector('ptah-form-section[wide]')).not.toBeNull();
+    for (const field of host().querySelectorAll('ptah-field')) {
+      expect(field.querySelector('[data-appearance]')?.getAttribute('data-appearance')).toBe('floating');
+    }
+    fixture.componentRef.setInput('headingStyle', 'caps');
+    fixture.detectChanges();
+    expect(host().querySelector('ptah-form-section')).toBeNull();
+    for (const field of host().querySelectorAll('ptah-field')) {
+      expect(field.querySelector('[data-appearance]')?.getAttribute('data-appearance')).toBe('stacked');
+    }
+  });
+
   beforeEach(() => {
     toast = null;
     lastUndo = null;
@@ -170,34 +187,22 @@ describe('AdvancedSettingsGroupComponent', () => {
       expect(classesOf(header())).not.toContain('border-b');
     });
 
-    it("'section' renders the 16px sentence-case heading with a divider and the description", async () => {
+    it('keeps the section heading hook and accessible region name', async () => {
       await createWith('section');
-      expect(classesOf(heading())).toEqual(
-        expect.arrayContaining(['text-base', 'font-semibold']),
-      );
-      expect(classesOf(heading())).not.toContain('uppercase');
-      expect(classesOf(header())).toContain('border-b');
-      // The section's 12px flex gap is the only header-to-content spacing.
-      expect(classesOf(header()).some((name) => name.startsWith('mb-'))).toBe(false);
-      expect(header().querySelector('p')?.textContent?.trim()).toBe(
-        group?.description,
-      );
+      const section = host().querySelector('section');
+      const headingId = section?.getAttribute('aria-labelledby');
+      expect(headingId).toBeTruthy();
+      expect(host().querySelector(`[id="${headingId}"]`)?.textContent).toContain(group?.title);
+      expect(byTestId('settings-section-memory-upkeep')).not.toBeNull();
     });
 
-    it.each(['caps', 'section'] as const)(
-      'keeps the heading id, aria-labelledby and test id in %s',
-      async (style) => {
-        await createWith(style);
-        const section = byTestId('settings-section-memory-upkeep');
-        expect(section).not.toBeNull();
-        expect(heading().id).toBeTruthy();
-        expect(section?.getAttribute('aria-labelledby')).toBe(heading().id);
-        expect(heading().textContent?.trim()).toBe(group?.title);
-      },
-    );
-  });
+    it("'section' uses the shared section title and description", async () => {
+      await createWith('section');
+      expect(host().querySelector('ptah-form-section[wide]')).not.toBeNull();
+      expect(host().querySelector('ptah-form-section h3')?.textContent).toContain(group?.title);
+      expect(host().querySelector('ptah-form-section')?.textContent).toContain(group?.description);
+    });
 
-  describe('load', () => {
     it('reads only the group keys, in parallel with a 5 s timeout, and shows the saved values', async () => {
       await create('memory-upkeep');
       expect(

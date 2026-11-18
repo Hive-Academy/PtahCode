@@ -274,60 +274,17 @@ describe('OrchestrationSettingsComponent', () => {
     expect(backgroundQueries).not.toBeNull();
   });
 
-  it('mounts Routing suggestions in Electron, directly after Lane guards and before the advanced groups', async () => {
-    await render();
-    const routing = element.querySelector('[data-testid="host-routing-setting"]');
-    expect(routing).not.toBeNull();
-    const guards = element.querySelector('[data-testid="lane-guards-settings"]');
-    expect(guards?.compareDocumentPosition(routing as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    // Not deferred: the defer block count is unchanged.
-    expect(await fixture.getDeferBlocks()).toHaveLength(3);
-    const blocks = await fixture.getDeferBlocks();
-    await blocks[2].render(DeferBlockState.Complete);
-    const firstGroup = element.querySelector(
-      '[data-testid="group-context-budgets"]',
-    );
-    expect(routing?.compareDocumentPosition(firstGroup as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    const rotation = element.querySelector(
-      '[data-testid="lane-rotation-setting"]',
-    );
-    const matrix = element.querySelector(
-      '[data-testid="capability-matrix-setting"]',
-    );
-    expect(rotation).not.toBeNull();
-    expect(matrix).toBeNull();
-    expect(routing?.compareDocumentPosition(rotation as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(rotation?.compareDocumentPosition(firstGroup as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-  });
-
-  it('does not mount Routing suggestions outside Electron (VS Code has no routing coordinator)', async () => {
-    fixture.destroy();
-    TestBed.resetTestingModule();
-    await setup(false);
-    await render();
-    expect(element.querySelector('ptah-host-routing-setting')).toBeNull();
-    expect(
-      element.querySelector('[data-testid="host-routing-setting"]'),
-    ).toBeNull();
-    expect(element.querySelector('ptah-lane-rotation-setting')).toBeNull();
-    expect(
-      element.querySelector('[data-testid="lane-rotation-setting"]'),
-    ).toBeNull();
-    expect(element.querySelector('ptah-capability-matrix-setting')).toBeNull();
-    expect(
-      element.querySelector('[data-testid="capability-matrix-setting"]'),
-    ).toBeNull();
-    expect(
-      element.querySelector('[data-testid="lane-guards-settings"]'),
-    ).not.toBeNull();
+  it('mounts neither routing suggestions nor lane rotation in Context, in Electron and outside it', async () => {
+    for (const electron of [true, false]) {
+      fixture.destroy();
+      TestBed.resetTestingModule();
+      await setup(electron);
+      await render();
+      for (const block of await fixture.getDeferBlocks()) await block.render(DeferBlockState.Complete);
+      expect(element.querySelector('ptah-host-routing-setting')).toBeNull();
+      expect(element.querySelector('ptah-lane-rotation-setting')).toBeNull();
+      expect(element.querySelector('[data-testid="lane-guards-settings"]')).not.toBeNull();
+    }
   });
 
   it('shows no inline commit panel: the TTL save reports through the page toast', async () => {
