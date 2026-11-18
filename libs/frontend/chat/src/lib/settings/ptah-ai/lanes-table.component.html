@@ -295,7 +295,16 @@
                     [title]="modelOf(row).title"
                     (click)="togglePopover(row, 'model', place)"
                   >
-                    {{ modelOf(row).label }}
+                    @if (modelParts(row); as parts) {
+                      <span class="lane-model-id"
+                        ><span class="lane-model-part">{{ parts[0] }}</span
+                        ><wbr /><span class="lane-model-part">{{
+                          parts[1]
+                        }}</span></span
+                      >
+                    } @else {
+                      {{ modelOf(row).label }}
+                    }
                   </button>
                   @if (isOpen(row, 'model', place)) {
                     <ptah-cli-model-effort-popover

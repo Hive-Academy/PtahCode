@@ -365,6 +365,10 @@ export class LanesTableComponent {
   protected hasModelId(row: LaneTableRow): boolean {
     return !!(row.kind === 'system' ? row.model.value : row.selectedModel);
   }
+  /** A model id as at most two unbreakable parts (see `splitModelId`). */
+  protected modelParts(row: LaneTableRow): readonly [string, string] | null {
+    return this.hasModelId(row) ? splitModelId(this.modelOf(row).label) : null;
+  }
   /** Model text. Instance: null = not loaded, '' = the tier mappings decide. */
   protected modelOf(row: LaneTableRow): { label: string; title: string } {
     if (row.kind === 'system') {
@@ -377,4 +381,27 @@ export class LanesTableComponent {
     const label = row.selectedModel || 'Provider default';
     return { label, title: label };
   }
+}
+
+/**
+ * Splits a model id after the one hyphen that makes its longer part shortest. The row renders the parts as two
+ * no-wrap spans with one `<wbr>` between them, so a compact row shows the id on at most two lines with any line
+ * breaker ("claude-" / "sonnet-4-6"). Returns null for an id with white space or with no inner hyphen; such a label
+ * keeps the normal line breaks.
+ */
+export function splitModelId(id: string): readonly [string, string] | null {
+  if (/\s/.test(id)) return null;
+  let best: readonly [string, string] | null = null;
+  for (
+    let i = id.indexOf('-');
+    i > 0 && i < id.length - 1;
+    i = id.indexOf('-', i + 1)
+  ) {
+    const parts = [id.slice(0, i + 1), id.slice(i + 1)] as const;
+    const longest = Math.max(parts[0].length, parts[1].length);
+    if (!best || longest < Math.max(best[0].length, best[1].length)) {
+      best = parts;
+    }
+  }
+  return best;
 }

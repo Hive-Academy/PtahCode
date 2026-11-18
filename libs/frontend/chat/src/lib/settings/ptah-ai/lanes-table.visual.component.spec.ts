@@ -8,6 +8,7 @@ import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.compo
 import type { CliMatrixCellField, CliMatrixRow } from './cli-matrix-rows';
 import {
   LanesTableComponent,
+  splitModelId,
   type LaneTableRow,
 } from './lanes-table.component';
 
@@ -98,6 +99,17 @@ async function mount(
   fixture.detectChanges();
   return { fixture, host: fixture.nativeElement as HTMLElement };
 }
+
+/** The Batch 52 lane: a system row with the Antigravity id, name and CLI. */
+const antigravity = (
+  patch: Partial<Extract<LaneTableRow, { kind: 'system' }>> = {},
+): LaneTableRow =>
+  ({
+    ...system('copilot', patch),
+    id: 'antigravity',
+    name: 'Antigravity',
+    cli: 'antigravity',
+  }) as LaneTableRow;
 
 const q = (host: HTMLElement, sel: string): HTMLElement | null =>
   host.querySelector<HTMLElement>(sel);
@@ -383,6 +395,68 @@ describe('LanesTableComponent visual presentation', () => {
     triggers?.[0].click();
     fixture.detectChanges();
     expect(triggers?.[0].getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('splits a model id once, at the hyphen that makes the longer part shortest', () => {
+    expect(splitModelId('claude-sonnet-4-6')).toEqual([
+      'claude-',
+      'sonnet-4-6',
+    ]);
+    expect(splitModelId('gpt-5.5-codex')).toEqual(['gpt-5.5-', 'codex']);
+    expect(splitModelId('claude-opus-4-1-20250805')).toEqual([
+      'claude-opus-',
+      '4-1-20250805',
+    ]);
+    expect(splitModelId('o3')).toBeNull();
+    expect(splitModelId('-lead')).toBeNull();
+    expect(splitModelId('trail-')).toBeNull();
+    expect(splitModelId('Provider default')).toBeNull();
+  });
+
+  it('renders the Batch 52 Antigravity id as one item of two no-wrap parts with the same text', async () => {
+    const { fixture, host } = await mount([
+      antigravity({
+        model: { key: 'antigravityModel', value: 'claude-sonnet-4-6' },
+      }),
+    ]);
+    narrow(fixture);
+    const model = q(
+      host,
+      '[data-testid="cli-provider-card-antigravity"] [data-popover-kind="model"]',
+    );
+    expect(model?.textContent?.trim()).toBe('claude-sonnet-4-6');
+    expect(model?.getAttribute('aria-label')).toBe(
+      'Model default for Antigravity',
+    );
+    // One flex item holds both parts: two items in the flex button would never wrap.
+    const id = model?.querySelectorAll(':scope > .lane-model-id');
+    expect(id).toHaveLength(1);
+    expect(
+      Array.from(
+        id?.[0].querySelectorAll('.lane-model-part') ?? [],
+        (part) => part.textContent,
+      ),
+    ).toEqual(['claude-', 'sonnet-4-6']);
+    expect(id?.[0].querySelectorAll('wbr')).toHaveLength(1);
+    // jsdom has no line boxes: the part rule must outweigh the compact
+    // `.lane-model-value :is(button, span)` rule that sets white-space: normal.
+    const css = readFileSync(
+      join(__dirname, 'lanes-table.component.css'),
+      'utf8',
+    );
+    expect(css).toMatch(
+      /\.lane-model-part:is\(span, #lane-model-part\)\s*\{[^}]*white-space: nowrap;/,
+    );
+  });
+
+  it('keeps a default model label as plain text', async () => {
+    const { fixture, host } = await mount([antigravity()]);
+    narrow(fixture);
+    const model = q(
+      host,
+      '[data-testid="cli-provider-card-antigravity"] [data-popover-kind="model"]',
+    );
+    expect(model?.querySelector('.lane-model-id')).toBeNull();
   });
 
   it('keeps the CI Codex model and effort in separate popover wrappers in the narrow row', async () => {

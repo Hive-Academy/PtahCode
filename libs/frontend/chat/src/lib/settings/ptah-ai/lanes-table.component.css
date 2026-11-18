@@ -308,6 +308,21 @@ ptah-lanes-table
   word-break: normal;
 }
 
+/* A model id is one flex item (two items would never wrap) that breaks at
+   most once, at the <wbr> between its two no-wrap parts (Batch 52: at most
+   two lines). Wide tiers keep one line and the ellipsis. The id weight wins
+   over the compact `.lane-model-value :is(button, span)` rule, which sets
+   white-space: normal. */
+ptah-lanes-table .lane-model-id {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+ptah-lanes-table .lane-model-part:is(span, #lane-model-part) {
+  white-space: nowrap;
+}
+
 /* The Status cell owns the menu anchor in every tier. The action wrapper has
    no box (and no transform), so recovery labels cannot move the menu. */
 ptah-lanes-table [data-lane-status] {

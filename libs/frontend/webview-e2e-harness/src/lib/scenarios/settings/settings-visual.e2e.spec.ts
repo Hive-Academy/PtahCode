@@ -1459,13 +1459,38 @@ for (const host of ['vscode', 'electron'] as const) {
         'title',
         'claude-sonnet-4-6 (Claude Sonnet 4.6 (Thinking))',
       );
-      const modelLines = await model.evaluate((element) =>
-        Math.round(
-          element.getBoundingClientRect().height /
-            parseFloat(getComputedStyle(element).lineHeight),
-        ),
-      );
-      expect(modelLines).toBeLessThanOrEqual(2);
+      const modelGeometry = await model.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const cell = element.closest('th, td');
+        const cellStyle = cell ? getComputedStyle(cell) : null;
+        const table = element.closest('.ptah-table');
+        return {
+          lines: Math.round(
+            element.getBoundingClientRect().height /
+              parseFloat(style.lineHeight),
+          ),
+          height: element.getBoundingClientRect().height,
+          triggerWidth: element.getBoundingClientRect().width,
+          cellContentWidth:
+            cell && cellStyle
+              ? cell.clientWidth -
+                parseFloat(cellStyle.paddingLeft) -
+                parseFloat(cellStyle.paddingRight)
+              : null,
+          tableWidth: table?.getBoundingClientRect().width ?? null,
+          tier: `collapsed=${table?.getAttribute('data-collapsed')} model-column=${table?.getAttribute('data-model-column')}`,
+          font: style.font,
+          minHeight: style.minHeight,
+          whiteSpace: style.whiteSpace,
+          overflowWrap: style.overflowWrap,
+          viewport: window.innerWidth,
+        };
+      });
+      const modelLines = modelGeometry.lines;
+      expect(
+        modelLines,
+        `Antigravity model trigger geometry: ${JSON.stringify(modelGeometry)}`,
+      ).toBeLessThanOrEqual(2);
       await capture(page, 'live-orchestration', host, theme);
     });
   }
