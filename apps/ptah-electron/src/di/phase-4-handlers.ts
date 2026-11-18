@@ -15,6 +15,7 @@
 
 import { instanceCachingFactory, type DependencyContainer } from 'tsyringe';
 import { app } from 'electron';
+import { registerBotsComposition } from './register-bots-composition';
 
 import {
   PLATFORM_TOKENS,
@@ -105,10 +106,13 @@ export function registerPhase4Handlers(
   logger: Logger,
 ): void {
   registerHarnessServices(container);
+  registerBotsComposition(container, logger);
   registerChatServices(container);
   registerHostRouting(container);
   container.registerSingleton(SessionHandoffCloser);
-  container.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, { useToken: SessionHandoffCloser });
+  container.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, {
+    useToken: SessionHandoffCloser,
+  });
   container.registerSingleton(SessionRpcHandlers);
   container.registerSingleton(ArtifactRpcHandlers);
   container.registerSingleton(DisplayWindowRpcHandlers);

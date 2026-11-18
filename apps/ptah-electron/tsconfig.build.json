@@ -71,6 +71,7 @@
       "@ptah-extension/persistence-sqlite": [
         "../../libs/backend/persistence-sqlite/src/index.ts"
       ],
+      "@ptah-extension/bots": ["../../libs/backend/bots/src/index.ts"],
       "@ptah-extension/session-organization": [
         "../../libs/backend/session-organization/src/index.ts"
       ],
