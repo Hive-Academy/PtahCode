@@ -1,3 +1,8 @@
+import type {
+  MemoryGraphParams,
+  MemoryGraphResult,
+} from '@ptah-extension/shared';
+import { resolveMemoryGraphParams, buildMemoryGraph } from './memory-graph';
 /**
  * MemoryStore — typed CRUD over the `memories` and `memory_chunks` tables
  * (plus the `memory_chunks_fts` and `memory_chunks_vec` virtual tables).
@@ -11,7 +16,7 @@ import { MEMORY_TOKENS } from './di/tokens';
 import type { ISqliteSearchWorker } from './search-worker.port';
 import { ulid } from 'ulid';
 import { blankToNull } from '@ptah-extension/shared';
-import { TOKENS } from '@ptah-extension/vscode-core';
+import { RpcUserError, TOKENS } from '@ptah-extension/vscode-core';
 import type {
   CuratorLogger,
   SqliteDbProvider,
@@ -162,6 +167,41 @@ export class MemoryStore implements IMemoryLister, IMemoryUsageRecorder {
     @inject(MEMORY_TOKENS.SQLITE_SEARCH_WORKER, { isOptional: true })
     private readonly searchWorker: ISqliteSearchWorker | null = null,
   ) {}
+
+  async graphSnapshot(
+    params: MemoryGraphParams,
+    deadlineMs?: number,
+  ): Promise<MemoryGraphResult> {
+    const resolved = resolveMemoryGraphParams(params);
+    if (this.searchWorker) {
+      const result = await this.searchWorker.graphMemories(
+        resolved,
+        deadlineMs,
+      );
+      if (result !== null) return result;
+      // A worker that used the whole deadline timed out. The fallback is
+      // synchronous database work on this thread, so it must not start after
+      // the deadline: the caller gets a recoverable error.
+      if (deadlineMs !== undefined && performance.now() >= deadlineMs) {
+        this.logger.warn('[memory-graph] worker timed out; no graph fallback');
+        throw new RpcUserError(
+          'The memory graph took too long to load.',
+          'PERSISTENCE_UNAVAILABLE',
+        );
+      }
+      this.logger.warn(
+        '[memory-graph] worker unavailable; using graph fallback',
+      );
+    }
+    // The fallback reads no vectors (`semantic: false`): one bounded SELECT of
+    // at most MEMORY_GRAPH_LIMITS.maxNodes rows plus linear chain edges. It
+    // runs only when no worker exists or the worker refused the request
+    // before the deadline.
+    return buildMemoryGraph(this.connection.db, {
+      params: resolved,
+      semantic: false,
+    });
+  }
 
   listSnapshot(workspaceRoot: string, limit: number): Promise<MemoryListPage> {
     return this.searchWorker

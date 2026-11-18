@@ -33,6 +33,24 @@ export const searchWorkerInitSchema = z.object({
 });
 export type SearchWorkerInit = z.infer<typeof searchWorkerInitSchema>;
 
+const graphParamsSchema = z
+  .object({
+    workspaceRoot: z.string().nullable().optional(),
+    tiers: z.array(z.enum(['core', 'recall', 'archival'])).nullable(),
+    kinds: z
+      .array(z.enum(['fact', 'preference', 'event', 'entity']))
+      .nullable(),
+    pinnedOnly: z.boolean(),
+    sessionId: z.string().nullable(),
+    createdFrom: z.number().nullable(),
+    createdTo: z.number().nullable(),
+    maxNodes: z.number().int().min(1).max(1500),
+    edgeKinds: z.array(z.enum(['semantic', 'subject', 'session'])),
+    k: z.number().int().min(1).max(32),
+    minSimilarity: z.number().min(0.5).max(0.99),
+  })
+  .strict();
+
 const symbolPageParamsSchema = z.object({
   workspaceRoot: z.string().nullable().optional(),
   query: z.string().max(MAX_QUERY_CHARS).optional(),
@@ -76,6 +94,13 @@ export const searchWorkerQuerySchema = z.discriminatedUnion('kind', [
     id: requestId,
     workspaceRoot: z.string(),
     limit: z.number().int().min(1).max(500),
+    budgetMs,
+    sentAtMs,
+  }),
+  z.object({
+    kind: z.literal('graph'),
+    id: requestId,
+    params: graphParamsSchema,
     budgetMs,
     sentAtMs,
   }),
@@ -125,7 +150,12 @@ export type SearchWorkerInbound = z.infer<typeof searchWorkerInboundSchema>;
 // Worker -> host
 // ---------------------------------------------------------------------------
 
-export const searchWorkerLogLevelSchema = z.enum(['debug', 'info', 'warn', 'error']);
+export const searchWorkerLogLevelSchema = z.enum([
+  'debug',
+  'info',
+  'warn',
+  'error',
+]);
 export type SearchWorkerLogLevel = z.infer<typeof searchWorkerLogLevelSchema>;
 
 export const searchWorkerOutboundSchema = z.discriminatedUnion('kind', [
@@ -190,7 +220,14 @@ const memorySchema = z.object({
   learned: nullableString,
   completed: nullableString,
   nextSteps: nullableString,
-  type: z.enum(['bugfix', 'feature', 'decision', 'discovery', 'refactor', 'change']),
+  type: z.enum([
+    'bugfix',
+    'feature',
+    'decision',
+    'discovery',
+    'refactor',
+    'change',
+  ]),
   concepts: z.array(z.string()),
   files: z.array(z.string()),
 });
@@ -293,20 +330,67 @@ const memoryListItemSchema = z.object({
  * fails its schema is dropped and passed to `report`; the envelope itself
  * (`bm25Only`, `total`) still has to be valid.
  */
+const graphNodeSchema = z
+  .object({
+    id: z.string(),
+    subject: nullableString,
+    preview: z.string(),
+    tier: z.enum(['core', 'recall', 'archival']),
+    kind: z.enum(['fact', 'preference', 'event', 'entity']),
+    salience: z.number(),
+    hits: z.number(),
+    pinned: z.boolean(),
+    sessionId: nullableString,
+    workspaceRoot: nullableString,
+    createdAt: z.number(),
+    lastUsedAt: z.number(),
+  })
+  .strict();
+const graphEdgeSchema = z
+  .object({
+    source: z.string(),
+    target: z.string(),
+    kind: z.enum(['semantic', 'subject', 'session']),
+    weight: z.number(),
+  })
+  .strict();
+const graphResultSchema = z
+  .object({
+    nodes: z.array(graphNodeSchema),
+    edges: z.array(graphEdgeSchema),
+    totalMatching: z.number(),
+    capped: z.boolean(),
+    semanticAvailable: z.boolean(),
+    edgeCap: z.number(),
+  })
+  .strict();
+
 export function createSearchWorkerResultSchemas(report: DroppedRowsReporter) {
   return {
-    memory: z.object({ hits: tolerantArray(memoryHitSchema, 'memory', report), bm25Only: z.boolean() }),
-    symbols: z.object({ hits: tolerantArray(codeSymbolHitSchema, 'symbols', report), bm25Only: z.boolean() }),
+    memory: z.object({
+      hits: tolerantArray(memoryHitSchema, 'memory', report),
+      bm25Only: z.boolean(),
+    }),
+    symbols: z.object({
+      hits: tolerantArray(codeSymbolHitSchema, 'symbols', report),
+      bm25Only: z.boolean(),
+    }),
     'symbol-page': z.object({
       items: tolerantArray(codeSymbolItemSchema, 'symbol-page', report),
       total: z.number(),
     }),
-    list: z.object({ memories: tolerantArray(memoryListItemSchema, 'list', report), total: z.number() }),
+    list: z.object({
+      memories: tolerantArray(memoryListItemSchema, 'list', report),
+      total: z.number(),
+    }),
     chunks: tolerantArray(memoryChunkSchema, 'chunks', report),
+    graph: graphResultSchema,
   } as const;
 }
 
-export type SearchWorkerResultSchemas = ReturnType<typeof createSearchWorkerResultSchemas>;
+export type SearchWorkerResultSchemas = ReturnType<
+  typeof createSearchWorkerResultSchemas
+>;
 
 /** Parsed result type for each query kind. */
 export type SearchWorkerResultMap = {
@@ -325,13 +409,18 @@ export function toTransferableLogContext(
   if (context === undefined) return undefined;
   try {
     const parsed: unknown = JSON.parse(JSON.stringify(context) ?? 'null');
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed)
+    ) {
       return Object.fromEntries(Object.entries(parsed));
     }
     return { value: parsed };
   } catch (error: unknown) {
     return {
-      unserializableContext: error instanceof Error ? error.message : String(error),
+      unserializableContext:
+        error instanceof Error ? error.message : String(error),
     };
   }
 }

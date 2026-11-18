@@ -1,5 +1,13 @@
 import { DOCUMENT } from '@angular/common';
-import { booleanAttribute, ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import {
+  booleanAttribute,
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  output,
+} from '@angular/core';
 
 export type PtahInstrumentBandTone = 'ok' | 'warn' | 'error' | 'idle' | 'info';
 
@@ -10,6 +18,9 @@ export interface PtahInstrumentBandSegment {
   readonly meta?: string;
   readonly tone: PtahInstrumentBandTone;
   readonly targetId?: string;
+  readonly testId?: string;
+  readonly valueTestId?: string;
+  readonly title?: string;
 }
 
 const BAR_CLASSES: Record<PtahInstrumentBandTone, string> = {
@@ -34,24 +45,59 @@ const BAR_CLASSES: Record<PtahInstrumentBandTone, string> = {
     class: 'block min-w-0 [container-type:inline-size]',
   },
   template: `
-    <nav [attr.aria-label]="ariaLabel()" class="border-b border-surface-border bg-base-100 py-ptah-controls">
-      <ol class="grid gap-ptah-label" [class]="columnClasses()" [style.--ptah-band-columns]="segments().length">
+    <nav
+      [attr.aria-label]="ariaLabel()"
+      class="border-b border-surface-border bg-base-100 py-ptah-controls"
+    >
+      <ol
+        class="grid gap-ptah-label"
+        [class]="columnClasses()"
+        [style.--ptah-band-columns]="segments().length"
+      >
         @for (segment of segments(); track segment.id) {
-          <li class="min-w-0">
+          <li
+            class="min-w-0"
+            [attr.data-testid]="segment.testId ?? null"
+            [attr.title]="segment.title ?? null"
+          >
             <button
               type="button"
               class="grid w-full min-w-0 gap-ptah-label rounded-ptah-control border border-transparent px-ptah-controls py-ptah-label text-left text-base-content hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
               [attr.aria-label]="accessibleName(segment)"
               (click)="select(segment)"
             >
-              <span aria-hidden="true" class="mb-ptah-label h-[3px] rounded-full" [class]="barClass(segment)"></span>
-              <span aria-hidden="true" class="truncate text-xs text-base-content-muted">{{ segment.label }}</span>
+              <span
+                aria-hidden="true"
+                class="mb-ptah-label h-[3px] rounded-full"
+                [class]="barClass(segment)"
+              ></span>
+              <span
+                aria-hidden="true"
+                class="truncate text-xs text-base-content-muted"
+                >{{ segment.label }}</span
+              >
               @if (loading()) {
-                <span aria-hidden="true" class="skeleton h-ptah-controls w-3/4"></span>
-                <span aria-hidden="true" class="skeleton h-ptah-label w-1/2"></span>
+                <span
+                  aria-hidden="true"
+                  class="skeleton h-ptah-controls w-3/4"
+                ></span>
+                <span
+                  aria-hidden="true"
+                  class="skeleton h-ptah-label w-1/2"
+                ></span>
               } @else {
-                <span aria-hidden="true" class="truncate text-sm font-semibold leading-5">{{ segment.value }}</span>
-                <span aria-hidden="true" class="truncate text-xs text-base-content-muted" [attr.title]="segment.meta ?? null">{{ segment.meta }}</span>
+                <span
+                  aria-hidden="true"
+                  class="truncate text-sm font-semibold leading-5"
+                  [attr.data-testid]="segment.valueTestId ?? null"
+                  >{{ segment.value }}</span
+                >
+                <span
+                  aria-hidden="true"
+                  class="truncate text-xs text-base-content-muted"
+                  [attr.title]="segment.meta ?? null"
+                  >{{ segment.meta }}</span
+                >
               }
             </button>
           </li>
@@ -71,7 +117,12 @@ export class PtahInstrumentBandComponent {
   /** Equal rows below 760 px (4 = 2x2, 6 = 3x2, no lone segment); one row above. */
   protected readonly columnClasses = computed(() => {
     const count = this.segments().length;
-    const narrow = count === 6 ? 'grid-cols-3' : count > 0 && count % 2 === 0 ? 'grid-cols-2' : 'grid-cols-1';
+    const narrow =
+      count === 6
+        ? 'grid-cols-3'
+        : count > 0 && count % 2 === 0
+          ? 'grid-cols-2'
+          : 'grid-cols-1';
     return `${narrow} [@container(min-width:760px)]:grid-cols-[repeat(var(--ptah-band-columns),minmax(0,1fr))]`;
   });
 
@@ -80,7 +131,9 @@ export class PtahInstrumentBandComponent {
   }
 
   protected accessibleName(segment: PtahInstrumentBandSegment): string {
-    return this.loading() ? `${segment.label} Loading` : [segment.label, segment.value, segment.meta].filter(Boolean).join(' ');
+    return this.loading()
+      ? `${segment.label} Loading`
+      : [segment.label, segment.value, segment.meta].filter(Boolean).join(' ');
   }
 
   protected select(segment: PtahInstrumentBandSegment): void {

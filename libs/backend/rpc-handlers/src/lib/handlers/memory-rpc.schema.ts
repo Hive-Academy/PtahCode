@@ -9,6 +9,7 @@
  * the optional `workspaceRoot` filter.
  */
 import { z } from 'zod';
+import { MEMORY_GRAPH_LIMITS } from '@ptah-extension/shared';
 
 export const MemoryPurgeBySubjectPatternParamsSchema = z.object({
   pattern: z.string().min(1, 'pattern must not be empty'),
@@ -111,6 +112,61 @@ export const MemoryStatsParamsSchema = z.object({
   workspaceRoot: z.string().min(1).nullable().optional(),
   scope: MemoryQueryScopeSchema,
 });
+
+const MEMORY_TIERS = ['core', 'recall', 'archival'] as const;
+const MEMORY_KINDS = ['fact', 'preference', 'event', 'entity'] as const;
+const MEMORY_GRAPH_EDGE_KINDS = ['semantic', 'subject', 'session'] as const;
+
+/** A finite number moved into `[min, max]`; `integer` floors it first. */
+function clampedNumber(
+  range: { readonly min: number; readonly max: number },
+  integer: boolean,
+) {
+  return z
+    .number()
+    .finite()
+    .transform((value) =>
+      Math.min(
+        range.max,
+        Math.max(range.min, integer ? Math.floor(value) : value),
+      ),
+    )
+    .optional();
+}
+
+const epochMs = z.number().finite().nonnegative().optional();
+
+/**
+ * Params of `memory:graph`. Out-of-range sizes are clamped, not rejected, so
+ * a slider at its limit cannot fail the call. An empty `tiers`, `kinds` or
+ * `edgeKinds` array means "all".
+ */
+export const MemoryGraphParamsSchema = z
+  .object({
+    workspaceRoot: z.string().min(1).nullable().optional(),
+    scope: MemoryQueryScopeSchema,
+    tiers: z.array(z.enum(MEMORY_TIERS)).max(MEMORY_TIERS.length).optional(),
+    kinds: z.array(z.enum(MEMORY_KINDS)).max(MEMORY_KINDS.length).optional(),
+    pinnedOnly: z.boolean().optional(),
+    sessionId: z.string().min(1).max(200).nullable().optional(),
+    createdFrom: epochMs,
+    createdTo: epochMs,
+    maxNodes: clampedNumber(MEMORY_GRAPH_LIMITS.maxNodes, true),
+    edgeKinds: z
+      .array(z.enum(MEMORY_GRAPH_EDGE_KINDS))
+      .max(MEMORY_GRAPH_EDGE_KINDS.length)
+      .optional(),
+    k: clampedNumber(MEMORY_GRAPH_LIMITS.k, true),
+    minSimilarity: clampedNumber(MEMORY_GRAPH_LIMITS.minSimilarity, false),
+  })
+  .strict()
+  .refine(
+    (v) =>
+      v.createdFrom === undefined ||
+      v.createdTo === undefined ||
+      v.createdFrom <= v.createdTo,
+    { message: 'createdFrom must not be after createdTo' },
+  );
 
 /** A quarantine rule reason as written by the rules, e.g. `rule:commitlint-scope-facts`. */
 const QuarantineReasonSchema = z

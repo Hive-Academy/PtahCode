@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  Injector,
   OnInit,
   computed,
   effect,
@@ -8,25 +9,20 @@ import {
   output,
   signal,
   untracked,
-  viewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { Brain, LucideAngularModule } from 'lucide-angular';
 
 import { AppStateManager, VSCodeService } from '@ptah-extension/core';
-import {
-  WorkspaceIndexingComponent,
-  WorkspaceIndexingService,
-} from '@ptah-extension/workspace-indexing';
+import { WorkspaceIndexingService } from '@ptah-extension/workspace-indexing';
 
 import {
   MemoryStateService,
   type MemoryScopeFilter,
   type MemoryTierFilter,
 } from '../services/memory-state.service';
-import { MemoryRpcService } from '../services/memory-rpc.service';
+import { MemoryDiagnosticsStateService } from '../services/memory-diagnostics-state.service';
+import { MemoryGraphStateService } from '../services/memory-graph-state.service';
 
-import { MemoryDiagnosticsAccordionComponent } from './diagnostics/memory-diagnostics-accordion.component';
 import { MemoryPauseSwitchComponent } from './memory-pause-switch.component';
 import { TimelineViewComponent } from './timeline-view.component';
 import { CorpusListComponent } from './corpus-list.component';
@@ -34,15 +30,18 @@ import { MemoryIndexingBannerComponent } from './memory-indexing-banner.componen
 import { MemoryStatsStripComponent } from './memory-stats-strip.component';
 import { MemorySearchBarComponent } from './memory-search-bar.component';
 import { MemoryEntryListComponent } from './memory-entry-list.component';
-import { MemoryIndexedCodeComponent } from './memory-indexed-code.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
-  MemoryDangerZoneComponent,
-  type MemoryPurgeRequest,
-} from './memory-danger-zone.component';
+  NativeTabGroupComponent,
+  PtahAlertComponent,
+  PtahPageHeaderComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
+import { MemoryGraphViewComponent } from './graph/memory-graph-view.component';
+import { MemoryCodePaneComponent } from './memory-code-pane.component';
+import { MemoryHealthPaneComponent } from './memory-health-pane.component';
 
 export type MemoryTabView =
-  'memories' | 'timeline' | 'corpus' | 'code' | 'maintenance';
+  'graph' | 'list' | 'timeline' | 'boards' | 'code' | 'health';
 
 interface ViewChip {
   readonly id: MemoryTabView;
@@ -63,10 +62,7 @@ export const PURGE_JUNK_FAILED_MESSAGE =
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     PtahButtonDirective,
-    CommonModule,
     LucideAngularModule,
-    WorkspaceIndexingComponent,
-    MemoryDiagnosticsAccordionComponent,
     MemoryPauseSwitchComponent,
     TimelineViewComponent,
     CorpusListComponent,
@@ -74,8 +70,12 @@ export const PURGE_JUNK_FAILED_MESSAGE =
     MemoryStatsStripComponent,
     MemorySearchBarComponent,
     MemoryEntryListComponent,
-    MemoryIndexedCodeComponent,
-    MemoryDangerZoneComponent,
+    NativeTabGroupComponent,
+    PtahAlertComponent,
+    PtahPageHeaderComponent,
+    MemoryGraphViewComponent,
+    MemoryCodePaneComponent,
+    MemoryHealthPaneComponent,
   ],
   template: `
     @if (!isElectron()) {
@@ -108,227 +108,93 @@ export const PURGE_JUNK_FAILED_MESSAGE =
         class="surface-1 flex flex-col gap-5 rounded-xl p-5"
         data-testid="thoth-section-memory"
       >
-        <header class="flex flex-wrap items-start justify-between gap-3">
-          <div class="flex items-start gap-3">
-            <span
-              class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-lg bg-surface-0 text-primary"
-            >
-              <lucide-angular
-                [img]="BrainIcon"
-                class="w-5 h-5"
-                aria-hidden="true"
-              />
-            </span>
-            <div>
-              <h1 class="text-xl font-semibold tracking-tight">Memory</h1>
-              <p class="mt-0.5 text-sm text-base-content-muted">
-                Facts, events, and code Thoth has learned across sessions.
-              </p>
-            </div>
-          </div>
-          @if (view() === 'code') {
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                ptahButton
-                variant="ghost"
-                [disabled]="purgingJunk() || !hasWorkspace()"
-                [attr.title]="
-                  !hasWorkspace()
-                    ? 'Open a workspace to clean its code-index junk.'
-                    : 'Remove indexed code symbols from build artifacts (.angular, node_modules, dist, etc.)'
-                "
-                (click)="onPurgeJunk()"
-                aria-label="Clean code-index junk"
-              >
-                @if (purgingJunk()) {
-                  <span class="loading loading-spinner loading-xs"></span>
-                }
-                Clean junk
-              </button>
-              <button
-                type="button"
-                ptahButton
-                variant="ghost"
-                [disabled]="rebuilding()"
-                [busy]="rebuilding()"
-                (click)="onRebuildIndex()"
-                aria-label="Rebuild memory search index"
-                data-testid="memory-rebuild-index"
-              >
-                @if (rebuilding()) {
-                  <span
-                    class="loading loading-spinner loading-xs"
-                    aria-hidden="true"
-                  ></span>
-                }
-                Rebuild memory search index
-              </button>
-            </div>
-          }
-        </header>
-
-        @if (view() === 'code') {
-          @if (rebuildSummary(); as summary) {
-            <div
-              class="rounded-xl border border-success/40 bg-success/5 px-4 py-3 text-sm"
-              role="status"
-              data-testid="memory-rebuild-result"
-            >
-              {{ summary }}
-            </div>
-          }
-          @if (rebuildError(); as rebuildMessage) {
-            <div
-              class="rounded-xl border border-error/40 bg-error/5 px-4 py-3"
-              role="alert"
-              data-testid="memory-code-error"
-            >
-              <span class="text-sm text-error">{{ rebuildMessage }}</span>
-            </div>
-          }
+        <ptah-page-header
+          title="Memory"
+          description="Facts, events, and code Thoth has learned across sessions."
+        >
+          <ptah-memory-pause-switch
+            actions
+            (pausedChange)="pausedChange.emit($event)"
+          />
+        </ptah-page-header>
+        @if (memoryPaused()) {
+          <ptah-alert tone="warning" title="Memory is paused"
+            >Turn Memory on to resume curation.</ptah-alert
+          >
         }
-
-        <ptah-memory-pause-switch (pausedChange)="pausedChange.emit($event)" />
-
+        <ptah-memory-indexing-banner
+          [state]="indexingUiState()"
+          [hasWorkspace]="hasWorkspace()"
+          [busy]="indexingBusy()"
+          [actionMessage]="indexingActionMessage()"
+          (indexNow)="onIndexNow()"
+          (resumeIndex)="onResumeIndex()"
+          (cancelIndex)="onCancelIndex()"
+        />
         <ptah-memory-stats-strip
           [counts]="statCounts()"
           [lastCuratedLabel]="lastCuratedAtLabel()"
         />
-
-        <nav
-          role="tablist"
+        <ptah-native-tab-group
+          [tabs]="viewChips"
+          [(activeId)]="activeView"
+          ariaLabel="Memory views"
           aria-label="Memory views"
-          class="tabs tabs-boxed tabs-sm w-fit bg-surface-2 p-1"
         >
-          @for (chip of viewChips; track chip.id) {
-            <button
-              type="button"
-              role="tab"
-              class="tab"
-              [class.tab-active]="view() === chip.id"
-              [attr.aria-selected]="view() === chip.id"
-              (click)="onViewChange(chip.id)"
-            >
-              {{ chip.label }}
-            </button>
-          }
-        </nav>
-
-        @switch (view()) {
-          @case ('timeline') {
-            <div class="space-y-4">
+          @switch (activeView()) {
+            @case ('graph') {
+              <ptah-memory-graph-view (openHealth)="activeView.set('health')" />
+            }
+            @case ('list') {
+              <div class="space-y-4">
+                <ptah-memory-search-bar
+                  [searchValue]="searchInput()"
+                  [tier]="tierFilter()"
+                  [scope]="scopeFilter()"
+                  (searchInput)="onSearchInput($event)"
+                  (tierChange)="onTierChipClick($event)"
+                  (scopeChange)="onScopeFilterChange($event)"
+                />
+                @if (error()) {
+                  <ptah-alert tone="error" live="assertive">{{
+                    error()
+                  }}</ptah-alert>
+                }
+                <ptah-memory-entry-list
+                  class="mt-1 block"
+                  [entries]="filteredEntries()"
+                  [loading]="loading()"
+                  (pin)="onPin($event)"
+                  (unpin)="onUnpin($event)"
+                  (forget)="onForget($event)"
+                />
+              </div>
+            }
+            @case ('timeline') {
               <ptah-timeline-view />
-            </div>
-          }
-          @case ('corpus') {
-            <div class="space-y-4">
+            }
+            @case ('boards') {
               <ptah-corpus-list />
-            </div>
+            }
+            @case ('code') {
+              <ptah-memory-code-pane />
+            }
+            @case ('health') {
+              <ptah-memory-health-pane />
+            }
           }
-          @case ('code') {
-            <div class="space-y-6">
-              <ptah-memory-indexed-code
-                [searchValue]="symbolInput()"
-                [items]="state.symbolItems()"
-                [total]="state.symbolTotal()"
-                [loading]="state.symbolLoading()"
-                [error]="state.symbolError()"
-                [offset]="state.symbolOffset()"
-                [prevDisabled]="symbolPrevDisabled()"
-                [nextDisabled]="symbolNextDisabled()"
-                [workspaceRoot]="workspaceRoot()"
-                (searchInput)="onSymbolSearchInput($event)"
-                (reload)="onSymbolReload()"
-                (prev)="onSymbolPrev()"
-                (next)="onSymbolNext()"
-              />
-
-              <section class="space-y-2">
-                <h2 class="text-sm font-medium text-base-content-muted">
-                  Advanced indexing
-                </h2>
-                <ptah-workspace-indexing />
-              </section>
-            </div>
-          }
-          @case ('maintenance') {
-            <div class="space-y-6">
-              <section
-                class="space-y-2"
-                data-testid="memory-diagnostics-details"
-              >
-                <h2 class="text-sm font-medium text-base-content-muted">
-                  Diagnostics
-                </h2>
-                <ptah-memory-diagnostics-accordion />
-              </section>
-
-              <ptah-memory-danger-zone
-                [purging]="purging()"
-                [error]="purgeError()"
-                [info]="purgeInfo()"
-                [hasWorkspace]="hasWorkspace()"
-                [scopeIsAll]="scopeFilter() === 'all'"
-                (purge)="onPurge($event)"
-                (inputChanged)="onPurgeInputChanged()"
-                (switchScope)="onScopeFilterChange('workspace')"
-              />
-            </div>
-          }
-          @default {
-            <div class="space-y-4">
-              <ptah-memory-indexing-banner
-                [state]="indexingUiState()"
-                [hasWorkspace]="hasWorkspace()"
-                [busy]="indexingBusy()"
-                [actionMessage]="indexingActionMessage()"
-                (indexNow)="onIndexNow()"
-                (resumeIndex)="onResumeIndex()"
-                (cancelIndex)="onCancelIndex()"
-              />
-
-              <ptah-memory-search-bar
-                [searchValue]="searchInput()"
-                [tier]="tierFilter()"
-                [scope]="scopeFilter()"
-                (searchInput)="onSearchInput($event)"
-                (tierChange)="onTierChipClick($event)"
-                (scopeChange)="onScopeFilterChange($event)"
-              />
-
-              @if (error()) {
-                <div
-                  class="rounded-xl border border-error/40 bg-error/5 px-4 py-3"
-                  role="alert"
-                >
-                  <span class="text-sm text-error">{{ error() }}</span>
-                </div>
-              }
-
-              <ptah-memory-entry-list
-                class="mt-1 block"
-                [entries]="filteredEntries()"
-                [loading]="loading()"
-                (pin)="onPin($event)"
-                (unpin)="onUnpin($event)"
-                (forget)="onForget($event)"
-              />
-            </div>
-          }
-        }
+        </ptah-native-tab-group>
       </div>
     }
   `,
 })
 export class MemoryCuratorTabComponent implements OnInit {
   protected readonly state = inject(MemoryStateService);
+  private readonly graphState = inject(MemoryGraphStateService);
   private readonly vscodeService = inject(VSCodeService);
   private readonly appState = inject(AppStateManager);
-  private readonly rpcService = inject(MemoryRpcService);
   private readonly indexingService = inject(WorkspaceIndexingService);
-
-  private readonly dangerZone = viewChild(MemoryDangerZoneComponent);
+  private readonly injector = inject(Injector);
 
   protected readonly BrainIcon = Brain;
 
@@ -346,50 +212,39 @@ export class MemoryCuratorTabComponent implements OnInit {
     );
   });
   protected readonly indexingActionMessage = this.indexingService.actionMessage;
-  protected readonly purgingJunk = signal<boolean>(false);
 
   public readonly isElectron = computed(
     () => this.vscodeService.config()?.isElectron === true,
   );
+  // Electron only: the diagnostics state needs chat-state providers.
+  protected readonly memoryPaused = computed(
+    () =>
+      this.isElectron() &&
+      this.injector.get(MemoryDiagnosticsStateService).memoryPaused(),
+  );
 
   protected readonly viewChips: readonly ViewChip[] = [
-    { id: 'memories', label: 'Memories' },
+    { id: 'graph', label: 'Graph' },
+    { id: 'list', label: 'List' },
     { id: 'timeline', label: 'Timeline' },
-    { id: 'corpus', label: 'Corpus' },
+    { id: 'boards', label: 'Knowledge boards' },
     { id: 'code', label: 'Code index' },
-    { id: 'maintenance', label: 'Maintenance' },
+    { id: 'health', label: 'Health' },
   ];
 
-  private readonly _view = signal<MemoryTabView>('memories');
-  public readonly view = this._view.asReadonly();
+  protected readonly activeView = signal<MemoryTabView>('graph');
+  public readonly view = this.activeView.asReadonly();
 
   protected readonly searchInput = signal<string>('');
 
-  protected readonly purging = signal<boolean>(false);
-  protected readonly purgeError = signal<string | null>(null);
-  protected readonly purgeInfo = signal<string | null>(null);
   protected readonly hasWorkspace = computed(() =>
     Boolean(this.appState.workspaceInfo()?.path),
-  );
-  protected readonly workspaceRoot = computed(
-    () => this.appState.workspaceInfo()?.path ?? '',
   );
   protected readonly tierFilter = this.state.tierFilter;
   protected readonly scopeFilter = this.state.scopeFilter;
   protected readonly filteredEntries = this.state.filteredEntries;
   protected readonly loading = this.state.loading;
   protected readonly error = this.state.error;
-  protected readonly rebuilding = this.state.rebuilding;
-  protected readonly rebuildError = this.state.rebuildError;
-  /** Result line of the last successful memory search index rebuild. */
-  protected readonly rebuildSummary = computed<string | null>(() => {
-    const result = this.state.rebuildResult();
-    if (!result) return null;
-    const fts = result.rebuiltFts ? 'yes' : 'no';
-    const vec = result.rebuiltVec ? 'yes' : 'unavailable';
-    return `Memory search index rebuilt (full-text: ${fts}, vectors: ${vec})`;
-  });
-
   protected readonly statCounts = computed(() => {
     const remote = this.state.stats();
     if (remote) {
@@ -420,20 +275,9 @@ export class MemoryCuratorTabComponent implements OnInit {
   });
 
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private symbolDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private tierEffectInitialized = false;
   private scopeEffectInitialized = false;
   private indexingEffectInitialized = false;
-  protected readonly symbolInput = signal<string>('');
-  protected readonly symbolPrevDisabled = computed(
-    () => this.state.symbolOffset() === 0,
-  );
-  protected readonly symbolNextDisabled = computed(
-    () =>
-      this.state.symbolOffset() + this.state.symbolLimit() >=
-      this.state.symbolTotal(),
-  );
-
   public constructor() {
     effect(() => {
       this.state.tierFilter();
@@ -456,10 +300,6 @@ export class MemoryCuratorTabComponent implements OnInit {
       void this.state.loadSymbols();
     });
     effect(() => {
-      // Track ONLY indexing completion. Reading workspaceInfo/config inside the
-      // tracked context would make this effect ALSO fire on a workspace switch,
-      // double-fetching alongside the dedicated switch effect below — so the
-      // rest runs untracked.
       this.indexingService.completedAt();
       if (!this.indexingEffectInitialized) {
         this.indexingEffectInitialized = true;
@@ -476,12 +316,6 @@ export class MemoryCuratorTabComponent implements OnInit {
         }
       });
     });
-    // Follow the active Electron workspace. Tracks ONLY the workspace path so it
-    // composes with (rather than duplicating) the tier/scope/completedAt effects
-    // above. The baseline is seeded synchronously below with the same path
-    // `ngOnInit` loads, so a switch that lands between construction and the
-    // effect's first flush is treated as a real switch (fetch) rather than
-    // silently recorded; every subsequent switch reloads for the new root.
     this.lastWorkspacePath = this.appState.workspaceInfo()?.path ?? null;
     effect(() => {
       const path = this.appState.workspaceInfo()?.path ?? null;
@@ -492,12 +326,6 @@ export class MemoryCuratorTabComponent implements OnInit {
     });
   }
 
-  /**
-   * The workspace path the switch effect last observed. Seeded synchronously at
-   * construction with the path `ngOnInit` loads, so the effect's first flush
-   * neither double-fetches (when unchanged) nor swallows a switch that raced
-   * construction (Issue 7).
-   */
   private lastWorkspacePath: string | null = null;
 
   private onWorkspaceSwitch(path: string | null): void {
@@ -542,34 +370,6 @@ export class MemoryCuratorTabComponent implements OnInit {
     void this.indexingService.cancel(root);
   }
 
-  protected onPurgeJunk(): void {
-    if (this.purgingJunk()) return;
-    const root = this.appState.workspaceInfo()?.path ?? null;
-    if (!root) return;
-    const confirmed = window.confirm(
-      'Remove indexed code symbols from build artifacts (.angular, node_modules, dist, etc.) in this workspace? This cannot be undone.',
-    );
-    if (!confirmed) return;
-    this.purgingJunk.set(true);
-    void this.runPurgeJunk(root);
-  }
-
-  private async runPurgeJunk(workspaceRoot: string): Promise<void> {
-    try {
-      const result = await this.rpcService.purgeJunk(workspaceRoot);
-      this.purgeInfo.set(
-        `Removed ${result.deleted} junk code-index ${result.deleted === 1 ? 'entry' : 'entries'}.`,
-      );
-      await this.state.refresh();
-      await this.state.loadStats();
-    } catch (error: unknown) {
-      console.warn('[memory-tab] purgeJunk failed', error);
-      this.purgeError.set(PURGE_JUNK_FAILED_MESSAGE);
-    } finally {
-      this.purgingJunk.set(false);
-    }
-  }
-
   protected onSearchInput(value: string): void {
     this.searchInput.set(value);
     if (this.debounceTimer !== null) {
@@ -589,10 +389,6 @@ export class MemoryCuratorTabComponent implements OnInit {
     this.state.setScopeFilter(scope);
   }
 
-  protected onViewChange(view: MemoryTabView): void {
-    this._view.set(view);
-  }
-
   protected onPin(id: string): void {
     void this.state.pin(id);
   }
@@ -601,94 +397,7 @@ export class MemoryCuratorTabComponent implements OnInit {
     void this.state.unpin(id);
   }
 
-  protected onForget(id: string): void {
-    void this.state.forget(id);
-  }
-
-  protected onRebuildIndex(): void {
-    void this.state.rebuildIndex();
-  }
-
-  protected onPurgeInputChanged(): void {
-    this.purgeInfo.set(null);
-    this.purgeError.set(null);
-  }
-
-  protected onPurge(request: MemoryPurgeRequest): void {
-    if (this.purging()) return;
-    const pattern = request.pattern.trim();
-    if (pattern === '') return;
-    const mode = request.mode;
-    const workspaceRoot = this.appState.workspaceInfo()?.path ?? null;
-
-    if (!workspaceRoot) {
-      this.purgeError.set('Open a workspace before purging memory.');
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Delete all memory entries whose subject matches '${pattern}' (mode: ${mode})? This cannot be undone.`,
-    );
-    if (!confirmed) return;
-
-    this.purging.set(true);
-    this.purgeError.set(null);
-    this.purgeInfo.set(null);
-    void this.runPurge(pattern, mode, workspaceRoot);
-  }
-
-  private async runPurge(
-    pattern: string,
-    mode: 'substring' | 'like',
-    workspaceRoot: string | null,
-  ): Promise<void> {
-    try {
-      const result = await this.rpcService.purgeBySubjectPattern(
-        pattern,
-        mode,
-        workspaceRoot,
-      );
-      this.dangerZone()?.clearPattern();
-      this.purgeInfo.set(
-        `Deleted ${result.deleted} ${result.deleted === 1 ? 'entry' : 'entries'}.`,
-      );
-      await this.state.refresh();
-      await this.state.loadStats();
-    } catch (error: unknown) {
-      console.warn('[memory-tab] purgeBySubjectPattern failed', error);
-      this.purgeError.set(PURGE_FAILED_MESSAGE);
-    } finally {
-      this.purging.set(false);
-    }
-  }
-
-  protected onSymbolSearchInput(value: string): void {
-    this.symbolInput.set(value);
-    if (this.symbolDebounceTimer !== null) {
-      clearTimeout(this.symbolDebounceTimer);
-    }
-    this.symbolDebounceTimer = setTimeout(() => {
-      this.state.setSymbolQuery(value);
-      this.state.setSymbolPage(0);
-      void this.state.loadSymbols();
-      this.symbolDebounceTimer = null;
-    }, SEARCH_DEBOUNCE_MS);
-  }
-
-  protected onSymbolReload(): void {
-    void this.state.loadSymbols();
-  }
-
-  protected onSymbolPrev(): void {
-    const next = this.state.symbolOffset() - this.state.symbolLimit();
-    this.state.setSymbolPage(next < 0 ? 0 : next);
-    void this.state.loadSymbols();
-  }
-
-  protected onSymbolNext(): void {
-    this.state.setSymbolPage(
-      this.state.symbolOffset() + this.state.symbolLimit(),
-    );
-    void this.state.loadSymbols();
+  protected async onForget(id: string): Promise<void> {
+    if (await this.state.forget(id)) this.graphState.removeNodes([id]);
   }
 }

@@ -12,6 +12,7 @@ import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahInputDirective,
+  PtahFieldComponent,
 } from '@ptah-extension/ui';
 
 interface TypeChip {
@@ -44,21 +45,28 @@ const TYPE_CHIPS: readonly TypeChip[] = [
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
+    PtahFieldComponent,
     CommonModule,
   ],
   template: `
     <div class="flex flex-col gap-2">
       <div class="flex flex-wrap items-center gap-2">
-        <input
-          type="search"
-          ptahInput
+        <ptah-field
+          label="Timeline search query"
           size="sm"
           class="w-full md:max-w-md"
-          placeholder="Filter timeline (BM25 + filters)..."
-          [value]="state.query()"
-          (input)="onQueryInput($event)"
-          aria-label="Timeline search query"
-        />
+        >
+          <input
+            type="search"
+            ptahInput
+            size="sm"
+            class="w-full md:max-w-md"
+            placeholder="Filter timeline (BM25 + filters)..."
+            [value]="state.query()"
+            (input)="onQueryInput($event)"
+            aria-label="Timeline search query"
+          />
+        </ptah-field>
         <button
           type="button"
           ptahButton
@@ -106,31 +114,42 @@ const TYPE_CHIPS: readonly TypeChip[] = [
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          ptahInput
-          size="xs"
+        <ptah-field
+          label="Concepts (comma-separated)"
+          size="sm"
           class="w-full md:max-w-xs"
-          placeholder="Concepts (comma-separated)"
-          [value]="conceptInput()"
-          (change)="onConceptCommit($event)"
-          aria-label="Comma-separated concept filter"
-        />
-        <input
-          type="text"
-          ptahInput
-          size="xs"
+        >
+          <input
+            type="text"
+            ptahInput
+            size="xs"
+            class="w-full md:max-w-xs"
+            placeholder="Concepts (comma-separated)"
+            [value]="conceptInput()"
+            (change)="onConceptCommit($event)"
+            aria-label="Comma-separated concept filter"
+          />
+        </ptah-field>
+        <ptah-field
+          label="Files (comma-separated)"
+          size="sm"
           class="w-full md:max-w-xs"
-          placeholder="Files (comma-separated)"
-          [value]="fileInput()"
-          (change)="onFileCommit($event)"
-          aria-label="Comma-separated file filter"
-        />
+        >
+          <input
+            type="text"
+            ptahInput
+            size="xs"
+            class="w-full md:max-w-xs"
+            placeholder="Files (comma-separated)"
+            [value]="fileInput()"
+            (change)="onFileCommit($event)"
+            aria-label="Comma-separated file filter"
+          />
+        </ptah-field>
       </div>
 
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        <label class="flex items-center gap-1">
-          <span class="text-base-content-muted">From</span>
+        <ptah-field label="From" size="sm">
           <input
             type="date"
             ptahInput
@@ -139,9 +158,8 @@ const TYPE_CHIPS: readonly TypeChip[] = [
             (change)="onFromChange($event)"
             aria-label="Date range from"
           />
-        </label>
-        <label class="flex items-center gap-1">
-          <span class="text-base-content-muted">To</span>
+        </ptah-field>
+        <ptah-field label="To" size="sm">
           <input
             type="date"
             ptahInput
@@ -150,7 +168,7 @@ const TYPE_CHIPS: readonly TypeChip[] = [
             (change)="onToChange($event)"
             aria-label="Date range to"
           />
-        </label>
+        </ptah-field>
         @if (state.bm25Only()) {
           <span
             ptahBadge

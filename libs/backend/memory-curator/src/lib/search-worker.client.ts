@@ -1,3 +1,5 @@
+import type { MemoryGraphResult } from '@ptah-extension/shared';
+import type { ResolvedMemoryGraphParams } from './memory-graph';
 /**
  * Host-side coordinator for the SQLite search utility process.
  *
@@ -30,13 +32,23 @@
  */
 import { z } from 'zod';
 import type { IEmbedder } from '@ptah-extension/persistence-sqlite';
-import type { CodeSymbolHitPage, MemoryListPage } from '@ptah-extension/memory-contracts';
+import type {
+  CodeSymbolHitPage,
+  MemoryListPage,
+} from '@ptah-extension/memory-contracts';
 import type { MemoryChunk, MemorySearchResponse } from './memory.types';
-import type { CodeSymbolSearchParams, CodeSymbolSearchResult } from './code-symbol.store';
+import type {
+  CodeSymbolSearchParams,
+  CodeSymbolSearchResult,
+} from './code-symbol.store';
 import { EmbedderWorkerClient } from './embedder/embedder-worker-client';
 import { SearchWorkerHostCalls } from './search-worker-host-calls';
 import { wireBudgetMs } from './search-deadline';
-import type { ISearchWorkerFactory, ISearchWorkerProcess, ISqliteSearchWorker } from './search-worker.port';
+import type {
+  ISearchWorkerFactory,
+  ISearchWorkerProcess,
+  ISqliteSearchWorker,
+} from './search-worker.port';
 import {
   createSearchWorkerResultSchemas,
   searchWorkerOutboundSchema,
@@ -46,7 +58,10 @@ import {
   type SearchWorkerQuery,
   type SearchWorkerResultSchemas,
 } from './search-worker.protocol';
-import { forwardWorkerLog, reportDroppedRows } from './search-worker-log-forwarding';
+import {
+  forwardWorkerLog,
+  reportDroppedRows,
+} from './search-worker-log-forwarding';
 import type { CuratorLogger } from './sqlite-reader-deps.types';
 
 const LOG_PREFIX = '[sqlite-search-worker]';
@@ -56,7 +71,9 @@ const BOOT_TIMEOUT_MS = 30_000;
 /** Margin between the deadline sent to the worker and the client's own timeout. */
 const DEADLINE_MARGIN_MS = 500;
 
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
 type QueryBody = DistributiveOmit<SearchWorkerQuery, 'id'>;
 
 interface PendingRequest {
@@ -126,25 +143,58 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     options: SearchWorkerClientOptions = {},
   ) {
     this.timeoutMs = options.timeoutMs ?? 5_000;
-    this.queueTimeoutMs = options.queueTimeoutMs ?? Math.max(this.timeoutMs, 15_000);
+    this.queueTimeoutMs =
+      options.queueTimeoutMs ?? Math.max(this.timeoutMs, 15_000);
     this.maxPending = options.maxPending ?? 32;
     this.maxInFlight = Math.max(1, options.maxInFlight ?? 4);
     this.livenessMs = options.livenessMs ?? 10_000;
     this.exitWaitMs = options.exitWaitMs ?? 2_000;
     this.reranker = embedder instanceof EmbedderWorkerClient ? embedder : null;
     this.hostCalls = new SearchWorkerHostCalls(embedder, logger);
-    this.schemas = createSearchWorkerResultSchemas((report) => reportDroppedRows(this.logger, report));
-  }
-
-  searchMemory(query: string, topK: number, workspaceRoot?: string | null, deadlineMs?: number): Promise<MemorySearchResponse> {
-    return this.request(
-      { kind: 'memory', query, topK: clampTopK(topK), workspaceRoot },
-      this.schemas.memory,
-      { hits: [], bm25Only: true }, deadlineMs,
+    this.schemas = createSearchWorkerResultSchemas((report) =>
+      reportDroppedRows(this.logger, report),
     );
   }
 
-  searchSymbols(query: string, topK: number, workspaceRoot?: string): Promise<CodeSymbolHitPage> {
+  graphMemories(
+    params: ResolvedMemoryGraphParams,
+    deadlineMs?: number,
+  ): Promise<MemoryGraphResult | null> {
+    return this.request<MemoryGraphResult | null>(
+      {
+        kind: 'graph',
+        params: {
+          ...params,
+          tiers: params.tiers ? [...params.tiers] : null,
+          kinds: params.kinds ? [...params.kinds] : null,
+          edgeKinds: [...params.edgeKinds],
+        },
+      },
+      this.schemas.graph,
+      null,
+      deadlineMs,
+    );
+  }
+
+  searchMemory(
+    query: string,
+    topK: number,
+    workspaceRoot?: string | null,
+    deadlineMs?: number,
+  ): Promise<MemorySearchResponse> {
+    return this.request(
+      { kind: 'memory', query, topK: clampTopK(topK), workspaceRoot },
+      this.schemas.memory,
+      { hits: [], bm25Only: true },
+      deadlineMs,
+    );
+  }
+
+  searchSymbols(
+    query: string,
+    topK: number,
+    workspaceRoot?: string,
+  ): Promise<CodeSymbolHitPage> {
     return this.request(
       { kind: 'symbols', query, topK: clampTopK(topK), workspaceRoot },
       this.schemas.symbols,
@@ -152,17 +202,33 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     );
   }
 
-  searchSymbolPage(params: CodeSymbolSearchParams, deadlineMs?: number): Promise<CodeSymbolSearchResult> {
+  searchSymbolPage(
+    params: CodeSymbolSearchParams,
+    deadlineMs?: number,
+  ): Promise<CodeSymbolSearchResult> {
     return this.request(
-      { kind: 'symbol-page', params: { ...params, kinds: params.kinds ? [...params.kinds] : undefined } },
+      {
+        kind: 'symbol-page',
+        params: {
+          ...params,
+          kinds: params.kinds ? [...params.kinds] : undefined,
+        },
+      },
       this.schemas['symbol-page'],
-      { items: [], total: 0 }, deadlineMs,
+      { items: [], total: 0 },
+      deadlineMs,
     );
   }
 
   listMemories(workspaceRoot: string, limit: number): Promise<MemoryListPage> {
     return this.request(
-      { kind: 'list', workspaceRoot, limit: Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 20 },
+      {
+        kind: 'list',
+        workspaceRoot,
+        limit: Number.isFinite(limit)
+          ? Math.max(1, Math.min(500, Math.floor(limit)))
+          : 20,
+      },
       this.schemas.list,
       { memories: [], total: 0 },
     );
@@ -177,7 +243,8 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
    * process boot. No-op when it is running, disposed or backing off.
    */
   start(): void {
-    if (this.disposed || this.process || performance.now() < this.retryAfter) return;
+    if (this.disposed || this.process || performance.now() < this.retryAfter)
+      return;
     this.ensureProcess('boot');
   }
 
@@ -193,7 +260,9 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<void>((resolve) => {
       timer = setTimeout(() => {
-        this.logger.warn(`${LOG_PREFIX} process did not exit after kill`, { waitedMs: this.exitWaitMs });
+        this.logger.warn(`${LOG_PREFIX} process did not exit after kill`, {
+          waitedMs: this.exitWaitMs,
+        });
         resolve();
       }, this.exitWaitMs);
       timer.unref?.();
@@ -205,16 +274,28 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     }
   }
 
-  private request<T>(body: QueryBody, schema: z.ZodType<T>, empty: T, callerDeadlineMs?: number): Promise<T> {
-    const deadlineMs = Math.min(callerDeadlineMs ?? Infinity, performance.now() + this.queueTimeoutMs + this.timeoutMs);
+  private request<T>(
+    body: QueryBody,
+    schema: z.ZodType<T>,
+    empty: T,
+    callerDeadlineMs?: number,
+  ): Promise<T> {
+    const deadlineMs = Math.min(
+      callerDeadlineMs ?? Infinity,
+      performance.now() + this.queueTimeoutMs + this.timeoutMs,
+    );
     if (deadlineMs <= performance.now()) return Promise.resolve(empty);
-    if (this.disposed || performance.now() < this.retryAfter) return Promise.resolve(empty);
+    if (this.disposed || performance.now() < this.retryAfter)
+      return Promise.resolve(empty);
     if (this.pending.size >= this.maxPending) {
       if (!this.saturated) {
         this.saturated = true;
-        this.logger.warn(`${LOG_PREFIX} too many requests in flight; answering degraded`, {
-          maxPending: this.maxPending,
-        });
+        this.logger.warn(
+          `${LOG_PREFIX} too many requests in flight; answering degraded`,
+          {
+            maxPending: this.maxPending,
+          },
+        );
       }
       return Promise.resolve(empty);
     }
@@ -224,10 +305,13 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     const id = this.nextId++;
     const checked = searchWorkerQuerySchema.safeParse({ ...body, id });
     if (!checked.success) {
-      this.logger.warn(`${LOG_PREFIX} request rejected before send; answering degraded`, {
-        kind: body.kind,
-        issue: checked.error.issues[0]?.message,
-      });
+      this.logger.warn(
+        `${LOG_PREFIX} request rejected before send; answering degraded`,
+        {
+          kind: body.kind,
+          issue: checked.error.issues[0]?.message,
+        },
+      );
       return Promise.resolve(empty);
     }
     const message: SearchWorkerQuery = checked.data;
@@ -241,7 +325,13 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
         message,
         deadlineMs,
         queuedAt: performance.now(),
-        timer: setTimeout(() => this.onTimeout(id), Math.max(1, Math.min(this.queueTimeoutMs, deadlineMs - performance.now()))),
+        timer: setTimeout(
+          () => this.onTimeout(id),
+          Math.max(
+            1,
+            Math.min(this.queueTimeoutMs, deadlineMs - performance.now()),
+          ),
+        ),
         dispatched: false,
         degrade: () => resolve(empty),
         settle: (raw) => {
@@ -251,11 +341,14 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
             resolve(parsed.data);
             return;
           }
-          this.logger.warn(`${LOG_PREFIX} result failed validation; answering degraded`, {
-            kind: body.kind,
-            issue: parsed.error.issues[0]?.message,
-            path: parsed.error.issues[0]?.path.map(String).join('.'),
-          });
+          this.logger.warn(
+            `${LOG_PREFIX} result failed validation; answering degraded`,
+            {
+              kind: body.kind,
+              issue: parsed.error.issues[0]?.message,
+              path: parsed.error.issues[0]?.path.map(String).join('.'),
+            },
+          );
           resolve(empty);
         },
       });
@@ -274,28 +367,52 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     }
   }
 
-  private dispatch(child: ISearchWorkerProcess, id: number, slot: PendingRequest): void {
+  private dispatch(
+    child: ISearchWorkerProcess,
+    id: number,
+    slot: PendingRequest,
+  ): void {
     clearTimeout(slot.timer);
     const remaining = slot.deadlineMs - performance.now();
-    if (remaining <= 0) { this.onTimeout(id); return; }
+    if (remaining <= 0) {
+      this.onTimeout(id);
+      return;
+    }
     const queueWaitMs = performance.now() - slot.queuedAt;
-    this.logger.debug(`${LOG_PREFIX} request queue wait`, { kind: slot.message.kind, queueWaitMs });
+    this.logger.debug(`${LOG_PREFIX} request queue wait`, {
+      kind: slot.message.kind,
+      queueWaitMs,
+    });
     slot.dispatchedAt = performance.now();
-    slot.timer = setTimeout(() => this.onTimeout(id), Math.max(1, Math.min(this.timeoutMs, remaining)));
+    slot.timer = setTimeout(
+      () => this.onTimeout(id),
+      Math.max(1, Math.min(this.timeoutMs, remaining)),
+    );
     slot.dispatched = true;
     // The silence clock starts when the worker begins owing an answer.
     if (this.owed.size === 0) this.lastActivityAt = performance.now();
     this.owed.add(id);
     this.armWatchdog();
     try {
-      child.postMessage({ ...slot.message, budgetMs: Math.min(wireBudgetMs(slot.deadlineMs) ?? 0, Math.max(1, this.timeoutMs - DEADLINE_MARGIN_MS)), sentAtMs: Date.now() });
+      child.postMessage({
+        ...slot.message,
+        budgetMs: Math.min(
+          wireBudgetMs(slot.deadlineMs) ?? 0,
+          Math.max(1, this.timeoutMs - DEADLINE_MARGIN_MS),
+        ),
+        sentAtMs: Date.now(),
+      });
     } catch (error: unknown) {
-      this.logger.warn(`${LOG_PREFIX} request send failed`, { error: errorMessage(error) });
+      this.logger.warn(`${LOG_PREFIX} request send failed`, {
+        error: errorMessage(error),
+      });
       this.resetProcess(child, true);
     }
   }
 
-  private ensureProcess(reason: 'boot' | 'request'): ISearchWorkerProcess | null {
+  private ensureProcess(
+    reason: 'boot' | 'request',
+  ): ISearchWorkerProcess | null {
     if (this.process) return this.process;
     let child: ISearchWorkerProcess;
     let init: SearchWorkerInbound;
@@ -315,7 +432,9 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     } catch (error: unknown) {
       // degradation-audit: reported - logged at warn; the request answers
       // degraded and the next spawn waits for the backoff.
-      this.logger.warn(`${LOG_PREFIX} spawn failed`, { error: errorMessage(error) });
+      this.logger.warn(`${LOG_PREFIX} spawn failed`, {
+        error: errorMessage(error),
+      });
       this.backOff();
       return null;
     }
@@ -324,7 +443,10 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     this.spawnedAt = performance.now();
     this.warmPending = vecPath !== undefined;
     this.logger.info(`${LOG_PREFIX} forked`, { reason });
-    this.bootTimer = setTimeout(() => this.onBootTimeout(child), BOOT_TIMEOUT_MS);
+    this.bootTimer = setTimeout(
+      () => this.onBootTimeout(child),
+      BOOT_TIMEOUT_MS,
+    );
     this.bootTimer.unref?.();
     let markExited: () => void = () => undefined;
     this.processExited = new Promise<void>((resolve) => {
@@ -344,7 +466,9 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     } catch (error: unknown) {
       // degradation-audit: reported - logged at warn; the process is reset and
       // the request answers degraded.
-      this.logger.warn(`${LOG_PREFIX} init send failed`, { error: errorMessage(error) });
+      this.logger.warn(`${LOG_PREFIX} init send failed`, {
+        error: errorMessage(error),
+      });
       this.resetProcess(child, true);
       return null;
     }
@@ -360,7 +484,9 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     this.hostCalls.warmup().then(
       () => undefined,
       (error: unknown) =>
-        this.logger.debug(`${LOG_PREFIX} embedder warm-up failed`, { error: errorMessage(error) }),
+        this.logger.debug(`${LOG_PREFIX} embedder warm-up failed`, {
+          error: errorMessage(error),
+        }),
     );
   }
 
@@ -376,7 +502,10 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
       // Only an answer's id names a request: embed/rerank ids are the worker
       // bridge's own sequence.
       const identifiable = z
-        .object({ kind: z.enum(['result', 'error']), id: z.number().int().positive() })
+        .object({
+          kind: z.enum(['result', 'error']),
+          id: z.number().int().positive(),
+        })
         .safeParse(raw);
       if (identifiable.success) {
         this.owed.delete(identifiable.data.id);
@@ -398,16 +527,20 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
         this.pump();
         return;
       case 'init-failed':
-        this.logger.warn(`${LOG_PREFIX} init failed`, { error: message.message });
+        this.logger.warn(`${LOG_PREFIX} init failed`, {
+          error: message.message,
+        });
         this.resetProcess(child, true);
         return;
       case 'result':
         this.owed.delete(message.id);
         {
           const slot = this.takePending(message.id);
-          if (slot?.dispatchedAt !== undefined) this.logger.debug(`${LOG_PREFIX} request run time`, {
-            kind: slot.message.kind, runMs: performance.now() - slot.dispatchedAt,
-          });
+          if (slot?.dispatchedAt !== undefined)
+            this.logger.debug(`${LOG_PREFIX} request run time`, {
+              kind: slot.message.kind,
+              runMs: performance.now() - slot.dispatchedAt,
+            });
           slot?.settle(message.result);
         }
         this.pump();
@@ -416,11 +549,16 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
         this.owed.delete(message.id);
         const slot = this.takePending(message.id);
         if (slot) {
-          this.logger.warn(`${LOG_PREFIX} query failed; answering degraded`, { error: message.message });
+          this.logger.warn(`${LOG_PREFIX} query failed; answering degraded`, {
+            error: message.message,
+          });
           slot.degrade();
         } else {
           // Already answered degraded at its timeout, which was logged then.
-          this.logger.debug(`${LOG_PREFIX} late error for a timed-out request`, { error: message.message });
+          this.logger.debug(
+            `${LOG_PREFIX} late error for a timed-out request`,
+            { error: message.message },
+          );
         }
         this.pump();
         return;
@@ -444,7 +582,9 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
     try {
       child.postMessage(reply);
     } catch (error: unknown) {
-      this.logger.warn(`${LOG_PREFIX} host reply send failed`, { error: errorMessage(error) });
+      this.logger.warn(`${LOG_PREFIX} host reply send failed`, {
+        error: errorMessage(error),
+      });
     }
   }
 
@@ -457,9 +597,11 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
       if (queued >= 0) this.queue.splice(queued, 1);
     }
     slot.degrade();
-    if (slot.dispatchedAt !== undefined) this.logger.debug(`${LOG_PREFIX} request run time`, {
-      kind: slot.message.kind, runMs: performance.now() - slot.dispatchedAt,
-    });
+    if (slot.dispatchedAt !== undefined)
+      this.logger.debug(`${LOG_PREFIX} request run time`, {
+        kind: slot.message.kind,
+        runMs: performance.now() - slot.dispatchedAt,
+      });
     this.logger.warn(`${LOG_PREFIX} request timed out; answering degraded`, {
       kind: slot.message.kind,
       phase: slot.dispatched ? 'running' : 'queued',
@@ -471,7 +613,10 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
 
   private armWatchdog(): void {
     if (this.watchdog !== null || !this.process) return;
-    const wait = Math.max(0, this.lastActivityAt + this.livenessMs - performance.now());
+    const wait = Math.max(
+      0,
+      this.lastActivityAt + this.livenessMs - performance.now(),
+    );
     this.watchdog = setTimeout(() => this.checkLiveness(), wait);
     this.watchdog.unref?.();
   }
@@ -510,10 +655,13 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
   private onBootTimeout(child: ISearchWorkerProcess): void {
     this.bootTimer = null;
     if (child !== this.process || this.ready) return;
-    this.logger.warn(`${LOG_PREFIX} worker not ready after boot timeout; restarting`, {
-      waitedMs: BOOT_TIMEOUT_MS,
-      queued: this.queue.length,
-    });
+    this.logger.warn(
+      `${LOG_PREFIX} worker not ready after boot timeout; restarting`,
+      {
+        waitedMs: BOOT_TIMEOUT_MS,
+        queued: this.queue.length,
+      },
+    );
     this.resetProcess(child, true);
   }
 
@@ -546,7 +694,9 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
       child.kill();
     } catch (error: unknown) {
       // The process has usually exited already; nothing else to release.
-      this.logger.debug(`${LOG_PREFIX} kill after exit`, { error: errorMessage(error) });
+      this.logger.debug(`${LOG_PREFIX} kill after exit`, {
+        error: errorMessage(error),
+      });
     }
     // Every pending request belongs to this process: there is only ever one.
     for (const id of [...this.pending.keys()]) this.takePending(id)?.degrade();
@@ -555,15 +705,18 @@ export class SearchWorkerClient implements ISqliteSearchWorker {
 
   private backOff(): void {
     this.failures = Math.min(this.failures + 1, 8);
-    this.retryAfter = performance.now() + Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** (this.failures - 1));
+    this.retryAfter =
+      performance.now() +
+      Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** (this.failures - 1));
   }
 }
 
 function clampTopK(topK: number): number {
-  return Number.isFinite(topK) ? Math.max(1, Math.min(50, Math.floor(topK))) : 10;
+  return Number.isFinite(topK)
+    ? Math.max(1, Math.min(50, Math.floor(topK)))
+    : 10;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-

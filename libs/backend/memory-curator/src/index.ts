@@ -243,3 +243,9 @@ export type {
   IndexingPipeline,
   IndexingRunDeps,
 } from './lib/control/indexing-control.service';
+
+export { resolveMemoryGraphParams, buildMemoryGraph } from './lib/memory-graph';
+export type {
+  ResolvedMemoryGraphParams,
+  BuildMemoryGraphOptions,
+} from './lib/memory-graph';

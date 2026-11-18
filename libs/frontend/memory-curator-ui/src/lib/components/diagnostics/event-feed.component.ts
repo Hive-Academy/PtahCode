@@ -50,12 +50,13 @@ const GATE_FALLBACK = 'Skipped by a gate';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PtahBadgeDirective],
   template: `
-    <div class="surface-2 overflow-hidden rounded-lg">
-      <header
-        class="border-b border-surface-border px-3 py-2 text-sm font-semibold text-base-content"
-      >
-        Recent events
+    <div class="border-t border-surface-border pt-4">
+      <header class="text-base font-semibold text-base-content">
+        Live events
       </header>
+      <p class="mt-0.5 text-sm text-base-content-muted">
+        Curator, index and retention events from this session.
+      </p>
       @if (rows().length === 0) {
         <div
           class="px-3 py-3 text-xs text-base-content-muted"
@@ -69,10 +70,7 @@ const GATE_FALLBACK = 'Skipped by a gate';
             <li
               class="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
             >
-              <span
-                ptahBadge
-                size="sm"
-                [tone]="row.tone"
+              <span ptahBadge size="sm" [tone]="row.tone"
                 ><span class="ptah-badge-text">{{ row.kind }}</span></span
               >
               <span class="flex-1 truncate">{{ row.outcome }}</span>

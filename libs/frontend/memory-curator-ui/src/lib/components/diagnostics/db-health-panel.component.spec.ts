@@ -77,7 +77,7 @@ describe('DbHealthPanelComponent', () => {
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.textContent ?? '').toContain('DB Health');
+    expect(root.textContent ?? '').toContain('Index health');
     expect(root.textContent ?? '').toContain('614 / 614');
     expect(
       root.querySelectorAll('[data-testid="health-mismatch"]'),

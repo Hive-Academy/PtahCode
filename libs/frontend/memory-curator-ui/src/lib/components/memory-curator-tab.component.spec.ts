@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { Component, output, signal } from '@angular/core';
 
 import { AppStateManager, VSCodeService } from '@ptah-extension/core';
 import {
@@ -8,11 +8,33 @@ import {
   type IndexingUiState,
 } from '@ptah-extension/workspace-indexing';
 
-import { MemoryStateService } from '../services/memory-state.service';
+import {
+  MemoryStateService,
+  type MemoryPurgeStatus,
+} from '../services/memory-state.service';
+import { MemoryGraphStateService } from '../services/memory-graph-state.service';
 import { MemoryRpcService } from '../services/memory-rpc.service';
 import { MemoryDiagnosticsStateService } from '../services/memory-diagnostics-state.service';
 
 import { MemoryCuratorTabComponent } from './memory-curator-tab.component';
+import { MemoryGraphViewComponent } from './graph/memory-graph-view.component';
+
+@Component({
+  selector: 'ptah-memory-graph-view',
+  standalone: true,
+  template: '<div data-testid="graph-stub"></div>',
+})
+class StubMemoryGraphViewComponent {
+  public readonly openHealth = output<void>();
+}
+
+function stubGraphView(): void {
+  TestBed.overrideComponent(MemoryCuratorTabComponent, {
+    remove: { imports: [MemoryGraphViewComponent] },
+    add: { imports: [StubMemoryGraphViewComponent] },
+  });
+}
+
 import { MemoryPauseSwitchComponent } from './memory-pause-switch.component';
 import { By } from '@angular/platform-browser';
 
@@ -88,6 +110,19 @@ function vscodeServiceStub(isElectron: boolean): Partial<VSCodeService> {
  * Smoke tests for {@link MemoryCuratorTabComponent}. Stubs the entire
  * {@link MemoryStateService} surface so no real RPC traffic is generated.
  */
+/** Signal-backed purge status, like the real MemoryStateService. */
+function purgeStub(): Pick<MemoryStateService, 'purge' | 'patchPurge'> {
+  const purge = signal<MemoryPurgeStatus>({
+    running: false,
+    error: null,
+    info: null,
+  });
+  return {
+    purge,
+    patchPurge: (patch) => purge.update((status) => ({ ...status, ...patch })),
+  };
+}
+
 describe('MemoryCuratorTabComponent', () => {
   let stateMock: jest.Mocked<MemoryStateService>;
 
@@ -96,11 +131,16 @@ describe('MemoryCuratorTabComponent', () => {
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
       error: jest.fn(() => null),
       filteredEntries: jest.fn(() => []),
+      total: jest.fn(() => 0),
+      hasMore: jest.fn(() => false),
+      loadingMore: jest.fn(() => false),
+      loadMore: jest.fn(() => Promise.resolve()),
       totalsByTier: jest.fn(() => ({
         core: 0,
         recall: 0,
@@ -135,6 +175,7 @@ describe('MemoryCuratorTabComponent', () => {
 
     stateMock = baseState;
 
+    stubGraphView();
     await TestBed.configureTestingModule({
       imports: [MemoryCuratorTabComponent],
       providers: [
@@ -166,6 +207,8 @@ describe('MemoryCuratorTabComponent', () => {
     expect(stateMock.loadStats).toHaveBeenCalled();
 
     const root = fixture.nativeElement as HTMLElement;
+    (root.querySelector('[data-tab-id="list"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
     const input = root.querySelector(
       'input[type="search"]',
     ) as HTMLInputElement | null;
@@ -183,6 +226,32 @@ describe('MemoryCuratorTabComponent', () => {
     fixture.detectChanges();
     expect(root.textContent ?? '').toContain('Rebuild memory search index');
   });
+  it('removes a List forgotten node from graph state only after success', async () => {
+    const fixture = TestBed.createComponent(MemoryCuratorTabComponent);
+    const graph = TestBed.inject(MemoryGraphStateService);
+    const remove = jest.spyOn(graph, 'removeNodes');
+    stateMock.forget.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await fixture.componentInstance['onForget']('a');
+    expect(remove).not.toHaveBeenCalled();
+    await fixture.componentInstance['onForget']('a');
+    expect(remove).toHaveBeenCalledWith(['a']);
+  });
+
+  it('opens Health from the graph view', () => {
+    const fixture = TestBed.createComponent(MemoryCuratorTabComponent);
+    fixture.detectChanges();
+    const graph = fixture.debugElement.query(
+      By.directive(StubMemoryGraphViewComponent),
+    );
+    (graph.componentInstance as StubMemoryGraphViewComponent).openHealth.emit();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.view()).toBe('health');
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector(
+        'ptah-memory-health-pane',
+      ),
+    ).not.toBeNull();
+  });
 
   it('puts the Memory switch at the top of the tab and re-emits its pausedChange', () => {
     const fixture = TestBed.createComponent(MemoryCuratorTabComponent);
@@ -191,7 +260,7 @@ describe('MemoryCuratorTabComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     const switchEl = root.querySelector('ptah-memory-pause-switch');
     expect(switchEl).not.toBeNull();
-    expect(switchEl?.previousElementSibling?.tagName).toBe('HEADER');
+    expect(switchEl?.closest('ptah-page-header')).not.toBeNull();
 
     const emitted: boolean[] = [];
     fixture.componentInstance.pausedChange.subscribe((p) => emitted.push(p));
@@ -209,6 +278,12 @@ describe('MemoryCuratorTabComponent', () => {
       const fixture = TestBed.createComponent(MemoryCuratorTabComponent);
       fixture.detectChanges();
 
+      (
+        (fixture.nativeElement as HTMLElement).querySelector(
+          '[data-tab-id="list"]',
+        ) as HTMLButtonElement
+      ).click();
+      fixture.detectChanges();
       const input = (fixture.nativeElement as HTMLElement).querySelector(
         'input[type="search"]',
       ) as HTMLInputElement;
@@ -225,11 +300,18 @@ describe('MemoryCuratorTabComponent', () => {
     }
   });
 
-  it('defaults to the list view and switches to timeline / corpus on tab click', () => {
+  it('defaults to graph and switches to list, timeline, and boards on tab click', () => {
     const fixture = TestBed.createComponent(MemoryCuratorTabComponent);
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('[data-testid="graph-stub"]')).not.toBeNull();
+    expect(fixture.componentInstance.view()).toBe('graph');
+    const listTab = root.querySelector(
+      '[data-tab-id="list"]',
+    ) as HTMLButtonElement;
+    listTab.click();
+    fixture.detectChanges();
     expect(
       root.querySelector('input[aria-label="Search memory entries"]'),
     ).not.toBeNull();
@@ -250,7 +332,7 @@ describe('MemoryCuratorTabComponent', () => {
     ).toBeNull();
 
     const corpusTab = tabButtons.find(
-      (b) => (b.textContent ?? '').trim() === 'Corpus',
+      (b) => (b.textContent ?? '').trim() === 'Knowledge boards',
     ) as HTMLButtonElement;
     corpusTab.click();
     fixture.detectChanges();
@@ -265,11 +347,16 @@ describe('MemoryCuratorTabComponent', () => {
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
       error: jest.fn(() => null),
       filteredEntries: jest.fn(() => []),
+      total: jest.fn(() => 0),
+      hasMore: jest.fn(() => false),
+      loadingMore: jest.fn(() => false),
+      loadMore: jest.fn(() => Promise.resolve()),
       totalsByTier: jest.fn(() => ({
         core: 0,
         recall: 0,
@@ -302,11 +389,16 @@ describe('MemoryCuratorTabComponent', () => {
       loadSymbols: jest.fn(() => Promise.resolve()),
     } as unknown as jest.Mocked<MemoryStateService>;
 
+    stubGraphView();
     await TestBed.configureTestingModule({
       imports: [MemoryCuratorTabComponent],
       providers: [
         { provide: MemoryStateService, useValue: stateMockNonElectron },
         { provide: VSCodeService, useValue: vscodeServiceStub(false) },
+        {
+          provide: MemoryDiagnosticsStateService,
+          useValue: diagnosticsStateStub(),
+        },
       ],
     }).compileComponents();
 
@@ -340,11 +432,16 @@ describe('MemoryCuratorTabComponent — purge toolbar', () => {
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
       error: jest.fn(() => null),
       filteredEntries: jest.fn(() => []),
+      total: jest.fn(() => 0),
+      hasMore: jest.fn(() => false),
+      loadingMore: jest.fn(() => false),
+      loadMore: jest.fn(() => Promise.resolve()),
       totalsByTier: jest.fn(() => ({
         core: 0,
         recall: 0,
@@ -381,6 +478,7 @@ describe('MemoryCuratorTabComponent — purge toolbar', () => {
       purgeBySubjectPattern: jest.fn(),
     };
 
+    stubGraphView();
     TestBed.configureTestingModule({
       imports: [MemoryCuratorTabComponent],
       providers: [
@@ -412,10 +510,10 @@ describe('MemoryCuratorTabComponent — purge toolbar', () => {
     const maintenanceTab = Array.from(root.querySelectorAll('button')).find(
       (b) =>
         b.getAttribute('role') === 'tab' &&
-        (b.textContent ?? '').trim() === 'Maintenance',
+        (b.textContent ?? '').trim() === 'Health',
     ) as HTMLButtonElement | undefined;
     if (!maintenanceTab) {
-      throw new Error('Maintenance tab not found in rendered template');
+      throw new Error('Health tab not found in rendered template');
     }
     maintenanceTab.click();
   }
@@ -664,11 +762,16 @@ describe('MemoryCuratorTabComponent — workspace switch', () => {
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => scope),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
       error: jest.fn(() => null),
       filteredEntries: jest.fn(() => []),
+      total: jest.fn(() => 0),
+      hasMore: jest.fn(() => false),
+      loadingMore: jest.fn(() => false),
+      loadMore: jest.fn(() => Promise.resolve()),
       totalsByTier: jest.fn(() => ({
         core: 0,
         recall: 0,
@@ -704,6 +807,7 @@ describe('MemoryCuratorTabComponent — workspace switch', () => {
 
   function render(state: jest.Mocked<MemoryStateService>) {
     TestBed.resetTestingModule();
+    stubGraphView();
     TestBed.configureTestingModule({
       imports: [MemoryCuratorTabComponent],
       providers: [
@@ -810,11 +914,16 @@ describe('MemoryCuratorTabComponent — indexing banner three-state predicate', 
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
       error: jest.fn(() => null),
       filteredEntries: jest.fn(() => []),
+      total: jest.fn(() => 0),
+      hasMore: jest.fn(() => false),
+      loadingMore: jest.fn(() => false),
+      loadMore: jest.fn(() => Promise.resolve()),
       totalsByTier: jest.fn(() => ({
         core: 0,
         recall: 0,
@@ -856,6 +965,7 @@ describe('MemoryCuratorTabComponent — indexing banner three-state predicate', 
       type: string;
     } | null>({ name: 'w', path: '/ws', type: 'workspace' });
 
+    stubGraphView();
     TestBed.configureTestingModule({
       imports: [MemoryCuratorTabComponent],
       providers: [
@@ -951,11 +1061,16 @@ describe('MemoryCuratorTabComponent — rebuild state and banner action message'
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
       error: error.asReadonly(),
       filteredEntries: jest.fn(() => []),
+      total: jest.fn(() => 0),
+      hasMore: jest.fn(() => false),
+      loadingMore: jest.fn(() => false),
+      loadMore: jest.fn(() => Promise.resolve()),
       totalsByTier: jest.fn(() => ({
         core: 0,
         recall: 0,
@@ -990,12 +1105,17 @@ describe('MemoryCuratorTabComponent — rebuild state and banner action message'
   }
 
   function render(
-    uiState: IndexingUiState = { kind: 'indexed', lastIndexedAt: 1, isNonGit: false },
+    uiState: IndexingUiState = {
+      kind: 'indexed',
+      lastIndexedAt: 1,
+      isNonGit: false,
+    },
     actionMessage: IndexingActionMessage | null = null,
   ) {
     TestBed.resetTestingModule();
     const state = buildStateMock();
     const indexing = indexingServiceStub(uiState, actionMessage);
+    stubGraphView();
     TestBed.configureTestingModule({
       imports: [MemoryCuratorTabComponent],
       providers: [
@@ -1018,7 +1138,11 @@ describe('MemoryCuratorTabComponent — rebuild state and banner action message'
         {
           provide: AppStateManager,
           useValue: {
-            workspaceInfo: signal({ name: 'w', path: '/ws', type: 'workspace' }),
+            workspaceInfo: signal({
+              name: 'w',
+              path: '/ws',
+              type: 'workspace',
+            }),
           },
         },
         { provide: WorkspaceIndexingService, useValue: indexing },
@@ -1053,7 +1177,9 @@ describe('MemoryCuratorTabComponent — rebuild state and banner action message'
     const button = root.querySelector(
       '[data-testid="memory-rebuild-index"]',
     ) as HTMLButtonElement;
-    expect(button.getAttribute('aria-label')).toBe('Rebuild memory search index');
+    expect(button.getAttribute('aria-label')).toBe(
+      'Rebuild memory search index',
+    );
     expect(button.textContent?.trim()).toBe('Rebuild memory search index');
     expect(button.disabled).toBe(false);
     button.click();
@@ -1096,7 +1222,9 @@ describe('MemoryCuratorTabComponent — rebuild state and banner action message'
     const { fixture } = render();
     const root = fixture.nativeElement as HTMLElement;
     openCodeView(root);
-    rebuildError.set('Could not rebuild the memory search index. See the logs for details.');
+    rebuildError.set(
+      'Could not rebuild the memory search index. See the logs for details.',
+    );
     fixture.detectChanges();
     const alert = root.querySelector('[data-testid="memory-code-error"]');
     expect(alert?.getAttribute('role')).toBe('alert');

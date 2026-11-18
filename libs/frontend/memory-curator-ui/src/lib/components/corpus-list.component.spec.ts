@@ -77,7 +77,7 @@ describe('CorpusListComponent', () => {
     });
     expect(rpcMock.suggestCorpora).toHaveBeenCalledTimes(1);
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('No corpora yet');
+    expect(text).toContain('No boards yet');
   });
 
   it('renders corpus rows and triggers prime + switchSession on click', async () => {

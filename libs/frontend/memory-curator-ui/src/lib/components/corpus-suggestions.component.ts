@@ -31,15 +31,20 @@ import type { CorpusSuggestion } from '@ptah-extension/shared';
   selector: 'ptah-corpus-suggestions',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahIconButtonDirective, PtahButtonDirective, PtahBadgeDirective, CommonModule],
+  imports: [
+    PtahIconButtonDirective,
+    PtahButtonDirective,
+    PtahBadgeDirective,
+    CommonModule,
+  ],
   template: `
     @if (loading()) {
       <section
         class="flex flex-col gap-2"
         aria-label="Loading suggested boards"
       >
-        <span class="text-sm font-semibold">Suggested boards</span>
-        <div class="flex flex-wrap gap-2">
+        <h2 class="text-base font-semibold">Suggested boards</h2>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           @for (n of skeletonCards; track n) {
             <div
               class="flex w-64 flex-col gap-2 surface-2 rounded-xl px-4 py-3"
@@ -53,16 +58,17 @@ import type { CorpusSuggestion } from '@ptah-extension/shared';
       </section>
     } @else if (suggestions().length > 0) {
       <section class="flex flex-col gap-2" aria-label="Suggested boards">
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-sm font-semibold">Suggested boards</span>
+        <div class="flex flex-col gap-0.5">
+          <h2 class="text-base font-semibold">Suggested boards</h2>
           <span class="text-xs text-base-content-muted">
-            One-click boards clustered from your memories.
+            One-click boards clustered from your memories. Built from graph
+            clusters.
           </span>
         </div>
-        <div class="flex flex-wrap gap-2">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           @for (suggestion of suggestions(); track suggestion.suggestedName) {
             <article
-              class="group flex w-64 flex-col gap-2 surface-2 rounded-xl px-4 py-3 transition-colors duration-150 hover:bg-surface-3"
+              class="group flex min-w-0 flex-col gap-2 rounded-xl border border-surface-border bg-surface-2 px-4 py-3 transition-colors duration-150 hover:bg-surface-3"
             >
               <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0 flex-1">
@@ -102,8 +108,9 @@ import type { CorpusSuggestion } from '@ptah-extension/shared';
               <button
                 type="button"
                 ptahButton
-                variant="primary"
-                class="mt-1"
+                variant="outline"
+                size="xs"
+                class="mt-1 self-start"
                 [disabled]="busyName() === suggestion.suggestedName"
                 (click)="create.emit(suggestion)"
                 [attr.aria-label]="'Create board ' + suggestion.suggestedName"

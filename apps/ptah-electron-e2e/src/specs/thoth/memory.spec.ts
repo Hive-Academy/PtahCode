@@ -1,3 +1,5 @@
+import type { Page } from '@playwright/test';
+
 import { test, expect } from '../../support/fixtures';
 
 interface MemoryWireFixture {
@@ -39,6 +41,14 @@ function makeEntry(
   };
 }
 
+/** The Graph view is the default; the entry table is in the List view. */
+async function openListView(page: Page): Promise<void> {
+  await page
+    .locator('[data-testid="thoth-section-memory"]')
+    .getByRole('tab', { name: 'List', exact: true })
+    .click();
+}
+
 test.describe('Thoth — Memory tab', () => {
   test('Memory tab renders with mocked stats', async ({ ui }) => {
     const entries: MemoryWireFixture[] = [
@@ -68,18 +78,22 @@ test.describe('Thoth — Memory tab', () => {
 
     const page = ui.page;
 
-    await expect(page.locator('[data-testid="memory-stat-core"] .tabular-nums')).toHaveText(
-      '3',
-    );
+    await expect(
+      page.locator('[data-testid="memory-stat-core"]').getByRole('button'),
+    ).toHaveAccessibleName('Core 3');
     await expect(page.locator('[data-testid="memory-stat-recall"]')).toHaveText(
       '5',
     );
     await expect(
-      page.locator('[data-testid="memory-stat-archival"] .tabular-nums'),
-    ).toHaveText('2');
+      page.locator('[data-testid="memory-stat-archival"]').getByRole('button'),
+    ).toHaveAccessibleName('Archival 2');
     await expect(
-      page.locator('[data-testid="memory-stat-code-index"] .tabular-nums'),
-    ).toHaveText('120');
+      page
+        .locator('[data-testid="memory-stat-code-index"]')
+        .getByRole('button'),
+    ).toHaveAccessibleName('Code index 120');
+
+    await openListView(page);
 
     await expect(page.locator('[data-testid="memory-entry-row"]')).toHaveCount(
       3,
@@ -133,6 +147,7 @@ test.describe('Thoth — Memory tab', () => {
     await ui.openTab('memory');
 
     const page = ui.page;
+    await openListView(page);
 
     await expect(page.locator('[data-testid="memory-entry-row"]')).toHaveCount(
       3,
@@ -172,6 +187,7 @@ test.describe('Thoth — Memory tab', () => {
     await ui.openTab('memory');
 
     const page = ui.page;
+    await openListView(page);
     const row = page.locator('[data-testid="memory-entry-row"]');
 
     await expect(row).toHaveCount(1);
@@ -182,6 +198,6 @@ test.describe('Thoth — Memory tab', () => {
     await expect(
       row.locator('[data-testid="memory-entry-unpin"]'),
     ).toBeVisible();
-    await expect(row.getByText('pinned')).toBeVisible();
+    await expect(row.getByText('Pinned', { exact: true })).toBeVisible();
   });
 });

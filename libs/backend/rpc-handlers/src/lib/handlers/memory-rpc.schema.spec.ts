@@ -7,6 +7,7 @@
  */
 
 import {
+  MemoryGraphParamsSchema,
   MemoryListQuarantinedParamsSchema,
   MemoryPurgeBySubjectPatternParamsSchema,
   MemoryRestoreQuarantinedParamsSchema,
@@ -292,5 +293,68 @@ describe('MemorySetTriggersParamsSchema — enabled (TASK_2026_620 B-P)', () => 
       enabled: v,
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('MemoryGraphParamsSchema', () => {
+  it('accepts an empty object and defaults the scope to the workspace', () => {
+    const result = MemoryGraphParamsSchema.parse({});
+    expect(result.scope).toBe('workspace');
+    expect(result.maxNodes).toBeUndefined();
+  });
+
+  it.each([
+    [{ maxNodes: 0.4 }, { maxNodes: 1 }],
+    [{ maxNodes: 1500.9 }, { maxNodes: 1500 }],
+    [{ maxNodes: 99999 }, { maxNodes: 1500 }],
+    [{ k: 0 }, { k: 1 }],
+    [{ k: 8.7 }, { k: 8 }],
+    [{ k: 100 }, { k: 32 }],
+    [{ minSimilarity: 0.1 }, { minSimilarity: 0.5 }],
+    [{ minSimilarity: 1 }, { minSimilarity: 0.99 }],
+    [{ minSimilarity: 0.8 }, { minSimilarity: 0.8 }],
+  ])('clamps %j to %j', (input, expected) => {
+    expect(MemoryGraphParamsSchema.parse(input)).toMatchObject(expected);
+  });
+
+  it('keeps empty filter arrays (they mean "all")', () => {
+    const result = MemoryGraphParamsSchema.parse({
+      tiers: [],
+      kinds: [],
+      edgeKinds: [],
+    });
+    expect(result.tiers).toEqual([]);
+    expect(result.kinds).toEqual([]);
+    expect(result.edgeKinds).toEqual([]);
+  });
+
+  it('keeps a null workspaceRoot distinct from an omitted one', () => {
+    expect(
+      MemoryGraphParamsSchema.parse({ workspaceRoot: null }).workspaceRoot,
+    ).toBeNull();
+    expect(MemoryGraphParamsSchema.parse({}).workspaceRoot).toBeUndefined();
+  });
+
+  it.each([
+    [{ tiers: ['hot'] }],
+    [{ kinds: ['note'] }],
+    [{ edgeKinds: ['temporal'] }],
+    [{ maxNodes: Number.NaN }],
+    [{ k: Number.POSITIVE_INFINITY }],
+    [{ createdFrom: -1 }],
+    [{ createdFrom: 20, createdTo: 10 }],
+    [{ sessionId: '' }],
+    [{ workspaceRoot: '' }],
+    [{ scope: 'global' }],
+    [{ unknownKey: true }],
+  ])('rejects %j', (input) => {
+    expect(MemoryGraphParamsSchema.safeParse(input).success).toBe(false);
+  });
+
+  it('accepts an equal createdFrom and createdTo', () => {
+    expect(
+      MemoryGraphParamsSchema.safeParse({ createdFrom: 10, createdTo: 10 })
+        .success,
+    ).toBe(true);
   });
 });

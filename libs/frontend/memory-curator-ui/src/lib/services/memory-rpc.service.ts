@@ -18,6 +18,8 @@ import type {
   MemTimelineParams,
   MemTimelineResult,
   MemoryForgetResult,
+  MemoryGraphParams,
+  MemoryGraphResult,
   MemoryGetResult,
   MemoryListResult,
   MemoryPinResult,
@@ -43,6 +45,7 @@ import type {
  */
 const MEMORY_RPC_TIMEOUTS = {
   LIST_MS: 10_000,
+  GRAPH_MS: 15_000,
   SHORT_MS: 8_000,
   REBUILD_MS: 120_000,
   PRIME_MS: 60_000,
@@ -68,6 +71,14 @@ const MEMORY_RPC_TIMEOUTS = {
 @Injectable({ providedIn: 'root' })
 export class MemoryRpcService {
   private readonly rpc = inject(ClaudeRpcService);
+
+  public async graph(params: MemoryGraphParams): Promise<MemoryGraphResult> {
+    const result = await this.rpc.call('memory:graph', params, {
+      timeout: MEMORY_RPC_TIMEOUTS.GRAPH_MS,
+    });
+    if (result.isSuccess() && result.data) return result.data;
+    throw new Error(result.error || 'memory:graph failed');
+  }
 
   public async list(params?: {
     workspaceRoot?: string | null;

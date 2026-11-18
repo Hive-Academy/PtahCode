@@ -36,6 +36,8 @@ const FORBIDDEN_MARKERS = [
   'ptah-task-worktree',
   'ptah-history-timeline',
   'ptah-conflict-banner',
+  // SIGMA_ADAPTER_MARKER: Sigma.js and graphology must stay in the lazy memory graph chunk.
+  'ptah-sigma-adapter',
 ];
 
 const args = process.argv.slice(2);

@@ -55,26 +55,25 @@ import { EventFeedComponent } from './event-feed.component';
   ],
   template: `
     <div
-      class="flex flex-col gap-3"
+      class="flex flex-col gap-5 rounded-xl border border-surface-border bg-base-100 p-4"
       data-testid="thoth-section-memory-diagnostics"
     >
-      <section class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div class="surface-2 rounded-xl px-4 py-3">
-          <div class="text-xs text-base-content-muted">Last curator run</div>
-          <div class="mt-1 text-sm" data-testid="last-curator-run">
-            {{ lastRunLabel() }}
-          </div>
+      <section class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-base font-semibold">Curator</h2>
+          <p
+            class="text-sm text-base-content-muted"
+            data-testid="last-curator-run"
+          >
+            Last run: {{ lastRunLabel() }}
+          </p>
         </div>
       </section>
 
-      <section class="surface-2 rounded-xl">
-        <header
-          class="border-b border-surface-border px-4 py-2.5 text-sm font-medium text-base-content-muted"
-        >
-          Triggers
-        </header>
+      <section class="border-b border-surface-border pb-4">
+        <h3 class="sr-only">Triggers</h3>
         @if (triggers(); as t) {
-          <div class="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2">
+          <div class="divide-y divide-surface-border">
             <ptah-memory-trigger-toggle
               label="Idle timer"
               [enabled]="t.idleMs > 0"

@@ -45,6 +45,8 @@ import type {
   MemoryGetResult,
   MemoryGetTriggersParams,
   MemoryGetTriggersResult,
+  MemoryGraphParams,
+  MemoryGraphResult,
   MemoryListParams,
   MemoryListQuarantinedParams,
   MemoryListQuarantinedResult,
@@ -80,6 +82,7 @@ import { z } from 'zod';
 import {
   MemoryDiagnosticsParamsSchema,
   MemoryGetTriggersParamsSchema,
+  MemoryGraphParamsSchema,
   MemoryListQuarantinedParamsSchema,
   MemoryPurgeBySubjectPatternParamsSchema,
   MemoryRestoreQuarantinedParamsSchema,
@@ -154,10 +157,14 @@ function toChunkWire(c: MemoryChunk): MemoryChunkWire {
   };
 }
 
+/** Budget of one `memory:graph` call; past it the result has no semantic edges. */
+const MEMORY_GRAPH_DEADLINE_MS = 4_000;
+
 @injectable()
 export class MemoryRpcHandlers {
   static readonly METHODS = [
     'memory:list',
+    'memory:graph',
     'memory:search',
     'memory:get',
     'memory:pin',
@@ -267,21 +274,31 @@ export class MemoryRpcHandlers {
   }
 
   private async withSearchDeadline<T>(
-    startWork: () => Promise<T>, deadlineMs: number, started: number, phase: string, degraded: T,
+    startWork: () => Promise<T>,
+    deadlineMs: number,
+    started: number,
+    phase: string,
+    degraded: T,
   ): Promise<T> {
     const remaining = deadlineMs - performance.now();
     if (remaining <= 0) {
-      this.logger.warn('[memory] search deadline expired', { phase, elapsedMs: performance.now() - started });
+      this.logger.warn('[memory] search deadline expired', {
+        phase,
+        elapsedMs: performance.now() - started,
+      });
       return degraded;
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const timeout = new Promise<T>((resolve) => {
-          timer = setTimeout(() => {
-            this.logger.warn('[memory] search deadline expired', { phase, elapsedMs: performance.now() - started });
-            resolve(degraded);
-          }, remaining);
-        });
+        timer = setTimeout(() => {
+          this.logger.warn('[memory] search deadline expired', {
+            phase,
+            elapsedMs: performance.now() - started,
+          });
+          resolve(degraded);
+        }, remaining);
+      });
       return await Promise.race([timeout, startWork()]);
     } finally {
       clearTimeout(timer);
@@ -320,12 +337,19 @@ export class MemoryRpcHandlers {
         const workspaceRoot = WorkspaceRootSchema.safeParse(
           (params as { workspaceRoot?: unknown }).workspaceRoot,
         ).data;
-        const r = await this.withSearchDeadline(() => this.search.searchRich(
-          params.query,
-          params.topK ?? 10,
-          workspaceRoot,
+        const r = await this.withSearchDeadline(
+          () =>
+            this.search.searchRich(
+              params.query,
+              params.topK ?? 10,
+              workspaceRoot,
+              deadlineMs,
+            ),
           deadlineMs,
-        ), deadlineMs, started, 'memory:search', { hits: [], bm25Only: true });
+          started,
+          'memory:search',
+          { hits: [], bm25Only: true },
+        );
         const hits: MemorySearchHitWire[] = r.hits.map((h) => ({
           memory: toMemoryWire(h.memory),
           chunk: toChunkWire(h.chunk),
@@ -435,6 +459,45 @@ export class MemoryRpcHandlers {
     );
 
     this.rpcHandler.registerMethod(
+      'memory:graph',
+      async (
+        params: MemoryGraphParams | undefined,
+      ): Promise<MemoryGraphResult> => {
+        let validated: z.infer<typeof MemoryGraphParamsSchema>;
+        try {
+          validated = MemoryGraphParamsSchema.parse(params ?? {});
+        } catch (err: unknown) {
+          this.logger.warn('[memory] graph — invalid params', {
+            err: String(err),
+          });
+          throw new RpcUserError(
+            'Invalid parameters for memory:graph',
+            'INVALID_PARAMS',
+          );
+        }
+        const { scope, workspaceRoot: requestedRoot, ...filters } = validated;
+        // Below this line `undefined` means "no workspace filter" and `null`
+        // means "unscoped rows only"; the two must not be merged.
+        const workspaceRoot = this.resolveReadScope(scope, requestedRoot);
+        const started = performance.now();
+        const result = await this.store.graphSnapshot(
+          { ...filters, workspaceRoot },
+          started + MEMORY_GRAPH_DEADLINE_MS,
+        );
+        this.logger.info('[memory] graph', {
+          scope,
+          nodes: result.nodes.length,
+          edges: result.edges.length,
+          totalMatching: result.totalMatching,
+          capped: result.capped,
+          semanticAvailable: result.semanticAvailable,
+          elapsedMs: Math.round(performance.now() - started),
+        });
+        return result;
+      },
+    );
+
+    this.rpcHandler.registerMethod(
       'memory:stats',
       async (
         params: MemoryStatsParams | undefined,
@@ -491,16 +554,26 @@ export class MemoryRpcHandlers {
           );
         }
         try {
-          const result = await this.withSearchDeadline(() => this.codeSymbols.searchAsync({
-            workspaceRoot: this.resolveReadScope(
-              validated.scope,
-              validated.workspaceRoot,
-            ),
-            query: validated.query,
-            kinds: validated.kinds,
-            limit: validated.limit,
-            offset: validated.offset,
-          }, deadlineMs), deadlineMs, started, 'memory:searchSymbols', { items: [], total: 0 });
+          const result = await this.withSearchDeadline(
+            () =>
+              this.codeSymbols.searchAsync(
+                {
+                  workspaceRoot: this.resolveReadScope(
+                    validated.scope,
+                    validated.workspaceRoot,
+                  ),
+                  query: validated.query,
+                  kinds: validated.kinds,
+                  limit: validated.limit,
+                  offset: validated.offset,
+                },
+                deadlineMs,
+              ),
+            deadlineMs,
+            started,
+            'memory:searchSymbols',
+            { items: [], total: 0 },
+          );
           return { items: result.items, total: result.total };
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
