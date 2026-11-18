@@ -20,14 +20,12 @@ function setup(kind = 'structured') {
   const openCaller = jest
     .fn()
     .mockResolvedValue({ kind, providerId: 'fake', model: 'fake' });
-  const dispatchFor = jest
-    .fn()
-    .mockReturnValue({
-      kind: 'structured',
-      completer: { complete },
-      model: 'fake',
-      providerId: 'fake',
-    });
+  const dispatchFor = jest.fn().mockReturnValue({
+    kind: 'structured',
+    completer: { complete },
+    model: 'fake',
+    providerId: 'fake',
+  });
   const noteLive = jest.fn().mockResolvedValue(undefined);
   const service = new SkillRankingCallerService(
     { openCaller, dispatchFor, noteLive } as unknown as DecisionCaller,
@@ -121,7 +119,7 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
   it('accepts an answer that arrives within the total budget (not the erroneous margin cap)', async () => {
     jest.useFakeTimers();
     try {
-      const { service, openCaller, dispatchFor, complete } = setup();
+      const { service, openCaller, complete } = setup();
       openCaller.mockResolvedValue({
         kind: 'system-one',
         target: { timeoutMs: 60000 },
@@ -129,13 +127,13 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
       complete.mockImplementation(
         () =>
           new Promise((resolve) =>
-            setTimeout(() => resolve({ i1: 'c1' }), 1000),
+            setTimeout(() => resolve({ i1: 'c2' }), 1000),
           ),
       );
       const pending = service.rankSkillCandidates([item]);
       await jest.advanceTimersByTimeAsync(1001);
       const result = await pending;
-      expect(result).toEqual({ i1: ['c1'] });
+      expect(result).toEqual({ items: { angular: { order: ['b', 'a'] } } });
     } finally {
       jest.useRealTimers();
     }

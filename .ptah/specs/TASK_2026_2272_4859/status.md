@@ -55,3 +55,19 @@ Previous CI failure (8a9c52dc4):
 3. Update PR #1418 with results
 4. Watch CI for new head
 5. User decision on F1 (descriptions) and F6 (timeout)
+
+## Coordinator correction (2026-11-18, 13:20 UTC)
+
+The session that owned this worktree ended. The coordinator of PR #1421 took over.
+
+- CI of `8613c1c01` failed in `test (shard 4/4)`:
+  `libs/backend/lane-routing/src/lib/decision-model/skill-ranking-caller.service.spec.ts:138`.
+  The test for the timeout correction expected a result shape that the service does not return.
+  An earlier line of this file said that the full gate passed. CI did not confirm that.
+- Cause and correction: `ci-spec-fix-report.md`. Only the spec changed. The test now fails when
+  the wait is capped at 250 ms (proved with a temporary change that was removed).
+- Local gate after the correction: `npm run verify -- -p lane-routing`,
+  log `.ptah/tmp/gate-lane-routing.log`: "2 tasks: 2 succeeded" (lint, typecheck) and
+  "1 task: 1 succeeded" (test), exit code 0.
+- User decisions (2026-11-18): F1 = keep the sanitized catalog descriptions. Merge = squash,
+  which also removes the invalid commit scopes from `main`.
