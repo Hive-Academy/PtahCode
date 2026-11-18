@@ -81,8 +81,11 @@ If there are no scores, the section shows **No capability matrix yet**.
 | **Subagent handoff size** | `150,000` tokens | 1,000–2,000,000 | When a subagent context reaches this size, PtahCode stops it and gives the main chat a handoff to continue the work |
 | **Suggest a new session at** | `300,000` tokens | 1,000–5,000,000 | When a chat context reaches this size, PtahCode suggests a new session |
 | **Subagent stop size** | `3,000,000` weighted tokens | 1,000–100,000,000 | PtahCode stops a subagent when its weighted token total reaches this size |
-| **Compact idle chats** | Off | — | When enabled, before the prompt cache of a long chat expires, PtahCode compacts the chat, so that your next message costs less |
-| **Compact idle chats from** | `200,000` tokens | 100,000–5,000,000 | PtahCode compacts an idle chat when it reaches this size |
+| **Compact a chat at** | Model default (unset) | 100,000 to 1,000,000 tokens | The model runtime summarizes a chat when its context reaches this size. Clear the field to use the model's own limit |
+| **Compact idle chats** | On | — | Before the prompt cache of a long chat expires, PtahCode compacts the chat, so that your next message costs less |
+| **Smallest idle chat to compact** | `150,000` tokens | 100,000 to 5,000,000 | Idle compaction skips smaller chats. This does not change when an active chat compacts |
+
+**Compact a chat at** (`compaction.threshold`) controls size-based compaction by the model runtime. It is unset by default, so Claude uses its model's own window. **Compact idle chats** is separate: Ptah compacts a long idle chat shortly before its 1-hour prompt cache expires to reduce the cost of the next message.
 
 The setting keys start with `compaction.`, for example `compaction.toolOutputBudgetTokens`.
 
@@ -97,6 +100,8 @@ Codex CLI lanes also use **Tool output size**, and they compact at floor(**Budge
 | **Parallel background queries** | `3` | 1–16 | The maximum number of background calls at the same time |
 | **Parallel queries per feature** | `1` | 1–16 | The maximum number of background calls for one feature, such as memory or skills |
 | **Queue wait limit** | `60,000` ms | 1,000–600,000 | How long a background query waits for a free slot before it stops |
+
+**Compact a chat at** (`compaction.threshold`) controls size-based compaction by the model runtime. It is unset by default, so Claude uses its model's own window. **Compact idle chats** is separate: Ptah compacts a long idle chat shortly before its 1-hour prompt cache expires to reduce the cost of the next message.
 
 The setting keys start with `internalQuery.`, for example `internalQuery.maxConcurrent`.
 

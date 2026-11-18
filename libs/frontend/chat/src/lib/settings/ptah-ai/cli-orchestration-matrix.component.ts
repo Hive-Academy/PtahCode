@@ -5,8 +5,10 @@ import {
   ElementRef,
   Injector,
   afterNextRender,
+  booleanAttribute,
   computed,
   inject,
+  input,
   output,
   signal,
   viewChild,
@@ -186,10 +188,13 @@ const SAVE_SCOPE = 'global';
         @if (!loading() && tableRows().length === 0) {
           <p data-testid="cli-matrix-empty">No CLI agent is installed. Install one from the list below, then Re-detect.</p>
         }
-        @if (loading()) {
+        @if (loading() && !hostReadStates()) {
           <p data-testid="cli-matrix-empty">Loading CLI agents…</p>
         }
       </div>
+      <!-- The host's read states (loading and retry per source) show inside this card, outside the
+           aria-busy region, so a failed read is announced (TASK_2026_2256). -->
+      <ng-content select="[read-states]" />
 
     </section>
 
@@ -231,6 +236,8 @@ const SAVE_SCOPE = 'global';
 export class CliOrchestrationMatrixComponent {
   private readonly providerGrid = viewChild(CliProviderGridComponent);
   readonly codexSettingsRequested = output<void>();
+  /** The host projects its own read states into `[read-states]`, so the matrix's loading line would repeat them. */
+  readonly hostReadStates = input(false, { transform: booleanAttribute });
   protected readonly TerminalIcon = Terminal;
   protected readonly CLI_INSTALL_GUIDES = CLI_INSTALL_GUIDES;
   protected readonly guideDetecting = computed(() => this.state.cliDetection().status === 'loading');

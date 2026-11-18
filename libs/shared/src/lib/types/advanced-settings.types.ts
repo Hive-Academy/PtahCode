@@ -67,7 +67,8 @@ export interface AdvancedNumberSetting extends AdvancedSettingBase {
   readonly integer: boolean;
   /** Plural unit shown after the value and in errors; absent for a bare ratio. */
   readonly unit?: string;
-  readonly default: number;
+  /** null means unset: the consuming runtime chooses its own default. */
+  readonly default: number | null;
 }
 
 export interface AdvancedBooleanSetting extends AdvancedSettingBase {
@@ -85,7 +86,7 @@ export interface AdvancedSettingGroup {
 
 /** The result of checking one value against its descriptor. Never thrown. */
 export type AdvancedSettingValidation =
-  | { readonly ok: true; readonly value: number | boolean }
+  | { readonly ok: true; readonly value: number | boolean | null }
   | { readonly ok: false; readonly error: string };
 
 export const ADVANCED_SETTING_GROUPS: readonly AdvancedSettingGroup[] = [
@@ -189,20 +190,33 @@ export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [
     default: 90, apply: 'live',
   },
   {
+    key: 'compaction.threshold',
+    group: 'context-budgets',
+    kind: 'number',
+    label: 'Compact a chat at',
+    help: "When a chat's context reaches this size, the model runtime summarizes it to free space. Leave empty to use the model's own limit.",
+    unit: 'tokens',
+    min: 100_000,
+    max: 1_000_000,
+    integer: true,
+    default: null,
+    apply: 'live',
+  },
+  {
     key: 'compaction.idleCompactionEnabled',
     group: 'context-budgets',
     kind: 'boolean',
     label: 'Compact idle chats',
-    help: "Before a long chat's prompt cache expires, Ptah compacts it so your next message costs less.",
-    default: false,
+    help: "When a long chat sits idle, Ptah compacts it shortly before its prompt cache expires, so your next message costs less.",
+    default: true,
     apply: 'live',
   },
   {
     key: 'compaction.idleCompactionMinTokens',
     group: 'context-budgets',
     kind: 'number',
-    label: 'Compact idle chats from',
-    help: 'Ptah compacts an idle chat once it reaches this size.',
+    label: 'Smallest idle chat to compact',
+    help: 'Idle compaction skips chats smaller than this. It does not change when an active chat compacts.',
     unit: 'tokens',
     min: 100_000,
     max: 5_000_000,
@@ -452,6 +466,7 @@ export function validateAdvancedSettingValue(
       ? { ok: true, value }
       : { ok: false, error: 'Use on or off.' };
   }
+  if (setting.default === null && value === null) return { ok: true, value: null };
   const unit = setting.unit ? ` ${setting.unit}` : '';
   const error = `Use ${setting.integer ? 'a whole number' : 'a number'} from ${formatBound(setting.min)} to ${formatBound(setting.max)}${unit}.`;
   if (

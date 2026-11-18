@@ -34,6 +34,7 @@ class ElevenLabsStub {
   readonly direction = input.required<'stt' | 'tts'>();
   readonly config = input.required<unknown>();
   readonly keyOnly = input(false);
+  readonly startClearConfirm = input(false);
   readonly changed = output<void>();
 }
 
@@ -41,11 +42,12 @@ class ElevenLabsStub {
   standalone: true,
   imports: [VoiceDetailsDrawerComponent],
   template: `<ptah-voice-details-drawer [(direction)]="direction" [config]="config()"
-    (closed)="closedCount = closedCount + 1; direction.set(null)" (changed)="changedCount = changedCount + 1" />`,
+    [confirmClearKey]="clearKey()" (closed)="closedCount = closedCount + 1; direction.set(null)" (changed)="changedCount = changedCount + 1" />`,
 })
 class HostComponent {
   readonly direction = signal<VoiceDirection | null>('stt');
   readonly config = signal<VoiceProviderConfigDto | null>(null);
+  readonly clearKey = signal(false);
   closedCount = 0;
   changedCount = 0;
 }
@@ -95,6 +97,7 @@ describe('VoiceDetailsDrawerComponent', () => {
   it('opens as a labelled dialog on the requested tab with the active provider panel', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog?.getAttribute('aria-label')).toBe('Voice engine details');
+    expect(q('voice-details-drawer')?.querySelector('h2')?.textContent).toBe('Voice details');
     expect(q('voice-details-subtitle')?.textContent).toContain('Speech-to-text: Local · Text-to-speech: Local');
     expect(q('stub-local-stt')).not.toBeNull();
     expect(q('stub-local-tts')).toBeNull();
@@ -126,6 +129,22 @@ describe('VoiceDetailsDrawerComponent', () => {
       expect(panel?.classList.contains('px-2')).toBe(true);
       expect(panel?.classList.contains('pt-4')).toBe(true);
     }
+  });
+
+  it('passes a page clear request only to the TTS ElevenLabs panel', () => {
+    host.config.set(config({ ttsProvider: 'elevenlabs' }));
+    host.clearKey.set(true);
+    host.direction.set('tts');
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.directive(ElevenLabsStub)).componentInstance.startClearConfirm()).toBe(true);
+    // With Local as TTS engine the request reaches the key-only ElevenLabs setup panel.
+    host.config.set(config({ elevenlabs: { ...config().elevenlabs, apiKeyConfigured: false } }));
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.directive(ElevenLabsStub)).componentInstance.startClearConfirm()).toBe(true);
+    host.config.set(config({ elevenlabs: { ...config().elevenlabs, apiKeyConfigured: false } }));
+    tab('Speech-to-text')?.click();
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.directive(ElevenLabsStub)).componentInstance.startClearConfirm()).toBe(false);
   });
 
   it('renders the ElevenLabs panel for the direction that uses it', () => {

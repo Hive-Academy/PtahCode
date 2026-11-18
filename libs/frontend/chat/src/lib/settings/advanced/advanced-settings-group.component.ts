@@ -22,6 +22,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 import {
   PtahButtonDirective,
+  PtahFieldGridDirective,
   PtahFieldComponent,
   PtahInputDirective,
   PtahSettingRowComponent,
@@ -56,15 +57,20 @@ function parseNumber(
   raw: string,
 ): AdvancedSettingValidation {
   const text = raw.trim().replace(/[,_\s]/g, '');
-  if (text === '') return { ok: false, error: 'Enter a value.' };
+  if (text === '') {
+    return setting.default === null
+      ? { ok: true, value: null }
+      : { ok: false, error: 'Enter a value.' };
+  }
   if (!NUMBER_TEXT.test(text)) return { ok: false, error: 'Enter a number.' };
   return validateAdvancedSettingValue(setting, Number(text));
 }
 
 function formatValue(
   setting: AdvancedSetting,
-  value: number | boolean,
+  value: number | boolean | null,
 ): string {
+  if (value === null) return 'Model default';
   if (typeof value === 'boolean') return value ? 'on' : 'off';
   const unit =
     setting.kind === 'number' && setting.unit ? ` ${setting.unit}` : '';
@@ -83,6 +89,7 @@ function formatValue(
   imports: [
     NgTemplateOutlet,
     PtahButtonDirective,
+    PtahFieldGridDirective,
     PtahFieldComponent,
     PtahSettingRowComponent,
     PtahInputDirective,
@@ -163,7 +170,7 @@ function formatValue(
           }
           @default {
             <div
-              class="settings-grid grid grid-cols-1 items-start gap-x-4 gap-y-[var(--ptah-gap-section)]"
+              ptahFieldGrid minColumn="md"
             >
               @for (setting of settings(); track setting.key) {
                 <div
@@ -224,6 +231,7 @@ function formatValue(
                         class="min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
                         [invalid]="!!errors()[setting.key]"
                         [value]="numberText(setting)"
+                        [placeholder]="setting.default === null ? 'Model default' : ''"
                         [attr.aria-describedby]="describedBy(setting)"
                         [ptahBusyDisabled]="busy()"
                         (input)="edit(setting, $event)"
@@ -293,17 +301,6 @@ function formatValue(
     }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
-    }
-    /* Columns follow the group's own width, so a narrow drawer gets one column. */
-    @container (min-width: 36rem) {
-      .settings-grid {
-        grid-template-columns: repeat(2, minmax(0, 22rem));
-      }
-    }
-    @container (min-width: 56rem) {
-      .settings-grid {
-        grid-template-columns: repeat(3, minmax(0, 22rem));
-      }
     }
   `,
 })
@@ -462,7 +459,7 @@ export class AdvancedSettingsGroupComponent implements OnInit {
     const parsed = parseNumber(setting, text);
     this.setError(setting.key, parsed.ok ? null : parsed.error);
     if (!parsed.ok) return;
-    if (parsed.value === this.saved()[setting.key]) {
+    if (parsed.value === (this.saved()[setting.key] ?? null)) {
       this.clearDraft(setting.key);
       return;
     }
@@ -484,10 +481,10 @@ export class AdvancedSettingsGroupComponent implements OnInit {
    */
   private async write(
     setting: AdvancedSetting,
-    value: number | boolean,
+    value: number | boolean | null,
   ): Promise<boolean> {
     const { key, label } = setting;
-    const previous = this.saved()[key];
+    const previous = validateAdvancedSettingValue(setting, this.saved()[key] ?? null);
     this.savingKey.set(key);
     this.setError(key, null);
     try {
@@ -496,8 +493,8 @@ export class AdvancedSettingsGroupComponent implements OnInit {
         write: () => this.send(setting, value),
         // An unreadable or hand-edited previous value cannot be written back.
         undo:
-          typeof previous === typeof value
-            ? () => this.send(setting, previous as number | boolean)
+          previous.ok
+            ? () => this.send(setting, previous.value)
             : null,
       });
       return result === 'saved';
@@ -509,7 +506,7 @@ export class AdvancedSettingsGroupComponent implements OnInit {
   /** One `settings:set` write; a confirmed one moves the read-back value. */
   private async send(
     setting: AdvancedSetting,
-    value: number | boolean,
+    value: number | boolean | null,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     const { key, label } = setting;
     let confirmed = false;

@@ -943,12 +943,17 @@ describe('isFileBasedSettingKey', () => {
     );
 
     it('derives every default from the shared table, key for key', () => {
-      expect(ADVANCED_SETTINGS.map((setting) => setting.key).sort()).toEqual(
+      expect(ADVANCED_SETTINGS
+        .filter((setting) => setting.default !== null)
+        .map((setting) => setting.key).sort()).toEqual(
         Object.keys(advancedDefaults).sort(),
       );
       for (const setting of ADVANCED_SETTINGS) {
         expect(FILE_BASED_SETTINGS_KEYS.has(setting.key)).toBe(true);
-        expect(FILE_BASED_SETTINGS_DEFAULTS[setting.key]).toBe(setting.default);
+        expect(FILE_BASED_SETTINGS_DEFAULTS[setting.key]).toBe(setting.default ?? undefined);
+        if (setting.default === null) {
+          expect(Object.prototype.hasOwnProperty.call(FILE_BASED_SETTINGS_DEFAULTS, setting.key)).toBe(false);
+        }
       }
     });
 

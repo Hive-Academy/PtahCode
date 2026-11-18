@@ -109,7 +109,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
         <ptah-field
           label="MCP port"
           appearance="stacked"
-          class="w-full max-w-sm"
+          class="w-full min-w-0"
           size="sm"
           [error]="validationError() ?? saveError()"
           errorRole="alert"
@@ -120,7 +120,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             type="number"
             ptahInput
             size="xs"
-            class="w-28"
+            class="w-full min-w-0"
             [ngModel]="portValue()"
             (ngModelChange)="onPortInput($event)"
             [min]="1024"
@@ -159,7 +159,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
         <ptah-field
           label="External MCP callers"
           appearance="stacked"
-          class="w-full max-w-sm"
+          class="w-full min-w-0"
           size="sm"
         >
           <select

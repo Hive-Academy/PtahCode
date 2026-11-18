@@ -48,7 +48,11 @@ const DRAWERS: readonly {
 }[] = [
   { card: 'Kimi Code', name: 'drawer-kimi-code' },
   { card: 'sovereigneg', name: 'drawer-sovereigneg' },
-  { card: 'Kimi Code', name: 'drawer-kimi-code-credentials', tab: 'Credentials' },
+  {
+    card: 'Kimi Code',
+    name: 'drawer-kimi-code-credentials',
+    tab: 'Credentials',
+  },
   {
     card: 'Claude (Subscription)',
     name: 'drawer-claude-cli-credentials',
@@ -138,6 +142,8 @@ type FoldRegion = 'tabs' | 'main' | 'heading' | 'card5';
  *   The tabs, the Main agent section and the Connections heading end at or above 660 px
  *   (card 5 is below the fold by that decision); at least 1 column at 800 px.
  * Both hosts: nothing scrolled, every card at most 80 px, and no horizontal overflow at 800 px.
+ * TASK_2026_2256_159f: when the navigation is a sidebar beside the main column, it has the full page height and does
+ * not push the content down. Then the tabs region must end inside the viewport, not above the fold line.
  */
 const FOLD_BUDGET: Readonly<
   Record<
@@ -188,6 +194,19 @@ async function assertProvidersFold(
         .evaluate((node) => node.getBoundingClientRect().bottom),
     ),
   };
+  const navBox = await page
+    .locator('[data-testid="settings-tabs"]')
+    .first()
+    .boundingBox();
+  const mainBox = await page
+    .locator('[data-testid="settings-layout-main"]')
+    .first()
+    .boundingBox();
+  const sidebar =
+    navBox !== null &&
+    mainBox !== null &&
+    navBox.x + navBox.width <= mainBox.x + 1;
+  const viewportHeight = page.viewportSize()?.height ?? 768;
   const heights = await cards.evaluateAll((nodes) =>
     nodes.map((node) => Math.round(node.getBoundingClientRect().height)),
   );
@@ -239,7 +258,7 @@ async function assertProvidersFold(
   });
   await page.setViewportSize({ width: 1024, height: 768 });
   console.log(
-    `B28 fold ${host}/${theme}: scroll ${scroll.window}/${scroll.page}; bottoms tabs ${bottoms.tabs}, main ${bottoms.main}, ` +
+    `B28 fold ${host}/${theme} (${sidebar ? 'sidebar' : 'tabs'}): scroll ${scroll.window}/${scroll.page}; bottoms tabs ${bottoms.tabs}, main ${bottoms.main}, ` +
       `heading ${bottoms.heading}, card5 ${bottoms.card5}; card heights ${heights.join(',')}; widths ${widths.join(',')}; ` +
       `${columns} columns at 1024, ${columnsAt800} at 800 (overflow ${overflowAt800}px)`,
   );
@@ -254,7 +273,7 @@ async function assertProvidersFold(
   for (const height of heights) expect(height).toBeLessThanOrEqual(80);
   for (const region of budget.regions)
     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
-      budget.maxBottom,
+      region === 'tabs' && sidebar ? viewportHeight : budget.maxBottom,
     );
 }
 
@@ -307,6 +326,7 @@ async function assertOrderStripWhole(
 /**
  * Batch 27b deviation 6 / Batch 28: an open popover is painted above everything on the page, the Main agent
  * section's badges included. The top-most element at the centre of each popover row must belong to the popover.
+ * Each row is first scrolled into view inside the popover, because the panel scrolls when the window is short.
  */
 async function assertPopoverOnTop(
   page: Page,
@@ -317,6 +337,8 @@ async function assertPopoverOnTop(
     (panel, rowSelector) =>
       Array.from(panel.querySelectorAll(rowSelector))
         .map((row) => {
+          // The popover scrolls whole when the room beside its trigger is short: test stacking, not scroll.
+          row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
           const box = row.getBoundingClientRect();
           const top = document.elementFromPoint(
             box.left + box.width / 2,
@@ -462,7 +484,9 @@ async function captureMatrixPopovers(
     page.locator('[data-testid="cli-provider-popover-content"]'),
   ).toHaveCount(0);
   await expandMatrixDetail(page, 'cursor');
-  await page.locator('#lane-detail-cursor [data-popover-kind="credentials"]').click();
+  await page
+    .locator('#lane-detail-cursor [data-popover-kind="credentials"]')
+    .click();
   const cursorPopover = '[data-testid="cursor-credential-popover"]';
   await expect(
     page.locator(`${cursorPopover} [data-testid="cursor-credential-key"]`),
@@ -481,7 +505,11 @@ async function captureMatrixPopovers(
   await capture(page, 'orchestration-popover-cursor', host, theme);
   await page.keyboard.press('Escape');
   await expect(page.locator(cursorPopover)).toHaveCount(0);
-  await expect(page.locator('[data-testid="cli-provider-card-cursor"] ptah-table-row-expander button')).toHaveAttribute('aria-expanded', 'true');
+  await expect(
+    page.locator(
+      '[data-testid="cli-provider-card-cursor"] ptah-table-row-expander button',
+    ),
+  ).toHaveAttribute('aria-expanded', 'true');
   // Batch 32: the add-instance modal (prototype interactions/orchestration-1, with an API-key provider chosen) and Glm's
   // tier-mapping modal, centred and fully on screen once daisyUI's open transition has finished.
   for (const modal of [
@@ -498,7 +526,9 @@ async function captureMatrixPopovers(
   ]) {
     if (modal.testid === 'cli-tier-mapping-modal') {
       await expandMatrixDetail(page, 'glm-instance-1');
-      await page.locator('#lane-detail-glm-instance-1 button:text-is("Edit tiers")').click();
+      await page
+        .locator('#lane-detail-glm-instance-1 button:text-is("Edit tiers")')
+        .click();
     } else await page.locator(modal.opener).click();
     const dialog = page.locator(`dialog:has([data-testid="${modal.testid}"])`);
     await expect(dialog).toHaveAttribute('open', '');
@@ -582,7 +612,10 @@ async function assertOrchestrationFold(
   }));
   const bottoms: Record<OrchestrationFoldRegion, number> = {
     policyBar: await bottomOf(page, '[data-testid="orchestration-policy-bar"]'),
-    matrixHeader: await bottomOf(page, '[data-testid="cli-provider-card-codex"] th[scope="row"]'),
+    matrixHeader: await bottomOf(
+      page,
+      '[data-testid="cli-provider-card-codex"] th[scope="row"]',
+    ),
     firstRow: await bottomOf(
       page,
       '[data-testid="cli-provider-grid"] [data-testid^="cli-provider-card-"]',
@@ -600,12 +633,26 @@ async function assertOrchestrationFold(
           `${row.getAttribute('data-testid')?.replace('cli-provider-card-', '')}:${Math.round(row.getBoundingClientRect().height)}`,
       ),
     );
-  const uninstalledHeader = await matrix.locator('[data-testid="cli-provider-grid"] thead').evaluate((row) => Math.round(row.getBoundingClientRect().height));
-  const installed = await matrix.locator('[data-testid^="cli-provider-card-"]').count();
-  const instances = await matrix.locator('[data-testid^="cli-matrix-row-"]').count();
-  const uninstalled = await matrix.locator('[data-testid="cli-provider-card-cursor"], [data-testid="cli-provider-card-pi"]').count();
-  await expect(matrix.locator('[data-testid="cli-provider-card-cursor"]')).toBeVisible();
-  await expect(matrix.locator('[data-testid="cli-provider-card-pi"]')).toBeVisible();
+  const uninstalledHeader = await matrix
+    .locator('[data-testid="cli-provider-grid"] thead')
+    .evaluate((row) => Math.round(row.getBoundingClientRect().height));
+  const installed = await matrix
+    .locator('[data-testid^="cli-provider-card-"]')
+    .count();
+  const instances = await matrix
+    .locator('[data-testid^="cli-matrix-row-"]')
+    .count();
+  const uninstalled = await matrix
+    .locator(
+      '[data-testid="cli-provider-card-cursor"], [data-testid="cli-provider-card-pi"]',
+    )
+    .count();
+  await expect(
+    matrix.locator('[data-testid="cli-provider-card-cursor"]'),
+  ).toBeVisible();
+  await expect(
+    matrix.locator('[data-testid="cli-provider-card-pi"]'),
+  ).toBeVisible();
   const over = (Object.keys(bottoms) as OrchestrationFoldRegion[])
     .filter((region) => bottoms[region] > ORCHESTRATION_FOLD)
     .map(
@@ -626,9 +673,13 @@ async function assertOrchestrationFold(
     instances: 1,
     uninstalled: 2,
   });
-  const providerGrid = matrix.locator('[data-testid="cli-provider-grid"]').first();
+  const providerGrid = matrix
+    .locator('[data-testid="cli-provider-grid"]')
+    .first();
   await expect(providerGrid).toBeVisible();
-  expect(await providerGrid.evaluate((grid) => getComputedStyle(grid).display)).toBe('block');
+  expect(
+    await providerGrid.evaluate((grid) => getComputedStyle(grid).display),
+  ).toBe('block');
   const consumers = page.locator('[data-testid="consumer-table"]');
   await expect(consumers).toHaveClass(/\bgrid\b/);
   await expect(consumers).toHaveClass(/\bgap-2\b/);
@@ -720,9 +771,13 @@ async function captureRolesOpen(
   await waitForSettled(page);
   await capture(page, 'orchestration-roles-open', host, theme);
   // A retained role's reassignment popover stays on screen; Esc returns focus.
-  const roleCell = consumers.locator('[data-testid="consumer-edit-enhancement"]');
+  const roleCell = consumers.locator(
+    '[data-testid="consumer-edit-enhancement"]',
+  );
   await roleCell.click();
-  const rolePopover = page.locator('[data-testid="consumer-editor-enhancement"]');
+  const rolePopover = page.locator(
+    '[data-testid="consumer-editor-enhancement"]',
+  );
   await expect(rolePopover).toBeVisible();
   const popoverBox = await rolePopover.boundingBox();
   const viewport = page.viewportSize();
@@ -825,7 +880,9 @@ async function openSettingsAt(
   await waitForSettled(page);
   if (tab === 'Providers')
     await expect(
-      page.locator('[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]'),
+      page.locator(
+        '[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]',
+      ),
     ).toBeVisible();
 }
 
@@ -849,7 +906,9 @@ for (const host of ['vscode', 'electron'] as const) {
         // section or the On ticks mid-bounce (Batch 36c.i).
         if (tab.name === 'providers')
           await expect(
-            page.locator('[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]'),
+            page.locator(
+              '[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]',
+            ),
           ).toBeVisible();
         await capture(page, tab.name, host, theme);
       }
@@ -859,13 +918,7 @@ for (const host of ['vscode', 'electron'] as const) {
       page,
       fixtureServer,
     }) => {
-      await openSettingsAt(
-        page,
-        fixtureServer.url,
-        host,
-        theme,
-        'Providers',
-      );
+      await openSettingsAt(page, fixtureServer.url, host, theme, 'Providers');
       // Batch 36: the Orchestration fold gate (the tab is still open), then (Batch 33) the roles <details> open.
       await assertOrderStripWhole(page, host, theme, 6);
       await test.step('orchestration fold', () =>
@@ -878,13 +931,7 @@ for (const host of ['vscode', 'electron'] as const) {
       page,
       fixtureServer,
     }) => {
-      await openSettingsAt(
-        page,
-        fixtureServer.url,
-        host,
-        theme,
-        'Providers',
-      );
+      await openSettingsAt(page, fixtureServer.url, host, theme, 'Providers');
       // Batch 30: the CLI matrix's cell popovers (prototype interactions/orchestration-2/-3).
       await captureMatrixPopovers(page, host, theme);
     });
@@ -910,13 +957,19 @@ for (const host of ['vscode', 'electron'] as const) {
       ).toHaveCount(1);
       const [mainBox, connectionsBox] = await Promise.all([
         mainSection.boundingBox(),
-        page.locator('[data-testid="providers-connections-card"]').boundingBox(),
+        page
+          .locator('[data-testid="providers-connections-card"]')
+          .boundingBox(),
       ]);
       console.log(
         `main agent section ${host}/${theme}: ${Math.round(mainBox?.width ?? 0)}x${Math.round(mainBox?.height ?? 0)}`,
       );
-      expect(Math.abs((mainBox?.width ?? 0) - (connectionsBox?.width ?? 0))).toBeLessThanOrEqual(1);
-      expect((mainBox?.y ?? 0) + (mainBox?.height ?? 0)).toBeLessThanOrEqual(connectionsBox?.y ?? 0);
+      expect(
+        Math.abs((mainBox?.width ?? 0) - (connectionsBox?.width ?? 0)),
+      ).toBeLessThanOrEqual(1);
+      expect((mainBox?.y ?? 0) + (mainBox?.height ?? 0)).toBeLessThanOrEqual(
+        connectionsBox?.y ?? 0,
+      );
       // Gate V 28 (prototype header): the status pill and badges sit beside the title. The title is one line: 20 px
       // leading since the Settings UI polish (text-base, leading-5; was 16 px); a layer badge that does not fit moves,
       // whole, to the next line under it.
@@ -928,7 +981,10 @@ for (const host of ['vscode', 'electron'] as const) {
       const titleRow = await page
         .locator('[data-testid="routing-node-main-agent"]')
         .evaluate((node) => ({
-          title: node.querySelector('[data-testid="routing-node-title"]')?.getBoundingClientRect() ?? null,
+          title:
+            node
+              .querySelector('[data-testid="routing-node-title"]')
+              ?.getBoundingClientRect() ?? null,
           badges: Array.from(
             node.querySelectorAll(
               '[data-testid="routing-node-status"], [data-testid="main-scope-layer"]',
@@ -946,7 +1002,10 @@ for (const host of ['vscode', 'electron'] as const) {
       const headFit = await page
         .locator('[data-testid="routing-node-main-agent"]')
         .evaluate((node) => ({
-          title: node.querySelector('[data-testid="routing-node-title"]')?.getBoundingClientRect().height ?? 0,
+          title:
+            node
+              .querySelector('[data-testid="routing-node-title"]')
+              ?.getBoundingClientRect().height ?? 0,
           overflow: Math.max(
             0,
             ...Array.from(
@@ -997,9 +1056,9 @@ for (const host of ['vscode', 'electron'] as const) {
         if (layout.labelBottom <= layout.valueTop + 1) {
           expect(layout.valueTop - layout.labelBottom).toBeLessThanOrEqual(8);
         } else {
-          expect(Math.abs(layout.labelMid - layout.valueMid)).toBeLessThanOrEqual(
-            2,
-          );
+          expect(
+            Math.abs(layout.labelMid - layout.valueMid),
+          ).toBeLessThanOrEqual(2);
         }
         expect(layout.overflow).toBeLessThanOrEqual(0);
       }
@@ -1387,7 +1446,9 @@ for (const host of ['vscode', 'electron'] as const) {
       await gotoSettingsTab(page, 'Providers');
       await waitForSettled(page);
       await expect(
-        page.locator('[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]'),
+        page.locator(
+          '[data-testid="cli-provider-card-codex"] input[aria-label="Codex enabled"]',
+        ),
       ).toBeVisible();
       await assertOrderStripWhole(page, host, theme, 6);
       // 52.1: one normalised version per card. PR #1309: the version is a fact in the card's description list
@@ -1422,20 +1483,17 @@ for (const host of ['vscode', 'electron'] as const) {
       const model = page.locator(
         '#lane-detail-antigravity [data-popover-kind="model"]',
       );
-      await expect(model).toHaveText(
-        'claude-sonnet-4-6',
-      );
+      await expect(model).toHaveText('claude-sonnet-4-6');
       await expect(model).toHaveAttribute(
         'title',
         'claude-sonnet-4-6 (Claude Sonnet 4.6 (Thinking))',
       );
-      const modelLines = await model
-        .evaluate((element) =>
-          Math.round(
-            element.getBoundingClientRect().height /
-              parseFloat(getComputedStyle(element).lineHeight),
-          ),
-        );
+      const modelLines = await model.evaluate((element) =>
+        Math.round(
+          element.getBoundingClientRect().height /
+            parseFloat(getComputedStyle(element).lineHeight),
+        ),
+      );
       expect(modelLines).toBeLessThanOrEqual(2);
       await capture(page, 'live-orchestration', host, theme);
     });

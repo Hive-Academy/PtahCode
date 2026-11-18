@@ -14,6 +14,8 @@ let nextFormSectionId = 0;
 
 const DIVIDER_CLASS = '[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)]';
 const DISABLED_CLASS = 'opacity-[var(--ptah-field-disabled-opacity)]';
+/** Lets the fields column grow to the settings content cap (card grids, tables). */
+const WIDE_CLASS = '[--ptah-form-section-fields-max-w:var(--ptah-settings-content-max-w)]';
 const TITLE_CLASS =
   'text-[length:var(--ptah-text-section-title-size)] leading-[var(--ptah-text-section-title-leading)] font-[number:var(--ptah-text-section-title-weight)]';
 const HINT_CLASS =
@@ -115,6 +117,11 @@ export class PtahFormSectionComponent {
   readonly disabled = input(false, { transform: booleanAttribute });
   /** Error text shown at the top of the fields column. */
   readonly error = input<string | null>(null);
+  /**
+   * Lets the fields column use the full width of the section, for a card grid
+   * or a table. Default false: text fields keep the readable fields cap.
+   */
+  readonly wide = input(false, { transform: booleanAttribute });
 
   private readonly baseId = `ptah-form-section-${nextFormSectionId++}`;
   /** Read by ptah-editable-section to label its region. */
@@ -125,7 +132,10 @@ export class PtahFormSectionComponent {
   protected readonly titleClass = TITLE_CLASS;
   protected readonly hintClass = HINT_CLASS;
   /** Toggles only. The static layout classes stay on the `class` attribute. */
-  protected readonly sectionToggles = computed(() => ({ [DIVIDER_CLASS]: this.divider() }));
+  protected readonly sectionToggles = computed(() => ({
+    [DIVIDER_CLASS]: this.divider(),
+    [WIDE_CLASS]: this.wide(),
+  }));
   protected readonly fieldsToggles = computed(() => ({ [DISABLED_CLASS]: this.disabled() }));
 
   private readonly hostRef = inject<ElementRef<HTMLElement>>(ElementRef);

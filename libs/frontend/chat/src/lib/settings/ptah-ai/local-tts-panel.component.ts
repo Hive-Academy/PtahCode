@@ -9,7 +9,12 @@ import {
   OnInit,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { LucideAngularModule, AlertCircle, Mic, Download } from 'lucide-angular';
+import {
+  LucideAngularModule,
+  AlertCircle,
+  Mic,
+  Download,
+} from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
   VoiceProviderConfigLocalDto,
@@ -22,7 +27,8 @@ import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahInputDirective,
-  PtahSelectDirective,
+  PtahRichSelectComponent,
+  PtahFieldGridDirective,
   PtahFormSectionComponent,
   PtahMeterComponent,
   PtahFieldComponent,
@@ -84,22 +90,16 @@ interface VoiceGroup {
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
-    PtahSelectDirective,
-  PtahFormSectionComponent,
-  PtahMeterComponent,
-  PtahFieldComponent,
-  PtahSettingRowComponent,
+    PtahRichSelectComponent,
+    PtahFieldGridDirective,
+    PtahFormSectionComponent,
+    PtahMeterComponent,
+    PtahFieldComponent,
+    PtahSettingRowComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <p class="text-xs text-base-content-muted mb-3">
-      Kokoro voice used to read replies aloud. Apache-licensed, runs locally;
-      the ~80 MB model downloads to
-      <code class="text-[10px] bg-base-300 px-1 rounded">~/.ptah/models/</code>
-      on first use.
-    </p>
-
     @if (errorMessage(); as message) {
       <div
         role="alert"
@@ -115,61 +115,72 @@ interface VoiceGroup {
       </div>
     }
 
-    <ptah-form-section heading="Local text to speech" level="3" data-testid="local-tts-panel-table">
-
+    <ptah-form-section
+      wide
+      description="Read replies aloud on this device."
+      heading="Local text to speech"
+      level="3"
+      data-testid="local-tts-panel-table"
+    >
+      <div ptahFieldGrid minColumn="sm">
         <!-- V13: source. Returning to Curated saves immediately; a custom source
              is committed by its Save button (V15). -->
-        <ptah-setting-row label="Source" hint="Choose where the voice model comes from.">
-            <div
-              class="flex items-center gap-1"
-              role="radiogroup"
-              aria-label="Model source"
-            >
-              @for (opt of sourceOptions; track opt.value) {
-                <button
-                  type="button"
-                  ptahButton
-                  size="xs"
-                  class="flex-1"
-                  [variant]="source() === opt.value ? 'primary' : 'ghost'"
-                  role="radio"
-                  [attr.aria-checked]="source() === opt.value"
-                  [ptahBusyDisabled]="saving()"
-                  (click)="onSourceChange(opt.value)"
-                  [attr.data-testid]="'local-tts-source-' + opt.value"
-                >
-                  {{ opt.label }}
-                </button>
-              }
-            </div>
+        <ptah-setting-row
+          label="Source"
+          hint="Choose where the voice model comes from."
+        >
+          <div
+            class="flex items-center gap-1"
+            role="radiogroup"
+            aria-label="Model source"
+          >
+            @for (opt of sourceOptions; track opt.value) {
+              <button
+                type="button"
+                ptahButton
+                size="xs"
+                class="flex-1"
+                [variant]="source() === opt.value ? 'primary' : 'ghost'"
+                role="radio"
+                [attr.aria-checked]="source() === opt.value"
+                [ptahBusyDisabled]="saving()"
+                (click)="onSourceChange(opt.value)"
+                [attr.data-testid]="'local-tts-source-' + opt.value"
+              >
+                {{ opt.label }}
+              </button>
+            }
+          </div>
         </ptah-setting-row>
 
         <!-- V15: custom id or folder (only for non-curated sources) -->
         @if (source() !== 'curated') {
-          <div class="flex flex-col gap-[var(--ptah-gap-field)]">
-            <div class="text-sm font-medium text-base-content">
-              Custom model
-            </div>
+          <div class="flex flex-col gap-ptah-field">
             <div class="min-w-0">
               <div class="flex items-center gap-1">
-                <input
-                  id="local-tts-custom"
-                  type="text"
-                  aria-label="Custom model id or folder"
-                  ptahInput
-                  size="sm"
-                  class="w-full"
-                  [invalid]="customModel().length > 0 && !customModelValid()"
-                  [value]="customModel()"
-                  [disabled]="saving()"
-                  [placeholder]="
-                    source() === 'hf'
-                      ? 'owner/kokoro-model (HF repo id)'
-                      : 'Absolute path to model folder'
-                  "
-                  (input)="onCustomModelInput($event)"
-                  data-testid="local-tts-custom-input"
-                />
+                <ptah-field
+                  class="flex-1"
+                  label="Custom model id or folder"
+                  hint="Enter an owner/name repository or an absolute folder path."
+                  ><input
+                    id="local-tts-custom"
+                    type="text"
+                    aria-label="Custom model id or folder"
+                    ptahInput
+                    size="sm"
+                    class="w-full"
+                    tone="mono"
+                    [invalid]="customModel().length > 0 && !customModelValid()"
+                    [value]="customModel()"
+                    [disabled]="saving()"
+                    [placeholder]="
+                      source() === 'hf'
+                        ? 'owner/kokoro-model (HF repo id)'
+                        : 'Absolute path to model folder'
+                    "
+                    (input)="onCustomModelInput($event)"
+                    data-testid="local-tts-custom-input"
+                /></ptah-field>
                 <button
                   type="button"
                   ptahButton
@@ -205,10 +216,7 @@ interface VoiceGroup {
         }
 
         <!-- V17: Kokoro voice -->
-        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
-          <div class="text-sm font-medium text-base-content">
-            Voice
-          </div>
+        <div class="flex flex-col gap-ptah-field">
           <div class="min-w-0">
             @if (isLoadingVoices()) {
               <div
@@ -218,132 +226,140 @@ interface VoiceGroup {
                 Loading voices…
               </div>
             } @else {
-              <ptah-field label="Voice" appearance="stacked">
-<select
-                id="local-tts-voice"
-                aria-label="Voice"
-                ptahSelect
-                size="sm"
-                class="w-full"
-                [value]="selectedVoice()"
-                [ptahBusyDisabled]="saving()"
-                (change)="onVoiceChange($event)"
-                data-testid="local-tts-voice-select"
+              <ptah-field
+                label="Voice"
+                hint="The local model downloads on first use."
               >
-                @for (group of voiceGroups(); track group.category) {
-                  <optgroup [label]="group.category">
-                    @for (voice of group.voices; track voice.id) {
-                      <option
-                        [value]="voice.id"
-                        [selected]="voice.id === selectedVoice()"
-                      >
-                        {{ voice.label }}
-                      </option>
-                    }
-                  </optgroup>
-                }
-              </select>
-</ptah-field>
+                <ptah-select
+                  #selectionControl
+                  id="local-tts-voice"
+                  aria-label="Voice"
+                  size="sm"
+                  class="w-full"
+                  [value]="selectedVoice()"
+                  [disabled]="saving()"
+                  (valueChange)="onVoiceChange($event, selectionControl)"
+                  data-testid="local-tts-voice-select"
+                  [options]="voiceOptions()"
+                />
+              </ptah-field>
             }
           </div>
         </div>
-
-        <!-- V18/V19: preview + download + live progress -->
-        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
-          <div class="text-sm font-medium text-base-content">
-            Download
-          </div>
-          <div class="min-w-0">
-            @if (isTtsDownloading()) {
-              <div
-                class="flex items-center gap-2"
-                data-testid="local-tts-download-status"
+      </div>
+      <!-- V18/V19: preview + download + live progress -->
+      <div class="flex flex-col gap-ptah-field">
+        <div class="text-sm font-medium text-base-content">Download</div>
+        <div class="min-w-0">
+          @if (isTtsDownloading()) {
+            <div
+              class="flex items-center gap-2"
+              data-testid="local-tts-download-status"
+            >
+              <ptah-meter
+                class="flex-1"
+                [value]="ttsDownloadPercent() ?? 0"
+                [indeterminate]="ttsDownloadPercent() === null"
+                [max]="100"
+                label="Voice model download progress"
+                [hideLabel]="true"
+                [showValue]="false"
+                barRole="progressbar"
+                data-testid="local-tts-download-progress"
+              />
+              <span
+                class="text-[10px] text-base-content-muted w-20 text-right"
+                role="status"
               >
-                <ptah-meter class="flex-1" [value]="ttsDownloadPercent() ?? 0"
-                  [indeterminate]="ttsDownloadPercent() === null" [max]="100"
-                  label="Voice model download progress" [hideLabel]="true"
-                  [showValue]="false" barRole="progressbar"
-                  data-testid="local-tts-download-progress" />
-                <span class="text-[10px] text-base-content-muted w-20 text-right" role="status">
-                  <span class="sr-only">Downloading voice model</span>
-                  <span aria-hidden="true">
-                    @if (ttsDownloadPercent() !== null) {
-                      Downloading {{ ttsDownloadPercent() }}%
-                    } @else {
-                      Starting…
-                    }
-                  </span>
+                <span class="sr-only">Downloading voice model</span>
+                <span aria-hidden="true">
+                  @if (ttsDownloadPercent() !== null) {
+                    Downloading {{ ttsDownloadPercent() }}%
+                  } @else {
+                    Starting…
+                  }
                 </span>
-              </div>
-            } @else {
-              <div class="flex items-center justify-between gap-2">
-                @if (downloaded()) {
+              </span>
+            </div>
+          } @else {
+            <div class="flex items-center justify-between gap-2">
+              @if (downloaded()) {
+                <span
+                  ptahBadge
+                  appearance="outline"
+                  class="gap-1 whitespace-nowrap text-base-content"
+                  data-testid="local-tts-download-status"
+                >
                   <span
-                    ptahBadge appearance="outline" class="gap-1 whitespace-nowrap text-base-content"
-                    data-testid="local-tts-download-status"
-                  >
-                    <span
-                      class="w-1.5 h-1.5 rounded-full bg-success"
-                      aria-hidden="true"
-                    ></span>
-                    Downloaded
-                  </span>
-                } @else {
+                    class="w-1.5 h-1.5 rounded-full bg-success"
+                    aria-hidden="true"
+                  ></span>
+                  Downloaded
+                </span>
+              } @else {
+                <span
+                  ptahBadge
+                  appearance="outline"
+                  class="gap-1 whitespace-nowrap text-base-content"
+                  data-testid="local-tts-download-status"
+                >
                   <span
-                    ptahBadge appearance="outline" class="gap-1 whitespace-nowrap text-base-content"
-                    data-testid="local-tts-download-status"
-                  >
-                    <span
-                      class="w-1.5 h-1.5 rounded-full bg-warning"
-                      aria-hidden="true"
-                    ></span>
-                    Not downloaded
-                  </span>
-                }
+                    class="w-1.5 h-1.5 rounded-full bg-warning"
+                    aria-hidden="true"
+                  ></span>
+                  Not downloaded
+                </span>
+              }
 
-                <div class="flex items-center gap-1">
-                  <button
-                    type="button"
-                    ptahButton
-                    variant="ghost"
-                    size="xs"
-                    [busy]="isPreviewing() || saving()"
-                    (click)="previewVoice()"
-                    data-testid="local-tts-preview-btn"
-                  >
-                    <lucide-angular
-                      [img]="MicIcon"
-                      class="w-3 h-3"
-                      aria-hidden="true"
-                    />
-                    <span>{{ isPreviewing() ? 'Playing…' : 'Preview' }}</span>
-                  </button>
-                  <button
-                    type="button"
-                    ptahButton
-                    size="xs"
-                    [busy]="saving()"
-                    [disabled]="!canDownload()"
-                    (click)="downloadTtsModel()"
-                    data-testid="local-tts-download-btn"
-                  >
-                    <lucide-angular
-                      [img]="DownloadIcon"
-                      class="w-3 h-3"
-                      aria-hidden="true"
-                    />
-                    <span>{{ downloaded() ? 'Ready' : 'Download' }}</span>
-                  </button>
-                </div>
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  ptahButton
+                  variant="ghost"
+                  size="xs"
+                  [busy]="isPreviewing() || saving()"
+                  (click)="previewVoice()"
+                  data-testid="local-tts-preview-btn"
+                >
+                  <lucide-angular
+                    [img]="MicIcon"
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                  <span>{{ isPreviewing() ? 'Playing…' : 'Preview' }}</span>
+                </button>
+                <button
+                  type="button"
+                  ptahButton
+                  size="xs"
+                  [busy]="saving()"
+                  [disabled]="!canDownload()"
+                  (click)="downloadTtsModel()"
+                  data-testid="local-tts-download-btn"
+                >
+                  <lucide-angular
+                    [img]="DownloadIcon"
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                  <span>{{ downloaded() ? 'Ready' : 'Download' }}</span>
+                </button>
               </div>
-            }
-          </div>
+            </div>
+          }
         </div>
-
+      </div>
     </ptah-form-section>
   `,
 })
 export class LocalTtsPanelComponent implements OnInit {
+  readonly voiceOptions = computed(() =>
+    this.voices().map((voice) => ({
+      value: voice.id,
+      label: voice.label,
+      group: voice.category ?? 'Voices',
+    })),
+  );
   private readonly rpc = inject(ClaudeRpcService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly downloadProgress = inject(VoiceDownloadProgressService);
@@ -513,9 +529,8 @@ export class LocalTtsPanelComponent implements OnInit {
   }
 
   /** V17: saves on selection with Undo; a failed write reverts the select (D15). */
-  async onVoiceChange(event: Event): Promise<void> {
-    const select = event.target as HTMLSelectElement;
-    const next = select.value;
+  async onVoiceChange(next: string | null, control: PtahRichSelectComponent<string>): Promise<void> {
+    if (next === null) return;
     const previous = this.selectedVoice();
     if (next === previous) return;
     await this.feedback.saveGeneric({
@@ -523,8 +538,8 @@ export class LocalTtsPanelComponent implements OnInit {
       write: () => this.writeVoice(next, previous),
       undo: () => this.writeVoice(previous, next),
     });
-    // The binding alone does not repaint when the signal ends where it started.
-    select.value = this.selectedVoice();
+    // Restore the menu model even if the write failed before the next render.
+    control.value.set(this.selectedVoice());
   }
 
   /**

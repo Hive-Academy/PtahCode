@@ -71,7 +71,9 @@ async function open(page: Page, modal: ModalCase): Promise<Locator> {
   const opener = modal.opener(page);
   if (modal.testid === 'cli-tier-mapping-modal') {
     await expandMatrixDetail(page, GLM_ID);
-    await page.locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`).click();
+    await page
+      .locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`)
+      .click();
   } else await opener.click();
   const dialog = dialogOf(page, modal.testid);
   await expect(dialog).toHaveAttribute('open', '');
@@ -207,11 +209,18 @@ for (const host of HOSTS) {
     test('edit modal (#50): a rename sends ptahCli:update with the new name only', async ({
       page,
     }) => {
+      // TASK_2026_2256_159f: the wider content column no longer collapses the lane table at the
+      // default viewport. These steps use the collapsed detail controls, as the More actions test does.
+      await page.setViewportSize({ width: 1024, height: 768 });
       // V36-7: Edit sits in the row's "More actions" popover; focus returns to that trigger.
       await expandMatrixDetail(page, GLM_ID);
-      const more = page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`);
+      const more = page.locator(
+        `#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`,
+      );
       await more.click();
-      await page.locator(`#lane-detail-${GLM_ID} [role="menuitem"]:text-is("Edit")`).click();
+      await page
+        .locator(`#lane-detail-${GLM_ID} [role="menuitem"]:text-is("Edit")`)
+        .click();
       const dialog = dialogOf(page, 'add-cli-instance-modal');
       await expect(dialog).toHaveAttribute('open', '');
       await expect(
@@ -235,9 +244,14 @@ for (const host of HOSTS) {
     test('cell pick: the Codex model cell, then a model, sends one agent:setConfig; Undo writes the previous model back', async ({
       page,
     }) => {
+      // TASK_2026_2256_159f: the wider content column no longer collapses the lane table at the
+      // default viewport. These steps use the collapsed detail controls, as the More actions test does.
+      await page.setViewportSize({ width: 1024, height: 768 });
       const state = getFixtureState(page);
       await expandMatrixDetail(page, 'codex');
-      const cell = page.locator('#lane-detail-codex [data-popover-kind="model"]');
+      const cell = page.locator(
+        '#lane-detail-codex [data-popover-kind="model"]',
+      );
       await cell.click();
       const popover = page.locator('[data-testid="cli-matrix-popover"]');
       const search = popover.locator('input[role="combobox"]');
@@ -270,6 +284,9 @@ for (const host of HOSTS) {
     test('on/off: a system CLI writes disabledClis and disables model editing; an instance writes ptahCli:update', async ({
       page,
     }) => {
+      // TASK_2026_2256_159f: the wider content column no longer collapses the lane table at the
+      // default viewport. These steps use the collapsed detail controls, as the More actions test does.
+      await page.setViewportSize({ width: 1024, height: 768 });
       const state = getFixtureState(page);
       const codexCard = page.locator('[data-testid="cli-provider-card-codex"]');
       await expandMatrixDetail(page, 'codex');
@@ -294,9 +311,7 @@ for (const host of HOSTS) {
         disabledClis: ['copilot'],
       });
       await expect(codex).toBeChecked();
-      await visibleEnabled(
-        codexModel.locator('[data-popover-kind="model"]'),
-      );
+      await visibleEnabled(codexModel.locator('[data-popover-kind="model"]'));
       // A Ptah CLI instance's on/off is its own `enabled` field.
       const glm = page.locator(`[data-testid="cli-matrix-toggle-${GLM_ID}"]`);
       before = state.calls.length;
@@ -323,9 +338,7 @@ for (const host of HOSTS) {
         `[id="${await search.getAttribute('aria-controls')}"]`,
       );
       // A compact field names each option by its ID, then its display name.
-      await listbox
-        .getByRole('option', { name: 'k3 K3', exact: true })
-        .click();
+      await listbox.getByRole('option', { name: 'k3 K3', exact: true }).click();
       await expectCall(page, before, 'ptahCli:update', {
         id: GLM_ID,
         tierMappings: { ...GLM_TIERS, sonnet: 'k3' },
@@ -371,7 +384,11 @@ for (const host of HOSTS) {
     }) => {
       await page.setViewportSize({ width: 1024, height: 768 });
       await expandMatrixDetail(page, GLM_ID);
-      await page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`).click();
+      await page
+        .locator(
+          `#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`,
+        )
+        .click();
       const menu = page.locator(`#lane-detail-${GLM_ID} [role="menu"]`);
       await expect(menu).toBeVisible();
       const panel = await menu.boundingBox();
@@ -396,12 +413,8 @@ for (const host of HOSTS) {
       }
       // A column: Delete sits under Edit, not beside it.
       const [edit, remove] = [
-        await menu
-          .getByRole('menuitem', { name: 'Edit' })
-          .boundingBox(),
-        await menu
-          .getByRole('menuitem', { name: 'Delete' })
-          .boundingBox(),
+        await menu.getByRole('menuitem', { name: 'Edit' }).boundingBox(),
+        await menu.getByRole('menuitem', { name: 'Delete' }).boundingBox(),
       ];
       expect(remove?.y ?? 0).toBeGreaterThan(edit?.y ?? 0);
     });
@@ -497,7 +510,6 @@ for (const host of HOSTS) {
       await expectClosedToOpener(page, modal);
     });
 
-
     test('Cursor key (Batch 36d.b): save, then remove; the row moves within the table, the detail and popover stay open, and Esc returns focus to the credentials trigger', async ({
       page,
       fixtureServer,
@@ -511,16 +523,12 @@ for (const host of HOSTS) {
       const expander = page.locator(
         '[data-testid="cli-provider-card-cursor"] button[aria-label="Details for Cursor"]',
       );
-      const detail = page.locator(
-        '#lane-detail-cursor',
-      );
+      const detail = page.locator('#lane-detail-cursor');
       const popover = page.locator('[data-testid="cursor-credential-popover"]');
       const key = popover.locator('[data-testid="cursor-credential-key"]');
       // Save moves Cursor above uninstalled rows while its detail stays open.
       await expandMatrixDetail(page, 'cursor');
-      await detail
-        .locator('[data-popover-kind="credentials"]')
-        .click();
+      await detail.locator('[data-popover-kind="credentials"]').click();
       await expect(key).toBeFocused();
       await key.fill('crsr_e2e_secret_value');
       await popover.locator('[data-testid="cursor-credential-save"]').click();
@@ -530,8 +538,14 @@ for (const host of HOSTS) {
       );
       await expect(installedTrigger).toBeVisible();
       await expect(expander).toHaveAttribute('aria-expanded', 'true');
-      await expect(detail.locator('[data-testid="cursor-credential-popover"]')).toBeVisible();
-      await expect.poll(() => popover.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+      await expect(
+        detail.locator('[data-testid="cursor-credential-popover"]'),
+      ).toBeVisible();
+      await expect
+        .poll(() =>
+          popover.evaluate((node) => node.contains(document.activeElement)),
+        )
+        .toBe(true);
       await expect(
         popover.locator('[data-testid="cursor-credential-status"]'),
       ).toHaveText('Set');
@@ -562,9 +576,15 @@ for (const host of HOSTS) {
       await page.keyboard.press('Escape');
       await expect(popover).toHaveCount(0);
       await expect(expander).toHaveAttribute('aria-expanded', 'true');
-      await expect(page.locator('[data-testid="cli-provider-card-cursor"]')).toBeVisible();
-      await expect(page.locator('[data-testid="cli-provider-card-cursor"]')).toContainText('Needs API key');
-      await expect(page.locator('[data-testid="cli-provider-card-cursor"]')).toHaveAttribute('data-state', 'muted');
+      await expect(
+        page.locator('[data-testid="cli-provider-card-cursor"]'),
+      ).toBeVisible();
+      await expect(
+        page.locator('[data-testid="cli-provider-card-cursor"]'),
+      ).toContainText('Needs API key');
+      await expect(
+        page.locator('[data-testid="cli-provider-card-cursor"]'),
+      ).toHaveAttribute('data-state', 'muted');
       await expect(installedTrigger).toBeFocused();
       // A second Esc changes nothing: the table stays visible.
       await page.keyboard.press('Escape');
@@ -617,6 +637,5 @@ for (const host of HOSTS) {
       await expect(popover).toHaveCount(0);
       await expect(trigger).toBeFocused();
     });
-
   });
 }

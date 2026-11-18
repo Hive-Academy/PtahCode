@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
   ClaudeAmbientStatusService,
@@ -220,6 +220,18 @@ class AmbientStub {
   readonly read = jest.fn(async (_refresh: boolean) => undefined);
 }
 
+@Component({
+  selector: 'ptah-read-states-host',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [CliOrchestrationMatrixComponent],
+  template: `
+    <ptah-cli-orchestration-matrix hostReadStates>
+      <p read-states role="alert" data-testid="projected-read-state">Could not load CLI agents.</p>
+    </ptah-cli-orchestration-matrix>
+  `,
+})
+class ReadStatesHostComponent {}
+
 describe('CliOrchestrationMatrixComponent', () => {
   let fixture: ComponentFixture<CliOrchestrationMatrixComponent>;
   let state: StateStub;
@@ -334,6 +346,29 @@ describe('CliOrchestrationMatrixComponent', () => {
     button(q('ptah-lanes-table'), 'Retry')?.click(); await flush();
     expect(state.refreshOrchestration).toHaveBeenCalledTimes(1);
     expect(state.refreshCliAgents).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides its own loading line when the host shows the read states', () => {
+    state.orchestration.set({ status: 'loading', data: null, error: null });
+    state.cliAgents.set({ status: 'loading', data: null, error: null });
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix"]')?.textContent).toContain('Loading CLI agents…');
+    fixture.componentRef.setInput('hostReadStates', true);
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix"]')?.textContent).not.toContain('Loading CLI agents…');
+  });
+
+  it('projects the host read states into the card, outside any busy region', () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'x' });
+    state.cliAgents.set({ status: 'error', data: null, error: 'x' });
+    const host = TestBed.createComponent(ReadStatesHostComponent);
+    host.detectChanges();
+    const root = host.nativeElement as HTMLElement;
+    const projected = root.querySelector('[data-testid="projected-read-state"]');
+    expect(root.querySelector('[data-testid="cli-matrix"]')?.getAttribute('aria-busy')).toBe('true');
+    expect(projected?.closest('[data-testid="settings-cli-matrix"]')).not.toBeNull();
+    expect(projected?.closest('[aria-busy="true"]')).toBeNull();
+    host.destroy();
   });
 
   it('opens the install guide and invokes Re-detect', async () => {
