@@ -1,0 +1,103 @@
+<section
+  aria-label="Detected project stack"
+  class="space-y-[var(--ptah-gap-heading)] rounded-[22px] border border-base-300 p-[var(--ptah-surface-pad)]"
+>
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h2 class="text-base font-semibold">Stack coverage</h2>
+    @if (!loading()) {
+      <p class="text-xs text-base-content-muted" data-coverage-count>
+        {{ coveredCount() }} of {{ items().length }} stack items covered
+      </p>
+    }
+  </div>
+  @if (loading()) {
+    <div role="status" aria-live="polite">
+      <span class="sr-only">Finding recommended skills</span>
+      <div class="flex flex-wrap gap-2">
+        @for (id of skeletons; track id) {
+          <ptah-skeleton class="w-28" shape="block" size="sm" />
+        }
+      </div>
+    </div>
+  } @else {
+    <div
+      role="group"
+      aria-label="Filter skills by stack item"
+      class="flex flex-wrap gap-[var(--ptah-gap-controls)]"
+    >
+      <button
+        ptahButton
+        type="button"
+        size="sm"
+        [selected]="activeItem() === null"
+        (click)="filterChanged.emit(null)"
+      >
+        All skills
+      </button>
+      @for (item of visibleItems(); track item.kind + ':' + item.name) {
+        <button
+          ptahButton
+          type="button"
+          size="sm"
+          [selected]="activeItem() === item.kind + ':' + item.name"
+          [title]="item.kind + ': ' + item.evidence"
+          [attr.aria-describedby]="descriptionId(item)"
+          [attr.aria-label]="accessibleName(item)"
+          (click)="
+            filterChanged.emit(
+              activeItem() === item.kind + ':' + item.name
+                ? null
+                : item.kind + ':' + item.name
+            )
+          "
+        >
+          <span class="sr-only" [id]="descriptionId(item)"
+            >{{ item.kind }}: {{ item.evidence }}</span
+          >
+          <ptah-status
+            [status]="status(item)"
+            appearance="dot"
+            size="xs"
+            [label]="summary(item)"
+          />{{ item.name
+          }}<span class="text-xs text-base-content-muted">{{
+            summary(item)
+          }}</span>
+        </button>
+      }
+      @if (!expanded() && items().length > 12) {
+        <button
+          ptahButton
+          type="button"
+          size="sm"
+          aria-expanded="false"
+          (click)="expand()"
+        >
+          +{{ items().length - 11 }} more
+        </button>
+      }
+    </div>
+    <div
+      class="flex flex-wrap gap-4 text-xs text-base-content-muted"
+      aria-label="Coverage legend"
+    >
+      <ptah-status
+        status="completed"
+        label="Covered"
+        appearance="inline"
+        size="xs"
+      /><ptah-status
+        status="pending"
+        label="Available"
+        appearance="inline"
+        size="xs"
+      /><ptah-status
+        status="warning"
+        label="No match or search failed"
+        appearance="inline"
+        size="xs"
+      />
+    </div>
+  }
+  <ng-content />
+</section>

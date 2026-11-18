@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Skills step — Coverage board prototype (TASK_2026_2269_0334)</title>
+<style>
+/* Token values copied from apps/ptah-extension-webview/tailwind.config.js (ptah-glass, ptah-glass-light),
+   apps/ptah-extension-webview/src/styles.css (--glass-*, --surface-*) and
+   libs/frontend/ui/src/lib/tokens/ptah-tokens.css (--ptah-*). Hex/oklch only, no network. */
+:root{
+  --ptah-space-1:.25rem;--ptah-space-2:.5rem;--ptah-space-3:.75rem;--ptah-space-4:1rem;--ptah-space-6:1.5rem;--ptah-space-8:2rem;
+  --ptah-gap-controls:var(--ptah-space-2);--ptah-gap-field:var(--ptah-space-4);--ptah-gap-group:var(--ptah-space-6);
+  --ptah-gap-section:var(--ptah-space-8);--ptah-gap-heading:var(--ptah-space-3);--ptah-surface-pad:var(--ptah-space-4);
+  --ptah-control-h-xs:1.5rem;--ptah-control-h-sm:2rem;--ptah-control-h-md:2.5rem;
+  --glass-radius:22px;--glass-radius-inner:14px;--glass-radius-sm:10px;--rounded-btn:9999px;--rounded-badge:9999px;
+  --ptah-focus-ring-width:2px;--ptah-focus-ring-offset:2px;--ptah-btn-disabled-opacity:.48;
+  --ptah-duration-fast:120ms;
+  --font-sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+}
+[data-theme="ptah-glass"]{
+  color-scheme:dark;
+  --p:#e4b94a;--pc:#1b1403;--b1:#17191d;--b2:#202329;--b3:#2a2e35;--bc:#f2f2f1;--bcm:oklch(90.05% .0071 268.54);
+  --ink-run:#93bdff;--ink-need:#ffb066;--ink-err:#ff9696;--ink-done:#5fe0a0;--ink-idle:#dcdee3;
+  --glass-fill:rgb(23 25 29 / .44);--glass-fill-raised:rgb(23 25 29 / .72);--glass-fill-tile:rgb(23 25 29 / .5);--glass-fill-input:rgb(23 25 29 / .58);
+  --line:rgb(255 255 255 / .12);--line-strong:rgb(242 242 241 / .28);--surface-2:#202329;
+  --backdrop:radial-gradient(1200px 700px at 15% -10%,#2b3140 0%,transparent 60%),radial-gradient(900px 600px at 110% 20%,#2a2416 0%,transparent 55%),#111316;
+}
+[data-theme="ptah-glass-light"]{
+  color-scheme:light;
+  --p:#7c5700;--pc:#fff8e6;--b1:#f7f3fd;--b2:#eee8f8;--b3:#e2daf1;--bc:#1e1936;--bcm:oklch(46.559% .0614 293.53);
+  --ink-run:#2449b0;--ink-need:#8f5200;--ink-err:#a31f26;--ink-done:#0f6434;--ink-idle:#5f5878;
+  --glass-fill:rgb(247 243 253 / .6);--glass-fill-raised:rgb(247 243 253 / .85);--glass-fill-tile:rgb(255 255 255 / .62);--glass-fill-input:rgb(255 255 255 / .8);
+  --line:rgb(30 25 54 / .12);--line-strong:rgb(30 25 54 / .26);--surface-2:#eee8f8;
+  --backdrop:radial-gradient(1200px 700px at 15% -10%,#e9defc 0%,transparent 60%),radial-gradient(900px 600px at 110% 20%,#fbeccc 0%,transparent 55%),#f3eefb;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--font-sans);font-size:.875rem;line-height:1.25rem;color:var(--bc);background:var(--backdrop);min-height:100vh}
+button{font:inherit;color:inherit}
+:focus-visible{outline:var(--ptah-focus-ring-width) solid var(--bc);outline-offset:var(--ptah-focus-ring-offset)}
+
+/* Prototype controls (not part of the design) */
+.proto-bar{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:8px 16px;
+  background:#0b0c0e;color:#e6e6e6;font:12px/1.4 var(--font-sans);border-bottom:1px solid #333}
+.proto-bar b{font-weight:600;color:#bbb;margin-right:4px}
+.proto-bar .grp{display:flex;gap:4px;align-items:center}
+.proto-bar button{background:#22252b;border:1px solid #3a3e46;color:#e6e6e6;border-radius:6px;padding:3px 9px;cursor:pointer;font-size:12px}
+.proto-bar button[aria-pressed="true"]{background:#e4b94a;color:#1b1403;border-color:#e4b94a}
+
+/* Window frame: simulates the Electron content width */
+.window{margin:16px auto;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:transparent;box-shadow:0 20px 60px rgb(0 0 0 / .35)}
+.titlebar{height:32px;display:flex;align-items:center;padding:0 12px;gap:8px;background:var(--glass-fill-raised);border-bottom:1px solid var(--line);font-size:12px;color:var(--bcm)}
+.titlebar i{width:10px;height:10px;border-radius:50%;background:var(--line-strong);display:inline-block}
+.window{position:relative}
+.scroller{height:var(--vp-h,688px);overflow:auto;position:relative}
+.root{container-type:inline-size;container-name:skills}
+
+/* Page */
+.page{margin:0 auto;padding:var(--ptah-space-4);display:flex;flex-direction:column;gap:var(--ptah-gap-group)}
+@container skills (min-width:720px){.page{max-width:1040px;padding:var(--ptah-space-4)}}
+@container skills (min-width:1100px){.page{max-width:1240px;padding:var(--ptah-space-6);display:grid;column-gap:var(--ptah-gap-group);row-gap:var(--ptah-gap-group);
+  grid-template-columns:minmax(0,1fr) 296px;grid-template-rows:auto auto 1fr;grid-template-areas:"header rail" "cov rail" "body rail";align-items:start}
+  .page>.header{grid-area:header}.page>.cov{grid-area:cov}.page>.body{grid-area:body}}
+@container skills (min-width:1440px){.page{max-width:1440px;grid-template-columns:minmax(0,1fr) 320px}}
+
+.header{display:flex;flex-wrap:wrap;gap:var(--ptah-gap-heading);align-items:flex-start;justify-content:space-between}
+.header .lead{display:flex;gap:var(--ptah-gap-heading);align-items:flex-start;min-width:0}
+.header h1{margin:0;font-size:1.25rem;line-height:1.75rem;font-weight:600}
+.header p{margin:2px 0 0;color:var(--bcm)}
+.header .meta{font-size:.75rem;color:var(--bcm);margin-top:4px}
+.header .meta code{font-family:var(--font-mono);font-size:.6875rem}
+
+.section{border:1px solid var(--line);border-radius:var(--glass-radius);background:var(--glass-fill);padding:var(--ptah-surface-pad);backdrop-filter:blur(18px)}
+h2{margin:0;font-size:1rem;line-height:1.5rem;font-weight:600}
+.sec-head{display:flex;align-items:center;justify-content:space-between;gap:var(--ptah-gap-controls);margin-bottom:var(--ptah-gap-heading)}
+.sec-head .sub{font-size:.75rem;color:var(--bcm)}
+
+/* Buttons (PtahButtonDirective look) */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--ptah-control-h-sm);padding:0 var(--ptah-space-3);border-radius:var(--rounded-btn);
+  border:1px solid transparent;background:transparent;cursor:pointer;font-weight:500;white-space:nowrap;transition:background-color var(--ptah-duration-fast),border-color var(--ptah-duration-fast)}
+.btn svg{width:14px;height:14px}
+.btn-md{height:var(--ptah-control-h-md);padding:0 var(--ptah-space-4)}
+.btn-xs{height:var(--ptah-control-h-xs);padding:0 var(--ptah-space-2);font-size:.75rem}
+.btn-primary{background:var(--p);color:var(--pc);font-weight:600}
+.btn-primary:hover{background:color-mix(in oklch,var(--p) 88%,var(--bc))}
+.btn-secondary{background:var(--surface-2);border-color:color-mix(in oklch,var(--bc) 55%,var(--b1))}
+.btn-secondary:hover{background:var(--b3)}
+.btn-ghost:hover{background:var(--b3)}
+.btn-ghost.muted{color:var(--bcm)}
+.btn-link{color:var(--p);padding:0;height:auto;font-size:.75rem}
+[data-theme="ptah-glass"] .btn-link{color:#f2cd6b}
+.btn-link:hover{text-decoration:underline}
+.btn[disabled]{opacity:var(--ptah-btn-disabled-opacity);cursor:not-allowed}
+.btn.busy{opacity:.8;cursor:progress}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin 720ms linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.w-full{width:100%}
+
+/* Badges (ptahBadge look) */
+.badge{display:inline-flex;align-items:center;gap:4px;height:16px;padding:0 6px;border-radius:var(--rounded-badge);font-size:.6875rem;line-height:1rem;font-weight:500;white-space:nowrap}
+.badge.outline{border:1px solid var(--line-strong);color:var(--bc)}
+.badge.accent{border:1px solid color-mix(in oklch,var(--p) 70%,transparent);background:color-mix(in oklch,var(--p) 16%,transparent);color:var(--bc)}
+.badge.ok{background:color-mix(in oklch,var(--ink-done) 16%,transparent);color:var(--ink-done)}
+.badge.count{background:var(--b3);color:var(--bc)}
+
+/* Coverage strip */
+.strip{display:flex;flex-wrap:wrap;gap:var(--ptah-gap-controls)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:var(--ptah-control-h-sm);padding:0 12px 0 10px;border-radius:var(--rounded-btn);
+  border:1px solid var(--line-strong);background:var(--glass-fill-tile);cursor:pointer;font-size:.8125rem}
+.chip:hover{background:var(--surface-2)}
+.chip[aria-pressed="true"]{border-color:var(--p);background:color-mix(in oklch,var(--p) 16%,var(--glass-fill-tile))}
+.chip .g{width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border-radius:50%}
+.chip .n{font-size:.6875rem;color:var(--bcm)}
+.g.done{background:var(--ink-done);color:var(--b1)}
+.g.idle{border:1.5px solid var(--ink-idle)}
+.g.need{background:transparent;color:var(--ink-need);border:1.5px solid var(--ink-need);border-radius:3px;transform:rotate(45deg)}
+.g.need span{transform:rotate(-45deg)}
+.chip.none{border-color:color-mix(in oklch,var(--ink-need) 60%,transparent)}
+.chip.none .n{color:var(--ink-need)}
+.legend{display:flex;gap:16px;margin-top:var(--ptah-gap-heading);font-size:.75rem;color:var(--bcm);flex-wrap:wrap}
+.legend span{display:inline-flex;gap:6px;align-items:center}
+
+/* Alerts */
+.alert{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:var(--glass-radius-sm);border:1px solid var(--line);margin-top:var(--ptah-gap-heading);font-size:.8125rem}
+.alert.info{border-color:color-mix(in oklch,var(--ink-run) 50%,transparent);background:color-mix(in oklch,var(--ink-run) 10%,transparent)}
+.alert.warn{border-color:color-mix(in oklch,var(--ink-need) 50%,transparent);background:color-mix(in oklch,var(--ink-need) 10%,transparent)}
+.alert.err{border-color:color-mix(in oklch,var(--ink-err) 50%,transparent);background:color-mix(in oklch,var(--ink-err) 10%,transparent)}
+.alert .ic{font-weight:700}
+.alert.info .ic{color:var(--ink-run)}.alert.warn .ic{color:var(--ink-need)}.alert.err .ic{color:var(--ink-err)}
+.alert .grow{flex:1}
+
+/* Body layout: main + rail */
+.body{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--ptah-gap-group);align-items:start}
+.main{display:flex;flex-direction:column;gap:var(--ptah-gap-section);min-width:0}
+
+/* Toolbar search */
+.toolbar{display:flex;gap:var(--ptah-gap-controls);align-items:flex-end;flex-wrap:wrap}
+.field{flex:1;min-width:220px;display:flex;flex-direction:column;gap:4px}
+.field label{font-size:.75rem;font-weight:500;color:var(--bcm)}
+.input{height:var(--ptah-control-h-md);border-radius:var(--glass-radius-sm);border:1px solid color-mix(in oklch,var(--bc) 55%,var(--b1));background:var(--glass-fill-input);
+  color:var(--bc);padding:0 12px 0 34px;font:inherit;width:100%}
+.input-wrap{position:relative}
+.input-wrap svg{position:absolute;left:11px;top:50%;width:14px;height:14px;transform:translateY(-50%);color:var(--bcm)}
+.field-err{color:var(--ink-err);font-size:.75rem;display:flex;gap:6px;align-items:center;margin-top:6px}
+
+/* Grid of cards */
+.grid{list-style:none;margin:0;padding:0;display:grid;gap:var(--ptah-gap-field);grid-template-columns:minmax(0,1fr);grid-auto-rows:1fr}
+@container skills (min-width:720px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container skills (min-width:1440px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.grid.dim{opacity:.48}
+
+/* Skill pick card */
+.card{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:var(--ptah-gap-heading);height:100%;
+  padding:var(--ptah-surface-pad);border:1px solid var(--line);border-radius:var(--glass-radius-inner);background:var(--glass-fill-tile);cursor:pointer;
+  transition:background-color var(--ptah-duration-fast),border-color var(--ptah-duration-fast)}
+.card:hover{border-color:var(--line-strong);background:var(--surface-2)}
+.card:has(input:focus-visible){outline:var(--ptah-focus-ring-width) solid var(--bc);outline-offset:var(--ptah-focus-ring-offset)}
+.card[data-selected]{border-color:color-mix(in oklch,var(--p) 70%,transparent);background:color-mix(in oklch,var(--p) 8%,var(--glass-fill-tile))}
+.card[data-selected]:hover{border-color:var(--p)}
+.card input{appearance:none;width:18px;height:18px;margin:3px 0 0;border-radius:5px;border:1.5px solid color-mix(in oklch,var(--bc) 55%,var(--b1));background:var(--glass-fill-input);display:grid;place-items:center;cursor:pointer}
+.card input:checked{background:var(--p);border-color:var(--p)}
+.card input:checked::after{content:"";width:10px;height:6px;border-left:2px solid var(--pc);border-bottom:2px solid var(--pc);transform:rotate(-45deg) translate(1px,-1px)}
+.card input:focus-visible{outline:none}
+.c-body{display:flex;flex-direction:column;gap:6px;min-width:0}
+.c-top{display:flex;gap:8px;align-items:center;min-width:0}
+.c-name{font-size:1rem;line-height:1.5rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.c-meta{display:flex;gap:8px;align-items:center;font-size:.75rem;line-height:1rem;color:var(--bcm);min-width:0}
+.c-src{font-family:var(--font-mono);font-size:.6875rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.c-dl{display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
+.c-dl svg{width:12px;height:12px}
+.c-desc{margin:4px 0 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.c-desc.fallback{color:var(--bcm)}
+.c-covers{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:auto;padding-top:6px}
+.c-covers .lbl{font-size:.75rem;font-weight:500;color:var(--bcm);margin-right:2px}
+.c-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.75rem;color:var(--bcm)}
+
+/* Skeleton */
+.sk{border-radius:var(--glass-radius-inner);background:linear-gradient(90deg,var(--b2),var(--b3),var(--b2));background-size:200% 100%;animation:shimmer 1.4s ease-in-out infinite}
+.sk-card{height:150px}.sk-chip{height:32px;width:110px;border-radius:9999px}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+@media (prefers-reduced-motion:reduce){.sk,.spin{animation:none}*{transition:none!important}}
+
+/* State panel */
+.state-panel{text-align:center;padding:40px 16px;border:1px dashed var(--line-strong);border-radius:var(--glass-radius-inner)}
+.state-panel h3{margin:0 0 4px;font-size:.875rem;font-weight:600}
+.state-panel p{margin:0 0 12px;color:var(--bcm)}
+
+/* No match panel */
+.nomatch{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.nomatch li{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;padding:12px 14px;border:1px solid color-mix(in oklch,var(--ink-need) 40%,var(--line));border-radius:var(--glass-radius-inner);background:var(--glass-fill-tile)}
+.nomatch .nm{font-weight:600}.nomatch .k{color:var(--bcm);font-size:.75rem}
+.nomatch .acts{display:flex;gap:8px}
+
+/* Selection rail */
+.rail{display:none}
+@container skills (min-width:1100px){.rail{grid-area:rail;align-self:start;display:flex;flex-direction:column;gap:var(--ptah-gap-field);position:sticky;top:var(--ptah-space-6);
+  max-height:calc(var(--vp-h,688px) - 2 * var(--ptah-space-6));overflow:hidden;background:var(--glass-fill-raised)}}
+.rail>.rail-head{flex:none}
+.rail .count{font-size:1.25rem;line-height:1.75rem;font-weight:600}
+.rail .count small{font-size:.875rem;font-weight:400;color:var(--bcm)}
+.meter{height:6px;border-radius:9999px;background:var(--b3);overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;background:var(--ink-done);border-radius:9999px;transition:width var(--ptah-duration-fast)}
+.cov-line{font-size:.75rem;color:var(--bcm);margin-top:6px}
+.sel-list{list-style:none;margin:0;padding:0;flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.sel-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 4px 4px 8px;border-radius:8px}
+.sel-list li:hover{background:var(--surface-2)}
+.sel-list .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8125rem}
+.icon-btn{width:24px;height:24px;border-radius:9999px;border:0;background:transparent;cursor:pointer;display:inline-grid;place-items:center;color:var(--bcm)}
+.icon-btn:hover{background:var(--b3);color:var(--bc)}
+.icon-btn svg{width:12px;height:12px}
+.rail .empty-sel{color:var(--bcm);font-size:.8125rem;margin:0}
+.rail-actions{flex:none;display:flex;flex-direction:column;gap:6px;padding-top:var(--ptah-space-3);border-top:1px solid var(--line)}
+.rail-hint{font-size:.75rem;line-height:1rem;color:var(--bcm);margin:0}
+.rail-hint.scripts{display:flex;gap:6px}.rail-hint.scripts::before{content:"!";flex:none;width:14px;height:14px;border-radius:50%;border:1.5px solid var(--ink-need);color:var(--ink-need);font-size:9px;font-weight:700;display:inline-grid;place-items:center}
+
+/* Sticky bottom bar (720-1099) and inline row (<720) */
+.bar{position:sticky;bottom:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  padding:12px var(--ptah-space-4);border-top:1px solid var(--line);background:var(--glass-fill-raised);backdrop-filter:blur(18px)}
+.bar .sum{font-size:.8125rem}.bar .sum small{display:block;color:var(--bcm);font-size:.75rem}
+.bar .acts{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.bar .right{display:flex;flex-direction:column;gap:4px;align-items:flex-end;max-width:100%}
+.bar .rail-hint{text-align:right}
+@container skills (min-width:1100px){.bar{display:none}}
+@container skills (max-width:719px){.bar{flex-direction:column;align-items:stretch}.bar .right{align-items:stretch}.bar .rail-hint{text-align:left}}
+
+/* Consent modal (ptah-stack-skill-consent in ptah-native-modal size lg): layout unchanged, confirm label changed (A4) */
+.backdrop{position:absolute;inset:32px 0 0 0;z-index:40;background:rgb(0 0 0 / .5);display:grid;place-items:center;padding:24px}
+.modal{width:min(720px,100%);max-height:calc(var(--vp-h,688px) - 48px);display:flex;flex-direction:column;border:1px solid var(--line-strong);border-radius:var(--glass-radius);
+  background:var(--b1);box-shadow:0 24px 64px rgb(0 0 0 / .45)}
+.modal header{padding:16px 20px 0}.modal header h2{font-size:1.125rem}.modal header p{margin:4px 0 0;color:var(--bcm)}
+.modal .m-body{flex:1 1 auto;min-height:0;max-height:60vh;overflow:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+.modal footer{flex:none;display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:12px 20px 16px;border-top:1px solid var(--line)}
+.cs{border:1px solid var(--line);border-radius:var(--glass-radius-inner);background:var(--glass-fill-tile);padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.cs .nm{font-weight:600;word-break:break-all}.cs .hash{font-family:var(--font-mono);font-size:.6875rem;color:var(--bcm);word-break:break-all}
+.cs .flag{font-size:.8125rem}.cs .flag.scr{color:var(--ink-need)}.cs .flag.ok{color:var(--ink-done)}
+.cs details{font-size:.8125rem}.cs summary{cursor:pointer;color:var(--bcm)}.cs details ul{margin:4px 0 0;padding-left:18px;font-family:var(--font-mono);font-size:.75rem}
+.cs .approve{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:var(--glass-radius-sm);border:1px solid color-mix(in oklch,var(--ink-need) 45%,var(--line));background:color-mix(in oklch,var(--ink-need) 8%,transparent);cursor:pointer}
+.cs .approve input{width:16px;height:16px;margin:2px 0 0;accent-color:var(--p)}
+.next{position:absolute;inset:32px 0 0 0;z-index:45;background:var(--backdrop);display:grid;place-items:center;padding:24px}
+.next .section{max-width:560px;text-align:center;display:flex;flex-direction:column;gap:12px;align-items:center}
+.next h2{font-size:1.25rem}.next p{margin:0;color:var(--bcm)}
+body.bare .proto-bar{display:none}body.bare .window{margin:0;border:0;border-radius:0;box-shadow:none}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.hidden{display:none!important}
+</style>
+</head>
+<body data-theme="ptah-glass">
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <div class="grp"><b>Theme</b>
+    <button data-theme-btn="ptah-glass" aria-pressed="true">Dark</button>
+    <button data-theme-btn="ptah-glass-light" aria-pressed="false">Light</button></div>
+  <div class="grp"><b>State</b>
+    <button data-state-btn="selected" aria-pressed="true">Selected (populated)</button>
+    <button data-state-btn="none" aria-pressed="false">None selected</button>
+    <button data-state-btn="loading" aria-pressed="false">Loading</button>
+    <button data-state-btn="empty" aria-pressed="false">Empty</button>
+    <button data-state-btn="searcherr" aria-pressed="false">Search error</button>
+    <button data-state-btn="reset" aria-pressed="false">Re-run reset</button>
+    <button data-state-btn="error" aria-pressed="false">Load error</button>
+    <button data-state-btn="consent" aria-pressed="false">Consent</button></div>
+  <div class="grp"><b>Window</b>
+    <button data-width-btn="900" data-h="700" aria-pressed="false">900×700</button>
+    <button data-width-btn="1280" data-h="720" aria-pressed="true">1280×720</button>
+    <button data-width-btn="1600" data-h="900" aria-pressed="false">1600×900</button></div>
+</div>
+
+<div class="window" id="win" style="width:1280px;--vp-h:688px">
+  <div class="titlebar"><i></i><i></i><i></i><span>Ptah — Setup · Skills</span></div>
+  <div class="scroller" id="scroller">
+    <div class="root">
+      <div class="page">
+        <header class="header">
+          <div class="lead">
+            <button class="btn btn-ghost" type="button" id="backBtn" aria-label="Back to analysis">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>Back</button>
+            <div>
+              <h1 id="title" tabindex="-1">Choose skills for your stack</h1>
+              <p>Skills teach your agents the tools this project uses. All recommended skills are selected. You can continue without any.</p>
+              <div class="meta">Analysis <code>ptah-extension · 2026-11-18 09:42</code></div>
+            </div>
+          </div>
+          <button class="btn btn-secondary" type="button" id="rerunBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+            <span>Re-run skill search</span></button>
+        </header>
+
+        <section class="section cov" aria-labelledby="cov-title" data-testid="stack-coverage-strip">
+          <div class="sec-head"><h2 id="cov-title">Stack coverage</h2><span class="sub" id="covSub"></span></div>
+          <div class="strip" role="group" aria-label="Filter skills by stack item" id="strip"></div>
+          <div class="legend" id="legend">
+            <span><i class="chip-g g done" style="width:12px;height:12px;border-radius:50%;display:inline-block"></i>Covered by a selected skill</span>
+            <span><i class="g idle" style="width:12px;height:12px;border-radius:50%;display:inline-block"></i>Skills available, none selected</span>
+            <span><i class="g need" style="width:10px;height:10px;display:inline-block"></i>No match in the registry</span>
+          </div>
+          <div id="alerts"></div>
+        </section>
+
+        <div class="body">
+          <div class="main">
+            <section aria-labelledby="find-title">
+              <h2 id="find-title" class="sr-only">Find more skills</h2>
+              <form class="toolbar" id="searchForm" role="search">
+                <div class="field"><label for="q">Find more skills</label>
+                  <div class="input-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                  <input class="input" id="q" name="skill-search" placeholder="Search the skill registry" autocomplete="off" /></div>
+                  <div id="searchErr" class="field-err hidden" role="alert">⚠ Skill search failed. Try again.</div>
+                </div>
+                <button class="btn btn-secondary btn-md" type="submit" id="searchBtn">Search</button>
+              </form>
+            </section>
+
+            <section id="resultsSec" class="hidden" aria-labelledby="res-title">
+              <div class="sec-head"><h2 id="res-title">Search results</h2><button class="btn btn-ghost btn-xs" type="button" id="clearRes">Clear</button></div>
+              <ul class="grid" id="resGrid" role="list"></ul>
+            </section>
+
+            <section aria-labelledby="rec-title" aria-busy="false" id="recSec">
+              <div class="sec-head"><h2 id="rec-title">Recommended for this workspace <span class="badge count" id="recCount"></span></h2>
+                <button class="btn btn-ghost btn-xs hidden" type="button" id="showAll">Show all</button></div>
+              <div id="recBody"></div>
+            </section>
+
+            <section aria-labelledby="nm-title" id="nmSec">
+              <div class="sec-head"><h2 id="nm-title">No match in the registry <span class="badge count">1</span></h2></div>
+              <ul class="nomatch">
+                <li><div><span class="nm">Electron</span> <span class="k">· framework · apps/ptah-electron/package.json</span></div>
+                  <div class="acts"><button class="btn btn-secondary btn-xs" type="button" id="searchElectron">Search for Electron</button>
+                  <button class="btn btn-ghost btn-xs" type="button">Draft a project skill</button></div></li>
+              </ul>
+            </section>
+          </div>
+        </div>
+      <aside class="rail section" aria-labelledby="sel-title" data-testid="skill-selection-rail">
+        <div class="rail-head">
+          <h2 id="sel-title">Your selection</h2>
+          <div class="count" aria-live="polite" id="railCount"></div>
+          <div class="meter" aria-hidden="true"><i id="meter"></i></div>
+          <div class="cov-line" id="covLine"></div>
+        </div>
+        <ul class="sel-list" id="selList" aria-label="Selected skills"></ul>
+        <div class="rail-actions">
+          <button class="btn btn-primary btn-md w-full" type="button" id="primary" data-testid="skill-install-primary" aria-describedby="hint1 hint2"></button>
+          <button class="btn btn-ghost muted w-full" type="button" id="skip">Skip skills</button>
+          <p class="rail-hint" id="hint1"></p>
+          <p class="rail-hint scripts" id="hint2"></p>
+        </div>
+      </aside>
+      </div>
+      <div class="bar" role="region" aria-label="Skill selection actions">
+        <div class="sum" id="barSum"></div>
+        <div class="right"><div class="acts"><button class="btn btn-ghost muted" type="button" id="skip2">Skip skills</button>
+          <button class="btn btn-primary btn-md" type="button" id="primary2" aria-describedby="hint1b hint2b"></button></div>
+          <p class="rail-hint" id="hint1b"></p><p class="rail-hint scripts" id="hint2b"></p></div>
+      </div>
+    </div>
+  </div>
+  <div class="backdrop hidden" id="consent">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="skill-consent-title" data-testid="skill-consent-modal">
+      <header><h2 id="skill-consent-title" tabindex="-1">Review skill installation</h2>
+        <p>Review the files and approve each skill that contains scripts.</p></header>
+      <div class="m-body" id="consentBody"></div>
+      <footer><button class="btn btn-ghost" type="button" id="consentBack">Back</button>
+        <button class="btn btn-primary btn-md" type="button" id="consentOk"></button></footer>
+    </div>
+  </div>
+  <div class="next hidden" id="next"><div class="section" role="status">
+    <h2 id="nextTitle"></h2><p id="nextBody"></p>
+    <button class="btn btn-secondary" type="button" id="nextBack">Back to the prototype</button></div></div>
+</div>
+
+<script>
+const STACK = [
+  {name:'Angular',kind:'framework',evidence:'@angular/core ~22.2.0'},
+  {name:'TypeScript',kind:'language',evidence:'typescript 6.0.3'},
+  {name:'Nx',kind:'tool',evidence:'nx.json, nx 24.0.0'},
+  {name:'Tailwind CSS',kind:'library',evidence:'tailwindcss ^3.4.18'},
+  {name:'Playwright',kind:'test-tool',evidence:'@playwright/test ^1.50.0'},
+  {name:'Jest',kind:'test-tool',evidence:'jest ^30.0.2'},
+  {name:'RxJS',kind:'library',evidence:'rxjs 7.8.2'},
+  {name:'Electron',kind:'framework',evidence:'electron ^44.4.3',unmatched:true},
+];
+const SKILLS = [
+  {source:'vercel-labs/agent-skills',skillId:'angular-best-practices',name:'angular-best-practices',installs:12400,description:'Signals, standalone components, OnPush and built-in control flow rules for modern Angular projects.',evidence:'Angular',url:'#'},
+  {source:'hive-academy/skills',skillId:'angular-playwright-testing',name:'angular-playwright-testing',installs:3120,description:'Write stable Playwright tests for Angular apps: harnesses, locators by role, and fixture setup.',evidence:'Angular, Playwright',url:'#'},
+  {source:'tailwindlabs/skills',skillId:'tailwind-design-tokens',name:'tailwind-design-tokens',installs:21500,description:'Map design tokens to Tailwind theme values and keep utility classes consistent across components.',evidence:'Tailwind CSS',url:'#'},
+  {source:'mattpocock/skills',skillId:'typescript-strict',name:'typescript-strict',installs:15200,description:'Strict TypeScript patterns: narrow unknown values, avoid casts, and type public APIs precisely.',evidence:'TypeScript',url:'#'},
+  {source:'nrwl/nx-ai-skills',skillId:'nx-workspace',name:'nx-workspace',installs:8900,description:'Run affected targets, read the project graph, and keep module boundaries in an Nx monorepo.',evidence:'Nx',url:'#'},
+  {source:'microsoft/playwright-skills',skillId:'playwright-e2e',name:'playwright-e2e',installs:9800,description:'End-to-end test structure, trace review and flaky test triage with Playwright.',evidence:'Playwright',url:'#',isInstalled:true,scripts:['scripts/record-trace.sh','scripts/triage-flaky.mjs']},
+  {source:'testing-library/skills',skillId:'jest-unit-testing',name:'jest-unit-testing',installs:4400,description:'Behaviour-first unit tests with Jest: fakes over mocks, fake timers, and clear assertions.',evidence:'Jest',url:'#'},
+  {source:'acme/rx-skills',skillId:'rxjs-patterns',name:'rxjs-patterns',installs:312,description:'',evidence:'RxJS'},
+  {source:'acme/ts-skills',skillId:'typescript-monorepo-refs',name:'typescript-monorepo-refs-and-path-aliases',installs:0,description:'Project references and path aliases for TypeScript monorepos.',evidence:'TypeScript, Nx'},
+];
+const RESULTS = [
+  {source:'electron/agent-skills',skillId:'electron-security',name:'electron-security',installs:2750,description:'Context isolation, sandbox, IPC sender checks and safe openExternal for Electron apps.',evidence:''},
+  {source:'acme/desktop-skills',skillId:'electron-ipc-patterns',name:'electron-ipc-patterns',installs:640,description:'',evidence:''},
+];
+const key = s => s.source + '/' + s.skillId;
+const fmt = n => n === 0 ? 'New' : n < 1000 ? String(n) : (n/1000).toFixed(n < 10000 ? 1 : 1).replace(/\.0$/,'') + 'k';
+const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const covers = s => s.evidence ? s.evidence.split(',').map(x=>x.trim()).filter(Boolean) : [];
+const DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>';
+const X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+
+const S = { selected:new Set(SKILLS.map(key)), filter:null, view:'selected', results:false, searching:false, searchErr:false, reset:false, previewed:null, approved:new Set(), installing:false };
+const sameSel = () => !!S.previewed && S.previewed.size === S.selected.size && [...S.selected].every(k => S.previewed.has(k));
+const installLabel = n => n === 1 ? 'Install 1 skill and continue' : `Install ${n} skills and continue`;
+const all = () => [...SKILLS, ...(S.results ? RESULTS : [])];
+
+function coverage(){
+  return STACK.map(it => {
+    if (it.unmatched) return {...it, state:'none', sel:0, tot:0};
+    const skills = SKILLS.filter(s => covers(s).includes(it.name));
+    const sel = skills.filter(s => S.selected.has(key(s))).length;
+    return {...it, state: sel ? 'covered' : 'available', sel, tot:skills.length};
+  });
+}
+
+function card(s){
+  const k = key(s), sel = S.selected.has(k), cv = covers(s);
+  const desc = s.description ? `<p class="c-desc" title="${esc(s.description)}">${esc(s.description)}</p>`
+    : `<p class="c-desc fallback">${esc(s.source)} - ${s.installs.toLocaleString('en-US')} installs</p>`;
+  const chips = cv.length ? `<div class="c-covers"><span class="lbl">Covers</span>${cv.slice(0,3).map(c=>`<span class="badge ${c===S.filter?'accent':'outline'}">${esc(c)}</span>`).join('')}${cv.length>3?`<span class="badge outline">+${cv.length-3}</span>`:''}</div>` : '<div class="c-covers"></div>';
+  const foot = (s.url || s.isInstalled) ? `<div class="c-foot"><span>${s.isInstalled?'Select to reinstall this version.':''}</span>${s.url?`<a class="btn btn-link" href="${s.url}" onclick="event.stopPropagation();event.preventDefault()">View on skills.sh ↗</a>`:''}</div>` : '';
+  return `<li><label class="card" data-testid="skill-pick-card" ${sel?'data-selected':''} title="${esc(k)}">
+    <input type="checkbox" ${sel?'checked':''} data-key="${esc(k)}" aria-label="Select ${esc(s.name)}" aria-describedby="m-${esc(s.skillId)}" />
+    <span class="c-body">
+      <span class="c-top"><span class="c-name">${esc(s.name)}</span>${s.isInstalled?'<span class="badge ok">✓ Installed</span>':''}</span>
+      <span class="c-meta" id="m-${esc(s.skillId)}"><span class="c-src">${esc(s.source)}</span><span aria-hidden="true">·</span>
+        <span class="c-dl" aria-label="${s.installs.toLocaleString('en-US')} installs">${DL}${fmt(s.installs)}</span></span>
+      ${desc}${chips}${foot}
+    </span></label></li>`;
+}
+
+function render(){
+  const loading = S.view === 'loading', empty = S.view === 'empty', error = S.view === 'error';
+  const cov = coverage();
+  const covered = cov.filter(c=>c.state==='covered').length;
+  const n = [...S.selected].length, total = all().length;
+
+  // strip
+  const strip = document.getElementById('strip');
+  if (loading) strip.innerHTML = Array.from({length:6},()=>'<span class="sk sk-chip"></span>').join('');
+  else strip.innerHTML = cov.map(c => {
+    const g = c.state==='covered' ? '<span class="g done">✓</span>' : c.state==='none' || empty ? '<span class="g need"><span>!</span></span>' : '<span class="g idle"></span>';
+    const st = empty ? 'none' : c.state;
+    const note = st==='none' ? 'no match' : `${c.sel}/${c.tot}`;
+    const name = st==='none' ? `${c.name}, no match in the registry` : `${c.name}, covered by ${c.sel} of ${c.tot} skills`;
+    return `<button type="button" class="chip ${st==='none'?'none':''}" aria-pressed="${S.filter===c.name}" data-item="${esc(c.name)}" title="${esc(c.kind+' · '+c.evidence)}" aria-label="${esc(name)}">${g}${esc(c.name)}<span class="n">${note}</span></button>`;
+  }).join('');
+  document.getElementById('covSub').textContent = loading ? 'Reading your stack…' : empty ? `0 of ${STACK.length} stack items covered` : `${covered} of ${STACK.length} stack items covered`;
+
+  // alerts
+  let a = '';
+  if (S.reset) a += `<div class="alert info" role="status"><span class="ic">i</span><span class="grow">Skill selection was reset to the new recommendations.</span><button class="icon-btn" type="button" id="dismissReset" aria-label="Dismiss">${X}</button></div>`;
+  if (!loading && !error) a += `<div class="alert warn" role="status"><span class="ic">!</span><span class="grow">Search failed for 1 stack item. <span style="color:var(--bcm)">RxJS: registry timeout, partial results shown.</span></span></div>`;
+  document.getElementById('alerts').innerHTML = a;
+
+  // rerun
+  const rr = document.getElementById('rerunBtn');
+  rr.disabled = loading; rr.classList.toggle('busy', loading);
+  rr.querySelector('svg').style.display = loading ? 'none' : '';
+  rr.querySelector('.spin')?.remove(); if (loading) rr.insertAdjacentHTML('afterbegin','<span class="spin" aria-hidden="true"></span>');
+
+  // search
+  document.getElementById('searchErr').classList.toggle('hidden', !S.searchErr);
+  const sb = document.getElementById('searchBtn');
+  sb.disabled = S.searching; sb.innerHTML = S.searching ? '<span class="spin" aria-hidden="true"></span>Searching…' : 'Search';
+  const rs = document.getElementById('resultsSec');
+  rs.classList.toggle('hidden', !(S.results || S.searching));
+  document.getElementById('res-title').textContent = S.searching ? 'Searching skills…' : 'Search results for “electron”';
+  document.getElementById('resGrid').innerHTML = S.searching ? '<li class="sk sk-card"></li><li class="sk sk-card"></li>' : RESULTS.map(card).join('');
+
+  // recommended
+  const recBody = document.getElementById('recBody');
+  const list = S.filter ? SKILLS.filter(s=>covers(s).includes(S.filter)) : SKILLS;
+  document.getElementById('recCount').textContent = loading ? '…' : empty || error ? '0' : (S.filter ? `${list.length} of ${SKILLS.length}` : SKILLS.length);
+  document.getElementById('showAll').classList.toggle('hidden', !S.filter);
+  document.getElementById('recSec').setAttribute('aria-busy', String(loading));
+  if (loading) recBody.innerHTML = `<p class="sr-only" role="status" aria-live="polite">Finding recommended skills</p><ul class="grid" role="list">${Array.from({length:6},()=>'<li class="sk sk-card"></li>').join('')}</ul>`;
+  else if (error) recBody.innerHTML = `<div class="state-panel" role="alert"><h3>Could not find skills. Try again or skip this step.</h3><p>The skill registry did not answer.</p><button class="btn btn-secondary" type="button" data-rerun>Re-run skill search</button></div>`;
+  else if (empty) recBody.innerHTML = `<div class="state-panel"><h3>No skills match your stack yet</h3><p>Search the registry, or continue without skills.</p><button class="btn btn-secondary" type="button" data-focus-search>Search the registry</button></div>`;
+  else if (S.filter && !list.length) recBody.innerHTML = `<div class="state-panel"><h3>No recommended skill covers ${esc(S.filter)}</h3><p>Search the registry for it, or draft a project skill below.</p></div>`;
+  else recBody.innerHTML = `<ul class="grid" role="list">${list.map(card).join('')}</ul>`;
+
+  document.getElementById('nmSec').classList.toggle('hidden', loading || error);
+
+  // rail + bar
+  const label = n ? installLabel(n) : 'Continue without skills';
+  const h1 = n ? 'Installs the selected skills in this workspace, then opens the next step.' : 'Opens the next step. No skill is installed.';
+  let h2 = '';
+  if (n && !loading) {
+    if (sameSel()) { const sc = all().filter(s => S.selected.has(key(s)) && s.scripts).length;
+      h2 = sc ? `${sc} selected ${sc===1?'skill contains':'skills contain'} scripts. You approve ${sc===1?'it':'them'} before the install.` : ''; }
+    else h2 = 'You approve skills that contain scripts before the install.';
+  }
+  for (const id of ['hint1','hint1b']) document.getElementById(id).textContent = loading ? '' : h1;
+  for (const id of ['hint2','hint2b']) { const el = document.getElementById(id); el.textContent = h2; el.classList.toggle('hidden', !h2); }
+  const stackN = STACK.length;
+  const covTxt = `Covers ${empty?0:covered} of ${stackN} stack items`;
+  document.getElementById('railCount').innerHTML = loading ? '<small>Finding skills…</small>' : `${n} <small>of ${empty||error?0:total} selected</small>`;
+  document.getElementById('meter').style.width = ((empty||loading?0:covered)/stackN*100)+'%';
+  document.getElementById('covLine').textContent = loading ? '' : covTxt;
+  const selNames = all().filter(s=>S.selected.has(key(s)));
+  document.getElementById('selList').innerHTML = selNames.length ? selNames.map(s=>`<li><span class="nm" title="${esc(key(s))}">${esc(s.name)}</span><button class="icon-btn" type="button" data-remove="${esc(key(s))}" aria-label="Remove ${esc(s.name)}">${X}</button></li>`).join('') : `<li><p class="empty-sel">${loading?'':'No skills selected. You can add skills later from Settings.'}</p></li>`;
+  for (const id of ['primary','primary2']) { const b = document.getElementById(id); b.textContent = label; b.disabled = loading; }
+  for (const id of ['skip','skip2']) document.getElementById(id).classList.toggle('hidden', n === 0);
+  document.getElementById('barSum').innerHTML = loading ? 'Finding skills…' : `${n} of ${empty||error?0:total} selected<small>${covTxt}</small>`;
+}
+
+document.addEventListener('change', e => {
+  if (e.target.dataset && e.target.dataset.approve) { const a = e.target.dataset.approve; e.target.checked ? S.approved.add(a) : S.approved.delete(a); renderConsent(); return; }
+  const k = e.target.dataset && e.target.dataset.key; if (!k) return;
+  S.selected.has(k) ? S.selected.delete(k) : S.selected.add(k); S.reset = false; render();
+  const el = document.querySelector(`input[data-key="${CSS.escape(k)}"]`); el && el.focus();
+});
+document.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.item) { S.filter = S.filter === t.dataset.item ? null : t.dataset.item; render(); document.querySelector(`[data-item="${CSS.escape(t.dataset.item)}"]`).focus(); }
+  else if (t.dataset.remove) { S.selected.delete(t.dataset.remove); render(); }
+  else if (t.id === 'showAll') { S.filter = null; render(); }
+  else if (t.id === 'dismissReset') { S.reset = false; render(); }
+  else if (t.id === 'clearRes') { S.results = false; RESULTS.forEach(r=>S.selected.delete(key(r))); render(); }
+  else if (t.id === 'searchElectron') { document.getElementById('q').value = 'electron'; runSearch(); }
+  else if (t.hasAttribute('data-focus-search')) document.getElementById('q').focus();
+  else if (t.id === 'rerunBtn' || t.hasAttribute('data-rerun')) { setView('loading'); setTimeout(()=>{ S.selected = new Set(SKILLS.map(key)); S.reset = true; setView('selected', true); }, 1200); }
+  else if (t.id === 'primary' || t.id === 'primary2') {
+    if (!S.selected.size) { showNext(false); return; }
+    for (const id of ['primary','primary2']) { const b = document.getElementById(id); b.classList.add('busy'); b.disabled = true; b.innerHTML = '<span class="spin" aria-hidden="true"></span>Preparing install…'; }
+    setTimeout(()=>{ openConsent(); render(); }, 900); }
+  else if (t.id === 'skip' || t.id === 'skip2') showNext(false, true);
+  else if (t.id === 'consentBack') { if (!S.installing) closeConsent(); }
+  else if (t.id === 'consentOk') { S.installing = true; renderConsent(); setTimeout(()=>{ S.installing = false; closeConsent(); showNext(true); }, 1100); }
+  else if (t.id === 'nextBack') { document.getElementById('next').classList.add('hidden'); setView('selected'); }
+});
+function openConsent(){ S.previewed = new Set(S.selected); S.approved = new Set(); document.getElementById('consent').classList.remove('hidden'); renderConsent(); document.getElementById('skill-consent-title').focus(); }
+function closeConsent(){ document.getElementById('consent').classList.add('hidden'); for (const id of ['primary','primary2']) document.getElementById(id).classList.remove('busy'); render(); document.getElementById('primary').focus(); }
+function renderConsent(){
+  const sel = all().filter(s => S.previewed && S.previewed.has(key(s)));
+  const hashOf = s => [...(s.skillId+s.source)].reduce((h,c)=>((h*31+c.charCodeAt(0))>>>0),7).toString(16).padStart(8,'0').repeat(8);
+  document.getElementById('consentBody').innerHTML = sel.map(s => {
+    const files = ['SKILL.md','references/patterns.md','references/checklist.md', ...(s.scripts||[])];
+    return `<section class="cs" aria-label="${esc(s.name)}"><div class="nm">${esc(s.name)}</div><div class="hash">Content hash: ${hashOf(s)}</div>
+      ${s.scripts ? '<div class="flag scr">Contains scripts</div>' : '<div class="flag ok">No scripts detected</div>'}
+      ${s.scripts ? `<details open><summary>Scripts (${s.scripts.length})</summary><ul>${s.scripts.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></details>` : ''}
+      <details><summary>All files (${files.length})</summary><ul>${files.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></details>
+      ${s.scripts ? `<label class="approve"><input type="checkbox" data-approve="${esc(s.name)}" ${S.approved.has(s.name)?'checked':''} ${S.installing?'disabled':''}/><span>I approve installing this exact version of ${esc(s.name)} with its scripts.</span></label>` : ''}</section>`;
+  }).join('');
+  const allApproved = sel.length > 0 && sel.filter(s=>s.scripts).every(s => S.approved.has(s.name));
+  const ok = document.getElementById('consentOk');
+  ok.disabled = S.installing || !allApproved; ok.classList.toggle('busy', S.installing);
+  ok.innerHTML = S.installing ? '<span class="spin" aria-hidden="true"></span>Installing…' : esc(installLabel(sel.length));
+  document.getElementById('consentBack').disabled = S.installing;
+}
+function showNext(installed, skipped){
+  const n = installed ? S.previewed.size : 0;
+  document.getElementById('nextTitle').textContent = 'Next step: Project guidance';
+  document.getElementById('nextBody').textContent = (installed ? `${n} ${n===1?'skill was':'skills were'} installed in this workspace.` : skipped ? 'No skill was installed (Skip skills).' : 'No skill was installed.') + ' In the team-builder host, the chat opens here instead.';
+  document.getElementById('next').classList.remove('hidden');
+}
+function runSearch(){
+  const q = document.getElementById('q').value.trim(); if (!q) return;
+  S.searching = true; S.searchErr = false; render();
+  setTimeout(()=>{ S.searching = false; if (S.view === 'searcherr') S.searchErr = true; else S.results = true; render(); }, 900);
+}
+document.getElementById('searchForm').addEventListener('submit', e => { e.preventDefault(); runSearch(); });
+
+function setView(v, keepReset){
+  S.view = v; S.filter = null; S.searchErr = false; if (!keepReset) S.reset = false;
+  if (v === 'selected') S.selected = new Set(SKILLS.map(key));
+  if (v === 'none' || v === 'empty' || v === 'error' || v === 'loading') S.selected = new Set();
+  if (v === 'searcherr') { S.selected = new Set(SKILLS.map(key)); S.results = false; S.searchErr = true; document.getElementById('q').value = 'electron'; }
+  if (v === 'reset') { S.selected = new Set(SKILLS.map(key)); S.reset = true; }
+  document.getElementById('consent').classList.add('hidden'); S.previewed = null;
+  if (v === 'consent') S.selected = new Set(['vercel-labs/agent-skills/angular-best-practices','microsoft/playwright-skills/playwright-e2e']);
+  document.querySelectorAll('[data-state-btn]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.stateBtn === v)));
+  document.getElementById('next').classList.add('hidden');
+  render();
+  if (v === 'consent') openConsent();
+}
+document.querySelectorAll('[data-state-btn]').forEach(b => b.addEventListener('click', () => setView(b.dataset.stateBtn)));
+document.querySelectorAll('[data-theme-btn]').forEach(b => b.addEventListener('click', () => {
+  document.body.dataset.theme = b.dataset.themeBtn;
+  document.querySelectorAll('[data-theme-btn]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+}));
+const params = new URLSearchParams(location.search);
+document.querySelectorAll('[data-width-btn]').forEach(b => b.addEventListener('click', () => {
+  const w = document.getElementById('win'); w.style.width = b.dataset.widthBtn + 'px';
+  w.style.setProperty('--vp-h', ((Number(params.get('height')) || Number(b.dataset.h)) - 32) + 'px');
+  document.querySelectorAll('[data-width-btn]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+}));
+if (params.get('theme')) document.querySelector(`[data-theme-btn="${params.get('theme')}"]`)?.click();
+if (params.get('width')) document.querySelector(`[data-width-btn="${params.get('width')}"]`)?.click();
+if (params.get('frame') === '0') document.body.classList.add('bare');
+setView(params.get('state') || 'selected');
+</script>
+</body>
+</html>
