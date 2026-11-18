@@ -382,7 +382,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('resends a direct command whose send already settled with authoritative absent', async () => {
     send.mockResolvedValueOnce({ success: true, settled: true });
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     await run();
     expect(send).toHaveBeenCalledTimes(2);

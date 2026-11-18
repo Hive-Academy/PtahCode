@@ -146,7 +146,7 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           .fill('Create a backend TypeScript review and release team.');
         await page.getByRole('button', { name: 'Review skills' }).click();
         await expect(
-          page.getByRole('heading', { name: 'Review skills' }),
+          page.getByRole('heading', { name: 'Choose skills for your stack' }),
         ).toBeVisible();
         await expect(
           page.getByRole('checkbox', { name: 'Select TypeScript review' }),
@@ -158,7 +158,7 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           page.getByRole('heading', { name: 'Project guidance', exact: true }),
         ).toBeVisible();
         await expect(
-          page.getByRole('button', { name: 'Skip skills' }),
+          page.getByRole('button', { name: 'Continue without skills' }),
         ).toBeEnabled();
         await shoot(page, {
           view: `${size.prefix}team-builder-skill-review`,
@@ -208,9 +208,11 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           .fill('Create a backend TypeScript review and release team.');
         await page.getByRole('button', { name: 'Review skills' }).click();
         await expect(
-          page.getByRole('heading', { name: 'Review skills' }),
+          page.getByRole('heading', { name: 'Choose skills for your stack' }),
         ).toBeVisible();
-        await page.getByRole('button', { name: 'Skip skills' }).click();
+        await page
+          .getByRole('button', { name: 'Continue without skills' })
+          .click();
 
         await expect(page.getByTestId('onboarding-shell')).toHaveCount(0);
         await expect(
