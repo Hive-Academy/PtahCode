@@ -174,7 +174,7 @@ const LIMIT_CLASSIFIER_ERROR_SEGMENTS = 8;
 const LIMIT_CLASSIFIER_SEGMENT_CHARS = 4 * 1024;
 /** Exit-zero output is prose; accept only provider-shaped error lines. */
 const STRUCTURED_EXIT_ZERO_LIMIT_ERROR =
-  /^(?:API rate limit \(HTTP 429\)|API Error: Request rejected \((?:402|429)\)|(?:HTTP(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*(?:402|429)\b[^\n]*(?:usage|quota|rate limit|RESOURCE_EXHAUSTED|balance exhausted|Too Many Requests))/im;
+  /^(?:API rate limit \(HTTP 429\)|API Error: Request rejected \((?:402|429)\)|\s*(?:"message":\s*")?API error \(status 402 Payment Required\):\s*Grok Build usage balance exhausted\b|\{"type":"error","message":"(?:Internal error: \{\\n\s*\\"message\\": \\")?API error \(status 402 Payment Required\):\s*Grok Build usage balance exhausted\b|(?:HTTP(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*(?:402|429)\b[^\n]*(?:usage|quota|rate limit|RESOURCE_EXHAUSTED|balance exhausted|Too Many Requests))/im;
 const STRUCTURED_EXIT_ZERO_AUTH_ERROR =
   /^(?:API Error: Request rejected \(401\)|(?:HTTP(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*401\b|Authentication (?:failed|required)\b|Invalid API key\b|Not logged in\b)/im;
 /**

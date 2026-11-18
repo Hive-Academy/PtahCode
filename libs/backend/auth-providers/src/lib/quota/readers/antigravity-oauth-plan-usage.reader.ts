@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { PlanLimitWindow, PlanWindowKind } from '@ptah-extension/shared';
-import type { PlanUsageReading } from './plan-usage-reader.types';
+import type { PlanUsageReading, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
 
 const TokenSchema = z.object({
   client_id: z.string().min(1),
@@ -47,20 +47,47 @@ const ModelsSchema = z.object({
     }),
   ),
 });
-const unavailable = (): PlanUsageReading => ({
-  status: 'service-unavailable',
-  windowSetEstablished: false,
-  windows: [],
-});
-const noPlan = (): PlanUsageReading => ({
-  status: 'no-usage-source',
-  windowSetEstablished: false,
-  windows: [],
-});
+export interface AntigravitySourceFailure {
+  readonly source: UsageSourceLabel;
+  readonly reason: UsageFailureReason;
+  readonly cause: 'missing-token-file' | 'invalid-grant' | 'http-rejection' |
+    'schema-mismatch' | 'timeout' | 'missing-local-server' | 'account-mismatch' |
+    'request-failed' | 'source-unavailable';
+  readonly httpStatus?: number;
+}
+export type AntigravityUsageReading = PlanUsageReading & {
+  readonly sourceFailures?: readonly AntigravitySourceFailure[];
+};
+export function antigravityFailure(
+  source: UsageSourceLabel,
+  cause: AntigravitySourceFailure['cause'],
+  httpStatus?: number,
+): AntigravityUsageReading {
+  const reason: UsageFailureReason = cause === 'missing-token-file' ? 'no-oauth'
+    : cause === 'invalid-grant' || cause === 'http-rejection' ? 'usage-auth-rejected'
+    : cause === 'schema-mismatch' ? 'cli-parse-failed'
+    : cause === 'timeout' ? 'usage-budget-exhausted'
+    : cause === 'missing-local-server' ? 'no-local-server'
+    : cause === 'account-mismatch' ? 'account-unverified' : 'cli-unavailable';
+  return { status: 'service-unavailable',
+    statusReason: reason,
+    windowSetEstablished: false, windows: [],
+    sourceFailures: [{ source, reason, cause, ...(httpStatus !== undefined && { httpStatus }) }] };
+}
+
+async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new Error('aborted');
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error('aborted'));
+    signal.addEventListener('abort', abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
 const ENDPOINTS = [
   'https://daily-cloudcode-pa.googleapis.com',
   'https://cloudcode-pa.googleapis.com',
 ];
+export const ANTIGRAVITY_OAUTH_TIMEOUT_MS = 10_000;
 const MAX_BODY_BYTES = 256 * 1024;
 let cachedAccess:
   | {
@@ -82,147 +109,96 @@ export async function readAntigravityOAuthQuota(
   signal?: AbortSignal,
   now: () => number = Date.now,
   fetcher: typeof fetch = fetch,
-  readAuth: typeof readFile = readFile,
+  readAuth: (path: string, encoding: 'utf8') => Promise<string> = readFile,
   env: NodeJS.ProcessEnv = process.env,
   retryUnauthorized = true,
-): Promise<PlanUsageReading | undefined> {
-  if (signal?.aborted) return unavailable();
-  const profile =
-    env['ANTIGRAVITY_HOME']?.trim() ||
-    join(env['HOME'] || env['USERPROFILE'] || homedir(), '.gemini');
-  let raw: string;
-  try {
-    raw = await readAuth(
-      join(profile, 'antigravity-acp', 'acp_token.json'),
-      'utf8',
-    );
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT'
-      ? { status: 'no-usage-source', statusReason: 'no-oauth', windowSetEstablished: false, windows: [] }
-      : unavailable();
-  }
-  let token: ReturnType<typeof TokenSchema.safeParse>;
-  try {
-    token = TokenSchema.safeParse(JSON.parse(raw));
-  } catch {
-    return unavailable();
-  }
-  if (!token.success) return unavailable();
+): Promise<AntigravityUsageReading> {
+  const failure = (cause: AntigravitySourceFailure['cause'], status?: number) =>
+    antigravityFailure('provider-api', cause, status);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) controller.abort();
+  const timeout = setTimeout(abort, ANTIGRAVITY_OAUTH_TIMEOUT_MS);
+  const bounded = <T>(work: Promise<T>) => abortable(work, controller.signal);
   try {
-    let accessToken =
-      cachedAccess?.refreshToken === token.data.refresh_token &&
-      cachedAccess.fetcher === fetcher
-        ? cachedAccess
-        : undefined;
-    if (!accessToken || accessToken.expiresAt <= now()) {
-      const params = new URLSearchParams({
-        client_id: token.data.client_id,
-        client_secret: token.data.client_secret,
-        refresh_token: token.data.refresh_token,
-        grant_type: 'refresh_token',
-      });
-      const refreshed = await fetcher('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        body: params,
-        redirect: 'error',
-        signal: controller.signal,
-      });
-      if (refreshed.status === 403) return noPlan();
-      if (!refreshed.ok) {
-        if (refreshed.status === 400) {
-          const error = await boundedJson(refreshed);
-          if (
-            z.object({ error: z.string() }).safeParse(error).data?.error ===
-            'invalid_grant'
-          ) {
-            cachedAccess = undefined;
-            return {
-              status: 'unsupported-auth',
-              windowSetEstablished: false,
-              windows: [],
-            };
-          }
-        }
-        return unavailable();
-      }
-      const access = RefreshSchema.safeParse(await boundedJson(refreshed));
-      if (!access.success) return unavailable();
-      accessToken = {
-        refreshToken: token.data.refresh_token,
-        fetcher,
-        token: access.data.access_token,
-        expiresAt: now() + access.data.expires_in * 1000 - 60_000,
-      };
-      cachedAccess = accessToken;
+    if (controller.signal.aborted) return failure('timeout');
+    const profile = env['ANTIGRAVITY_HOME']?.trim() ||
+      join(env['HOME'] || env['USERPROFILE'] || homedir(), '.gemini');
+    let raw: string;
+    try {
+      raw = await bounded(readAuth(join(profile, 'antigravity-acp', 'acp_token.json'), 'utf8'));
+    } catch (error: unknown) {
+      if (controller.signal.aborted) return failure('timeout');
+      return failure(error instanceof Error && 'code' in error && error.code === 'ENOENT'
+        ? 'missing-token-file' : 'request-failed');
     }
-    const observedAt = now();
-    let forbidden = false;
-    for (const operation of [
-      'retrieveUserQuotaSummary',
-      'fetchAvailableModels',
-    ] as const) {
-      for (const endpoint of ENDPOINTS) {
-        try {
-          const response = await fetcher(
-            `${endpoint}/v1internal:${operation}`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${accessToken.token}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(
-                token.data.project_id ? { project: token.data.project_id } : {},
-              ),
-              redirect: 'error',
-              signal: controller.signal,
-            },
-          );
-          if (response.status === 403) {
-            forbidden = true;
+    let token: z.infer<typeof TokenSchema>;
+    try { token = TokenSchema.parse(JSON.parse(raw)); }
+    catch (error: unknown) {
+      return failure(error instanceof Error ? 'schema-mismatch' : 'request-failed');
+    }
+    let lastFailure = failure('schema-mismatch');
+    for (let attempt = 0; attempt < (retryUnauthorized ? 2 : 1); attempt++) {
+      let accessToken = cachedAccess?.refreshToken === token.refresh_token &&
+        cachedAccess.fetcher === fetcher ? cachedAccess : undefined;
+      if (!accessToken || accessToken.expiresAt <= now()) {
+        const refreshed = await bounded(fetcher('https://oauth2.googleapis.com/token', {
+          method: 'POST', redirect: 'error', signal: controller.signal,
+          body: new URLSearchParams({ client_id: token.client_id, client_secret: token.client_secret,
+            refresh_token: token.refresh_token, grant_type: 'refresh_token' }),
+        }));
+        if (!refreshed.ok) {
+          if (refreshed.status === 400) {
+            const body = await bounded(boundedJson(refreshed));
+            if (z.object({ error: z.string() }).safeParse(body).data?.error === 'invalid_grant') {
+              cachedAccess = undefined;
+              return failure('invalid-grant', 400);
+            }
+          }
+          return failure('http-rejection', refreshed.status);
+        }
+        const access = RefreshSchema.safeParse(await bounded(boundedJson(refreshed)));
+        if (!access.success) return failure('schema-mismatch');
+        accessToken = { refreshToken: token.refresh_token, fetcher, token: access.data.access_token,
+          expiresAt: now() + access.data.expires_in * 1000 - 60_000 };
+        cachedAccess = accessToken;
+      }
+      let unauthorized = false;
+      for (const operation of ['retrieveUserQuotaSummary', 'fetchAvailableModels'] as const) {
+        for (const endpoint of ENDPOINTS) {
+          const response = await bounded(fetcher(`${endpoint}/v1internal:${operation}`, {
+            method: 'POST', headers: { Authorization: `Bearer ${accessToken.token}`,
+              'Content-Type': 'application/json' },
+            body: JSON.stringify(token.project_id ? { project: token.project_id } : {}),
+            redirect: 'error', signal: controller.signal,
+          }));
+          if (!response.ok) {
+            lastFailure = failure('http-rejection', response.status);
+            if (response.status === 401) { cachedAccess = undefined; unauthorized = true; break; }
             continue;
           }
-          if (response.status === 401) {
-            cachedAccess = undefined;
-            return retryUnauthorized
-              ? readAntigravityOAuthQuota(
-                  signal,
-                  now,
-                  fetcher,
-                  readAuth,
-                  env,
-                  false,
-                )
-              : unavailable();
-          }
-          if (!response.ok) continue;
-          const body: unknown = await boundedJson(response);
-          const windows =
-            operation === 'retrieveUserQuotaSummary'
-              ? summaryWindows(body, observedAt)
-              : modelWindows(body, observedAt);
-          if (windows.length)
-            return {
-              status: 'available',
-              fetchedAt: observedAt,
-              windowSetEstablished: true,
-              windows,
-            };
-        } catch {
-          if (controller.signal.aborted) return unavailable();
+          const body = await bounded(boundedJson(response));
+          const observedAt = now();
+          const windows = operation === 'retrieveUserQuotaSummary'
+            ? summaryWindows(body, observedAt) : modelWindows(body, observedAt);
+          if (windows.length) return { status: 'available', fetchedAt: observedAt,
+            windowSetEstablished: true, windows };
+          lastFailure = failure('schema-mismatch');
         }
+        if (unauthorized) break;
       }
+      if (!unauthorized) break;
     }
-    return forbidden ? noPlan() : unavailable();
-  } catch {
-    return unavailable();
+    return lastFailure;
+  } catch (error: unknown) {
+    return failure(controller.signal.aborted ? 'timeout'
+      : error instanceof SyntaxError || error instanceof z.ZodError ? 'schema-mismatch'
+      : 'request-failed');
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', abort);
+    controller.abort();
   }
 }
 

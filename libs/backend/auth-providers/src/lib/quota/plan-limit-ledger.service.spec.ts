@@ -269,7 +269,10 @@ describe('PlanLimitLedgerService — window and owner evidence', () => {
 
   it('clears only older provider API evidence for all models', () => {
     const { ledger } = harness();
-    ledger.recordOwnerEvidence(OWNER_A, { observedAt: T0, source: 'provider-api' });
+    ledger.recordOwnerEvidence(OWNER_A, {
+      observedAt: T0,
+      source: 'provider-api',
+    });
     ledger.clearProviderOwnerEvidence(OWNER_A, T0);
     expect(ledger.snapshotFor(OWNER_A.key)?.ownerEvidence).toHaveLength(1);
     ledger.clearProviderOwnerEvidence(OWNER_A, T0 + 1);
@@ -354,18 +357,25 @@ describe('PlanLimitLedgerService — removeProviderWindowEvidence', () => {
   it('uses the exhaustion stamp for the cutoff and removes a passed cutoff', () => {
     const { ledger } = harness();
     ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0);
-    ledger.recordWindowEvidence(OWNER_A, readWindow(KEY, T0 - 1, 100, {
-      exhaustion: { observedAt: T0 + 1, source: 'provider-api' },
-    }));
+    ledger.recordWindowEvidence(
+      OWNER_A,
+      readWindow(KEY, T0 - 1, 100, {
+        exhaustion: { observedAt: T0 + 1, source: 'provider-api' },
+      }),
+    );
     expect(windowOf(ledger, OWNER_A, KEY)).toBeDefined();
-    expect(Reflect.get(ledger, 'providerWindowRemovalCutoffs').has(OWNER_A.key)).toBe(false);
+    expect(
+      Reflect.get(ledger, 'providerWindowRemovalCutoffs').has(OWNER_A.key),
+    ).toBe(false);
   });
 
   it('prunes cutoffs older than a minute when another removal is recorded', () => {
     const { ledger } = harness();
     ledger.removeProviderWindowEvidence(OWNER_A, KEY, T0);
     ledger.removeProviderWindowEvidence(OWNER_B, KEY, T0 + 60_001);
-    expect(Reflect.get(ledger, 'providerWindowRemovalCutoffs').has(OWNER_A.key)).toBe(false);
+    expect(
+      Reflect.get(ledger, 'providerWindowRemovalCutoffs').has(OWNER_A.key),
+    ).toBe(false);
   });
 
   it('does not apply the provider cutoff to lane-error evidence', () => {
@@ -689,10 +699,20 @@ describe('PlanLimitLedgerService — clearing (F22, F23, F62-F66)', () => {
       const { ledger } = harness();
       ledger.recordWindowEvidence(OWNER_A, {
         ...readWindow('weekly', T0, 100, { resetsAt: OLD_RESET }),
-        exhaustion: { observedAt: T0, source: 'error-derived', resetsAt: OLD_RESET },
+        exhaustion: {
+          observedAt: T0,
+          source: 'error-derived',
+          resetsAt: OLD_RESET,
+        },
       });
-      ledger.recordWindowEvidence(OWNER_A, readWindow('weekly', T0 + MINUTE, 7, { resetsAt: OLD_RESET }));
-      expect(windowOf(ledger, OWNER_A, 'weekly')?.exhaustion).toMatchObject({ source: 'error-derived', resetsAt: OLD_RESET });
+      ledger.recordWindowEvidence(
+        OWNER_A,
+        readWindow('weekly', T0 + MINUTE, 7, { resetsAt: OLD_RESET }),
+      );
+      expect(windowOf(ledger, OWNER_A, 'weekly')?.exhaustion).toMatchObject({
+        source: 'error-derived',
+        resetsAt: OLD_RESET,
+      });
     });
 
     it('keeps a stream-reported hit when the reset of the read moves forward', () => {
@@ -712,7 +732,10 @@ describe('PlanLimitLedgerService — clearing (F22, F23, F62-F66)', () => {
     });
 
     it.each([
-      ['a reached type', { reachedType: 'workspace_owner_usage_limit_reached' }],
+      [
+        'a reached type',
+        { reachedType: 'workspace_owner_usage_limit_reached' },
+      ],
       ['a spend control', { spendControlReached: true }],
     ])('keeps a table-reported hit while the read names %s', (_name, gate) => {
       const { ledger } = harness();
@@ -1191,22 +1214,42 @@ describe('PlanLimitLedgerService — persistence (P6, F24, F74)', () => {
     const storage = memoryStorage();
     const first = harness({ storage });
     first.ledger.recordOwnerEvidence(OWNER_A, {
-      observedAt: T0 - 1, source: 'error-derived',
-      pattern: 'grok-balance-exhausted', resetsAt: T0 + HOUR,
+      observedAt: T0 - 1,
+      source: 'error-derived',
+      pattern: 'grok-balance-exhausted',
+      resetsAt: T0 + HOUR,
     });
     first.ledger.recordOwnerEvidence(OWNER_B, {
-      observedAt: T0 - 1, source: 'error-derived',
-      pattern: 'grok-free-usage', resetsAt: T0 + HOUR,
+      observedAt: T0 - 1,
+      source: 'error-derived',
+      pattern: 'grok-free-usage',
+      resetsAt: T0 + HOUR,
     });
-    first.ledger.clearOwnerEvidenceByPattern(OWNER_A, 'grok-balance-exhausted', T0);
-    first.ledger.clearOwnerEvidenceByPattern(OWNER_B, 'grok-balance-exhausted', T0);
-    expect(first.ledger.snapshotFor(OWNER_A.key)?.ownerEvidence ?? []).toEqual([]);
+    first.ledger.clearOwnerEvidenceByPattern(
+      OWNER_A,
+      'grok-balance-exhausted',
+      T0,
+    );
+    first.ledger.clearOwnerEvidenceByPattern(
+      OWNER_B,
+      'grok-balance-exhausted',
+      T0,
+    );
+    expect(first.ledger.snapshotFor(OWNER_A.key)?.ownerEvidence ?? []).toEqual(
+      [],
+    );
     const restarted = harness({ storage });
-    expect(restarted.ledger.snapshotFor(OWNER_A.key)?.ownerEvidence ?? []).toEqual([]);
-    expect(restarted.ledger.snapshotFor(OWNER_B.key)?.ownerEvidence).toEqual([{
-      observedAt: T0 - 1, source: 'error-derived',
-      pattern: 'grok-free-usage', resetsAt: T0 + HOUR,
-    }]);
+    expect(
+      restarted.ledger.snapshotFor(OWNER_A.key)?.ownerEvidence ?? [],
+    ).toEqual([]);
+    expect(restarted.ledger.snapshotFor(OWNER_B.key)?.ownerEvidence).toEqual([
+      {
+        observedAt: T0 - 1,
+        source: 'error-derived',
+        pattern: 'grok-free-usage',
+        resetsAt: T0 + HOUR,
+      },
+    ]);
   });
 
   it('F24: after a restart known-reset exhaustion survives and unknown-reset does not', () => {
@@ -1528,5 +1571,30 @@ describe('PlanLimitLedgerService — session index eviction', () => {
       ownerKey: OWNER_A.key,
       modelScope: null,
     });
+  });
+});
+
+describe('Grok balance evidence clearance', () => {
+  const owner = quotaOwnerRefFromKey(accountOwnerKey('grok', 'synthetic-a'));
+  const other = quotaOwnerRefFromKey(accountOwnerKey('grok', 'synthetic-b'));
+  const evidence = {
+    observedAt: T0,
+    source: 'error-derived' as const,
+    pattern: 'grok-balance-exhausted',
+  };
+
+  it('clears only the same pattern and owner strictly before request start', () => {
+    const { ledger } = harness();
+    ledger.recordOwnerEvidence(owner, evidence);
+    ledger.recordOwnerEvidence(other, evidence);
+    for (const at of [T0 - 1, T0, Number.NaN]) {
+      ledger.clearOwnerEvidenceByPattern(owner, evidence.pattern, at);
+      expect(ledger.snapshotFor(owner.key)?.ownerEvidence).toEqual([evidence]);
+    }
+    ledger.clearOwnerEvidenceByPattern(owner, 'grok-free-usage', T0 + 1);
+    expect(ledger.snapshotFor(owner.key)?.ownerEvidence).toEqual([evidence]);
+    ledger.clearOwnerEvidenceByPattern(owner, evidence.pattern, T0 + 1);
+    expect(ledger.snapshotFor(owner.key)?.ownerEvidence ?? []).toEqual([]);
+    expect(ledger.snapshotFor(other.key)?.ownerEvidence).toEqual([evidence]);
   });
 });

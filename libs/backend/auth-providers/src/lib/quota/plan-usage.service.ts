@@ -239,7 +239,7 @@ export class PlanUsageService {
       opencode: createOpenCodeLocalUsageReader(logger, now),
       'opencode-go': createOpenCodeGoPlanUsageReader(now),
       'opencode-zen': createOpenCodeLocalUsageReader(logger, now),
-      grok: createGrokAccountPlanUsageReader(now),
+      grok: createGrokAccountPlanUsageReader(now, undefined, undefined, undefined, logger),
       ...(kimiAuth && { 'kimi-code': createKimiCodePlanUsageReader(kimiAuth, credentials, now) }),
     };
     this.localReaders = {
