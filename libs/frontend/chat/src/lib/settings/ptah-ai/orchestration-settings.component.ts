@@ -26,7 +26,7 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
   selector: 'ptah-orchestration-settings',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: '[--ptah-field-grid-min-sm:14.5rem]' },
+  host: { style: '--ptah-field-grid-min-sm: 14.5rem; --ptah-field-grid-min-md: 14.5rem' },
   imports: [
     SubagentCacheTtlSettingComponent,
     SessionBudgetSettingsComponent,

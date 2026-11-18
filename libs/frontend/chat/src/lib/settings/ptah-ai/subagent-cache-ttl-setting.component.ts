@@ -111,15 +111,17 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
           </p>
         }
         @if (needsRecheck()) {
-          <button
-            type="button"
-            ptahButton
-            [busy]="saving()"
-            (click)="recheck()"
-            data-testid="subagent-cache-ttl-recheck"
-          >
-            Check saved setting again
-          </button>
+          <div>
+            <button
+              type="button"
+              ptahButton
+              [busy]="saving()"
+              (click)="recheck()"
+              data-testid="subagent-cache-ttl-recheck"
+            >
+              Check saved setting again
+            </button>
+          </div>
         }
       </ptah-form-section>
     </section>
