@@ -62,7 +62,7 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
       const { service, complete, noteLive } = setup();
       complete.mockResolvedValue({ i1: choice });
       const result = await service.rankSkillCandidates([item]);
-      expect(result?.items.angular.order).toEqual(order);
+      expect(result?.items['angular'].order).toEqual(order);
       expect(noteLive).toHaveBeenCalledTimes(1);
     },
   );
@@ -74,7 +74,7 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
       { ...item, key: 'next' },
     ]);
     expect(result?.items).not.toHaveProperty('angular');
-    expect(result?.items.next.order).toEqual(['b', 'a']);
+    expect(result?.items['next'].order).toEqual(['b', 'a']);
   });
   it('returns null when every answer is unknown', async () => {
     const { service, complete } = setup();

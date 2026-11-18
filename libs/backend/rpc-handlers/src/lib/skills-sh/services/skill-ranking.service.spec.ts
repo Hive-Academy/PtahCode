@@ -60,9 +60,9 @@ describe('SkillRankingService.rank', () => {
       items: { angular: { order: ['b', 'a'] } },
     });
     const result = await service.rank(request);
-    expect(result.items.angular.order).toEqual(['b', 'a']);
-    expect(result.items.angular.rankedBy).toBe('decision-model');
-    expect(result.items.angular.reason).toBeTruthy();
+    expect(result.items['angular'].order).toEqual(['b', 'a']);
+    expect(result.items['angular'].rankedBy).toBe('decision-model');
+    expect(result.items['angular'].reason).toBeTruthy();
     expect(run).not.toHaveBeenCalled();
   });
   it.each([false, true])(
@@ -71,14 +71,14 @@ describe('SkillRankingService.rank', () => {
       const { service, run } = setup(registered);
       const result = await service.rank(request);
       expect(run).toHaveBeenCalledTimes(1);
-      expect(result.items.angular.order).toEqual(['b', 'a']);
-      expect(result.items.angular.rankedBy).toBe('session-model');
+      expect(result.items['angular'].order).toEqual(['b', 'a']);
+      expect(result.items['angular'].rankedBy).toBe('session-model');
     },
   );
   it('continues to the session model after a decision error', async () => {
     const { service, rankSkillCandidates } = setup(true);
     rankSkillCandidates.mockRejectedValue(new Error('fake unavailable'));
-    expect((await service.rank(request)).items.angular.rankedBy).toBe(
+    expect((await service.rank(request)).items['angular'].rankedBy).toBe(
       'session-model',
     );
   });
@@ -91,8 +91,8 @@ describe('SkillRankingService.rank', () => {
     const { service, run } = setup();
     run.mockResolvedValue({ structuredOutput: output });
     const result = await service.rank(request);
-    expect(result.items.angular.order).toEqual(['a', 'b']);
-    expect(result.items.angular.rankedBy).toBe('heuristic');
+    expect(result.items['angular'].order).toEqual(['a', 'b']);
+    expect(result.items['angular'].rankedBy).toBe('heuristic');
     expect(result.rankedBy).toBe('heuristic');
   });
   it('isolates invalid items while accepting the next valid item', async () => {
@@ -106,12 +106,12 @@ describe('SkillRankingService.rank', () => {
       ...request,
       items: { ...request.items, next: request.items.angular },
     });
-    expect(result.items.angular).toEqual({
+    expect(result.items['angular']).toEqual({
       order: ['a', 'b'],
       rankedBy: 'heuristic',
     });
-    expect(result.items.next.order).toEqual(['b', 'a']);
-    expect(result.items.next.rankedBy).toBe('session-model');
+    expect(result.items['next'].order).toEqual(['b', 'a']);
+    expect(result.items['next'].rankedBy).toBe('session-model');
   });
   it('passes only unresolved items to the session model', async () => {
     const { service, run, rankSkillCandidates } = setup(true);
@@ -128,8 +128,8 @@ describe('SkillRankingService.rank', () => {
     expect(
       JSON.parse(run.mock.calls[0][0].execute.prompt).items,
     ).not.toHaveProperty('angular');
-    expect(result.items.angular.rankedBy).toBe('decision-model');
-    expect(result.items.next.rankedBy).toBe('session-model');
+    expect(result.items['angular'].rankedBy).toBe('decision-model');
+    expect(result.items['next'].rankedBy).toBe('session-model');
   });
   it.each([
     '<img onerror>',
@@ -146,7 +146,7 @@ describe('SkillRankingService.rank', () => {
       expect(run.mock.calls[1][0].execute.prompt).not.toMatch(
         /<img|onerror|<script|javascript:/i,
       );
-      expect(result.items.angular.order).toEqual(baseline.items.angular.order);
+      expect(result.items['angular'].order).toEqual(baseline.items['angular'].order);
     },
   );
   it('constrains prompt metadata and requests a tool-free item-scoped JSON schema', async () => {
