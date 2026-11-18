@@ -49,6 +49,11 @@ test.describe('docs screenshots — v2 Electron surfaces', () => {
       'indexing:getStatus': { state: 'ready', lastIndexedAt: now, pipelineEnabled: true },
     });
     await ui.openTab('memory');
+    // The Graph view is the default; the entry table is in the List view.
+    await page
+      .getByTestId('thoth-section-memory')
+      .getByRole('tab', { name: 'List', exact: true })
+      .click();
     await expect(page.getByTestId('memory-entry-row')).toHaveCount(3);
     await shoot(page, 'v2-thoth-memory');
   });

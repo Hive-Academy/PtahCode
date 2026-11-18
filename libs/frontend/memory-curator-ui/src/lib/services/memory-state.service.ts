@@ -274,6 +274,7 @@ export class MemoryStateService {
       ]);
       this._total.set(result.total ?? this._entries().length);
     } catch (err) {
+      // degradation-audit: reported - the list error alert shows the failure
       if (seq !== this.entriesReqSeq) return;
       this._error.set(failureMessage('list', err));
     } finally {

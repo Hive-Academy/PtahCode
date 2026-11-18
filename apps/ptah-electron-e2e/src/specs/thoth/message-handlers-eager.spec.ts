@@ -72,8 +72,8 @@ test.describe('Thoth MESSAGE_HANDLERS — eager while Thoth is unopened (R4, TAS
       // overwrites `_vecDiagnostic` when `result.data?.vecDiagnostic` is
       // present (vec-embedder-recovery.service.ts:127), an explicit
       // "best-effort prime, push events keep state fresh" guard already in
-      // the product. This lets the pre-open push survive the Maintenance
-      // panel's own mount-time prime() on first open.
+      // the product. This lets the pre-open push survive the Health
+      // pane's own mount-time prime() on first open.
       'db:health': {},
     });
 
@@ -95,9 +95,12 @@ test.describe('Thoth MESSAGE_HANDLERS — eager while Thoth is unopened (R4, TAS
     await ui.openTab('memory');
 
     const page = ui.page;
-    // db-health-panel only mounts once the Maintenance sub-view is selected
+    // db-health-panel only mounts once the Health sub-view is selected
     // (memory-curator-tab.component.ts's own @switch).
-    await page.getByRole('tab', { name: 'Maintenance' }).click();
+    await page
+      .locator('[data-testid="thoth-section-memory"]')
+      .getByRole('tab', { name: 'Health', exact: true })
+      .click();
 
     await expect(page.locator('[data-testid="vec-badge"]')).toHaveText(
       'online',

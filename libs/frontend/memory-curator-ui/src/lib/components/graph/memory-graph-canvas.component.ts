@@ -205,6 +205,7 @@ export class MemoryGraphCanvasComponent {
     try {
       renderer = await this.rendererFactory();
     } catch (error) {
+      // degradation-audit: reported - the canvas shows the error and emits rendererError
       if (!this.destroyed) {
         const message = 'Memory graph could not be displayed.';
         this.error.set(message);
