@@ -1,3 +1,6 @@
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -66,6 +69,7 @@ describe('McpPortConfigComponent', () => {
     TestBed.configureTestingModule({
       imports: [McpPortConfigComponent],
       providers: [
+        AdvancedOverviewStore,
         { provide: ClaudeRpcService, useValue: { call } },
         {
           provide: ProvidersSettingsStateService,
@@ -124,7 +128,7 @@ describe('McpPortConfigComponent', () => {
           field
             ?.querySelector('[data-ptah-field]')
             ?.getAttribute('data-appearance'),
-        ).toBe('stacked');
+        ).toBe('floating');
       }
     });
 
@@ -153,9 +157,8 @@ describe('McpPortConfigComponent', () => {
           isDisabledControl(byTestId<HTMLButtonElement>('mcp-port-save-btn')),
         ).toBe(true);
         expect(
-          isDisabledControl(
-            byTestId<HTMLSelectElement>('mcp-external-caller-access'),
-          ),
+          byTestId<HTMLElement>('mcp-external-caller-access')
+            .querySelector<HTMLButtonElement>('button')?.disabled,
         ).toBe(true);
         expect(
           isDisabledControl(
@@ -249,15 +252,18 @@ describe('McpPortConfigComponent', () => {
     it('renders the control and saves the selected value through the RPC', async () => {
       await render();
 
-      const select = byTestId<HTMLSelectElement>('mcp-external-caller-access');
-      expect(select.value).toBe('read-only');
+      const select = byTestId<HTMLElement>('mcp-external-caller-access');
+      expect(select.textContent).toContain('Read-only (recommended)');
+      const info = element.querySelector('[aria-label="About external MCP caller access"]');
+      expect(info).not.toBeNull();
+      expect(info?.closest('ptah-field')).toBeNull();
       expect(element.textContent).toContain('External MCP callers');
       expect(element.textContent).toContain('Read-only (recommended)');
-      expect(element.textContent).toContain('Full access');
+      component.callerInfoOpen.set(true);
+      fixture.detectChanges();
       expect(element.textContent).toContain('execute_code');
 
-      select.value = 'full';
-      select.dispatchEvent(new Event('change'));
+      fixture.debugElement.query(By.directive(PtahRichSelectComponent)).injector.get(PtahRichSelectComponent).choose({ value: 'full', label: 'Full access' });
       await settle();
 
       expect(call).toHaveBeenCalledWith('agent:setConfig', {
@@ -285,17 +291,16 @@ describe('McpPortConfigComponent', () => {
         responses['agent:setConfig'] = respond;
         await render();
 
-        const select = byTestId<HTMLSelectElement>(
+        const select = byTestId<HTMLElement>(
           'mcp-external-caller-access',
         );
-        select.value = 'full';
-        select.dispatchEvent(new Event('change'));
+        fixture.debugElement.query(By.directive(PtahRichSelectComponent)).injector.get(PtahRichSelectComponent).choose({ value: 'full', label: 'Full access' });
         fixture.detectChanges();
         await settle();
 
         expect(component.externalCallerAccess()).toBe('read-only');
         expect(component.savedExternalCallerAccess()).toBe('read-only');
-        expect(select.value).toBe('read-only');
+        expect(select.textContent).toContain('Read-only (recommended)');
         expect(feedback.toast()?.tone).toBe('alert');
         expect(feedback.toast()?.message).toBe(
           COULD_NOT_UPDATE_EXTERNAL_CALLER_ACCESS,
@@ -348,10 +353,20 @@ describe('McpPortConfigComponent', () => {
       expect(isDisabledControl(saveBtn)).toBe(false);
     });
 
-    it('saves port explicitly with persistent restart hint in row and supports Undo (R4)', async () => {
+    it('saves port explicitly with restart information in the field popover and supports Undo (R4)', async () => {
       await render();
 
-      // Persistent restart hint is visible in the row before save
+      expect(byTestId('mcp-port-hint').textContent?.trim()).toBe('Default 51820. Range 1024 to 65535.');
+      const info = element.querySelector<HTMLButtonElement>('button[aria-label="More about MCP port"]');
+      expect(info).not.toBeNull();
+      info?.click();
+      await settle();
+      expect(element.querySelector('[role="dialog"]')?.textContent).toContain(
+        'Changes apply after the MCP server restarts.',
+      );
+      info?.click();
+      await settle();
+      // Restart information stays accessible before saving.
       expect(element.textContent).toContain(
         'Changes apply after the MCP server restarts.',
       );
@@ -394,7 +409,7 @@ describe('McpPortConfigComponent', () => {
         COULD_NOT_SAVE_PORT,
       );
       expect(byTestId('mcp-port-hint').textContent).toContain(
-        'Changes apply after the MCP',
+        'Default 51820. Range 1024 to 65535.',
       );
       expect(feedback.toast()?.tone).toBe('alert');
       expect(feedback.toast()?.message).toBe(COULD_NOT_SAVE_PORT);
@@ -677,4 +692,14 @@ describe('McpPortConfigComponent', () => {
       expect(feedback.toast()?.message).not.toContain('host detail');
     });
   });
+  it('reports the saved port and access and clears the overview on a load error', async () => {
+    await render();
+    const overview = TestBed.inject(AdvancedOverviewStore);
+    expect(overview.segments().find((segment) => segment.id === 'mcp-server')).toMatchObject({ value: 'Port 51820', meta: 'Read-only', tone: 'ok' });
+    responses['agent:getConfig'] = () => fail('unavailable');
+    await component.loadConfig();
+    await settle();
+    expect(overview.segments().find((segment) => segment.id === 'mcp-server')).toMatchObject({ value: 'Not loaded', tone: 'idle' });
+  });
+
 });

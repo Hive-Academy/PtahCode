@@ -82,6 +82,8 @@ const NO_VIEW_STATES: ReadonlyMap<string, SurfaceViewState> = new Map();
  */
 const PANEL_STYLES = `
   :host { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+  .dp-tabpanel:not([hidden]) { display: flex; flex-direction: column; }
+  .dp-tabpanel > ptah-surface-renderer { display: block; flex: 1; min-height: 0; overflow: auto; }
   .dp-strip { scrollbar-width: thin; }
   .dp-pill { height: 1.75rem; max-width: 180px; }
   .dp-pill[aria-selected='true'] {
@@ -249,7 +251,7 @@ function idSafe(key: string): string {
         @for (item of items(); track item.key) {
           <div
             role="tabpanel"
-            class="dp-tabpanel min-w-0 rounded-box"
+            class="dp-tabpanel min-h-0 min-w-0 flex-1 overflow-auto rounded-box"
             [id]="panelId(item.key)"
             [attr.aria-labelledby]="tabId(item.key)"
             [hidden]="item.key !== activeKey()"
@@ -259,6 +261,7 @@ function idSafe(key: string): string {
           >
             @if (item.kind === 'artifact') {
               @if (item.key === activeKey() && open()) { <ptah-artifact-viewer
+                [fillAvailable]="true"
                 [artifact]="item.artifact"
                 [fullscreen]="fullscreenArtifactId() === item.artifact.id"
                 (fullscreenChange)="fullscreenChange.emit($event)"

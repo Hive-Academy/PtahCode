@@ -17,7 +17,6 @@ import {
   TableProperties,
   SlidersHorizontal,
   AudioLines,
-  Wrench,
   ShieldCheck,
 } from 'lucide-angular';
 import {
@@ -29,6 +28,7 @@ import {
   PtahDescriptionListComponent,
   PtahStatusComponent,
   PtahStatePanelComponent,
+  PtahFormSectionComponent,
   PtahSkeletonComponent,
 } from '@ptah-extension/ui';
 // Two declarations on purpose: each component import must hold only the `@defer`-only class, or
@@ -135,6 +135,7 @@ const isAgentsRoutingSection = (
     PtahDescriptionListComponent,
     PtahStatusComponent,
     PtahStatePanelComponent,
+    PtahFormSectionComponent,
     PtahSkeletonComponent,
   ],
   // Page-scoped: the toast timer dies with the page; one models loader for every tab.
@@ -163,7 +164,6 @@ export class SettingsComponent implements OnInit {
   readonly authState = inject(AuthStateService);
   private readonly document = inject(DOCUMENT);
   readonly ArrowLeftIcon = ArrowLeft;
-  readonly SetupIcon = Wrench;
   readonly SecurityIcon = ShieldCheck;
   /** Card tabs, in order. Each label is the button's exact accessible name (live-app scripts use it). */
   readonly settingsTabs = [

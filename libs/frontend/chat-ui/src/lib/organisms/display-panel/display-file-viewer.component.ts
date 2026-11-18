@@ -11,6 +11,7 @@ import type { DisplayFileItem } from './display-file-item';
   standalone: true,
   imports: [MarkdownBlockComponent, PtahButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'flex h-full min-h-0 w-full flex-1 flex-col overflow-auto' },
   template: `
     @if (loading()) { <p role="status" class="p-3 text-xs">Loading file…</p> }
     @else if (error()) {
@@ -19,11 +20,13 @@ import type { DisplayFileItem } from './display-file-item';
         <button type="button" ptahButton variant="ghost" size="xs" (click)="retry()">Retry</button>
       </div>
     } @else if (file().kind === 'markdown-file') {
-      <ptah-markdown-block [content]="markdown()" variant="auto" />
+      <ptah-markdown-block class="block min-h-0 flex-1 overflow-auto" [content]="markdown()" variant="auto" />
     } @else if (file().kind === 'image-file') {
-      <img class="max-h-full max-w-full object-contain" [src]="objectUrl()" [alt]="file().title" />
+      <div class="flex h-full min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
+        <img class="max-h-full max-w-full object-contain" [src]="objectUrl()" [alt]="file().title" />
+      </div>
     } @else if (pdfUrl()) {
-      <iframe class="h-[70vh] w-full border-0" [src]="pdfUrl()" [title]="file().title"></iframe>
+      <iframe class="h-full min-h-0 w-full flex-1 border-0" [src]="pdfUrl()" [title]="file().title"></iframe>
     }
   `,
 })

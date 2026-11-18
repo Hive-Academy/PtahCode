@@ -16,7 +16,7 @@ const TABBABLE =
 /** Narrowest chat beside the docked sidebar (px); below it the sidebar opens as an overlay. */
 const CHAT_MIN_BESIDE_DOCK = 560;
 const PANE_OVERLAYS =
-  '[role="dialog"], [role="menu"], ptah-display-sheet [role="region"].full';
+  '[role="dialog"], [role="menu"]';
 
 export function isCanvasInspectorTabbable(element: HTMLElement, sheet?: HTMLElement): boolean {
   if (element.tabIndex < 0 || (element as HTMLButtonElement).disabled)

@@ -36,7 +36,7 @@ export type PtahUiDisplayFenceStatus =
 export interface PtahUiDisplayDock {
   /** The fence's status in the tab, or `null` before the sync computed it. */
   fenceStatus(tabId: string, fenceKey: string): PtahUiDisplayFenceStatus | null;
-  /** Opens the tab's dock on the Displays tab and brings the surface into view. */
+  /** Opens or focuses the detached display window on this surface. */
   openSurface(tabId: string, surfaceKey: string): void;
 }
 

@@ -262,7 +262,7 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
     });
 
     // A child without a working document is closed, not left blank: the
-    // `closed` handler then tells the main renderer, which re-attaches.
+    // `closed` handler then tells the main renderer, which records the close.
     const closeBroken = (what: string, detail: string): void => {
       console.error(`[Ptah Electron] Display window ${what}:`, detail);
       // degradation-audit: reported — BrowserWindow.close() is synchronous (not the host's async close); the failure is logged above.
@@ -327,7 +327,7 @@ export class ElectronDisplayWindowHost implements IDisplayWindowHost {
 
   relayAction(tabId: string, action: DisplayWindowAction): boolean {
     // An action on a snapshot of another tab is stale: the main renderer
-    // would drop it, so report it as not relayed. Re-attach always goes through.
+    // would drop it, so report it as not relayed. Close always goes through.
     if (
       action.type !== 'attach' &&
       this.snapshot !== null &&

@@ -118,7 +118,7 @@ async function attempt(findings: string[], name: string, body: () => Promise<voi
 async function captureAdvanced(page: Page, host: Host, theme: string): Promise<unknown> {
   await gotoSettingsTab(page, 'Advanced');
   await expect(page.locator('[data-testid="output-style-matrix"]')).toBeVisible();
-  await expect(page.locator('[data-testid="vscode-lm-model-select"]')).toBeVisible();
+  await expect(page.locator('[data-testid="vscode-lm-model-select"]').getByRole('combobox')).toBeVisible();
   await waitForSettled(page);
   const fold = await test.step('fold §2.2', () => assertAdvancedFold(page, host, theme)).then(() => null, (error: unknown) => error);
   await capture(page, 'advanced', host, theme);
@@ -208,7 +208,8 @@ for (const host of HOSTS) {
     await escape('Advanced: membership key popover', () => by('membership-key-trigger'), by('membership-key-popover'));
     await escape('Advanced: import confirm', () => page.getByRole('button', { name: 'Import settings' }), by('import-confirm'),
       () => by('import-confirm').getByRole('button', { name: 'Cancel' }).click());
-    await escape('Advanced: effort popover', () => by('agent-behaviour-effort-value'), by('agent-behaviour-effort-choice-high'));
+    await escape('Advanced: effort popover', () => by('agent-behaviour-effort-value').getByRole('combobox'),
+      page.getByRole('listbox').getByRole('option', { name: 'High', exact: true }));
     await escape('Advanced: new output style drawer (D-OS)', () => by('output-style-new-button'), by('output-style-drawer'));
     await escape('Advanced: edit output style drawer (D-OS)',
       () => styleRow(page, 'concise-reviewer').locator('[data-testid="output-style-edit-button"]'), by('output-style-drawer'));
@@ -252,11 +253,14 @@ for (const host of HOSTS) {
     const findings: string[] = [];
     await gotoSettingsTab(page, 'Advanced');
     await attempt(findings, 'effort (transport failure)', async () => {
-      const value = page.locator('[data-testid="agent-behaviour-effort-value"]');
+      const value = page.locator('[data-testid="agent-behaviour-effort-value"]').getByRole('combobox');
       await expect(value).toContainText('Medium');
       failures.set('config:effort-set', rpcError(HOST_DETAIL));
       await value.click();
-      await page.locator('[data-testid="agent-behaviour-effort-choice-high"]').click();
+      // The panel opens over the next section: a trial click on the lowest option fails if that
+      // section covers the panel (pointer hit-target check, no write).
+      await page.getByRole('listbox').getByRole('option').last().click({ trial: true });
+      await page.getByRole('listbox').getByRole('option', { name: 'High', exact: true }).click();
       await expectFailedWrite(page, 'Could not save the chat reasoning effort.');
       await expect(value).toContainText('Medium');
     });

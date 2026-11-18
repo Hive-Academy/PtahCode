@@ -69,7 +69,6 @@ describe('DisplayDockState', () => {
       store.open(TAB_A);
       store.setPinned(TAB_A, true);
       store.selectTab(TAB_A, 'agents');
-      store.setWidth(TAB_A, 420);
       store.setSurfaces(TAB_A, {
         surfaces: [surface('id:stats')],
         statuses: new Map(),
@@ -79,26 +78,14 @@ describe('DisplayDockState', () => {
       expect(a.open).toBe(true);
       expect(a.pinned).toBe(true);
       expect(a.activeTab).toBe('agents');
-      expect(a.widthPx).toBe(420);
       expect(a.surfaces.map((s) => s.key)).toEqual(['id:stats']);
 
       const b = store.tab(TAB_B);
       expect(b.open).toBe(false);
       expect(b.pinned).toBe(false);
       expect(b.activeTab).toBe('displays');
-      expect(b.widthPx).toBeNull();
       expect(b.surfaces).toEqual([]);
       expect(store.surfaces(TAB_B)).toEqual([]);
-    });
-
-    it('keeps the width per tab across tab switches (R1.5)', () => {
-      store.setWidth(TAB_A, 360);
-      store.setWidth(TAB_B, 500);
-      expect(store.tab(TAB_A).widthPx).toBe(360);
-      expect(store.tab(TAB_B).widthPx).toBe(500);
-      store.setWidth(TAB_A, null);
-      expect(store.tab(TAB_A).widthPx).toBeNull();
-      expect(store.tab(TAB_B).widthPx).toBe(500);
     });
 
     it('keeps seen fences per tab', () => {
@@ -124,15 +111,13 @@ describe('DisplayDockState', () => {
       expect(store.tab(TAB_A)).toMatchObject({ open: false, pinned: false });
     });
 
-    it('closes only the current tab and retains the other tab pin, section and width', () => {
+    it('closes only the current tab and retains the other tab pin and section', () => {
       store.open(TAB_A);
       store.setPinned(TAB_A, true);
       store.selectTab(TAB_A, 'agents');
-      store.setWidth(TAB_A, 420);
       store.open(TAB_B);
       store.setPinned(TAB_B, true);
       store.selectTab(TAB_B, 'agents');
-      store.setWidth(TAB_B, 500);
 
       store.close(TAB_A);
 
@@ -140,13 +125,11 @@ describe('DisplayDockState', () => {
         open: false,
         pinned: false,
         activeTab: 'agents',
-        widthPx: 420,
       });
       expect(store.tab(TAB_B)).toMatchObject({
         open: true,
         pinned: true,
         activeTab: 'agents',
-        widthPx: 500,
       });
     });
 

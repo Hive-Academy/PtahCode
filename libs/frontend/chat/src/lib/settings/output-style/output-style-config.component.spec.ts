@@ -26,6 +26,7 @@ import type {
   OutputStyleEntry,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { OutputStyleConfigComponent } from './output-style-config.component';
 import { OutputStyleEditorComponent } from './output-style-editor.component';
 import { OutputStyleListComponent } from './output-style-list.component';
@@ -118,6 +119,7 @@ describe('OutputStyleConfigComponent', () => {
         { provide: ProvidersSettingsStateService, useValue: { commit: signal({ status: 'idle' }) } },
         { provide: VSCodeService, useValue: { isElectron: true } },
         SettingsSaveFeedbackService,
+        AdvancedOverviewStore,
       ],
     });
     TestBed.overrideComponent(OutputStyleConfigComponent, {
@@ -142,8 +144,24 @@ describe('OutputStyleConfigComponent', () => {
 
   it('marks the Output Style section as a glass reading plane', () => {
     expect(
-      (fixture.nativeElement as HTMLElement).querySelector('ptah-form-section')?.getAttribute('data-glass-surface'),
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="output-style-card"]')?.getAttribute('data-glass-surface'),
     ).toBe('content');
+  });
+
+  it('reports the active style and count, and clears while loading or after a load error', () => {
+    const overview = TestBed.inject(AdvancedOverviewStore);
+    const segment = () => overview.segments().find(item => item.id === 'output-style');
+    expect(segment()).toMatchObject({ value: 'default', meta: '2 styles', tone: 'ok' });
+    component.store.active.set({ name: 'Terse', tier: 'user', missing: false });
+    fixture.detectChanges();
+    expect(segment()).toMatchObject({ value: 'Terse', tone: 'ok' });
+    component.store.loading.set(true);
+    fixture.detectChanges();
+    expect(segment()?.tone).toBe('idle');
+    component.store.loading.set(false);
+    component.store.failedOperation.set('list');
+    fixture.detectChanges();
+    expect(segment()).toMatchObject({ value: 'Not loaded', tone: 'idle' });
   });
 
   describe('parity outcome in the toast (Serious 2)', () => {
