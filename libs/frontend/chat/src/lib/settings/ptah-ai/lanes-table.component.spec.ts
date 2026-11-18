@@ -1,5 +1,5 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { Component, input, output } from '@angular/core';
+import { ChangeDetectorRef, Component, input, output } from '@angular/core';
 import { By } from '@angular/platform-browser';
 import { PtahTableComponent, PtahTableOrderButtonsComponent } from '@ptah-extension/ui';
 import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.component';
@@ -104,10 +104,30 @@ function narrow(fixture: ComponentFixture<LanesTableComponent>): void {
   const table = fixture.debugElement.query(By.directive(PtahTableComponent))
     .componentInstance as PtahTableComponent;
   Object.defineProperty(table, 'collapsed', { value: () => true });
+  // The stub is not a signal, so mark the OnPush view to read the collapsed state again.
+  fixture.componentRef.injector.get(ChangeDetectorRef).markForCheck();
   fixture.detectChanges();
 }
 
 describe('LanesTableComponent', () => {
+  it('collapses below 950px and sizes the columns with a colgroup', async () => {
+    const { fixture, host } = await mount([system('codex')]);
+    const table = fixture.debugElement.query(By.directive(PtahTableComponent))
+      .componentInstance as PtahTableComponent;
+    expect(table.collapseBelow()).toBe(950);
+    const widths = (sel: string): string[] =>
+      Array.from(host.querySelectorAll(`${sel} col`)).map((col) => col.className);
+    expect(widths('table [data-testid="lanes-colgroup"]')).toEqual([
+      'w-[6%]', 'w-[20%]', 'w-[12%]', 'w-[14%]', 'w-[11%]', 'w-[17%]', 'w-[13%]', 'w-[7%]', '',
+    ]);
+    expect(q(host, '[data-testid="lanes-colgroup-collapsed"]')).toBeNull();
+    narrow(fixture);
+    expect(q(host, '[data-testid="lanes-colgroup"]')).toBeNull();
+    expect(widths('table [data-testid="lanes-colgroup-collapsed"]')).toEqual([
+      'w-[10%]', 'w-[34%]', 'w-[31%]', 'w-[15%]', 'w-[10%]',
+    ]);
+  });
+
   it('opens Model for the selected row and closes from the popover', async () => {
     const row = system('codex');
     const { fixture, host } = await mount([row]);

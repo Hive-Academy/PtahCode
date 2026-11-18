@@ -33,16 +33,21 @@ const NAVIGATION_SPLIT_PX = 640;
  * Keep each navigation-mode width class in this object and nowhere else.
  */
 const NAVIGATION_CLASSES = {
-  frameGrid: '[@container(min-width:640px)]:grid-cols-[14.5rem_minmax(0,1fr)]',
-  frameGap: '[@container(min-width:640px)]:gap-x-[var(--ptah-gap-section)]',
-  nav: '[@container(min-width:640px)]:sticky [@container(min-width:640px)]:top-0 [@container(min-width:640px)]:self-start',
-  slot: 'hidden [@container(min-width:640px)]:[&:not(:empty)]:block',
-  list: 'flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [@container(min-width:640px)]:flex-col [@container(min-width:640px)]:overflow-visible',
+  frameGrid: '[@container(min-width:640px)]:grid-cols-[var(--ptah-settings-nav-column-w)_minmax(0,1fr)]',
+  frameGap: '[@container(min-width:640px)]:gap-x-0 [@container(min-width:640px)]:p-0',
+  nav: '[@container(min-width:640px)]:sticky [@container(min-width:640px)]:top-0 [@container(min-width:640px)]:self-start [@container(min-width:640px)]:h-[var(--ptah-settings-nav-height)] [@container(min-width:640px)]:gap-[var(--ptah-settings-nav-gap)] [@container(min-width:640px)]:px-[var(--ptah-settings-nav-px)] [@container(min-width:640px)]:py-[var(--ptah-settings-nav-py)] [@container(min-width:640px)]:bg-surface-1 [@container(min-width:640px)]:border-r [@container(min-width:640px)]:border-[var(--ptah-border-color)]',
+  slot: 'hidden shrink-0 [@container(min-width:640px)]:[&:not(:empty)]:block',
+  list: 'flex min-h-0 min-w-0 gap-[var(--ptah-settings-nav-list-gap)] overflow-x-auto [@container(min-width:640px)]:flex-col [@container(min-width:640px)]:overflow-x-hidden [@container(min-width:640px)]:overflow-y-auto [@container(max-width:639px)]:[&>*]:shrink-0',
 } as const;
+
+/** Splits a space-separated class string into one class-map entry per class. */
+function singleClassToggles(classes: string, on: boolean): Record<string, boolean> {
+  return Object.fromEntries(classes.split(' ').map((name) => [name, on]));
+}
 
 /** The connector of a child item in navigation mode. */
 const NAVIGATION_CHILD_CLASS =
-  'relative ml-[var(--ptah-gap-section)] before:pointer-events-none before:absolute before:left-0 before:top-0 before:h-1/2 before:w-[var(--ptah-gap-inline)] before:rounded-bl-[var(--ptah-radius-control)] before:border-b before:border-l before:border-[var(--ptah-border-color)]';
+  'relative ml-[var(--ptah-settings-nav-child-indent)] before:pointer-events-none before:absolute before:left-[var(--ptah-settings-nav-connector-left)] before:top-0 before:bottom-1/2 before:w-[var(--ptah-settings-nav-connector-w)] before:rounded-bl-[var(--ptah-settings-nav-connector-radius)] before:border-b before:border-l before:border-[var(--ptah-border-color-strong)] [&>button]:pl-[var(--ptah-settings-nav-child-indent)]';
 
 /** One tab item of `ptah-settings-layout`. */
 export interface PtahSettingsTab<TId extends string = string> {
@@ -83,21 +88,25 @@ const TAB_CLASS = [
 ].join(' ');
 
 const NAV_CLASS = [
-  'inline-flex w-full min-w-0 items-center gap-[var(--ptah-gap-inline)] text-start',
-  'h-[var(--ptah-settings-nav-item-h)] px-[var(--ptah-control-px)] rounded-[var(--ptah-radius-control)]',
+  'inline-flex w-full min-w-0 items-center gap-[var(--ptah-settings-nav-icon-gap)] text-start',
+  'h-[var(--ptah-settings-nav-navigation-item-h)] pl-[var(--ptah-settings-nav-item-pl)] pr-[var(--ptah-settings-nav-item-pr)] rounded-[var(--ptah-radius-control)]',
   'text-[length:var(--ptah-text-body-size)] leading-[var(--ptah-text-body-leading)] font-medium',
-  'hover:bg-[var(--ptah-btn-ghost-bg-hover)]',
+  'text-base-content-muted hover:bg-surface-highlight hover:text-base-content',
   'focus-visible:outline focus-visible:outline-[length:var(--ptah-focus-ring-width)] focus-visible:outline-offset-[length:var(--ptah-focus-ring-offset)] focus-visible:outline-[color:var(--ptah-focus-ring-color)]',
-  'aria-[current=page]:font-semibold aria-[current=page]:bg-[var(--ptah-settings-nav-active-bg)]',
-  'aria-[current=page]:shadow-[inset_2px_0_0_var(--ptah-settings-nav-active-edge)]',
+  'aria-[current=page]:text-base-content aria-[current=page]:bg-[var(--ptah-settings-nav-navigation-active-bg)]',
+  'aria-[current=page]:shadow-[inset_3px_0_0_var(--ptah-settings-nav-active-edge)]',
   'aria-disabled:cursor-not-allowed aria-disabled:text-base-content-muted aria-disabled:hover:bg-transparent',
+  'transition-colors duration-[var(--ptah-duration-fast)] ease-[var(--ptah-ease-standard)] motion-reduce:transition-none',
 ].join(' ');
 
 /**
  * Settings layout pattern (TASK_2026_1177_9109, `pattern-spec.md` section 5).
  * The settings page frame: a side nav of tabs, a page header and one tab
- * panel with a max width. Below the `layout-split` width (768px of its own
- * container) the nav becomes a horizontal strip above the header.
+ * panel. The header and the panel share one fluid, centered main column,
+ * capped at `--ptah-settings-content-max-w`. Table and card-grid sections use
+ * the full column; field sections keep the form-section grid. Below the
+ * `layout-split` width (768px of its own container) the nav becomes a
+ * horizontal strip above the header.
  *
  * Tabs use manual activation (decision D5): arrow keys, Home and End move
  * focus, Enter, Space or a click emits `selectedChange`. The parent owns the
@@ -158,7 +167,7 @@ const NAV_CLASS = [
                 [class]="navMode() === 'tabs' ? tabClass : navClass"
                 [class.tab-active]="navMode() === 'navigation' && tab.id === selected()"
                 [class.text-base-content]="navMode() === 'navigation' && inSection(tab.id)"
-                [class.shadow-[inset_2px_0_0_var(--ptah-border-color)]]="navMode() === 'navigation' && inSection(tab.id)"
+                [class.shadow-[inset_2px_0_0_var(--ptah-border-color-strong)]]="navMode() === 'navigation' && inSection(tab.id)"
                 [attr.data-active]="navMode() === 'navigation' && tab.id === selected() ? 'true' : null"
                 [attr.data-in-section]="navMode() === 'navigation' && inSection(tab.id) ? 'true' : null"
                 [attr.aria-current]="navMode() === 'navigation' && tab.id === selected() ? 'page' : null"
@@ -198,10 +207,14 @@ const NAV_CLASS = [
               <span class="sr-only" [id]="reasonId(tab.id)">{{ tab.disabledReason }}</span>
             }
           }
-          <div [class]="navSlotClass()"><ng-content select="[nav-footer]" /></div>
+          <div [class]="navFooterClass()"><ng-content select="[nav-footer]" /></div>
         </nav>
       }
-      <div class="flex min-w-0 flex-col" data-testid="settings-layout-main">
+      <div
+        class="mx-auto flex w-full min-w-0 max-w-[var(--ptah-settings-content-max-w)] flex-col"
+        [class]="navMode() === 'navigation' ? '[@container(min-width:640px)]:p-[var(--ptah-page-gutter)]' : ''"
+        data-testid="settings-layout-main"
+      >
         <header
           class="mb-[var(--ptah-gap-group)] flex flex-wrap items-start justify-between gap-[var(--ptah-gap-controls)]"
           data-testid="settings-layout-header"
@@ -227,7 +240,7 @@ const NAV_CLASS = [
         </header>
         <div class="empty:hidden" data-testid="settings-layout-header-band"><ng-content select="[header-band]" /></div>
         <div
-          class="flex w-full min-w-0 max-w-[var(--ptah-settings-content-max-w)] flex-col gap-[var(--ptah-gap-section)] scroll-pb-[calc(var(--ptah-control-h-md)+2*var(--ptah-surface-pad))]"
+          class="flex w-full min-w-0 flex-col gap-[var(--ptah-gap-section)] scroll-pb-[calc(var(--ptah-control-h-md)+2*var(--ptah-surface-pad))]"
           [id]="panelId"
           [attr.role]="hasTabs() && navMode() === 'tabs' ? 'tabpanel' : null"
           [attr.aria-labelledby]="hasTabs() && navMode() === 'tabs' ? panelLabelledBy() : null"
@@ -282,12 +295,16 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   /** The roving tabindex target. It follows the selected tab. */
   protected readonly focusIndex = linkedSignal(() => Math.max(0, this.selectedIndex()));
 
-  protected readonly frameToggles = computed(() => ({
-    '[@container(min-width:768px)]:grid-cols-[var(--ptah-settings-nav-w)_minmax(0,1fr)]': this.hasTabs() && this.navMode() === 'tabs',
-    '[@container(min-width:768px)]:gap-x-[var(--ptah-gap-section)]': this.hasTabs() && this.navMode() === 'tabs',
-    [NAVIGATION_CLASSES.frameGrid]: this.hasTabs() && this.navMode() === 'navigation',
-    [NAVIGATION_CLASSES.frameGap]: this.hasTabs() && this.navMode() === 'navigation',
-  }));
+  /** A class-map key must hold one class: Angular ignores keys that contain a space. */
+  protected readonly frameToggles = computed(() => {
+    const navigation = this.hasTabs() && this.navMode() === 'navigation';
+    return {
+      '[@container(min-width:768px)]:grid-cols-[var(--ptah-settings-nav-w)_minmax(0,1fr)]': this.hasTabs() && this.navMode() === 'tabs',
+      '[@container(min-width:768px)]:gap-x-[var(--ptah-gap-section)]': this.hasTabs() && this.navMode() === 'tabs',
+      ...singleClassToggles(NAVIGATION_CLASSES.frameGrid, navigation),
+      ...singleClassToggles(NAVIGATION_CLASSES.frameGap, navigation),
+    };
+  });
 
   protected readonly navToggles = computed(() => this.navMode() === 'navigation'
     ? NAVIGATION_CLASSES.nav
@@ -295,6 +312,9 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   protected readonly navSlotClass = computed(() => this.navMode() === 'navigation'
     ? NAVIGATION_CLASSES.slot
     : 'hidden [@container(min-width:768px)]:[&:not(:empty)]:block');
+  protected readonly navFooterClass = computed(() => this.navMode() === 'navigation'
+    ? `${NAVIGATION_CLASSES.slot} mt-auto shrink-0`
+    : this.navSlotClass());
   protected readonly navListClass = computed(() => this.navMode() === 'navigation'
     ? NAVIGATION_CLASSES.list
     : 'flex min-w-0 gap-[var(--ptah-gap-controls)] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] [@container(min-width:768px)]:flex-col [@container(min-width:768px)]:gap-[var(--ptah-gap-label)] [@container(min-width:768px)]:overflow-visible [@container(min-width:768px)]:[border-bottom:none]');

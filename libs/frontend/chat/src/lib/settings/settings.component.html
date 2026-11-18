@@ -1,4 +1,4 @@
-<div class="settings-page h-full overflow-y-auto bg-surface-0">
+<div class="settings-page h-full [container-type:size] overflow-y-auto bg-surface-0">
   <ptah-settings-layout
     navMode="navigation"
     navTestId="settings-tabs"
@@ -10,11 +10,12 @@
     [description]="activeTabDescription()"
     [titleLevel]="1"
   >
-    <div nav-header class="flex items-center gap-ptah-inline">
-      <button type="button" ptahIconButton label="Back to Chat" data-testid="settings-back" (click)="backToChat()">
+    <div nav-header class="flex flex-col gap-[var(--ptah-settings-nav-gap)]">
+      <button type="button" ptahButton variant="ghost" size="sm" class="self-start" aria-label="Back to Chat" data-testid="settings-back" (click)="backToChat()">
         <lucide-angular [img]="ArrowLeftIcon" class="w-4 h-4" aria-hidden="true" />
+        Back to chat
       </button>
-      <span class="font-semibold">Settings</span>
+      <h2 class="px-[var(--ptah-settings-nav-px)] text-[length:var(--ptah-text-section-title-size)] leading-[var(--ptah-text-section-title-leading)] font-[number:var(--ptah-text-section-title-weight)]">Settings</h2>
     </div>
     <!-- The layout hides [nav-header] below its 640px split, so a narrow container keeps a way back
          in the header actions. It has no test id: settings-back stays unique. The wrapper owns the
@@ -34,9 +35,9 @@
         </div>
       </div>
     }
-    <!-- px-ptah-control-x is the inline padding of the nav items, so the footer content starts on their edge. -->
-    <div nav-footer class="flex flex-col gap-ptah-controls px-ptah-control-x">
-      <div data-testid="settings-context" class="[--ptah-dl-compact-term-w:5.5rem]" [attr.title]="workspacePath()">
+    <!-- Footer spacing follows the navigation prototype. -->
+    <div nav-footer class="flex flex-col gap-[var(--ptah-settings-nav-icon-gap)] p-[var(--ptah-settings-nav-px)] border-t border-[var(--ptah-border-color)]">
+      <div data-testid="settings-context" class="[--ptah-dl-compact-term-w:5.5rem] [&_dd]:text-base-content-muted [&_dd]:truncate" [attr.title]="workspacePath()">
         <ptah-description-list density="compact" [items]="contextRows()" />
       </div>
       @if (authState.isCustomProviderSelected()) {
@@ -46,7 +47,7 @@
         </div>
       } @else {
         <div data-testid="builtin-provider-security-copy" class="flex min-w-0 items-start gap-ptah-inline text-xs text-base-content-muted">
-          <ptah-status status="online" appearance="dot" label="Local" />
+          <span class="shrink-0" role="img" aria-label="Local"><lucide-angular [img]="SecurityIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" /></span>
           <p class="min-w-0 break-words">Runs 100% locally. Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.</p>
         </div>
       }

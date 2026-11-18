@@ -10,7 +10,13 @@ import {
   viewChild,
 } from '@angular/core';
 import { ChevronRight, LucideAngularModule } from 'lucide-angular';
-import { PtahBadgeDirective } from '@ptah-extension/ui';
+import { NgTemplateOutlet } from '@angular/common';
+import {
+  PtahAlertComponent,
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahSkeletonComponent,
+} from '@ptah-extension/ui';
 import {
   AppStateManager,
   ProvidersSettingsStateService,
@@ -30,8 +36,6 @@ import {
 export type AgentsRoutingFocusTarget =
   'background-models' | 'cli-agents' | ProviderConsumerId;
 
-const CONTROL =
-  'btn btn-outline btn-sm border-base-content-muted bg-base-100 text-base-content hover:bg-base-100 hover:text-base-content hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 
@@ -53,51 +57,73 @@ const FOCUS =
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    NgTemplateOutlet,
+    PtahAlertComponent,
     PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahSkeletonComponent,
     LucideAngularModule,
     CliOrchestrationMatrixComponent,
     ProviderConsumerAssignmentsComponent,
   ],
   template: `
     <div class="flex flex-col gap-8 font-sans text-sm text-base-content">
+      <!-- The loading and retry state of each source shows inside the matrix card (or its placeholder), not below it. -->
+      <ng-template #readStatesTpl>
+        @for (section of readStates(); track section.id) {
+          @if (section.state.status === 'error') {
+            <ptah-alert
+              tone="error"
+              [compact]="true"
+              live="assertive"
+              [attr.data-read-error]="section.id"
+            >
+              <p class="min-w-0">
+                {{ section.label }} could not be loaded. Your saved settings have
+                not changed.
+              </p>
+              <button alertAction type="button" ptahButton variant="ghost" (click)="section.retry()">
+                Retry {{ section.label }}
+              </button>
+            </ptah-alert>
+          } @else if (
+            section.state.status === 'loading' ||
+            section.state.status === 'unloaded'
+          ) {
+            <div
+              role="status"
+              aria-live="polite"
+              class="flex min-w-0 flex-col gap-[var(--ptah-gap-controls)] text-base-content-muted"
+              [attr.data-read-loading]="section.id"
+            >
+              <span>Loading {{ section.label }}…</span>
+              <ptah-skeleton [lines]="1" size="sm" />
+            </div>
+          }
+        }
+      </ng-template>
+
       <!-- Deferred (own chunk; the eager bundle is at its budget) behind a same-footprint placeholder. -->
       @defer (on immediate) {
-        <ptah-cli-orchestration-matrix #cliMatrix (codexSettingsRequested)="codexSettingsRequested.emit()" />
+        <ptah-cli-orchestration-matrix
+          #cliMatrix
+          hostReadStates
+          (codexSettingsRequested)="codexSettingsRequested.emit()"
+        >
+          <div read-states class="contents" data-testid="cli-matrix-read-states">
+            <ng-container *ngTemplateOutlet="readStatesTpl" />
+          </div>
+        </ptah-cli-orchestration-matrix>
       } @placeholder {
         <div
-          class="min-h-[22rem] border-b border-base-content/10"
-          aria-busy="true"
+          class="flex min-h-[22rem] flex-col gap-[var(--ptah-gap-field)] border-b border-base-content/10"
           data-testid="cli-matrix-placeholder"
-        ></div>
-      }
-
-      @for (section of readStates(); track section.id) {
-        @if (section.state.status === 'error') {
-          <div
-            role="alert"
-            class="rounded-lg border border-base-content/10 p-4 space-y-2"
-            [attr.data-read-error]="section.id"
-          >
-            <p>
-              {{ section.label }} could not be loaded. Your saved settings have
-              not changed.
-            </p>
-            <button type="button" [class]="control" (click)="section.retry()">
-              Retry {{ section.label }}
-            </button>
-          </div>
-        } @else if (
-          section.state.status === 'loading' ||
-          section.state.status === 'unloaded'
-        ) {
-          <p
-            role="status"
-            aria-live="polite"
-            [attr.data-read-loading]="section.id"
-          >
-            Loading {{ section.label }}…
-          </p>
-        }
+        >
+          <!-- Only the empty matrix slot is busy. The read states are its siblings, so a failed read
+               is announced (TASK_2026_2256). -->
+          <div aria-busy="true" data-testid="cli-matrix-placeholder-busy"></div>
+          <ng-container *ngTemplateOutlet="readStatesTpl" />
+        </div>
       }
 
       <!-- Closed by default; the background-role deep links open it (focusTarget). -->
@@ -172,7 +198,6 @@ export class AgentsRoutingSettingsComponent {
   protected readonly state = inject(ProvidersSettingsStateService);
   private readonly appState = inject(AppStateManager);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
-  protected readonly control = CONTROL;
   protected readonly focusRing = FOCUS;
   protected readonly ChevronIcon = ChevronRight;
   protected readonly roleCount = BACKGROUND_ROLE_IDS.length;

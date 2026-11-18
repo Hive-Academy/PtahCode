@@ -86,10 +86,10 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
         <!-- Model selection dropdown (A34) -->
         <div class="flex items-center gap-[var(--ptah-gap-controls)] mt-[var(--ptah-gap-label)] min-w-0">
           @if (vsCodeModels().length > 0) {
-            <ptah-field label="Model" appearance="stacked">
+            <ptah-field label="Model" appearance="stacked" class="min-w-0 flex-1">
             <select
               id="vscode-lm-model"
-              ptahSelect size="xs" class="flex-1 min-w-0 max-w-[260px] text-xs truncate text-base-content"
+              ptahSelect size="xs" class="w-full min-w-0 text-xs truncate text-base-content"
               [value]="currentModelId()"
               (change)="onVsCodeModelSelectEvent($event)"
               [ptahBusyDisabled]="saving() || savingModel()"
