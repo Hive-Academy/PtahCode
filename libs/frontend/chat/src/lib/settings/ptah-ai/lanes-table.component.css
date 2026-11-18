@@ -428,6 +428,8 @@ ptah-lanes-table
     th[scope='row']
     [data-popover-kind='model'][data-ptah-button]:is(.btn, #ptah-button) {
     width: 100%;
+    /* The shared button centers its flex content; keep the label at the start. */
+    justify-content: flex-start;
     text-align: start;
     line-height: 0.75rem;
     border-block-width: 0;
