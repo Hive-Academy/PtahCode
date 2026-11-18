@@ -1,3 +1,4 @@
+import { summarizeSubagentPaths } from './subagent-path-summary';
 /**
  * The texts of the subagent budget monitor: the near-budget warning a
  * subagent gets, and the parent message sent when it stops a subagent: who
@@ -6,6 +7,7 @@
  * record (`subagent-handoff-record.ts`) the second line names it, and the
  * fresh subagent's instruction repeats that line.
  */
+import { describeStopCause, type SubagentStopCause } from './subagent-stop-cause';
 import type { HandoffFileState } from './subagent-handoff-files';
 
 /** Why the monitor stopped a subagent. */
@@ -28,6 +30,7 @@ export interface HandoffSubject {
 /** The stopped subagent's usage and the limit it reached. */
 export interface HandoffUsage {
   readonly reason: StopReason;
+  readonly cause?: SubagentStopCause;
   readonly contextTokens: number;
   readonly weightedUsed: number;
   readonly handoffTokens: number;
@@ -35,6 +38,7 @@ export interface HandoffUsage {
 }
 
 export interface HandoffProgress {
+  readonly permittedPaths?: readonly string[];
   readonly lastAssistantText?: string;
   readonly filePaths: readonly string[];
   readonly toolCalls: readonly { readonly name: string; readonly targetPath?: string; readonly outcome: 'started' | 'completed' | 'failed' }[];
@@ -50,17 +54,14 @@ export function nearBudgetWarning(
   handoffTokens: number,
   notesPath: string,
   taskId?: string,
+  permittedPaths: readonly string[] = [notesPath],
 ): string {
   return (
-    `Ptah budget notice: your context is at ${contextTokens} tokens, close to ` +
-    `the ${handoffTokens}-token limit at which Ptah's subagent budget monitor ` +
-    `ends this subagent. Task id: ${taskId ?? 'unknown'}. Before your next step, ` +
-    `write or UPDATE your progress notes at ${notesPath} (create its directory ` +
-    `if needed; overwrite a stub): current ` +
-    `state, findings, decisions and their reasons, files touched, and the exact ` +
-    `next steps. Then end your turn with a final message that starts ` +
-    `"PTAH BUDGET HANDOFF:" and summarizes progress and next steps. ` +
-    `Do not call other tools. A fresh subagent continues from that file.`
+    `Ptah budget notice: your context is at ${contextTokens} tokens; the handoff limit is ${handoffTokens} tokens. ` +
+    `Task id: ${taskId ?? 'unknown'}. Permitted paths: ${summarizeSubagentPaths(permittedPaths)}; ` +
+    `You may Read, Write or Edit these paths. Deliverables are optional; write progress and next steps to the notes file last at ${notesPath}. ` +
+    `Your turn ends immediately after the notes write. ` +
+    `Other tools and paths are not permitted during this notes phase.`
   );
 }
 
@@ -73,12 +74,12 @@ export function stopNotice(
   const name = subject.teammateName
     ? `\`${subject.agentType}\` ('${subject.teammateName}')`
     : `\`${subject.agentType}\``;
-  const why =
+  const why = usage.cause ? describeStopCause(usage.cause) :
     usage.reason === 'handoff'
       ? `context reached the handoff size (${usage.contextTokens} of ${usage.handoffTokens} tokens)`
       : `weighted tokens reached the safety limit (${Math.round(usage.weightedUsed)} of ${usage.stopWeightedTokens} tokens)`;
   return (
-    `Ptah's budget monitor stopped ${name} at its budget: ${why}. ` +
+    `Ptah's budget monitor ${usage.cause?.forced === false ? 'received a cooperative return from' : 'stopped'} ${name}: ${why}. ` +
     `Usage: ${usage.contextTokens} context tokens of ${usage.handoffTokens}; ` +
     `${Math.round(usage.weightedUsed)} weighted tokens of ${usage.stopWeightedTokens}. ` +
     `Reason: ${usage.reason}. Record: ${recordPath ?? 'unknown'}. The user did not stop it. ` +
@@ -107,7 +108,7 @@ export function handoffMessage(
   const name = subject.teammateName
     ? `\`${subject.agentType}\` ('${subject.teammateName}')`
     : `\`${subject.agentType}\``;
-  const why =
+  const why = usage.cause ? describeStopCause(usage.cause) :
     usage.reason === 'handoff'
       ? `at ${usage.contextTokens} context tokens (handoff limit ${usage.handoffTokens} tokens)`
       : usage.contextTokens >= usage.handoffTokens * 2
@@ -115,11 +116,12 @@ export function handoffMessage(
         : `after ${Math.round(usage.weightedUsed)} weighted tokens (safety limit ${usage.stopWeightedTokens})`;
   const { paths, taskSaved, notesWritten, notesInferred, unavailable } = files;
   const lines = [
-    `Ptah's subagent budget monitor handed off subagent ${name} ${why}. ` +
-      `The interruption notice in the Agent result came from Ptah's subagent budget monitor, not the user. ` +
+    `Ptah's subagent budget monitor handed off subagent ${name} ${usage.cause ? 'because ' : ''}${why}. ` +
+      (usage.cause?.forced === false ? `The subagent returned cooperatively during Ptah's notes phase. ` : `The interruption notice in the Agent result came from Ptah's subagent budget monitor, not the user. `) +
       `No user input is needed; continue autonomously now.`,
   ];
   lines.push(`Budget stop reason: ${usage.reason}; SDK agent: ${subject.agentId ?? 'unknown'}; SDK task: ${subject.taskId}.`);
+  if (usage.cause) lines.push(`Budget stop cause: ${usage.cause.kind}; quantity: ${usage.cause.quantity}; measured: ${usage.cause.measured}; limit: ${usage.cause.limit}; forced: ${usage.cause.forced}.`);
   lines.push(`Usage: ${usage.contextTokens} context tokens of ${usage.handoffTokens}; ${Math.round(usage.weightedUsed)} weighted tokens of ${usage.stopWeightedTokens}.`);
   if (recordPath) {
     lines.push(recordLine(recordPath));
@@ -134,7 +136,8 @@ export function handoffMessage(
   }
   lines.push('Observed progress (from the monitor):');
   lines.push(`Last assistant text: ${progress?.lastAssistantText ?? 'unknown'}`);
-  lines.push(`Files targeted: ${progress?.filePaths.length ? progress.filePaths.join(', ') : 'unknown'}`);
+  if (progress?.permittedPaths?.length) lines.push(`Permitted paths: ${summarizeSubagentPaths(progress.permittedPaths)}`);
+  lines.push(`Files targeted: ${progress?.filePaths.length ? summarizeSubagentPaths(progress.filePaths) : 'unknown'}`);
   lines.push(`Recent tools: ${progress?.toolCalls.length ? progress.toolCalls.map((call) => `${call.name}${call.targetPath ? ` (${call.targetPath})` : ''}: ${call.outcome}`).join('; ') : 'unknown'}`);
   lines.push(`Subagent transcript: ${progress?.transcriptPath ?? 'unknown'}`);
   const taskSource = paths && taskSaved

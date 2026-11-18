@@ -11,6 +11,7 @@ const base = z.object({
   tool_use_id: z.string().optional(),
   is_interrupt: z.boolean().optional(),
   tool_input: z.unknown().optional(),
+  tool_response: z.unknown().optional(),
 });
 
 const NOTES_GATE_FAILURE_REASON = 'Ptah notes gate failed. End your turn now; do not call other tools.';
@@ -18,9 +19,10 @@ const NOTES_GATE_FAILURE_REASON = 'Ptah notes gate failed. End your turn now; do
 /** Hook side of the cooperative exit. All input fields are parsed before use. */
 export function createSubagentBudgetHooks(
   logger: Pick<Logger, 'info' | 'debug' | 'warn' | 'error'>,
-  monitor: Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff' | 'takeInterruptedHandoff'>,
+  monitor: Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff' | 'takeInterruptedHandoff'> & Partial<Pick<SubagentBudgetMonitor, 'recordNotesToolResult'>>,
   capturedSessionId?: string,
 ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
+  if (!monitor.recordNotesToolResult) logger.warn('[SubagentBudgetHooks] Notes result recorder missing; completion will rely on the watchdog');
   const events = ['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'SubagentStop', 'TaskCompleted'] as const;
   const result: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {};
   for (const event of events) {
@@ -72,6 +74,10 @@ export function createSubagentBudgetHooks(
             hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
             permissionDecisionReason: reason,
           } } : { continue: true };
+        }
+        if (event === 'PostToolUse' && data.agent_id && data.tool_name) {
+          const failed = z.object({ is_error: z.literal(true) }).safeParse(data.tool_response).success;
+          if (!failed) await monitor.recordNotesToolResult?.(sessionId, data.agent_id, data.tool_name, data.tool_input);
         }
         if (event === 'SubagentStop' && data.agent_id) {
           await monitor.finishWarnedAgent(sessionId, data.agent_id);

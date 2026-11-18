@@ -1711,6 +1711,10 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       await flush();
       feed(run, bigSubagentRequest());
       await flush();
+      expect(port.stopSubagent).not.toHaveBeenCalled();
+      // A context-only crossing gets notes time; missing telemetry is independent safety.
+      feed(run, msg({ type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_big', message: { id: 'msg_safety' } }));
+      await flush();
       expect(port.stopSubagent).toHaveBeenCalledWith(REAL, 'task-1');
       expect(port.pushParentMessage).toHaveBeenCalledTimes(1);
       expect(port.pushParentMessage).toHaveBeenCalledWith(
@@ -1734,6 +1738,10 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
         taskStarted({ tool_use_id: 'toolu_big', subagent_type: 'Explore' }),
       );
       feed(run, bigSubagentRequest());
+      await flush();
+      expect(port.stopSubagent).not.toHaveBeenCalled();
+      // A context-only crossing gets notes time; missing telemetry is independent safety.
+      feed(run, msg({ type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_big', message: { id: 'msg_safety' } }));
       await flush();
       expect(stopSubagent).toHaveBeenCalledWith(REAL, 'task-1');
       expect(port.pushParentMessage).toHaveBeenCalledWith(
