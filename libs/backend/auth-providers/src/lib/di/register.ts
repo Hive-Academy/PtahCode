@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile, stat } from 'node:fs/promises';
+import { lstat, readdir, stat } from 'node:fs/promises';
 import {
   Lifecycle,
   instanceCachingFactory,
@@ -15,6 +15,8 @@ import { ProviderAccountService } from '../accounts/provider-account.service';
 import { ProviderAccountActionsService } from '../accounts/provider-account-actions.service';
 import { accountActionResult, ClaudeAccountCommand } from '../accounts/claude-account-command';
 import { ClaudeRouteCertifier, type ClaudeRouteCertifierFs } from '../accounts/claude-route-certifier';
+import { CLAUDE_SETTINGS_MAX_BYTES } from '../accounts/claude-auth-settings-scan';
+import { readRegularFileUtf8 } from '../accounts/read-regular-file';
 import { ClaudeLoginConsole } from '../accounts/claude-login-console';
 import { ClaudeAmbientLoginStatusReader, NODE_AMBIENT_STATUS_HOST } from '../accounts/claude-ambient-login-status';
 import type { ClaudeAccountSelectionReader, ClaudeUsageProfileRoots, ProviderAccountAdmissionPort } from '@ptah-extension/auth-providers-tokens';
@@ -155,7 +157,8 @@ export function registerAuthProvidersServices(
 
 /** Read-only fs of the certifier (D14 note 1): UTF-8 reads, typed dir entries, `stat` follows links. */
 const certifierFs: ClaudeRouteCertifierFs = {
-  readFile: (path) => readFile(path, 'utf8'),
+  // Regular files only and a size limit: a FIFO at a settings path must not block the scan.
+  readFile: (path) => readRegularFileUtf8(path, CLAUDE_SETTINGS_MAX_BYTES),
   lstat: (path) => lstat(path),
   readdir: (path) => readdir(path, { withFileTypes: true }),
   stat: (path) => stat(path),
