@@ -192,10 +192,10 @@
         ptahButton
         variant="primary"
         type="button"
-        [disabled]="!selectedIds().size || loading() || busy()"
+        [disabled]="loading() || busy()"
         (click)="continueRequested.emit()"
       >
-        Review selected skills ({{ selectedIds().size }})
+        {{ selectedIds().size ? 'Review selected skills (' + selectedIds().size + ')' : 'Continue without skills' }}
       </button>
     </div>
   </div>
