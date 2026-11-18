@@ -112,6 +112,9 @@ export function clampArtifactHeight(px: number): number {
   providers: [ArtifactThemeBridgeService],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
+    '[class.h-full]': 'fillAvailable()',
+    '[class.min-h-0]': 'fillAvailable()',
+    '[class.flex-1]': 'fillAvailable()',
     // Escape closes full screen; the guard inside makes it a no-op otherwise.
     '(document:keydown.escape)': 'onDocumentEscape()',
   },
@@ -130,6 +133,8 @@ export function clampArtifactHeight(px: number): number {
         #dialog
         tabindex="-1"
         [class]="containerClass()"
+        [class.h-full]="fillAvailable()"
+        [class.min-h-0]="fillAvailable()"
         [attr.role]="fullscreenActive() ? 'dialog' : null"
         [attr.aria-modal]="fullscreenActive() ? 'true' : null"
         [attr.aria-label]="fullscreenActive()
@@ -174,9 +179,9 @@ export function clampArtifactHeight(px: number): number {
           sandbox="allow-scripts"
           referrerpolicy="no-referrer"
           (load)="onFrameLoad()"
-          [class.min-h-0]="fullscreenActive()"
-          [class.flex-1]="fullscreenActive()"
-          [style.height.px]="fullscreenActive() ? null : height()"
+          [class.min-h-0]="fullscreenActive() || fillAvailable()"
+          [class.flex-1]="fullscreenActive() || fillAvailable()"
+          [style.height.px]="fullscreenActive() || fillAvailable() ? null : height()"
           data-testid="artifact-viewer-frame"
         ></iframe>
       </div>
@@ -184,6 +189,7 @@ export function clampArtifactHeight(px: number): number {
   `,
 })
 export class ArtifactViewerComponent implements OnDestroy {
+  readonly fillAvailable = input(false);
   /** The immutable record to render. */
   readonly artifact = input.required<ArtifactRecord>();
   /** The host can also drive full screen from outside (the chat card). */

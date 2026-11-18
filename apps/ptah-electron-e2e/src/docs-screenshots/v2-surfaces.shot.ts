@@ -108,9 +108,6 @@ test.describe('docs screenshots — v2 Electron surfaces', () => {
     await ui.goto('canvas');
     await (await visibleNewSessionTrigger(page)).click();
     await page.getByRole('button', { name: 'Create', exact: true }).click();
-    await expect(page.getByTestId('display-sheet')).toBeVisible();
-    await page.getByTestId('display-sheet-tab').click();
-    await expect(page.getByTestId('display-sheet-region')).toContainText('Revenue');
     await shoot(page, 'v2-display-panel');
   });
 });

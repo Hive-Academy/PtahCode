@@ -22,7 +22,7 @@ import {
  * on the observed RPC calls plus the window's own URL.
  *
  * Code files open the review shell's read-only spot editor. Markdown files
- * open in the docked display panel. The window is asserted, never resized:
+ * open in the separate Display window. The window is asserted, never resized:
  * the default (1200x800) is the geometry the feature is designed at.
  */
 
@@ -245,11 +245,10 @@ test.describe('agent file links', () => {
     // ---------------------------------------------------------------------
     // 3. `b` is markdown: it opens as the selected display-panel file.
     // ---------------------------------------------------------------------
+    const opened = electronApp.waitForEvent('window');
     await bubble.getByRole('link', { name: 'b', exact: true }).click();
-    await expect(
-      mainWindow.locator('[data-testid="display-sheet-region"]'),
-    ).toBeVisible();
-    const displayPanel = mainWindow.locator('ptah-display-panel');
+    const displayWindow = await opened;
+    const displayPanel = displayWindow.locator('ptah-display-panel');
     await expect(displayPanel).toBeVisible();
     const markdownTab = displayPanel.locator('[data-testid="display-panel-tab"]', {
       hasText: 'readme.md',
@@ -262,13 +261,9 @@ test.describe('agent file links', () => {
       displayPanel.locator('[data-testid="display-panel-tabpanel"]:visible ptah-display-file-viewer'),
     ).toContainText('Safe markdown body.');
     expect(mainWindow.url()).toBe(urlBefore);
-    // Close the display panel before step 4: with the Review dock also open,
-    // the chat column is narrow and the panel can cover the next link, which
-    // step 4 clicks by raw coordinates.
-    await mainWindow.locator('[data-testid="display-sheet-close"]').click();
-    await expect(
-      mainWindow.locator('[data-testid="display-sheet-region"]'),
-    ).toBeHidden();
+    const closed = displayWindow.waitForEvent('close');
+    await displayWindow.getByTestId('display-window-close').click();
+    await closed;
 
     // ---------------------------------------------------------------------
     // 4. The http link is left alone — no read, no navigation (AC 20).

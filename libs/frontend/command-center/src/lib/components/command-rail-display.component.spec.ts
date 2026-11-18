@@ -5,7 +5,7 @@ import { DisplayPanelComponent } from '@ptah-extension/chat-ui/display-panel';
 import type { DisplayFileItem, DisplaySurface } from '@ptah-extension/chat-ui';
 import { ArtifactStore, DisplayDockState, DisplayWindowSync } from '@ptah-extension/chat';
 import { TabManagerService } from '@ptah-extension/chat-state';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
 import type { ArtifactRecord } from '@ptah-extension/shared';
 import { CommandRailDisplayComponent } from './command-rail-display.component';
 
@@ -54,11 +54,10 @@ describe('CommandRailDisplayComponent', () => {
   const displayWindow = {
     detached: signal(false),
     error: signal<string | null>(null),
-    detach: jest.fn(async () => undefined),
-    attach: jest.fn(async () => undefined),
+    focus: jest.fn(async () => undefined),
   };
 
-  function mount() {
+  function mount(desktop = false) {
     dock = new DisplayDockState();
     TestBed.configureTestingModule({
       imports: [CommandRailDisplayComponent],
@@ -68,6 +67,7 @@ describe('CommandRailDisplayComponent', () => {
         { provide: TabManagerService, useValue: { activeTabId: signal(null) } },
         { provide: ClaudeRpcService, useValue: { call } },
         { provide: DisplayWindowSync, useValue: displayWindow },
+        { provide: VSCodeService, useValue: { isElectron: desktop } },
       ],
     });
     TestBed.overrideComponent(CommandRailDisplayComponent, {
@@ -133,14 +133,15 @@ describe('CommandRailDisplayComponent', () => {
     expect(dock.tab('tab-1').selection).toEqual({ kind: 'file', fileKey: key });
   });
 
-  it('uses the existing detached window control', async () => {
-    const fixture = mount();
+  it('uses only the detached surface on Electron', async () => {
+    const fixture = mount(true);
     dock.openFile('tab-1', { kind: 'image-file', path: '/root/photo.png', workspaceRoot: '/root', title: 'photo.png' });
-    await settle(fixture);
+    expect(await settle(fixture)).toBeNull();
     const button = (fixture.nativeElement as HTMLElement).querySelector('button');
-    expect(button?.textContent).toContain('Detach');
+    expect(button?.textContent).toContain('Open Display');
+    const previous = dock.windowRequest()?.sequence ?? 0;
     button?.click();
-    expect(displayWindow.detach).toHaveBeenCalledTimes(1);
+    expect(dock.windowRequest()).toEqual({ tabId: 'tab-1', focus: true, sequence: previous + 1 });
   });
 
   it('writes selection to the dock per tab, so a tab change resets it', async () => {

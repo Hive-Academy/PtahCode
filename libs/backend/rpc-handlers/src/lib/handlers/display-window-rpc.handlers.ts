@@ -44,6 +44,7 @@ const ActionSchema: z.ZodType<DisplayWindowAction> = z.discriminatedUnion('type'
     surfaceKey: z.string().min(1).max(MAX_KEY_LENGTH),
     viewState: JsonObjectSchema,
   }),
+  z.strictObject({ type: z.literal('pin'), pinned: z.boolean() }),
   z.strictObject({ type: z.literal('attach') }),
 ]);
 

@@ -65,15 +65,13 @@ export interface DisplayDockTabState {
   /** Pinned: updates move neither scroll nor focus; closing unpins (R1.6). */
   readonly pinned: boolean;
   readonly activeTab: DisplayDockTab;
-  /** The user's width in px; `null` uses the responsive default (R1.5). */
-  readonly widthPx: number | null;
   /** The turn streaming in the tab, as the transcript or the sync reported it. */
   readonly liveTurnKey: string | null;
   /** The turn in which the user closed the dock; its displays never reopen it (R1.8). */
   readonly userClosedTurnKey: string | null;
-  /** Display updates held back by a user close; the toggle shows "n new". */
+  /** Display updates held back by a user close; used by command-center reveal. */
   readonly newCount: number;
-  /** Advances for each published surface that requests a sheet peek. */
+  /** Advances for each published surface that requests a display reveal. */
   readonly surfaceRevision: number;
   /** The user closed the dock; agent activity does not reopen it until released. */
   readonly agentsUserClosed: boolean;
@@ -91,7 +89,6 @@ const EMPTY_TAB_STATE: DisplayDockTabState = Object.freeze({
   open: false,
   pinned: false,
   activeTab: 'displays',
-  widthPx: null,
   liveTurnKey: null,
   userClosedTurnKey: null,
   newCount: 0,
@@ -105,7 +102,7 @@ const EMPTY_TAB_STATE: DisplayDockTabState = Object.freeze({
 });
 
 /**
- * Per-tab state of the right-side `Displays | Agents` dock (TASK_2026_623,
+ * Per-tab detached display state and inline agent-monitor state (TASK_2026_623,
  * D4, D10, D12, component 8). Provided by `ChatViewComponent`, so each canvas
  * tile owns its own store; every method takes the tab id, so the main
  * ChatView keeps each tab's dock across tab switches (R1.1).
@@ -125,6 +122,21 @@ const EMPTY_TAB_STATE: DisplayDockTabState = Object.freeze({
  */
 @Injectable()
 export class DisplayDockState implements PtahUiDisplayDock, PtahUiDisplayDockSync {
+  private readonly _windowRequest = signal<{ tabId: string; sequence: number; focus: boolean } | null>(null);
+  readonly windowRequest = this._windowRequest.asReadonly();
+  private consumedWindowSequence = 0;
+  consumeWindowRequest(sequence: number): void {
+    this.consumedWindowSequence = sequence;
+  }
+
+  private requestWindow(tabId: string, focus: boolean): void {
+    if (!focus && !untracked(() => this.tab(tabId).open)) return;
+    this._windowRequest.update((previous) => {
+      if (!focus && previous?.focus && previous.sequence > this.consumedWindowSequence) return previous;
+      return { tabId, focus, sequence: (previous?.sequence ?? 0) + 1 };
+    });
+  }
+
   private readonly fullscreenRequests = signal<ReadonlyMap<string, string>>(new Map());
   fullscreenArtifact(tabId: string): string | null { return this.fullscreenRequests().get(tabId) ?? null; }
   requestFullscreenArtifact(tabId: string, artifactId: string): void {
@@ -165,6 +177,7 @@ export class DisplayDockState implements PtahUiDisplayDock, PtahUiDisplayDockSyn
       ...openedState(state, 'displays'),
       selection: { kind: 'surface', surfaceKey },
     }));
+    this.requestWindow(tabId, true);
   }
 
   /**
@@ -178,6 +191,7 @@ export class DisplayDockState implements PtahUiDisplayDock, PtahUiDisplayDockSyn
       ...openedState(state, 'displays'),
       selection: { kind: 'artifact', artifactId },
     }));
+    this.requestWindow(tabId, true);
   }
 
   openFile(tabId: string, file: Omit<DisplayFileItem, 'key' | 'readStatus'>): void {
@@ -191,12 +205,14 @@ export class DisplayDockState implements PtahUiDisplayDock, PtahUiDisplayDockSyn
         : [...state.files, { ...file, path, workspaceRoot, key, readStatus: 'unread' }],
       selection: { kind: 'file', fileKey: key },
     }));
+    this.requestWindow(tabId, true);
   }
 
   // --- User actions --------------------------------------------------------
 
   open(tabId: string): void {
     this.update(tabId, (state) => openedState(state, state.activeTab));
+    this.requestWindow(tabId, true);
   }
 
   /**
@@ -242,13 +258,6 @@ export class DisplayDockState implements PtahUiDisplayDock, PtahUiDisplayDockSyn
   select(tabId: string, selection: DisplayDockSelection): void {
     this.update(tabId, (state) =>
       sameSelection(state.selection, selection) ? state : { ...state, selection },
-    );
-  }
-
-  /** The width the separator set, already clamped by `PanelResizeService`. */
-  setWidth(tabId: string, widthPx: number | null): void {
-    this.update(tabId, (state) =>
-      state.widthPx === widthPx ? state : { ...state, widthPx },
     );
   }
 
@@ -379,6 +388,7 @@ export class DisplayDockState implements PtahUiDisplayDock, PtahUiDisplayDockSyn
         selection: { kind: 'surface', surfaceKey },
       };
     });
+    this.requestWindow(tabId, false);
   }
 
   /**
@@ -405,6 +415,7 @@ export class DisplayDockState implements PtahUiDisplayDock, PtahUiDisplayDockSyn
       }
       return { ...openedState(state, 'displays'), selection };
     });
+    this.requestWindow(tabId, false);
   }
 
   // --- Internals -----------------------------------------------------------
