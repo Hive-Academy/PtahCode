@@ -1,7 +1,7 @@
 {
   "phase": "after",
   "autoHandoffHintLines1168": 1,
-  "tokenBudgetInfo": true,
+  "budgetLongHelpInfo": true,
   "routingHintLines1168": 1,
   "stacking": {
     "page-stt-1824": "on-top",
