@@ -113,11 +113,11 @@ describe('PtahDescriptionListComponent (data API)', () => {
     expect(host.querySelector('dl')?.classList.contains('gap-[var(--ptah-gap-controls)]')).toBe(true);
   });
 
-  it('stacks below 640px and uses three columns from 640px', () => {
+  it('stacks below the row-split width and uses three columns from it', () => {
     const fixture = renderList(items);
     const row = (fixture.nativeElement as HTMLElement).querySelector('[data-ptah-description-row]') as HTMLElement;
     expect(row.classList.contains('grid')).toBe(true);
-    expect(row.classList.contains('[@container(min-width:640px)]:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]')).toBe(true);
+    expect(row.classList.contains('row-split:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]')).toBe(true);
   });
 
   it('keeps the default row and host unchanged', () => {
@@ -125,7 +125,7 @@ describe('PtahDescriptionListComponent (data API)', () => {
     const host = fixture.nativeElement as HTMLElement;
     const row = host.querySelector('[data-ptah-description-row]') as HTMLElement;
     expect(host.hasAttribute('data-density')).toBe(false);
-    expect(row.classList.contains('[@container(min-width:640px)]:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]')).toBe(true);
+    expect(row.classList.contains('row-split:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]')).toBe(true);
     expect(row.classList.contains('grid-cols-[minmax(0,var(--ptah-dl-compact-term-w,7.5rem))_minmax(0,1fr)_auto]')).toBe(false);
   });
 
