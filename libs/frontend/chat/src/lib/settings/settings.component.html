@@ -62,7 +62,7 @@
            (CLI matrix, background model roles) are one chunk, so the eager route stays inside its bundle budget and
            one load failure shows one recovery. Deep links apply once the page renders. -->
       @defer (on immediate) {
-        <div class="ptah-motion-panel flex flex-col gap-[var(--ptah-gap-section)]" animate.enter="ptah-motion-enter">
+        <div class="ptah-motion-panel flex flex-col gap-[var(--ptah-gap-section)] [&>*:focus-within]:z-[var(--ptah-z-raised)]" animate.enter="ptah-motion-enter">
         <ptah-providers-settings
           class="block"
           [focusTarget]="providersTarget()"

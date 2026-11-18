@@ -21,7 +21,8 @@ import type { LaneTableRow } from './lanes-table.component';
       appearance="inline"
       size="sm"
       [status]="status()"
-      [label]="row().status.label"
+      [label]="label()"
+      [attr.title]="row().status.label"
       [attr.data-testid]="
         row().kind === 'instance' ? 'cli-matrix-status' : null
       "
@@ -45,7 +46,16 @@ import type { LaneTableRow } from './lanes-table.component';
 })
 export class LanesTableStatusComponent {
   readonly row = input.required<LaneTableRow>();
+  readonly collapsed = input(false);
   readonly testing = input(false);
+  protected readonly label = computed(() => {
+    const status = this.row().status;
+    if (this.collapsed()) {
+      if (status.kind === 'not-installed') return 'Missing';
+      if (status.kind === 'needs-key') return 'Key';
+    }
+    return status.label;
+  });
   readonly testResult = input('');
   readonly installGuide = output<LaneTableRow>();
   readonly signIn = output<LaneTableRow>();

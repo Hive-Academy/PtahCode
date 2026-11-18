@@ -76,22 +76,6 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
       font-size: 0.75rem;
       white-space: nowrap;
     }
-    ptah-lane-row-identity[data-uninstalled='true'][data-collapsed='true'] {
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      height: 2.5rem;
-    }
-    ptah-lane-row-identity[data-uninstalled='true'][data-collapsed='true']
-      ptah-table-row-title {
-      height: auto;
-    }
-    ptah-lane-row-identity[data-uninstalled='true'][data-collapsed='true']
-      .ptah-table-row-title-kind,
-    ptah-lane-row-identity[data-uninstalled='true'][data-collapsed='true']
-      .ptah-table-row-title-secondary {
-      display: none;
-    }
     ptah-lane-row-identity[data-uninstalled='true']
       .ptah-table-row-title-secondary {
       visibility: hidden;

@@ -100,7 +100,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
       </header>
       <div
         class="consumer-grid grid min-w-0 gap-[var(--ptah-gap-field)]"
-        aria-label="Background models"
+        aria-label="Background model roles"
         data-testid="consumer-table"
       >
         @for (row of rows(); track row.id) {

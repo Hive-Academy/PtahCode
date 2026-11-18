@@ -98,6 +98,30 @@ describe('CliLaneDefaultCellComponent', () => {
     ).toEqual(['deny']);
   });
 
+  it('uses human labels in compact, wide and card controls without changing values', () => {
+    const fixture = setup('codex', {
+      permission: 'auto-edit',
+      network: 'allow',
+    });
+    for (const layout of ['compact', 'wide', 'card']) {
+      fixture.componentRef.setInput('layout', layout);
+      fixture.detectChanges();
+      expect(combobox(fixture, 'codex permission default').options()).toEqual([
+        { value: 'plan', label: 'Plan only' },
+        { value: 'auto-edit', label: 'Auto edit' },
+        { value: 'yolo', label: 'Yolo' },
+      ]);
+      expect(combobox(fixture, 'codex network default').options()).toEqual([
+        { value: 'deny', label: 'Blocked' },
+        { value: 'allow', label: 'Allowed' },
+      ]);
+      expect(combobox(fixture, 'codex permission default').value()).toBe(
+        'auto-edit',
+      );
+      expect(combobox(fixture, 'codex network default').value()).toBe('allow');
+    }
+  });
+
   it('keeps compact cells label-free and names each designed select', () => {
     const fixture = setup('codex', {
       permission: 'auto-edit',
@@ -266,7 +290,7 @@ describe('CliLaneDefaultCellComponent', () => {
       fixture.nativeElement.querySelectorAll('[tabindex="0"]').length,
     ).toBe(4);
     expect(combobox(fixture, 'cursor permission default').placeholder()).toBe(
-      'Choose',
+      'Select mode',
     );
     expect(combobox(fixture, 'cursor permission default').value()).toBeNull();
   });

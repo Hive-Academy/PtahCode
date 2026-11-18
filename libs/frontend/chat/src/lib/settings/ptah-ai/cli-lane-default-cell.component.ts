@@ -1,4 +1,8 @@
 import {
+  LANE_PERMISSION_LABELS,
+  LANE_NETWORK_LABELS,
+} from './lane-option-labels';
+import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
@@ -140,10 +144,10 @@ let nextTitleId = 0;
             class="w-full min-w-0"
             size="sm"
             [label]="name() + ' permission default'"
-            [title]="effectivePermission() ?? ''"
+            [title]="permissionLabel()"
             [options]="permissionOptions()"
             [value]="effectivePermission() ?? null"
-            placeholder="Choose"
+            placeholder="Select mode"
             [disabled]="disabled() || pending() !== null"
             (valueChange)="
               choosePermission($event, permissionSelect.element.nativeElement);
@@ -174,10 +178,10 @@ let nextTitleId = 0;
             class="w-full min-w-0"
             size="sm"
             [label]="name() + ' network default'"
-            [title]="effectiveNetwork() ?? ''"
+            [title]="networkLabel()"
             [options]="networkOptions()"
             [value]="effectiveNetwork() ?? null"
-            placeholder="Choose"
+            placeholder="Select mode"
             [disabled]="disabled() || pending() !== null"
             (valueChange)="
               chooseNetwork($event, networkSelect.element.nativeElement);
@@ -276,10 +280,10 @@ let nextTitleId = 0;
                 class="w-full min-w-0"
                 size="sm"
                 [label]="name() + ' permission default'"
-                [title]="effectivePermission() ?? ''"
+                [title]="permissionLabel()"
                 [options]="permissionOptions()"
                 [value]="effectivePermission() ?? null"
-                placeholder="Choose"
+                placeholder="Select mode"
                 [disabled]="disabled() || pending() !== null"
                 (valueChange)="
                   choosePermission(
@@ -299,10 +303,10 @@ let nextTitleId = 0;
                   class="w-full min-w-0"
                   size="sm"
                   [label]="name() + ' permission default'"
-                  [title]="effectivePermission() ?? ''"
+                  [title]="permissionLabel()"
                   [options]="permissionOptions()"
                   [value]="effectivePermission() ?? null"
-                  placeholder="Choose"
+                  placeholder="Select mode"
                   [disabled]="disabled() || pending() !== null"
                   (valueChange)="
                     choosePermission(
@@ -338,10 +342,10 @@ let nextTitleId = 0;
                 class="w-full min-w-0"
                 size="sm"
                 [label]="name() + ' network default'"
-                [title]="effectiveNetwork() ?? ''"
+                [title]="networkLabel()"
                 [options]="networkOptions()"
                 [value]="effectiveNetwork() ?? null"
-                placeholder="Choose"
+                placeholder="Select mode"
                 [disabled]="disabled() || pending() !== null"
                 (valueChange)="
                   chooseNetwork($event, networkSelect.element.nativeElement);
@@ -355,10 +359,10 @@ let nextTitleId = 0;
                   class="w-full min-w-0"
                   size="sm"
                   [label]="name() + ' network default'"
-                  [title]="effectiveNetwork() ?? ''"
+                  [title]="networkLabel()"
                   [options]="networkOptions()"
                   [value]="effectiveNetwork() ?? null"
-                  placeholder="Choose"
+                  placeholder="Select mode"
                   [disabled]="disabled() || pending() !== null"
                   (valueChange)="
                     chooseNetwork($event, networkSelect.element.nativeElement);
@@ -514,11 +518,25 @@ export class CliLaneDefaultCellComponent {
         ? this.reason()
         : null,
   );
+  readonly permissionLabel = computed(() => {
+    const value = this.effectivePermission();
+    return value ? LANE_PERMISSION_LABELS[value] : 'Select mode';
+  });
+  readonly networkLabel = computed(() => {
+    const value = this.effectiveNetwork();
+    return value ? LANE_NETWORK_LABELS[value] : 'Select mode';
+  });
   readonly permissionOptions = computed(() =>
-    this.permissions().map((value) => ({ value, label: value })),
+    this.permissions().map((value) => ({
+      value,
+      label: LANE_PERMISSION_LABELS[value],
+    })),
   );
   readonly networkOptions = computed(() =>
-    this.networks().map((value) => ({ value, label: value })),
+    this.networks().map((value) => ({
+      value,
+      label: LANE_NETWORK_LABELS[value],
+    })),
   );
   private restoring = false;
   protected restoreSelection<T>(

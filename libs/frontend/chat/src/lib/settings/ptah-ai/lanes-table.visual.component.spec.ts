@@ -109,12 +109,30 @@ function narrow(fixture: ComponentFixture<LanesTableComponent>): void {
 }
 
 describe('LanesTableComponent visual presentation', () => {
-  it('uses sans defaults without default effort suffixes in cells and details', async () => {
+  it('matches projected Edit to the outline small Test button and keeps Delete destructive', async () => {
+    const { fixture, host } = await mount([instance('a')]);
+    q(host, 'ptah-table-row-expander button')?.click();
+    fixture.detectChanges();
+    const edit = Array.from(
+      host.querySelectorAll<HTMLButtonElement>('#lane-detail-a button'),
+    ).find((button) => button.textContent?.trim() === 'Edit');
+    const remove = Array.from(
+      host.querySelectorAll<HTMLButtonElement>('#lane-detail-a button'),
+    ).find((button) => button.textContent?.trim() === 'Delete');
+    expect(edit?.classList.contains('btn-outline')).toBe(true);
+    expect(edit?.classList.contains('btn-sm')).toBe(true);
+    expect(remove?.getAttribute('data-tone')).toBe('danger');
+  });
+
+  it('uses sans defaults and keeps the effort editor for an unset effort in cells and details', async () => {
     const { fixture, host } = await mount([
+      // Codex supports effort but has none saved (the reviewer's Pi case).
       system('codex', {
-        effort: { key: 'codexReasoningEffort', value: 'default' },
+        effort: { key: 'codexReasoningEffort', value: '' },
       }),
-      instance('a', { selectedModel: '', effort: 'n/a' }),
+      // Copilot here stands for a CLI without an effort setting.
+      system('copilot', { effort: null }),
+      instance('a', { selectedModel: '', effort: '' }),
     ]);
     const check = () => {
       for (const name of ['Codex', 'Lane a']) {
@@ -123,10 +141,16 @@ describe('LanesTableComponent visual presentation', () => {
           '[aria-label="Model default for ' + name + '"]',
         );
         expect(trigger?.classList.contains('font-mono')).toBe(false);
+        // A supported lane without a saved effort keeps its trigger, so an effort can be chosen.
         expect(
-          q(host, '[aria-label="Effort default for ' + name + '"]'),
-        ).toBeNull();
+          q(
+            host,
+            '[aria-label="Effort default for ' + name + '"]',
+          )?.textContent?.trim(),
+        ).toBe('default');
       }
+      // A CLI without an effort setting has no effort trigger.
+      expect(q(host, '[aria-label="Effort default for Copilot"]')).toBeNull();
     };
     check();
     narrow(fixture);
@@ -153,7 +177,7 @@ describe('LanesTableComponent visual presentation', () => {
     const { host } = await mount([]);
     const cell = q(host, 'td.ptah-table-message-cell');
     expect(cell?.textContent).toContain('No lanes available.');
-    expect(cell?.getAttribute('colspan')).toBe('9');
+    expect(cell?.getAttribute('colspan')).toBe('8');
   });
 
   it('distinguishes loading and error from an empty result and retries', async () => {
@@ -329,7 +353,7 @@ describe('LanesTableComponent visual presentation', () => {
     );
   });
 
-  it('keeps recovery actions and tier counts outside the status cell', async () => {
+  it('keeps recovery actions beside status and tier counts in details', async () => {
     const { fixture, host } = await mount([
       uninstalled('codex'),
       instance('a'),
@@ -341,7 +365,13 @@ describe('LanesTableComponent visual presentation', () => {
     const install = Array.from(lane?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.trim() === 'Install guide',
     );
-    expect(install?.closest('.lane-row-actions')).not.toBeNull();
+    expect(install?.closest('[data-lane-status]')).not.toBeNull();
+    expect(
+      Array.from(host.querySelectorAll('thead th')).map((cell) =>
+        cell.textContent?.trim(),
+      ),
+    ).not.toContain('Actions');
+    expect(lane?.querySelectorAll(':scope > th, :scope > td')).toHaveLength(8);
     narrow(fixture);
     const guide = lane?.querySelector<HTMLButtonElement>(
       'ptah-lane-row-identity .lane-install-guide',
@@ -371,6 +401,5 @@ describe('LanesTableComponent visual presentation', () => {
       q(host, '[ptahDetailFacts] [data-testid="cli-matrix-tier-summary"]')
         ?.textContent,
     ).toContain('0 of 3 set');
-    expect(q(host, '[ptahDetailChips] [ptahBadge]')).not.toBeNull();
   });
 });

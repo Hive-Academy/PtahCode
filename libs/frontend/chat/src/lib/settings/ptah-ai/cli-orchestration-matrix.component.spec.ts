@@ -414,7 +414,12 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(
       detail?.querySelector('[data-popover-kind="permission"]'),
     ).not.toBeNull();
-    expect(detail?.querySelector('ptah-cli-capability-cells')).not.toBeNull();
+    // Short capability chips; each value opens in the shared popover.
+    expect(
+      detail?.querySelector(
+        '[data-testid="cli-capability-summary"] [data-capability]',
+      ),
+    ).not.toBeNull();
     expect(
       detail?.querySelector('[data-testid="cli-matrix-test-result"]')
         ?.textContent,

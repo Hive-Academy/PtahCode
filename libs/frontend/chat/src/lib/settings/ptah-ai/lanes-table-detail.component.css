@@ -1,0 +1,88 @@
+ptah-lanes-table-detail {
+  display: block;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.9fr) minmax(0, 1.2fr);
+  grid-template-areas: 'facts chips actions' 'body body body';
+  gap: var(--ptah-gap-controls);
+  padding: var(--ptah-surface-pad);
+  margin-block: var(--ptah-gap-inline);
+  background: var(--ptah-card-bg-inset);
+  border: var(--ptah-border-width) solid var(--ptah-card-border);
+  border-radius: var(--ptah-card-radius-inset);
+}
+ptah-lanes-table-detail .ptah-table-detail-layout > div {
+  min-width: 0;
+}
+ptah-lanes-table-detail
+  .ptah-table-detail-layout[data-mode='wide']
+  > .ptah-table-detail-chips {
+  margin-block-start: 0;
+}
+ptah-lanes-table-detail
+  .ptah-table-detail-layout
+  .ptah-table-detail-facts
+  > [ptahDetailFacts] {
+  display: block;
+}
+ptah-lanes-table-detail [ptahDetailFacts] > dl {
+  display: grid;
+  grid-template-columns: minmax(0, 8.5rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ptah-gap-inline);
+  margin: 0;
+  font-size: var(--ptah-text-body-size);
+}
+ptah-lanes-table-detail dt,
+ptah-lanes-table-detail dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+ptah-lanes-table-detail dt {
+  color: var(--color-base-content-muted);
+}
+ptah-lanes-table-detail
+  .ptah-table-detail-layout
+  .ptah-table-detail-actions
+  > [ptahDetailActions] {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ptah-gap-inline);
+  min-width: 0;
+}
+ptah-lanes-table-detail .quiet-actions,
+ptah-lanes-table-detail .test-action,
+ptah-lanes-table-detail .capability-chips,
+ptah-lanes-table-detail [laneActions] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ptah-gap-inline);
+  min-width: 0;
+}
+ptah-lanes-table-detail [laneActions] {
+  flex: 1 1 auto;
+}
+ptah-lanes-table-detail [laneActions] > button[tone='danger'] {
+  margin-inline-start: auto;
+}
+ptah-lanes-table-detail .test-action [role='status'] {
+  flex: 1 1 8rem;
+}
+ptah-lanes-table-detail .capability-value {
+  padding: var(--ptah-gap-field);
+  max-width: min(20rem, 80vw);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 784px) {
+  ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'facts' 'chips' 'actions' 'body';
+  }
+}

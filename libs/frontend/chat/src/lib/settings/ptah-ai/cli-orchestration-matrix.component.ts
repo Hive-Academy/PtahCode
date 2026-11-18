@@ -129,7 +129,9 @@ const SAVE_SCOPE = 'global';
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex flex-col gap-[var(--ptah-gap-field)]">
+    <div
+      class="flex flex-col gap-[var(--ptah-gap-field)] [&>*:focus-within]:z-[var(--ptah-z-raised)]"
+    >
       <section
         class="flex flex-col gap-[var(--ptah-gap-field)]"
         aria-labelledby="cli-matrix-heading"

@@ -1,7 +1,10 @@
-import { signal } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { NativePopoverComponent } from '@ptah-extension/ui';
+import {
+  NativePopoverComponent,
+  PtahButtonDirective,
+} from '@ptah-extension/ui';
 import { ProvidersSettingsStateService } from '@ptah-extension/core';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import type { SystemCliMatrixRow } from './cli-matrix-rows';
@@ -34,6 +37,30 @@ const row = (
   credentialAction: cli === 'cursor',
 });
 
+@Component({
+  imports: [LanesTableDetailComponent, PtahButtonDirective],
+  template: `<ptah-lanes-table-detail [row]="instance">
+    <span laneActions>
+      <button type="button" ptahButton variant="ghost" size="sm">Edit</button>
+      <button type="button" ptahButton variant="ghost" size="sm" tone="danger">
+        Delete
+      </button>
+    </span>
+  </ptah-lanes-table-detail>`,
+})
+class InstanceDetailHost {
+  readonly instance = {
+    ...row(),
+    kind: 'instance' as const,
+    providerId: 'local',
+    keyStatus: null,
+    tiers: [],
+    selectedModel: null,
+    lastTest: null,
+    runtimeStatus: null,
+  };
+}
+
 describe('LanesTableDetailComponent', () => {
   function mount(value = row()) {
     const fixture = TestBed.createComponent(LanesTableDetailComponent);
@@ -44,7 +71,9 @@ describe('LanesTableDetailComponent', () => {
 
   it('shows version, executable, provider and native permission facts', () => {
     const { host } = mount();
-    const facts = host.querySelector('dl[data-testid="cli-provider-facts"]');
+    const facts = host.querySelector(
+      'ptah-description-list[data-testid="cli-provider-facts"]',
+    );
     expect(facts?.getAttribute('aria-label')).toBe('Codex details');
     expect(facts?.textContent).toContain('v1.2.3');
     expect(facts?.textContent).toContain('Executable found');
@@ -74,7 +103,83 @@ describe('LanesTableDetailComponent', () => {
       .find((button) => button.textContent?.trim() === 'Test')
       ?.click();
     expect(test).toHaveBeenCalledTimes(1);
-    expect(host.querySelectorAll('dl[ptahDetailFacts]')).toHaveLength(1);
+    expect(
+      host.querySelectorAll('ptah-description-list[ptahDetailFacts]'),
+    ).toHaveLength(1);
+  });
+
+  it('uses wide slots and keeps action order and size consistent', () => {
+    const { host } = mount();
+    expect(
+      host.querySelector('ptah-table-detail-layout')?.getAttribute('data-mode'),
+    ).toBe('wide');
+    expect(host.querySelectorAll('ptah-description-list')).toHaveLength(1);
+    expect(host.querySelector('[ptahDetailChips]')).not.toBeNull();
+    const actions = Array.from(
+      host.querySelectorAll('[ptahDetailActions] button'),
+    );
+    expect(actions.map((button) => button.textContent?.trim())).toEqual([
+      'Test',
+      'All capabilities',
+      'Info',
+      'Codex settings',
+    ]);
+    expect(
+      actions.every((button) => button.getAttribute('size') === 'sm'),
+    ).toBe(true);
+    const status = host.querySelector('[role="status"]');
+    expect(status?.textContent).toContain('Not run yet');
+    expect(status?.previousElementSibling?.textContent?.trim()).toBe('Test');
+  });
+
+  it('opens name-only capability chips with values in the shared popover', () => {
+    const { fixture, host } = mount();
+    const chips = Array.from(
+      host.querySelectorAll<HTMLButtonElement>('[data-capability]'),
+    );
+    expect(chips.map((chip) => chip.textContent?.trim())).toEqual([
+      'Messaging',
+      'Permission',
+      'Network',
+      'MCP',
+      'Limit',
+    ]);
+    expect(chips.every((chip) => chip.type === 'button')).toBe(true);
+    chips[0].focus();
+    expect(document.activeElement).toBe(chips[0]);
+    chips[0].click();
+    fixture.detectChanges();
+    expect(chips[0].getAttribute('aria-expanded')).toBe('true');
+    expect(
+      host.querySelector('#lane-capability-codex-Messaging')?.textContent,
+    ).toContain('Unverified');
+    chips[1].click();
+    fixture.detectChanges();
+    expect(chips[0].getAttribute('aria-expanded')).toBe('false');
+    expect(chips[1].getAttribute('aria-expanded')).toBe('true');
+    chips[1].click();
+    fixture.detectChanges();
+    expect(host.querySelector('.capability-value')).toBeNull();
+  });
+
+  it('places destructive Delete last after the instance actions', () => {
+    const fixture = TestBed.createComponent(InstanceDetailHost);
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const buttons = Array.from(
+      host.querySelectorAll('[ptahDetailActions] button'),
+    );
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual([
+      'Test',
+      'All capabilities',
+      'Edit tiers',
+      'Edit',
+      'Delete',
+    ]);
+    expect(
+      buttons.every((button) => button.getAttribute('size') === 'sm'),
+    ).toBe(true);
+    expect(buttons.at(-1)?.getAttribute('tone')).toBe('danger');
   });
 
   it('emits Codex settings', () => {

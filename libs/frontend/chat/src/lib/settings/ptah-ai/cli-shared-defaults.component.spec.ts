@@ -1,4 +1,5 @@
-﻿import { By } from '@angular/platform-browser';
+﻿import { PtahRichSelectComponent } from '@ptah-extension/ui';
+import { By } from '@angular/platform-browser';
 import { TestBed } from '@angular/core/testing';
 import type { CliAdapterManifest } from '@ptah-extension/shared';
 import { CliSharedDefaultsComponent } from './cli-shared-defaults.component';
@@ -31,6 +32,16 @@ describe('CliSharedDefaultsComponent', () => {
     expect(
       host.querySelector('ptah-cli-lane-default-cell[data-layout="wide"]'),
     ).toBeTruthy();
+    const selects = fixture.debugElement.queryAll(
+      By.directive(PtahRichSelectComponent),
+    );
+    expect(selects[0].componentInstance.options()).toEqual([
+      { value: 'plan', label: 'Plan only' },
+      { value: 'yolo', label: 'Yolo' },
+    ]);
+    expect(selects[1].componentInstance.options()).toEqual([
+      { value: 'deny', label: 'Blocked' },
+    ]);
     const selected = jest.fn();
     fixture.componentInstance.selected.subscribe(selected);
     fixture.debugElement

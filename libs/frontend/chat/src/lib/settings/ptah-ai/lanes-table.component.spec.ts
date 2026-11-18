@@ -154,12 +154,11 @@ describe('LanesTableComponent', () => {
       );
     expect(widths('table [data-testid="lanes-colgroup"]')).toEqual([
       'w-[6%]',
-      'w-[17%]',
-      'w-[12%]',
+      'lane-identity',
+      'lane-status',
       'w-[14%]',
       'w-[10%]',
       'w-[14%]',
-      'w-[16%]',
       'w-[6%]',
       'lane-expander',
     ]);

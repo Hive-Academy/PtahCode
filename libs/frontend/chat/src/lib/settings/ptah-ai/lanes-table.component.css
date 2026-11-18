@@ -35,7 +35,7 @@ ptah-lanes-table .lane-default-value [data-popover-kind='model'] {
 }
 
 ptah-lanes-table [data-testid='lanes-colgroup'] col:nth-child(2) {
-  width: 17%;
+  width: 26%;
 }
 ptah-lanes-table .ptah-table-control-cell > span {
   font-size: 0.75rem;
@@ -80,8 +80,7 @@ ptah-lanes-table .lane-order {
   width: 2.25rem;
 }
 ptah-lanes-table .lane-status {
-  width: 7rem;
-  min-width: 7rem;
+  width: 23%;
 }
 ptah-lanes-table .lane-enabled {
   width: 3rem;
@@ -157,4 +156,72 @@ ptah-lanes-table
   button.btn.btn-xs[data-ptah-button]:is(.btn, #ptah-button) {
   padding-inline: 0;
   text-align: start;
+}
+
+/* Keep status recovery and the existing menu beside the status in every layout. */
+ptah-lanes-table [data-lane-status] > ptah-lanes-table-status,
+ptah-lanes-table [data-lane-status] > .lane-row-actions {
+  display: inline-flex;
+  vertical-align: middle;
+  max-width: 100%;
+  width: auto;
+}
+ptah-lanes-table [data-lane-status] {
+  white-space: nowrap;
+}
+ptah-lanes-table [data-lane-status] .lane-row-actions > button {
+  padding-inline: 0;
+  font-size: 0.75rem;
+}
+ptah-lanes-table .ptah-table-grid > tbody > tr:not([ptahDetailRow]) {
+  height: 49px;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-status {
+  width: 8rem;
+}
+
+/* Recovery is visible beside Status in both table layouts. */
+ptah-lanes-table
+  ptah-lane-row-identity
+  .lane-install-guide[data-ptah-button]:is(.btn, #ptah-button) {
+  display: none;
+}
+
+/* The 358px settings pane must leave room for the lane icon and name. */
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  > ptah-lanes-table-status {
+  max-width: calc(100% - 2rem);
+  margin-inline-end: 0.25rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .ptah-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  > .lane-row-actions {
+  gap: 0;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .ptah-table-row-actions
+  button[data-ptah-button]:is(.btn, #ptah-button) {
+  width: 1.5rem;
+}
+
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .lane-row-actions
+  > button[data-ptah-button]:is(.btn, #ptah-button) {
+  padding-inline: 0;
+  font-size: 0.75rem;
 }

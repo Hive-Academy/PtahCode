@@ -18,12 +18,11 @@
   } @else {
     <colgroup data-testid="lanes-colgroup">
       <col class="w-[6%]" />
-      <col class="w-[17%]" />
-      <col class="w-[12%]" />
+      <col class="lane-identity" />
+      <col class="lane-status" />
       <col class="w-[14%]" />
       <col class="w-[10%]" />
       <col class="w-[14%]" />
-      <col class="w-[16%]" />
       <col class="w-[6%]" />
       <col class="lane-expander" />
     </colgroup>
@@ -36,7 +35,6 @@
       <th scope="col" ptahCollapsible>Permission</th>
       <th scope="col" ptahCollapsible>Network</th>
       <th scope="col" ptahCollapsible>Model</th>
-      <th scope="col" ptahCollapsible>Actions</th>
       <th scope="col">Enabled</th>
       <th scope="col" class="lane-expander">
         <span class="sr-only">Details</span>
@@ -46,7 +44,7 @@
   <tbody>
     @if (error() && rows().length > 0) {
       <tr>
-        <td [ptahMessageCell]="9">
+        <td [ptahMessageCell]="8">
           {{ error() }}
           <button
             ptahButton
@@ -97,12 +95,110 @@
             (installGuideRequested)="recover(row)"
           />
         </th>
-        <td>
+        <td data-lane-status>
           <ptah-lanes-table-status
             [row]="row"
+            [collapsed]="table.collapsed()"
             [testing]="!!testingRows()[row.id]"
             [testResult]="testResults()[row.id] ?? ''"
           />
+          <div class="lane-row-actions flex items-center gap-ptah-inline">
+            @if (
+              row.status.kind === 'needs-key' ||
+              row.status.kind === 'not-installed'
+            ) {
+              <button
+                type="button"
+                ptahButton
+                variant="ghost"
+                size="sm"
+                [attr.aria-label]="
+                  row.status.kind === 'not-installed'
+                    ? 'Install guide'
+                    : 'Sign in'
+                "
+                (click)="recover(row)"
+              >
+                {{
+                  row.status.kind === 'not-installed'
+                    ? table.collapsed()
+                      ? 'Install'
+                      : 'Install guide'
+                    : 'Sign in'
+                }}
+              </button>
+            }
+            <ptah-table-row-actions [rowLabel]="row.name">
+              <button
+                role="menuitem"
+                type="button"
+                [attr.aria-label]="'Details for ' + row.name"
+                (click)="showDetail(row)"
+              >
+                Details
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                [disabled]="
+                  rowBusy(row) ||
+                  testingRows()[row.id] ||
+                  (row.kind === 'system' && !row.installed)
+                "
+                (click)="test.emit(row)"
+                [attr.data-testid]="
+                  row.kind === 'instance' ? 'cli-matrix-test-' + row.id : null
+                "
+              >
+                Test
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                (click)="
+                  showDetail(row, 'capabilities'); capabilities.emit(row)
+                "
+              >
+                All capabilities
+              </button>
+              @if (row.kind === 'instance') {
+                <button
+                  role="menuitem"
+                  type="button"
+                  [attr.data-testid]="'cli-matrix-tiers-' + row.id"
+                  (click)="tiers.emit(row); showDetail(row)"
+                >
+                  Tiers
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  [disabled]="rowBusy(row) || !canWrite()"
+                  (click)="edit.emit(row)"
+                  [attr.data-testid]="'cli-matrix-edit-' + row.id"
+                >
+                  Edit
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  [disabled]="rowBusy(row) || !canWrite()"
+                  (click)="requestDelete(row, $event)"
+                  [attr.data-testid]="'cli-matrix-delete-' + row.id"
+                >
+                  Delete
+                </button>
+              }
+            </ptah-table-row-actions>
+          </div>
+          @if (pendingDelete()?.id === row.id) {
+            <ptah-inline-confirm
+              [message]="'Delete ' + row.name + '?'"
+              tone="danger"
+              (confirm)="confirmDelete(row)"
+              (cancelled)="cancelDelete()"
+            />
+          }
         </td>
         <td ptahCollapsible ptahControlCell class="ptah-table-control-cell">
           @if (row.kind === 'system') {
@@ -248,98 +344,6 @@
             [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
           />
         </td>
-        <td ptahCollapsible>
-          <div class="lane-row-actions flex items-center gap-ptah-inline">
-            @if (
-              row.status.kind === 'needs-key' ||
-              row.status.kind === 'not-installed'
-            ) {
-              <button
-                type="button"
-                ptahButton
-                variant="ghost"
-                size="sm"
-                (click)="recover(row)"
-              >
-                {{
-                  row.status.kind === 'not-installed'
-                    ? 'Install guide'
-                    : 'Sign in'
-                }}
-              </button>
-            }
-            <ptah-table-row-actions [rowLabel]="row.name">
-              <button
-                role="menuitem"
-                type="button"
-                [attr.aria-label]="'Details for ' + row.name"
-                (click)="showDetail(row)"
-              >
-                Details
-              </button>
-              <button
-                role="menuitem"
-                type="button"
-                [disabled]="
-                  rowBusy(row) ||
-                  testingRows()[row.id] ||
-                  (row.kind === 'system' && !row.installed)
-                "
-                (click)="test.emit(row)"
-                [attr.data-testid]="
-                  row.kind === 'instance' ? 'cli-matrix-test-' + row.id : null
-                "
-              >
-                Test
-              </button>
-              <button
-                role="menuitem"
-                type="button"
-                (click)="
-                  showDetail(row, 'capabilities'); capabilities.emit(row)
-                "
-              >
-                All capabilities
-              </button>
-              @if (row.kind === 'instance') {
-                <button
-                  role="menuitem"
-                  type="button"
-                  [attr.data-testid]="'cli-matrix-tiers-' + row.id"
-                  (click)="tiers.emit(row); showDetail(row)"
-                >
-                  Tiers
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  [disabled]="rowBusy(row) || !canWrite()"
-                  (click)="edit.emit(row)"
-                  [attr.data-testid]="'cli-matrix-edit-' + row.id"
-                >
-                  Edit
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  [disabled]="rowBusy(row) || !canWrite()"
-                  (click)="requestDelete(row, $event)"
-                  [attr.data-testid]="'cli-matrix-delete-' + row.id"
-                >
-                  Delete
-                </button>
-              }
-            </ptah-table-row-actions>
-          </div>
-          @if (pendingDelete()?.id === row.id) {
-            <ptah-inline-confirm
-              [message]="'Delete ' + row.name + '?'"
-              tone="danger"
-              (confirm)="confirmDelete(row)"
-              (cancelled)="cancelDelete()"
-            />
-          }
-        </td>
         <td ptahControlCell>
           <input
             ptahToggle
@@ -371,7 +375,7 @@
         [ptahDetailRow]="detailRowId() === row.id"
         [id]="'lane-detail-' + row.id"
       >
-        <td ptahDetailCell [colspan]="table.collapsed() ? 5 : 9">
+        <td ptahDetailCell [colspan]="table.collapsed() ? 5 : 8">
           @if (detailRowId() === row.id) {
             <ptah-lanes-table-detail
               [row]="row"
@@ -460,7 +464,7 @@
                   <button
                     type="button"
                     ptahButton
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     data-testid="lanes-detail-reset-default"
                     [disabled]="rowBusy(row) || !canWrite()"
@@ -473,7 +477,7 @@
                   <button
                     type="button"
                     ptahButton
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     [disabled]="rowBusy(row) || !canWrite()"
                     (click)="edit.emit(row)"
@@ -507,7 +511,7 @@
       </tr>
     } @empty {
       <tr>
-        <td [ptahMessageCell]="9">
+        <td [ptahMessageCell]="8">
           @if (loading()) {
             Loading lanes…
           } @else if (error()) {

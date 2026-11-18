@@ -59,7 +59,9 @@ export type AgentsRoutingFocusTarget =
     ProviderConsumerAssignmentsComponent,
   ],
   template: `
-    <div class="flex flex-col gap-8 font-sans text-sm text-base-content">
+    <div
+      class="flex flex-col gap-8 font-sans text-sm text-base-content [&>*:focus-within]:z-[var(--ptah-z-raised)]"
+    >
       <!-- The loading and retry state of each source shows inside the matrix card (or its placeholder), not below it. -->
       <ng-template #readStatesTpl>
         @for (section of readStates(); track section.id) {

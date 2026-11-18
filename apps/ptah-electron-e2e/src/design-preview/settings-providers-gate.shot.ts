@@ -203,6 +203,36 @@ test('captures populated Settings Providers gate shots on the real backend', asy
         list.map((el) => Math.round(el.getBoundingClientRect().height)),
       ),
     });
+    // The collapsed table (784 px) once squeezed the Lane column to zero: every
+    // visible lane name keeps a readable width. Measure the Lane cell, not the
+    // text: a short name such as "Pi" is narrower than 24 px by itself.
+    const nameCells = await table
+      .locator('.ptah-table-row-title-name')
+      .evaluateAll((list) =>
+        list
+          .filter((el) => (el as HTMLElement).offsetParent !== null)
+          .map((el) => {
+            // Content width of the cell: a squeezed column keeps only padding.
+            // The Lane column is the row header (th scope="row").
+            const cell = (el.closest('th, td') ?? el) as HTMLElement;
+            const style = getComputedStyle(cell);
+            return {
+              name: (el.textContent ?? '').trim(),
+              tag: cell.tagName,
+              width: Math.round(
+                cell.clientWidth -
+                  parseFloat(style.paddingLeft) -
+                  parseFloat(style.paddingRight),
+              ),
+            };
+          }),
+      );
+    if (SUFFIX !== 'before' && nameCells.length) {
+      expect(
+        Math.min(...nameCells.map((cell) => cell.width)),
+        `${image}: a Lane cell is narrower than 24 px ${JSON.stringify(nameCells)}`,
+      ).toBeGreaterThan(24);
+    }
   };
   const remount = async (): Promise<void> => {
     await ui.goto('chat');
@@ -246,11 +276,95 @@ test('captures populated Settings Providers gate shots on the real backend', asy
       );
       await shot('lanes', width);
 
+      if (SUFFIX !== 'before') {
+        // 1b. An open ptah-select panel that opens down over the next glass section must stay
+        // on top: its lowest option is the element under the pointer (the section that has
+        // focus is raised by the page containers). Checked for the last select in the lanes
+        // card, the Ptah CLI defaults and Background models.
+        const lowestOptionOnTop = async (
+          trigger: Locator,
+        ): Promise<boolean> => {
+          await trigger.evaluate((el) => el.scrollIntoView({ block: 'end' }));
+          await trigger.click();
+          const listbox = page.getByRole('listbox').last();
+          await expect(listbox).toBeVisible();
+          const lowest = listbox.getByRole('option').last();
+          await lowest.scrollIntoViewIfNeeded();
+          const onTop = await lowest.evaluate((el) => {
+            const box = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              box.left + box.width / 2,
+              box.top + box.height / 2,
+            );
+            return hit !== null && (hit === el || el.contains(hit));
+          });
+          await page.keyboard.press('Escape');
+          return onTop;
+        };
+        const selectTriggers = [
+          page
+            .locator(
+              '[data-testid="settings-cli-matrix"] [role="combobox"]:not([disabled]):visible',
+            )
+            .last(),
+          page
+            .locator(
+              'ptah-cli-shared-defaults [role="combobox"]:not([disabled]):visible',
+            )
+            .last(),
+          page
+            .locator(
+              'ptah-provider-consumer-assignments [role="combobox"]:not([disabled]):visible',
+            )
+            .last(),
+        ];
+        for (const trigger of selectTriggers) {
+          if (!(await trigger.count())) continue;
+          const label = (await trigger.getAttribute('aria-label')) ?? 'select';
+          const onTop = await lowestOptionOnTop(trigger);
+          metrics.push({
+            check: 'lowest-option-on-top',
+            theme,
+            width,
+            label,
+            onTop,
+          });
+          expect(onTop, `${label}: lowest option covered at ${width}px`).toBe(
+            true,
+          );
+        }
+        await remount();
+      }
+
       // 2. A system lane detail expanded.
       await openDetail(page, codex, 'Codex');
       await expect(page.locator('#lane-detail-codex')).toBeVisible();
       await page.locator('#lane-detail-codex').scrollIntoViewIfNeeded();
       await shot('system-detail', width);
+
+      if (full && SUFFIX !== 'before') {
+        // 2b. A capability chip opens its value in the shared popover.
+        const chip = page
+          .locator('#lane-detail-codex [data-capability]')
+          .first();
+        await chip.click();
+        await expect(chip).toHaveAttribute('aria-expanded', 'true');
+        await shot('capability-popover', width);
+        await page.keyboard.press('Escape');
+
+        // 2c. The "N available in catalog" badge opens the catalog names.
+        const catalog = page
+          .locator('ptah-providers-settings')
+          .getByTestId('catalog-hint')
+          .first();
+        await catalog.scrollIntoViewIfNeeded();
+        await catalog.click();
+        await expect(
+          page.getByTestId('catalog-hint-text').first(),
+        ).toBeVisible();
+        await shot('catalog-popover', width);
+        await page.keyboard.press('Escape');
+      }
 
       if (!full) {
         // Layout runs: the instance detail (rev2b 784 expanded) and the defaults (review-a3 1440).
@@ -304,9 +418,9 @@ test('captures populated Settings Providers gate shots on the real backend', asy
             { timeout: 45_000 },
           )
           .toBe(false);
-        await expect(
-          page.getByText(/This instance was not found/),
-        ).toHaveCount(0);
+        await expect(page.getByText(/This instance was not found/)).toHaveCount(
+          0,
+        );
       }
       await claudeDetail.scrollIntoViewIfNeeded();
       await shot('claude-test', width);

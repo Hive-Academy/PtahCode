@@ -1480,7 +1480,7 @@ describe('ProvidersSettingsComponent', () => {
           .querySelector('[data-testid="connections-count"]')
           ?.textContent?.replace(/\s+/g, ' ')
           .trim(),
-      ).toBe('2 configured · 1 available in catalog');
+      ).toBe('2 configured');
       const connect = element.querySelector<HTMLButtonElement>(
         '[data-testid="connect-provider"]',
       );
@@ -1539,7 +1539,7 @@ describe('ProvidersSettingsComponent', () => {
         element.querySelectorAll('ptah-provider-connection-card'),
       ).toHaveLength(2);
     });
-    it('the list is a wide card grid (columns from the container width), and the catalog caption is one passive row under the header', async () => {
+    it('the list uses a wide card grid and the catalog badge opens an accessible provider list', async () => {
       await render();
       const grid = element.querySelector('[data-testid="connections-grid"]');
       expect(grid?.getAttribute('data-ptah-pattern')).toBe('card-grid');
@@ -1549,17 +1549,23 @@ describe('ProvidersSettingsComponent', () => {
       );
       expect(grid?.className).toContain('items-start');
       const hint = element.querySelector('[data-testid="catalog-hint"]');
-      // Directly under the header row (the row holding "Connect provider").
+      expect(hint?.tagName).toBe('BUTTON');
+      expect(hint?.getAttribute('aria-expanded')).toBe('false');
+      expect(hint?.getAttribute('aria-haspopup')).toBe('dialog');
       expect(
-        hint?.previousElementSibling?.querySelector(
-          '[data-testid="connect-provider"]',
-        ),
-      ).not.toBeNull();
-      expect(hint?.className).not.toContain('flex-wrap');
-      expect(hint?.querySelector('button')).toBeNull();
+        element.querySelector('[data-testid="catalog-hint-text"]'),
+      ).toBeNull();
+      (hint as HTMLButtonElement).click();
+      await render();
+      expect(hint?.getAttribute('aria-expanded')).toBe('true');
       expect(
-        element.querySelector('[data-testid="catalog-hint-text"]')?.className,
-      ).toContain('truncate');
+        element.querySelector('[data-testid="catalog-hint-text"]')?.tagName,
+      ).toBe('UL');
+      hint?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+      await render();
+      expect(hint?.getAttribute('aria-expanded')).toBe('false');
       // One way into the catalog: the header button carries the more-providers focus hook; the grid tile is gone.
       expect(
         element
@@ -1694,7 +1700,18 @@ describe('ProvidersSettingsComponent', () => {
     await render();
     expect(
       element.querySelector('[data-testid="catalog-hint"]')?.textContent,
-    ).toContain('1 catalog provider ready to add: OpenRouter');
+    ).toContain('1 available in catalog');
+    element
+      .querySelector<HTMLButtonElement>('[data-testid="catalog-hint"]')
+      ?.click();
+    await render();
+    expect(
+      element.querySelector('[data-testid="catalog-hint-text"]')?.textContent,
+    ).toContain('OpenRouter');
+    element
+      .querySelector<HTMLButtonElement>('[data-testid="catalog-hint"]')
+      ?.click();
+    await render();
     for (const opener of [
       button('Connect provider'),
       element.querySelector<HTMLButtonElement>('[data-focus="more-providers"]'),

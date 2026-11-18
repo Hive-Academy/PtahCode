@@ -1,3 +1,4 @@
+import { choosePtahSelect } from '../../choose-ptah-select';
 /**
  * E2E: CLI matrix and background roles interaction scenes (TASK_2026_555; on the Providers tab since the Context
  * Management regroup). Batch 32 started this file with the Batch 14 review's
@@ -64,8 +65,6 @@ const toastMessage = (page: Page): Locator =>
   page.locator('[data-testid="settings-toast-message"]').last();
 const toastUndo = (page: Page): Locator =>
   page.locator('[data-testid="settings-toast-undo"]').last();
-const rolesDetails = (page: Page): Locator =>
-  page.locator('[data-testid="background-roles-details"]');
 
 async function open(page: Page, modal: ModalCase): Promise<Locator> {
   const opener = modal.opener(page);
@@ -177,9 +176,10 @@ for (const host of HOSTS) {
         .locator('[data-testid="add-cli-instance-name"]')
         .fill('Llama-Local');
       // A local provider needs no key (#48).
-      await dialog
-        .locator('[data-testid="add-cli-instance-provider"]')
-        .selectOption('ollama');
+      await choosePtahSelect(
+        dialog.locator('[data-testid="add-cli-instance-provider"]'),
+        'Ollama · Local server',
+      );
       await expect(
         dialog.locator('[data-testid="add-cli-instance-key-help"]'),
       ).toContainText('No API key needed');
@@ -215,11 +215,13 @@ for (const host of HOSTS) {
       // V36-7: Edit sits in the row's "More actions" popover; focus returns to that trigger.
       await expandMatrixDetail(page, GLM_ID);
       const more = page.locator(
-        `#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`,
+        `[data-testid="cli-matrix-row-${GLM_ID}"] ptah-table-row-actions button[aria-haspopup="menu"]`,
       );
       await more.click();
       await page
-        .locator(`#lane-detail-${GLM_ID} [role="menuitem"]:text-is("Edit")`)
+        .locator(
+          `[data-testid="cli-matrix-row-${GLM_ID}"] [role="menuitem"]:text-is("Edit")`,
+        )
         .click();
       const dialog = dialogOf(page, 'add-cli-instance-modal');
       await expect(dialog).toHaveAttribute('open', '');
@@ -361,22 +363,20 @@ for (const host of HOSTS) {
       });
     });
 
-    test('roles are collapsed by default: the summary shows, the roles table does not', async ({
+    test('roles are visible by default and after returning to Providers', async ({
       page,
     }) => {
-      const details = rolesDetails(page);
-      await expect(details).not.toHaveAttribute('open');
       await expect(
-        page.locator('[data-testid="background-roles-summary"]'),
+        page.locator('[data-testid="consumer-table"]'),
       ).toBeVisible();
       await expect(
-        page.locator('[data-testid="background-roles-summary"]'),
-      ).toContainText('3 roles');
-      await expect(page.locator('[data-testid="consumer-table"]')).toBeHidden();
-      // Leaving the tab and coming back keeps them closed.
+        page.locator('[data-testid="consumer-row-enhancement"]'),
+      ).toBeVisible();
       await contextManagementTab(page);
       await agentsRoutingTab(page);
-      await expect(rolesDetails(page)).not.toHaveAttribute('open');
+      await expect(
+        page.locator('[data-testid="consumer-table"]'),
+      ).toBeVisible();
     });
 
     test("More actions (visual re-check N1): the open menu's items sit inside the panel box and the viewport", async ({
@@ -386,10 +386,12 @@ for (const host of HOSTS) {
       await expandMatrixDetail(page, GLM_ID);
       await page
         .locator(
-          `#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`,
+          `[data-testid="cli-matrix-row-${GLM_ID}"] ptah-table-row-actions button[aria-haspopup="menu"]`,
         )
         .click();
-      const menu = page.locator(`#lane-detail-${GLM_ID} [role="menu"]`);
+      const menu = page.locator(
+        `[data-testid="cli-matrix-row-${GLM_ID}"] [role="menu"]`,
+      );
       await expect(menu).toBeVisible();
       const panel = await menu.boundingBox();
       if (!panel) throw new Error('No More actions panel box');
@@ -482,9 +484,10 @@ for (const host of HOSTS) {
       await dialog
         .locator('[data-testid="add-cli-instance-name"]')
         .fill('Copilot-agent');
-      await dialog
-        .locator('[data-testid="add-cli-instance-provider"]')
-        .selectOption('github-copilot');
+      await choosePtahSelect(
+        dialog.locator('[data-testid="add-cli-instance-provider"]'),
+        'GitHub Copilot · OAuth',
+      );
       const create = dialog.locator('[data-testid="add-cli-instance-submit"]');
       const signIn = dialog.locator(
         '[data-testid="add-cli-instance-copilot-state"]',

@@ -342,10 +342,15 @@ export class LanesTableComponent {
       (row.kind === 'system' ? row.effort?.value : row.effort) || 'default'
     );
   }
+  /**
+   * The lane has an effort setting: instances always, a system lane when its CLI has one
+   * (`effort` is null otherwise). An unset effort keeps the trigger ("default"), because
+   * the trigger is the only way to choose an effort. An instance whose model is not
+   * loaded yet (`selectedModel` null) shows no trigger.
+   */
   protected hasEffort(row: LaneTableRow): boolean {
-    return !['', 'default', 'n/a'].includes(
-      this.effortOf(row).trim().toLowerCase(),
-    );
+    if (row.kind === 'instance') return row.selectedModel !== null;
+    return row.effort != null;
   }
   protected hasModelId(row: LaneTableRow): boolean {
     return !!(row.kind === 'system' ? row.model.value : row.selectedModel);

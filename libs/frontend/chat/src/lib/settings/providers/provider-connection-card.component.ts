@@ -1,4 +1,8 @@
 import {
+  afterRenderEffect,
+  ElementRef,
+  signal,
+  viewChild,
   ChangeDetectionStrategy,
   Component,
   computed,
@@ -7,8 +11,15 @@ import {
   type OutputEmitterRef,
 } from '@angular/core';
 import { LucideAngularModule, AlertTriangle } from 'lucide-angular';
-import { PtahBadgeDirective, PtahButtonDirective, SurfaceCardComponent } from '@ptah-extension/ui';
-import type { ConnectionCheckRecord, SettingScope } from '@ptah-extension/shared';
+import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  SurfaceCardComponent,
+} from '@ptah-extension/ui';
+import type {
+  ConnectionCheckRecord,
+  SettingScope,
+} from '@ptah-extension/shared';
 import {
   SettingScopeRowComponent,
   type SettingScopeDisplay,
@@ -61,87 +72,184 @@ interface InlineAction {
 @Component({
   selector: 'ptah-provider-connection-card',
   standalone: true,
-  imports: [LucideAngularModule, SurfaceCardComponent, PtahBadgeDirective, PtahButtonDirective, SettingScopeRowComponent],
+  imports: [
+    LucideAngularModule,
+    SurfaceCardComponent,
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    SettingScopeRowComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block self-start' },
+  host: { class: 'block min-w-0 self-start' },
   template: `
-    <ptah-surface-card class="block [&>div]:hover:bg-base-200/70 [&>div]:hover:border-base-content/20"
-      density="compact" [tone]="cardTone()" [spine]="cardSpine()"
+    <ptah-surface-card
+      class="block [&>div]:hover:bg-base-200/70 [&>div]:hover:border-base-content/20"
+      density="compact"
+      [tone]="cardTone()"
+      [spine]="cardSpine()"
       [attr.title]="keyUnreadable() ? keyUnreadableText : statusCopy()"
-      [attr.data-state]="resolvedState()" data-testid="provider-connection-card">
-      <button type="button" class="absolute inset-0 z-0 w-full cursor-pointer rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-base-content"
-        [attr.aria-label]="cardAriaLabel()" [attr.title]="triggerTitle()" (click)="detailsRequested.emit()" data-testid="provider-card-details-trigger"></button>
-      <div class="pointer-events-none relative z-10 flex min-h-[40px] items-center gap-ptah-controls">
-        <span [class]="avatarClass()" aria-hidden="true" data-testid="card-avatar">{{ initials() }}</span>
+      [attr.data-state]="resolvedState()"
+      data-testid="provider-connection-card"
+    >
+      <button
+        type="button"
+        class="absolute inset-0 z-0 w-full cursor-pointer rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-base-content"
+        [attr.aria-label]="cardAriaLabel()"
+        [attr.title]="triggerTitle()"
+        (click)="detailsRequested.emit()"
+        data-testid="provider-card-details-trigger"
+      ></button>
+      <div
+        class="pointer-events-none relative z-10 flex min-h-[40px] flex-wrap items-center gap-ptah-controls"
+      >
+        <span
+          [class]="avatarClass()"
+          aria-hidden="true"
+          data-testid="card-avatar"
+          >{{ initials() }}</span
+        >
         <!-- The name keeps at least 7rem (a long status once squeezed it to one letter per line);
              the status shrinks instead and wraps its own chips, so the card keeps its height. -->
         <div class="min-w-[7rem] flex-1 basis-0">
-          <p class="break-words text-sm font-semibold leading-snug text-base-content" data-testid="provider-name">
+          <p
+            class="break-words text-sm font-semibold leading-snug text-base-content"
+            data-testid="provider-name"
+          >
             {{ displayName() }}
           </p>
-          <!-- Wraps between two whole segments (a narrow 3-column grid cut the first one to a few letters): the provenance,
-               then the usage ("Used by N · Used for: …" as ONE segment), so the line is at most two lines and the card
-               stays within its 80 px budget. Full segment text is also in the card trigger's title for pointer hover.
-               Each "·" ends the segment before it, so a wrapped line never starts with a separator. -->
-          <div class="flex min-w-0 flex-wrap items-center gap-x-ptah-inline text-xs leading-snug text-base-content-muted">
+          <!-- Usage wraps into the available column width, capped at two lines.
+               The full text is added to hover titles only when measurement finds overflow. -->
+          <div
+            class="flex min-w-0 flex-wrap items-center gap-x-ptah-inline text-xs leading-snug text-base-content-muted"
+          >
             @if (subtitle(); as text) {
-              <span class="flex min-w-0 max-w-full items-center gap-x-ptah-inline">
-                <span class="block min-w-0 truncate text-xs leading-snug text-base-content-muted" [attr.title]="text"
-                  data-testid="card-subtitle">{{ text }}</span>
+              <span
+                class="flex min-w-0 max-w-full items-center gap-x-ptah-inline"
+              >
+                <span
+                  class="block min-w-0 truncate text-xs leading-snug text-base-content-muted"
+                  [attr.title]="text"
+                  data-testid="card-subtitle"
+                  >{{ text }}</span
+                >
                 @if (usedByCount() !== null) {
                   <span class="shrink-0" aria-hidden="true">·</span>
                 }
               </span>
             }
             @if (usedByCount() !== null) {
-              <span class="min-w-0 max-w-full truncate text-xs text-base-content-muted" data-testid="used-by-segment">
-                <span data-testid="used-by-count">Used by {{ usedByCount() }}</span>
+              <span
+                class="min-w-0 max-w-full line-clamp-2 break-words text-xs text-base-content-muted"
+                #usage
+                data-testid="used-by-segment"
+              >
+                <span data-testid="used-by-count"
+                  >Used by {{ usedByCount() }}</span
+                >
                 @if (usedByLabels().length) {
                   <span aria-hidden="true"> · </span>
-                  <span [attr.title]="usedForText()" data-testid="used-for">Used for: {{ usedForText() }}</span>
+                  <span
+                    [attr.title]="usageOverflows() ? usedForText() : null"
+                    data-testid="used-for"
+                    >Used for: {{ usedForText() }}</span
+                  >
                 }
               </span>
             }
           </div>
         </div>
-        <div class="flex min-w-0 flex-wrap items-center justify-end gap-ptah-inline text-xs">
-          <span class="flex items-center gap-ptah-inline font-medium text-base-content" data-testid="status-badge">
+        <div
+          class="flex min-w-0 flex-wrap items-center justify-end gap-ptah-inline text-xs"
+        >
+          <span
+            class="flex items-center gap-ptah-inline font-medium text-base-content"
+            data-testid="status-badge"
+          >
             @if (isBlockedMain()) {
-              <lucide-angular [img]="AlertTriangleIcon" class="h-3.5 w-3.5" aria-hidden="true" />
-              <span data-testid="blocked-main-badge">Main agent · Needs attention ·</span>
+              <lucide-angular
+                [img]="AlertTriangleIcon"
+                class="h-3.5 w-3.5"
+                aria-hidden="true"
+              />
+              <span data-testid="blocked-main-badge"
+                >Main agent · Needs attention ·</span
+              >
             } @else if (keyUnreadable()) {
-              <lucide-angular [img]="AlertTriangleIcon" class="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
+              <lucide-angular
+                [img]="AlertTriangleIcon"
+                class="h-3.5 w-3.5 shrink-0 text-warning"
+                aria-hidden="true"
+              />
             } @else {
-              <span [class]="'h-2 w-2 shrink-0 rounded-full ' + dotClass()" aria-hidden="true"></span>
+              <span
+                [class]="'h-2 w-2 shrink-0 rounded-full ' + dotClass()"
+                aria-hidden="true"
+              ></span>
             }
             @if (keyUnreadable()) {
-              <span data-testid="card-key-unreadable">{{ keyUnreadableText }}</span>
+              <span data-testid="card-key-unreadable">{{
+                keyUnreadableText
+              }}</span>
             } @else {
               <span data-testid="status-copy">{{ statusLabel() }}</span>
             }
           </span>
           @if (keyUnreadable()) {
             <!-- M-6: the key's state is unknown, so the repair is a re-read, never "Add API key". -->
-            <button type="button" ptahButton variant="ghost" [class]="inlineActionClass" [attr.aria-label]="'Retry reading the stored key for ' + displayName()"
-              (click)="keyRetryRequested.emit()" data-testid="card-key-unreadable-retry">Retry</button>
+            <button
+              type="button"
+              ptahButton
+              variant="ghost"
+              [class]="inlineActionClass"
+              [attr.aria-label]="
+                'Retry reading the stored key for ' + displayName()
+              "
+              (click)="keyRetryRequested.emit()"
+              data-testid="card-key-unreadable-retry"
+            >
+              Retry
+            </button>
           } @else if (inlineAction(); as action) {
-            <button type="button" ptahButton variant="ghost" [class]="inlineActionClass"
-              [attr.aria-label]="action.ariaLabel" (click)="action.emit.emit()" [attr.data-testid]="action.testId">
+            <button
+              type="button"
+              ptahButton
+              variant="ghost"
+              [class]="inlineActionClass"
+              [attr.aria-label]="action.ariaLabel"
+              (click)="action.emit.emit()"
+              [attr.data-testid]="action.testId"
+            >
               {{ action.label }}
             </button>
           }
           @if (hasScope()) {
-            <ptah-setting-scope-row class="pointer-events-auto relative z-20" [scope]="scope()" [hasOverride]="hasOverride()" [supportedTargets]="supportedTargets()"
-              [workspaceName]="workspaceName()" [workspaceCrossApp]="workspaceCrossApp()" [fieldName]="displayName()"
-              (clearRequested)="scopeClearRequested.emit()" (useGlobalRequested)="scopeUseGlobalRequested.emit()"
-              (copyGlobalRequested)="scopeCopyGlobalRequested.emit()" data-testid="card-scope-wrapper" />
+            <ptah-setting-scope-row
+              class="pointer-events-auto relative z-20"
+              [scope]="scope()"
+              [hasOverride]="hasOverride()"
+              [supportedTargets]="supportedTargets()"
+              [workspaceName]="workspaceName()"
+              [workspaceCrossApp]="workspaceCrossApp()"
+              [fieldName]="displayName()"
+              (clearRequested)="scopeClearRequested.emit()"
+              (useGlobalRequested)="scopeUseGlobalRequested.emit()"
+              (copyGlobalRequested)="scopeCopyGlobalRequested.emit()"
+              data-testid="card-scope-wrapper"
+            />
           }
           @if (connectedAccounts(); as connected) {
-            <span ptahBadge data-testid="connected-accounts-badge">{{ connected }} connected</span>
+            <span ptahBadge data-testid="connected-accounts-badge"
+              >{{ connected }} connected</span
+            >
           }
           @if (modalityLabel(); as modality) {
-            <span ptahBadge appearance="outline" class="whitespace-nowrap"
-              data-testid="auth-modality">{{ modality }}</span>
+            <span
+              ptahBadge
+              appearance="outline"
+              class="whitespace-nowrap"
+              data-testid="auth-modality"
+              >{{ modality }}</span
+            >
           }
         </div>
       </div>
@@ -149,6 +257,28 @@ interface InlineAction {
   `,
 })
 export class ProviderConnectionCardComponent {
+  private readonly usage = viewChild<ElementRef<HTMLElement>>('usage');
+  protected readonly usageOverflows = signal(false);
+
+  constructor() {
+    afterRenderEffect((cleanup) => {
+      this.usedByCount();
+      this.usedByLabels();
+      const element = this.usage()?.nativeElement;
+      const measure = () =>
+        this.usageOverflows.set(
+          !!element &&
+            (element.scrollHeight > element.clientHeight ||
+              element.scrollWidth > element.clientWidth),
+        );
+      measure();
+      if (!element || typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      cleanup(() => observer.disconnect());
+    });
+  }
+
   protected readonly AlertTriangleIcon = AlertTriangle;
   protected readonly keyUnreadableText = KEY_UNREADABLE_TEXT;
   protected readonly inlineActionClass =
@@ -179,7 +309,9 @@ export class ProviderConnectionCardComponent {
   /** CLI name used in the not-installed copy (e.g. 'Claude CLI'). */
   readonly cliName = input<string | null>(null);
   /** "Sign-in required" vs "Credential rejected"; derived from `authModality` when null. */
-  readonly unauthenticatedVariant = input<'sign-in' | 'credential-rejected' | null>(null);
+  readonly unauthenticatedVariant = input<
+    'sign-in' | 'credential-rejected' | null
+  >(null);
   /** Timestamp of the last successful probe (ISO 8601 or formatted string). */
   readonly lastConnectedAt = input<string | null>(null);
   /** Display string for the last connected time (e.g. "2 hours ago"). */
@@ -237,23 +369,48 @@ export class ProviderConnectionCardComponent {
   readonly scopeUseGlobalRequested = output<void>();
   readonly scopeCopyGlobalRequested = output<void>();
 
-  protected readonly displayName = computed(() => this.providerName() || this.providerId() || 'Provider');
+  protected readonly displayName = computed(
+    () => this.providerName() || this.providerId() || 'Provider',
+  );
   protected readonly hasScope = computed(() => this.scope() !== null);
-  protected readonly modalityLabel = computed(() => this.authModalityText() || authModalityBadge(this.authModality()));
-  protected readonly usedForText = computed(() => this.usedByLabels().join(', '));
-  protected readonly initials = computed(() => connectionInitials(this.displayName()));
-  protected readonly avatarClass = computed(() =>
-    `flex h-8 w-8 shrink-0 items-center justify-center rounded border text-xs font-bold text-base-content ${connectionAvatarTone(this.providerId() || this.displayName())}`);
+  protected readonly modalityLabel = computed(
+    () => this.authModalityText() || authModalityBadge(this.authModality()),
+  );
+  protected readonly usedForText = computed(() =>
+    this.usedByLabels().join(', '),
+  );
+  protected readonly initials = computed(() =>
+    connectionInitials(this.displayName()),
+  );
+  protected readonly avatarClass = computed(
+    () =>
+      `flex h-8 w-8 shrink-0 items-center justify-center rounded border text-xs font-bold text-base-content ${connectionAvatarTone(this.providerId() || this.displayName())}`,
+  );
 
-  readonly resolvedState = computed<ResolvedConnectionState>(() => applyRecordedCheck(
-    resolveConnectionState(this.status(), this.positiveProbeEvidence(), this.isActive(), this.isBlocked()),
-    this.lastCheck(), this.routeProbedAt()));
+  readonly resolvedState = computed<ResolvedConnectionState>(() =>
+    applyRecordedCheck(
+      resolveConnectionState(
+        this.status(),
+        this.positiveProbeEvidence(),
+        this.isActive(),
+        this.isBlocked(),
+      ),
+      this.lastCheck(),
+      this.routeProbedAt(),
+    ),
+  );
 
   /** The host cannot check this connection (`unknown`/`skipped`): not checkable is not failed. */
-  private readonly uncheckable = computed(() => this.status() === 'unknown' || this.status() === 'skipped');
+  private readonly uncheckable = computed(
+    () => this.status() === 'unknown' || this.status() === 'skipped',
+  );
 
   /** The selected main route, currently blocked or failing. */
-  protected readonly isBlockedMain = computed(() => (this.isActive() || this.isBlocked()) && this.resolvedState() !== 'active');
+  protected readonly isBlockedMain = computed(
+    () =>
+      (this.isActive() || this.isBlocked()) &&
+      this.resolvedState() !== 'active',
+  );
 
   private readonly credentialRejected = computed(() => {
     const variant = this.unauthenticatedVariant();
@@ -262,33 +419,62 @@ export class ProviderConnectionCardComponent {
     return modality === 'api-key' || modality === 'apiKey';
   });
 
-  protected readonly cardTone = computed(() => connectionCardTone(this.resolvedState(), this.isBlockedMain()));
-  protected readonly cardSpine = computed(() => connectionCardSpine(this.resolvedState(), this.isBlockedMain()));
-  protected readonly dotClass = computed(() => connectionStateDot(this.resolvedState()));
-  protected readonly statusLabel = computed(() => connectionStateLabel(this.resolvedState(), this.credentialRejected()));
+  protected readonly cardTone = computed(() =>
+    connectionCardTone(this.resolvedState(), this.isBlockedMain()),
+  );
+  protected readonly cardSpine = computed(() =>
+    connectionCardSpine(this.resolvedState(), this.isBlockedMain()),
+  );
+  protected readonly dotClass = computed(() =>
+    connectionStateDot(this.resolvedState()),
+  );
+  protected readonly statusLabel = computed(() =>
+    connectionStateLabel(this.resolvedState(), this.credentialRejected()),
+  );
   protected readonly statusCopy = computed(() =>
-    connectionStateCopy(this.resolvedState(), this.displayName(), this.cliName() || `${this.displayName()} CLI`));
-  protected readonly cardAriaLabel = computed(() => this.keyUnreadable()
-    ? `${this.displayName()}: ${this.isBlockedMain() ? 'main agent needs attention, ' : ''}${KEY_UNREADABLE_TEXT} Open connection details.`
-    : `${this.displayName()}: ${this.isBlockedMain() ? 'main agent needs attention, ' : ''}${this.statusLabel()}. ${this.statusCopy()} Open connection details.`);
+    connectionStateCopy(
+      this.resolvedState(),
+      this.displayName(),
+      this.cliName() || `${this.displayName()} CLI`,
+    ),
+  );
+  protected readonly cardAriaLabel = computed(() =>
+    this.keyUnreadable()
+      ? `${this.displayName()}: ${this.isBlockedMain() ? 'main agent needs attention, ' : ''}${KEY_UNREADABLE_TEXT} Open connection details.`
+      : `${this.displayName()}: ${this.isBlockedMain() ? 'main agent needs attention, ' : ''}${this.statusLabel()}. ${this.statusCopy()} Open connection details.`,
+  );
 
   /** Provenance line: the stored credential, else the last connected / failed time, else the full modality. */
   protected readonly subtitle = computed(() => {
     const connected = this.lastConnectedText() || this.lastConnectedAt();
     const failed = this.lastFailedText();
-    return this.sourceLabel() || (connected ? `Last connected ${connected}` : failed ? `Last check failed ${failed}` : null)
-      || authModalityLabel(this.authModality());
+    return (
+      this.sourceLabel() ||
+      (connected
+        ? `Last connected ${connected}`
+        : failed
+          ? `Last check failed ${failed}`
+          : null) ||
+      authModalityLabel(this.authModality())
+    );
   });
 
-  protected readonly triggerTitle = computed(() => [
-    this.keyUnreadable() ? this.keyUnreadableText : this.statusCopy(),
-    this.subtitle(),
-    this.usedByLabels().length ? `Used for: ${this.usedForText()}` : null,
-  ].filter((part): part is string => part !== null).join('\n'));
+  protected readonly triggerTitle = computed(() =>
+    [
+      this.keyUnreadable() ? this.keyUnreadableText : this.statusCopy(),
+      this.subtitle(),
+      this.usageOverflows() && this.usedByLabels().length
+        ? `Used for: ${this.usedForText()}`
+        : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join('\n'),
+  );
 
   protected readonly inlineAction = computed<InlineAction | null>(() => {
     const action = primaryConnectionAction(this.resolvedState(), {
-      uncheckable: this.uncheckable(), credentialRejected: this.credentialRejected(),
+      uncheckable: this.uncheckable(),
+      credentialRejected: this.credentialRejected(),
     });
     return action ? this.describe(action) : null;
   });
@@ -296,13 +482,55 @@ export class ProviderConnectionCardComponent {
   private describe(action: ConnectionCardAction): InlineAction {
     const name = this.displayName();
     switch (action) {
-      case 'add-key': return { label: 'Add API key', testId: 'btn-add-key', ariaLabel: `Add API key for ${name}`, emit: this.addKeyRequested };
-      case 'replace-key': return { label: 'Replace key', testId: 'btn-replace-key', ariaLabel: `Replace key for ${name}`, emit: this.replaceKeyRequested };
-      case 'sign-in': return { label: 'Sign in', testId: 'btn-sign-in', ariaLabel: `Sign in to ${name}`, emit: this.signInRequested };
-      case 'retry': return { label: 'Retry', testId: 'btn-retry', ariaLabel: `Retry connection to ${name}`, emit: this.retryRequested };
-      case 'check-again': return { label: 'Check again', testId: 'btn-check-again', ariaLabel: `Check again for ${this.cliName() || `${name} CLI`}`, emit: this.checkAgainRequested };
-      case 'set-up': return { label: 'Set up', testId: 'btn-setup', ariaLabel: `Set up ${name}`, emit: this.setupRequested };
-      case 'check-connection': return { label: 'Check connection', testId: 'btn-check-connection', ariaLabel: `Check connection for ${name}`, emit: this.checkConnectionRequested };
+      case 'add-key':
+        return {
+          label: 'Add API key',
+          testId: 'btn-add-key',
+          ariaLabel: `Add API key for ${name}`,
+          emit: this.addKeyRequested,
+        };
+      case 'replace-key':
+        return {
+          label: 'Replace key',
+          testId: 'btn-replace-key',
+          ariaLabel: `Replace key for ${name}`,
+          emit: this.replaceKeyRequested,
+        };
+      case 'sign-in':
+        return {
+          label: 'Sign in',
+          testId: 'btn-sign-in',
+          ariaLabel: `Sign in to ${name}`,
+          emit: this.signInRequested,
+        };
+      case 'retry':
+        return {
+          label: 'Retry',
+          testId: 'btn-retry',
+          ariaLabel: `Retry connection to ${name}`,
+          emit: this.retryRequested,
+        };
+      case 'check-again':
+        return {
+          label: 'Check again',
+          testId: 'btn-check-again',
+          ariaLabel: `Check again for ${this.cliName() || `${name} CLI`}`,
+          emit: this.checkAgainRequested,
+        };
+      case 'set-up':
+        return {
+          label: 'Set up',
+          testId: 'btn-setup',
+          ariaLabel: `Set up ${name}`,
+          emit: this.setupRequested,
+        };
+      case 'check-connection':
+        return {
+          label: 'Check connection',
+          testId: 'btn-check-connection',
+          ariaLabel: `Check connection for ${name}`,
+          emit: this.checkConnectionRequested,
+        };
     }
   }
 }
