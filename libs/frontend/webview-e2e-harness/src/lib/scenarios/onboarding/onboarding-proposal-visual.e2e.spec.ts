@@ -146,7 +146,7 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           .fill('Create a backend TypeScript review and release team.');
         await page.getByRole('button', { name: 'Review skills' }).click();
         await expect(
-          page.getByRole('heading', { name: 'Review skills' }),
+          page.getByRole('heading', { name: 'Choose skills for your stack' }),
         ).toBeVisible();
         await expect(
           page.getByRole('checkbox', { name: 'Select TypeScript review' }),
@@ -208,7 +208,7 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           .fill('Create a backend TypeScript review and release team.');
         await page.getByRole('button', { name: 'Review skills' }).click();
         await expect(
-          page.getByRole('heading', { name: 'Review skills' }),
+          page.getByRole('heading', { name: 'Choose skills for your stack' }),
         ).toBeVisible();
         await page.getByRole('button', { name: 'Skip skills' }).click();
 
