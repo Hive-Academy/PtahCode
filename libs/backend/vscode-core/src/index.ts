@@ -1,4 +1,8 @@
-export { TOKENS } from './di/tokens';
+export { TOKENS, LANE_SPEND_LEDGER, LANE_SPEND_READER } from './di/tokens';
+export { LaneSpendLedgerService, LANE_SPEND_STORAGE_KEY, LANE_SPEND_CORRUPT_BACKUP_KEY } from './services/lane-spend-ledger.service';
+export { SpendEventSchema, SpendLedgerSchema } from './services/lane-spend-ledger.schema';
+export type { SpendLedger, SpendEvent } from './services/lane-spend-ledger.schema';
+export { classifyLaneUsage } from './services/plan-usage/plan-usage.classifier';
 export { registerVsCodeCoreServices } from './di';
 export { registerVsCodeCorePlatformAgnostic } from './di/register-platform-agnostic';
 export type { PlatformAgnosticRegistrationOptions } from './di/register-platform-agnostic';

@@ -19,6 +19,7 @@ import type {
   SessionStatsPricingCoverage,
 } from '../types/rpc/rpc-session.types';
 
+import { ANTHROPIC_RATE_CARD, findAnthropicRate } from './anthropic-rate-card';
 import { CODEX_RATE_CARD } from './codex-rate-card';
 
 /**
@@ -33,6 +34,8 @@ export interface ModelPricing {
   readonly cacheReadCostPerToken?: number;
   /** Cost per cache creation token in USD (optional) */
   readonly cacheCreationCostPerToken?: number;
+  /** Anthropic one-hour cache write rate. */
+  readonly cacheCreation1hCostPerToken?: number;
   /** Maximum context window size */
   readonly maxTokens?: number;
   /** Provider name (anthropic, openai, etc.) */
@@ -50,7 +53,9 @@ export interface TokenBreakdown {
   readonly input: number;
   readonly output: number;
   readonly cacheHit?: number; // cache read tokens
-  readonly cacheCreation?: number; // cache write tokens
+  readonly cacheCreation?: number; // total cache write tokens
+  /** One-hour subset; remainder uses the five-minute rate. */
+  readonly cacheCreation1h?: number;
 }
 
 /**
@@ -127,6 +132,7 @@ export const DEFAULT_MODEL_PRICING: Record<string, ModelPricing> = {
   // provenance for the seven static Codex fallback IDs. See
   // `codex-rate-card.ts` for retrieval dates and per-entry sources.
   ...CODEX_RATE_CARD,
+  ...ANTHROPIC_RATE_CARD,
 };
 
 /**
@@ -178,6 +184,12 @@ export function registerProviderPricing(
   }
   const normalized: Record<string, ModelPricing> = {};
   for (const [id, pricing] of Object.entries(entries)) {
+    // A hydrated dotted catalog ID supersedes only its bundled dashed fallback.
+    // Explicit runtime dashed entries retain precedence; native pricing is separate.
+    const dashed = id.replace(/^(claude-[a-z]+-\d+)\.(\d+)$/, '$1-$2');
+    if (dashed !== id && modelPricingMap[dashed] === DEFAULT_MODEL_PRICING[dashed]) {
+      delete modelPricingMap[dashed];
+    }
     normalized[id] = pricing;
     const lower = id.toLowerCase();
     if (lower !== id) {
@@ -475,7 +487,8 @@ export function calculateMessageCost(
   const cacheReadCost =
     (tokens.cacheHit ?? 0) * (resolved.cacheReadCostPerToken ?? 0);
   const cacheCreationCost =
-    (tokens.cacheCreation ?? 0) * (resolved.cacheCreationCostPerToken ?? 0);
+    ((tokens.cacheCreation ?? 0) - (tokens.cacheCreation1h ?? 0)) * (resolved.cacheCreationCostPerToken ?? 0) +
+    (tokens.cacheCreation1h ?? 0) * (resolved.cacheCreation1hCostPerToken ?? 0);
 
   const totalCost = inputCost + outputCost + cacheReadCost + cacheCreationCost;
   return Math.round(totalCost * 1000000) / 1000000;
@@ -493,7 +506,8 @@ export function pricesCacheTokens(
     !tokens.cacheHit || pricing.cacheReadCostPerToken !== undefined;
   const writePriced =
     !tokens.cacheCreation || pricing.cacheCreationCostPerToken !== undefined;
-  return readPriced && writePriced;
+  return readPriced && writePriced &&
+    (!tokens.cacheCreation1h || pricing.cacheCreation1hCostPerToken !== undefined);
 }
 
 /** Exact catalog key and its rate. No provider prefix or date-family fallback. */
@@ -532,6 +546,10 @@ export function findExactModelPricing(
 }
 
 export interface ExactCostOptions {
+  readonly providerReportedCost?: number | null;
+  /** Native Anthropic API prices are isolated from third-party catalogs. */
+  readonly pricingProvider?: 'anthropic';
+  readonly contextTokens?: number;
   readonly billingMode: 'subscription' | 'api-key' | 'unknown';
   /** Must be verified before cache counters can be treated as disjoint. */
   readonly cacheSemantics?: 'disjoint' | 'ambiguous';
@@ -576,6 +594,10 @@ export function calculateExactMessageCost(
     pricingCoverage: 'none',
     costUnavailableReason,
   });
+  if (options.billingMode === 'api-key' && options.providerReportedCost !== undefined && options.providerReportedCost !== null &&
+      Number.isFinite(options.providerReportedCost) && options.providerReportedCost >= 0) {
+    return { totalCost: options.providerReportedCost, costBasis: 'reported', pricingCoverage: 'full' };
+  }
   if (options.billingMode === 'unknown') return unavailable('billing-unknown');
   if (!modelId.trim()) return unavailable('usage-incomplete');
   const counts = [
@@ -583,11 +605,16 @@ export function calculateExactMessageCost(
     tokens.output,
     tokens.cacheHit ?? 0,
     tokens.cacheCreation ?? 0,
+    tokens.cacheCreation1h ?? 0,
   ];
   const usageIncomplete = counts.some((count) =>
     !Number.isSafeInteger(count) || count < 0) ||
-    (counts.every((count) => count === 0) && !options.usageObserved);
-  const found = findExactModelPricing(modelId);
+    (counts.every((count) => count === 0) && !options.usageObserved) ||
+    (tokens.cacheCreation1h ?? 0) > (tokens.cacheCreation ?? 0);
+  const nativeRate = options.pricingProvider === 'anthropic' ? findAnthropicRate(modelId, options.contextTokens) : null;
+  const found = options.pricingProvider === 'anthropic'
+    ? (nativeRate ? { modelIdUsed: modelId, pricing: nativeRate } : null)
+    : findExactModelPricing(modelId);
   // No catalog entry (or only a base Claude entry for a `[1m]` request) means
   // Ptah lacks a needed rate: "not priced", never a fabricated
   // substitute rate or zero.
@@ -610,7 +637,7 @@ export function calculateExactMessageCost(
   }
   // Only the id's own entry (or its catalog spelling) prices it: a `[1m]`
   // request resolved to its base entry stays unpriced.
-  if (found.modelIdUsed !== resolvePricingKey(modelId.toLowerCase())) {
+  if (options.pricingProvider !== 'anthropic' && found.modelIdUsed !== resolvePricingKey(modelId.toLowerCase())) {
     return unavailable('rate-missing');
   }
   const availableBasis: SessionCostBasis =
@@ -622,7 +649,8 @@ export function calculateExactMessageCost(
   const readPriced =
     !tokens.cacheHit || validRate(pricing.cacheReadCostPerToken);
   const writePriced =
-    !tokens.cacheCreation || validRate(pricing.cacheCreationCostPerToken);
+    (!tokens.cacheCreation || validRate(pricing.cacheCreationCostPerToken)) &&
+    (!tokens.cacheCreation1h || validRate(pricing.cacheCreation1hCostPerToken));
   const cacheUnverified =
     ((tokens.cacheHit ?? 0) > 0 || (tokens.cacheCreation ?? 0) > 0) &&
     options.cacheSemantics !== 'disjoint';
@@ -650,17 +678,20 @@ export function calculateExactMessageCost(
         : 'usage-incomplete',
     };
   }
-  const rounded = calculateMessageCost(modelId, tokens, pricing) ?? 0;
+  const oneHour = tokens.cacheCreation1h ?? 0;
   const unrounded =
     tokens.input * pricing.inputCostPerToken +
     tokens.output * pricing.outputCostPerToken +
     (tokens.cacheHit ?? 0) * (pricing.cacheReadCostPerToken ?? 0) +
-    (tokens.cacheCreation ?? 0) * (pricing.cacheCreationCostPerToken ?? 0);
+    ((tokens.cacheCreation ?? 0) - oneHour) * (pricing.cacheCreationCostPerToken ?? 0) +
+    oneHour * (pricing.cacheCreation1hCostPerToken ?? 0);
+  const rounded = Math.round(unrounded * 1e6) / 1e6;
   return {
     // Rounding to 6 decimals must not turn real non-zero usage into $0.
     totalCost: rounded === 0 && unrounded > 0 ? unrounded : rounded,
     costBasis: availableBasis,
-    pricingCoverage: 'full',
+    pricingCoverage: (tokens.cacheCreation ?? 0) > 0 && tokens.cacheCreation1h === undefined &&
+      pricing.cacheCreation1hCostPerToken !== undefined ? 'partial' : 'full',
     priceProvenance: provenance,
   };
 }

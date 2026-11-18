@@ -20,6 +20,8 @@
  * `provider:getPlanLimits` and its result are unrelated and stay unchanged.
  */
 
+import type { ApiLaneSpend } from '../rpc-lane-spend.types';
+
 // ---------------------------------------------------------------------------
 // agent:getLanePlanLimits
 // ---------------------------------------------------------------------------
@@ -66,4 +68,10 @@ export interface AgentGetLanePlanLimitsResult {
   readonly unknown: number;
   /** Epoch milliseconds the rows were formatted against (the "as of" time). */
   readonly asOf: number;
+}
+
+/** Optional API spend extension keeps the display-only plan rows compatible. */
+export interface AgentLaneSpendResult {
+  readonly lane: string;
+  readonly spend: ApiLaneSpend;
 }

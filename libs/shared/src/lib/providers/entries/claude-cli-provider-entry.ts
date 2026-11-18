@@ -40,7 +40,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
     haiku: 'claude-haiku-5-5',
   },
   // Fallback for when the native login cannot list models. Prices and
-  // windows from models.dev where published; unpublished prices are omitted.
+  // windows from provider metadata; prices from the 2026-11-18 Anthropic card.
   staticModels: [
     {
       id: 'claude-opus-5-5',
@@ -61,7 +61,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       supportsToolUse: true,
       inputCostPerToken: 2e-6, // $2.00 per 1M tokens
       outputCostPerToken: 10e-6, // $10.00 per 1M tokens
-      cacheReadCostPerToken: 0.2e-6,
+      cacheReadCostPerToken: 0.1e-6,
       cacheCreationCostPerToken: 2.5e-6,
     },
     {
@@ -77,6 +77,10 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       description: 'Largest model (1M context)',
       contextLength: 1000000,
       supportsToolUse: true,
+      inputCostPerToken: 8e-6,
+      outputCostPerToken: 40e-6,
+      cacheReadCostPerToken: 0.2e-6,
+      cacheCreationCostPerToken: 10e-6,
     },
     {
       id: 'claude-fable-5-1',
