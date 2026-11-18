@@ -192,10 +192,10 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   });
 
   it('reconciles a delivered turn after polling expires and the stream settles', async () => {
-    start([makeTab(TAB, { status: 'streaming' })]);
-    handoff.claim(SESSION);
-    handoff.recordQueued(SESSION, null);
-    handoff.transition(SESSION, 'delivered');
+    start([makeTab(TAB)]);
+    await run();
+    patch(TAB, { status: 'streaming' });
+    await run();
     statusCall.mockResolvedValue({ success: true, data: { state: 'absent' } });
     await TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 12);
     const callsBeforeSettlement = statusCall.mock.calls.length;
@@ -233,12 +233,49 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     expect(handoff.entry(SESSION)).toBeNull();
   });
 
-  it('resends a direct delivered command after authoritative absent', async () => {
+  it('resends a direct delivered command after streaming ends with authoritative absent', async () => {
     start([makeTab(TAB)]);
     await run();
     expect(handoff.entry(SESSION)?.clientMessageId).toBeNull();
+    patch(TAB, { status: 'streaming' });
+    await run();
+    patch(TAB, { status: 'loaded' });
+    await run();
     await run();
     expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['direct', 'queued'] as const)('sends once while a %s delivery has not started streaming, even after polling expires', async (delivery) => {
+    jest.useFakeTimers();
+    try {
+      start([makeTab(TAB, { status: delivery === 'queued' ? 'streaming' : 'loaded' })]);
+      const flush = async () => {
+        TestBed.tick();
+        await jest.advanceTimersByTimeAsync(1);
+        TestBed.tick();
+      };
+      await flush();
+      if (delivery === 'queued') {
+        patch(TAB, { status: 'loaded' });
+        store.settle(queued().clientMessageId, 'delivered');
+        await flush();
+      }
+      for (let step = 0; step < 15; step++) {
+        await jest.advanceTimersByTimeAsync(60_000);
+        await flush();
+      }
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(handoff.entry(SESSION)?.state).toBe('delivered');
+      // Starting late must still wake reconciliation when this turn ends.
+      patch(TAB, { status: 'streaming' });
+      await flush();
+      patch(TAB, { status: 'loaded' });
+      await flush();
+      await flush();
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('resumes a claimed deferral after compaction finishes', async () => {
@@ -315,6 +352,11 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     for (let attempt = 1; attempt <= 5; attempt++) {
       expect(send).toHaveBeenCalledTimes(attempt);
       store.settle(queued().clientMessageId, 'delivered');
+      await run();
+      patch(TAB, { status: 'streaming' });
+      await run();
+      patch(TAB, { status: 'loaded' });
+      await run();
       await run();
     }
     expect(handoff.entry(SESSION)?.state).toBe('failed');
