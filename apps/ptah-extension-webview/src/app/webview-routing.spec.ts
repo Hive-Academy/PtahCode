@@ -91,6 +91,7 @@ const ELECTRON_ONLY_SURFACES: readonly string[] = [
   'apps',
   'command-center',
   'review-runs',
+  'bots',
   'machines',
 ];
 
@@ -1261,14 +1262,15 @@ describe('app.routes', () => {
     expect(routeFor('review-runs').canMatch).toEqual([reviewOnlySurface]);
   });
 
-  it('places review runs after command-center, then machines, before the fallbacks', () => {
+  it('places review runs after command-center, then bots and machines, before the fallbacks', () => {
     const order = appRoutes.map((route) => route.path);
     expect(order.indexOf('apps')).toBe(order.indexOf('tasks') + 1);
     expect(order.indexOf('command-center')).toBe(order.indexOf('apps') + 1);
     expect(order.indexOf('review-runs')).toBe(
       order.indexOf('command-center') + 1,
     );
-    expect(order.indexOf('machines')).toBe(order.indexOf('review-runs') + 1);
+    expect(order.indexOf('bots')).toBe(order.indexOf('review-runs') + 1);
+    expect(order.indexOf('machines')).toBe(order.indexOf('bots') + 1);
     expect(order.indexOf('ui-gallery')).toBe(order.indexOf('machines') + 1);
     expect(order.indexOf('ui-gallery')).toBe(appRoutes.length - 3);
   });
