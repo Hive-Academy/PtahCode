@@ -1,37 +1,57 @@
-# Status — Skill Ranking Implementation
+# Status — Skill Ranking Testing & Verification (Session 2)
 
-## Session Status
-- Coordinator: child session on `feat/skill-ranking-decision-model` branch
-- Working directory: `.claude-worktrees/feat-skill-ranking-decision-model-dec49e44aa6c`
+## Current State
+- **Phase**: Testing & verification after code-logic-review
+- **Branch**: `feat/skill-ranking-decision-model`
+- **Worktree**: `.claude-worktrees/feat-skill-ranking-decision-model-dec49e44aa6c`
+- **Date**: 2026-11-18
 
-## Implementation Lanes (Spawned 2026-11-18 09:53 UTC)
+## Commits (Current Session)
 
-| Batch | Lane ID | CLI | Executor | Status | Deliverables | Notes |
-|-------|---------|-----|----------|--------|--------------|-------|
-| 1 | eb98efbb-670e-4979-b2a6-4c3e3bcc02c2 | codex | backend-developer | starting | skill-ranking-caller.service.ts | Setup: decision model caller + DI wiring |
-| 2 | bf44cb32-3639-4334-8c0a-e95d58a21a08 | codex | backend-developer | starting | skill-ranking.service.ts (3 files) | Implementation: session model fallback + integration |
-| 3 | 6ad538fd-feef-48e2-a19f-0fbb9bc13741 | codex | backend-developer | running | rpc-setup.types.ts (modified) | RPC contract + DI registration |
+| Commit | Type | Message |
+|--------|------|---------|
+| 5938a82a5 | test | Complete TS4111 fixes (rpc-handlers) |
+| b30293687 | refactor | Remove dead code in schema |
+| 6d12b7133 | docs | Add code-logic-review report |
 
-## Plan
+## Code-Logic-Review Results
 
-1. ✓ Spawn batches 1-3 (backend setup, implementation, RPC contract)
-2. ⏳ Wait for completion signals
-3. ⏳ Read and verify deliverables
-4. ⏳ Run verification (inner loop then full gate)
-5. ⏳ Spawn code review lanes (logic + style review)
-6. ⏳ Address findings and commit
-7. ⏳ Push and open PR
+**Score**: 72/100 (before TS4111 fix; will improve after tests run)
 
-## Decisions Made
+### Fixed Issues
+- **F0**: TS4111 TypeScript errors — **FIXED** in commit 5938a82a5
+- **F8**: Dead code in schema — **FIXED** in commit b30293687
 
-- **CLI lanes**: Codex (confirmed room, 64% Weekly)
-- **Review lanes**: Claude CLI (limits not tracked) for logic + style review
-- **Implementation order**: Setup → Core logic → RPC contract + DI
-- **Partial fallback**: Per-item fallback allowed (one invalid item doesn't block others)
-- **UI deferred**: Rendering (sort by rank, "Ranked by" note) deferred to follow-up PR
+### Open Findings (Known Defects)
 
-## Notes
+| # | Type | Severity | Status |
+|----|------|----------|--------|
+| F1 | Policy gap (descriptions in prompt) | Medium | Accept — sanitized & needed |
+| F2 | Weak sanitizer | Low | Accept |
+| F3 | Injection risk | Low | Accept — mitigated |
+| F4 | Missing field (heuristic reason) | Low | Accept |
+| F5 | Duplicate input validation | Low | Accept |
+| F6 | Questionable timeout bound (250ms) | Low | **TBD — User decision** |
+| F7 | Redundant timer | Info | Accept |
+| F9 | Uncancelled work | Info | Accept — bounded |
 
-- Verification will use: `npm run verify -- --related -p lane-routing,rpc-handlers,shared` (inner loop)
-- Full gate: `npm run verify -- -p lane-routing,rpc-handlers,shared,ptah-electron` before push
-- Electron first: will run Electron app and e2e setup wizard specs to confirm no regressions
+**Security**: All checks PASS
+
+## Verification Status
+
+**Completed** (Session 2):
+- ✓ Lane-routing specs: Exit code 0 (all tests pass, including new timeout spec)
+- ✓ RPC-handlers specs: Exit code 0 (TS4111 fixes + dot notation fix verified)
+- ⏳ Full gate: Queued (waiting for slot, position 2)
+
+Previous CI failure (8a9c52dc4):
+- Shard 3/4: TS4111 errors in rpc-handlers (now fixed)
+- Shard 4/4: Status unknown
+
+## Next Steps
+
+1. Await verification completion
+2. Push to remote
+3. Update PR #1418 with results
+4. Watch CI for new head
+5. User decision on F1 (descriptions) and F6 (timeout)
