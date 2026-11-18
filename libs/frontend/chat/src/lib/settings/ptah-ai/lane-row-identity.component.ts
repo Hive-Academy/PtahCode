@@ -92,6 +92,22 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
       margin-left: 5rem;
       max-width: calc(100% - 5rem);
     }
+    ptah-lane-row-identity
+      ptah-table-row-title:not(:has(.ptah-table-row-title-secondary)) {
+      justify-content: center;
+    }
+    ptah-lane-row-identity[data-collapsed='true'] ptah-table-row-title {
+      justify-content: center;
+    }
+    ptah-lane-row-identity[data-collapsed='true']
+      .ptah-table-row-title-secondary[class] {
+      display: none;
+    }
+    ptah-lane-row-identity[data-collapsed='true'] .ptah-table-row-title-name {
+      white-space: normal;
+      overflow: visible;
+      overflow-wrap: anywhere;
+    }
     @container (max-width: 13rem) {
       ptah-lane-row-identity .ptah-table-row-title-kind {
         position: absolute;
@@ -125,9 +141,11 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
       [name]="row.name"
       [kind]="row.kind === 'system' ? 'CLI agent' : 'Ptah CLI'"
       [secondary]="
-        row.kind === 'system'
-          ? row.versionLabel || emptySecondary
-          : row.provider
+        collapsed()
+          ? ''
+          : row.kind === 'system'
+            ? row.versionLabel || ''
+            : row.provider
       "
       [mono]="row.kind === 'system'"
     >
@@ -158,7 +176,6 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
     }`,
 })
 export class LaneRowIdentityComponent {
-  protected readonly emptySecondary = '\u00a0';
   readonly row = input.required<LaneTableRow>();
   readonly collapsed = input(false);
   readonly installGuideRequested = output<void>();

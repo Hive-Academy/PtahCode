@@ -132,9 +132,6 @@ interface InlineAction {
                   data-testid="card-subtitle"
                   >{{ text }}</span
                 >
-                @if (usedByCount() !== null) {
-                  <span class="shrink-0" aria-hidden="true">·</span>
-                }
               </span>
             }
             @if (usedByCount() !== null) {
@@ -143,6 +140,9 @@ interface InlineAction {
                 #usage
                 data-testid="used-by-segment"
               >
+                @if (subtitle()) {
+                  <span aria-hidden="true">&#183; </span>
+                }
                 <span data-testid="used-by-count"
                   >Used by {{ usedByCount() }}</span
                 >

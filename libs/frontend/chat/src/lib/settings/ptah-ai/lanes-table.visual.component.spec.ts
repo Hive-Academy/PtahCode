@@ -124,48 +124,78 @@ describe('LanesTableComponent visual presentation', () => {
     expect(remove?.getAttribute('data-tone')).toBe('danger');
   });
 
-  it('uses sans defaults and keeps the effort editor for an unset effort in cells and details', async () => {
+  it('hides unset effort in rows and keeps its editor in expanded details at both tiers', async () => {
     const { fixture, host } = await mount([
-      // Codex supports effort but has none saved (the reviewer's Pi case).
-      system('codex', {
-        effort: { key: 'codexReasoningEffort', value: '' },
-      }),
-      // Copilot here stands for a CLI without an effort setting.
+      system('codex', { effort: { key: 'codexReasoningEffort', value: '' } }),
       system('copilot', { effort: null }),
       instance('a', { selectedModel: '', effort: '' }),
     ]);
-    const check = () => {
-      for (const name of ['Codex', 'Lane a']) {
-        const trigger = q(
+    for (const [, name] of [
+      ['codex', 'Codex'],
+      ['a', 'Lane a'],
+    ]) {
+      expect(
+        q(host, '[aria-label="Effort default for ' + name + '"]'),
+      ).toBeNull();
+      expect(
+        q(
           host,
           '[aria-label="Model default for ' + name + '"]',
+        )?.classList.contains('font-mono'),
+      ).toBe(false);
+    }
+    const check = async () => {
+      for (const [id, name] of [
+        ['codex', 'Codex'],
+        ['a', 'Lane a'],
+      ]) {
+        q(host, '[aria-controls="lane-detail-' + id + '"]')?.click();
+        fixture.detectChanges();
+        await fixture.whenStable();
+        const effort = q(
+          host,
+          '#lane-detail-' +
+            id +
+            ' [aria-label="Effort default for ' +
+            name +
+            '"]',
         );
-        expect(trigger?.classList.contains('font-mono')).toBe(false);
-        // A supported lane without a saved effort keeps its trigger, so an effort can be chosen.
+        expect(effort?.textContent?.trim()).toBe('default');
+        effort?.click();
+        fixture.detectChanges();
+        expect(effort?.getAttribute('aria-expanded')).toBe('true');
         expect(
-          q(
-            host,
-            '[aria-label="Effort default for ' + name + '"]',
-          )?.textContent?.trim(),
-        ).toBe('default');
+          fixture.debugElement
+            .query(By.directive(StubModelEffortPopoverComponent))
+            .componentInstance.field(),
+        ).toBe('effort');
+        effort?.click();
+        fixture.detectChanges();
+        q(host, '[aria-controls="lane-detail-' + id + '"]')?.click();
+        fixture.detectChanges();
       }
-      // A CLI without an effort setting has no effort trigger.
       expect(q(host, '[aria-label="Effort default for Copilot"]')).toBeNull();
     };
-    check();
+    await check();
     narrow(fixture);
-    q(
-      host,
-      '[data-testid="cli-provider-card-codex"] ptah-table-row-expander button',
-    )?.click();
+    await fixture.whenStable();
+    await check();
+  });
+
+  it('hides compact row subtitles while keeping the complete name and detail version', async () => {
+    const { fixture, host } = await mount([
+      system('codex', { name: 'Antigravity' }),
+    ]);
+    narrow(fixture);
+    const identity = q(host, 'ptah-lane-row-identity');
+    expect(identity?.getAttribute('data-collapsed')).toBe('true');
+    expect(q(host, '.ptah-table-row-title-name')?.textContent).toBe(
+      'Antigravity',
+    );
+    expect(q(host, '.ptah-table-row-title-secondary')).toBeNull();
+    q(host, 'ptah-table-row-expander button')?.click();
     fixture.detectChanges();
-    check();
-    expect(
-      q(
-        host,
-        '#lane-detail-codex [data-popover-kind="model"]',
-      )?.textContent?.trim(),
-    ).toBe('CLI default');
+    expect(q(host, '#lane-detail-codex')?.textContent).toContain('v1.2.3');
   });
 
   it('does not show a config hint without a source', async () => {
@@ -328,14 +358,13 @@ describe('LanesTableComponent visual presentation', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true');
     expect(button.getAttribute('aria-controls')).toBe('lane-detail-a');
   });
-  it('reserves a secondary identity line when a version is absent', async () => {
+  it('omits an empty secondary identity line so the name can center', async () => {
     const { host } = await mount([system('copilot', { versionLabel: null })]);
     const secondary = q(host, '.ptah-table-row-title-secondary');
-    expect(secondary).not.toBeNull();
-    expect(secondary?.textContent).toBe('\u00a0');
+    expect(secondary).toBeNull();
   });
 
-  it('shows row defaults in details only when collapsed', async () => {
+  it('shows Model / Effort at every tier and other row defaults when collapsed', async () => {
     const { fixture, host } = await mount([system('codex')]);
     q(host, 'ptah-table-row-expander button')?.click();
     fixture.detectChanges();
@@ -346,10 +375,10 @@ describe('LanesTableComponent visual presentation', () => {
       );
     expect(terms()).not.toContain('Permission');
     expect(terms()).not.toContain('Network');
-    expect(terms()).not.toContain('Model');
+    expect(terms()).toContain('Model / Effort');
     narrow(fixture);
     expect(terms()).toEqual(
-      expect.arrayContaining(['Permission', 'Network', 'Model']),
+      expect.arrayContaining(['Permission', 'Network', 'Model / Effort']),
     );
   });
 

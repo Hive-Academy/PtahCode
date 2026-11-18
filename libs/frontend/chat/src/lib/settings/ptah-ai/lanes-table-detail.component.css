@@ -5,7 +5,7 @@ ptah-lanes-table-detail {
   overflow-wrap: anywhere;
 }
 ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.9fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 1.4fr) max-content minmax(0, 1fr);
   grid-template-areas: 'facts chips actions' 'body body body';
   gap: var(--ptah-gap-controls);
   padding: var(--ptah-surface-pad);
@@ -79,6 +79,12 @@ ptah-lanes-table-detail .capability-value {
   max-width: min(20rem, 80vw);
   white-space: normal;
   overflow-wrap: anywhere;
+}
+@media (min-width: 785px) and (max-width: 1400px) {
+  ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: 'facts actions' 'chips chips' 'body body';
+  }
 }
 @media (max-width: 784px) {
   ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {

@@ -162,6 +162,30 @@ describe('ProviderConnectionCardComponent', () => {
     });
   });
 
+  it('keeps the provenance separator with a nonempty usage segment', () => {
+    const fixture = createComponent({
+      ...KIMI_CODE,
+      authModality: 'cli',
+      sourceLabel: 'CLI subscription',
+    });
+    const subtitle = query(fixture, 'card-subtitle');
+    expect(subtitle).not.toBeNull();
+    expect(subtitle?.parentElement?.textContent?.trim()).toBe(
+      'CLI subscription',
+    );
+    expect(query(fixture, 'used-by-segment')).toBeNull();
+    fixture.componentRef.setInput('usedByCount', 0);
+    fixture.detectChanges();
+    expect(subtitle?.parentElement?.textContent?.trim()).toBe(
+      'CLI subscription',
+    );
+    expect(
+      query(fixture, 'used-by-segment')
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim(),
+    ).toBe('\u00b7 Used by 0');
+  });
+
   describe('compact layout (≤ 80 px, prototype .conn-card)', () => {
     it('renders the avatar, name, provenance and auth-modality badge on row 1', () => {
       const fixture = createComponent({

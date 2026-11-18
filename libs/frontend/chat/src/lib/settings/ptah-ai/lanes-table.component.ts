@@ -243,7 +243,7 @@ export class LanesTableComponent {
       if (
         !currentRow ||
         !open.row.interactive ||
-        (open.place === 'detail' && !this.table()?.collapsed())
+        (open.place === 'detail' && this.detailRowId() !== open.row.id)
       ) {
         this.openCell.set(null);
       } else if (currentRow !== open.row) {
@@ -300,7 +300,7 @@ export class LanesTableComponent {
       open?.row === row &&
       open.field === field &&
       open.place === place &&
-      (place === 'cell' || !!this.table()?.collapsed())
+      (place === 'cell' || this.detailRowId() === row.id)
     );
   }
   protected togglePopover(

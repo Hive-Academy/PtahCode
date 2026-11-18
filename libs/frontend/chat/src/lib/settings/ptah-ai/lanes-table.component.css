@@ -77,7 +77,7 @@ ptah-lanes-table .lane-row-actions > button {
 }
 
 ptah-lanes-table .lane-order {
-  width: 2.25rem;
+  width: 3rem;
 }
 ptah-lanes-table .lane-status {
   width: 23%;
@@ -123,14 +123,6 @@ ptah-lanes-table
   > tr
   > :is(th, td) {
   padding-inline: 0.25rem;
-}
-ptah-lanes-table
-  .ptah-table[data-collapsed='true']
-  .ptah-table-grid
-  > thead
-  > tr
-  > th:first-child {
-  padding-inline: 0.125rem;
 }
 ptah-lanes-table
   .ptah-table[data-collapsed='true']
@@ -224,4 +216,50 @@ ptah-lanes-table
   > button[data-ptah-button]:is(.btn, #ptah-button) {
   padding-inline: 0;
   font-size: 0.75rem;
+}
+
+/* Detail values are editable facts and may occupy several lines. */
+ptah-lanes-table .lane-default-value .lane-model-value {
+  flex-wrap: wrap;
+  overflow: visible;
+  white-space: normal;
+}
+ptah-lanes-table .lane-default-value .lane-model-value > ptah-native-popover {
+  overflow: visible;
+}
+ptah-lanes-table .lane-default-value .lane-model-value > span,
+ptah-lanes-table .lane-default-value .lane-model-value button {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  height: auto;
+  text-overflow: clip;
+}
+/* Anchor menus to the cell edge, independent of status/recovery label length. */
+ptah-lanes-table [data-lane-status] {
+  position: relative;
+  padding-inline-end: 2.5rem;
+}
+ptah-lanes-table [data-lane-status] > .lane-row-actions {
+  position: absolute;
+  inset-inline-end: var(--ptah-gap-inline);
+  top: 50%;
+  transform: translateY(-50%);
+}
+ptah-lanes-table [data-lane-status] > ptah-lanes-table-status {
+  white-space: normal;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] [data-lane-status] {
+  padding-inline-end: 2.5rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  > ptah-lanes-table-status {
+  max-width: 100%;
+}
+ptah-lanes-table
+  [data-lane-status]:has(.lane-row-actions > button)
+  > ptah-lanes-table-status {
+  display: block;
 }

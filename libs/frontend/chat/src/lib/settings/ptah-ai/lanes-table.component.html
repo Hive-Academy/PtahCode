@@ -297,7 +297,11 @@
                   }
                 </ptah-native-popover>
               }
-              @if (hasEffort(row)) {
+              @if (
+                hasEffort(row) &&
+                (place === 'detail' ||
+                  (row.kind === 'system' ? row.effort?.value : row.effort))
+              ) {
                 <span aria-hidden="true">·</span>
                 <ptah-native-popover
                   [isOpen]="isOpen(row, 'effort', place)"
@@ -447,17 +451,17 @@
                       >
                     }
                   </dd>
-                  <dt>Model</dt>
-                  <dd class="lane-default-value">
-                    <ng-container
-                      [ngTemplateOutlet]="modelEffort"
-                      [ngTemplateOutletContext]="{
-                        $implicit: row,
-                        place: 'detail',
-                      }"
-                    />
-                  </dd>
                 }
+                <dt>Model / Effort</dt>
+                <dd class="lane-default-value">
+                  <ng-container
+                    [ngTemplateOutlet]="modelEffort"
+                    [ngTemplateOutletContext]="{
+                      $implicit: row,
+                      place: 'detail',
+                    }"
+                  />
+                </dd>
               </ng-container>
               <span laneActions>
                 @if (row.kind === 'system' && defaults()?.[row.cli]) {
