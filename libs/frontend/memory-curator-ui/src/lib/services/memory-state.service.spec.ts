@@ -140,6 +140,20 @@ describe('MemoryStateService pagination', () => {
     expect(service.hasMore()).toBe(true);
   });
 
+  it('does not page the list after a failed search', async () => {
+    const search = jest.fn().mockRejectedValue(new Error('secret'));
+    (
+      TestBed.inject(MemoryRpcService) as unknown as { search: jest.Mock }
+    ).search = search;
+    list.mockResolvedValue({ memories: [memory('a')], total: 5 });
+    await service.refresh();
+    expect(service.hasMore()).toBe(true);
+    await service.search('query');
+    expect(service.hasMore()).toBe(false);
+    await service.loadMore();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
   it('drops the rows when a refresh for another tier fails', async () => {
     list
       .mockResolvedValueOnce({ memories: [memory('a')], total: 5 })

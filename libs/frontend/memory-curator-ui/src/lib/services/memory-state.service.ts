@@ -114,8 +114,11 @@ export class MemoryStateService {
   public readonly loading = this._loading.asReadonly();
   public readonly loadingMore = this._loadingMore.asReadonly();
   public readonly total = this._total.asReadonly();
+  /** Paging applies to the list only: it is off while a search is active. */
   public readonly hasMore = computed(
-    () => this._entries().length < this._total(),
+    () =>
+      this._query().trim().length === 0 &&
+      this._entries().length < this._total(),
   );
   public readonly error = this._error.asReadonly();
   /** Purge status. It is here so that it stays when the Health view closes. */
