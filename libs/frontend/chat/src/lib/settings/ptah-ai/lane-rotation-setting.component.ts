@@ -103,7 +103,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
                 <span
                   ptahBadge
                   [title]="names.route(pick.key).text + ': ' + pick.candidateId"
-                  >{{ names.executor(pick.candidateId).text }}</span
+                  >{{ names.route(pick.key).text }}: {{ names.executor(pick.candidateId).text }}</span
                 >
               </li>
             }
@@ -114,7 +114,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           </p>
         }
         @if (lastPicksUnavailable()) {
-          <ptah-alert tone="warning" [compact]="true">
+          <ptah-alert tone="warning" [compact]="true" live="polite">
             Recent picks unavailable
             <button
               alertAction

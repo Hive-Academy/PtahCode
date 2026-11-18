@@ -103,9 +103,9 @@ export class ContextOverviewStore {
                 : 'Not set',
         meta:
           override === 'invalid'
-            ? 'Invalid environment override'
+            ? 'Invalid override'
             : override
-              ? 'Set by environment'
+              ? 'From environment'
               : undefined,
         tone: override === 'invalid' ? 'warn' : 'idle',
       };

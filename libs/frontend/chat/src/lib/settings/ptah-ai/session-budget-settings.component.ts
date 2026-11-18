@@ -258,7 +258,7 @@ function storedNumberIsValid(
 
             <div class="session-budget-fields">
               <div ptahFieldGrid minColumn="md">
-                <ptah-field label="Budget unit">
+                <ptah-field label="Budget unit" hint="Tokens use chat usage; Cost uses priced models.">
                   <ptah-select #unitSelect
                     triggerId="session-budget-unit"
                     label="Budget unit"
@@ -269,7 +269,7 @@ function storedNumberIsValid(
                   />
                   <p ptahFieldAfterError
                     id="session-budget-unit-help"
-                    class="px-[var(--ptah-field-pad-x)] text-xs text-base-content-muted"
+                    class="sr-only"
                   >
                     Tokens use chat usage; Cost uses priced models.
                   </p>
@@ -278,7 +278,7 @@ function storedNumberIsValid(
                   }
                 </ptah-field>
 
-                <ptah-field label="Token measure">
+                <ptah-field label="Token measure" hint="Weighted discounts cache reads; raw counts all tokens.">
                   <ptah-select #measureSelect
                     triggerId="session-budget-token-measure"
                     label="Token measure"
@@ -289,7 +289,7 @@ function storedNumberIsValid(
                   />
                   <p ptahFieldAfterError
                     id="session-budget-token-measure-help"
-                    class="px-[var(--ptah-field-pad-x)] text-xs text-base-content-muted"
+                    class="sr-only"
                   >
                     Weighted discounts cache reads; raw counts all tokens.
                   </p>

@@ -1,7 +1,9 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   OnInit,
+  afterRenderEffect,
   computed,
   effect,
   inject,
@@ -255,6 +257,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                   ' for ' +
                                   displayModel(profile.model)
                                 "
+                                [attr.aria-description]="'Score: ' + cell.score + (cell.stale ? '. Stale.' : '.')"
                                 [attr.aria-expanded]="
                                   openCell() ===
                                   rowId(family, profile.model, kind)
@@ -283,6 +286,8 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                               </button>
                               <div
                                 content
+                                role="dialog"
+                                [attr.aria-label]="'Details for ' + labels[kind] + ' for ' + displayModel(profile.model)"
                                 [id]="
                                   'detail-' + rowId(family, profile.model, kind)
                                 "
@@ -308,7 +313,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                             <span
                               class="text-base-content-muted"
                               aria-label="Unrated"
-                              >&#8212;</span
+                              >Unrated</span
                             >
                           }
                         </td>
@@ -376,6 +381,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                           ' for ' +
                                           displayModel(profile.model)
                                         "
+                                        [attr.aria-description]="'Score: ' + detail.score + (detail.stale ? '. Stale.' : '.')"
                                         [attr.aria-expanded]="
                                           openCell() ===
                                           rowId(family, profile.model, kind)
@@ -409,6 +415,8 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                       </button>
                                       <div
                                         content
+                                        role="dialog"
+                                        [attr.aria-label]="'Details for ' + labels[kind] + ' for ' + displayModel(profile.model)"
                                         [id]="
                                           'detail-' +
                                           rowId(family, profile.model, kind)
@@ -440,7 +448,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                     <span
                                       class="text-base-content-muted"
                                       aria-label="Unrated"
-                                      >&#8212;</span
+                                      >Unrated</span
                                     >
                                   }
                                 </dd>
@@ -492,7 +500,29 @@ export class CapabilityMatrixSettingComponent implements OnInit {
   protected readonly openCell = signal<string | null>(null);
   protected readonly announcement = signal('');
   private readonly table = viewChild(PtahTableComponent);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private openPlacement: boolean | null = null;
   constructor() {
+    afterRenderEffect(() => {
+      const id = this.openCell();
+      const hidden = this.table()?.hiddenColumns();
+      if (!id || !hidden) {
+        this.openPlacement = null;
+        return;
+      }
+      const kind = this.tasks.find((task) => this.visible().some(
+        (profile) => this.rowId(profile.family, profile.model, task) === id,
+      ));
+      if (!kind) return;
+      const placement = hidden.has(kind);
+      if (this.openPlacement !== null && placement !== this.openPlacement) {
+        this.openCell.set(null);
+        this.host.nativeElement.querySelector<HTMLButtonElement>(
+          'ptah-table-row-expander button, button[ptahCellButton]',
+        )?.focus();
+      }
+      this.openPlacement = placement;
+    });
     effect(() => {
       const table = this.table();
       const message = this.announcement();
@@ -567,6 +597,7 @@ export class CapabilityMatrixSettingComponent implements OnInit {
     model: string,
     kind: OutcomeTaskKind,
   ): void {
+    this.openPlacement = null;
     const id = this.rowId(family, model, kind);
     this.openCell.set(this.openCell() === id ? null : id);
   }

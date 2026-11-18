@@ -81,6 +81,7 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
       </div>
     </div>
     <ptah-instrument-band
+      class="mb-[var(--ptah-gap-heading)]"
       [segments]="segments()"
       [loading]="busy()"
       ariaLabel="Decision matrix overview"
@@ -198,10 +199,12 @@ export class DecisionMatrixPageComponent {
   }));
   protected readonly familyOptions = computed(() => [
     { value: '', label: 'All families' },
-    ...this.families().map((value) => ({
-      value,
-      label: this.names.executor(value).text,
-    })),
+    ...this.families().map((value) => {
+      const name = this.names.executor(value);
+      // An unresolved custom executor has a generic name; its id keeps the options distinct.
+      const generic = name.loading || name.text === 'Unknown executor';
+      return { value, label: generic && name.raw ? name.raw : name.text };
+    }),
   ]);
   protected readonly family = signal('');
   protected readonly search = signal('');
@@ -232,21 +235,16 @@ export class DecisionMatrixPageComponent {
   protected readonly segments = computed<readonly PtahInstrumentBandSegment[]>(
     () => {
       const profiles = this.result()?.profiles ?? [];
-      const stale = profiles.reduce(
-        (count, p) =>
-          count +
-          OUTCOME_TASK_KINDS.filter(
-            (kind) => p.cells[kind].kind === 'value' && p.cells[kind].stale,
-          ).length,
-        0,
-      );
       const latest = this.latest();
+      // null: the routing model read has not succeeded yet, so make no claim about it.
+      const configured = this.routingModelConfigured();
       return [
         {
           id: 'routing-model',
           label: 'Routing model',
-          value: this.routingModelConfigured() ? 'On' : 'Needs a model',
-          tone: this.routingModelConfigured() ? 'ok' : 'warn',
+          value:
+            configured === null ? 'Unknown' : configured ? 'On' : 'Needs a model',
+          tone: configured === null ? 'idle' : configured ? 'ok' : 'warn',
         },
         {
           id: 'families',
@@ -276,14 +274,7 @@ export class DecisionMatrixPageComponent {
           id: 'last',
           label: 'Last rating',
           value: latest ? this.relative(latest) : 'None',
-          meta: latest ?? undefined,
           tone: 'info',
-        },
-        {
-          id: 'stale',
-          label: 'Stale ratings',
-          value: String(stale),
-          tone: stale > 0 ? 'warn' : 'ok',
         },
       ];
     },

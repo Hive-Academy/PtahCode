@@ -197,7 +197,7 @@ describe('OrchestrationSettingsComponent', () => {
         id: 'prompt-cache',
         label: 'Prompt cache',
         value: '1 hour',
-        meta: 'Set by environment',
+        meta: 'From environment',
       }),
       expect.objectContaining({
         id: 'session-budget',

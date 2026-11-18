@@ -82,10 +82,21 @@ describe('DecisionMatrixPageComponent', () => {
     expect(refresh.textContent).not.toContain('?');
     expect(root.querySelector('ptah-host-routing-setting')).not.toBeNull();
     expect(root.querySelector('ptah-lane-rotation-setting')).not.toBeNull();
-    expect(root.textContent).toContain('Needs a model');
+    // Before the routing read succeeds, the band makes no claim about the model.
+    expect(
+      root.querySelector(
+        'ptah-instrument-band button[aria-label="Routing model Unknown"]',
+      ),
+    ).not.toBeNull();
+    expect(root.textContent).not.toContain('Needs a model');
+    expect(root.querySelectorAll('ptah-instrument-band button')).toHaveLength(4);
+    expect(root.textContent).not.toContain('Stale ratings');
     const routing = fixture.debugElement.query(
       By.directive(HostRoutingStubComponent),
     ).componentInstance as HostRoutingStubComponent;
+    routing.modelConfiguredChange.emit(false);
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Needs a model');
     routing.modelConfiguredChange.emit(true);
     fixture.detectChanges();
     expect(

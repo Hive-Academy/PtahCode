@@ -11,7 +11,7 @@ import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
     <ptah-alert tone="info" [compact]="true" data-testid="session-budget-token-measure-recommendation">
       Weighted session tokens are recommended. Switching keeps your saved token budget unchanged.
       <div alertAction class="flex flex-wrap gap-[var(--ptah-gap-label)]">
-        <button type="button" ptahButton variant="ghost" size="xs" [disabled]="busy()"
+        <button type="button" ptahButton variant="ghost" size="xs" [busy]="busy()"
           (click)="switchMeasure.emit()" data-testid="session-budget-token-measure-switch">Switch to weighted</button>
         <button type="button" ptahButton variant="ghost" size="xs" (click)="dismissAdvice.emit()">Dismiss</button>
       </div>

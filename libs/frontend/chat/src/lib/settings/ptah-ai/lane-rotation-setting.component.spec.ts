@@ -95,7 +95,8 @@ describe('LaneRotationSettingComponent', () => {
     const chips = (fixture.nativeElement as HTMLElement).querySelectorAll(
       '[data-testid="lane-rotation-last-picks"] span',
     );
-    expect(chips[0].textContent).toContain('Codex');
+    expect(chips[0].textContent).toContain('Implement \u00b7 implement: Codex');
+    expect(chips[1].textContent).toContain('Plan \u00b7 plan: Claude');
     expect(chips[0].getAttribute('title')).toBe(
       'Implement \u00b7 implement: codex',
     );
@@ -133,4 +134,15 @@ describe('LaneRotationSettingComponent', () => {
       TIMEOUT,
     );
   });
+  it('announces that recent picks remain unavailable after retry', async () => {
+    host.call.mockImplementation(async (method: string) => method === 'agent:getCapabilityMatrix'
+      ? rpcError('unavailable') : rpcSuccess({ success: true, value: true }));
+    await create();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('ptah-alert [role="status"]')).not.toBeNull();
+    root.querySelector<HTMLButtonElement>('ptah-alert button')?.click();
+    await settle();
+    expect(root.querySelector('ptah-alert [role="status"]')?.textContent).toContain('Recent picks unavailable');
+  });
+
 });

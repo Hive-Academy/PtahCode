@@ -705,4 +705,12 @@ describe('SessionBudgetSettingsComponent', () => {
       expect(rich('unit').value()).toBe('cost');
     });
   });
+  it('describes the focused budget triggers with their help', async () => {
+    await create();
+    const description = (id: string) => (host().querySelector(`#${id}`)?.getAttribute('aria-describedby') ?? '')
+      .split(' ').map((value) => host().querySelector(`[id="${value}"]`)?.textContent).join(' ');
+    expect(description('session-budget-unit')).toContain('Tokens use chat usage; Cost uses priced models.');
+    expect(description('session-budget-token-measure')).toContain('Weighted discounts cache reads; raw counts all tokens.');
+  });
+
 });

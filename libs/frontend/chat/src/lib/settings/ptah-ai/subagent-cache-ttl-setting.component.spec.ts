@@ -220,7 +220,8 @@ describe('SubagentCacheTtlSettingComponent', () => {
         `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=${value} is set in your environment and takes precedence.`,
       );
       expect(el().querySelector('ptah-select')?.getAttribute('aria-describedby')).toBe('subagent-cache-ttl-env');
-      expect(select()?.getAttribute('aria-describedby')).toBeTruthy();
+      const ids = select()?.getAttribute('aria-describedby')?.split(' ') ?? [];
+      expect(ids.map((id) => el().querySelector(`[id="${id}"]`)?.textContent).join(' ')).toContain(`Your environment sets this value to ${value}.`);
       expect(isDisabledControl(select())).toBe(false);
       choose('5m');
       await flush();
@@ -239,6 +240,7 @@ describe('SubagentCacheTtlSettingComponent', () => {
     expect(envNotice()).toBe(
       'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL has an invalid value and is ignored by Ptah.',
     );
+    expect(el().textContent).not.toContain('Your environment sets this value');
     expect(isDisabledControl(select())).toBe(false);
   });
 

@@ -72,7 +72,7 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
         data-glass-surface="content"
       >
         <div ptahFieldGrid>
-          <ptah-field label="Subagent prompt-cache TTL" [hint]="envNotice() ? 'Your environment sets this value.' : null">
+          <ptah-field label="Subagent prompt-cache TTL" [hint]="envHint()">
             <ptah-select #cacheSelect
               triggerId="subagent-cache-ttl"
               [options]="options"
@@ -133,6 +133,13 @@ const LABELS: Readonly<Record<SubagentPromptCacheTtlSetting, string>> = {
   `,
 })
 export class SubagentCacheTtlSettingComponent {
+  protected readonly envHint = computed(() => {
+    const notice = this.envNotice();
+    if (!notice) return null;
+    return notice.invalid
+      ? 'Your environment override is invalid and ignored by Ptah.'
+      : 'Your environment sets this value to ' + notice.value + '.';
+  });
   protected readonly envVar = ENV_VAR;
   protected readonly options = SUBAGENT_PROMPT_CACHE_TTL_SETTINGS.map(
     (value) => ({ value, label: LABELS[value] }),
