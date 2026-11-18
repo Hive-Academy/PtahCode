@@ -1766,7 +1766,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     const sub = subAssistant();
     feed(run, sub);
     expect(observe).toHaveBeenCalledTimes(1);
-    expect(observe).toHaveBeenCalledWith(REAL, sub);
+    expect(observe).toHaveBeenCalledWith(REAL, sub, { kind: 'native', providerId: 'anthropic' });
     run.abortController.abort();
   });
 
@@ -1894,7 +1894,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     });
     feed(run, spawning);
     expect(observe).toHaveBeenCalledTimes(1);
-    expect(observe).toHaveBeenCalledWith(REAL, spawning);
+    expect(observe).toHaveBeenCalledWith(REAL, spawning, { kind: 'native', providerId: 'anthropic' });
     run.abortController.abort();
   });
 

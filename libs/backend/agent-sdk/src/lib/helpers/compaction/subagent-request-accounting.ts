@@ -4,6 +4,7 @@ import type { SubagentRequestUsage } from './subagent-budget-monitor';
 import { independentSafetyCause, unavailableUsageCause, type SubagentStopCause } from './subagent-stop-cause';
 
 interface UsageState {
+  initialContext?: number; warningRequestCount?: number;
   stopFired: boolean; stopInFlight: boolean; warnedAgentId?: string;
   policySnapshot: AgentBudgetSnapshot; startedAt: number; requestSequence: number;
   lastMessageId?: string; lastWeighted: number; lastRaw: number; weightedUsed: number;
@@ -38,6 +39,8 @@ export function countSubagentUsage(state: UsageState, message: Record<string, un
       before, telemetry, Date.now() - state.startedAt,
       modelId ? findModelPricing(modelId) : null,
     );
+    state.initialContext ??= usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+    if (transition.snapshot.warned) state.warningRequestCount ??= state.requestSequence;
     state.lastWeighted = transition.snapshot.weightedTokens - before.weightedTokens;
     state.lastRaw = transition.snapshot.rawTokens - before.rawTokens;
     const safetyCause = telemetry.status === 'unavailable' ? unavailableUsageCause()

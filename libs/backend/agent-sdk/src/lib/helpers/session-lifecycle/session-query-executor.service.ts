@@ -225,11 +225,11 @@ class CompactionSessionTap {
   private readonly trackedIds = new Set<string>();
   private query: Query | null = null;
   private turn = 0;
+  private capacityRoute?: ContextCapacityRoute;
   private readonly subagentIds = new Set<string>();
   private readonly signalledStops = new Set<string>();
   private released = false;
   private readonly requestTracker = new MainRequestTracker(Date.now());
-
   constructor(
     private readonly logger: Logger,
     private readonly coordinator: CompactionCoordinatorSink | null,
@@ -252,8 +252,8 @@ class CompactionSessionTap {
   attachQuery(query: Query): void {
     this.query = query;
   }
-
-  observe(message: SDKMessage): void | Promise<void> {
+  observe(message: SDKMessage, route?: ContextCapacityRoute): void | Promise<void> {
+    this.capacityRoute = route;
     if (this.released) return;
     try {
       return this.handle(message);
@@ -339,6 +339,7 @@ class CompactionSessionTap {
         );
       }
     } else if (message.type === 'result') {
+      this.feedSubagentMonitor(message);
       this.onTurnEnd(sessionId);
     } else if (
       (message.type === 'assistant' && hasContentBlock(message, 'tool_use')) ||
@@ -359,9 +360,8 @@ class CompactionSessionTap {
     if (!monitor) return;
     const id = this.monitorSessionId(message);
     if (!id) return;
-    // The executor runs observe() now; a synchronous throw becomes a rejection.
     return new Promise<void>((resolve) =>
-      resolve(monitor.observe(id, message)),
+      resolve(monitor.observe(id, message, this.capacityRoute)),
     ).then(() => {
       const toolCallId = 'parent_tool_use_id' in message ? message.parent_tool_use_id : undefined;
       if (typeof toolCallId === 'string' && monitor.getAgentBudgetState(toolCallId, id)?.stopState === 'stopped' && !this.signalledStops.has(toolCallId)) {
@@ -1926,7 +1926,7 @@ export class SessionQueryExecutor {
         // The stream feeds the tap explicitly (TASK_2026_614 D.11). The abort
         // listener above stays for a run whose stream never reached the
         // transformer; release() is idempotent, so both paths are safe.
-        onMessage: (message: SDKMessage) => compactionTap.observe(message),
+        onMessage: (message: SDKMessage) => compactionTap.observe(message, rec.capacityRoute),
         beforeLiveStatsDispose: () => compactionTap.release('stream-end'),
         onStreamEnd: () => compactionTap.release('stream-end'),
         sessionToken: rec.token,

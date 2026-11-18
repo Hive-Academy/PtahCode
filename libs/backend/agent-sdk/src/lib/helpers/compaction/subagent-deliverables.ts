@@ -37,6 +37,7 @@ export class SubagentDeliverables {
     const file = path.resolve(workspace, parsed.data.file_path);
     try { if (!insideNotesWorkspace(workspace, file)) return; }
     catch (error: unknown) {
+      // degradation-audit: reported — debug logging explains why a mutation is excluded.
       logger?.debug('[SubagentDeliverables] Mutation containment unavailable; path excluded', { errorKind: error instanceof Error ? error.name : 'unknown' });
       return;
     }
@@ -55,6 +56,13 @@ export class SubagentDeliverables {
   permitted(agentId: string, declared: readonly string[], workspace: string): readonly string[] {
     return [...(this.agents.get(agentId)?.paths ?? []), ...declared]
       .map((file) => path.resolve(workspace, file)).filter((file) => insideNotesWorkspace(workspace, file));
+  }
+
+  completed(agentId: string, declared: readonly string[], workspace: string, notes?: string): boolean {
+    const paths = this.agents.get(agentId)?.paths;
+    const key = (file: string): string => process.platform === 'win32' ? file.toLowerCase() : file;
+    const productive = [...(paths ?? [])].filter(file => !notes || key(file) !== key(path.resolve(workspace, notes)));
+    return declared.length === 0 ? productive.length > 0 : declared.some(file => productive.some(written => key(written) === key(path.resolve(workspace, file))));
   }
 
   finish(agentId: string): void { this.agents.delete(agentId); }

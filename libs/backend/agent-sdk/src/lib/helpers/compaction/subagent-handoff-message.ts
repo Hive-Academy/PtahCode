@@ -1,3 +1,4 @@
+import { continuationInstructions } from './subagent-successor-lineage';
 import { summarizeSubagentPaths } from './subagent-path-summary';
 /**
  * The texts of the subagent budget monitor: the near-budget warning a
@@ -124,7 +125,7 @@ export function handoffMessage(
   if (usage.cause) lines.push(`Budget stop cause: ${usage.cause.kind}; quantity: ${usage.cause.quantity}; measured: ${usage.cause.measured}; limit: ${usage.cause.limit}; forced: ${usage.cause.forced}.`);
   lines.push(`Usage: ${usage.contextTokens} context tokens of ${usage.handoffTokens}; ${Math.round(usage.weightedUsed)} weighted tokens of ${usage.stopWeightedTokens}.`);
   if (recordPath) {
-    lines.push(recordLine(recordPath));
+    lines.push(recordLine(recordPath), continuationInstructions(recordPath));
   }
   lines.push(
     `If a Read or Glob right after this handoff fails with "The user doesn't want to take this action right now" ` +

@@ -1121,7 +1121,7 @@ describe('SubagentBudgetMonitor', () => {
     );
 
     expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
-    expect(h.logger.warn).toHaveBeenCalledTimes(1);
+    expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(1);
 
     h.registry.get.mockReturnValue({
       toolCallId: TOOL_CALL,
@@ -1156,7 +1156,7 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.streamed).toHaveLength(1);
       expect(h.streamed[0]).toContain('handed off subagent `Plan`');
       expect(h.streamed[0]).toContain('spawn a fresh `Plan` subagent');
-      expect(h.logger.warn).toHaveBeenCalledTimes(1);
+      expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(1);
       expect(h.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('without an agent id'),
         expect.objectContaining({ toolCallId: TOOL_CALL }),
@@ -1225,7 +1225,7 @@ describe('SubagentBudgetMonitor', () => {
       expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
       expect(h.registry.update).not.toHaveBeenCalled();
       expect(h.streamed).toHaveLength(0);
-      expect(h.logger.warn).toHaveBeenCalledTimes(1);
+      expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(1);
       expect(h.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('stop deferred'),
         expect.objectContaining({ toolCallId: TOOL_CALL }),
@@ -1332,7 +1332,7 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(MAX_STOP_ATTEMPTS);
     expect(h.registry.update).not.toHaveBeenCalled();
     expect(h.streamed).toHaveLength(0);
-    expect(h.logger.warn).toHaveBeenCalledTimes(1);
+    expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(1);
     expect(h.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('giving up'),
       expect.objectContaining({ attempts: MAX_STOP_ATTEMPTS }),
@@ -1409,7 +1409,7 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.dispatcher.pushParentMessage).not.toHaveBeenCalled();
     expect(h.recordStore.withdraw).not.toHaveBeenCalled();
     expect(h.index.publish).toHaveBeenCalledTimes(1);
-    expect(h.logger.warn).not.toHaveBeenCalled();
+    expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(0);
     expect(h.logger.debug).not.toHaveBeenCalledWith(
       '[SubagentBudgetMonitor] Near-budget warning deferred', expect.anything(),
     );
@@ -1670,7 +1670,7 @@ describe('SubagentBudgetMonitor', () => {
       assistant({ input: 310_000, output: 600_000 }, { id: 'm2' }),
     );
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
-    expect(h.logger.warn).not.toHaveBeenCalled();
+    expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(0);
     jest.useRealTimers();
   });
 
@@ -1812,7 +1812,7 @@ describe('SubagentBudgetMonitor', () => {
       assistant(null, { parent: 'toolu_other' }),
     );
 
-    expect(h.logger.warn).toHaveBeenCalledTimes(2);
+    expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(2);
     expect(h.dispatcher.stopSubagent).toHaveBeenCalled();
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(true);
     expect(h.dispatcher.stopSubagent).toHaveBeenCalledWith(SESSION, 'task-1');
@@ -1823,7 +1823,7 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.logger.warn.mock.calls.filter(([message]) => message.includes('telemetry unavailable'))).toHaveLength(2);
 
     await h.monitor.observe('session-2', assistant(null));
-    expect(h.logger.warn).toHaveBeenCalledTimes(3);
+    expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(3);
   });
 
   it('release forgets the session', async () => {
@@ -2106,7 +2106,7 @@ describe('SubagentBudgetMonitor', () => {
 
         expect(h.dispatcher.pushParentMessage).toHaveBeenCalledTimes(2);
         expect(h.dispatcher.postMainThreadNotice).not.toHaveBeenCalled();
-        expect(h.logger.warn).not.toHaveBeenCalled();
+        expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(0);
       });
 
       it('background handoff whose pushes all reject stays pending in the notice queue, once', async () => {
@@ -2130,8 +2130,8 @@ describe('SubagentBudgetMonitor', () => {
           PARENT_PUSH_ATTEMPTS,
         );
         expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
-        expect(h.logger.warn).toHaveBeenCalledTimes(1);
-        const warned = JSON.stringify(h.logger.warn.mock.calls[0]);
+        expect(h.logger.warn.mock.calls.filter(([message]) => !String(message).startsWith('[SubagentContextLimits]'))).toHaveLength(1);
+        const warned = JSON.stringify(h.logger.warn.mock.calls.find(([message]) => !String(message).startsWith('[SubagentContextLimits]')));
         expect(warned).not.toContain('Map auth');
         // The next main-thread tool result's PostToolUse carries it.
         expect(h.notices.take(SESSION)).toContain('Its task was: Map auth');
