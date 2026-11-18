@@ -113,6 +113,59 @@ describe('MemoryGraphStateService', () => {
     await service.refresh();
     expect(service.sessions()).toEqual(['s2']);
   });
+  it('refreshes the session choices when other filters change', async () => {
+    const inSession = (id: string, sessionId: string) => ({
+      ...node(id),
+      sessionId,
+    });
+    graph
+      .mockResolvedValueOnce({
+        ...result,
+        nodes: [inSession('a', 's1'), inSession('b', 's2')],
+      })
+      .mockResolvedValueOnce({ ...result, nodes: [inSession('a', 's1')] })
+      .mockResolvedValueOnce({ ...result, nodes: [inSession('a', 's1')] })
+      .mockResolvedValueOnce({
+        ...result,
+        nodes: [inSession('a', 's1'), inSession('d', 's3')],
+      });
+    await service.refresh();
+    service.patchFilters({ sessionId: 's1' });
+    await service.refresh();
+    expect(graph).toHaveBeenCalledTimes(2);
+    service.patchFilters({ pinnedOnly: true });
+    await service.refresh();
+    expect(graph).toHaveBeenCalledTimes(4);
+    expect(graph.mock.calls[2][0]).toMatchObject({ sessionId: 's1' });
+    expect(graph.mock.calls[3][0]).toMatchObject({ pinnedOnly: true });
+    expect(graph.mock.calls[3][0]).not.toHaveProperty('sessionId');
+    expect(service.nodes()).toHaveLength(1);
+    expect(service.sessions()).toEqual(['s1', 's3']);
+  });
+  it('keeps the selected session when the choices request fails', async () => {
+    graph
+      .mockResolvedValueOnce({ ...result, nodes: [] })
+      .mockRejectedValueOnce(new Error('secret'));
+    service.patchFilters({ sessionId: 's1' });
+    await service.refresh();
+    expect(service.sessions()).toEqual(['s1']);
+    expect(service.error()).toBeNull();
+  });
+  it('removes a session choice when its last node is removed', async () => {
+    graph.mockResolvedValueOnce({
+      ...result,
+      nodes: [
+        { ...node('a'), sessionId: 's1' },
+        { ...node('b'), sessionId: 's2' },
+        { ...node('c'), sessionId: 's2' },
+      ],
+    });
+    await service.refresh();
+    service.removeNodes(['b']);
+    expect(service.sessions()).toEqual(['s1', 's2']);
+    service.removeNodes(['a']);
+    expect(service.sessions()).toEqual(['s2']);
+  });
   it('debounces server filters and sends explicit scope', async () => {
     service.patchFilters({ scope: 'all' });
     service.patchFilters({ pinnedOnly: true });

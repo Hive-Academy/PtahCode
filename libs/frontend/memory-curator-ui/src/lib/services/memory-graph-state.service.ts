@@ -57,9 +57,11 @@ export class MemoryGraphStateService {
   private readonly _result = signal<MemoryGraphResult | null>(null);
   /**
    * Session choices for the filter. A session-filtered result holds one
-   * session only, so the choices stay from the last unfiltered result.
+   * session only, so the choices come from a result without the session
+   * filter. `sessionsContext` identifies the other filters of that result.
    */
   private readonly _sessions = signal<readonly string[]>([]);
+  private sessionsContext: string | null = null;
   private readonly _loading = signal(false);
   private readonly _error = signal<string | null>(null);
   private readonly _selectedIds = signal<readonly string[]>([]);
@@ -154,6 +156,7 @@ export class MemoryGraphStateService {
       this._loading.set(false);
       this._result.set(null);
       this._sessions.set([]);
+      this.sessionsContext = null;
       this.clearSelection();
       this._error.set('No workspace is open.');
       return;
@@ -164,7 +167,7 @@ export class MemoryGraphStateService {
       const result = await this.rpc.graph(graphFiltersToParams(filters, root));
       if (seq === this.requestSeq) {
         this._result.set(result);
-        this.updateSessions(result, filters.sessionId !== null);
+        await this.updateSessions(result, filters, root, seq);
       }
     } catch {
       if (seq === this.requestSeq)
@@ -174,15 +177,45 @@ export class MemoryGraphStateService {
     }
   }
 
-  private updateSessions(
+  private async updateSessions(
     result: MemoryGraphResult,
-    sessionFiltered: boolean,
+    filters: MemoryGraphFilters,
+    root: string | null,
+    seq: number,
+  ): Promise<void> {
+    const params = graphFiltersToParams({ ...filters, sessionId: null }, root);
+    const context = JSON.stringify(params);
+    if (filters.sessionId === null) {
+      this.setSessions(result.nodes, context);
+      return;
+    }
+    if (context === this.sessionsContext) return;
+    // The other filters changed while a session filter is active: the
+    // choices need a result without the session filter.
+    this._sessions.set([filters.sessionId]);
+    this.sessionsContext = null;
+    try {
+      const unfiltered = await this.rpc.graph(params);
+      if (seq !== this.requestSeq) return;
+      this.setSessions(unfiltered.nodes, context, filters.sessionId);
+    } catch {
+      // degradation-audit: optional-capability - the graph result is shown;
+      // the choices keep the selected session and the next refresh tries again
+    }
+  }
+
+  private setSessions(
+    nodes: readonly MemoryGraphNodeWire[],
+    context: string,
+    selected: string | null = null,
   ): void {
-    const found = result.nodes.flatMap((node) =>
+    const found = nodes.flatMap((node) =>
       node.sessionId ? [node.sessionId] : [],
     );
-    const kept = sessionFiltered ? this._sessions() : [];
-    this._sessions.set([...new Set([...kept, ...found])].sort());
+    this._sessions.set(
+      [...new Set(selected ? [selected, ...found] : found)].sort(),
+    );
+    this.sessionsContext = context;
   }
 
   public patchFilters(patch: Partial<MemoryGraphFilters>): void {
@@ -233,6 +266,7 @@ export class MemoryGraphStateService {
   }
   public removeNodes(ids: readonly string[]): void {
     const removed = new Set(ids);
+    const before = this.nodes();
     this._result.update((result) =>
       result
         ? {
@@ -252,6 +286,17 @@ export class MemoryGraphStateService {
     this._selectedIds.update((selected) =>
       selected.filter((id) => !removed.has(id)),
     );
+    const remaining = new Set(this.nodes().map((node) => node.sessionId));
+    const emptied = new Set(
+      before
+        .filter((node) => removed.has(node.id))
+        .map((node) => node.sessionId)
+        .filter((sessionId) => !remaining.has(sessionId)),
+    );
+    if (emptied.size > 0)
+      this._sessions.update((sessions) =>
+        sessions.filter((sessionId) => !emptied.has(sessionId)),
+      );
   }
   public patchNode(id: string, patch: Partial<MemoryGraphNodeWire>): void {
     this._result.update((result) =>
