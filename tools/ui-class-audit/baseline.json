@@ -512,16 +512,6 @@
     "input-bordered": 1,
     "input-sm": 1
   },
-  "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
-    "<dynamic>": 1
-  },
-  "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-detail-drawer.component.ts": {
-    "<dynamic>": 2
-  },
-  "libs/frontend/cron-scheduler-ui/src/lib/components/cron-scheduler-tab.component.ts": {
-    "alert": 1,
-    "alert-error": 1
-  },
   "libs/frontend/dashboard/src/lib/components/builders-card/builders-card.component.html": {
     "card-actions": 1,
     "card-title": 1

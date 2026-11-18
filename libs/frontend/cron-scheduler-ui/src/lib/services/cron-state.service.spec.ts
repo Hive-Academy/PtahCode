@@ -23,6 +23,8 @@ function makeJob(over: Partial<ScheduledJobDto>): ScheduledJobDto {
     updatedAt: over.updatedAt ?? 0,
     lastRunAt: over.lastRunAt ?? null,
     nextRunAt: over.nextRunAt ?? null,
+    createdBy: over.createdBy ?? { kind: 'user' },
+    lastRunStatus: over.lastRunStatus ?? null,
   };
 }
 
