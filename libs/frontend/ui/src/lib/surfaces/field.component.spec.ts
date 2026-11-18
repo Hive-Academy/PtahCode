@@ -298,7 +298,7 @@ describe('PtahFieldComponent projection and error metadata', () => {
 @Component({
   standalone: true,
   imports: [PtahFieldComponent, PtahInputDirective],
-  template: `<ptah-field label="Timeout" hint="In seconds" [info]="info()">
+  template: `<ptah-field label="Timeout" hint="In seconds" [info]="info()" [infoTextId]="infoTextId()" [infoTestId]="infoTestId()">
     <input ptahInput [attr.aria-describedby]="description()" />
     <span ptahFieldTrailing>seconds</span>
   </ptah-field>`,
@@ -306,9 +306,40 @@ describe('PtahFieldComponent projection and error metadata', () => {
 class InfoHost {
   readonly info = signal<string | null>('How long to wait before giving up.');
   readonly description = signal('consumer-help other-help');
+  readonly infoTextId = signal<string | null>(null);
+  readonly infoTestId = signal<string | null>(null);
 }
 
 describe('PtahFieldComponent info', () => {
+  it('preserves custom info hooks and removes stale ids when they change or clear', () => {
+    const fixture = TestBed.createComponent(InfoHost);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const control = root.querySelector('input') as HTMLInputElement;
+    const generatedId = (root.querySelector('.sr-only') as HTMLElement).id;
+    fixture.componentInstance.infoTextId.set('custom-info');
+    fixture.componentInstance.infoTestId.set('custom-info-test');
+    fixture.detectChanges();
+    const info = root.querySelector('.sr-only') as HTMLElement;
+    expect(info.id).toBe('custom-info');
+    expect(info.getAttribute('data-testid')).toBe('custom-info-test');
+    expect(info.textContent).toBe('How long to wait before giving up.');
+    expect(control.getAttribute('aria-describedby')?.split(' ')).toContain('custom-info');
+    expect(control.getAttribute('aria-describedby')?.split(' ')).not.toContain(generatedId);
+    fixture.componentInstance.infoTextId.set('updated-info');
+    fixture.detectChanges();
+    expect(control.getAttribute('aria-describedby')?.split(' ')).toContain('updated-info');
+    expect(control.getAttribute('aria-describedby')?.split(' ')).not.toContain('custom-info');
+    fixture.componentInstance.infoTextId.set(null);
+    fixture.detectChanges();
+    expect(info.id).toBe(generatedId);
+    expect(control.getAttribute('aria-describedby')?.split(' ')).toContain(generatedId);
+    expect(control.getAttribute('aria-describedby')?.split(' ')).not.toContain('updated-info');
+    fixture.componentInstance.info.set(null);
+    fixture.detectChanges();
+    expect(control.getAttribute('aria-describedby')?.split(' ')).not.toContain(generatedId);
+  });
+
   it('places an accessible native button after the suffix and before the rail', () => {
     const fixture = TestBed.createComponent(InfoHost);
     fixture.detectChanges();

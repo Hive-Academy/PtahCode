@@ -132,7 +132,8 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
             @if (source() === 'curated') {
               <ptah-field
                 label="Whisper model"
-                hint="Curated models download to ~/.ptah/models/ on first use."
+                hint="Downloads on first use."
+                info="Curated models download to ~/.ptah/models/ on first use."
               >
                 <ptah-select
                   #selectionControl
@@ -152,7 +153,7 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
                 <ptah-field
                   class="flex-1"
                   label="Custom model id or folder"
-                  hint="Enter an owner/name repository or an absolute folder path."
+                  info="Enter an owner/name repository or an absolute folder path."
                   ><input
                     id="local-stt-custom"
                     type="text"

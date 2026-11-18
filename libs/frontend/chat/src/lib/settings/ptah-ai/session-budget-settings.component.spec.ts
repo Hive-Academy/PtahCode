@@ -278,6 +278,66 @@ describe('SessionBudgetSettingsComponent', () => {
     ).toBeNull();
   });
 
+  it('keeps number help behind info actions and only ranges below the fields', async () => {
+    await create();
+    const fields = [
+      {
+        key: 'tokens',
+        label: 'Token budget',
+        help: 'Chat token limit.',
+      },
+      {
+        key: 'usd',
+        label: 'Cost budget (USD)',
+        help: 'Session cost limit.',
+      },
+      {
+        key: 'fallbackWeightedTokens',
+        label: 'Fallback weighted tokens',
+        help: 'Used when model pricing is unavailable.',
+      },
+      {
+        key: 'tightenPercent',
+        label: 'Tighten at (%)',
+        help: 'Starts tightening; stays below Handoff.',
+      },
+      {
+        key: 'handoffPercent',
+        label: 'Handoff at (%)',
+        help: 'Offers to wrap up and hand off to a new session.',
+      },
+      {
+        key: 'handoffAfterCompactions',
+        label: 'Handoff after compactions',
+        help: 'Handoff after repeated compactions leave context at least half full.',
+      },
+      {
+        key: 'tightenWindowTokens',
+        label: 'Tighten auto-compact window (tokens)',
+        help: 'Advisory only until set; then lowers the compact window.',
+      },
+    ] as const;
+    for (const setting of fields) {
+      const row = field(setting.key).closest('ptah-field');
+      expect(row?.querySelector(`button[aria-label="More about ${setting.label}"]`)).not.toBeNull();
+      const info = row?.querySelector<HTMLElement>('.sr-only[id^="ptah-field-info-"]');
+      expect(info?.textContent).toBe(setting.help);
+      expect(field(setting.key).getAttribute('aria-describedby')?.split(' ')).toContain(info?.id);
+      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(`Range: ${SESSION_BUDGET_SETTINGS[setting.key].min.toLocaleString('en-US')} to ${SESSION_BUDGET_SETTINGS[setting.key].max.toLocaleString('en-US')}.`);
+      const suffix = row?.querySelector('[ptahFieldTrailing]');
+      expect(suffix?.classList.contains('shrink-0')).toBe(true);
+      expect(suffix?.getAttribute('aria-hidden')).toBe('true');
+    }
+    for (const label of ['Budget unit', 'Token measure']) {
+      const row = host().querySelector(`button[aria-label="More about ${label}"]`)?.closest('ptah-field');
+      expect(row).toBeDefined();
+      expect(row?.querySelector('.ptah-field__message')).toBeNull();
+      expect(row?.querySelector('.sr-only[id^="ptah-field-info-"]')?.textContent).toBe(
+        label === 'Budget unit' ? 'Tokens use chat usage; Cost uses priced models.' : 'Weighted discounts cache reads; raw counts all tokens.',
+      );
+    }
+  });
+
   describe('load', () => {
     it('reads all sessionBudget keys and shows the saved values (TOKENS, 50M default)', async () => {
       await create();
@@ -298,8 +358,10 @@ describe('SessionBudgetSettingsComponent', () => {
       expect(read).toHaveLength(Object.keys(SESSION_BUDGET_SETTINGS).length);
       expect(field('tokens').value).toBe('50000000');
       expect(field('tokens').className).toContain('input-sm');
-      expect(field('tokens').className).toContain('flex-1');
-      expect(field('tokens').className).toContain('join-item');
+      expect(field('tokens').hasAttribute('size')).toBe(false);
+      expect(field('tokens').className).not.toContain('flex-1');
+      expect(field('tokens').className).not.toContain('join-item');
+      expect(field('tokens').classList.contains('tabular-nums')).toBe(true);
       expect(host().textContent).toContain('Range: 1,000,000 to 2,000,000,000');
       expect(field('tightenPercent').value).toBe('50');
       expect(field('handoffPercent').value).toBe('80');
@@ -542,7 +604,7 @@ describe('SessionBudgetSettingsComponent', () => {
             field('tightenWindowTokens')
               .getAttribute('aria-describedby')
               ?.split(' ')
-              .find((id) => id.startsWith('ptah-field-description-')),
+              .find((id) => id.startsWith('ptah-field-info-')),
         )?.textContent,
       ).toMatch(/advisory only until set/i);
       await enter('tightenWindowTokens', '');

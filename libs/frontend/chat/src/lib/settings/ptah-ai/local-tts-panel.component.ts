@@ -161,7 +161,7 @@ interface VoiceGroup {
                 <ptah-field
                   class="flex-1"
                   label="Custom model id or folder"
-                  hint="Enter an owner/name repository or an absolute folder path."
+                  info="Enter an owner/name repository or an absolute folder path."
                   ><input
                     id="local-tts-custom"
                     type="text"

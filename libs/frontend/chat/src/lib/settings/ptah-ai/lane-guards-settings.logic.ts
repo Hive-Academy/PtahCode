@@ -13,7 +13,7 @@ export interface LaneGuardField {
   readonly key: LaneGuardKey;
   readonly label: string;
   readonly min: number;
-  readonly help: string;
+  readonly info: string;
   readonly testId: string;
 }
 
@@ -23,7 +23,7 @@ export const LANE_GUARD_FIELDS: readonly LaneGuardField[] = [
     label: 'Repeat-call stop at',
     min: 2,
     testId: 'lane-guards-repeat',
-    help: 'Stops a lane that repeats the same tool call this many times.',
+    info: 'This guard stops a lane when it repeats the same call this many times. Lanes also have a weighted token budget and a duration limit. A lane gets an early warning when it reaches the budget warning ratio, or when one more turn of its largest size would cross the limit. The first turn that crosses the token limit is a grace turn: the lane is warned again, and its next turn stops it. A lane stopped by its budget does not resume; start a fresh lane for the remaining work.',
   },
 ];
 

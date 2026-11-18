@@ -140,7 +140,7 @@ let fieldId = 0;
       <span class="ptah-field__rail" aria-hidden="true"></span>
     </div>
     @if (info()) {
-      <span class="sr-only" [id]="infoId">{{ info() }}</span>
+      <span class="sr-only" [id]="resolvedInfoId()" [attr.data-testid]="infoTestId()">{{ info() }}</span>
     }
     <ng-content select="[ptahFieldBeforeHint]" />
     @if (hint() || error() || counter()) {
@@ -176,6 +176,10 @@ export class PtahFieldComponent {
   readonly hint = input<string | null>(null);
   /** Long help text, available from the trailing info action. */
   readonly info = input<string | null>(null);
+  /** Id of the always-present sr-only info text; keeps a consumer id when help moves into `info`. */
+  readonly infoTextId = input<string | null>(null);
+  /** `data-testid` of the same sr-only info text. */
+  readonly infoTestId = input<string | null>(null);
   readonly error = input<string | null>(null);
   readonly errorRole = input<'alert' | 'status' | null>(null);
   readonly errorTestId = input<string | null>(null);
@@ -196,6 +200,8 @@ export class PtahFieldComponent {
   readonly descriptionId = `ptah-field-description-${fieldId}`;
   readonly infoId = `ptah-field-info-${fieldId}`;
   readonly infoPanelId = `${this.infoId}-panel`;
+  readonly resolvedInfoId = computed(() => this.infoTextId() ?? this.infoId);
+  private previousInfoId: string | null = null;
   readonly infoOpen = signal(false);
   readonly labelFor = signal(this.controlId);
   readonly revealed = signal(false);
@@ -279,9 +285,14 @@ export class PtahFieldComponent {
   private syncDescription(control: HTMLElement): void {
     const ids = (control.getAttribute('aria-describedby') ?? '')
       .split(/\s+/)
-      .filter((id) => id && id !== this.descriptionId && id !== this.infoId);
+      .filter((id) =>
+        id && id !== this.descriptionId && id !== this.infoId &&
+        id !== this.previousInfoId && id !== this.resolvedInfoId(),
+      );
     if (this.error() || this.hint()) ids.push(this.descriptionId);
-    if (this.info()) ids.push(this.infoId);
+    const infoId = this.resolvedInfoId();
+    if (this.info()) ids.push(infoId);
+    this.previousInfoId = this.info() ? infoId : null;
     const next = ids.join(' ');
     if ((control.getAttribute('aria-describedby') ?? '') === next) return;
     if (next) control.setAttribute('aria-describedby', next);

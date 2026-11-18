@@ -132,7 +132,7 @@ const BOOLEAN_LABELS: Readonly<Record<BooleanKey, string>> = {
 const BOOLEAN_HELP: Readonly<Record<BooleanKey, string>> = {
   enabled: 'Enable this limit for the current chat.',
   autoHandoffAtLimit:
-    'Hand off once per session after the current turn; cancel from the banner.',
+    'Hands off once per session, after the current turn.',
 };
 
 const LABELS: Readonly<Record<BudgetKey, string>> = {
@@ -258,7 +258,7 @@ function storedNumberIsValid(
 
             <div class="session-budget-fields">
               <div ptahFieldGrid minColumn="md">
-                <ptah-field label="Budget unit" hint="Tokens use chat usage; Cost uses priced models.">
+                <ptah-field label="Budget unit" info="Tokens use chat usage; Cost uses priced models.">
                   <ptah-select #unitSelect
                     triggerId="session-budget-unit"
                     label="Budget unit"
@@ -278,7 +278,7 @@ function storedNumberIsValid(
                   }
                 </ptah-field>
 
-                <ptah-field label="Token measure" hint="Weighted discounts cache reads; raw counts all tokens.">
+                <ptah-field label="Token measure" info="Weighted discounts cache reads; raw counts all tokens.">
                   <ptah-select #measureSelect
                     triggerId="session-budget-token-measure"
                     label="Token measure"
@@ -315,19 +315,19 @@ function storedNumberIsValid(
                   <ptah-field
                     class="w-full min-w-0"
                     [label]="field.label"
-                    [hint]="field.help + ' Range: ' + range(field.key) + '.'"
+                    [hint]="'Range: ' + range(field.key) + '.'"
+                    [info]="field.help"
                     [error]="errors()[field.key] ?? null"
                     [errorTestId]="'session-budget-' + field.key + '-error'"
                   >
                     <input
                       ptahInput
-                      size="sm"
                       type="text"
                       [id]="'session-budget-' + field.key"
                       [attr.inputmode]="
                         settings[field.key].integer ? 'numeric' : 'decimal'
                       "
-                      class="join-item min-w-0 flex-1 tabular-nums"
+                      class="tabular-nums"
                       [invalid]="!!errors()[field.key]"
                       [value]="numberText(field.key)"
                       [attr.aria-describedby]="
@@ -342,14 +342,16 @@ function storedNumberIsValid(
                       (blur)="blurred(field.key)"
                       [attr.data-testid]="'session-budget-' + field.key"
                     />
-                    <span ptahFieldTrailing aria-hidden="true">{{
-                      unitSuffix(field.key)
-                    }}</span>
+                    @if (unitSuffix(field.key); as unit) {
+                      <span ptahFieldTrailing
+                        class="shrink-0 whitespace-nowrap pr-[var(--ptah-gap-heading)] text-xs text-base-content-muted"
+                        aria-hidden="true">{{ unit }}</span>
+                    }
                     @if (errors()[field.key]) {
                       <span
                         ptahFieldBeforeHint
                         class="text-xs text-base-content-muted"
-                        >{{ field.help }} Range: {{ range(field.key) }}.</span
+                        >Range: {{ range(field.key) }}.</span
                       >
                     }
                     @if (storedNotice(field.key); as notice) {

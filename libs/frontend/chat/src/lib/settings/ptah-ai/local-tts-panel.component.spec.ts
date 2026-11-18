@@ -127,6 +127,17 @@ describe('LocalTtsPanelComponent', () => {
     expect(host.querySelectorAll('[role="group"]')).toHaveLength(2);
     expect(host.closest('ptah-field')?.querySelector('[data-appearance="floating"]')).not.toBeNull();
   });
+  it('shows model help in info actions', () => {
+    const rpc = createMockRpcService();
+    routeRpc(rpc, { 'voice:listVoices': VOICES });
+    mount(rpc, localConfig());
+    byTestId<HTMLButtonElement>('local-tts-source-hf').click();
+    fixture.detectChanges();
+    const custom = element.querySelector('button[aria-label="More about Custom model id or folder"]')?.closest('ptah-field');
+    expect(custom).toBeDefined();
+    expect(custom?.querySelector('.sr-only[id^="ptah-field-info-"]')?.textContent).toBe('Enter an owner/name repository or an absolute folder path.');
+    expect(custom?.querySelector('.ptah-field__message')).toBeNull();
+  });
   it('places download progress text in one polite status region', () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { 'voice:listVoices': VOICES });
