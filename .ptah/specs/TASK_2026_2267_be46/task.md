@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_2267_be46
-status: backlog
+status: in_review
 type: FEATURE
 title: Move decision-model settings to Decision matrix and match the prototype
 depends_on: []
-created: "2026-11-18T06:17:20.206Z"
-updated: "2026-11-18T06:17:20.206Z"
-description: "Move routing/lane-choice settings from Context Management to Decision matrix; make both Settings pages match the rev 2 prototype."
+created: '2026-11-18T06:17:20.206Z'
+updated: '2026-11-18T09:36:52.843Z'
+description: >-
+  Move routing/lane-choice settings from Context Management to Decision matrix;
+  make both Settings pages match the rev 2 prototype.
 estimate: L
 relates_to:
   - TASK_2026_1177_9109
