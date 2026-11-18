@@ -312,7 +312,9 @@
                 (place === 'detail' ||
                   (row.kind === 'system' ? row.effort?.value : row.effort))
               ) {
-                <span aria-hidden="true">·</span>
+                @if (place !== 'detail') {
+                  <span aria-hidden="true">·</span>
+                }
                 <ptah-native-popover
                   [isOpen]="isOpen(row, 'effort', place)"
                   [keepInViewport]="true"

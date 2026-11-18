@@ -445,6 +445,8 @@ ptah-lanes-table
   display: inline-flex;
   position: static;
   transform: none;
+  /* Keep the recovery action apart from the status text on one line. */
+  margin-inline-start: var(--ptah-space-2);
 }
 ptah-lanes-table
   .ptah-table[data-model-column='true']
