@@ -26,6 +26,7 @@ import {
   PtahButtonDirective,
   PtahFieldGridDirective,
   PtahFieldComponent,
+  PtahFormSectionComponent,
   PtahInputDirective,
   PtahIconButtonDirective,
   NativePopoverComponent,
@@ -99,6 +100,7 @@ function formatValue(
     PtahButtonDirective,
     PtahFieldGridDirective,
     PtahFieldComponent,
+    PtahFormSectionComponent,
     PtahSettingRowComponent,
     PtahInputDirective,
     PtahToggleDirective,
@@ -110,9 +112,9 @@ function formatValue(
       <section
         [attr.data-glass-surface]="contentSurface() ? 'content' : null"
         class="flex flex-col gap-[var(--ptah-gap-field)] text-sm text-base-content"
-        [class.border-b]="headingStyle() !== 'hidden'"
-        [class.border-base-content/10]="headingStyle() !== 'hidden'"
-        [class.pb-7]="headingStyle() !== 'hidden'"
+        [class.border-b]="headingStyle() === 'caps'"
+        [class.border-base-content/10]="headingStyle() === 'caps'"
+        [class.pb-7]="headingStyle() === 'caps'"
         [attr.aria-labelledby]="idPrefix() + '-heading'"
         [attr.data-testid]="'settings-section-' + group.id"
       >
@@ -172,18 +174,15 @@ function formatValue(
             {{ group.title }}
           </h3>
         } @else if (headingStyle() === 'section') {
-          <div
-            section-header
-            class="border-b border-base-content/10 pb-[var(--ptah-space-2)]"
-          >
-            <h3
-              [id]="idPrefix() + '-heading'"
-              class="text-base font-semibold text-base-content"
-            >
-              {{ group.title }}
-            </h3>
-            <ng-container [ngTemplateOutlet]="description" />
-          </div>
+          <!-- 'section': the shared form section of Context Management (title and description at the left, the
+               group at the right); the sr-only span keeps the aria-labelledby id. -->
+          <ptah-form-section wide [heading]="group.title" [description]="group.description">
+            <span class="sr-only" [id]="idPrefix() + '-heading'">{{ group.title }}</span>
+            @if (group.id === 'context-budgets') {
+              <p aside class="text-xs text-base-content-muted">Agent limits apply even when compaction is off.</p>
+            }
+            <ng-container [ngTemplateOutlet]="body" />
+          </ptah-form-section>
         } @else {
           <div section-header class="mb-[var(--ptah-gap-heading)]">
             <h3
@@ -196,6 +195,7 @@ function formatValue(
           </div>
         }
 
+        <ng-template #body>
         @switch (load()) {
           @case ('loading') {
             <p
@@ -361,6 +361,10 @@ function formatValue(
               </div>
             }
           }
+        }
+        </ng-template>
+        @if (headingStyle() !== 'section') {
+          <ng-container [ngTemplateOutlet]="body" />
         }
       </section>
     }

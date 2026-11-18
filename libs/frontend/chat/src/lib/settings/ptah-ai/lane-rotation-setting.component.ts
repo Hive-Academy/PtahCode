@@ -18,10 +18,12 @@ import {
   PtahButtonDirective,
   PtahSettingRowComponent,
   PtahSkeletonComponent,
+  PtahToggleDirective,
+  PtahFormSectionComponent,
+  PtahBadgeDirective,
+  PtahAlertComponent,
 } from '@ptah-extension/ui';
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const RPC_TIMEOUT_MS = 5_000;
 const SETTING_KEY = 'agentOrchestration.laneRotation';
 const LABEL = 'Rotate close executors';
@@ -49,23 +51,35 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
     PtahButtonDirective,
     PtahSettingRowComponent,
     PtahSkeletonComponent,
+    PtahToggleDirective,
+    PtahFormSectionComponent,
+    PtahBadgeDirective,
+    PtahAlertComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section
+    <ptah-form-section
+      wide
+      level="2"
+      heading="Rotate close executors"
+      description="When two lanes rate the same, Ptah takes turns between them."
       data-glass-surface="content"
       class="flex flex-col gap-3 text-sm text-base-content [container-type:inline-size]"
       aria-labelledby="lane-rotation-heading"
       data-testid="lane-rotation-setting"
     >
-      <div class="border-b border-base-content/10 pb-2">
+      <div>
         <span id="lane-rotation-heading" hidden>{{ label }}</span>
-        <ptah-setting-row [label]="label" controlId="lane-rotation-toggle">
+        <ptah-setting-row
+          label="Take turns between close lanes"
+          hint="Recent picks, newest first."
+          controlId="lane-rotation-toggle"
+        >
           @if (load() === 'ready' && stored() !== null) {
             <input
               id="lane-rotation-toggle"
               type="checkbox"
-              [class]="'toggle toggle-xs toggle-success ' + focusRing"
+              ptahToggle
               [checked]="stored()"
               [ptahBusyDisabled]="saving() || feedback.saving()"
               [attr.aria-label]="label"
@@ -75,36 +89,22 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
             />
           }
         </ptah-setting-row>
-        <p
-          id="lane-rotation-help"
-          class="mt-0.5 text-xs text-base-content-muted"
-        >
+        <p id="lane-rotation-help" class="sr-only">
           When several executors are equally suitable, Ptah cycles which one it
           picks. Off keeps the first candidate.
         </p>
         @if (lastPicks().length > 0) {
           <ul
-            class="rotation-picks mt-3 grid grid-cols-1 gap-2 text-xs"
+            class="mt-3 flex flex-wrap gap-2"
             data-testid="lane-rotation-last-picks"
           >
             @for (pick of lastPicks(); track pick.key) {
-              <li
-                class="min-h-11 rounded-lg border border-base-content/20 bg-base-200/40 p-2"
-              >
-                <span class="block text-base-content-muted"
-                  >Last pick ({{ names.route(pick.key).text }})</span
+              <li>
+                <span
+                  ptahBadge
+                  [title]="names.route(pick.key).text + ': ' + pick.candidateId"
+                  >{{ chipRoute(pick.key) }}: {{ names.executor(pick.candidateId).text }}</span
                 >
-                <span class="font-medium text-base-content">{{
-                  names.executor(pick.candidateId).text
-                }}</span>
-                @if (names.executor(pick.candidateId).raw; as raw) {
-                  <details class="mt-1">
-                    <summary class="flex min-h-11 cursor-pointer items-center">
-                      ID details
-                    </summary>
-                    <code class="break-all">{{ raw }}</code>
-                  </details>
-                }
               </li>
             }
           </ul>
@@ -114,15 +114,18 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           </p>
         }
         @if (lastPicksUnavailable()) {
-          <div
-            class="mt-2 flex items-center gap-2 text-xs text-warning"
-            role="status"
-          >
+          <ptah-alert tone="warning" [compact]="true" live="polite">
             Recent picks unavailable
-            <button type="button" ptahButton (click)="retryPicks()">
+            <button
+              alertAction
+              type="button"
+              ptahButton
+              variant="ghost"
+              (click)="retryPicks()"
+            >
               Retry
             </button>
-          </div>
+          </ptah-alert>
         }
       </div>
 
@@ -140,9 +143,13 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
         }
         @case ('error') {
           <div role="alert" class="space-y-1.5">
-            <p data-testid="lane-rotation-load-error">
+            <ptah-alert
+              tone="error"
+              [compact]="true"
+              data-testid="lane-rotation-load-error"
+            >
               The setting could not be read.
-            </p>
+            </ptah-alert>
             <button
               type="button"
               ptahButton
@@ -155,21 +162,11 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           </div>
         }
       }
-    </section>
+    </ptah-form-section>
   `,
   styles: `
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
-    }
-    @container (min-width: 480px) {
-      .rotation-picks {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-    }
-    @container (min-width: 850px) {
-      .rotation-picks {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
     }
   `,
 })
@@ -179,8 +176,14 @@ export class LaneRotationSettingComponent implements OnInit {
   protected readonly feedback = inject(SettingsSaveFeedbackService);
   protected readonly names = inject(RoutingDisplayNamesStore);
 
-  protected readonly focusRing = FOCUS;
   protected readonly label = LABEL;
+
+  /** Chip label: "Research" for 'research|research' (task kind once); the title keeps the full route. */
+  protected chipRoute(key: string): string {
+    const text = this.names.route(key).text;
+    const [first, second] = text.split(' · ');
+    return second !== undefined && first.toLowerCase() === second.toLowerCase() ? first : text;
+  }
   protected readonly stored = signal<boolean | null>(null);
   protected readonly load = signal<'loading' | 'ready' | 'error'>('loading');
   protected readonly saving = signal(false);
@@ -216,7 +219,7 @@ export class LaneRotationSettingComponent implements OnInit {
         { timeout: RPC_TIMEOUT_MS },
       );
       if (response.isSuccess()) {
-        this.lastPicks.set(response.data.lastPicks ?? []);
+        this.lastPicks.set([...(response.data.lastPicks ?? [])].reverse());
         this.lastPicksUnavailable.set(
           response.data.lastPicksUnavailable === true ||
             response.data.lastPicks === undefined,

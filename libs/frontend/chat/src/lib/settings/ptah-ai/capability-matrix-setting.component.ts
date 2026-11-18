@@ -1,7 +1,9 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   OnInit,
+  afterRenderEffect,
   computed,
   effect,
   inject,
@@ -21,7 +23,6 @@ import {
 import {
   NativePopoverComponent,
   PtahBadgeDirective,
-  PtahButtonDirective,
   PtahTableBarCellDirective,
   PtahDetailCellDirective,
   PtahDetailRowDirective,
@@ -31,13 +32,16 @@ import {
   PtahTableStickyHeaderDirective,
   PtahTableComponent,
   PtahTableGroupTitleComponent,
-  PtahTableScoreComponent,
+  PtahTableColumnDirective,
+  PtahTableCellButtonDirective,
+  type PtahTableColumn,
   PtahTableMessageCellDirective,
 } from '@ptah-extension/ui';
 import {
   SettingsSectionReadyDirective,
   SettingsSectionStateComponent,
 } from '../shared/settings-section-state.component';
+import { MatrixScoreComponent } from './matrix-score.component';
 import { RoutingDisplayNamesStore } from './routing-display-names.store';
 
 const NO_PARAMS: AgentGetCapabilityMatrixParams = {};
@@ -57,7 +61,6 @@ const LABELS: Record<OutcomeTaskKind, string> = {
   imports: [
     NativePopoverComponent,
     PtahBadgeDirective,
-    PtahButtonDirective,
     PtahTableBarCellDirective,
     PtahDetailCellDirective,
     PtahDetailRowDirective,
@@ -67,7 +70,9 @@ const LABELS: Record<OutcomeTaskKind, string> = {
     PtahTableStickyHeaderDirective,
     PtahTableComponent,
     PtahTableGroupTitleComponent,
-    PtahTableScoreComponent,
+    PtahTableColumnDirective,
+    PtahTableCellButtonDirective,
+    MatrixScoreComponent,
     PtahTableMessageCellDirective,
     SettingsSectionReadyDirective,
     SettingsSectionStateComponent,
@@ -118,16 +123,17 @@ const LABELS: Record<OutcomeTaskKind, string> = {
               #matrix
               label="Capability matrix"
               density="compact"
-              [collapseBelow]="780"
+              [columns]="columns()"
+              [collapseBelow]="600"
               data-testid="capability-matrix-table"
             >
               <thead>
                 <tr>
-                  <th scope="col" ptahStickyHeader>Model</th>
+                  <th scope="col" ptahColumn="model" ptahStickyHeader>Model</th>
                   @for (kind of tasks; track kind) {
                     <th
                       scope="col"
-                      [hidden]="matrix.collapsed() && kind !== sortKind()"
+                      [ptahColumn]="kind"
                       [attr.aria-sort]="
                         kind === sortKind()
                           ? sortDescending()
@@ -139,7 +145,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                       {{ labels[kind] }}
                     </th>
                   }
-                  @if (matrix.collapsed()) {
+                  @if (matrix.detailEnabled()) {
                     <th scope="col">Details</th>
                   }
                 </tr>
@@ -148,7 +154,10 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                 <tbody>
                   <tr>
                     <td
-                      [ptahMessageCell]="matrix.collapsed() ? 3 : 7"
+                      [ptahMessageCell]="
+                        matrix.visibleColumnCount() +
+                        (matrix.detailEnabled() ? 1 : 0)
+                      "
                       data-testid="capability-matrix-filtered-empty"
                     >
                       No models match the filters.
@@ -159,7 +168,13 @@ const LABELS: Record<OutcomeTaskKind, string> = {
               @for (family of families(); track family) {
                 <tbody [id]="'family-' + family">
                   <tr ptahGroupRow>
-                    <th ptahGroupHeader [columns]="matrix.collapsed() ? 3 : 7">
+                    <th
+                      ptahGroupHeader
+                      [columns]="
+                        matrix.visibleColumnCount() +
+                        (matrix.detailEnabled() ? 1 : 0)
+                      "
+                    >
                       <ptah-table-group-title
                         [name]="names.executor(family).text"
                         ><span ptahGroupCount ptahBadge count>{{
@@ -184,6 +199,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                       <th
                         scope="row"
                         ptahStickyHeader
+                        ptahColumn="model"
                         class="font-mono"
                         [class.font-semibold]="profile.model === '*'"
                       >
@@ -204,7 +220,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                         @let cell = profile.cells[kind];
                         <td
                           ptahBarCell
-                          [hidden]="matrix.collapsed() && kind !== sortKind()"
+                          [ptahColumn]="kind"
                           [attr.data-testid]="
                             'matrix-row-' +
                             family +
@@ -214,19 +230,10 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                             kind
                           "
                         >
-                          <ptah-table-score
-                            [label]="
-                              labels[kind] +
-                              ' for ' +
-                              displayModel(profile.model)
-                            "
-                            [score]="cell.kind === 'value' ? cell.score : null"
-                            [stale]="cell.kind === 'value' && cell.stale"
-                          />
                           <!-- A hidden (collapsed) cell has no popover: its detail row owns the one popover per rating. -->
                           @if (
                             cell.kind === 'value' &&
-                            (!matrix.collapsed() || kind === sortKind())
+                            !matrix.hiddenColumns().has(kind)
                           ) {
                             <ptah-native-popover
                               [isOpen]="
@@ -239,9 +246,10 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                             >
                               <button
                                 trigger
-                                ptahButton
-                                variant="ghost"
-                                size="xs"
+                                [ptahCellButton]="
+                                  openCell() ===
+                                  rowId(family, profile.model, kind)
+                                "
                                 type="button"
                                 [attr.aria-label]="
                                   'Details for ' +
@@ -249,6 +257,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                   ' for ' +
                                   displayModel(profile.model)
                                 "
+                                [attr.aria-description]="'Score: ' + cell.score + (cell.stale ? '. Stale.' : '.')"
                                 [attr.aria-expanded]="
                                   openCell() ===
                                   rowId(family, profile.model, kind)
@@ -260,10 +269,25 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                   toggleCell(family, profile.model, kind)
                                 "
                               >
-                                Details
+                                <ptah-matrix-score
+                                  [label]="
+                                    labels[kind] +
+                                    ' for ' +
+                                    displayModel(profile.model)
+                                  "
+                                  [score]="
+                                    cell.kind === 'value' ? cell.score : null
+                                  "
+                                  [date]="
+                                    cell.kind === 'value' ? cell.asOf : ''
+                                  "
+                                  [stale]="cell.kind === 'value' && cell.stale"
+                                />
                               </button>
                               <div
                                 content
+                                role="dialog"
+                                [attr.aria-label]="'Details for ' + labels[kind] + ' for ' + displayModel(profile.model)"
                                 [id]="
                                   'detail-' + rowId(family, profile.model, kind)
                                 "
@@ -285,10 +309,16 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                 }
                               </div>
                             </ptah-native-popover>
+                          } @else if (cell.kind === 'unknown') {
+                            <span
+                              class="text-base-content-muted"
+                              aria-label="Unrated"
+                              >Unrated</span
+                            >
                           }
                         </td>
                       }
-                      @if (matrix.collapsed()) {
+                      @if (matrix.detailEnabled()) {
                         <td>
                           <ptah-table-row-expander
                             label="Show other ratings"
@@ -310,7 +340,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                         </td>
                       }
                     </tr>
-                    @if (matrix.collapsed()) {
+                    @if (matrix.detailEnabled()) {
                       <tr
                         [ptahDetailRow]="
                           expandedRows().has(
@@ -319,24 +349,15 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                         "
                         [id]="rowId(family, profile.model, 'plan') + '-more'"
                       >
-                        <td ptahDetailCell [colspan]="3">
+                        <td
+                          ptahDetailCell
+                          [colspan]="matrix.visibleColumnCount() + 1"
+                        >
                           <dl>
                             @for (kind of tasks; track kind) {
-                              @if (kind !== sortKind()) {
+                              @if (matrix.hiddenColumns().has(kind)) {
                                 <dt>{{ labels[kind] }}</dt>
                                 <dd>
-                                  <ptah-table-score
-                                    [label]="
-                                      labels[kind] +
-                                      ' for ' +
-                                      displayModel(profile.model)
-                                    "
-                                    [score]="score(profile, kind)"
-                                    [stale]="
-                                      profile.cells[kind].kind === 'value' &&
-                                      profile.cells[kind].stale
-                                    "
-                                  />
                                   @if (profile.cells[kind].kind === 'value') {
                                     @let detail = profile.cells[kind];
                                     <ptah-native-popover
@@ -349,9 +370,10 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                       (closed)="openCell.set(null)"
                                       ><button
                                         trigger
-                                        ptahButton
-                                        variant="ghost"
-                                        size="xs"
+                                        [ptahCellButton]="
+                                          openCell() ===
+                                          rowId(family, profile.model, kind)
+                                        "
                                         type="button"
                                         [attr.aria-label]="
                                           'Details for ' +
@@ -359,6 +381,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                           ' for ' +
                                           displayModel(profile.model)
                                         "
+                                        [attr.aria-description]="'Score: ' + detail.score + (detail.stale ? '. Stale.' : '.')"
                                         [attr.aria-expanded]="
                                           openCell() ===
                                           rowId(family, profile.model, kind)
@@ -375,10 +398,25 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                           )
                                         "
                                       >
-                                        Details
+                                        <ptah-matrix-score
+                                          [label]="
+                                            labels[kind] +
+                                            ' for ' +
+                                            displayModel(profile.model)
+                                          "
+                                          [score]="score(profile, kind)"
+                                          [date]="detail.asOf"
+                                          [stale]="
+                                            profile.cells[kind].kind ===
+                                              'value' &&
+                                            profile.cells[kind].stale
+                                          "
+                                        />
                                       </button>
                                       <div
                                         content
+                                        role="dialog"
+                                        [attr.aria-label]="'Details for ' + labels[kind] + ' for ' + displayModel(profile.model)"
                                         [id]="
                                           'detail-' +
                                           rowId(family, profile.model, kind)
@@ -405,6 +443,12 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                           <p>{{ detail.note }}</p>
                                         }
                                       </div></ptah-native-popover
+                                    >
+                                  } @else {
+                                    <span
+                                      class="text-base-content-muted"
+                                      aria-label="Unrated"
+                                      >Unrated</span
                                     >
                                   }
                                 </dd>
@@ -438,6 +482,14 @@ export class CapabilityMatrixSettingComponent implements OnInit {
   readonly visibleCountChange = output<number>();
   private requestSequence = 0;
   protected readonly tasks = OUTCOME_TASK_KINDS;
+  protected readonly columns = computed<readonly PtahTableColumn[]>(() => [
+    { id: 'model', minWidth: 150 },
+    ...OUTCOME_TASK_KINDS.map((kind, index) =>
+      kind === this.sortKind()
+        ? { id: kind, minWidth: 85 }
+        : { id: kind, minWidth: 85, priority: index + 1 },
+    ),
+  ]);
   protected readonly labels = LABELS;
   protected readonly load = signal<'loading' | 'error' | 'ready' | 'empty'>(
     'loading',
@@ -448,7 +500,29 @@ export class CapabilityMatrixSettingComponent implements OnInit {
   protected readonly openCell = signal<string | null>(null);
   protected readonly announcement = signal('');
   private readonly table = viewChild(PtahTableComponent);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private openPlacement: boolean | null = null;
   constructor() {
+    afterRenderEffect(() => {
+      const id = this.openCell();
+      const hidden = this.table()?.hiddenColumns();
+      if (!id || !hidden) {
+        this.openPlacement = null;
+        return;
+      }
+      const kind = this.tasks.find((task) => this.visible().some(
+        (profile) => this.rowId(profile.family, profile.model, task) === id,
+      ));
+      if (!kind) return;
+      const placement = hidden.has(kind);
+      if (this.openPlacement !== null && placement !== this.openPlacement) {
+        this.openCell.set(null);
+        this.host.nativeElement.querySelector<HTMLButtonElement>(
+          'ptah-table-row-expander button, button[ptahCellButton]',
+        )?.focus();
+      }
+      this.openPlacement = placement;
+    });
     effect(() => {
       const table = this.table();
       const message = this.announcement();
@@ -523,6 +597,7 @@ export class CapabilityMatrixSettingComponent implements OnInit {
     model: string,
     kind: OutcomeTaskKind,
   ): void {
+    this.openPlacement = null;
     const id = this.rowId(family, model, kind);
     this.openCell.set(this.openCell() === id ? null : id);
   }

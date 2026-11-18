@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
+  AppStateManager,
   ClaudeRpcService,
   ProvidersSettingsStateService,
 } from '@ptah-extension/core';
@@ -107,7 +108,7 @@ describe('HostRoutingSettingComponent', () => {
     await create();
     expect(
       (fixture.nativeElement as HTMLElement)
-        .querySelector('section')
+        .querySelector('[data-testid="host-routing-setting"]')
         ?.getAttribute('data-glass-surface'),
     ).toBe('content');
     expect(host.call).toHaveBeenCalledWith(
@@ -122,8 +123,7 @@ describe('HostRoutingSettingComponent', () => {
     );
     expect(toggle()?.checked).toBe(true);
     expect(toggle()?.disabled).toBe(false);
-    for (const name of ['toggle', 'toggle-xs', 'toggle-success'])
-      expect(toggle()?.classList.contains(name)).toBe(true);
+    expect(toggle()?.getAttribute('data-ptah-control')).toBe('toggle');
     expect(toggle()?.getAttribute('aria-label')).toBe('Routing suggestions');
     expect(el().textContent).toContain('Routing suggestions');
     expect(toggle()?.getAttribute('aria-describedby')).toBe(
@@ -166,14 +166,26 @@ describe('HostRoutingSettingComponent', () => {
     expect(reads).toHaveLength(3);
   });
 
+  it('opens Background models from the needs-model action', async () => {
+    host.decisionModel = MODEL_UNSET;
+    await create();
+    const appState = TestBed.inject(AppStateManager);
+    const request = jest.spyOn(appState, 'requestSettingsTab');
+    byTestId('host-routing-needs-model')?.querySelector('button')?.click();
+    expect(request).toHaveBeenCalledWith({
+      tab: 'providers',
+      section: 'background-models',
+    });
+  });
+
   it('shows routing as inactive without a decision model, and writes nothing on click', async () => {
     host.decisionModel = MODEL_UNSET;
     host.stored = true;
     await create();
     expect(toggle()?.checked).toBe(false);
     expect(toggle()?.disabled).toBe(true);
-    expect(byTestId('host-routing-needs-model')?.textContent?.trim()).toBe(
-      'Off: set a decision model in Providers to use this.',
+    expect(byTestId('host-routing-needs-model')?.textContent?.trim()).toContain(
+      'Suggestions need a routing model. Choose one in Background models.',
     );
     expect(toggle()?.getAttribute('aria-describedby')).toBe(
       'host-routing-help host-routing-needs-model',
@@ -303,9 +315,10 @@ describe('HostRoutingSettingComponent', () => {
     expect(feedback.toast()?.canUndo).toBe(true);
     // The Undo write is acknowledged but the stored value stays off.
     const original = host.call.getMockImplementation();
+    if (!original) throw new Error('Expected host mock implementation');
     host.call.mockImplementation(async (method: string, params?: unknown) => {
       if (method === 'settings:set') return rpcSuccess({ success: true });
-      return original?.(method, params);
+      return original(method, params);
     });
     await feedback.undo();
     await settle();
@@ -345,13 +358,14 @@ describe('HostRoutingSettingComponent', () => {
     await create();
     let release: () => void = () => undefined;
     const original = host.call.getMockImplementation();
+    if (!original) throw new Error('Expected host mock implementation');
     host.call.mockImplementation(async (method: string, params?: unknown) => {
       if (method === 'settings:set') {
         await new Promise<void>((resolve) => {
           release = resolve;
         });
       }
-      return original?.(method, params);
+      return original(method, params);
     });
     toggle()?.click();
     fixture.detectChanges();
