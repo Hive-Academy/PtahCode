@@ -33,6 +33,8 @@
       "@ptah-extension/auth-providers-tokens": [
         "./libs/backend/auth-providers-tokens/src/index.ts"
       ],
+      "@ptah-extension/bots": ["./libs/backend/bots/src/index.ts"],
+      "@ptah-extension/bots-ui": ["./libs/frontend/bots-ui/src/index.ts"],
       "@ptah-extension/canvas": ["./libs/frontend/canvas/src/index.ts"],
       "@ptah-extension/canvas/focus": ["./libs/frontend/canvas/src/focus.ts"],
       "@ptah-extension/chat": ["./libs/frontend/chat/src/index.ts"],

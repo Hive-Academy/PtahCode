@@ -16,6 +16,8 @@ export * from './lib/types/permission.parsers';
 export * from './lib/types/quality-assessment.types';
 export * from './lib/types/reliable-workflow.types';
 export * from './lib/types/rpc.types';
+export * from './lib/types/rpc-bots.types';
+export * from './lib/types/rpc-bots.schemas';
 export * from './lib/types/source-slug';
 export * from './lib/types/sdk-hook.types';
 export * from './lib/types/sdk-hook.parsers';
