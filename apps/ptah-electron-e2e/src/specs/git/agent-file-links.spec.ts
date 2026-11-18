@@ -171,6 +171,8 @@ test.describe('agent file links', () => {
       },
       'editor:openFile': { success: true },
       'file:viewContent': FILE_VIEW_CONTENT,
+      'displayWindow:open': { ok: true },
+      'displayWindow:publishState': { delivered: true },
     });
 
     await ui.goto('chat');
@@ -245,25 +247,20 @@ test.describe('agent file links', () => {
     // ---------------------------------------------------------------------
     // 3. `b` is markdown: it opens as the selected display-panel file.
     // ---------------------------------------------------------------------
-    const opened = electronApp.waitForEvent('window');
+    // The fake RPC listener of this fixture answers every renderer call, so no
+    // native Display window opens here. The assertions are on the open request
+    // and on the state that the renderer publishes for that window.
     await bubble.getByRole('link', { name: 'b', exact: true }).click();
-    const displayWindow = await opened;
-    const displayPanel = displayWindow.locator('ptah-display-panel');
-    await expect(displayPanel).toBeVisible();
-    const markdownTab = displayPanel.locator('[data-testid="display-panel-tab"]', {
-      hasText: 'readme.md',
-    });
-    await expect(markdownTab).toHaveAttribute('aria-selected', 'true');
-    await expect(
-      displayPanel.locator('[data-testid="display-panel-tabpanel"]:visible ptah-display-file-viewer'),
-    ).toContainText('Rendered preview');
-    await expect(
-      displayPanel.locator('[data-testid="display-panel-tabpanel"]:visible ptah-display-file-viewer'),
-    ).toContainText('Safe markdown body.');
+    await expect
+      .poll(async () => (await ui.getObservedCalls('displayWindow:open')).length)
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () =>
+        JSON.stringify(await ui.getObservedCalls('displayWindow:publishState')),
+      )
+      .toContain('readme.md');
+    await expect(mainWindow.locator('ptah-display-panel')).toHaveCount(0);
     expect(mainWindow.url()).toBe(urlBefore);
-    const closed = displayWindow.waitForEvent('close');
-    await displayWindow.getByTestId('display-window-close').click();
-    await closed;
 
     // ---------------------------------------------------------------------
     // 4. The http link is left alone — no read, no navigation (AC 20).
