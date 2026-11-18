@@ -166,6 +166,22 @@ describe('MemoryGraphStateService', () => {
     service.removeNodes(['a']);
     expect(service.sessions()).toEqual(['s2']);
   });
+  it('clears the old graph when a refresh with new filters fails', async () => {
+    graph
+      .mockResolvedValueOnce(result)
+      .mockRejectedValueOnce(new Error('secret'))
+      .mockRejectedValueOnce(new Error('secret'));
+    await service.refresh();
+    service.select('a');
+    await service.refresh();
+    expect(service.nodes()).toHaveLength(2);
+    expect(service.selectedIds()).toEqual(['a']);
+    service.patchFilters({ pinnedOnly: true });
+    await service.refresh();
+    expect(service.nodes()).toHaveLength(0);
+    expect(service.selectedIds()).toEqual([]);
+    expect(service.error()).toBeTruthy();
+  });
   it('debounces server filters and sends explicit scope', async () => {
     service.patchFilters({ scope: 'all' });
     service.patchFilters({ pinnedOnly: true });

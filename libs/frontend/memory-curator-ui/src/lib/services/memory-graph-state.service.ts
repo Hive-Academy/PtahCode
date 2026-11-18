@@ -62,6 +62,8 @@ export class MemoryGraphStateService {
    */
   private readonly _sessions = signal<readonly string[]>([]);
   private sessionsContext: string | null = null;
+  /** The request parameters of the result that is on the screen. */
+  private resultContext: string | null = null;
   private readonly _loading = signal(false);
   private readonly _error = signal<string | null>(null);
   private readonly _selectedIds = signal<readonly string[]>([]);
@@ -155,6 +157,7 @@ export class MemoryGraphStateService {
     if (filters.scope === 'workspace' && !root) {
       this._loading.set(false);
       this._result.set(null);
+      this.resultContext = null;
       this._sessions.set([]);
       this.sessionsContext = null;
       this.clearSelection();
@@ -163,15 +166,26 @@ export class MemoryGraphStateService {
     }
     this._loading.set(true);
     this._error.set(null);
+    const params = graphFiltersToParams(filters, root);
+    const context = JSON.stringify(params);
     try {
-      const result = await this.rpc.graph(graphFiltersToParams(filters, root));
+      const result = await this.rpc.graph(params);
       if (seq === this.requestSeq) {
         this._result.set(result);
+        this.resultContext = context;
         await this.updateSessions(result, filters, root, seq);
       }
     } catch {
-      if (seq === this.requestSeq)
+      if (seq === this.requestSeq) {
         this._error.set(memoryFailureMessage('list'));
+        // A result for other filters or another workspace must not stay
+        // under the new filter controls. A result for the same request stays.
+        if (this.resultContext !== context) {
+          this._result.set(null);
+          this.resultContext = null;
+          this.clearSelection();
+        }
+      }
     } finally {
       if (seq === this.requestSeq) this._loading.set(false);
     }
