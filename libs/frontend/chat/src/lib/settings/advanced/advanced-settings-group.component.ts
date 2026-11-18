@@ -150,7 +150,7 @@ function formatValue(
               (click)="openHelp.set(openHelp() === setting.key ? null : setting.key)">
               <lucide-angular [img]="InfoIcon" />
             </button>
-            <p content class="max-w-xs text-sm">{{ setting.help }} {{ applyNote(setting) }}</p>
+            <p content class="max-w-xs text-sm">{{ helpText(setting) }}</p>
           </ptah-native-popover>
         </ng-template>
         <ng-template #description>
@@ -309,7 +309,7 @@ function formatValue(
                       'advanced-setting-' + setting.key + '-field'
                     "
                   >
-                    <ptah-field [label]="setting.label">
+                    <ptah-field [label]="setting.label" [hint]="rangeHint(setting)" [info]="helpText(setting)">
                       <input
                         type="text"
                         ptahInput
@@ -336,27 +336,20 @@ function formatValue(
                           >{{ setting.unit }}</span
                         >
                       }
-                      <p
-                        ptahFieldBeforeHint
-                        [id]="'advanced-setting-' + setting.key + '-help'"
-                        class="mt-[var(--ptah-gap-label)] px-[var(--ptah-gap-controls)] text-xs text-base-content-muted"
-                      >
-                        @if (setting.apply === 'restart') {
-                          <span
-                            ptahBadge
-                            tone="info"
-                            size="xs"
-                            data-restart-badge
-                            class="mr-[var(--ptah-gap-label)] align-middle"
-                            aria-hidden="true"
-                            >Restart</span
-                          >
-                        }
-                        {{ rangeHint(setting) }}
-                        <ng-container [ngTemplateOutlet]="info"
-                          [ngTemplateOutletContext]="{ $implicit: setting }" />
-                      </p>
+                      @if (setting.apply === 'restart') {
+                        <span
+                          ptahFieldBeforeHint
+                          ptahBadge
+                          tone="info"
+                          size="xs"
+                          data-restart-badge
+                          class="self-start"
+                          aria-hidden="true"
+                          >Restart</span
+                        >
+                      }
                       <div ptahFieldAfterError>
+                        <p class="sr-only" [id]="'advanced-setting-' + setting.key + '-help'">{{ helpText(setting) }}</p>
                         <ng-container
                           [ngTemplateOutlet]="messages"
                           [ngTemplateOutletContext]="{ $implicit: setting }"
@@ -501,6 +494,10 @@ export class AdvancedSettingsGroupComponent implements OnInit {
   /** A short apply note for switch rows and the full explanation in the popover. */
   protected applyNote(setting: AdvancedSetting): string {
     return APPLY_NOTES[setting.apply];
+  }
+
+  protected helpText(setting: AdvancedSetting): string {
+    return `${setting.help} ${this.applyNote(setting)}`;
   }
 
   protected rangeHint(setting: AdvancedNumberSetting): string {

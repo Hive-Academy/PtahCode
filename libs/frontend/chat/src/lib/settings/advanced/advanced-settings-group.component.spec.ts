@@ -151,7 +151,7 @@ describe('AdvancedSettingsGroupComponent', () => {
     const key = 'compaction.threshold';
     expect(field(key).value).toBe('');
     expect(field(key).placeholder).toBe('Model default');
-    expect(host().querySelector('[id="advanced-setting-' + key + '-help"]')?.textContent)
+    expect(field(key).closest('ptah-field')?.querySelector('.ptah-field__footer')?.textContent)
       .toContain('Model default or 100,000 to 1,000,000 tokens');
     await enter(key, '800000');
     expect(writes()).toEqual([{ key, value: 800000 }]);
@@ -374,10 +374,13 @@ describe('AdvancedSettingsGroupComponent', () => {
         'advanced-setting-memory.retention.processedDays-field',
       );
       expect(help?.textContent).toContain('1 to 365 days');
-      expect(help?.textContent).not.toContain('Applies on the next cleanup run.');
+      expect(help?.querySelector('.ptah-field__footer')?.textContent).not.toContain('Applies on the next cleanup run.');
       const setting = ADVANCED_SETTINGS.find((item) => item.key === 'memory.retention.processedDays');
       const trigger = help?.querySelector<HTMLButtonElement>('button');
-      expect(trigger?.getAttribute('aria-label')).toBe('About ' + setting?.label);
+      expect(trigger?.getAttribute('aria-label')).toBe('More about ' + setting?.label);
+      expect(help?.querySelector('[id="advanced-setting-memory.retention.processedDays-help"]')?.textContent)
+        .toContain(setting?.help);
+      expect(help?.querySelector('button[aria-label^="About "]')).toBeNull();
       trigger?.click();
       fixture.detectChanges();
       await settle();
@@ -390,7 +393,7 @@ describe('AdvancedSettingsGroupComponent', () => {
     it('marks a restart key with the restart note and badge', async () => {
       await create('scheduled-jobs');
       const restart = byTestId('advanced-setting-cron.maxConcurrentJobs-field');
-      expect(restart?.textContent).not.toContain('Restart Ptah to apply.');
+      expect(restart?.querySelector('.ptah-field__footer')?.textContent).not.toContain('Restart Ptah to apply.');
       restart?.querySelector<HTMLButtonElement>('button')?.click();
       fixture.detectChanges();
       await settle();

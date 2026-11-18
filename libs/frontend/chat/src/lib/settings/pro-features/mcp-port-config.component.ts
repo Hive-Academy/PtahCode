@@ -124,6 +124,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
         <div class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-ptah-controls">
         <ptah-field
           label="MCP port"
+          info="Changes apply after the MCP server restarts."
           class="w-full min-w-0"
           [error]="validationError() ?? saveError()"
           errorRole="alert"
@@ -145,15 +146,14 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             data-testid="mcp-port-input"
           />
 
-          <!-- Before the footer, so the error never hides the range and restart note. -->
+          <!-- Before the footer, so the error never hides the range. -->
           <p
             ptahFieldBeforeHint
             id="mcp-port-hint"
             class="text-xs text-base-content-muted"
             data-testid="mcp-port-hint"
           >
-            Default 51820. Range 1024 to 65535. Changes apply after the MCP
-            server restarts.
+            Default 51820. Range 1024 to 65535.
           </p>
         </ptah-field>
           <button

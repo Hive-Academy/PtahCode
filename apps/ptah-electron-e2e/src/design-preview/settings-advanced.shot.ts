@@ -44,14 +44,20 @@ async function shoot(page: Page, target: Locator, name: string): Promise<void> {
 }
 
 /** Element shot with a margin, so a floated label above the box border is not cut. */
-async function shootPadded(page: Page, target: Locator, name: string, pad = 12): Promise<void> {
+async function shootPadded(page: Page, target: Locator, name: string, pad = 12, include?: Locator): Promise<void> {
   await settled(page);
   const box = await target.boundingBox();
   if (!box) throw new Error(`Missing bounds for ${name}`);
+  const extra = await include?.boundingBox();
+  const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const x = Math.max(0, Math.min(box.x, extra?.x ?? box.x) - pad);
+  const y = Math.max(0, Math.min(box.y, extra?.y ?? box.y) - pad);
+  const right = Math.min(viewport.width, Math.max(box.x + box.width, extra ? extra.x + extra.width : 0) + pad);
+  const bottom = Math.min(viewport.height, Math.max(box.y + box.height, extra ? extra.y + extra.height : 0) + pad);
   await page.screenshot({
     ...jpeg,
     path: join(OUT, `${name}-${PHASE}.jpg`),
-    clip: { x: Math.max(0, box.x - pad), y: Math.max(0, box.y - pad), width: box.width + pad * 2, height: box.height + pad * 2 },
+    clip: { x, y, width: right - x, height: bottom - y },
   });
 }
 
@@ -88,39 +94,20 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
   await expect(page.locator('ptah-license-status-card')).toContainText('Demo User');
   await expect(page.locator('ptah-output-style-config')).toContainText('Team concise');
   const details = page.getByTestId('fine-tuning-details');
-  // Before: one disclosure for all groups. After: one closed row per group. Open every closed row.
   const rows = details.locator('[data-testid^="fine-tuning-row-"]');
-  if ((await rows.count()) === 0) {
-    const closed = details.locator('button[aria-expanded="false"]');
-    if ((await closed.count()) > 0) await closed.first().click();
-  }
-  for (const row of await rows.all()) {
-    const toggle = row.locator('button[aria-expanded]').first();
-    if ((await toggle.getAttribute('aria-expanded')) === 'false') {
-      await toggle.click();
-      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    }
-  }
-  // Each open row loads its group on viewport entry: bring every placeholder into view.
-  const placeholders = page.getByTestId('fine-tuning-placeholder');
-  for (let loaded = 0; loaded < 6 && (await placeholders.count()) > 0; loaded += 1) {
-    await placeholders.first().scrollIntoViewIfNeeded();
-    await settled(page);
-  }
-  await details.scrollIntoViewIfNeeded();
-  await expect(placeholders).toHaveCount(0);
-  const groups = details.locator('ptah-advanced-settings-group');
-  await expect(groups).toHaveCount(3);
-  const numberGroup = groups.first();
-  const number = numberGroup.locator('input[type="number"], input[inputmode="numeric"], input[inputmode="decimal"]').first();
-  await expect(number).toBeVisible();
-  await expect(number).not.toHaveValue('');
-  await settled(page);
+  await expect(rows).toHaveCount(3);
+  const memoryRow = rows.filter({ has: page.getByRole('button', { name: /Memory upkeep/ }) });
+  const memoryToggle = memoryRow.locator('button[aria-expanded]').first();
+  const numberGroup = memoryRow.locator('ptah-advanced-settings-group');
+  const number = numberGroup.locator('input[inputmode="numeric"], input[inputmode="decimal"]').first();
+  const infoField = numberGroup.locator('ptah-field').nth(1);
+  const info = infoField.getByRole('button', { name: /^More about / });
+  const help = infoField.locator('[role="dialog"]');
 
   const scroll = page.locator('.settings-page');
   const mcp = page.locator('ptah-mcp-port-config');
   const port = page.getByTestId('mcp-port-input');
-  const metrics: { theme: string; width: number; pageWidth: number; mcpPortWidth: number; fineTuningNumberWidth: number; captureHeight: number; capped: boolean }[] = [];
+  const metrics: { theme: string; width: number; pageWidth: number; mcpPortWidth: number; fineTuningNumberWidth: number | null; captureHeight: number; capped: boolean }[] = [];
   const cdp = await page.context().newCDPSession(page);
   const resize = async (width: number, height = HEIGHT): Promise<void> => {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -130,6 +117,10 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
   try {
     for (const theme of ['dark', 'light'] as const) {
       await setTheme(page, theme);
+      for (const row of await rows.all()) {
+        await expect(row.locator('button[aria-expanded]').first()).toHaveAttribute('aria-expanded', 'false');
+        await expect(row).toContainText(/\d+ settings/);
+      }
       for (const width of [1824, 1168, 784]) {
         await resize(width);
         // Include the fixed shell/header space as well as the inner scroll content.
@@ -138,7 +129,7 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
         metrics.push({
           theme, width, pageWidth: await page.evaluate(() => window.innerWidth),
           mcpPortWidth: await port.evaluate((element) => element.getBoundingClientRect().width),
-          fineTuningNumberWidth: await number.evaluate((element) => element.getBoundingClientRect().width),
+          fineTuningNumberWidth: null, // Default-closed groups have no visible numeric controls.
           captureHeight, capped: desiredHeight > 6000,
         });
         try {
@@ -153,25 +144,36 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
       }
       await resize(1824);
       await fieldStates(page, port, mcp, 'advanced-controls', theme);
+      await memoryToggle.click();
+      await expect(memoryToggle).toHaveAttribute('aria-expanded', 'true');
+      await numberGroup.scrollIntoViewIfNeeded();
+      await expect(number).toBeVisible();
+      await expect(number).not.toHaveValue('');
       await fieldStates(page, number, numberGroup, 'advanced-number', theme);
 
-      // Isolate one expanded group for the help shot, then restore the populated-page state.
-      for (const row of (await rows.all()).slice(1)) {
-        await row.locator('button[aria-expanded="true"]').click();
+      // Only Memory upkeep is open; other group counts stay visible.
+      await details.scrollIntoViewIfNeeded();
+      await blur(page);
+      await shootPadded(page, details, `advanced-fine-tuning-open-${theme}-1824`);
+      for (const width of [1824, 784]) {
+        await resize(width);
+        // The second numeric field occupies the middle column at 1824.
+        await infoField.scrollIntoViewIfNeeded();
+        await blur(page);
+        await expect(info).toBeVisible();
+        await expect(info).toHaveAttribute('aria-expanded', 'false');
+        await shootPadded(page, infoField, `advanced-field-info-rest-${theme}-${width}`);
+        await info.click();
+        await expect(help).toBeVisible();
+        await shootPadded(page, infoField, `advanced-field-info-open-${theme}-${width}`, 12, help);
+        // The shot helper can move focus; Escape closes from the trigger.
+        await info.press('Escape');
+        await expect(help).not.toBeVisible();
+        await expect(info).toHaveAttribute('aria-expanded', 'false');
       }
-      await numberGroup.scrollIntoViewIfNeeded();
-      // A middle-column hint: its end-aligned popover stays inside the shot.
-      const info = numberGroup.getByRole('button', { name: /^About / }).nth(2);
-      await info.click();
-      const help = numberGroup.locator('ptah-native-popover [popover]:popover-open');
-      await expect(help).toBeVisible();
-      await shootPadded(page, details, `advanced-fine-tuning-popover-${theme}-1824`);
-      // The shot helper can move focus; Escape closes the popover from its trigger.
-      await info.press('Escape');
-      await expect(help).not.toBeVisible();
-      for (const row of (await rows.all()).slice(1)) {
-        await row.locator('button[aria-expanded="false"]').click();
-      }
+      await memoryToggle.click();
+      await expect(memoryToggle).toHaveAttribute('aria-expanded', 'false');
+      await resize(1824);
 
       await mcp.scrollIntoViewIfNeeded();
       const caller = page.getByTestId('mcp-external-caller-access');

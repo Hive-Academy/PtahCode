@@ -353,10 +353,20 @@ describe('McpPortConfigComponent', () => {
       expect(isDisabledControl(saveBtn)).toBe(false);
     });
 
-    it('saves port explicitly with persistent restart hint in row and supports Undo (R4)', async () => {
+    it('saves port explicitly with restart information in the field popover and supports Undo (R4)', async () => {
       await render();
 
-      // Persistent restart hint is visible in the row before save
+      expect(byTestId('mcp-port-hint').textContent?.trim()).toBe('Default 51820. Range 1024 to 65535.');
+      const info = element.querySelector<HTMLButtonElement>('button[aria-label="More about MCP port"]');
+      expect(info).not.toBeNull();
+      info?.click();
+      await settle();
+      expect(element.querySelector('[role="dialog"]')?.textContent).toContain(
+        'Changes apply after the MCP server restarts.',
+      );
+      info?.click();
+      await settle();
+      // Restart information stays accessible before saving.
       expect(element.textContent).toContain(
         'Changes apply after the MCP server restarts.',
       );
@@ -399,7 +409,7 @@ describe('McpPortConfigComponent', () => {
         COULD_NOT_SAVE_PORT,
       );
       expect(byTestId('mcp-port-hint').textContent).toContain(
-        'Changes apply after the MCP',
+        'Default 51820. Range 1024 to 65535.',
       );
       expect(feedback.toast()?.tone).toBe('alert');
       expect(feedback.toast()?.message).toBe(COULD_NOT_SAVE_PORT);
