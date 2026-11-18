@@ -52,13 +52,16 @@ const TIER_ORDER: Readonly<Record<ChildModelTier, readonly ChildModelTier[]>> = 
   3: [],
 };
 
-/** Return the candidates of the first available tier in {@link TIER_ORDER}. */
+/**
+ * Return the candidates of every tier in {@link TIER_ORDER}, in that order. Admission can refuse
+ * a whole tier, so the next allowed tier must stay in the list.
+ */
 export function childModelCandidates(models: readonly string[], floor: ChildModelTier): string[] {
-  for (const tier of TIER_ORDER[floor]) {
-    const candidates = [...new Set(models)].filter((model) => childModelTier(model) === tier);
+  const unique = [...new Set(models)];
+  return TIER_ORDER[floor].flatMap((tier) => {
+    const candidates = unique.filter((model) => childModelTier(model) === tier);
     const hasMillion = candidates.some((model) => (childModelWindow(model) ?? 0) >= 1_000_000);
     const eligible = hasMillion ? candidates.filter((model) => childModelWindow(model) !== 200_000) : candidates;
-    if (eligible.length) return eligible.sort(compareChildModelVersions);
-  }
-  return [];
+    return eligible.sort(compareChildModelVersions);
+  });
 }

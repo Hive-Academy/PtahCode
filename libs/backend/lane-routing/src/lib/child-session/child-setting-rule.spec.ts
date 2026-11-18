@@ -25,9 +25,9 @@ describe('rankChildSettings', () => {
   it('does not use text in preference to explicit code kind', () => {
     expect(rankChildSettings({ brief: 'design', models, workKind: 'code' }).reason.rule).toBe('code-work-kind');
   });
-  it('orders the real mixed-generation catalog newest first', () => {
+  it('orders the real mixed-generation catalog newest first, then the strong fallback', () => {
     const catalog = [...models, 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-3-7-sonnet-20250219'];
-    expect(rankChildSettings({ brief: '', models: catalog }).candidates).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929']);
+    expect(rankChildSettings({ brief: '', models: catalog }).candidates).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-opus-5-5']);
   });
   it('uses the old generation when it is the only admitted balanced candidate', () => {
     expect(rankChildSettings({ brief: '', models: ['claude-sonnet-5', 'claude-haiku-4-5'] }).model).toBe('claude-sonnet-5');

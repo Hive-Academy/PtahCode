@@ -29,6 +29,12 @@ describe('child model tiers', () => {
     expect(childModelTier('claude-fable-5-2')).toBe(3);
     expect(childModelCandidates(['default', 'claude-fable-5-2'], 1)).toEqual([]);
   });
+  it('keeps the allowed fallback tiers after the preferred tier, in tier order', () => {
+    const catalog = ['claude-haiku-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5'];
+    expect(childModelCandidates(catalog, 1)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-opus-5-5']);
+    expect(childModelCandidates(catalog, 2)).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5']);
+    expect(childModelCandidates(catalog, 0)).toEqual(['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-opus-5-5']);
+  });
   it('deduplicates candidates', () => {
     expect(childModelCandidates(['claude-sonnet-5', 'claude-sonnet-5'], 1)).toEqual(['claude-sonnet-5']);
   });
