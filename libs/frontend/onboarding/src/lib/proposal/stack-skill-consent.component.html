@@ -40,7 +40,9 @@
             </ul>
           </details>
         } @else if (item.hasScripts) {
-          <p class="text-sm">Also contains hooks or executable files. Review all files.</p>
+          <p class="text-sm">
+            Also contains hooks or executable files. Review all files.
+          </p>
         }
         <details class="mt-2">
           <summary class="cursor-pointer text-sm">
@@ -85,8 +87,14 @@
       [disabled]="busy() || !allApproved()"
       (click)="install.emit()"
     >
-      {{ busy() ? 'Installing…' : 'Install skills' }}
+      {{
+        busy()
+          ? 'Installing…'
+          : 'Install ' +
+            previews().length +
+            (previews().length === 1 ? ' skill' : ' skills') +
+            ' and continue'
+      }}
     </button>
   </div>
 </ptah-native-modal>
-
