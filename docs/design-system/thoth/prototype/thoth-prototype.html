@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ptah Thoth prototype: Memory graph and Skills (TASK_2026_2271_7a3e)</title>
+<style>
+/* ============ Tokens: copied from ptah-glass / ptah-glass-light and ptah-tokens.css (same values as the Settings prototype) ============ */
+:root, [data-theme="dark"] {
+  color-scheme: dark;
+  --b1: #17191d; --b2: #202329; --b3: #2a2e35; --bc: #f2f2f1;
+  --bcm: oklch(90.05% 0.0071 268.54);
+  --p: #e4b94a; --pf: #f2cd6b; --pc: #1b1403;
+  --a: #45d0be; --er: #ff6b6b; --erc: #2a0505;
+  --state-ink-run: #93bdff; --state-ink-need: #ffb066; --state-ink-err: #ff9696;
+  --state-ink-done: #5fe0a0; --state-ink-idle: #dcdee3;
+  --focus: #f2cd6b; --ptah-link: #f0cf7a;
+  --primary-fill: linear-gradient(180deg, #f6d675, #d9a928);
+  --primary-fill-hover: linear-gradient(180deg, #f9df8a, #e4b94a);
+  --shadow-overlay: 0 16px 40px -12px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.25);
+  --stage: #0f1013;
+  --surface-highlight: color-mix(in oklab, var(--bc) 10%, transparent);
+  /* NEW graph data-viz tokens (proposed, see thoth-design-spec.md section 6) */
+  --graph-fact: #e4b94a; --graph-preference: #c3a6ff; --graph-event: #7db4ff; --graph-entity: #4fd6b8;
+  --graph-canvas: #121418; --graph-edge: #b7bcc6;
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --b1: #faf9f6; --b2: #f1f0ec; --b3: #e8e6e1; --bc: #242423;
+  --bcm: #686763;
+  --p: #7c5700; --pf: #6e4a00; --pc: #fff8e6;
+  --a: #0b7f77; --er: #cf3a3a; --erc: #fff5f5;
+  --state-ink-run: #2449b0; --state-ink-need: #8f5200; --state-ink-err: #a31f26;
+  --state-ink-done: #0f6434; --state-ink-idle: #666560;
+  --focus: #6e4a00; --ptah-link: #6e4a00;
+  --primary-fill: #7c5700; --primary-fill-hover: #6e4a00;
+  --shadow-overlay: 0 16px 40px -14px rgb(35 34 30 / 0.25), 0 2px 6px rgb(35 34 30 / 0.1);
+  --stage: #e5e2da;
+  --surface-highlight: color-mix(in oklab, var(--bc) 13%, transparent);
+  --graph-fact: #7c5700; --graph-preference: #6a3fc2; --graph-event: #1f55c4; --graph-entity: #0b6e62;
+  --graph-canvas: #f4f2ed; --graph-edge: #45433f;
+}
+:root {
+  --surface-1: color-mix(in oklab, var(--b2) 88%, var(--b1));
+  --surface-2: var(--b2);
+  --surface-3: color-mix(in oklab, var(--b3) 86%, var(--b2));
+  --border: color-mix(in oklab, var(--bc) 14%, transparent);
+  --border-strong: color-mix(in oklab, var(--bc) 22%, transparent);
+  --edge: color-mix(in oklab, var(--bc) 55%, var(--b1));
+  --edge-strong: color-mix(in oklab, var(--bc) 68%, var(--b1));
+  --muted: var(--bcm);
+  --faint: color-mix(in oklab, var(--bcm) 74%, var(--b1));
+  --fill-input: color-mix(in oklab, var(--b1) 66%, transparent);
+  --notch: var(--b1);
+  --r-box: 1.5rem; --r-inner: 0.625rem; --r-btn: 9999px;
+  --font: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  --fast: 120ms; --base: 180ms; --ease: cubic-bezier(.2, 0, 0, 1);
+  --toolbar-h: 3rem;
+}
+[data-theme="light"] { --faint: var(--bcm); }
+
+* { box-sizing: border-box; }
+html { background: var(--stage); }
+body { margin: 0; font: 400 .875rem/1.25rem var(--font); color: var(--bc); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, p, dl, dd, ol, ul { margin: 0; }
+ol, ul { padding: 0; list-style: none; }
+button, input, select, textarea { font: inherit; color: inherit; }
+.mono { font-family: var(--mono); font-size: .8125rem; }
+.t-page { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; letter-spacing: -.01em; }
+.t-section { font-size: 1rem; line-height: 1.5rem; font-weight: 600; }
+.t-group { font-size: .875rem; line-height: 1.25rem; font-weight: 600; }
+.t-label { font-size: .75rem; line-height: 1rem; font-weight: 500; color: var(--muted); }
+.hint { font-size: .75rem; line-height: 1rem; color: var(--muted); }
+.caption { font-size: .6875rem; line-height: 1rem; font-weight: 500; color: var(--faint); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+a { color: var(--ptah-link); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.i { width: 1rem; height: 1rem; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.i-sm { width: .875rem; height: .875rem; }
+[hidden] { display: none !important; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ============ Prototype toolbar (not part of the design) ============ */
+.proto { position: sticky; top: 0; z-index: 70; height: var(--toolbar-h); display: flex; align-items: center; gap: 1rem; padding: 0 1rem; overflow-x: auto;
+  background: color-mix(in oklab, var(--stage) 80%, var(--b3)); border-bottom: 1px dashed var(--border-strong); font-size: .75rem; white-space: nowrap; }
+.proto strong { font-weight: 600; color: var(--muted); }
+.proto .grp { display: flex; align-items: center; gap: .375rem; }
+.proto .seg-ctl { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 9999px; padding: 2px; }
+.proto .seg-ctl button { border: 0; background: none; padding: .125rem .625rem; border-radius: 9999px; cursor: pointer; color: var(--muted); }
+.proto .seg-ctl button[aria-pressed="true"] { background: var(--surface-3); color: var(--bc); }
+.proto select { background: var(--b2); border: 1px solid var(--border-strong); border-radius: 9999px; padding: .125rem .5rem; }
+
+.stage { padding: 1.25rem 1rem 3rem; }
+.app { --w: 1168px; position: relative; width: min(var(--w), 100%); margin: 0 auto; display: grid; grid-template-columns: 16rem minmax(0, 1fr);
+  background: var(--b1); border: 1px solid var(--border); border-radius: 12px; container: app / inline-size; min-height: 44rem; overflow: clip; }
+
+/* ============ Thoth shell ============ */
+.shell-nav { background: var(--surface-1); border-right: 1px solid var(--border); padding: 1rem .75rem; display: flex; flex-direction: column; gap: 1rem; }
+.shell-head { display: flex; align-items: center; gap: .625rem; }
+.shell-head .logo { width: 2rem; height: 2rem; border-radius: 9999px; display: grid; place-items: center; background: color-mix(in oklab, var(--p) 16%, transparent); color: var(--p); }
+.shell-head p { color: var(--muted); font-size: .75rem; line-height: 1rem; }
+.tiles { display: flex; flex-direction: column; gap: .25rem; }
+.tile { text-align: left; background: none; border: 1px solid transparent; border-radius: var(--r-inner); padding: .5rem .625rem; cursor: pointer; display: grid; grid-template-columns: 1.25rem 1fr auto; gap: .125rem .5rem; align-items: center; }
+.tile:hover { background: var(--surface-highlight); }
+.tile[aria-selected="true"] { background: var(--surface-2); border-color: var(--border-strong); box-shadow: inset 3px 0 0 var(--p); }
+.tile .lab { font-weight: 600; } .tile .val { font-size: .75rem; color: var(--muted); }
+.tile .desc { grid-column: 2 / 4; font-size: .6875rem; line-height: 1rem; color: var(--faint); }
+.app[data-compact] { grid-template-columns: minmax(0, 1fr); }
+@container app (max-width: 1023px) {
+  .shell-nav { border-right: 0; border-bottom: 1px solid var(--border); flex-direction: row; align-items: center; flex-wrap: wrap; padding: .625rem .75rem; }
+  .tiles { flex-direction: row; flex-wrap: wrap; } .tile .desc, .tile .val { display: none; } .tile { grid-template-columns: 1.25rem auto; }
+}
+
+/* ============ Primitives ============ */
+.btn { --h: 2.5rem; display: inline-flex; align-items: center; justify-content: center; gap: .375rem; flex: none; height: var(--h); padding: 0 1.25rem; border: 1px solid transparent; border-radius: var(--r-btn);
+  font-size: .875rem; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; text-decoration: none; background: none;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), color var(--fast) var(--ease); }
+.btn[data-s="sm"] { --h: 2rem; padding: 0 .875rem; font-size: .8125rem; }
+.btn[data-s="xs"] { --h: 1.5rem; padding: 0 .625rem; font-size: .75rem; gap: .25rem; }
+.btn[data-icon] { width: var(--h); padding: 0; }
+.btn[data-v="primary"] { background: var(--primary-fill); color: var(--pc); font-weight: 600; }
+.btn[data-v="primary"]:hover { background: var(--primary-fill-hover); }
+.btn[data-v="secondary"] { background: var(--surface-2); border-color: var(--edge); }
+.btn[data-v="secondary"]:hover { background: var(--b3); border-color: var(--edge-strong); }
+.btn[data-v="outline"] { border-color: var(--edge); } .btn[data-v="outline"]:hover { border-color: var(--edge-strong); background: var(--surface-highlight); }
+.btn[data-v="ghost"]:hover { background: var(--b3); }
+.btn[data-v="danger"] { background: var(--er); color: var(--erc); font-weight: 600; }
+.btn[data-tone="danger"]:is([data-v="ghost"], [data-v="outline"]) { color: var(--state-ink-err); }
+.btn[data-tone="danger"][data-v="ghost"]:hover { background: color-mix(in oklab, var(--state-ink-err) 10%, transparent); }
+.btn[data-tone="warning"]:is([data-v="ghost"], [data-v="outline"]) { color: var(--state-ink-need); }
+.btn[data-tone="warning"][data-v="outline"] { border-color: color-mix(in oklab, var(--state-ink-need) 50%, transparent); }
+.btn[data-v="link"] { color: var(--ptah-link); padding: 0 .25rem; text-decoration: underline; text-underline-offset: 2px; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .48; cursor: not-allowed; }
+.badge { --tone: var(--bcm); display: inline-flex; align-items: center; gap: .25rem; height: 1.375rem; padding: 0 .5rem; border-radius: 9999px; font-size: .75rem; font-weight: 500; line-height: 1; white-space: nowrap;
+  background: color-mix(in oklab, var(--tone) 15%, transparent); color: var(--tone); }
+.badge[data-s="xs"] { height: 1.125rem; padding: 0 .375rem; font-size: .6875rem; }
+.badge[data-tone="neutral"] { --tone: var(--bcm); background: color-mix(in oklab, var(--bc) 9%, transparent); }
+.badge[data-tone="info"] { --tone: var(--state-ink-run); } .badge[data-tone="ok"] { --tone: var(--state-ink-done); }
+.badge[data-tone="warn"] { --tone: var(--state-ink-need); } .badge[data-tone="err"] { --tone: var(--state-ink-err); }
+.badge[data-tone="accent"] { --tone: var(--a); } [data-theme="light"] .badge[data-tone="accent"] { --tone: color-mix(in oklab, var(--a) 82%, #000); }
+.badge[data-tone="gold"] { --tone: var(--p); }
+.status { --ink: var(--state-ink-idle); display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; line-height: 1rem; font-weight: 500; color: var(--ink); white-space: nowrap; }
+.status::before { content: ""; width: .5rem; height: .5rem; border-radius: 50%; background: var(--ink); flex: none; }
+.status[data-ink="done"] { --ink: var(--state-ink-done); } .status[data-ink="need"] { --ink: var(--state-ink-need); } .status[data-ink="err"] { --ink: var(--state-ink-err); } .status[data-ink="run"] { --ink: var(--state-ink-run); }
+.alert { --tone: var(--state-ink-run); display: flex; align-items: flex-start; gap: .625rem; padding: .5rem .75rem; border: 1px solid color-mix(in oklab, var(--tone) 32%, transparent); border-radius: var(--r-inner);
+  background: color-mix(in oklab, var(--tone) 8%, transparent); font-size: .8125rem; line-height: 1.25rem; }
+.alert > .i { color: var(--tone); margin-top: .125rem; } .alert .txt { flex: 1; min-width: 0; } .alert .act { display: flex; gap: .25rem; align-self: center; }
+.alert[data-tone="warn"] { --tone: var(--state-ink-need); } .alert[data-tone="err"] { --tone: var(--state-ink-err); } .alert[data-tone="ok"] { --tone: var(--state-ink-done); }
+.meter { height: .375rem; border-radius: 9999px; background: color-mix(in oklab, var(--bc) 12%, transparent); overflow: hidden; min-width: 3rem; }
+.meter > span { display: block; height: 100%; width: var(--v, 0%); border-radius: inherit; background: var(--ink, var(--p)); }
+.toggle { appearance: none; flex: none; width: 2rem; height: 1.25rem; margin: 0; border-radius: 9999px; cursor: pointer; border: 1px solid var(--edge); background-color: transparent;
+  background-image: radial-gradient(circle, var(--edge) 0 5px, transparent 5.5px); background-size: 1.125rem 1.125rem; background-repeat: no-repeat; background-position: 0 50%;
+  transition: background-position var(--base) var(--ease), background-color var(--base) var(--ease); }
+.toggle:checked { background-color: var(--bc); border-color: var(--bc); background-image: radial-gradient(circle, var(--b1) 0 5.5px, transparent 6px); background-position: 100% 50%; }
+.toggle:disabled { opacity: .48; cursor: not-allowed; }
+.tg { display: inline-flex; align-items: center; gap: .5rem; cursor: pointer; }
+.field { display: flex; flex-direction: column; gap: .25rem; min-width: 0; position: relative; }
+.field-box { --fh: 2.5rem; position: relative; display: flex; align-items: center; height: var(--fh); border: 1px solid var(--edge); border-radius: var(--r-inner); background: var(--fill-input); }
+.field-box:hover { border-color: var(--edge-strong); } .field-box:focus-within { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
+.field-label { position: absolute; left: .5rem; top: -1px; transform: translateY(-50%); padding: 0 .25rem; font-size: .6875rem; line-height: 1rem; font-weight: 600; color: var(--muted); background: var(--notch); pointer-events: none; white-space: nowrap; }
+.field-box input[type=text], .field-box input[type=search], .field-box input[type=number] { flex: 1; min-width: 0; height: 100%; border: 0; background: none; padding: 0 .75rem; outline: 0; }
+.field-box.compact { --fh: 2rem; } .field-box.compact .lead { margin-left: .625rem; color: var(--muted); }
+.field-box.compact input { padding-left: .5rem; }
+.sel-btn { flex: 1; height: 100%; display: flex; align-items: center; justify-content: space-between; gap: .5rem; border: 0; background: none; padding: 0 .75rem; cursor: pointer; text-align: left; min-width: 0; }
+.sel-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sel-list { position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; right: 0; min-width: 9rem; background: var(--b2); border: 1px solid var(--border-strong); border-radius: var(--r-inner); box-shadow: var(--shadow-overlay); padding: .25rem; max-height: 14rem; overflow: auto; }
+.sel-list li { padding: .375rem .625rem; border-radius: .5rem; cursor: pointer; display: flex; justify-content: space-between; gap: .5rem; }
+.sel-list li:hover, .sel-list li[data-active] { background: var(--surface-highlight); }
+.sel-list li[aria-selected="true"] { color: var(--p); font-weight: 600; }
+.sel-list li[aria-selected="true"]::after { content: "\2713"; }
+.chip { display: inline-flex; align-items: center; gap: .375rem; height: 1.625rem; padding: 0 .625rem; border-radius: 9999px; border: 1px solid var(--edge); background: none; cursor: pointer; font-size: .75rem; font-weight: 500; color: var(--bc); }
+.chip:hover { border-color: var(--edge-strong); background: var(--surface-highlight); }
+.chip[aria-pressed="true"] { background: var(--btn-sel, var(--b3)); border-color: var(--edge-strong); box-shadow: inset 0 0 0 1px var(--edge-strong); }
+.chip .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--c, var(--muted)); }
+.chip[aria-pressed="false"] { color: var(--muted); } .chip[aria-pressed="false"] .dot { opacity: .45; }
+.segmented { display: inline-flex; padding: 2px; border: 1px solid var(--edge); border-radius: 9999px; background: var(--fill-input); }
+.segmented button { border: 0; background: none; height: 1.75rem; padding: 0 .75rem; border-radius: 9999px; cursor: pointer; color: var(--muted); font-weight: 500; font-size: .8125rem; display: inline-flex; gap: .375rem; align-items: center; }
+.segmented button[aria-checked="true"] { background: var(--b3); color: var(--bc); box-shadow: inset 0 0 0 1px var(--edge-strong); }
+.tabs { display: flex; gap: .25rem; overflow-x: auto; scrollbar-width: none; }
+.tabs [role=tab] { border: 1px solid transparent; background: none; height: 2.25rem; padding: 0 .875rem; border-radius: 9999px; cursor: pointer; color: var(--muted); font-weight: 500; white-space: nowrap; display: inline-flex; align-items: center; gap: .375rem; }
+.tabs [role=tab]:hover { background: var(--surface-highlight); color: var(--bc); }
+.tabs [role=tab][aria-selected="true"] { background: var(--b3); color: var(--bc); border-color: var(--edge); box-shadow: inset 0 -2px 0 var(--p); }
+.tabs .ct { font-size: .6875rem; color: var(--faint); }
+
+/* ============ Panel ============ */
+.panel { container: pan / inline-size; padding: 1.25rem 1.5rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.phead { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+.phead p { color: var(--muted); }
+.phead .tgrp { display: flex; gap: 1.25rem; flex-wrap: wrap; align-items: center; }
+.band { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .25rem; padding: .5rem 0; border-block: 1px solid var(--border); }
+.band li { padding: .125rem .75rem; border-left: 1px solid var(--border); min-width: 0; } .band li:first-child { border-left: 0; padding-left: 0; }
+.band .v { font-size: 1.125rem; line-height: 1.5rem; font-weight: 600; } .band .l { font-size: .75rem; color: var(--muted); display: flex; align-items: center; gap: .375rem; }
+.band .bar { height: 3px; border-radius: 2px; background: var(--ink); margin-bottom: .25rem; width: 2rem; }
+@container pan (max-width: 700px) { .band { grid-template-columns: repeat(3, 1fr); row-gap: .5rem; } .band li:nth-child(4) { border-left: 0; padding-left: 0; } }
+.viewbar { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; }
+
+/* ============ Memory graph ============ */
+.gtool { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.gtool .search { width: 15rem; flex: 1 1 11rem; max-width: 20rem; }
+.gtool .field { width: 9.5rem; } .gtool .sp { flex: 1; }
+.gmain { --rail: 15rem; --insp: 18rem; display: grid; grid-template-columns: var(--rail) minmax(0, 1fr) var(--insp); gap: 0; border: 1px solid var(--border); border-radius: var(--r-inner); height: 36rem; min-height: 30rem; overflow: clip; position: relative; }
+.rail { border-right: 1px solid var(--border); padding: .875rem; overflow: auto; display: flex; flex-direction: column; gap: 1.125rem; background: var(--surface-1); }
+.rail h3 { font-size: .875rem; font-weight: 600; margin-bottom: .5rem; }
+.rail .row { display: flex; flex-wrap: wrap; gap: .375rem; } .rail .stack { display: flex; flex-direction: column; gap: .625rem; }
+.edge-row { display: grid; grid-template-columns: auto 1fr auto; gap: .5rem; align-items: center; }
+.edge-row svg { width: 2rem; height: .75rem; } .edge-row .n { color: var(--muted); font-size: .75rem; }
+.range { position: relative; height: 1.5rem; display: flex; align-items: center; }
+.range input[type=range] { width: 100%; accent-color: var(--p); margin: 0; }
+.stagewrap { position: relative; min-width: 0; display: flex; flex-direction: column; background: var(--graph-canvas); }
+.cvwrap { position: relative; flex: 1; min-height: 0; }
+canvas.graph { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; outline-offset: -2px; }
+canvas.graph.dragging { cursor: grabbing; } canvas.graph.over { cursor: pointer; }
+.ovl { position: absolute; background: color-mix(in oklab, var(--b2) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--border-strong); border-radius: var(--r-inner); }
+.legend { left: .625rem; bottom: .625rem; padding: .5rem .625rem; font-size: .75rem; display: flex; flex-direction: column; gap: .25rem; max-width: 13rem; }
+.legend .li { display: flex; align-items: center; gap: .5rem; color: var(--muted); } .legend .li b { color: var(--bc); font-weight: 500; }
+.legend .sw { width: .625rem; height: .625rem; border-radius: 50%; flex: none; }
+.zoom { right: .625rem; top: .625rem; display: flex; flex-direction: column; padding: 2px; } .zoom .btn { --h: 1.75rem; }
+.minimap { right: .625rem; bottom: .625rem; width: 9.5rem; height: 6.25rem; padding: 0; overflow: hidden; } .minimap canvas { width: 100%; height: 100%; display: block; cursor: pointer; }
+.tip { pointer-events: none; padding: .375rem .625rem; font-size: .75rem; max-width: 15rem; box-shadow: var(--shadow-overlay); z-index: 5; }
+.tip b { display: block; font-size: .8125rem; }
+.gbanner { position: absolute; top: .625rem; left: .625rem; right: 3.5rem; z-index: 4; display: flex; flex-direction: column; gap: .375rem; }
+.selbar { left: 50%; transform: translateX(-50%); bottom: .75rem; display: flex; align-items: center; gap: .5rem; padding: .375rem .5rem .375rem .875rem; box-shadow: var(--shadow-overlay); z-index: 6; white-space: nowrap; }
+.toast { left: 50%; transform: translateX(-50%); top: .75rem; padding: .375rem .875rem; box-shadow: var(--shadow-overlay); z-index: 7; }
+.brush { border-top: 1px solid var(--border); padding: .5rem .875rem .625rem; background: var(--surface-1); display: grid; grid-template-columns: auto 1fr auto; gap: .75rem; align-items: center; }
+.brush .hist { display: flex; align-items: flex-end; gap: 2px; height: 1.5rem; } .brush .hist i { flex: 1; background: color-mix(in oklab, var(--bc) 30%, transparent); border-radius: 1px; min-height: 2px; }
+.brush .rg { position: relative; } .brush input[type=range] { position: absolute; left: 0; right: 0; bottom: -.5rem; width: 100%; margin: 0; accent-color: var(--p); background: none; pointer-events: none; }
+.brush input[type=range]::-webkit-slider-thumb { pointer-events: auto; }
+.insp { border-left: 1px solid var(--border); background: var(--surface-1); padding: .875rem; overflow: auto; display: flex; flex-direction: column; gap: .875rem; }
+.insp .empty { color: var(--muted); display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
+.insp h3 { font-size: 1rem; line-height: 1.5rem; font-weight: 600; overflow-wrap: anywhere; }
+.insp .body { color: var(--bc); }
+.dl { display: grid; grid-template-columns: auto 1fr; gap: .25rem .75rem; font-size: .8125rem; } .dl dt { color: var(--muted); } .dl dd { min-width: 0; overflow-wrap: anywhere; }
+.conn { display: flex; flex-direction: column; gap: 2px; } .conn button { display: grid; grid-template-columns: auto 1fr auto; gap: .5rem; align-items: center; text-align: left; border: 0; background: none; padding: .25rem .375rem; border-radius: .5rem; cursor: pointer; }
+.conn button:hover { background: var(--surface-highlight); } .conn .w { color: var(--muted); font-size: .75rem; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.confirm { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; padding: .5rem .625rem; border-radius: var(--r-inner); background: color-mix(in oklab, var(--state-ink-err) 8%, transparent); border: 1px solid color-mix(in oklab, var(--state-ink-err) 32%, transparent); font-size: .8125rem; }
+.sec-title { font-size: .875rem; font-weight: 600; margin-bottom: .375rem; }
+.insp-close { display: none; }
+.railbtn { display: none; }
+/* narrow panel: rail and inspector become overlays */
+@container pan (max-width: 1099px) {
+  .gmain { grid-template-columns: var(--rail) minmax(0, 1fr); }
+  .insp { position: absolute; right: 0; top: 0; bottom: 0; width: min(19rem, 100%); z-index: 20; box-shadow: var(--shadow-overlay); transform: translateX(105%); transition: transform var(--base) var(--ease); }
+  .gmain[data-insp="open"] .insp { transform: none; } .insp-close { display: inline-flex; }
+}
+@container pan (max-width: 820px) {
+  .gmain { grid-template-columns: minmax(0, 1fr); height: 34rem; }
+  .rail { position: absolute; left: 0; top: 0; bottom: 0; width: min(17rem, 100%); z-index: 21; box-shadow: var(--shadow-overlay); transform: translateX(-105%); transition: transform var(--base) var(--ease); }
+  .gmain[data-rail="open"] .rail { transform: none; } .railbtn { display: inline-flex; } .gtool .field { width: 8.5rem; }
+}
+@media (prefers-reduced-motion: reduce) { .insp, .rail { transition: none !important; } }
+
+/* ============ List / tables ============ */
+.tbl { width: 100%; border-collapse: collapse; } .tbl th { text-align: left; font-size: .75rem; font-weight: 500; color: var(--muted); padding: .5rem .625rem; border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
+.tbl td { padding: .5rem .625rem; border-bottom: 1px solid var(--border); vertical-align: middle; } .tbl tr[data-sel="1"] td { background: color-mix(in oklab, var(--p) 8%, transparent); }
+.tbl tbody tr:hover td { background: var(--surface-highlight); } .tbl th button { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; padding: 0; }
+.tbl .ttl { font-weight: 600; } .tbl .sub { color: var(--muted); font-size: .75rem; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 28rem; }
+.tbl td.act { text-align: right; white-space: nowrap; }
+.cb { width: 1rem; height: 1rem; accent-color: var(--p); margin: 0; }
+.pager { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: .75rem; padding-top: .5rem; }
+.listwrap { border: 1px solid var(--border); border-radius: var(--r-inner); padding: .75rem; position: relative; }
+.pane { display: flex; flex-direction: column; gap: 1rem; }
+.sect { border-top: 1px solid var(--border); padding-top: 1rem; display: flex; flex-direction: column; gap: .75rem; } .sect:first-child { border-top: 0; padding-top: 0; }
+.sect > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; } .sect > header p { color: var(--muted); }
+.srow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--border); } .srow:last-child { border-bottom: 0; }
+.srow .d { color: var(--muted); font-size: .75rem; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .75rem; }
+.card { border: 1px solid var(--border); border-radius: var(--r-box); padding: .875rem 1rem; display: flex; flex-direction: column; gap: .5rem; background: var(--surface-1); }
+.skel { background: linear-gradient(90deg, var(--surface-2), var(--b3), var(--surface-2)); background-size: 200% 100%; animation: sk 1.4s linear infinite; border-radius: .5rem; }
+@keyframes sk { to { background-position: -200% 0; } } @media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+.stateblock { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; text-align: center; padding: 2rem; height: 100%; color: var(--muted); } .stateblock h3 { color: var(--bc); font-size: 1rem; }
+
+/* ============ Skills ============ */
+.toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; } .toolbar .sp { flex: 1; }
+.provchips { display: flex; gap: .25rem; flex-wrap: wrap; }
+.drawer-scrim { position: absolute; inset: 0; background: color-mix(in oklab, #000 40%, transparent); z-index: 40; }
+.drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(40rem, 100%); background: var(--b1); border-left: 1px solid var(--border-strong); box-shadow: var(--shadow-overlay); z-index: 41; display: flex; flex-direction: column; }
+.drawer > header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 1rem; }
+.drawer > .scroll { padding: 1rem 1.25rem; overflow: auto; display: flex; flex-direction: column; gap: 1.25rem; flex: 1; }
+.drawer pre { margin: 0; white-space: pre-wrap; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-inner); padding: .75rem; font-family: var(--mono); font-size: .8125rem; line-height: 1.25rem; }
+.hist li { display: flex; justify-content: space-between; gap: .5rem; align-items: center; padding: .375rem 0; border-bottom: 1px solid var(--border); }
+.ap { position: relative; }
+.hr { height: 1px; background: var(--border); border: 0; margin: 0; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4M4 13a8 8 0 0 0 14 4M5 3v4h4M19 21v-4h-4"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4 10 14M18 14v5H5V6h5"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V4a3 3 0 0 0-3 0zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 5h16l-6 8v6l-4-2v-4z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5"/></symbol>
+  <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></symbol>
+</svg>
+
+<div class="proto" role="toolbar" aria-label="Prototype controls (not part of the design)">
+  <strong>Prototype</strong>
+  <span class="grp">Theme <span class="seg-ctl" id="p-theme"><button aria-pressed="true" data-v="dark">Dark</button><button aria-pressed="false" data-v="light">Light</button></span></span>
+  <span class="grp">Width <span class="seg-ctl" id="p-width"><button aria-pressed="false" data-v="784">784</button><button aria-pressed="true" data-v="1168">1168</button><button aria-pressed="false" data-v="1440">1440</button></span></span>
+  <span class="grp">Panel <span class="seg-ctl" id="p-panel"><button aria-pressed="true" data-v="memory">Memory</button><button aria-pressed="false" data-v="skills">Skills</button></span></span>
+  <span class="grp">Data state <select id="p-state" aria-label="Data state"><option value="loaded">Loaded</option><option value="loading">Loading</option><option value="empty">Empty</option><option value="capped">Node cap reached</option><option value="vecoff">Vectors off</option><option value="nows">No workspace</option></select></span>
+</div>
+
+<div class="stage"><div class="app" id="app">
+  <aside class="shell-nav" data-testid="thoth-section-nav">
+    <div class="shell-head"><button class="btn" data-v="ghost" data-s="sm" data-icon aria-label="Back to chat"><svg class="i"><use href="#i-back"/></svg></button><span class="logo"><svg class="i"><use href="#i-radio"/></svg></span><div><h1 class="t-section">Thoth</h1><p>Agentic platform</p></div></div>
+    <div class="tiles" role="tablist" aria-label="Thoth feature tabs" id="tiles"></div>
+  </aside>
+  <section class="panel" id="panel" role="tabpanel"></section>
+</div></div>
+
+<script>
+(() => {
+'use strict';
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const ic = (n, c = 'i') => `<svg class="${c}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const pick = a => a[Math.floor(rnd() * a.length)];
+const DAY = 864e5, NOW = Date.now();
+const ago = t => { const d = (NOW - t) / DAY; return d < 1 ? Math.max(1, Math.round(d * 24)) + ' h ago' : Math.round(d) + ' d ago'; };
+
+/* ============ Mock memories (~150) ============ */
+const TOPICS = [
+  ['Build and CI', ['nx cache policy', 'verify lock slots', 'husky hooks', 'ci test shards', 'affected targets']],
+  ['Electron host', ['sandbox flags', 'ipc sender policy', 'window guards', 'preload surface', 'worker bundles']],
+  ['Chat UX', ['transcript motion', 'composer shortcuts', 'tab restore', 'streaming markdown']],
+  ['Providers', ['model aliases', 'oauth refresh', 'copilot adapter', 'codex runtime']],
+  ['User preferences', ['commit style', 'sentence case copy', 'worktree per task', 'no emoji']],
+  ['Design system', ['ptah-select menu', 'floating label', 'gold primary', 'state ink tokens']],
+];
+const KINDS = ['fact', 'preference', 'event', 'entity'], TIERS = ['core', 'recall', 'archival'];
+const SESS = Array.from({ length: 8 }, (_, i) => 'sess-' + (0x4a10 + i * 0x37).toString(16));
+const TV = TOPICS.map(() => Array.from({ length: 6 }, () => rnd() * 2 - 1));
+let MEM = [];
+TOPICS.forEach((t, ti) => t[1].forEach((subj, si) => { const n = 5 + Math.floor(rnd() * 4);
+  for (let k = 0; k < n && MEM.length < 150; k++) {
+    const tier = rnd() < .16 ? 'core' : rnd() < .6 ? 'recall' : 'archival';
+    const age = Math.floor(rnd() * rnd() * 90), kind = rnd() < .45 ? 'fact' : pick(KINDS);
+    MEM.push({ id: 'm' + String(MEM.length + 1).padStart(3, '0'), topic: t[0], ti, subject: subj, kind, tier,
+      salience: +(.2 + rnd() * .78).toFixed(2), hits: Math.floor(rnd() * rnd() * 40), pinned: tier === 'core' && rnd() < .45,
+      createdAt: NOW - (age + 1) * DAY, updatedAt: NOW - age * DAY * .8, lastUsedAt: NOW - Math.floor(rnd() * Math.min(age + 1, 20)) * DAY,
+      sessionId: SESS[(ti + Math.floor(rnd() * 3)) % 8], workspace: rnd() < .9 ? 'ptah-extension' : 'ptah-landing-page',
+      vec: TV[ti].map(x => x + (rnd() - .5) * 1.1),
+      content: `${pick(['Decision', 'Observed', 'Rule', 'Note', 'Agreed'])}: ${subj} ${pick(['must stay stable across hosts', 'is checked before every push', 'changed after the last review', 'is owned by one library', 'needs a regression test', 'should use the shared component'])}.` });
+  } }));
+const cos = (a, b) => { let d = 0, x = 0, y = 0; for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return d / Math.sqrt(x * y); };
+const EDGES = [];
+function buildEdges() { EDGES.length = 0; const ix = new Map(MEM.map(m => [m.id, m]));
+  MEM.forEach(a => { MEM.map(b => [b, cos(a.vec, b.vec)]).filter(([b]) => b !== a).sort((x, y) => y[1] - x[1]).slice(0, 4).forEach(([b, w]) => { if (a.id < b.id || !EDGES.some(e => e.type === 'semantic' && e.s === b.id && e.t === a.id)) EDGES.push({ s: a.id, t: b.id, type: 'semantic', w: +w.toFixed(2) }); }); });
+  const chain = (key, type) => { const g = {}; MEM.forEach(m => (g[m[key]] ||= []).push(m)); Object.values(g).forEach(l => { l.sort((a, b) => a.createdAt - b.createdAt); for (let i = 1; i < l.length; i++) EDGES.push({ s: l[i - 1].id, t: l[i].id, type, w: 1 }); }); };
+  chain('subject', 'subject'); chain('sessionId', 'session'); }
+buildEdges();
+const MIN_T = NOW - 91 * DAY;
+
+/* ============ State ============ */
+const S = {
+  panel: 'memory', width: 1168, data: 'loaded', mview: 'graph', paused: false, telemetry: true,
+  tiers: new Set(TIERS), kinds: new Set(KINDS), pinned: false, scope: 'workspace', session: 'all', from: 0, to: 100,
+  edge: { semantic: true, subject: true, session: false }, thr: .75, colorBy: 'kind', sizeBy: 'salience', clusterBy: 'subject', cluster: false, freeze: false, labels: true,
+  sel: new Set(), hover: null, q: '', confirm: false, page: 0, sort: 'salience', listQ: '',
+  sk: { tab: 'agent', filter: 'all', q: '', sort: 'name', open: null, paused: false, telemetry: true, editing: false },
+};
+const OPTS = {
+  colorBy: [['kind', 'Kind'], ['tier', 'Tier'], ['session', 'Session'], ['topic', 'Subject group']],
+  sizeBy: [['salience', 'Salience'], ['hits', 'Hits'], ['uniform', 'Uniform']],
+  clusterBy: [['subject', 'Subject'], ['kind', 'Kind'], ['session', 'Session']],
+  scope: [['workspace', 'This workspace'], ['all', 'All workspaces']],
+  session: [['all', 'All sessions'], ...SESS.map(s => [s, s])],
+};
+const optLabel = (k, v) => (((k.startsWith('sk:') ? SK_OPTS[k] : OPTS[k]) || []).find(o => o[0] === v) || [])[1];
+const KCOL = { fact: 'var(--graph-fact)', preference: 'var(--graph-preference)', event: 'var(--graph-event)', entity: 'var(--graph-entity)' };
+
+/* ============ Shared widgets ============ */
+function selHTML(key, label, val, opts) { const v = opts ? opts : OPTS[key];
+  return `<div class="field" data-sel="${key}"><div class="field-box"><span class="field-label">${label}</span><button class="sel-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="${label}"><span>${esc(optLabel(key, val) ?? val)}</span>${ic('chev', 'i i-sm')}</button></div></div>`; }
+let openSel = null;
+function closeSel() { if (openSel) { openSel.remove(); openSel = null; $$('.sel-btn[aria-expanded=true]').forEach(b => b.setAttribute('aria-expanded', 'false')); } }
+document.addEventListener('click', e => {
+  const b = e.target.closest('.sel-btn');
+  if (!b) { if (!e.target.closest('.sel-list')) closeSel(); return; }
+  const f = b.closest('[data-sel]'), key = f.dataset.sel, wasOpen = openSel && openSel.parentElement === f; closeSel(); if (wasOpen) return;
+  const list = key.startsWith('sk:') ? SK_OPTS[key] : OPTS[key], cur = key.startsWith('sk:') ? S.sk[key.slice(3)] : S[key];
+  const ul = document.createElement('ul'); ul.className = 'sel-list'; ul.setAttribute('role', 'listbox');
+  ul.innerHTML = list.map(([v, l]) => `<li role="option" data-v="${esc(v)}" aria-selected="${v === cur}">${esc(l)}</li>`).join('');
+  f.appendChild(ul); openSel = ul; b.setAttribute('aria-expanded', 'true');
+  ul.addEventListener('click', ev => { const li = ev.target.closest('li'); if (!li) return; if (key.startsWith('sk:')) S.sk[key.slice(3)] = li.dataset.v; else S[key] = li.dataset.v; closeSel(); onSel(key); });
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSel(); });
+const SK_OPTS = { 'sk:sort': [['name', 'Name'], ['used', 'Most used'], ['success', 'Success rate'], ['enhanced', 'Recently enhanced']] };
+function onSel(key) { if (key.startsWith('sk:')) return renderPanel(); if (key === 'scope' || key === 'session') applyFilters(true); else { if (key === 'clusterBy') seedCluster(); updateGraphUI(); } if (key === 'colorBy' || key === 'sizeBy') drawAll(); }
+
+/* ============ Shell ============ */
+function renderTiles() {
+  const defs = [['memory', 'brain', 'Memory', '150 facts', S.paused ? 'Paused' : '2 queued for curation'], ['skills', 'spark', 'Skills', '27 entries', '3 diverged'], ['cron', 'cal', 'Schedules', '4 active', 'Next run in 12 min'], ['gateway', 'msg', 'Messaging', '2 bots', 'All connected']];
+  $('#tiles').innerHTML = defs.map(([id, i, l, v, d]) => `<button class="tile" role="tab" aria-selected="${S.panel === id}" data-id="${id}" ${['cron', 'gateway'].includes(id) ? 'disabled style="opacity:.55;cursor:default"' : ''}>${ic(i)}<span class="lab">${l}</span><span class="val num">${v}</span><span class="desc">${(id === 'memory' && S.paused) || (id === 'skills' && S.sk.paused) ? 'Paused' : d}</span></button>`).join('');
+}
+$('#tiles').addEventListener('click', e => { const t = e.target.closest('.tile'); if (t && !t.disabled) { S.panel = t.dataset.id; sync(); } });
+
+/* ============ Panel router ============ */
+function renderPanel() { stopLoop(); closeSel(); renderTiles(); $('#panel').innerHTML = S.panel === 'memory' ? memoryHTML() : skillsHTML(); if (S.panel === 'memory') bindMemory(); else bindSkills(); }
+
+/* ============ MEMORY ============ */
+const tg = (id, label, on, extra = '') => `<label class="tg"><input type="checkbox" class="toggle" id="${id}" ${on ? 'checked' : ''} ${extra}><span>${label}</span></label>`;
+function memoryHTML() {
+  const views = [['graph', 'Graph'], ['list', 'List'], ['timeline', 'Timeline'], ['boards', 'Boards'], ['code', 'Code index'], ['health', 'Health']];
+  const nows = S.data === 'nows';
+  return `<div class="phead"><div><h1 class="t-page">Memory</h1><p>Facts, events, and code Thoth has learned across sessions.</p></div>
+    <div class="tgrp">${tg('pause', S.paused ? 'Memory is paused' : 'Memory is on', !S.paused)}</div></div>
+    ${S.paused ? `<div class="alert" data-tone="warn">${ic('warn')}<div class="txt"><strong>Memory is paused.</strong> Capture, background processing and Run curator now are off. Saved memories are still used in chats.</div></div>` : ''}
+    <ol class="band" aria-label="Memory tier statistics">
+      ${[['Core', S.data === 'empty' ? 0 : 24, 'var(--p)'], ['Recall', S.data === 'empty' ? 0 : 78, 'var(--edge-strong)'], ['Archival', S.data === 'empty' ? 0 : 48, 'var(--faint)'], ['Code index', '1,204', 'var(--state-ink-run)'], ['Last curated', S.data === 'empty' ? 'never' : '4 min ago', 'var(--state-ink-done)']].map(([l, v, c]) => `<li style="--ink:${c}"><div class="bar"></div><div class="v num">${v}</div><div class="l">${l}</div></li>`).join('')}
+    </ol>
+    <div class="viewbar"><div class="tabs" role="tablist" aria-label="Memory views">${views.map(([v, l]) => `<button role="tab" aria-selected="${S.mview === v}" data-view="${v}">${l}</button>`).join('')}</div>
+      <span class="hint" id="matchline"></span></div>
+    <div id="mbody">${nows ? noWorkspace() : S.mview === 'graph' ? graphHTML() : S.mview === 'list' ? listHTML() : paneHTML(S.mview)}</div>`;
+}
+function noWorkspace() { return `<div class="stateblock listwrap" style="min-height:20rem">${ic('brain')}<h3>No workspace is open</h3><p>Memory is scoped to a workspace. Open a folder, or view memories from all workspaces.</p><button class="btn" data-v="secondary" data-s="sm" id="allws">Show all workspaces</button></div>`; }
+function graphHTML() {
+  const chip = (set, v, label) => `<button class="chip" data-chip="${set}" data-v="${v}" aria-pressed="${S[set].has(v)}">${set === 'kinds' ? `<span class="dot" style="--c:${KCOL[v]}"></span>` : ''}${label}</button>`;
+  const dash = { semantic: '', subject: '6 4', session: '1.5 3' };
+  const edgeRow = (t, l) => `<div class="edge-row"><svg viewBox="0 0 32 12" aria-hidden="true"><line x1="1" y1="6" x2="31" y2="6" stroke="currentColor" stroke-width="2" stroke-dasharray="${dash[t]}" stroke-linecap="round" opacity=".8"/></svg>
+    <label class="tg"><input type="checkbox" class="toggle" data-edge="${t}" ${S.edge[t] ? 'checked' : ''} ${t === 'semantic' && S.data === 'vecoff' ? 'disabled' : ''}><span>${l}</span></label><span class="n num" data-ec="${t}"></span></div>`;
+  return `<div class="pane"><div class="gtool">
+      <div class="field search"><div class="field-box compact"><span class="lead">${ic('search')}</span><input type="search" id="gsearch" placeholder="Search memories and press Enter" aria-label="Search memories" value="${esc(S.q)}"></div></div>
+      <div class="segmented" role="radiogroup" aria-label="Graph mode"><button role="radio" aria-checked="${!S.cluster}" data-mode="nodes">Nodes</button><button role="radio" aria-checked="${S.cluster}" data-mode="clusters">Clusters</button></div>
+      ${selHTML('colorBy', 'Color by', S.colorBy)}${selHTML('sizeBy', 'Size by', S.sizeBy)}
+      <span class="sp"></span>
+      <button class="btn railbtn" data-v="outline" data-s="sm" id="railbtn">${ic('filter')}Filters</button>
+      <button class="btn" data-v="outline" data-s="sm" id="relayout">${ic('refresh')}Re-run layout</button>
+      ${tg('freeze', 'Freeze', S.freeze)}
+    </div>
+    <div class="gmain" id="gmain" data-insp="${S.sel.size ? 'open' : 'closed'}" data-rail="closed">
+      <aside class="rail" aria-label="Graph filters">
+        <section><h3>Show</h3><div class="stack">
+          <div><div class="t-label" style="margin-bottom:.25rem">Tier</div><div class="row">${TIERS.map(t => chip('tiers', t, t[0].toUpperCase() + t.slice(1))).join('')}</div></div>
+          <div><div class="t-label" style="margin-bottom:.25rem">Kind</div><div class="row">${KINDS.map(k => chip('kinds', k, k[0].toUpperCase() + k.slice(1))).join('')}</div></div>
+          ${tg('pinnedOnly', 'Pinned only', S.pinned)}
+          ${selHTML('scope', 'Scope', S.scope)}${selHTML('session', 'Session', S.session)}
+        </div></section>
+        <section><h3>Connections</h3><div class="stack">
+          ${edgeRow('semantic', 'Similar meaning')}${edgeRow('subject', 'Same subject')}${edgeRow('session', 'Same session')}
+          <div><div class="t-label" style="display:flex;justify-content:space-between"><label for="thr">Similarity at least</label><span class="num" id="thrv">${S.thr.toFixed(2)}</span></div><div class="range"><input type="range" id="thr" min="0.5" max="0.95" step="0.01" value="${S.thr}" ${S.data === 'vecoff' ? 'disabled' : ''}></div></div>
+        </div></section>
+        <section><h3>Layout</h3><div class="stack">${selHTML('clusterBy', 'Cluster by', S.clusterBy)}${tg('labels', 'Show labels', S.labels)}<p class="hint">Cluster by applies in Clusters mode.</p></div></section>
+      </aside>
+      <div class="stagewrap"><div class="cvwrap" id="cvwrap">
+        <canvas class="graph" id="cv" tabindex="0" role="application" aria-label="Memory graph. Use arrow keys to move between connected memories, Enter to open, Escape to clear. The List view has the same data as a table."></canvas>
+        <div class="gbanner" id="gbanner"></div>
+        <div class="ovl zoom" aria-label="Zoom controls"><button class="btn" data-v="ghost" data-icon aria-label="Zoom in" id="zin">${ic('plus')}</button><button class="btn" data-v="ghost" data-icon aria-label="Zoom out" id="zout">${ic('minus')}</button><button class="btn" data-v="ghost" data-icon aria-label="Fit to view" id="zfit">${ic('fit')}</button></div>
+        <div class="ovl legend" id="legend" aria-label="Legend"></div>
+        <div class="ovl minimap" aria-hidden="true"><canvas id="mm"></canvas></div>
+        <div class="ovl tip" id="tip" hidden></div>
+        <div class="ovl toast t-label" id="toast" role="status" hidden></div>
+        <div class="ovl selbar" id="selbar" hidden></div>
+        <div class="sr" id="live" aria-live="polite"></div>
+      </div>
+      <div class="brush"><span class="t-label">Created</span><div class="rg"><div class="hist" id="hist" aria-hidden="true"></div>
+        <input type="range" id="tfrom" min="0" max="100" value="${S.from}" aria-label="From date"><input type="range" id="tto" min="0" max="100" value="${S.to}" aria-label="To date"></div><span class="t-label num" id="brushlab"></span></div></div>
+      <aside class="insp" id="insp" aria-label="Memory inspector"></aside>
+    </div></div>`;
+}
+function listHTML() {
+  return `<div class="listwrap"><div class="toolbar" style="margin-bottom:.5rem"><div class="field" style="width:16rem"><div class="field-box compact"><span class="lead">${ic('search')}</span><input type="search" id="lsearch" placeholder="Filter by subject or text" aria-label="Filter list" value="${esc(S.listQ)}"></div></div>
+    <span class="hint">Uses the same filters as the graph. Open the Graph view to change them.</span><span class="sp"></span><button class="btn" data-v="outline" data-s="sm" id="lclear">Clear selection</button></div>
+    <div id="ltable"></div></div><div class="gmain" id="gmain" data-insp="${S.sel.size ? 'open' : 'closed'}" style="display:block;height:auto;border:0;overflow:visible"><aside class="insp" id="insp" aria-label="Memory inspector" style="border:1px solid var(--border);border-radius:var(--r-inner);${''}"></aside></div>`;
+}
+function paneHTML(v) {
+  if (v === 'timeline') return `<div class="listwrap pane"><div class="toolbar"><div class="field" style="width:16rem"><div class="field-box compact"><span class="lead">${ic('search')}</span><input type="search" placeholder="Filter timeline" aria-label="Filter timeline"></div></div>${['Bugfix', 'Feature', 'Decision', 'Discovery', 'Refactor', 'Change'].map((t, i) => `<button class="chip" aria-pressed="${i < 3}">${t}</button>`).join('')}<span class="sp"></span><button class="btn" data-v="outline" data-s="sm">${ic('filter')}More filters</button></div>
+    <div class="hint">Events from memory:searchIndex. Same filters, restyled. The graph has its own time range under the canvas.</div>
+    <table class="tbl"><thead><tr><th>When</th><th>Type</th><th>Subject</th><th>Concepts</th><th></th></tr></thead><tbody>${MEM.slice(0, 6).map((m, i) => `<tr><td class="num">${ago(m.createdAt)}</td><td><span class="badge" data-s="xs" data-tone="${['info', 'ok', 'neutral'][i % 3]}">${['Decision', 'Feature', 'Discovery'][i % 3]}</span></td><td class="ttl">${esc(m.subject)}</td><td class="sub">${m.topic.toLowerCase()}, ${m.kind}</td><td class="act"><button class="btn" data-v="ghost" data-s="xs">Show around</button></td></tr>`).join('')}</tbody></table><div class="pager"><span>Showing 6 events</span><button class="btn" data-v="outline" data-s="xs">Load more</button></div></div>`;
+  if (v === 'boards') return `<div class="listwrap pane"><section class="sect"><header><div><h2 class="t-section">Knowledge boards</h2><p>Named, primeable bundles of memories. 2 boards.</p></div><div class="actions"><button class="btn" data-v="ghost" data-s="sm">${ic('refresh')}Refresh</button><button class="btn" data-v="primary" data-s="sm">Build board</button></div></header>
+    ${[['auth-system', 31, 'May 2'], ['electron-hardening', 18, 'Apr 21']].map(([n, c, d]) => `<div class="srow"><div><div class="ttl t-group mono">${n}</div><div class="d">${c} memories, built ${d}</div></div><div class="actions"><button class="btn" data-v="secondary" data-s="xs">Prime in new chat</button><button class="btn" data-v="ghost" data-s="xs">Reprime</button><button class="btn" data-v="ghost" data-s="xs">Rebuild</button><button class="btn" data-v="ghost" data-s="xs" data-tone="danger">Delete</button></div></div>`).join('')}</section>
+    <section class="sect"><header><div><h2 class="t-section">Suggested boards</h2><p>One-click boards clustered from your memories. Built from graph clusters.</p></div></header><div class="cards">${[['Build and CI', 38], ['Design system', 24], ['Providers', 21]].map(([n, c]) => `<div class="card"><div class="t-group">${n}</div><div class="hint">${c} memories</div><div class="provchips"><span class="badge" data-s="xs" data-tone="neutral">nx</span><span class="badge" data-s="xs" data-tone="neutral">cache</span></div><div class="actions" style="margin-top:.25rem"><button class="btn" data-v="outline" data-s="xs">Create</button><button class="btn" data-v="ghost" data-s="xs" aria-label="Dismiss">${ic('x', 'i i-sm')}</button></div></div>`).join('')}</div></section></div>`;
+  if (v === 'code') return `<div class="listwrap pane"><div class="alert">${ic('info')}<div class="txt"><strong>Workspace index is up to date.</strong> Files are read on your machine; nothing is uploaded.</div><div class="act"><button class="btn" data-v="outline" data-s="xs">Re-index</button></div></div>
+    <div class="toolbar"><div class="field" style="width:16rem"><div class="field-box compact"><span class="lead">${ic('search')}</span><input type="search" placeholder="Search indexed symbols" aria-label="Search symbols"></div></div><span class="hint num">1,204 symbols</span><span class="sp"></span><button class="btn" data-v="ghost" data-s="sm" data-tone="danger">Clean junk</button></div>
+    <table class="tbl"><thead><tr><th>Symbol</th><th>Kind</th><th>Path</th><th class="num">Tokens</th></tr></thead><tbody>${[['MemorySearchService', 'class', 'memory-curator/src/lib/memory-search.service.ts', 3120], ['scopedVectorCandidates', 'function', 'memory-curator/src/lib/scoped-vector-search.ts', 412], ['RpcHandler', 'class', 'vscode-core/src/messaging/rpc-handler.ts', 2480]].map(r => `<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td class="mono sub">${r[2]}</td><td class="num">${r[3]}</td></tr>`).join('')}</tbody></table><div class="pager"><span>1 to 50 of 1,204</span><span class="actions"><button class="btn" data-v="outline" data-s="xs" disabled>Prev</button><button class="btn" data-v="outline" data-s="xs">Next</button></span></div></div>`;
+  return `<div class="listwrap pane">
+    <section class="sect"><header><div><h2 class="t-section">Curator</h2><p>Last run: 4 min ago, 3 memories written.</p></div><div class="actions"><button class="btn" data-v="secondary" data-s="sm" ${S.paused ? 'disabled' : ''}>Run curator now</button><button class="btn" data-v="ghost" data-s="sm">${ic('refresh')}Refresh</button></div></header>
+      ${[['Idle timer', '60000 ms', 1], ['Turn threshold', '8 turns', 1], ['Boot scan', '', 1], ['Session-end flush', '', 0], ['Max curates per hour', '12', 1]].map(([l, v, on]) => `<div class="srow"><div>${l}</div><div class="actions">${v ? `<span class="hint num">${v}</span>` : ''}<input type="checkbox" class="toggle" ${on ? 'checked' : ''} aria-label="${l}"></div></div>`).join('')}
+      <div class="srow"><div>Curator model<div class="d">Set in Settings, orchestration, background models.</div></div><a href="#" class="btn" data-v="link">Change</a></div></section>
+    <section class="sect"><header><div><h2 class="t-section">Index health</h2><p>Search index, vector engine and embedder.</p></div><span class="status" data-ink="${S.data === 'vecoff' ? 'need' : 'done'}">${S.data === 'vecoff' ? 'Vectors offline' : 'Coherent'}</span></header>
+      <div class="cards">${[['Chunks vs vectors', S.data === 'vecoff' ? 'Mismatch' : 'In sync', S.data === 'vecoff' ? 'warn' : 'ok'], ['Chunks vs full-text', 'In sync', 'ok'], ['Code symbols vs vectors', 'In sync', 'ok'], ['sqlite-vec', S.data === 'vecoff' ? 'Offline' : 'Online', S.data === 'vecoff' ? 'warn' : 'ok'], ['Embedder', 'Ready', 'ok']].map(([l, v, t]) => `<div class="card"><div class="t-label">${l}</div><span class="badge" data-tone="${t}">${v}</span></div>`).join('')}</div>
+      <div class="actions"><button class="btn" data-v="outline" data-s="sm">Retry vec</button><button class="btn" data-v="outline" data-s="sm">Retry embedder</button>${S.data === 'vecoff' ? '<button class="btn" data-v="ghost" data-s="sm">Open binding folder</button>' : ''}<button class="btn" data-v="outline" data-s="sm">Rebuild memory search index</button><button class="btn" data-v="ghost" data-s="sm">Copy diagnostic</button></div></section>
+    <section class="sect"><header><div><h2 class="t-section">Storage and retention</h2><p>Database 48 MB, retention on, last run yesterday.</p></div><span class="status" data-ink="done">Retention on</span></header>
+      <div class="cards">${[['Database size', '48 MB'], ['Processed rows', '12,408'], ['Pending rows', '14'], ['Stuck rows', '0'], ['Oldest pending', '6 min'], ['Boot-scan retries', '0 pending, 0 given up'], ['Last retention run', 'Yesterday, 212 pages reclaimed'], ['Next run', 'In 18 h']].map(([l, v]) => `<div class="card"><div class="t-label">${l}</div><div class="num">${v}</div></div>`).join('')}</div></section>
+    <section class="sect"><header><div><h2 class="t-section">Live events</h2><p>Curator, index and retention events from this session.</p></div></header>
+      <table class="tbl"><thead><tr><th>When</th><th>Event</th><th>Detail</th></tr></thead><tbody>${[['4 min ago', 'curator.run', '3 memories written'], ['9 min ago', 'index.chunk', '28 chunks embedded'], ['1 h ago', 'retention.run', '212 pages reclaimed']].map(r => `<tr><td class="num">${r[0]}</td><td class="mono">${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table></section>
+    <section class="sect"><header><div><h2 class="t-section">Danger zone</h2><p>Permanently delete memory entries whose subject matches a pattern. This cannot be undone.</p></div></header>
+      <div class="toolbar"><div class="field" style="width:18rem"><div class="field-box"><span class="field-label">Purge by subject pattern</span><input type="text" placeholder=""></div></div>${selHTML('purgeMode', 'Mode', 'substring', 0).replace(/data-sel="purgeMode"/, 'data-sel="scope"')}<button class="btn" data-v="outline" data-tone="danger" data-s="sm" disabled>Purge</button></div></section></div>`;
+}
+
+/* ============ Graph engine (canvas force layout) ============ */
+const G = { nodes: [], map: new Map(), vis: [], edges: [], cv: null, ctx: null, w: 0, h: 0, k: 1, tx: 0, ty: 0, alpha: 1, raf: 0, clusters: [], drag: null, dpr: 1, focusIdx: 0 };
+function filtered() {
+  const lo = MIN_T + (NOW - MIN_T) * S.from / 100, hi = MIN_T + (NOW - MIN_T) * S.to / 100, q = S.q.trim().toLowerCase();
+  return MEM.filter(m => S.tiers.has(m.tier) && S.kinds.has(m.kind) && (!S.pinned || m.pinned) && (S.scope === 'all' || m.workspace === 'ptah-extension') && (S.session === 'all' || m.sessionId === S.session) && m.createdAt >= lo && m.createdAt <= hi);
+}
+const radius = m => S.sizeBy === 'uniform' ? 7 : S.sizeBy === 'hits' ? 4 + Math.sqrt(m.hits) * 1.9 : 4 + m.salience * 10;
+const hue = i => `hsl(${(i * 47) % 360} 62% ${document.documentElement.dataset.theme === 'light' ? 36 : 68}%)`;
+function colorOf(m) { const cs = getComputedStyle(document.documentElement);
+  if (S.colorBy === 'kind') return cs.getPropertyValue('--graph-' + m.kind).trim();
+  if (S.colorBy === 'tier') return m.tier === 'core' ? cs.getPropertyValue('--p').trim() : m.tier === 'recall' ? cs.getPropertyValue('--bc').trim() : cs.getPropertyValue('--bcm').trim();
+  if (S.colorBy === 'session') return hue(SESS.indexOf(m.sessionId));
+  return hue(m.ti); }
+function startGraph() {
+  G.cv = $('#cv'); if (!G.cv) return; G.ctx = G.cv.getContext('2d');
+  G.nodes = MEM.map((m, i) => { const a = rnd() * 6.283, r = 40 + rnd() * 260; return G.nodes.find?.(n => n.m === m) || { m, x: Math.cos(a) * r, y: Math.sin(a) * r, vx: 0, vy: 0 }; });
+  G.map = new Map(G.nodes.map(n => [n.m.id, n])); resize(); applyFilters(true, true); fit();
+  const cvw = $('#cvwrap'); new ResizeObserver(() => { resize(); drawAll(); }).observe(cvw);
+  bindCanvas(); loop();
+}
+function resize() { const w = $('#cvwrap'); if (!w || !G.cv) return; G.dpr = devicePixelRatio || 1; G.w = w.clientWidth; G.h = w.clientHeight; G.cv.width = G.w * G.dpr; G.cv.height = G.h * G.dpr; const mm = $('#mm'); if (mm) { mm.width = 152 * G.dpr; mm.height = 100 * G.dpr; } }
+function applyFilters(relayout, silent) {
+  const ok = new Set(filtered().map(m => m.id)); G.vis = G.nodes.filter(n => ok.has(n.m.id));
+  G.edges = EDGES.filter(e => ok.has(e.s) && ok.has(e.t) && S.edge[e.type] && (e.type !== 'semantic' || (S.data !== 'vecoff' && e.w >= S.thr))).map(e => ({ ...e, a: G.map.get(e.s), b: G.map.get(e.t) }));
+  [...S.sel].forEach(id => { if (!ok.has(id)) S.sel.delete(id); });
+  seedCluster(); if (relayout) G.alpha = 1; updateGraphUI(); drawAll(); if (!silent) {}
+}
+function seedCluster() { const key = S.clusterBy, g = {}; G.vis.forEach(n => { const k = key === 'subject' ? n.m.topic : key === 'kind' ? n.m.kind : n.m.sessionId; (g[k] ||= []).push(n); });
+  const names = Object.keys(g); G.clusters = names.map((name, i) => { const a = i / names.length * 6.283, R = names.length > 1 ? 230 : 0; return { name, nodes: g[name], cx: Math.cos(a) * R, cy: Math.sin(a) * R }; }); G.clusters.forEach(c => c.nodes.forEach(n => n.c = c)); }
+function tick() {
+  const N = G.vis, a = G.alpha; if (a < .004 || S.freeze) return false;
+  for (let i = 0; i < N.length; i++) { const p = N[i]; for (let j = i + 1; j < N.length; j++) { const q = N[j]; let dx = p.x - q.x, dy = p.y - q.y, d2 = dx * dx + dy * dy + .01; if (d2 > 90000) continue; const f = 1400 / d2 * a, d = Math.sqrt(d2); dx = dx / d * f; dy = dy / d * f; p.vx += dx; p.vy += dy; q.vx -= dx; q.vy -= dy; } }
+  G.edges.forEach(e => { const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, d = Math.sqrt(dx * dx + dy * dy) || 1, L = e.type === 'semantic' ? 70 : e.type === 'subject' ? 50 : 90, s = (e.type === 'semantic' ? .035 * e.w : .02) * a, f = (d - L) * s; e.a.vx += dx / d * f; e.a.vy += dy / d * f; e.b.vx -= dx / d * f; e.b.vy -= dy / d * f; });
+  N.forEach(n => { n.vx -= n.x * .0016 * a; n.vy -= n.y * .0016 * a; if (S.cluster && n.c) { n.vx += (n.c.cx - n.x) * .018 * a; n.vy += (n.c.cy - n.y) * .018 * a; } n.x += n.vx; n.y += n.vy; n.vx *= .8; n.vy *= .8; });
+  G.alpha *= .985; return true; }
+function loop() { cancelAnimationFrame(G.raf); const f = () => { if (S.panel !== 'memory' || S.mview !== 'graph') return; const moved = tick(); if (moved || G.dirty) { drawAll(); G.dirty = false; } G.raf = requestAnimationFrame(f); }; G.raf = requestAnimationFrame(f); }
+function stopLoop() { cancelAnimationFrame(G.raf); }
+function fit() { if (!G.vis.length || !G.w) return; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; G.vis.forEach(n => { x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x); y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y); });
+  const pw = x1 - x0 + 120, ph = y1 - y0 + 120; G.k = Math.min(G.w / pw, G.h / ph, 2.2); G.tx = G.w / 2 - (x0 + x1) / 2 * G.k; G.ty = G.h / 2 - (y0 + y1) / 2 * G.k; G.dirty = true; }
+const toS = n => [n.x * G.k + G.tx, n.y * G.k + G.ty];
+function nbrs(id) { const s = new Set(); G.edges.forEach(e => { if (e.s === id) s.add(e.t); else if (e.t === id) s.add(e.s); }); return s; }
+function drawAll() { drawGraph(); drawMini(); }
+function drawGraph() {
+  const c = G.ctx; if (!c) return; const cs = getComputedStyle(document.documentElement), txt = cs.getPropertyValue('--bc').trim(), edge = cs.getPropertyValue('--graph-edge').trim(), gold = cs.getPropertyValue('--p').trim(), canvasBg = cs.getPropertyValue('--graph-canvas').trim();
+  c.setTransform(G.dpr, 0, 0, G.dpr, 0, 0); c.clearRect(0, 0, G.w, G.h);
+  const focusId = S.hover || (S.sel.size === 1 ? [...S.sel][0] : null), nb = focusId ? nbrs(focusId) : null, dim = id => focusId && id !== focusId && !nb.has(id) && !S.sel.has(id);
+  if (S.cluster) G.clusters.forEach(cl => { if (!cl.nodes.length) return; let sx = 0, sy = 0; cl.nodes.forEach(n => { sx += n.x; sy += n.y; }); const mx = sx / cl.nodes.length, my = sy / cl.nodes.length; let r = 0; cl.nodes.forEach(n => r = Math.max(r, Math.hypot(n.x - mx, n.y - my))); r += 26;
+    const [px, py] = [mx * G.k + G.tx, my * G.k + G.ty]; c.beginPath(); c.arc(px, py, r * G.k, 0, 6.283); c.fillStyle = txt; c.globalAlpha = .045; c.fill(); c.globalAlpha = .28; c.setLineDash([5, 5]); c.lineWidth = 1; c.strokeStyle = txt; c.stroke(); c.setLineDash([]); c.globalAlpha = 1;
+    c.font = '600 12px Inter, system-ui, sans-serif'; c.fillStyle = txt; c.textAlign = 'center'; c.globalAlpha = .9; c.fillText(`${cl.name} (${cl.nodes.length})`, px, py - r * G.k - 6); c.globalAlpha = 1; });
+  const dash = { semantic: [], subject: [7, 4], session: [1.5, 3.5] };
+  ['session', 'subject', 'semantic'].forEach(t => { c.setLineDash(dash[t]); c.lineCap = 'round'; G.edges.filter(e => e.type === t).forEach(e => { const [ax, ay] = toS(e.a), [bx, by] = toS(e.b), hot = focusId && (e.s === focusId || e.t === focusId); c.globalAlpha = dim(e.s) && dim(e.t) ? .05 : hot ? .9 : (t === 'semantic' ? .12 + e.w * .3 : .28); c.lineWidth = hot ? 1.8 : t === 'semantic' ? .7 + e.w * .9 : 1; c.strokeStyle = hot ? gold : edge; c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke(); }); }); c.setLineDash([]);
+  G.vis.forEach(n => { const m = n.m, [x, y] = toS(n), r = radius(m) * Math.min(Math.max(G.k, .6), 1.8), col = colorOf(m), d = dim(m.id), sel = S.sel.has(m.id);
+    c.globalAlpha = d ? .13 : m.tier === 'archival' ? .62 : 1; c.beginPath(); c.arc(x, y, r, 0, 6.283); c.fillStyle = col; c.fill();
+    if (m.tier === 'core') { c.beginPath(); c.arc(x, y, r + 3, 0, 6.283); c.lineWidth = 1.5; c.strokeStyle = col; c.stroke(); }
+    if (m.pinned) { c.beginPath(); c.arc(x + r * .75, y - r * .75, 3, 0, 6.283); c.fillStyle = canvasBg; c.fill(); c.lineWidth = 1.5; c.strokeStyle = gold; c.stroke(); }
+    if (sel || m.id === S.hover) { c.globalAlpha = 1; c.beginPath(); c.arc(x, y, r + 6, 0, 6.283); c.lineWidth = 2; c.strokeStyle = txt; c.stroke(); }
+    const lab = S.labels && !d && (sel || m.id === S.hover || (nb && nb.has(m.id)) || m.pinned && G.k > .8 || (G.k > 1.35 && m.salience > .7));
+    if (lab) { c.globalAlpha = 1; c.font = '12px Inter, system-ui, sans-serif'; c.textAlign = 'left'; const t = m.subject, w = c.measureText(t).width; c.fillStyle = canvasBg; c.globalAlpha = .82; c.fillRect(x + r + 4, y - 8, w + 8, 16); c.globalAlpha = 1; c.fillStyle = txt; c.fillText(t, x + r + 8, y + 4); }
+  }); c.globalAlpha = 1;
+}
+function drawMini() { const mm = $('#mm'); if (!mm || !G.vis.length) return; const c = mm.getContext('2d'), W = 152, H = 100; c.setTransform(G.dpr, 0, 0, G.dpr, 0, 0); c.clearRect(0, 0, W, H);
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; G.vis.forEach(n => { x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x); y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y); });
+  const sc = Math.min((W - 12) / (x1 - x0 || 1), (H - 12) / (y1 - y0 || 1)), ox = W / 2 - (x0 + x1) / 2 * sc, oy = H / 2 - (y0 + y1) / 2 * sc; G.mini = { sc, ox, oy };
+  G.vis.forEach(n => { c.fillStyle = colorOf(n.m); c.globalAlpha = .9; c.fillRect(n.x * sc + ox - 1, n.y * sc + oy - 1, 2.4, 2.4); }); c.globalAlpha = 1;
+  const vx0 = -G.tx / G.k, vy0 = -G.ty / G.k, vw = G.w / G.k, vh = G.h / G.k; c.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--p').trim(); c.lineWidth = 1.5; c.strokeRect(vx0 * sc + ox, vy0 * sc + oy, vw * sc, vh * sc); }
+function hit(px, py) { let best = null, bd = 1e9; G.vis.forEach(n => { const [x, y] = toS(n), r = radius(n.m) * Math.min(Math.max(G.k, .6), 1.8) + 5, d = Math.hypot(x - px, y - py); if (d < r && d < bd) { best = n; bd = d; } }); return best; }
+function zoomAt(f, px, py) { const k2 = Math.min(Math.max(G.k * f, .25), 6); G.tx = px - (px - G.tx) * k2 / G.k; G.ty = py - (py - G.ty) * k2 / G.k; G.k = k2; G.dirty = true; }
+function focusNode(id, zoom = true) { const n = G.map.get(id); if (!n) return; if (zoom) { G.k = Math.max(G.k, 1.6); } G.tx = G.w / 2 - n.x * G.k; G.ty = G.h / 2 - n.y * G.k; G.dirty = true; }
+function select(id, add) { if (!id) { S.sel.clear(); } else if (add) { S.sel.has(id) ? S.sel.delete(id) : S.sel.add(id); } else { S.sel.clear(); S.sel.add(id); } S.confirm = false; updateGraphUI(); G.dirty = true; drawAll(); }
+function bindCanvas() {
+  const cv = G.cv, tip = $('#tip'); let pan = null, moved = 0;
+  cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); pan = { x: e.clientX, y: e.clientY, tx: G.tx, ty: G.ty }; moved = 0; cv.classList.add('dragging'); });
+  cv.addEventListener('pointermove', e => { const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+    if (pan) { moved += Math.abs(e.movementX) + Math.abs(e.movementY); G.tx = pan.tx + e.clientX - pan.x; G.ty = pan.ty + e.clientY - pan.y; G.dirty = true; return; }
+    const n = hit(px, py), id = n ? n.m.id : null; if (id !== S.hover) { S.hover = id; cv.classList.toggle('over', !!id); G.dirty = true; drawAll(); }
+    if (n) { const m = n.m; tip.hidden = false; tip.innerHTML = `<b>${esc(m.subject)}</b>${m.tier} / ${m.kind} / salience ${m.salience.toFixed(2)} / ${m.hits} hits`; tip.style.left = Math.min(px + 14, G.w - 240) + 'px'; tip.style.top = Math.min(py + 14, G.h - 60) + 'px'; } else tip.hidden = true; });
+  cv.addEventListener('pointerup', e => { cv.classList.remove('dragging'); if (pan && moved < 4) { const r = cv.getBoundingClientRect(), n = hit(e.clientX - r.left, e.clientY - r.top); select(n ? n.m.id : null, e.shiftKey || e.metaKey || e.ctrlKey); } pan = null; });
+  cv.addEventListener('pointerleave', () => { S.hover = null; tip.hidden = true; G.dirty = true; });
+  cv.addEventListener('dblclick', e => { const r = cv.getBoundingClientRect(), n = hit(e.clientX - r.left, e.clientY - r.top); if (n) { select(n.m.id); focusNode(n.m.id); } });
+  cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomAt(e.deltaY < 0 ? 1.12 : .89, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+  cv.addEventListener('keydown', e => { const cur = S.sel.size === 1 ? [...S.sel][0] : null;
+    if (e.key === 'Escape') { select(null); return; }
+    if (['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(e.key)) { e.preventDefault(); let list = cur ? [...nbrs(cur)] : G.vis.slice().sort((a, b) => b.m.salience - a.m.salience).map(n => n.m.id); if (!list.length) return;
+      if (cur) { list = [cur, ...list.filter(x => x !== cur)]; } const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1; G.focusIdx = ((cur ? G.focusIdx : -1) + dir + list.length * 2) % list.length; const id = cur ? list[Math.max(1, G.focusIdx % list.length)] : list[G.focusIdx % list.length]; select(id); focusNode(id, false); $('#live').textContent = `${G.map.get(id).m.subject}, ${G.map.get(id).m.kind}, ${G.map.get(id).m.tier}`; }
+    if (e.key === 'Enter' && cur) { $('#gmain').dataset.insp = 'open'; } if (e.key === '+') zoomAt(1.2, G.w / 2, G.h / 2); if (e.key === '-') zoomAt(.83, G.w / 2, G.h / 2); });
+  $('#zin').onclick = () => zoomAt(1.25, G.w / 2, G.h / 2); $('#zout').onclick = () => zoomAt(.8, G.w / 2, G.h / 2); $('#zfit').onclick = () => fit();
+  $('#mm').addEventListener('click', e => { if (!G.mini) return; const r = e.target.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * 152, y = (e.clientY - r.top) / r.height * 100, wx = (x - G.mini.ox) / G.mini.sc, wy = (y - G.mini.oy) / G.mini.sc; G.tx = G.w / 2 - wx * G.k; G.ty = G.h / 2 - wy * G.k; G.dirty = true; });
+}
+function toast(msg) { const t = $('#toast'); if (!t) return; t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 2200); const l = $('#live'); if (l) l.textContent = msg; }
+
+/* ============ Graph UI (banners, legend, inspector, selection bar, counts) ============ */
+function updateGraphUI() {
+  const vis = G.vis, total = MEM.length, ec = t => G.edges.filter(e => e.type === t).length;
+  $$('[data-ec]').forEach(el => el.textContent = S.edge[el.dataset.ec] ? ec(el.dataset.ec) : 'off');
+  const ml = $('#matchline'); if (ml) ml.textContent = S.mview === 'graph' ? `${vis.length} of ${S.data === 'capped' ? '1,842' : total} memories shown` : '';
+  const bl = $('#brushlab'); if (bl) { const f = Math.round((100 - S.from) / 100 * 91), t = Math.round((100 - S.to) / 100 * 91); bl.textContent = S.from === 0 && S.to === 100 ? 'Last 91 days' : `${f} to ${t} days ago`; }
+  const hist = $('#hist'); if (hist) { const b = new Array(30).fill(0); MEM.forEach(m => b[Math.min(29, Math.floor((m.createdAt - MIN_T) / (NOW - MIN_T) * 30))]++); const mx = Math.max(...b); hist.innerHTML = b.map(v => `<i style="height:${Math.max(2, v / mx * 24)}px"></i>`).join(''); }
+  const gb = $('#gbanner'); if (gb) gb.innerHTML = (S.data === 'vecoff' ? `<div class="alert ovl" data-tone="warn" style="position:static">${ic('warn')}<div class="txt"><strong>Semantic links are unavailable.</strong> The vector index is offline. The graph shows same-subject and same-session links only.</div><div class="act"><button class="btn" data-v="outline" data-s="xs" id="gohealth">Open Health</button></div></div>` : '') +
+    (S.data === 'capped' ? `<div class="alert ovl" style="position:static">${ic('info')}<div class="txt"><strong>Showing 150 of 1,842 memories.</strong> Ranked by pinned, salience and recency. Narrow the filters to see others.</div><div class="act"><button class="btn" data-v="outline" data-s="xs">Show up to 1,500</button></div></div>` : '') +
+    (!vis.length && S.data !== 'empty' ? `<div class="alert ovl" style="position:static">${ic('info')}<div class="txt"><strong>No memories match these filters.</strong></div><div class="act"><button class="btn" data-v="outline" data-s="xs" id="resetf">Reset filters</button></div></div>` : '');
+  const lg = $('#legend'); if (lg) { const rows = S.colorBy === 'kind' ? KINDS.map(k => [KCOL[k], k]) : S.colorBy === 'tier' ? [['var(--p)', 'core'], ['var(--bc)', 'recall'], ['var(--bcm)', 'archival']] : S.colorBy === 'session' ? SESS.slice(0, 4).map((s, i) => [hue(i), s]) : TOPICS.map((t, i) => [hue(i), t[0]]);
+    lg.innerHTML = `<div class="t-label" style="color:var(--bc)">Color: ${optLabel('colorBy', S.colorBy)}</div>` + rows.map(([c, l]) => `<div class="li"><span class="sw" style="background:${c}"></span><b>${esc(l)}</b></div>`).join('') + `<div class="li" style="margin-top:.125rem"><span class="sw" style="box-shadow:0 0 0 1.5px var(--bc) inset;background:none"></span>Core tier ring</div><div class="li"><span class="sw" style="border:1.5px solid var(--p);background:none"></span>Pinned</div><div class="li">Size: ${optLabel('sizeBy', S.sizeBy)}</div>`; }
+  updateInspector(); updateSelbar();
+  if (S.data === 'loading' || S.data === 'empty') { const w = $('#cvwrap'); }
+}
+function updateSelbar() { const sb = $('#selbar'); if (!sb) return; if (S.sel.size < 2) { sb.hidden = true; return; } sb.hidden = false;
+  sb.innerHTML = `<span class="t-label" style="color:var(--bc)">${S.sel.size} selected</span><button class="btn" data-v="secondary" data-s="xs" data-bulk="pin">${ic('pin', 'i i-sm')}Pin</button><button class="btn" data-v="secondary" data-s="xs" data-bulk="unpin">Unpin</button><button class="btn" data-v="outline" data-tone="danger" data-s="xs" data-bulk="forget">${ic('trash', 'i i-sm')}Forget</button><button class="btn" data-v="ghost" data-s="xs" data-bulk="clear" aria-label="Clear selection">${ic('x', 'i i-sm')}</button>`; }
+function updateInspector() { const el = $('#insp'); if (!el) return; const gm = $('#gmain'); if (gm && gm.dataset.insp !== undefined) gm.dataset.insp = S.sel.size ? 'open' : 'closed';
+  if (!S.sel.size) { el.innerHTML = `<button class="btn insp-close" data-v="ghost" data-s="xs" data-icon aria-label="Close inspector" data-act="close">${ic('x')}</button><div class="empty"><h3 class="t-group" style="color:var(--bc)">Inspector</h3><p>Select a node to see its content, its links and its actions. Shift-click adds more nodes.</p><p class="hint">Keyboard: focus the graph, then use the arrow keys to walk along links.</p></div>`; return; }
+  if (S.sel.size > 1) { const ms = [...S.sel].map(id => MEM.find(m => m.id === id)).filter(Boolean); el.innerHTML = `<div style="display:flex;justify-content:space-between"><h3>${ms.length} memories selected</h3><button class="btn insp-close" data-v="ghost" data-s="xs" data-icon aria-label="Close inspector" data-act="close">${ic('x')}</button></div><p class="hint">Use the bar on the canvas for bulk actions.</p><ul class="conn">${ms.map(m => `<li><button data-focus="${m.id}"><span class="dot" style="width:.5rem;height:.5rem;border-radius:50%;background:${colorOf(m)}"></span><span>${esc(m.subject)}</span><span class="w">${m.tier}</span></button></li>`).join('')}</ul>`; return; }
+  const m = MEM.find(x => x.id === [...S.sel][0]); if (!m) return; const cn = G.edges.filter(e => e.s === m.id || e.t === m.id).map(e => ({ o: MEM.find(x => x.id === (e.s === m.id ? e.t : e.s)), e })).filter(x => x.o).sort((a, b) => b.e.w - a.e.w).slice(0, 7);
+  el.innerHTML = `<div style="display:flex;justify-content:space-between;gap:.5rem"><div><div class="actions" style="margin-bottom:.375rem"><span class="badge" data-tone="${m.tier === 'core' ? 'gold' : 'neutral'}">${m.tier}</span><span class="badge" data-tone="neutral"><span style="width:.5rem;height:.5rem;border-radius:50%;background:${KCOL[m.kind]}"></span>${m.kind}</span>${m.pinned ? `<span class="badge" data-tone="gold">${ic('pin', 'i i-sm')}Pinned</span>` : ''}</div><h3>${esc(m.subject)}</h3></div><button class="btn insp-close" data-v="ghost" data-s="xs" data-icon aria-label="Close inspector" data-act="close">${ic('x')}</button></div>
+    <p class="body">${esc(m.content)}</p>
+    <dl class="dl"><dt>Salience</dt><dd class="num" style="display:flex;gap:.5rem;align-items:center">${m.salience.toFixed(2)}<span class="meter" style="flex:1"><span style="--v:${m.salience * 100}%"></span></span></dd><dt>Hits</dt><dd class="num">${m.hits}</dd><dt>Created</dt><dd>${ago(m.createdAt)}</dd><dt>Last used</dt><dd>${ago(m.lastUsedAt)}</dd><dt>Session</dt><dd class="mono">${m.sessionId}</dd><dt>Workspace</dt><dd class="mono">${m.workspace}</dd></dl>
+    <div><div class="sec-title">Connected (${cn.length})</div><ul class="conn">${cn.map(({ o, e }) => `<li><button data-focus="${o.id}"><span class="badge" data-s="xs" data-tone="neutral">${e.type === 'semantic' ? 'similar' : e.type}</span><span>${esc(o.subject)}</span><span class="w num">${e.type === 'semantic' ? e.w.toFixed(2) : ''}</span></button></li>`).join('') || '<li class="hint">No visible links with the current filters.</li>'}</ul></div>
+    <div class="actions"><button class="btn" data-v="${m.pinned ? 'secondary' : 'primary'}" data-s="sm" data-act="pin">${ic('pin', 'i i-sm')}${m.pinned ? 'Unpin' : 'Pin'}</button><button class="btn" data-v="outline" data-s="sm" data-act="session">${ic('ext', 'i i-sm')}Open source session</button><button class="btn" data-v="ghost" data-tone="danger" data-s="sm" data-act="forget">${ic('trash', 'i i-sm')}Forget</button></div>
+    ${S.confirm ? `<div class="confirm" role="alertdialog" aria-label="Confirm forget"><span style="flex:1">Forget this memory? This cannot be undone.</span><button class="btn" data-v="danger" data-s="xs" data-act="forget-yes">Forget</button><button class="btn" data-v="ghost" data-s="xs" data-act="forget-no">Cancel</button></div>` : ''}`; }
+function mutate(ids, kind) { if (kind === 'pin' || kind === 'unpin') ids.forEach(id => { const m = MEM.find(x => x.id === id); if (m) m.pinned = kind === 'pin'; });
+  if (kind === 'forget') { MEM = MEM.filter(m => !ids.includes(m.id)); buildEdges(); G.nodes = G.nodes.filter(n => !ids.includes(n.m.id)); G.map = new Map(G.nodes.map(n => [n.m.id, n])); ids.forEach(id => S.sel.delete(id)); }
+  S.confirm = false; if (S.mview === 'graph') { applyFilters(kind === 'forget'); } else renderList(); toast(kind === 'forget' ? `Forgot ${ids.length} ${ids.length === 1 ? 'memory' : 'memories'}.` : `${kind === 'pin' ? 'Pinned' : 'Unpinned'} ${ids.length}.`); }
+
+/* ============ List view ============ */
+function renderList() { const box = $('#ltable'); if (!box) return; let rows = filtered().filter(m => !S.listQ || (m.subject + m.content).toLowerCase().includes(S.listQ.toLowerCase()));
+  rows.sort((a, b) => S.sort === 'hits' ? b.hits - a.hits : S.sort === 'updated' ? b.updatedAt - a.updatedAt : b.salience - a.salience); const P = 12, pages = Math.max(1, Math.ceil(rows.length / P)); S.page = Math.min(S.page, pages - 1);
+  const ml = $('#matchline'); if (ml) ml.textContent = `${rows.length} of ${MEM.length} memories match`;
+  box.innerHTML = `<table class="tbl"><thead><tr><th style="width:2rem"><span class="sr">Select</span></th><th>Memory</th><th>Tier</th><th>Kind</th><th><button data-sort="salience">Salience${S.sort === 'salience' ? ' v' : ''}</button></th><th><button data-sort="hits">Hits${S.sort === 'hits' ? ' v' : ''}</button></th><th><button data-sort="updated">Updated${S.sort === 'updated' ? ' v' : ''}</button></th><th></th></tr></thead><tbody>${rows.slice(S.page * P, S.page * P + P).map(m => `<tr data-id="${m.id}" data-sel="${S.sel.has(m.id) ? 1 : 0}" tabindex="0"><td><input type="checkbox" class="cb" aria-label="Select ${esc(m.subject)}" ${S.sel.has(m.id) ? 'checked' : ''}></td><td><div class="ttl">${m.pinned ? ic('pin', 'i i-sm') + ' ' : ''}${esc(m.subject)}</div><div class="sub">${esc(m.content)}</div></td><td><span class="badge" data-s="xs" data-tone="${m.tier === 'core' ? 'gold' : 'neutral'}">${m.tier}</span></td><td><span class="chip" style="height:1.25rem;cursor:default"><span class="dot" style="--c:${KCOL[m.kind]}"></span>${m.kind}</span></td><td class="num" style="width:7rem"><div style="display:flex;gap:.5rem;align-items:center">${m.salience.toFixed(2)}<span class="meter" style="flex:1"><span style="--v:${m.salience * 100}%"></span></span></div></td><td class="num">${m.hits}</td><td>${ago(m.updatedAt)}</td><td class="act"><button class="btn" data-v="ghost" data-s="xs" data-icon aria-label="${m.pinned ? 'Unpin' : 'Pin'} ${esc(m.subject)}" data-rowact="pin">${ic('pin', 'i i-sm')}</button><button class="btn" data-v="ghost" data-s="xs" data-tone="danger" data-icon aria-label="Forget ${esc(m.subject)}" data-rowact="forget">${ic('trash', 'i i-sm')}</button></td></tr>`).join('') || `<tr><td colspan="8"><div class="stateblock"><h3>No memories match</h3></div></td></tr>`}</tbody></table>
+  <div class="pager"><span>${rows.length ? S.page * P + 1 : 0} to ${Math.min(rows.length, S.page * P + P)} of ${rows.length}</span><span class="actions"><button class="btn" data-v="outline" data-s="xs" data-page="-1" ${S.page === 0 ? 'disabled' : ''}>Prev</button><button class="btn" data-v="outline" data-s="xs" data-page="1" ${S.page >= pages - 1 ? 'disabled' : ''}>Next</button></span></div>`;
+  updateInspector(); }
+
+/* ============ Memory bindings ============ */
+function bindMemory() {
+  const p = $('#panel');
+  $('#pause').onchange = e => { S.paused = !e.target.checked; renderPanel(); };
+  $$('[data-view]', p).forEach(b => b.onclick = () => { S.mview = b.dataset.view; renderPanel(); });
+  const ah = $('#allws'); if (ah) ah.onclick = () => { S.data = 'loaded'; S.scope = 'all'; $('#p-state').value = 'loaded'; renderPanel(); };
+  if (S.data === 'nows') return;
+  if (S.mview === 'graph') bindGraphControls(); else if (S.mview === 'list') bindList();
+  if (S.mview !== 'graph' && S.mview !== 'list') { const gh = $$('[data-sel]', p); }
+  updateInspectorEvents();
+}
+function bindGraphControls() {
+  const p = $('#panel');
+  if (S.data === 'loading') { $('#cvwrap').innerHTML = `<div class="stateblock" aria-busy="true"><div style="display:grid;grid-template-columns:repeat(6,1fr);gap:1.25rem;width:60%">${Array.from({ length: 18 }, (_, i) => `<div class="skel" style="width:${14 + (i * 7) % 22}px;height:${14 + (i * 7) % 22}px;border-radius:50%;justify-self:center"></div>`).join('')}</div><p>Loading memory graph</p></div>`; updateGraphUI(); return; }
+  if (S.data === 'empty') { $('#cvwrap').innerHTML = `<div class="stateblock">${ic('brain')}<h3>No memories yet</h3><p>Thoth captures facts and decisions as you chat. Keep working and they will appear here as a graph.</p></div>`; updateGraphUI(); return; }
+  startGraph();
+  $$('[data-chip]', p).forEach(b => b.onclick = () => { const set = S[b.dataset.chip], v = b.dataset.v; set.has(v) ? set.delete(v) : set.add(v); b.setAttribute('aria-pressed', set.has(v)); applyFilters(true); });
+  $('#pinnedOnly').onchange = e => { S.pinned = e.target.checked; applyFilters(true); };
+  $$('[data-edge]', p).forEach(i => i.onchange = () => { S.edge[i.dataset.edge] = i.checked; applyFilters(true); });
+  $('#thr').oninput = e => { S.thr = +e.target.value; $('#thrv').textContent = S.thr.toFixed(2); applyFilters(false); };
+  $('#labels').onchange = e => { S.labels = e.target.checked; drawAll(); };
+  $('#freeze').onchange = e => { S.freeze = e.target.checked; toast(S.freeze ? 'Layout frozen.' : 'Layout running.'); };
+  $('#relayout').onclick = () => { G.nodes.forEach(n => { n.vx += (rnd() - .5) * 8; n.vy += (rnd() - .5) * 8; }); G.alpha = 1; S.freeze = false; $('#freeze').checked = false; toast('Layout re-run.'); };
+  $$('[data-mode]', p).forEach(b => b.onclick = () => { S.cluster = b.dataset.mode === 'clusters'; $$('[data-mode]', p).forEach(x => x.setAttribute('aria-checked', x === b)); G.alpha = 1; G.dirty = true; });
+  const slide = () => { let a = +$('#tfrom').value, b = +$('#tto').value; if (a > b - 3) { if (document.activeElement === $('#tfrom')) a = b - 3; else b = a + 3; } S.from = a; S.to = b; $('#tfrom').value = a; $('#tto').value = b; applyFilters(false); };
+  $('#tfrom').oninput = slide; $('#tto').oninput = slide;
+  $('#gsearch').onkeydown = e => { if (e.key !== 'Enter') return; const q = e.target.value.trim().toLowerCase(); S.q = ''; if (!q) return; const m = G.vis.map(n => n.m).filter(m => (m.subject + ' ' + m.content).toLowerCase().includes(q)).sort((a, b) => b.salience - a.salience)[0]; if (m) { select(m.id); focusNode(m.id); toast(`Focused: ${m.subject}`); } else toast('No visible memory matches that search.'); };
+  $('#railbtn').onclick = () => { const g = $('#gmain'); g.dataset.rail = g.dataset.rail === 'open' ? 'closed' : 'open'; };
+  const gh = $('#gohealth'); if (gh) gh.onclick = () => { S.mview = 'health'; renderPanel(); }; const rf = $('#resetf'); if (rf) rf.onclick = () => { S.tiers = new Set(TIERS); S.kinds = new Set(KINDS); S.pinned = false; S.from = 0; S.to = 100; S.session = 'all'; renderPanel(); };
+}
+function updateInspectorEvents() {
+  const p = $('#panel'); if (p._ev) return; p._ev = 1;
+  p.addEventListener('click', e => {
+    const t = e.target.closest('[data-act],[data-bulk],[data-focus],[data-rowact],[data-sort],[data-page]'); if (!t) return;
+    const id = S.sel.size === 1 ? [...S.sel][0] : null;
+    if (t.dataset.act === 'close') { select(null); }
+    if (t.dataset.act === 'pin' && id) mutate([id], MEM.find(m => m.id === id).pinned ? 'unpin' : 'pin');
+    if (t.dataset.act === 'session' && id) toast('Opening source session ' + MEM.find(m => m.id === id).sessionId);
+    if (t.dataset.act === 'forget') { S.confirm = true; updateInspector(); }
+    if (t.dataset.act === 'forget-no') { S.confirm = false; updateInspector(); }
+    if (t.dataset.act === 'forget-yes' && id) mutate([id], 'forget');
+    if (t.dataset.bulk) { const ids = [...S.sel]; if (t.dataset.bulk === 'clear') select(null); else mutate(ids, t.dataset.bulk); }
+    if (t.dataset.focus) { select(t.dataset.focus); if (S.mview === 'graph') focusNode(t.dataset.focus, false); }
+    if (t.dataset.rowact) { const rid = t.closest('tr').dataset.id; if (t.dataset.rowact === 'forget') { S.sel.clear(); S.sel.add(rid); S.confirm = true; renderList(); } else mutate([rid], MEM.find(m => m.id === rid).pinned ? 'unpin' : 'pin'); }
+    if (t.dataset.sort) { S.sort = t.dataset.sort; renderList(); }
+    if (t.dataset.page) { S.page += +t.dataset.page; renderList(); }
+  });
+}
+function bindList() {
+  renderList();
+  $('#lsearch').oninput = e => { S.listQ = e.target.value; S.page = 0; renderList(); };
+  $('#lclear').onclick = () => { S.sel.clear(); renderList(); };
+  $('#ltable').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (!tr || e.target.closest('[data-rowact]')) return; const id = tr.dataset.id; if (e.target.classList.contains('cb')) { S.sel.has(id) ? S.sel.delete(id) : S.sel.add(id); } else { S.sel.clear(); S.sel.add(id); } S.confirm = false; renderList(); });
+  $('#gmain').dataset.insp = 'open';
+}
+
+/* ============ SKILLS ============ */
+const SK = [
+  ['code-reviewer', 'agent', 'authored', 0, 41, .93, 3, 6, 'Workspace file'], ['frontend-developer', 'agent', 'diverged', 1, 58, .88, 5, 8, 'Setup wizard'], ['backend-developer', 'agent', 'clone', 0, 33, .85, 2, 2, 'Plugin: ptah-core'],
+  ['senior-tester', 'agent', 'diverged', 1, 4, null, 0, 0, 'Setup wizard'], ['ui-ux-designer', 'agent', 'synth', 0, 12, .79, 1, 1, 'Workspace file'], ['software-architect', 'agent', 'authored', 0, 27, .9, 4, 4, 'Workspace file'],
+  ['orchestration', 'skill', 'authored', 0, 73, .94, 6, 9, 'Plugin: ptah-core'], ['nx-workspace-architect', 'skill', 'clone', 0, 19, .84, 2, 2, 'skills.sh: nx'], ['angular-frontend-patterns', 'skill', 'diverged', 1, 25, .81, 3, 5, 'Plugin: ptah-angular'], ['tribunal', 'skill', 'synth', 0, 3, null, 0, 0, 'Workspace file'],
+  ['review-code', 'command', 'authored', 0, 22, .91, 1, 2, 'Plugin: ptah-core'], ['orchestrate', 'command', 'clone', 0, 0, null, 0, 0, 'Plugin: ptah-core'],
+].map(([slug, kind, status, div, inv, ok, hist, ago_, prov]) => ({ slug, kind, status, div: !!div, inv, ok, hist, enh: ago_, prov, min: 10 }));
+const PROVS = ['claude', 'codex', 'copilot', 'cursor', 'opencode'];
+const SYNC = { claude: 'in sync', codex: 'in sync', copilot: 'edited', cursor: 'not synced', opencode: 'unsupported' };
+const SYNC_T = { 'in sync': 'ok', edited: 'warn', 'not synced': 'neutral', unsupported: 'neutral' };
+function skillsHTML() {
+  const k = S.sk; const rows = SK.filter(s => s.kind === k.tab && (k.filter === 'all' || (k.filter === 'diverged' && s.div) || (k.filter === 'ready' && s.inv >= s.min) || (k.filter === 'unused' && !s.inv)) && (!k.q || s.slug.includes(k.q.toLowerCase())));
+  rows.sort((a, b) => k.sort === 'used' ? b.inv - a.inv : k.sort === 'success' ? (b.ok || 0) - (a.ok || 0) : k.sort === 'enhanced' ? a.enh - b.enh : a.slug.localeCompare(b.slug));
+  const cnt = kd => SK.filter(s => s.kind === kd).length, divN = SK.filter(s => s.div && s.kind === k.tab).length, tabs = [['skill', 'Skills'], ['agent', 'Agents'], ['command', 'Commands'], ['care', 'Maintenance']];
+  const body = k.tab === 'care' ? careHTML() : `<div class="toolbar"><div class="field" style="width:15rem"><div class="field-box compact"><span class="lead">${ic('search')}</span><input type="search" id="skq" placeholder="Search ${k.tab}s" aria-label="Search library" value="${esc(k.q)}"></div></div>
+      <div class="row" role="group" aria-label="Status filter" style="display:flex;gap:.375rem">${[['all', 'All'], ['diverged', 'Diverged'], ['ready', 'Ready to enhance'], ['unused', 'Never used']].map(([v, l]) => `<button class="chip" data-skf="${v}" aria-pressed="${k.filter === v}">${l}</button>`).join('')}</div>
+      <span class="sp"></span>${selHTML('sk:sort', 'Sort by', k.sort, SK_OPTS['sk:sort']).replace('data-sel="sk:sort"', 'data-sel="sk:sort" style="width:10rem"')}
+      <button class="btn" data-v="outline" data-tone="warning" data-s="sm" ${divN ? '' : 'disabled'} title="Rebases every diverged ${k.tab} that has an upstream. Role agents are skipped.">Rebase all diverged (${divN})</button>
+      <button class="btn" data-v="ghost" data-s="sm">${ic('refresh')}Refresh</button>${k.tab === 'agent' ? `<button class="btn" data-v="secondary" data-s="sm">Sync provider copies</button>` : ''}</div>
+    ${k.tab === 'agent' ? `<p class="hint">Each agent shows the state of its copy for every provider.</p>` : ''}<p class="hint">Plugin skills and agents are managed in <a href="#" class="btn" data-v="link">Plugin settings</a>.</p>
+    <div class="listwrap" style="padding:0 .75rem .5rem">${rows.length ? `<table class="tbl"><thead><tr><th>Name</th><th>Status</th><th class="num">Runs</th><th>Success</th><th>Last enhanced</th>${k.tab === 'agent' ? '<th>Provider copies</th>' : ''}<th></th></tr></thead><tbody>${rows.map(s => `<tr tabindex="0" data-slug="${s.slug}"><td><div class="ttl mono">${s.slug}</div><div class="sub">${s.prov}</div></td>
+        <td><span class="status" data-ink="${s.status === 'diverged' ? 'need' : s.status === 'authored' ? 'run' : 'idle'}">${s.status}</span></td><td class="num">${s.inv || '<span class="hint">never</span>'}</td>
+        <td style="width:8rem">${s.ok == null ? '<span class="hint">No grade</span>' : `<div style="display:flex;gap:.5rem;align-items:center"><span class="num">${Math.round(s.ok * 100)}%</span><span class="meter" style="flex:1"><span style="--v:${s.ok * 100}%;--ink:var(--state-ink-done)"></span></span></div>`}</td>
+        <td>${s.hist ? s.enh + ' d ago' : '<span class="hint">never</span>'}</td>
+        ${k.tab === 'agent' ? `<td><div class="provchips">${PROVS.map(p => `<span class="badge" data-s="xs" data-tone="${SYNC_T[SYNC[p]]}" title="${p}: ${SYNC[p]}">${p[0].toUpperCase()}</span>`).join('')}</div></td>` : ''}
+        <td class="act"><button class="btn" data-v="outline" data-s="xs" ${s.inv < s.min || k.paused ? 'disabled' : ''} data-skact="enh" title="${s.inv < s.min ? `Needs ${s.min} recorded runs before an enhancement can be proposed. This one has ${s.inv}.` : 'Propose an improvement from recorded usage. You review the diff before anything is written.'}">${ic('spark', 'i i-sm')}Enhance</button> <button class="btn" data-v="ghost" data-s="xs" data-skact="open">Details</button></td></tr>`).join('')}</tbody></table>`
+      : `<div class="stateblock"><h3>${k.filter === 'all' && !k.q ? `No ${k.tab}s in your library yet` : 'Nothing matches'}</h3><p>${k.tab === 'agent' ? 'Agents arrive from the setup wizard, from files in .claude/agents, or from plugins that ship agents.' : 'They arrive when you install a plugin or accept a recommendation.'}</p>${k.tab === 'agent' && k.filter === 'all' ? '<button class="btn" data-v="primary" data-s="sm">Open setup wizard</button>' : ''}</div>`}</div>`;
+  return `<div class="phead"><div><h1 class="t-page">Skills</h1><p>Manage your Skills, Agents and Commands Library.</p></div>
+      <div class="tgrp">${tg('skpause', k.paused ? 'Skills is paused' : 'Skills is on', !k.paused)}${tg('sktel', 'Skill telemetry', k.telemetry)}</div></div>
+    ${k.paused ? `<div class="alert" data-tone="warn">${ic('warn')}<div class="txt"><strong>Skills is paused.</strong> Capture, background processing and Enhance now are off. Saved skills are still used in chats. Telemetry ${k.telemetry ? 'still records skill use' : 'is off too'}.</div></div>` : ''}
+    <ol class="band" style="grid-template-columns:repeat(4,minmax(0,1fr))" aria-label="Library summary">${[['Skills', cnt('skill'), 'var(--edge-strong)'], ['Agents', cnt('agent'), 'var(--edge-strong)'], ['Commands', cnt('command'), 'var(--edge-strong)'], ['Diverged', SK.filter(s => s.div).length, 'var(--state-ink-need)']].map(([l, v, c]) => `<li style="--ink:${c}"><div class="bar"></div><div class="v num">${v}</div><div class="l">${l}</div></li>`).join('')}</ol>
+    <div class="viewbar"><div class="tabs" role="tablist" aria-label="Library sections">${tabs.map(([v, l]) => `<button role="tab" aria-selected="${k.tab === v}" data-sktab="${v}">${l}${v !== 'care' ? `<span class="ct num">${cnt(v)}</span>` : ''}</button>`).join('')}</div></div>
+    <div class="pane">${body}</div>${k.open ? drawerHTML(SK.find(s => s.slug === k.open)) : ''}`;
+}
+function careHTML() { return `<div class="listwrap pane">
+  <section class="sect"><header><div><h2 class="t-section">Orchestration specs</h2><p class="num">14 specs, 3 stale, 2 waiting to harvest</p></div><div class="actions"><button class="btn" data-v="secondary" data-s="sm">Harvest now</button><button class="btn" data-v="outline" data-s="sm">Clear stale (3)</button></div></header>
+    <details><summary class="hint" style="cursor:pointer">How this works</summary><p class="hint" style="margin-top:.375rem">Harvest reads finished task folders and records skill evidence. Clear stale archives harvested specs older than 7 days.</p></details></section>
+  <section class="sect"><header><div><h2 class="t-section">Quarantined agents <span class="badge" data-s="xs" data-tone="warn">2</span></h2><p>Agents Ptah set aside because a source file changed.</p></div></header>
+    ${[['legacy-reviewer', 'May 4', 'quarantined'], ['old-planner', 'Apr 12', 'restored, not yet synced']].map(([s, d, st]) => `<div class="srow"><div><span class="mono ttl">${s}</span> <span class="hint">${d}</span> <span class="badge" data-s="xs" data-tone="${st === 'quarantined' ? 'warn' : 'info'}">${st}</span></div><button class="btn" data-v="outline" data-s="xs">${st === 'quarantined' ? 'Restore' : 'Finish restore'}</button></div>`).join('')}</section>
+  <section class="sect"><header><div><h2 class="t-section">Phase scorecards</h2><p>How phase roles perform in graded runs.</p></div></header>
+    <table class="tbl"><thead><tr><th>Phase</th><th class="num">Graded</th><th class="num">Passed</th><th>Rate</th></tr></thead><tbody>${[['implement', 31, 27], ['review', 24, 22], ['design', 9, 7]].map(([p, g, ps]) => `<tr><td class="ttl">${p}</td><td class="num">${g}</td><td class="num">${ps}</td><td style="width:9rem"><div style="display:flex;gap:.5rem;align-items:center"><span class="num">${Math.round(ps / g * 100)}%</span><span class="meter" style="flex:1"><span style="--v:${ps / g * 100}%;--ink:var(--state-ink-done)"></span></span></div></td></tr>`).join('')}</tbody></table></section></div>`; }
+function drawerHTML(s) { const ed = S.sk.editing;
+  return `<div class="drawer-scrim" data-skact="close"></div><aside class="drawer" role="dialog" aria-label="${s.kind} details: ${s.slug}"><header><div><h2 class="t-section mono">${s.slug}</h2><div class="actions" style="margin-top:.25rem"><span class="badge" data-s="xs" data-tone="neutral">${s.prov}</span><span class="status" data-ink="${s.div ? 'need' : 'run'}">${s.status}</span><span class="hint">${s.kind}</span></div></div><button class="btn" data-v="ghost" data-icon data-s="sm" data-skact="close" aria-label="Close">${ic('x')}</button></header>
+  <div class="scroll"><dl class="dl"><dt>Runs</dt><dd class="num">${s.inv || 'Never invoked yet'}</dd><dt>Success</dt><dd>${s.ok == null ? 'No grade' : Math.round(s.ok * 100) + '%'}</dd><dt>Last enhanced</dt><dd>${s.hist ? s.enh + ' d ago' : 'never'}</dd><dt>History</dt><dd>${s.hist} snapshots</dd></dl>
+  <section><div class="sec-title">Actions</div><div class="actions"><button class="btn" data-v="primary" data-s="sm" ${s.inv < s.min ? 'disabled' : ''}>${ic('spark', 'i i-sm')}Enhance now</button>${s.inv < s.min ? `<span class="hint" style="align-self:center">Needs ${s.min} recorded runs. This one has ${s.inv}.</span>` : ''}</div></section>
+  ${s.div ? `<section><div class="alert" data-tone="warn">${ic('warn')}<div class="txt"><strong>Upstream changed since this copy was made.</strong><div class="hint" style="margin-top:.25rem">Origin: ${s.prov}. Rebase replaces your copy and snapshots the old body to history first. Keep mine changes no file and stops further notices for this change.</div><div class="actions" style="margin-top:.5rem"><button class="btn" data-v="outline" data-tone="warning" data-s="xs">Rebase to upstream</button><button class="btn" data-v="ghost" data-s="xs">Keep mine</button></div></div></div></section>` : ''}
+  ${s.kind === 'agent' ? `<section><div class="sec-title">Model per provider</div><table class="tbl"><thead><tr><th>Provider</th><th>Model</th><th>Copy</th><th></th></tr></thead><tbody>${PROVS.map(p => `<tr><td>${p}</td><td class="mono">${p === 'claude' ? 'opus' : p === 'codex' ? 'gpt-5' : '<span class="hint">inherits: CLI default</span>'}</td><td><span class="badge" data-s="xs" data-tone="${SYNC_T[SYNC[p]]}">${SYNC[p]}</span></td><td class="act"><button class="btn" data-v="ghost" data-s="xs" ${p === 'opencode' ? 'disabled' : ''}>Edit</button></td></tr>`).join('')}</tbody></table><p class="hint" style="margin-top:.375rem">Saving updates every Ptah-managed file in this workspace for all detected providers.</p>
+  <div class="field" style="margin-top:.5rem"><div class="field-box"><span class="field-label">Scorecard</span><span style="padding:0 .75rem">${s.ok == null ? 'No graded runs yet' : Math.round(s.ok * 100) + '% ok, 9 graded runs'}</span></div></div></section>` : ''}
+  <section><div style="display:flex;justify-content:space-between"><div class="sec-title">Body</div>${ed ? '' : `<button class="btn" data-v="outline" data-s="xs" data-skact="edit">Edit</button>`}</div>${ed ? `<textarea style="width:100%;min-height:9rem;background:var(--fill-input);border:1px solid var(--edge);border-radius:var(--r-inner);padding:.625rem;font-family:var(--mono);font-size:.8125rem" aria-label="Body">---\nname: ${s.slug}\n---\nYou are a careful ${s.slug}.</textarea><div class="actions" style="margin-top:.5rem"><button class="btn" data-v="primary" data-s="sm" data-skact="save">Save</button><button class="btn" data-v="ghost" data-s="sm" data-skact="canceledit">Cancel</button></div>` : `<pre>---\nname: ${s.slug}\n---\nYou are a careful ${s.slug}. Follow the repository rules.</pre>`}</section>
+  <section><div class="sec-title">History (${s.hist})</div>${s.hist ? `<ol class="hist">${Array.from({ length: Math.min(3, s.hist) }, (_, i) => `<li><span>${s.enh + i * 6} days ago</span><span class="actions"><button class="btn" data-v="ghost" data-s="xs">Diff</button><button class="btn" data-v="outline" data-s="xs">Revert to this</button></span></li>`).join('')}</ol>` : '<p class="hint">No snapshots yet. One is written every time this entry is enhanced or rebased.</p>'}</section></div></aside>`; }
+function bindSkills() { const p = $('#panel'), k = S.sk;
+  $('#skpause').onchange = e => { k.paused = !e.target.checked; renderPanel(); }; $('#sktel').onchange = e => { k.telemetry = e.target.checked; renderPanel(); };
+  $$('[data-sktab]', p).forEach(b => b.onclick = () => { k.tab = b.dataset.sktab; k.open = null; renderPanel(); });
+  $$('[data-skf]', p).forEach(b => b.onclick = () => { k.filter = b.dataset.skf; renderPanel(); });
+  const q = $('#skq'); if (q) q.oninput = e => { k.q = e.target.value; const pos = e.target.selectionStart; renderPanel(); const n = $('#skq'); n.focus(); n.setSelectionRange(pos, pos); };
+  p.onclick = e => { const t = e.target.closest('[data-skact]'); if (!t) return; const a = t.dataset.skact, tr = t.closest('tr');
+    if (a === 'open') k.open = tr.dataset.slug; if (a === 'close') { k.open = null; k.editing = false; } if (a === 'edit') k.editing = true; if (a === 'canceledit' || a === 'save') k.editing = false; if (a === 'enh') k.open = tr.dataset.slug;
+    renderPanel(); };
+  $$('tr[data-slug]', p).forEach(tr => tr.onkeydown = e => { if (e.key === 'Enter') { k.open = tr.dataset.slug; renderPanel(); } });
+}
+
+/* ============ Prototype toolbar ============ */
+function seg(id, fn) { $$(`#${id} button`).forEach(b => b.onclick = () => { $$(`#${id} button`).forEach(x => x.setAttribute('aria-pressed', x === b)); fn(b.dataset.v); }); }
+seg('p-theme', v => { document.documentElement.dataset.theme = v; renderPanel(); });
+seg('p-width', v => { S.width = +v; $('#app').style.setProperty('--w', v + 'px'); setTimeout(() => { renderPanel(); }, 30); });
+seg('p-panel', v => { S.panel = v; sync(); });
+$('#p-state').onchange = e => { S.data = e.target.value; renderPanel(); };
+function sync() { $$('#p-panel button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === S.panel)); renderPanel(); }
+const qp = new URLSearchParams(location.search);
+if (qp.get('theme')) { document.documentElement.dataset.theme = qp.get('theme'); $$('#p-theme button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === qp.get('theme'))); }
+if (qp.get('width')) { S.width = +qp.get('width'); $('#app').style.setProperty('--w', S.width + 'px'); $$('#p-width button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === qp.get('width'))); }
+if (qp.get('panel')) S.panel = qp.get('panel'); if (qp.get('view')) S.mview = qp.get('view'); if (qp.get('state')) { S.data = qp.get('state'); $('#p-state').value = S.data; }
+if (qp.get('tab')) S.sk.tab = qp.get('tab'); if (qp.get('open')) S.sk.open = qp.get('open'); if (qp.get('cluster')) S.cluster = true;
+if (qp.get('select')) { S.sel.add(qp.get('select')); }
+/* A container query cannot style its own container, so the frame gets a flag. */
+const compact = () => $('#app').toggleAttribute('data-compact', $('#app').clientWidth < 1024);
+new ResizeObserver(compact).observe($('#app')); compact();
+if (qp.get('chrome') === 'off') { const t = document.querySelector('.proto'); if (t) t.style.display = 'none'; }
+window.__thoth = { S, G, select, focusNode, fit };
+sync();
+if (qp.get('select')) setTimeout(() => { focusNode(qp.get('select'), false); }, 600);
+})();
+</script>
+</body>
+</html>
