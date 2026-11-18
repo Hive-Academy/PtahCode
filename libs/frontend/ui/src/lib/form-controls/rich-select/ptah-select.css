@@ -133,9 +133,14 @@
   color: var(--ptah-field-placeholder);
 }
 
-/* In a floating field the label takes the place of the placeholder at rest. */
+/* In a floating field the label takes the place of the placeholder at rest.
+   Focus floats the label (ptah-field.css) and shows the placeholder. */
 .ptah-field[data-appearance='floating'] .ptah-select:not([data-ptah-filled]) .ptah-select__placeholder {
   visibility: hidden;
+}
+
+.ptah-field[data-appearance='floating'] .ptah-field__box:focus-within .ptah-select:not([data-ptah-filled]) .ptah-select__placeholder {
+  visibility: visible;
 }
 
 .ptah-select__chevron,
@@ -248,6 +253,8 @@
   display: flex;
   flex-direction: column;
   max-height: var(--ptah-select-panel-max-h);
+  /* A long option must not push the panel past the viewport edge. */
+  max-width: min(32rem, calc(100vw - var(--ptah-space-4)));
   padding: var(--ptah-select-panel-pad);
   border: var(--ptah-border-width) solid var(--ptah-select-panel-edge);
   border-radius: var(--ptah-field-radius);
@@ -362,20 +369,18 @@ li + li > .ptah-select__group {
   min-width: 0;
 }
 
+/* Long option text wraps in the menu (the trigger truncates it and shows the
+   full text in its title). */
 .ptah-select__label {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .ptah-select__description {
-  overflow: hidden;
   color: var(--ptah-field-message-fg);
   font-size: var(--ptah-text-label-size);
   line-height: var(--ptah-text-label-leading);
   font-weight: var(--ptah-text-body-weight);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .ptah-select__check {

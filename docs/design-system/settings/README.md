@@ -26,6 +26,19 @@ the apply plan and the screens.
 - The "Field appearance (F3)" rule of `settings-apply-plan.md` (`appearance="stacked"` for
   fields that always have a value) is replaced by the floating label rule above.
 
+### How the shared controls implement these rules
+
+- `ptah-select` (`@ptah-extension/ui`) is the documented dropdown. Its menu is a token
+  listbox placed by Floating UI, never the operating system menu.
+- With a floating label: put `ptah-select` in `ptah-field label="..."`.
+- Compact, without a floating label (a `ptah-setting-row` or a table cell): use
+  `ptah-select` without `ptah-field`, with `size="xs"` or `size="sm"`, and
+  `labelledBy="<id of the row title or column header>"` or `label="..."`.
+- Text fields: `ptah-field` floats the label only on focus or with a value. A `placeholder`
+  is transparent at rest and shows on focus.
+- `select[ptahSelect]` still compiles, but it opens the native menu. Do not use it in new
+  Settings code.
+
 ## Source
 
 The files were copied from the design task `TASK_2026_2196_0f09` (branch

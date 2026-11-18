@@ -141,15 +141,16 @@
   top: calc(var(--ptah-field-textarea-pad-y) + var(--ptah-text-body-leading) / 2);
 }
 
-/* Floated: focus, a value, autofill, a real placeholder, a native select,
-   or an open or filled rich select. The label is centered on the top border
-   line, small, and has an opaque fill that cuts the border. Set
+/* Floated: focus, a value, autofill, a native select, or an open or filled
+   rich select. A real placeholder does not hold the label up (user decision
+   of 2026-11-17, docs/design-system/settings/README.md): the placeholder is
+   transparent at rest and shows only on focus. The label is centered on the
+   top border line, small, and has an opaque fill that cuts the border. Set
    --ptah-field-notch-bg to the surface under the field (see ptah-tokens.css). */
 .ptah-field[data-appearance='floating']:is(
     :focus-within,
     :has(.ptah-field__body :is(input, textarea):not(:placeholder-shown)),
     :has(.ptah-field__body :is(input, textarea):autofill),
-    :has(.ptah-field__body :is(input, textarea)[placeholder]:not([placeholder=' '])),
     :has(.ptah-field__body select),
     :has(.ptah-field__body button[ptahFieldTrigger]),
     :has(.ptah-field__body .ptah-select:is([data-open], [data-ptah-filled]))
@@ -167,6 +168,39 @@
    focus in the open panel is still focus within the box. */
 .ptah-field__box:focus-within .ptah-field__label {
   color: var(--ptah-field-label-fg-active);
+}
+
+/* True floating label: at rest the label takes the place of the placeholder,
+   so the placeholder is transparent. Focus floats the label and shows the
+   placeholder. The id in :is() beats the placeholder color of
+   ptah-form-controls.css without !important. */
+.ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder {
+  color: transparent;
+  transition: color var(--ptah-duration-base) var(--ptah-ease-standard);
+}
+
+.ptah-field[data-appearance='floating'] .ptah-field__box:focus-within :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder {
+  color: var(--ptah-field-placeholder);
+}
+
+/* A native select whose chosen option has an empty value (a "Select..."
+   option) is empty: without focus the label rests and the option text is
+   hidden. These rules have more weight than the floated rules above. */
+.ptah-field[data-appearance='floating']:not(:focus-within):has(.ptah-field__body select option[value='']:checked) .ptah-field__label {
+  top: 50%;
+  background-color: transparent;
+  font-size: var(--ptah-text-body-size);
+  line-height: var(--ptah-text-body-leading);
+  font-weight: var(--ptah-text-body-weight);
+}
+
+.ptah-field[data-size='sm'][data-appearance='floating']:not(:focus-within):has(.ptah-field__body select option[value='']:checked) .ptah-field__label {
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+}
+
+.ptah-field[data-appearance='floating']:not(:focus-within) :is(.ptah-field__body, #ptah-field) select:has(option[value='']:checked):is(.select, #ptah-control) {
+  color: transparent;
 }
 
 .ptah-field__required {
@@ -327,6 +361,10 @@
   }
 
   .ptah-field[data-appearance='floating'] .ptah-field__label {
+    transition: none;
+  }
+
+  .ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder {
     transition: none;
   }
 }

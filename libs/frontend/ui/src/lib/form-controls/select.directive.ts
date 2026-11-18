@@ -7,6 +7,9 @@ import { PtahTextControlBase } from './text-control.base';
  * events. Layout classes (width, margin, padding for an icon) stay with the
  * consumer. Look: ptah-form-controls.css.
  * `size` is the control height (xs, sm, md), not the native `size` attribute.
+ *
+ * Legacy: it opens the native menu. Use `ptah-select` for new code (designed
+ * menu); Settings must use `ptah-select` (docs/design-system/settings/README.md).
  */
 @Directive({
   selector: 'select[ptahSelect]',

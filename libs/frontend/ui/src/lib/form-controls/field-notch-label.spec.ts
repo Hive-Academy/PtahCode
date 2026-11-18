@@ -51,18 +51,45 @@ describe('ptah-field notch label', () => {
     );
   });
 
-  it('floats on focus, a value, autofill, a real placeholder, a native select and an open or filled ptah-select', () => {
+  it('floats on focus, a value, autofill, a native select and an open or filled ptah-select', () => {
     const { selector } = floatedRule();
     for (const state of [
       ':focus-within',
       ':not(:placeholder-shown)',
       ':autofill',
-      "[placeholder]:not([placeholder=' '])",
       ':has(.ptah-field__body select)',
       '.ptah-select:is([data-open], [data-ptah-filled])',
     ]) {
       expect(selector).toContain(state);
     }
+  });
+
+  it('is a true floating label: a real placeholder does not hold the label up (user decision 2026-11-17)', () => {
+    const floated = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(
+      ([, prelude, body]) =>
+        prelude.includes('.ptah-field__label') && body.includes('font-size: var(--ptah-field-label-float-size)'),
+    );
+    expect(floated.length).toBeGreaterThan(0);
+    for (const [, prelude] of floated) expect(prelude).not.toContain('[placeholder');
+    const placeholder = `${FLOATING} :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder`;
+    expect(exact(placeholder)).toContain('color: transparent;');
+    expect(
+      exact(
+        `${FLOATING} .ptah-field__box:focus-within :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder`,
+      ),
+    ).toContain('color: var(--ptah-field-placeholder);');
+  });
+
+  it('rests the label of a native select whose chosen option has an empty value, without focus', () => {
+    const rest = exact(
+      `${FLOATING}:not(:focus-within):has(.ptah-field__body select option[value='']:checked) .ptah-field__label`,
+    );
+    expect(rest).toContain('top: 50%;');
+    expect(rest).toContain('background-color: transparent;');
+    expect(rest).toContain('font-size: var(--ptah-text-body-size);');
+    expect(
+      exact(`${FLOATING}:not(:focus-within) :is(.ptah-field__body, #ptah-field) select:has(option[value='']:checked):is(.select, #ptah-control)`),
+    ).toContain('color: transparent;');
   });
 
   it('centers the floated label on the top border, small, with an opaque notch fill', () => {

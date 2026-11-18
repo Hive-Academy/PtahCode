@@ -128,6 +128,16 @@ const GUARD_HYSTERESIS_PX = 32;
         width: auto;
         font-size: var(--ptah-text-hint-size);
       }
+      .ptah-table-control-cell ptah-select {
+        display: inline-grid;
+        width: auto;
+        min-width: 8rem;
+        max-width: 100%;
+        vertical-align: middle;
+      }
+      .ptah-table-control-cell .ptah-select__trigger {
+        font-size: var(--ptah-text-hint-size);
+      }
       .ptah-table-control-cell [ptahToggle] {
         min-height: var(--ptah-control-h-sm);
         height: var(--ptah-control-h-sm);
