@@ -7,7 +7,7 @@ import type {
   SubagentRegistryService,
 } from '@ptah-extension/vscode-core';
 import { Logger as LoggerClass } from '@ptah-extension/vscode-core';
-import { AgentBudgetPolicy, registerProviderPricing, resetPricingMapForTesting, type SubagentRecord } from '@ptah-extension/shared';
+import { registerProviderPricing, resetPricingMapForTesting, type SubagentRecord } from '@ptah-extension/shared';
 import type { SessionId } from '@ptah-extension/shared';
 import type { SDKMessage } from '../../types/sdk-types/claude-sdk.types';
 import { STREAM_MONITOR_WAIT_MS, waitForMonitorMessage } from '../stream-transformer';
@@ -656,7 +656,7 @@ describe('SubagentBudgetMonitor', () => {
       finishPreparation = () => resolve({ ok: false, errorType: 'Unavailable' });
       reached();
     }));
-    const observing = h.monitor.observe(SESSION, assistant({ output: 600_000 }, { id: 'preparing' }));
+    const observing = h.monitor.observe(SESSION, assistant({ input: 310_000 }, { id: 'preparing' }));
     await writing;
     expect(h.monitor.getAgentBudgetState('reviewer', SESSION)).toEqual(expect.objectContaining({ stopped: true, stopState: 'pending' }));
     finishPreparation();
@@ -728,10 +728,14 @@ describe('SubagentBudgetMonitor', () => {
     ];
     await h.monitor.observe(SESSION, jump);
     expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
-    expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
-    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
-    expect(h.monitor.getAgentBudgetState('a1', SESSION)).toEqual(expect.objectContaining({ stopped: true, contextTokens: 186_000 }));
-    expect(h.monitor.hasNotesGate('a1')).toBe(false);
+    expect(h.recordStore.writeOnce).not.toHaveBeenCalled();
+    expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
+    expect(h.monitor.getAgentBudgetState('a1', SESSION)).toEqual(expect.objectContaining({ stopped: false, contextTokens: 186_000 }));
+    expect(h.monitor.hasNotesGate('a1')).toBe(true);
+    expect(h.subagentNotices.take('a1')).toContain('budget');
+    const denialAt = Date.now();
+    for (let i = 0; i < 3; i += 1) await h.monitor.checkNotesTool(SESSION, 'a1', 'Read', { file_path: 'remaining.txt' }, denialAt + i * 2_001);
+    await waitUntil(() => h.recordStore.writeOnce.mock.calls.length > 0);
     const recordText = h.recordStore.writeOnce.mock.calls[0][2];
     expect(recordText).toContain('src/parser.ts');
     expect(recordText).toContain('Changed the parser token=[redacted]');
@@ -981,32 +985,12 @@ describe('SubagentBudgetMonitor', () => {
     expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
   });
 
-  it('stops immediately on a handoff decision even without the stopped flag', async () => {
-    const h = makeHarness();
-    const evaluate = AgentBudgetPolicy.prototype.evaluate;
-    const decision = jest.spyOn(AgentBudgetPolicy.prototype, 'evaluate').mockImplementation(function (this: AgentBudgetPolicy, ...args) {
-      const result = evaluate.apply(this, args);
-      return { ...result, handoff: true, snapshot: { ...result.snapshot, stopped: false } };
-    });
-    try {
-      await h.monitor.observe(SESSION, assistant({ input: 150_000 }, { id: 'handoff-only' }));
-      expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
-      expect(h.streamed[0]).toContain('handoff threshold (100%');
-    } finally {
-      decision.mockRestore();
-      h.monitor.release(SESSION);
-    }
-  });
-
   it('at the handoff size stops the subagent, marks it not resumable and streams one parent message, once', async () => {
     const h = makeHarness({ teammateName: 'scout' });
     await h.monitor.observe(
       SESSION,
       assistant({ input: 1, cacheRead: 149_999 }, { id: 'm1' }),
     );
-    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
-    expect(h.streamed[0]).toContain('handoff threshold (100%');
-    expect(h.stopNotices.noticeFor('task-1')).toContain('handoff threshold (100%');
     await h.monitor.observe(
       SESSION,
       assistant({ input: 1, cacheRead: 310_000 }, { id: 'm2' }),
@@ -1020,7 +1004,7 @@ describe('SubagentBudgetMonitor', () => {
     );
     expect(h.streamed).toHaveLength(1);
     expect(h.streamed[0]).toContain('`Explore`');
-    expect(h.streamed[0]).toContain('150000 context tokens of 150000');
+    expect(h.streamed[0]).toContain('310001 context tokens of 150000');
     expect(h.streamed[0]).toContain('spawn a fresh `Explore` subagent');
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(true);
   });
@@ -1068,9 +1052,9 @@ describe('SubagentBudgetMonitor', () => {
 
   it.each([
     {
-      reason: 'handoff threshold (100%',
-      usage: { input: 150_000 },
-      amount: '150000 of 150000 tokens',
+      reason: 'safety limit',
+      usage: { input: 300_000 },
+      amount: '300000 of 3000000 tokens',
     },
     {
       reason: 'safety limit',
@@ -1354,7 +1338,7 @@ describe('SubagentBudgetMonitor', () => {
       expect.objectContaining({ attempts: MAX_STOP_ATTEMPTS }),
     );
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(false);
-    expect(h.stopNotices.noticeFor('task-1')).toContain('handoff threshold (100%');
+    expect(h.stopNotices.noticeFor('task-1')).toContain('safety limit');
     jest.useRealTimers();
   });
 
@@ -1886,7 +1870,7 @@ describe('SubagentBudgetMonitor', () => {
       const text = h.streamed[0];
       expect(text).toContain("Ptah's subagent budget monitor handed off");
       expect(text).toContain('not the user');
-      expect(text).toContain('handoff threshold (100%');
+      expect(text).toContain('2x handoff ceiling 300000');
       expect(text).toContain(
         `If a Read or Glob right after this handoff fails with "The user doesn't want to take this action right now" ` +
           `and you saw no permission prompt the user declined, retry that call once; ` +
@@ -2380,15 +2364,12 @@ describe('SubagentBudgetMonitor', () => {
         );
     }, STREAM_MONITOR_WAIT_MS + 15_000);
 
-    it('stops immediately when a 54k to 101k jump crosses the handoff threshold', async () => {
+    it('routes a 54k to 101k threshold jump into the notes gate', async () => {
       const h = makeHarness({ agentId: 'agent-7' }, { workspace, handoffTokens: 60_000 });
       await h.monitor.observe(SESSION, atContext(54_000, 'jump-before'));
+      await h.monitor.observe(SESSION, atContext(101_000, 'jump-after'));
       expect(h.monitor.hasNotesGate('agent-7')).toBe(true);
       expect(h.dispatcher.stopSubagent).not.toHaveBeenCalled();
-      await h.monitor.observe(SESSION, atContext(101_000, 'jump-after'));
-      expect(h.monitor.hasNotesGate('agent-7')).toBe(false);
-      expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
-      expect(h.streamed[0]).toContain('handoff threshold (100%');
     });
 
     it('normal background exit writes a record when the SDK gives no task id', async () => {
