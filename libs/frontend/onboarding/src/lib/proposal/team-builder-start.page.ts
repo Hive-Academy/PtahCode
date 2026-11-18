@@ -1,4 +1,8 @@
 import {
+  afterNextRender,
+  ElementRef,
+  Injector,
+  viewChild,
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
@@ -10,7 +14,7 @@ import {
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Users } from 'lucide-angular';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import type { DeepProjectAnalysis } from '@ptah-extension/shared';
 import {
   AttachmentTrayComponent,
@@ -51,40 +55,47 @@ import { teamBuilderGuidanceBrief } from './team-builder-guidance-brief';
 })
 export class TeamBuilderStartPage {
   protected readonly icons = { users: Users };
-  readonly attachments = inject(ComposerAttachmentsService);
+  public readonly attachments = inject(ComposerAttachmentsService);
   protected readonly launcher = inject(HarnessChatLauncherService);
   private readonly router = inject(Router);
   private readonly rpc = inject(ClaudeRpcService);
+  private readonly logger = inject(LoggingService);
   private readonly destroyRef = inject(DestroyRef);
-  readonly state = inject(StackSkillStore);
+  public readonly state = inject(StackSkillStore);
   /** Cancels a pending launch when the user leaves this page. */
   private launch: AbortController | null = null;
-  readonly intent = this.state.intent;
-  readonly touched = signal(false);
-  readonly submitted = signal(false);
-  readonly launched = signal(false);
-  readonly starting = computed(
+  private readonly injector = inject(Injector);
+  private readonly recoveryContinue =
+    viewChild<ElementRef<HTMLButtonElement>>('recoveryContinue');
+  public readonly intent = this.state.intent;
+  public readonly touched = signal(false);
+  public readonly submitted = signal(false);
+  public readonly launched = signal(false);
+  public readonly starting = computed(
     () =>
       this.state.stage() === 'installing' || this.state.stage() === 'launching',
   );
-  readonly actionError = this.state.error;
-  readonly invalid = computed(
+  public readonly actionError = this.state.error;
+  public readonly invalid = computed(
     () => (this.submitted() || this.touched()) && !this.intent().trim(),
   );
-  readonly searching = this.state.searching;
-  readonly searchError = this.state.searchError;
-  readonly ownerDecisionRequired = computed(() =>
+  public readonly searching = this.state.searching;
+  public readonly searchError = this.state.searchError;
+  public readonly ownerDecisionRequired = computed(() =>
     this.state.guidanceFacts().some((fact) => fact.label !== 'follow'),
   );
-  readonly ownerDecisionError = signal(false);
+  public readonly ownerDecisionError = signal(false);
   private requestVersion = 0;
   private searchVersion = 0;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private returnFocus: HTMLElement | null = null;
   private workspace = '';
-  private guidanceAnalysis: DeepProjectAnalysis = { projectType: 'unknown', frameworks: [] };
+  private guidanceAnalysis: DeepProjectAnalysis = {
+    projectType: 'unknown',
+    frameworks: [],
+  };
 
-  constructor() {
+  public constructor() {
     effect(() => {
       const root = this.launcher.workspaceRoot();
       if (this.workspace && this.workspace !== root) {
@@ -93,6 +104,7 @@ export class TeamBuilderStartPage {
         if (this.searchTimer) clearTimeout(this.searchTimer);
         this.launch?.abort();
         this.state.reset();
+        this.skillsInstalledState.set(false);
         this.ownerDecisionError.set(false);
         this.touched.set(false);
         this.submitted.set(false);
@@ -105,10 +117,11 @@ export class TeamBuilderStartPage {
       if (this.searchTimer) clearTimeout(this.searchTimer);
       this.launch?.abort();
       this.state.reset();
+      this.skillsInstalledState.set(false);
     });
   }
 
-  async submit(event: Event): Promise<void> {
+  public async submit(event: Event): Promise<void> {
     event.preventDefault();
     this.submitted.set(true);
     if (
@@ -119,28 +132,42 @@ export class TeamBuilderStartPage {
       return;
     }
     if (!this.launcher.workspaceRoot()) {
-      this.actionError.set('Open a workspace to find skills.');
+      this.state.setError('Open a workspace to find skills.');
       return;
     }
-    this.state.stage.set('review');
+    this.state.setStage('review');
     await this.loadReview();
   }
 
-  async loadReview(): Promise<void> {
+  private readonly loadErrorState = signal(false);
+  public readonly loadError = this.loadErrorState.asReadonly();
+  private readonly skillsInstalledState = signal(false);
+  public readonly skillsInstalled = this.skillsInstalledState.asReadonly();
+  public readonly launchStatus = computed(() =>
+    this.launched()
+      ? 'Chat opened. Use Back to leave this page.'
+      : 'Launching chat…',
+  );
+
+  public async loadReview(): Promise<void> {
+    this.skillsInstalledState.set(false);
+    this.loadErrorState.set(true);
     const version = ++this.requestVersion;
     this.searchVersion++;
     if (this.searchTimer) clearTimeout(this.searchTimer);
     const root = this.launcher.workspaceRoot();
-    this.state.loading.set(true);
-    this.searching.set(false);
-    this.actionError.set(null);
-    this.state.recommendations.set([]);
-    this.state.selectedIds.set(new Set());
-    this.state.ownerDecision.set(null);
-    this.state.guidanceFacts.set([]);
-    this.state.searchResults.set([]);
-    this.state.ownerDecisionPrompt.set('');
-    this.state.guidanceNote.set('');
+    this.state.setPreviewing(false);
+    this.state.setPreview([]);
+    this.state.setLoading(true);
+    this.state.setSearching(false);
+    this.state.setError(null);
+    this.state.setRecommendations([]);
+    this.state.setSelectedIds(new Set());
+    this.state.setOwnerDecision(null);
+    this.state.setGuidanceFacts([]);
+    this.state.setSearchResults([]);
+    this.state.setOwnerDecisionPrompt('');
+    this.state.setGuidanceNote('');
     this.guidanceAnalysis = { projectType: 'unknown', frameworks: [] };
     try {
       let analysis: DeepProjectAnalysis = {
@@ -176,19 +203,21 @@ export class TeamBuilderStartPage {
               ? frameworksLine
                   .split(/[,;|]/)
                   .map((value) => value.trim())
-                  .filter((value) => Boolean(value) && value !== '(not detected)')
+                  .filter(
+                    (value) => Boolean(value) && value !== '(not detected)',
+                  )
               : [],
           };
         } else
-          this.state.guidanceNote.set(
+          this.state.setGuidanceNote(
             'Could not load stored project analysis. Guidance is limited.',
           );
       } else if (listed.isSuccess()) {
-        this.state.guidanceNote.set(
+        this.state.setGuidanceNote(
           'No stored project analysis. Guidance is limited.',
         );
       } else
-        this.state.guidanceNote.set(
+        this.state.setGuidanceNote(
           'Could not list project analyses. Guidance is limited.',
         );
       const recommended = await this.rpc.call('wizard:recommend-skills', {
@@ -200,12 +229,13 @@ export class TeamBuilderStartPage {
       )
         return;
       if (!recommended.isSuccess()) {
-        this.actionError.set(
+        this.state.setError(
           this.rpcMessage(recommended, 'Could not load skill recommendations.'),
         );
         return;
       }
-      this.state.recommendations.set(recommended.data.skills);
+      this.loadErrorState.set(false);
+      this.state.setRecommendations(recommended.data.skills);
       const guidance = await this.rpc.call('wizard:get-project-guidance', {
         analysis,
       });
@@ -216,32 +246,33 @@ export class TeamBuilderStartPage {
         return;
       this.guidanceAnalysis = analysis;
       if (guidance.isSuccess()) {
-        this.state.guidanceFacts.set(guidance.data.facts);
-        this.state.ownerDecisionPrompt.set(guidance.data.ownerDecisionPrompt);
+        this.state.setGuidanceFacts(guidance.data.facts);
+        this.state.setOwnerDecisionPrompt(guidance.data.ownerDecisionPrompt);
       } else {
-        this.state.guidanceFacts.set([]);
-        this.state.guidanceNote.set('Could not load project guidance.');
+        this.state.setGuidanceFacts([]);
+        this.state.setGuidanceNote('Could not load project guidance.');
       }
     } catch {
       if (version === this.requestVersion)
-        this.actionError.set('Could not load skill recommendations.');
+        this.state.setError('Could not load skill recommendations.');
     } finally {
-      if (version === this.requestVersion) this.state.loading.set(false);
+      if (version === this.requestVersion) this.state.setLoading(false);
     }
   }
 
-  search(query: string): void {
+  public search(query: string): void {
     if (this.searchTimer) clearTimeout(this.searchTimer);
     const version = ++this.searchVersion;
-    this.state.searchQuery.set(query);
-    this.state.searchResults.set([]);
-    this.searchError.set(null);
+    this.state.setSearchQuery(query);
+    this.state.setSearchResults([]);
+    this.state.setSearchError(null);
     if (!query) {
-      this.state.searchResults.set([]);
-      this.searching.set(false);
+      this.state.setSearchResults([]);
+      this.state.setSearching(false);
       return;
     }
-    this.searching.set(true);
+    this.state.setSearchResults([]);
+    this.state.setSearching(true);
     const root = this.launcher.workspaceRoot();
     this.searchTimer = setTimeout(async () => {
       try {
@@ -252,37 +283,39 @@ export class TeamBuilderStartPage {
         )
           return;
         if (!result.isSuccess()) {
-          this.searchError.set(
+          this.state.setSearchError(
             this.rpcMessage(result, 'Could not search skills.'),
           );
           return;
         }
-        this.state.searchResults.set(result.data.skills);
+        this.state.setSearchResults(result.data.skills);
       } catch {
         if (version === this.searchVersion)
-          this.searchError.set('Could not search skills.');
+          this.state.setSearchError('Could not search skills.');
       } finally {
-        if (version === this.searchVersion) this.searching.set(false);
+        if (version === this.searchVersion) this.state.setSearching(false);
       }
     }, 300);
   }
 
-  async reviewSelection(): Promise<void> {
+  public async reviewSelection(): Promise<void> {
     if (this.blockForOwnerDecision()) return;
     // "Continue without skills": there is nothing to preview, so start the chat.
     if (!this.state.selectedIds().size) {
       await this.launchChat();
       return;
     }
-    if (this.state.loading() || this.starting()) return;
+    if (this.state.loading() || this.state.previewing() || this.starting())
+      return;
     this.returnFocus =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
     const version = ++this.requestVersion;
     const root = this.launcher.workspaceRoot();
-    this.state.loading.set(true);
-    this.actionError.set(null);
+    this.loadErrorState.set(false);
+    this.state.setPreviewing(true);
+    this.state.setError(null);
     try {
       const result = await this.rpc.call('wizard:preview-skills-for-consent', {
         skills: [...this.state.selectedIds()],
@@ -293,7 +326,7 @@ export class TeamBuilderStartPage {
       )
         return;
       if (!result.isSuccess()) {
-        this.actionError.set(
+        this.state.setError(
           this.rpcMessage(result, 'Could not preview skills.'),
         );
         return;
@@ -306,25 +339,26 @@ export class TeamBuilderStartPage {
         )
       )
         throw new Error('Skill preview was incomplete. Try again.');
-      this.state.preview.set(result.data.skills);
-      this.state.approvedIds.set(new Set());
-      this.state.stage.set('consent');
+      this.state.setPreview(result.data.skills);
+      this.state.setApprovedIds(new Set());
+      this.state.setStage('consent');
     } catch {
       if (version === this.requestVersion)
-        this.actionError.set('Could not preview skills.');
+        this.state.setError('Could not preview skills.');
     } finally {
-      if (version === this.requestVersion) this.state.loading.set(false);
+      if (version === this.requestVersion) this.state.setPreviewing(false);
     }
   }
 
-  closeConsent(): void {
+  public closeConsent(): void {
     if (this.starting()) return;
-    this.state.stage.set('review');
-    this.actionError.set(null);
+    this.state.setStage('review');
+    this.state.setError(null);
     queueMicrotask(() => this.returnFocus?.focus());
   }
 
-  async install(): Promise<void> {
+  public async install(): Promise<void> {
+    if (this.skillsInstalled()) return;
     const previews = this.state.preview();
     if (
       this.starting() ||
@@ -335,8 +369,8 @@ export class TeamBuilderStartPage {
       )
     )
       return;
-    this.state.stage.set('installing');
-    this.actionError.set(null);
+    this.state.setStage('installing');
+    this.state.setError(null);
     const root = this.launcher.workspaceRoot();
     const version = ++this.requestVersion;
     try {
@@ -358,15 +392,15 @@ export class TeamBuilderStartPage {
       )
         return;
       if (!result.isSuccess()) {
-        this.state.stage.set('review');
-        this.actionError.set(
+        this.state.setStage('review');
+        this.state.setError(
           this.rpcMessage(result, 'Could not install skills.'),
         );
         return;
       }
-      this.state.installed.set(result.data.installed);
+      this.state.setInstalled(result.data.installed);
       if (!result.data.success) {
-        this.state.stage.set('review');
+        this.state.setStage('review');
         const failed = result.data.failedSkill
           ? `Failed: ${result.data.failedSkill}. `
           : 'Some skills could not be installed. ';
@@ -374,17 +408,18 @@ export class TeamBuilderStartPage {
         const installed = result.data.installed.length
           ? `Installed: ${result.data.installed.join(', ')}. `
           : '';
-        this.actionError.set(
+        this.state.setError(
           `${failed}${reason}${installed}Review the skills and try again.`,
         );
         queueMicrotask(() => this.returnFocus?.focus());
         return;
       }
+      this.skillsInstalledState.set(true);
       await this.launchChat(true);
     } catch {
       if (version === this.requestVersion) {
-        this.state.stage.set('review');
-        this.actionError.set(
+        this.state.setStage('review');
+        this.state.setError(
           'Could not install skills. Review the skills and try again.',
         );
         queueMicrotask(() => this.returnFocus?.focus());
@@ -392,24 +427,34 @@ export class TeamBuilderStartPage {
     }
   }
 
-  async launchChat(fromInstall = false): Promise<void> {
+  public async launchChat(fromInstall = false): Promise<void> {
     if (this.state.loading() || this.blockForOwnerDecision()) {
-      if (fromInstall) this.state.stage.set('review');
+      if (fromInstall) this.state.setStage('review');
       return;
     }
-    if (this.state.stage() === 'launching' || (this.starting() && !fromInstall)) {
-      if (fromInstall) this.state.stage.set('review');
+    if (
+      this.state.stage() === 'launching' ||
+      (this.starting() && !fromInstall)
+    ) {
+      if (fromInstall) this.state.setStage('review');
       return;
     }
     this.launched.set(false);
     this.requestVersion++;
     this.searchVersion++;
-    this.state.loading.set(false);
-    this.searching.set(false);
-    this.state.stage.set('launching');
-    this.actionError.set(null);
+    this.state.setLoading(false);
+    this.state.setPreviewing(false);
+    this.state.setSearching(false);
+    this.state.setStage('launching');
+    this.state.setError(null);
     const launch = new AbortController();
     this.launch = launch;
+    const root = this.launcher.workspaceRoot();
+    const isActive = (): boolean =>
+      this.launch === launch &&
+      !launch.signal.aborted &&
+      !this.destroyRef.destroyed &&
+      root === this.launcher.workspaceRoot();
     const snapshot = this.attachments.snapshotForSend();
     try {
       const ownerDecision = this.state.ownerDecision();
@@ -419,13 +464,23 @@ export class TeamBuilderStartPage {
             analysis: this.guidanceAnalysis,
             ownerDecision,
           });
-          if (!recorded.isSuccess() || !recorded.data.recordPath)
-            this.state.guidanceNote.set('Guidance record was not written.');
-        } catch {
-          this.state.guidanceNote.set('Guidance record was not written.');
+          if (
+            isActive() &&
+            (!recorded.isSuccess() || !recorded.data.recordPath)
+          )
+            this.state.setGuidanceNote('Guidance record was not written.');
+        } catch (error: unknown) {
+          // degradation-audit: reported - optional guidance persistence failure is shown for the active launch.
+          this.logger.debug(
+            'TeamBuilderStartPage',
+            'Guidance record was not written.',
+            { error: error instanceof Error ? error.message : String(error) },
+          );
+          if (isActive())
+            this.state.setGuidanceNote('Guidance record was not written.');
         }
       }
-      if (launch.signal.aborted || this.destroyRef.destroyed) return;
+      if (!isActive()) return;
       await this.launcher.launchTeamBuilder(
         teamBuilderGuidanceBrief(
           this.intent().trim(),
@@ -437,28 +492,37 @@ export class TeamBuilderStartPage {
           signal: launch.signal,
         },
       );
-      if (this.launch === launch && !this.destroyRef.destroyed)
-        this.launched.set(true);
-    } catch (cause) {
+      if (isActive()) this.launched.set(true);
+    } catch (cause: unknown) {
       // degradation-audit: optional-capability - Back cancels this launch without an error.
       if (cause instanceof HarnessChatLaunchCancelledError) return;
-      if (this.launch === launch && !this.destroyRef.destroyed) {
-        this.actionError.set('Could not start the team builder. Try again.');
-        this.state.stage.set('review');
+      if (isActive()) {
+        this.state.setError(
+          this.skillsInstalled()
+            ? 'Skills are installed. Could not start the team builder. Try again.'
+            : 'Could not start the team builder. Try again.',
+        );
+        this.state.setStage('review');
+        if (this.skillsInstalled())
+          afterNextRender(
+            () => this.recoveryContinue()?.nativeElement.focus(),
+            { injector: this.injector },
+          );
       }
     } finally {
       if (this.launch === launch) this.launch = null;
     }
   }
 
-  backToIntent(): void {
+  public backToIntent(): void {
     if (this.starting()) return;
     this.requestVersion++;
     this.searchVersion++;
-    this.state.loading.set(false);
-    this.searching.set(false);
-    this.state.stage.set('intent');
-    this.actionError.set(null);
+    this.state.setLoading(false);
+    this.state.setPreviewing(false);
+    this.state.setSearching(false);
+    this.state.setStage('intent');
+    this.state.setError(null);
   }
   private blockForOwnerDecision(): boolean {
     const missing = this.ownerDecisionRequired() && !this.state.ownerDecision();
@@ -472,16 +536,15 @@ export class TeamBuilderStartPage {
     return result.errorCode && result.error ? result.error : fallback;
   }
 
-  async back(): Promise<void> {
+  public async back(): Promise<void> {
     if (this.state.stage() === 'installing') return;
     this.launched.set(false);
     this.requestVersion++;
     this.searchVersion++;
     this.launch?.abort();
     this.launch = null;
-    this.state.stage.set('intent');
-    this.actionError.set(null);
+    this.state.setStage('intent');
+    this.state.setError(null);
     await this.router.navigate(['/onboarding']);
   }
 }
-
