@@ -56,7 +56,7 @@ const LOG_CONTEXT = '[SessionAutoHandoff]';
  * only the SHOWN tab and its visible banner, so a background tab â€” or a
  * background workspace partition â€” that reached its limit never fired. This
  * coordinator watches the budget state of EVERY mounted tab, in the active
- * workspace and every background partition. Only sessions seen streaming in
+ * workspace and every background partition. Only sessions with renderer or backend-confirmed turn activity in
  * this page lifetime qualify, even if their budget reaches the limit after the
  * turn ends: a reopened idle session at its limit does not fire.
  *
@@ -151,7 +151,7 @@ export class SessionAutoHandoffCoordinatorService {
   }
 
   /**
-   * Sessions seen streaming this page that must fire now, one tab each: at the
+   * Sessions with turn activity this page that must fire now, one tab each: at the
    * limit with the setting on, not yet claimed, cancelled, wrapped up by hand, marked without
    * the skill, in flight, rate-gated or given up â€” and with no pending
    * permission prompt on its tab. Called inside the effect: every read here

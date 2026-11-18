@@ -2048,6 +2048,7 @@ export class TabManagerService {
     tabId: string,
     state: SessionTurnState,
     sessionId?: string,
+    options?: { readonly turnRan?: boolean },
   ): void {
     if (
       (state.phase !== 'idle' && state.phase !== 'failed') ||
@@ -2060,6 +2061,9 @@ export class TabManagerService {
       )
     )
       return;
+    const boundSessionId = this.findTabByIdAcrossWorkspaces(tabId)?.tab.claudeSessionId;
+    if (options?.turnRan === true && boundSessionId && (sessionId ?? boundSessionId) === boundSessionId)
+      this.turnActivity.recordTurnActivity(boundSessionId);
     this.updateTabInternal(tabId, {
       status: 'loaded',
       lastTerminalReason: state.terminalReason,

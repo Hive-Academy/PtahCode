@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import { QueuedFollowUpStore, TabManagerService, TabWorkspacePartitionService, SessionTurnActivityStore } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
-import { SessionId, type SessionBudgetState } from '@ptah-extension/shared';
+import { SessionId, type SessionBudgetState, type SessionTurnState } from '@ptah-extension/shared';
 import { FollowUpQueueService } from './chat-store/follow-up-queue.service';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
 import { ChatStore } from './chat.store';
@@ -147,6 +147,30 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off skipped: no turn in this page lifetime', {
       sessionId: SESSION, tabId: TAB,
     });
+  });
+
+  it.each([true, false])('gates a hidden external turn by backend confirmation (%s)', async (turnRan) => {
+    const claim = jest.spyOn(handoff, 'claim');
+    start([], [makeTab(TAB)]);
+    await run();
+    const terminal: SessionTurnState = {
+      phase: 'idle', revision: 2, timestamp: 1, backgroundTasks: [],
+      sessionCrons: [], terminalReason: 'completed',
+    };
+    // Exercise the production hidden-status writer against this partition fixture.
+    Reflect.apply(TabManagerService.prototype.applyHiddenTurnStateStatus, {
+      findTabByIdAcrossWorkspaces: (id: string) => ({ tab: tab(id) }),
+      canApplyTurnState: () => true,
+      turnActivity,
+      updateTabInternal: patch,
+    }, [TAB, terminal, SESSION, { turnRan }]);
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
+    await run();
+    expect(tab(TAB).status).toBe('loaded');
+    expect(probe).toHaveBeenCalledTimes(turnRan ? 1 : 0);
+    expect(claim).toHaveBeenCalledTimes(turnRan ? 1 : 0);
+    expect(send).toHaveBeenCalledTimes(turnRan ? 1 : 0);
   });
 
   it('fires exactly once when the reopened session starts streaming', async () => {

@@ -190,6 +190,24 @@ describe('TabManagerService — intent-named mutators', () => {
       expect(activity().hasTurnActivity(SESS_123)).toBe(false);
     });
 
+    // An event with no session id is not accepted, as before: it records nothing.
+    it.each([true, false])('records hidden activity only for an accepted event (session given: %s)', (explicitSession) => {
+      const id = service.createTab('hidden turn');
+      service.attachSession(id, SESS_123);
+      service.applyHiddenTurnStateStatus(id, terminal, explicitSession ? SESS_123 : undefined, { turnRan: true });
+      expect(activity().hasTurnActivity(SESS_123)).toBe(explicitSession);
+    });
+
+    it('rejects stale and unowned hidden activity', () => {
+      const id = service.createTab('hidden stale');
+      service.attachSession(id, SESS_123);
+      service.applyTurnState(id, { ...terminal, revision: terminal.revision + 1 }, SESS_123);
+      service.applyHiddenTurnStateStatus(id, terminal, SESS_123, { turnRan: true });
+      service.applyHiddenTurnStateStatus(id, terminal, SESS_XYZ, { turnRan: true });
+      expect(activity().hasTurnActivity(SESS_123)).toBe(false);
+      expect(activity().hasTurnActivity(SESS_XYZ)).toBe(false);
+    });
+
     it('records an id first bound mid-turn and a replacement id while streaming', () => {
       const id = service.createTab('unbound turn');
       service.markStreaming(id);
