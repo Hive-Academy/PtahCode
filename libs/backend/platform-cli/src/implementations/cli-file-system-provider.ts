@@ -47,7 +47,7 @@ export class CliFileSystemProvider implements IFileSystemProvider {
   }
 
   /** `open(2)` with `wx`: fails with EEXIST in the same syscall. */
-  async writeFileExclusive(filePath: string, content: string): Promise<void> {
+  async writeFileExclusive(filePath: string, content: string | Uint8Array): Promise<void> {
     await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx' });
   }
 
@@ -83,6 +83,7 @@ export class CliFileSystemProvider implements IFileSystemProvider {
       ctime: stats.ctimeMs,
       mtime: stats.mtimeMs,
       size: stats.size,
+      nlink: stats.nlink,
     };
   }
 
@@ -91,6 +92,7 @@ export class CliFileSystemProvider implements IFileSystemProvider {
     return {
       type: stats.isSymbolicLink() ? FileType.SymbolicLink : stats.isFile() ? FileType.File : stats.isDirectory() ? FileType.Directory : FileType.Unknown,
       ctime: stats.ctimeMs, mtime: stats.mtimeMs, size: stats.size,
+      nlink: stats.nlink,
     };
   }
 
@@ -141,6 +143,10 @@ export class CliFileSystemProvider implements IFileSystemProvider {
     } catch {
       return false;
     }
+  }
+
+  async rename(source: string, destination: string): Promise<void> {
+    await fs.rename(source, destination);
   }
 
   async delete(

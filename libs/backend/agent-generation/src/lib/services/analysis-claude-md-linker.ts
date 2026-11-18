@@ -1,4 +1,5 @@
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { inject, injectable } from 'tsyringe';
 import { FileType, PLATFORM_TOKENS, type IFileSystemProvider } from '@ptah-extension/platform-core';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
@@ -43,6 +44,10 @@ export class AnalysisClaudeMdLinker {
           this.logger.debug('Analysis index migration skipped: CLAUDE.md is not a regular file');
           return { written: false };
         }
+        if ((stat.nlink ?? 1) > 1) {
+          this.logger.debug('Analysis index migration skipped: CLAUDE.md has multiple hard links');
+          return { written: false };
+        }
         const bytes = Buffer.from(await this.fs.readFileBytes(path));
         // One character per byte keeps marker offsets exact, even for a BOM or invalid UTF-8.
         const current = bytes.toString('latin1');
@@ -65,11 +70,23 @@ export class AnalysisClaudeMdLinker {
         const updated = Buffer.concat([
           bytes.subarray(0, start), Buffer.from(`${eol}${index}${eol}`, 'utf8'), bytes.subarray(end),
         ]);
-        if (!bytes.equals(Buffer.from(await this.fs.readFileBytes(path)))) {
-          this.logger.debug('Analysis index migration skipped: CLAUDE.md changed');
-          return { written: false };
+        const temp = join(workspaceRoot, `.CLAUDE.md.${randomUUID()}.tmp`);
+        await this.fs.writeFileExclusive(temp, updated);
+        try {
+          const latest = await this.fs.lstat(path);
+          if (latest.type !== FileType.File || (latest.nlink ?? 1) > 1 ||
+              !bytes.equals(Buffer.from(await this.fs.readFileBytes(path)))) {
+            this.logger.debug('Analysis index migration skipped: CLAUDE.md changed');
+            return { written: false };
+          }
+          // Rename is atomic, but not a filesystem compare-and-swap. Keep the final
+          // read adjacent to it and never truncate the original inode in place.
+          await this.fs.rename(temp, path);
+        } finally {
+          if (await this.fs.exists(temp)) {
+            await this.fs.delete(temp);
+          }
         }
-        await this.fs.writeFileBytes(path, updated);
         return { written: true };
       } catch (error: unknown) {
         // degradation-audit: reported — migration must not interrupt workspace startup.

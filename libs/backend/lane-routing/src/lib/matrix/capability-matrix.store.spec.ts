@@ -93,6 +93,8 @@ class MemoryFiles implements IFileSystemProvider {
   realpath(_path: string): Promise<string> { return unsupported('realpath'); }
   readFileBoundedNoFollow(_path: string, _maxBytes: number): Promise<never> { return unsupported('readFileBoundedNoFollow'); }
 
+  rename(_source: string, _destination: string): Promise<void> { return unsupported('rename'); }
+
   delete(_path: string, _options?: { recursive?: boolean }): Promise<void> {
     return unsupported('delete');
   }

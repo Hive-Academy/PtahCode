@@ -23,8 +23,12 @@ import 'reflect-metadata';
 const mockCallOrder: string[] = [];
 
 jest.mock('@ptah-extension/agent-generation', () => ({
-  migrateWorkspaceAnalysisIndex: jest.fn(async () => {
+  ...jest.requireActual<object>('../../../../libs/backend/agent-generation/src/lib/di/tokens'),
+  migrateWorkspaceAnalysisIndex: jest.fn(async (...args: Parameters<typeof import('../../../../libs/backend/agent-generation/src/lib/services/migrate-workspace-analysis-index').migrateWorkspaceAnalysisIndex>) => {
     mockCallOrder.push('analysisIndex.migrate');
+    await jest.requireActual<typeof import('../../../../libs/backend/agent-generation/src/lib/services/migrate-workspace-analysis-index')>(
+      '../../../../libs/backend/agent-generation/src/lib/services/migrate-workspace-analysis-index',
+    ).migrateWorkspaceAnalysisIndex(...args);
   }),
 }));
 
@@ -74,7 +78,7 @@ import type { DependencyContainer } from 'tsyringe';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import { TOKENS } from '@ptah-extension/vscode-core';
 import { InstallScopeMigrationService } from '@ptah-extension/rpc-handlers';
-import { migrateWorkspaceAnalysisIndex } from '@ptah-extension/agent-generation';
+import { AGENT_GENERATION_TOKENS, migrateWorkspaceAnalysisIndex } from '@ptah-extension/agent-generation';
 
 import { BootCoordinator } from './boot-coordinator';
 import { createHeavyServicesBooter } from './boot-heavy-services';
@@ -103,10 +107,11 @@ interface Harness {
  * `run` is the migration's `run()`. Pass `null` to leave the service
  * unregistered, so resolving it throws.
  */
-function makeHarness(run: jest.Mock | null): Harness {
+function makeHarness(run: jest.Mock | null, migrateLegacyBlock: () => Promise<void> = jest.fn(async () => undefined)): Harness {
   const logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn() };
   const entries: Array<[unknown, unknown]> = [
     [TOKENS.LOGGER, logger],
+    [AGENT_GENERATION_TOKENS.ANALYSIS_CLAUDE_MD_LINKER, { migrateLegacyBlock }],
     [
       PLATFORM_TOKENS.CONTENT_DOWNLOAD,
       {
@@ -152,18 +157,35 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  jest.useRealTimers();
 });
 
 describe('Electron heavy boot — install-scope migration trigger', () => {
-  it('finishes boot while analysis index migration remains pending', async () => {
-    jest.mocked(migrateWorkspaceAnalysisIndex).mockImplementationOnce(
-      () => new Promise<void>(() => undefined),
-    );
-    const { container } = makeHarness(null);
-    await driveBoot(container);
+  it('finishes boot after the timeout while analysis index migration remains pending', async () => {
+    jest.useFakeTimers();
+    const pending = jest.fn(() => new Promise<void>(() => undefined));
+    const { container } = makeHarness(null, pending);
+    const boot = driveBoot(container);
+    await jest.advanceTimersByTimeAsync(1999);
+    expect(refreshUserLayer).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    await boot;
     expect(migrateWorkspaceAnalysisIndex).toHaveBeenCalledWith(container, '/ws');
     expect(refreshUserLayer).toHaveBeenCalledWith(container, '/ws', 'activation');
     expect(mockCallOrder).toContain('reconcileHarness');
+  });
+
+  it('waits for migration completion before activating the workspace', async () => {
+    let finish: (() => void) | undefined;
+    const pending = jest.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const { container } = makeHarness(null, pending);
+    const boot = driveBoot(container);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(refreshUserLayer).not.toHaveBeenCalled();
+    if (!finish) throw new Error('Migration did not start');
+    finish();
+    await boot;
+    expect(refreshUserLayer).toHaveBeenCalled();
   });
 
   it('migrates the analysis index for each opened workspace before harness activation', async () => {

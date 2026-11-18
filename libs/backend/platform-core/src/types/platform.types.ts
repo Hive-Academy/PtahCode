@@ -39,6 +39,8 @@ export enum FileType {
  * Replaces: vscode.FileStat
  */
 export interface FileStat {
+  /** Hard-link count, supplied by Node-backed stat/lstat implementations. */
+  readonly nlink?: number;
   readonly type: FileType;
   readonly ctime: number;
   readonly mtime: number;

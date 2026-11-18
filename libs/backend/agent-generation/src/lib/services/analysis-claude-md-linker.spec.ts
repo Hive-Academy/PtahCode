@@ -191,7 +191,9 @@ describe('AnalysisClaudeMdLinker', () => {
       const chosenEol = eol === '\r\n' ? '\r\n' : '\n';
       const bullets = FILES.map((file) => `- \`.ptah/analysis/demo/${file}\``).join(chosenEol);
       expect(content).toBe(`${before}${chosenEol}${HEADING}${chosenEol}${bullets}${chosenEol}${after}`);
-      expect(fs.writeFileBytes).toHaveBeenCalledTimes(1);
+      expect(fs.writeFileExclusive).toHaveBeenCalledTimes(1);
+      expect(fs.rename).toHaveBeenCalledWith(expect.any(String), path);
+      expect(fs.writeFileBytes).not.toHaveBeenCalled();
       fs.writeFileBytes.mockClear();
       expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
       expect(fs.writeFileBytes).not.toHaveBeenCalled();
@@ -239,6 +241,48 @@ describe('AnalysisClaudeMdLinker', () => {
       },
     );
 
+    it.each([false, true])('skips hard links, including ones added during staging: %s', async (duringStaging) => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      const original = `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`;
+      await fs.writeFile(path, original);
+      const stat = await fs.stat(path);
+      if (duringStaging) fs.lstat.mockResolvedValueOnce(stat);
+      fs.lstat.mockResolvedValueOnce({ ...stat, nlink: 2 });
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
+      expect(await fs.readFile(path)).toBe(original);
+      expect(fs.rename).not.toHaveBeenCalled();
+      expect([...fs.__state.files.keys()].filter((file) => file.endsWith('.tmp'))).toEqual([]);
+    });
+
+    it('rechecks after staging, preserves an editor save and removes the temp file', async () => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      await fs.writeFile(path, `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`);
+      const stage = fs.writeFileExclusive.getMockImplementation();
+      if (!stage) throw new Error('Missing staging implementation');
+      fs.writeFileExclusive.mockImplementationOnce(async (temp, bytes) => {
+        expect(temp).not.toBe(path);
+        await stage(temp, bytes);
+        await fs.writeFile(path, 'editor save');
+      });
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
+      expect(await fs.readFile(path)).toBe('editor save');
+      expect(fs.rename).not.toHaveBeenCalled();
+      expect([...fs.__state.files.keys()].filter((file) => file.endsWith('.tmp'))).toEqual([]);
+    });
+
+    it('keeps the original and cleans staging when rename fails', async () => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      const original = `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`;
+      await fs.writeFile(path, original);
+      fs.rename.mockRejectedValueOnce(new Error('rename failed'));
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false, error: 'rename failed' });
+      expect(await fs.readFile(path)).toBe(original);
+      expect([...fs.__state.files.keys()].filter((file) => file.endsWith('.tmp'))).toEqual([]);
+    });
+
     it('does not create CLAUDE.md', async () => {
       const { fs, linker } = await fixture();
       fs.writeFileBytes.mockClear();
@@ -274,7 +318,7 @@ describe('AnalysisClaudeMdLinker', () => {
     it.each([new Error('read-only'), 'unavailable'])('contains startup write failures: %j', async (error) => {
       const { fs, linker } = await fixture();
       await fs.writeFile(join(ROOT, 'CLAUDE.md'), `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`);
-      fs.writeFileBytes.mockRejectedValueOnce(error);
+      fs.writeFileExclusive.mockRejectedValueOnce(error);
       await expect(linker.migrateLegacyBlock(ROOT)).resolves.toMatchObject({ written: false, error: expect.any(String) });
       expect(logger.debug).toHaveBeenCalled();
     });

@@ -217,7 +217,7 @@ function nodeFileSystem() {
       await fsp.mkdir(path.dirname(p), { recursive: true });
       await fsp.writeFile(p, content, 'utf8');
     },
-    writeFileExclusive: (p: string, content: string) =>
+    writeFileExclusive: (p: string, content: string | Uint8Array) =>
       fsp.writeFile(p, content, { encoding: 'utf8', flag: 'wx' }),
     createDirectory: async (p: string) => {
       await fsp.mkdir(p, { recursive: true });

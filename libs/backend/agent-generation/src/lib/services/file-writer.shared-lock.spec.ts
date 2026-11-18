@@ -61,8 +61,9 @@ function realFileSystemPort(): MockFileSystemProvider {
   port.writeFile.mockImplementation((p: string, content: string) =>
     fsPromises.writeFile(p, content, 'utf-8'),
   );
-  port.writeFileExclusive.mockImplementation((p: string, content: string) =>
-    fsPromises.writeFile(p, content, { encoding: 'utf-8', flag: 'wx' }),
+  port.writeFileExclusive.mockImplementation(
+    (p: string, content: string | Uint8Array) =>
+      fsPromises.writeFile(p, content, { encoding: 'utf-8', flag: 'wx' }),
   );
   port.createDirectory.mockImplementation(async (p: string) => {
     await fsPromises.mkdir(p, { recursive: true });

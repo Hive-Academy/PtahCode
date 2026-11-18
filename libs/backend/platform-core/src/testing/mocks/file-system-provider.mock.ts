@@ -102,13 +102,13 @@ export function createMockFileSystemProvider(
       registerDirChain(path);
     }),
     writeFileExclusive: jest.fn(
-      async (path: string, content: string): Promise<void> => {
+      async (path: string, content: string | Uint8Array): Promise<void> => {
         // Synchronous check-and-create, like `open` with `wx`.
         const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
         if (files.has(path) || directories.has(normalized)) {
           throw eexist(path);
         }
-        files.set(path, toBytes(content));
+        files.set(path, typeof content === 'string' ? toBytes(content) : content);
         registerDirChain(path);
       },
     ),
@@ -154,6 +154,7 @@ export function createMockFileSystemProvider(
           ctime: 0,
           mtime: 0,
           size: bytes.byteLength,
+          nlink: 1,
         };
       }
       const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
@@ -179,6 +180,12 @@ export function createMockFileSystemProvider(
       if (files.has(path)) return true;
       const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
       return directories.has(normalized);
+    }),
+    rename: jest.fn(async (source: string, destination: string): Promise<void> => {
+      const bytes = files.get(source);
+      if (!bytes) throw enoent(source);
+      files.set(destination, bytes);
+      files.delete(source);
     }),
     delete: jest.fn(
       async (

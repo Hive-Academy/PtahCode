@@ -67,6 +67,21 @@ export function runFileSystemContract(
       ).rejects.toThrow();
     });
 
+    it('stages exclusive binary bytes and replaces an existing file', async () => {
+      const source = `${exclusiveRoot}/staged.tmp`;
+      const destination = `${exclusiveRoot}/destination.md`;
+      const bytes = new Uint8Array([0xff, 0x00, 0x80]);
+      await provider.writeFile(destination, 'original');
+      await provider.writeFileExclusive(source, bytes);
+      await expect(provider.writeFileExclusive(source, 'clobber')).rejects.toThrow();
+      await provider.rename(source, destination);
+      expect(await provider.readFileBytes(destination)).toEqual(bytes);
+      expect(await provider.exists(source)).toBe(false);
+      await expect(provider.rename(source, destination)).rejects.toThrow();
+      expect(await provider.readFileBytes(destination)).toEqual(bytes);
+      expect((await provider.lstat(destination)).nlink).toBe(1);
+    });
+
     it('stat on missing path rejects', async () => {
       await expect(provider.stat('/fs/missing')).rejects.toThrow();
     });

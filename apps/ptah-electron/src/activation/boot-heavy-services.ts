@@ -232,7 +232,7 @@ export function createHeavyServicesBooter(
     coordinator.markPersistenceSettled({
       sqliteOpen: thoth.sqliteConnection?.isOpen ?? false,
     });
-    if (workspaceRoot) void migrateWorkspaceAnalysisIndex(container, workspaceRoot);
+    if (workspaceRoot) await migrateWorkspaceAnalysisIndex(container, workspaceRoot);
     // Migrated: fork the read-only search worker now, not on the first search.
     if (thoth.sqliteConnection?.isOpen) startSearchWorkerAfterMigrations(container);
     // Migrated: move WAL checkpoints out of main-thread COMMITs (fix 11).

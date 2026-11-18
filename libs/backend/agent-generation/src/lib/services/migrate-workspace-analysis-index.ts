@@ -19,7 +19,20 @@ export async function migrateWorkspaceAnalysisIndex(
     const linker = container.resolve<AnalysisClaudeMdLinker>(
       AGENT_GENERATION_TOKENS.ANALYSIS_CLAUDE_MD_LINKER,
     );
-    await linker.migrateLegacyBlock(root);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        linker.migrateLegacyBlock(root),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            logMigrationFailure(logger, new Error('Analysis index migration exceeded 2000ms; continuing startup'));
+            resolve();
+          }, 2000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (error: unknown) {
     // degradation-audit: reported — startup continues even if DI resolution fails.
     logMigrationFailure(logger, error);

@@ -70,13 +70,34 @@ describe('withEngine analysis index startup migration', () => {
     }
   });
 
-  it('continues boot and runs the command while the linker never resolves', async () => {
+  it('waits for migration completion before running the first command', async () => {
+    const { bootstrap, migrateLegacyBlock } = fixture();
+    let finish: (() => void) | undefined;
+    migrateLegacyBlock.mockImplementationOnce(() => new Promise((resolve) => {
+      finish = () => resolve({ written: true });
+    }));
+    const command = jest.fn(async () => 'ready');
+    const boot = withEngine({}, { mode: 'full', requireSdk: false, bootstrap }, command);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(command).not.toHaveBeenCalled();
+    if (!finish) throw new Error('Migration did not start');
+    finish();
+    await expect(boot).resolves.toBe('ready');
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues boot and runs the command after the timeout while the linker never resolves', async () => {
+    jest.useFakeTimers();
     const { bootstrap, migrateLegacyBlock } = fixture();
     migrateLegacyBlock.mockImplementationOnce(() => new Promise(() => undefined));
     const command = jest.fn(async () => 'ready');
-    await expect(withEngine({}, { mode: 'full', requireSdk: false, bootstrap }, command))
-      .resolves.toBe('ready');
+    const boot = withEngine({}, { mode: 'full', requireSdk: false, bootstrap }, command);
+    await jest.advanceTimersByTimeAsync(1999);
+    expect(command).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(boot).resolves.toBe('ready');
     expect(migrateLegacyBlock).toHaveBeenCalledTimes(1);
     expect(command).toHaveBeenCalledTimes(1);
+    jest.useRealTimers();
   });
 });

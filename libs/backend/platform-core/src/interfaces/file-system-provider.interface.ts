@@ -34,7 +34,7 @@ export interface IFileSystemProvider {
   writeFile(path: string, content: string): Promise<void>;
 
   /**
-   * Create a NEW file with UTF-8 content, rejecting if the path already
+   * Create a NEW file with UTF-8 or binary content, rejecting if the path already
    * exists. The no-clobber counterpart of {@link writeFile}, for writers that
    * must never replace a file someone else created after they looked.
    *
@@ -47,7 +47,7 @@ export interface IFileSystemProvider {
    *
    * @throws An `Error & { code: 'EEXIST' }` when `path` already exists.
    */
-  writeFileExclusive(path: string, content: string): Promise<void>;
+  writeFileExclusive(path: string, content: string | Uint8Array): Promise<void>;
 
   /**
    * Write binary content to a file.
@@ -80,6 +80,9 @@ export interface IFileSystemProvider {
    * Replaces: try { await vscode.workspace.fs.stat(uri) } catch { false }
    */
   exists(path: string): Promise<boolean>;
+
+  /** Atomically replace destination with source on the same filesystem; never delete first. */
+  rename(source: string, destination: string): Promise<void>;
 
   /**
    * Delete a file or directory.

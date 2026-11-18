@@ -65,6 +65,7 @@ function createFsMock(): jest.Mocked<IFileSystemProvider> {
     realpath: jest.fn(),
     readFileBoundedNoFollow: jest.fn(),
     exists: jest.fn(),
+    rename: jest.fn(),
     delete: jest.fn(),
     createDirectory: jest.fn(),
     createDirectoryExclusive: jest.fn(),
