@@ -91,6 +91,28 @@ describe('MemoryGraphStateService', () => {
     });
     expect(graph).toHaveBeenCalledTimes(1);
   });
+  it('keeps the session choices after a session filter is applied', async () => {
+    const inSession = (id: string, sessionId: string) => ({
+      ...node(id),
+      sessionId,
+    });
+    graph
+      .mockResolvedValueOnce({
+        ...result,
+        nodes: [inSession('a', 's1'), inSession('b', 's2'), node('c')],
+      })
+      .mockResolvedValueOnce({ ...result, nodes: [inSession('a', 's1')] })
+      .mockResolvedValueOnce({ ...result, nodes: [inSession('b', 's2')] });
+    await service.refresh();
+    expect(service.sessions()).toEqual(['s1', 's2']);
+    service.patchFilters({ sessionId: 's1' });
+    await service.refresh();
+    expect(service.nodes()).toHaveLength(1);
+    expect(service.sessions()).toEqual(['s1', 's2']);
+    service.patchFilters({ sessionId: null });
+    await service.refresh();
+    expect(service.sessions()).toEqual(['s2']);
+  });
   it('debounces server filters and sends explicit scope', async () => {
     service.patchFilters({ scope: 'all' });
     service.patchFilters({ pinnedOnly: true });

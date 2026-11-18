@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import {
   PtahButtonDirective,
+  PtahInputDirective,
   PtahRichSelectComponent,
   type PtahSelectOption,
 } from '@ptah-extension/ui';
@@ -15,7 +16,7 @@ import type { GraphViewOptions } from './model/graph.types';
   selector: 'ptah-memory-graph-toolbar',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahButtonDirective, PtahRichSelectComponent],
+  imports: [PtahButtonDirective, PtahInputDirective, PtahRichSelectComponent],
   template: `
     <div
       class="flex flex-wrap items-center gap-2"
@@ -29,7 +30,8 @@ import type { GraphViewOptions } from './model/graph.types';
         id="memory-graph-search-input"
         data-testid="memory-graph-search"
         type="search"
-        class="input input-sm input-bordered"
+        ptahInput
+        size="sm"
         placeholder="Search memories"
         [value]="searchQuery()"
         (input)="onSearch($event)"

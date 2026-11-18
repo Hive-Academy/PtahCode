@@ -55,6 +55,11 @@ export class MemoryGraphStateService {
   private readonly destroyRef = inject(DestroyRef);
   private readonly _filters = signal<MemoryGraphFilters>(DEFAULT_GRAPH_FILTERS);
   private readonly _result = signal<MemoryGraphResult | null>(null);
+  /**
+   * Session choices for the filter. A session-filtered result holds one
+   * session only, so the choices stay from the last unfiltered result.
+   */
+  private readonly _sessions = signal<readonly string[]>([]);
   private readonly _loading = signal(false);
   private readonly _error = signal<string | null>(null);
   private readonly _selectedIds = signal<readonly string[]>([]);
@@ -119,15 +124,7 @@ export class MemoryGraphStateService {
   public readonly matchIds = computed(() =>
     graphSearch(this.nodes(), this._searchQuery()),
   );
-  public readonly sessions = computed(() =>
-    [
-      ...new Set(
-        this.nodes().flatMap((node) =>
-          node.sessionId ? [node.sessionId] : [],
-        ),
-      ),
-    ].sort(),
-  );
+  public readonly sessions = this._sessions.asReadonly();
   public readonly isDefaultFilters = computed(() => {
     const f = this._filters();
     return (
@@ -156,6 +153,7 @@ export class MemoryGraphStateService {
     if (filters.scope === 'workspace' && !root) {
       this._loading.set(false);
       this._result.set(null);
+      this._sessions.set([]);
       this.clearSelection();
       this._error.set('No workspace is open.');
       return;
@@ -164,13 +162,27 @@ export class MemoryGraphStateService {
     this._error.set(null);
     try {
       const result = await this.rpc.graph(graphFiltersToParams(filters, root));
-      if (seq === this.requestSeq) this._result.set(result);
+      if (seq === this.requestSeq) {
+        this._result.set(result);
+        this.updateSessions(result, filters.sessionId !== null);
+      }
     } catch {
       if (seq === this.requestSeq)
         this._error.set(memoryFailureMessage('list'));
     } finally {
       if (seq === this.requestSeq) this._loading.set(false);
     }
+  }
+
+  private updateSessions(
+    result: MemoryGraphResult,
+    sessionFiltered: boolean,
+  ): void {
+    const found = result.nodes.flatMap((node) =>
+      node.sessionId ? [node.sessionId] : [],
+    );
+    const kept = sessionFiltered ? this._sessions() : [];
+    this._sessions.set([...new Set([...kept, ...found])].sort());
   }
 
   public patchFilters(patch: Partial<MemoryGraphFilters>): void {

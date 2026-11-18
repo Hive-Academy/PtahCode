@@ -13,6 +13,7 @@ import {
   ElementRef,
 } from '@angular/core';
 import type { MemoryGraphEdgeWire } from '@ptah-extension/shared';
+import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   nearestInDirection,
   nextLinked,
@@ -35,7 +36,12 @@ import {
   selector: 'ptah-memory-graph-canvas',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [GraphLegendComponent, GraphMinimapComponent],
+  imports: [
+    GraphLegendComponent,
+    GraphMinimapComponent,
+    PtahAlertComponent,
+    PtahButtonDirective,
+  ],
   host: {
     role: 'application',
     tabindex: '0',
@@ -60,14 +66,16 @@ import {
       {{ announcement() }}
     </div>
     @if (error()) {
-      <div role="alert" class="alert alert-error absolute left-2 top-2">
-        {{ error() }}
-      </div>
+      <ptah-alert tone="error" live="assertive" class="absolute left-2 top-2">{{
+        error()
+      }}</ptah-alert>
     }
     <div class="absolute bottom-2 left-2 flex flex-col gap-1">
       <button
         type="button"
-        class="btn btn-sm"
+        ptahButton
+        variant="secondary"
+        size="sm"
         aria-label="Zoom in"
         (click)="zoom(1)"
       >
@@ -75,7 +83,9 @@ import {
       </button>
       <button
         type="button"
-        class="btn btn-sm"
+        ptahButton
+        variant="secondary"
+        size="sm"
         aria-label="Zoom out"
         (click)="zoom(-1)"
       >
@@ -83,7 +93,9 @@ import {
       </button>
       <button
         type="button"
-        class="btn btn-sm"
+        ptahButton
+        variant="secondary"
+        size="sm"
         aria-label="Fit graph"
         (click)="fit()"
       >
