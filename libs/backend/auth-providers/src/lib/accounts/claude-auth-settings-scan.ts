@@ -467,7 +467,12 @@ export async function scanClaudeAuthPolicy(request: ClaudeAuthPolicyScanRequest)
     if (!(await run.resolve(source))) {
       // A cancel during the scan is not a source refusal: report it as cancelled.
       if (request.signal.aborted) return run.refusal('cancelled');
-      request.onRefusedSource?.(source);
+      try {
+        request.onRefusedSource?.(source);
+      } catch {
+        // degradation-audit: reported - the callback is diagnostics only; its failure must not replace
+        // the refusal or drop the close receipts that the refusal carries.
+      }
       return run.refusal('unsupported-source');
     }
   }

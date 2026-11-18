@@ -583,6 +583,18 @@ describe('scanClaudeAuthPolicy', () => {
       expect(onRefusedSource).toHaveBeenCalledWith('S4');
     });
 
+    it('keeps the refusal when onRefusedSource throws', async () => {
+      const { fs } = fakeFs({
+        present: [win32.join(ancestor, '.git')],
+        files: { [ancestorLocal]: JSON.stringify({ apiKeyHelper: `${CANARY}.cmd` }) },
+      });
+      const onRefusedSource = jest.fn(() => {
+        throw new Error('observer failure');
+      });
+      await expect(scanClaudeAuthPolicy(request({ fs, onRefusedSource }))).resolves.toEqual(REFUSED);
+      expect(onRefusedSource).toHaveBeenCalledWith('S4');
+    });
+
     it('refuses an ancestor with .git whose settings.local.json cannot be read', async () => {
       const { fs } = fakeFs({ present: [win32.join(ancestor, '.git')], errors: { [ancestorLocal]: 'EACCES' } });
       await expect(scanClaudeAuthPolicy(request({ fs }))).resolves.toEqual(REFUSED);
