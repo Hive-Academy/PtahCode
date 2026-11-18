@@ -185,6 +185,7 @@ export class MemoryGraphStateService {
           this.resultContext = null;
           this.clearSelection();
         }
+        this.dropStaleSessions(filters, root);
       }
     } finally {
       if (seq === this.requestSeq) this._loading.set(false);
@@ -216,6 +217,19 @@ export class MemoryGraphStateService {
       // degradation-audit: optional-capability - the graph result is shown;
       // the choices keep the selected session and the next refresh tries again
     }
+  }
+
+  /** After a failed refresh: choices from other filters must not stay. */
+  private dropStaleSessions(
+    filters: MemoryGraphFilters,
+    root: string | null,
+  ): void {
+    const context = JSON.stringify(
+      graphFiltersToParams({ ...filters, sessionId: null }, root),
+    );
+    if (this.sessionsContext === context) return;
+    this._sessions.set(filters.sessionId ? [filters.sessionId] : []);
+    this.sessionsContext = null;
   }
 
   private setSessions(

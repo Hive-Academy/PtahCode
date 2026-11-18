@@ -182,6 +182,27 @@ describe('MemoryGraphStateService', () => {
     expect(service.selectedIds()).toEqual([]);
     expect(service.error()).toBeTruthy();
   });
+  it('drops the session choices when a refresh with new filters fails', async () => {
+    const inSession = (id: string, sessionId: string) => ({
+      ...node(id),
+      sessionId,
+    });
+    graph
+      .mockResolvedValueOnce({
+        ...result,
+        nodes: [inSession('a', 's1'), inSession('b', 's2')],
+      })
+      .mockRejectedValueOnce(new Error('secret'))
+      .mockRejectedValueOnce(new Error('secret'));
+    await service.refresh();
+    service.patchFilters({ sessionId: 's1' });
+    await service.refresh();
+    expect(service.nodes()).toHaveLength(0);
+    expect(service.sessions()).toEqual(['s1', 's2']);
+    service.patchFilters({ pinnedOnly: true });
+    await service.refresh();
+    expect(service.sessions()).toEqual(['s1']);
+  });
   it('debounces server filters and sends explicit scope', async () => {
     service.patchFilters({ scope: 'all' });
     service.patchFilters({ pinnedOnly: true });
