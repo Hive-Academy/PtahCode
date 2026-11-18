@@ -22,7 +22,7 @@ describe('shared control layout', () => {
   it('keeps a fixed message slot in a field grid, so one row has the same top and bottom', () => {
     const slot = body(
       field,
-      ":where([data-ptah-pattern='field-grid']) .ptah-field:not(:has(> .ptah-field__footer))::after",
+      ".ptah-field:where([data-ptah-pattern='field-grid'] *):not(:has(> .ptah-field__footer))::after",
     );
     expect(slot).toContain("content: '';");
     expect(slot).toContain('block-size: var(--ptah-text-label-leading);');
@@ -30,15 +30,26 @@ describe('shared control layout', () => {
   });
 
   it('gives the compact select one width in a setting row and one height in rows and table cells', () => {
-    expect(body(select, ":where([data-ptah-pattern='setting-row']) :where(ptah-select, ptah-field)")).toContain(
-      'inline-size: var(--ptah-setting-row-control-w);',
-    );
+    for (const [css, host] of [
+      [select, 'ptah-select'],
+      [field, 'ptah-field'],
+    ]) {
+      expect(body(css, `:where(${host}):where([data-ptah-setting-control] > *)`)).toContain(
+        'inline-size: var(--ptah-setting-row-control-w);',
+      );
+    }
     expect(tokens).toMatch(/--ptah-setting-row-control-w:\s*13rem;/);
     const height = body(
       select,
-      "[data-ptah-pattern='setting-row'] .ptah-select[data-size]:not(.ptah-field__body > .ptah-select) .ptah-select__trigger,\n.ptah-table-control-cell .ptah-select[data-size] .ptah-select__trigger",
+      '.ptah-select[data-size]:where([data-ptah-setting-control] > *, .ptah-table-control-cell *) .ptah-select__trigger',
     );
     expect(height).toContain('height: var(--ptah-control-h-sm);');
     expect(height).toContain('min-height: var(--ptah-control-h-sm);');
+  });
+
+  it('lets long options wrap in the panel, also inside a nowrap table cell, within the viewport', () => {
+    const panel = body(select, '.ptah-select__panel');
+    expect(panel).toContain('white-space: normal;');
+    expect(panel).toContain('max-width: min(32rem, calc(100vw - var(--ptah-space-4)));');
   });
 });

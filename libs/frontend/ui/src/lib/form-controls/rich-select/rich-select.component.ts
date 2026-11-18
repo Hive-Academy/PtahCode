@@ -292,7 +292,8 @@ export class PtahRichSelectComponent<T = unknown>
     const panel = this.panelRef()?.nativeElement;
     if (!panel) return;
     const anchor = this.host.nativeElement.closest<HTMLElement>('.ptah-field__box') ?? this.host.nativeElement;
-    panel.style.minWidth = `${anchor.getBoundingClientRect().width}px`;
+    // As wide as the anchor, but never wider than the viewport (min-width wins over max-width).
+    panel.style.minWidth = `min(${anchor.getBoundingClientRect().width}px, calc(100vw - var(--ptah-space-4)))`;
     void this.floating.position(anchor, panel, { placement: 'bottom-start', offset: 6 });
     this.searchRef()?.nativeElement.focus();
     this.scrollActive();

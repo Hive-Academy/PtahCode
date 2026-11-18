@@ -135,7 +135,7 @@ const GUARD_HYSTERESIS_PX = 32;
         max-width: 100%;
         vertical-align: middle;
       }
-      .ptah-table-control-cell .ptah-select__trigger {
+      .ptah-table-control-cell .ptah-select[data-size] .ptah-select__trigger {
         font-size: var(--ptah-text-hint-size);
       }
       .ptah-table-control-cell [ptahToggle] {

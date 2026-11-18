@@ -1,5 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { PtahSettingRowComponent } from '../../patterns/setting-row/setting-row.component';
 import { PtahRichSelectComponent } from './rich-select.component';
 import type { PtahSelectOption } from './rich-select.types';
 
@@ -89,5 +90,35 @@ describe('PtahRichSelectComponent compact variant', () => {
     fixture.detectChanges();
     expect(root.querySelector('[role="listbox"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+@Component({
+  standalone: true,
+  imports: [PtahRichSelectComponent, PtahSettingRowComponent],
+  template: `
+    <ptah-setting-row label="Default effort" controlId="row-effort">
+      <ptah-select triggerId="row-effort" labelledBy="row-effort-title" [options]="options" />
+    </ptah-setting-row>
+  `,
+})
+class RowHost {
+  readonly options = OPTIONS;
+}
+
+describe('PtahRichSelectComponent in a setting row', () => {
+  it('names the trigger and the listbox with the row title, and sits in the control slot', () => {
+    const fixture = TestBed.createComponent(RowHost);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const title = root.querySelector('#row-effort-title') as HTMLElement;
+    expect(title.textContent?.trim()).toBe('Default effort');
+    const trigger = root.querySelector('button[role="combobox"]') as HTMLButtonElement;
+    expect(trigger.id).toBe('row-effort');
+    expect(trigger.getAttribute('aria-labelledby')).toBe('row-effort-title');
+    expect(root.querySelector('[data-ptah-setting-control] > ptah-select')).not.toBeNull();
+    trigger.click();
+    fixture.detectChanges();
+    expect(root.querySelector('[role="listbox"]')?.getAttribute('aria-labelledby')).toBe('row-effort-title');
   });
 });

@@ -18,6 +18,18 @@
   min-inline-size: 0;
 }
 
+/* A field projected straight into the control slot of a setting row has the
+   compact control width of the row (ptah-select.css has the same rule). */
+:where(ptah-field):where([data-ptah-setting-control] > *) {
+  inline-size: var(--ptah-setting-row-control-w);
+}
+
+@container (width < 40rem) {
+  :where(ptah-field):where([data-ptah-setting-control] > *) {
+    inline-size: 100%;
+  }
+}
+
 .ptah-field {
   display: flex;
   flex-direction: column;
@@ -28,7 +40,7 @@
 /* Fixed message slot in a field grid: a field without a hint or an error
    keeps an empty line of the same height, so the fields of one row have the
    same top and bottom and the next row does not move when an error shows. */
-:where([data-ptah-pattern='field-grid']) .ptah-field:not(:has(> .ptah-field__footer))::after {
+.ptah-field:where([data-ptah-pattern='field-grid'] *):not(:has(> .ptah-field__footer))::after {
   content: '';
   display: block;
   block-size: var(--ptah-text-label-leading);

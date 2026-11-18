@@ -23,22 +23,18 @@
   inline-size: 100%;
 }
 
-/* Compact variant in a setting row: one fixed width and one height in every
-   row (the row title is the label). Below 640 px the control takes the row. */
-:where([data-ptah-pattern='setting-row']) :where(ptah-select, ptah-field) {
+/* Compact variant in a setting row: one fixed width in every row (the row
+   title is the label). Only a select projected straight into the control
+   slot: a select in a popover of the row keeps the full width. Below 40rem
+   (the setting-row breakpoint) the control takes the row. */
+:where(ptah-select):where([data-ptah-setting-control] > *) {
   inline-size: var(--ptah-setting-row-control-w);
 }
 
-@container (max-width: 639px) {
-  :where([data-ptah-pattern='setting-row']) :where(ptah-select, ptah-field) {
+@container (width < 40rem) {
+  :where(ptah-select):where([data-ptah-setting-control] > *) {
     inline-size: 100%;
   }
-}
-
-[data-ptah-pattern='setting-row'] .ptah-select[data-size]:not(.ptah-field__body > .ptah-select) .ptah-select__trigger,
-.ptah-table-control-cell .ptah-select[data-size] .ptah-select__trigger {
-  height: var(--ptah-control-h-sm);
-  min-height: var(--ptah-control-h-sm);
 }
 
 .ptah-field__body > .ptah-select {
@@ -279,6 +275,8 @@
   max-height: var(--ptah-select-panel-max-h);
   /* A long option must not push the panel past the viewport edge. */
   max-width: min(32rem, calc(100vw - var(--ptah-space-4)));
+  /* The panel can sit in a nowrap container (a table control cell). */
+  white-space: normal;
   padding: var(--ptah-select-panel-pad);
   border: var(--ptah-border-width) solid var(--ptah-select-panel-edge);
   border-radius: var(--ptah-field-radius);
@@ -421,4 +419,12 @@ li + li > .ptah-select__group {
   font-size: var(--ptah-text-label-size);
   line-height: var(--ptah-text-label-leading);
   text-align: center;
+}
+
+/* Compact variant: one height in every setting row and table control cell,
+   whatever the size input. Last in the file, so it wins over the size rules
+   of the same weight. */
+.ptah-select[data-size]:where([data-ptah-setting-control] > *, .ptah-table-control-cell *) .ptah-select__trigger {
+  height: var(--ptah-control-h-sm);
+  min-height: var(--ptah-control-h-sm);
 }

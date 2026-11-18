@@ -57,10 +57,10 @@ const EFFORT_OPTIONS: readonly PtahSelectOption<string>[] = [
     </div>
     <div data-testid="form-controls-settings-rows" class="flex flex-col">
       <ptah-setting-row label="Default effort" hint="The effort of a new session." controlId="gallery-row-effort">
-        <ptah-select triggerId="gallery-row-effort" [options]="effort" [value]="'high'" />
+        <ptah-select triggerId="gallery-row-effort" labelledBy="gallery-row-effort-title" [options]="effort" [value]="'high'" />
       </ptah-setting-row>
       <ptah-setting-row label="Fallback model" controlId="gallery-row-model">
-        <ptah-select triggerId="gallery-row-model" [options]="models" placeholder="No fallback" />
+        <ptah-select triggerId="gallery-row-model" labelledBy="gallery-row-model-title" [options]="models" placeholder="No fallback" />
       </ptah-setting-row>
     </div>
   `,

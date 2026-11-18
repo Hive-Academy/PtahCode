@@ -131,8 +131,15 @@ describe('Ptah design tokens in the application', () => {
   });
 
   it.each([
-    [FIELD_CSS_FILE, /^(\.ptah-field|:is\(\.ptah-field__body, #ptah-field\))/],
-    [SELECT_CSS_FILE, /^(\.ptah-select|\.ptah-field|li \+ li > \.ptah-select)/],
+    // The owner is the class of the field or select, or its host element with no weight (:where).
+    [
+      FIELD_CSS_FILE,
+      /^(\.ptah-field|:is\(\.ptah-field__body, #ptah-field\)|:where\(ptah-field\))/,
+    ],
+    [
+      SELECT_CSS_FILE,
+      /^(\.ptah-select|\.ptah-field|li \+ li > \.ptah-select|:where\(ptah-select\))/,
+    ],
   ])('scopes every rule of %s to its owner', (file, owner) => {
     const css = readFileSync(join(WORKSPACE_ROOT, file), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
