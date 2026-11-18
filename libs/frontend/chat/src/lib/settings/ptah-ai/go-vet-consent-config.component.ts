@@ -11,7 +11,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { AlertTriangle, LucideAngularModule } from 'lucide-angular';
+import { AlertTriangle, Info, LucideAngularModule } from 'lucide-angular';
 import { ClaudeRpcService, WorkspaceScopeService } from '@ptah-extension/core';
 import type {
   DiagnosticsGoVetConsentGetResult,
@@ -19,8 +19,10 @@ import type {
   GoVetConsentStaleReasonDto,
 } from '@ptah-extension/shared';
 import { SettingsSectionStateComponent } from '../shared/settings-section-state.component';
+import { SearchVoiceSummaryStore } from './search-voice-summary.store';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
+  NativePopoverComponent,
   PtahButtonDirective,
   PtahToggleDirective,
   PtahFormSectionComponent,
@@ -80,6 +82,7 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
   standalone: true,
   imports: [
     LucideAngularModule,
+    NativePopoverComponent,
     PtahButtonDirective,
     PtahToggleDirective,
     PtahFormSectionComponent,
@@ -97,25 +100,74 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
       <!-- P2 section card (pattern map V26-V29). -->
       <section
         data-glass-surface="content"
-        class="border-b border-base-content/10 pb-7"
+        class="border-b border-surface-border"
         data-testid="go-vet-consent-card"
       >
         <ptah-form-section
           id="go-vet-consent-title"
-          heading="Diagnostics: go vet"
+          tabindex="-1"
+          heading="go vet checks"
+          description="Let agents run go vet in Go workspaces to find problems before they edit."
           level="2"
+          wide
         >
-          <p class="text-xs text-base-content-muted mb-2">
-            When on, Ptah's diagnostics tools run your installed Go toolchain
-            (<code>go vet</code>) on the Go packages they are asked to check. It
-            reads the module source and module cache and writes the build cache.
-            It does not run go:generate, tests, build scripts, custom vet tools,
-            downloaded toolchains, network fetches, git or C compilers. Turning
-            this on authorises that run for this folder only; it is not a
-            sandbox. Consent ends when the folder moves or is replaced, or when
-            the Go binary changes.
-          </p>
-
+          <span aside data-testid="go-vet-consent-state"
+            ><ptah-status
+              [status]="
+                badgeView() === 'on'
+                  ? 'online'
+                  : badgeView() === 'stale'
+                    ? 'warning'
+                    : badgeView() === 'pending'
+                      ? 'pending'
+                      : 'offline'
+              "
+              [label]="badgeLabel()"
+          /></span>
+          <ptah-setting-row
+            label="Allow go vet in this workspace"
+            hint="Ptah asks again when the folder or the Go binary changes."
+            controlId="go-vet-consent-toggle"
+          >
+            <ptah-native-popover
+              meta
+              [isOpen]="whatRunsOpen()"
+              [keepInViewport]="true"
+              (closed)="whatRunsOpen.set(false)"
+            >
+              <button trigger ptahButton variant="ghost" size="sm"
+                [attr.aria-expanded]="whatRunsOpen()"
+                (click)="whatRunsOpen.set(!whatRunsOpen())">
+                <lucide-angular [img]="InfoIcon" size="16" aria-hidden="true" />
+                What runs
+              </button>
+              <p content class="max-w-prose p-ptah-controls text-sm text-base-content-muted">
+                When on, Ptah's diagnostics tools run your installed Go toolchain
+                (<span class="font-mono">go vet</span>) on the Go packages they are asked to check. It
+                reads the module source and module cache and writes the build cache.
+                It does not run go:generate, tests, build scripts, custom vet tools,
+                downloaded toolchains, network fetches, git or C compilers. Turning
+                this on authorises that run for this folder only; it is not a
+                sandbox. Consent ends when the folder moves or is replaced, or when
+                the Go binary changes.
+              </p>
+            </ptah-native-popover>
+            <label data-testid="go-vet-consent-toggle-target">
+              <input
+                #toggle
+                id="go-vet-consent-toggle"
+                type="checkbox"
+                ptahToggle
+                size="sm"
+                [checked]="toggleChecked()"
+                [attr.aria-checked]="toggleChecked()"
+                [disabled]="toggleDisabled()"
+                aria-describedby="go-vet-consent-status"
+                (change)="onToggle($event)"
+                data-testid="go-vet-consent-toggle"
+              />
+            </label>
+          </ptah-setting-row>
           <ptah-description-list
             ariaLabel="go vet consent details"
             data-testid="go-vet-consent-table"
@@ -139,39 +191,6 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
               </div>
             }
           </ptah-description-list>
-          <ptah-setting-row
-            label="Allow go vet in this workspace"
-            controlId="go-vet-consent-toggle"
-          >
-            <span status data-testid="go-vet-consent-state"
-              ><ptah-status
-                [status]="
-                  badgeView() === 'on'
-                    ? 'online'
-                    : badgeView() === 'stale'
-                      ? 'warning'
-                      : badgeView() === 'pending'
-                        ? 'pending'
-                        : 'offline'
-                "
-                [label]="badgeLabel()"
-            /></span>
-            <label data-testid="go-vet-consent-toggle-target">
-              <input
-                #toggle
-                id="go-vet-consent-toggle"
-                type="checkbox"
-                ptahToggle
-                size="sm"
-                [checked]="toggleChecked()"
-                [attr.aria-checked]="toggleChecked()"
-                [disabled]="toggleDisabled()"
-                aria-describedby="go-vet-consent-status"
-                (change)="onToggle($event)"
-                data-testid="go-vet-consent-toggle"
-              />
-            </label>
-          </ptah-setting-row>
 
           @if (loading()) {
             <div data-testid="go-vet-consent-loading">
@@ -231,7 +250,7 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
               />
               <span
                 id="go-vet-confirm-root"
-                class="block text-xs text-base-content-muted"
+                class="block font-mono text-xs text-base-content-muted"
                 data-testid="go-vet-consent-confirm-root"
                 >{{ root }}</span
               >
@@ -243,7 +262,7 @@ const LOAD_ERROR = 'Could not read the go vet setting for this workspace.';
   `,
   styles: `
     :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
+      padding: 0 1.25rem;
     }
   `,
 })
@@ -253,6 +272,10 @@ export class GoVetConsentConfigComponent {
   private readonly injector = inject(Injector);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
+  private readonly summary = inject(SearchVoiceSummaryStore, { optional: true });
+
+  readonly whatRunsOpen = signal(false);
+  readonly InfoIcon = Info;
   readonly AlertTriangleIcon = AlertTriangle;
 
   /** Last applied GET answer; `null` until the first one arrives. */
@@ -292,9 +315,9 @@ export class GoVetConsentConfigComponent {
       case 'on':
         return 'On';
       case 'stale':
-        return 'Out of date';
+        return 'Stale';
       case 'pending':
-        return this.saving() ? 'Saving…' : 'Confirm to enable';
+        return 'Pending';
       default:
         return 'Off';
     }
@@ -322,6 +345,21 @@ export class GoVetConsentConfigComponent {
   private getSeq = 0;
 
   constructor() {
+    effect(() => {
+      if (!this.visible()) {
+        this.summary?.clear('go-vet');
+        return;
+      }
+      const state = this.badgeView();
+      this.summary?.report('go-vet', {
+        value: this.badgeLabel(),
+        meta: state === 'on' ? 'Runs in this workspace'
+          : state === 'stale' ? 'Consent is out of date'
+            : state === 'pending' ? 'Saving' : 'Asks before it runs',
+        tone: state === 'on' ? 'ok' : state === 'stale' ? 'warn'
+          : state === 'pending' ? 'info' : 'idle',
+      });
+    });
     effect(() => {
       this.scope.scopeKey();
       untracked(() => {

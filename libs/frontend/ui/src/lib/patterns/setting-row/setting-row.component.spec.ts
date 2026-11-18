@@ -91,7 +91,7 @@ describe('PtahSettingRowComponent', () => {
     const row = element.querySelector('[data-testid="setting-row"]') as HTMLElement;
     expect(row.classList.contains('py-ptah-controls')).toBe(true);
     expect(row.classList.contains('grid-cols-1')).toBe(true);
-    expect(row.classList.contains('[@container(min-width:640px)]:grid-cols-[minmax(0,1fr)_auto]')).toBe(true);
+    expect(row.classList.contains('row-split:grid-cols-[minmax(0,1fr)_auto]')).toBe(true);
     expect(element.querySelector('ptah-setting-row')?.classList.contains('[container-type:inline-size]')).toBe(true);
   });
 });

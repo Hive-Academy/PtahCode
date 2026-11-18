@@ -1,3 +1,5 @@
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,11 +18,9 @@ import {
 } from '@ptah-extension/core/testing';
 import type { VoiceProviderConfigElevenLabsDto } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
-
 import { ElevenLabsPanelComponent } from './elevenlabs-panel.component';
 import type { ElevenLabsSelectKey } from './elevenlabs-select-rows';
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
-
 function elConfig(
   overrides: Partial<VoiceProviderConfigElevenLabsDto> = {},
 ): VoiceProviderConfigElevenLabsDto {
@@ -32,7 +32,6 @@ function elConfig(
     ...overrides,
   };
 }
-
 const VOICES = () =>
   rpcSuccess({
     ok: true,
@@ -41,20 +40,17 @@ const VOICES = () =>
       { id: 'v2', label: 'Adam' },
     ],
   });
-
 /** The three host-failure shapes an action can see (F1). */
 const HOST_FAILURES: readonly [string, () => unknown][] = [
   ['an RPC error', () => rpcError('host detail')],
   ['a thrown Error', () => Promise.reject(new Error('secret host detail'))],
   ['an { ok:false } result', () => rpcSuccess({ ok: false, error: 'host detail' })],
 ];
-
 describe('ElevenLabsPanelComponent', () => {
   let fixture: ComponentFixture<ElevenLabsPanelComponent>;
   let feedback: SettingsSaveFeedbackService;
   let element: HTMLElement;
   let rpc: MockRpcService;
-
   function routeRpc(routes: Record<string, () => unknown>): void {
     (rpc.call as jest.Mock).mockImplementation((method: string) => {
       const handler = routes[method];
@@ -62,7 +58,6 @@ describe('ElevenLabsPanelComponent', () => {
       return Promise.resolve(rpcSuccess({ ok: true, voices: [] }));
     });
   }
-
   function mount(
     direction: 'stt' | 'tts',
     config: VoiceProviderConfigElevenLabsDto,
@@ -89,7 +84,6 @@ describe('ElevenLabsPanelComponent', () => {
     fixture.detectChanges();
     return fixture.componentInstance;
   }
-
   /** Flushes pending RPC promises (not `whenStable()`: the toast's 8 s timer holds it open). */
   async function settle(): Promise<void> {
     for (let pass = 0; pass < 3; pass += 1) {
@@ -97,52 +91,50 @@ describe('ElevenLabsPanelComponent', () => {
       fixture.detectChanges();
     }
   }
-
   function byTestId<T extends HTMLElement = HTMLElement>(id: string): T {
     const el = element.querySelector<T>(`[data-testid="${id}"]`);
     if (!el) throw new Error(`missing [data-testid="${id}"]`);
     return el;
   }
-
+  function richSelect(testId: string): PtahRichSelectComponent<string> {
+    return fixture.debugElement.query(By.css(`[data-testid="${testId}"]`)).componentInstance;
+  }
+  function choose(testId: string, value: string): void {
+    const host = byTestId(testId);
+    host.querySelector<HTMLButtonElement>('button[role="combobox"]')?.click();
+    fixture.detectChanges();
+    const label = richSelect(testId).options().find(option => option.value === value)?.label;
+    const option = Array.from(host.querySelectorAll<HTMLElement>('[role="option"]'))
+      .find(button => button.textContent?.includes(label ?? '\0'));
+    if (!option) throw new Error(`Missing option ${value}`);
+    option.click();
+  }
   function calls(method: string): unknown[] {
     return rpc.call.mock.calls.filter(([m]) => m === method).map(([, p]) => p);
   }
-
   function typeKey(value: string): void {
     const input = byTestId<HTMLInputElement>('elevenlabs-key-input');
     input.value = value;
     input.dispatchEvent(new Event('input'));
     fixture.detectChanges();
   }
-
-  function choose(testId: string, value: string): void {
-    const select = byTestId<HTMLSelectElement>(testId);
-    select.value = value;
-    select.dispatchEvent(new Event('change'));
-  }
-
   function expectFixedAlert(sentence: string): void {
-    // The failure is reported only in the page toast, never inline (and never with host text).
     expect(element.querySelector('[data-testid="elevenlabs-panel-error"]')).toBeNull();
     expect(feedback.toast()).toEqual({ tone: 'alert', message: sentence, canUndo: false });
     expect(element.textContent).not.toContain('host detail');
   }
-
   beforeEach(() => {
     rpc = createMockRpcService();
   });
-
   afterEach(() => {
     feedback?.dismiss();
     fixture?.destroy();
     TestBed.resetTestingModule();
   });
-
   it('never renders a key value — the input is masked and empty even when configured', async () => {
     routeRpc({ 'voice:listVoices': VOICES });
     mount('tts', elConfig({ apiKeyConfigured: true }));
     await settle();
-
     expect(byTestId('elevenlabs-key-configured').textContent).toContain('Key saved');
     expect(byTestId('elevenlabs-key-stored-note').textContent).toContain('never shown');
     byTestId<HTMLButtonElement>('elevenlabs-key-replace').click();
@@ -154,7 +146,6 @@ describe('ElevenLabsPanelComponent', () => {
     expect(byTestId('elevenlabs-panel-table').tagName).toBe('PTAH-FORM-SECTION');
     expect(input.closest('ptah-field')?.querySelector('[data-appearance]')?.getAttribute('data-appearance')).toBe('floating');
   });
-
   describe('verify-then-save (V21, G13)', () => {
     it('keeps Save disabled until the draft key passes the probe, then saves exactly that key', async () => {
       routeRpc({
@@ -164,24 +155,19 @@ describe('ElevenLabsPanelComponent', () => {
       const component = mount('tts', elConfig());
       let emitted = 0;
       component.changed.subscribe(() => (emitted += 1));
-
       typeKey('  sk_draft_value  ');
       const save = byTestId<HTMLButtonElement>('elevenlabs-key-save');
       expect(isDisabledControl(save)).toBe(true);
       expect(byTestId('elevenlabs-key-hint').textContent).toContain('Test the key first');
-
       byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
       await settle();
-
       expect(calls('voice:testConnection')).toEqual([
         { providerId: 'elevenlabs', apiKey: 'sk_draft_value' },
       ]);
       expect(byTestId('elevenlabs-test-result').textContent).toContain('Connection works.');
       expect(isDisabledControl(save)).toBe(false);
-
       save.click();
       await settle();
-
       expect(calls('voice:setApiKey')).toEqual([
         { providerId: 'elevenlabs', apiKey: 'sk_draft_value' },
       ]);
@@ -194,30 +180,24 @@ describe('ElevenLabsPanelComponent', () => {
       expect(byTestId<HTMLInputElement>('elevenlabs-key-input').value).toBe('');
       expect(emitted).toBe(1);
     });
-
     it('never saves the key on a failed probe and shows the category sentence, not host text', async () => {
       routeRpc({
         'voice:testConnection': () =>
           rpcSuccess({ ok: false, error: 'host detail', category: 'auth' }),
       });
       const component = mount('tts', elConfig());
-
       typeKey('sk_bad');
       byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
       await settle();
-
       const result = byTestId('elevenlabs-test-result');
       expect(result.textContent?.trim()).toBe('Authentication: ElevenLabs rejected the key.');
       expect(result.hasAttribute('data-ptah-badge')).toBe(true);
       expect(result.getAttribute('data-tone')).toBe('err');
       expect(element.textContent).not.toContain('host detail');
       expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-save'))).toBe(true);
-
-      // Even a direct call cannot bypass the probe.
       await component.saveKey();
       expect(calls('voice:setApiKey')).toEqual([]);
     });
-
     it.each([
       ['quota', 'Quota: the ElevenLabs account is out of credits or rate-limited.'],
       ['network', 'Network: could not reach ElevenLabs.'],
@@ -228,25 +208,20 @@ describe('ElevenLabsPanelComponent', () => {
           rpcSuccess({ ok: false, error: 'host detail', category }),
       });
       mount('tts', elConfig());
-
       typeKey('sk_x');
       byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
       await settle();
-
       expect(byTestId('elevenlabs-test-result').textContent?.trim()).toBe(sentence);
       expect(element.textContent).not.toContain('host detail');
     });
-
     it.each(HOST_FAILURES)(
       'shows a fixed sentence when the probe fails with %s, and Save stays off (F1)',
       async (_shape, failure) => {
         routeRpc({ 'voice:testConnection': failure });
         mount('tts', elConfig());
-
         typeKey('sk_x');
         byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
         await settle();
-
         expect(byTestId('elevenlabs-test-result').textContent?.trim()).toBe(
           'The connection test failed.',
         );
@@ -254,21 +229,17 @@ describe('ElevenLabsPanelComponent', () => {
         expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-save'))).toBe(true);
       },
     );
-
     it('re-locks Save when the draft changes after a passing probe', async () => {
       routeRpc({ 'voice:testConnection': () => rpcSuccess({ ok: true }) });
       mount('tts', elConfig());
-
       typeKey('sk_one');
       byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
       await settle();
       expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-save'))).toBe(false);
-
       typeKey('sk_two');
       expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-save'))).toBe(true);
       expect(element.querySelector('[data-testid="elevenlabs-test-result"]')).toBeNull();
     });
-
     it('drops a probe result that arrives after the draft changed', async () => {
       let resolveProbe!: (result: RpcResult<{ ok: boolean }>) => void;
       rpc.call.mockImplementation((method: string) =>
@@ -277,17 +248,14 @@ describe('ElevenLabsPanelComponent', () => {
           : Promise.resolve(rpcSuccess({ ok: true, voices: [] })),
       );
       mount('tts', elConfig());
-
       typeKey('sk_one');
       byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
       typeKey('sk_two');
       resolveProbe(rpcSuccess({ ok: true }));
       await settle();
-
       expect(element.querySelector('[data-testid="elevenlabs-test-result"]')).toBeNull();
       expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-save'))).toBe(true);
     });
-
     it('tests the stored key when no draft is typed, without enabling Save', async () => {
       routeRpc({
         'voice:listVoices': VOICES,
@@ -295,27 +263,22 @@ describe('ElevenLabsPanelComponent', () => {
       });
       mount('tts', elConfig({ apiKeyConfigured: true }));
       await settle();
-
       byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
       await settle();
-
       expect(calls('voice:testConnection')).toEqual([{ providerId: 'elevenlabs' }]);
       expect(byTestId('elevenlabs-test-result').textContent).toContain('Connection works.');
       expect(element.querySelector('[data-testid="elevenlabs-key-save"]')).toBeNull();
     });
-
     it('hides the key form behind Replace for a saved key; Cancel drops the draft', async () => {
       routeRpc({ 'voice:listVoices': VOICES });
       mount('tts', elConfig({ apiKeyConfigured: true }));
       await settle();
       expect(element.querySelector('[data-testid="elevenlabs-key-input"]')).toBeNull();
-
       const replace = byTestId<HTMLButtonElement>('elevenlabs-key-replace');
       replace.click();
       fixture.detectChanges();
       expect(replace.getAttribute('aria-expanded')).toBe('true');
       typeKey('sk_abandoned');
-
       replace.click();
       fixture.detectChanges();
       expect(element.querySelector('[data-testid="elevenlabs-key-input"]')).toBeNull();
@@ -323,7 +286,6 @@ describe('ElevenLabsPanelComponent', () => {
       fixture.detectChanges();
       expect(byTestId<HTMLInputElement>('elevenlabs-key-input').value).toBe('');
     });
-
     it('closes the replace form after the new key saves', async () => {
       routeRpc({
         'voice:listVoices': VOICES,
@@ -334,18 +296,15 @@ describe('ElevenLabsPanelComponent', () => {
       await settle();
       byTestId<HTMLButtonElement>('elevenlabs-key-replace').click();
       fixture.detectChanges();
-
       typeKey('sk_new_key');
       byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
       await settle();
       byTestId<HTMLButtonElement>('elevenlabs-key-save').click();
       await settle();
-
       expect(calls('voice:setApiKey')).toEqual([{ providerId: 'elevenlabs', apiKey: 'sk_new_key' }]);
       expect(element.querySelector('[data-testid="elevenlabs-key-input"]')).toBeNull();
       expect(byTestId('elevenlabs-key-replace').textContent?.trim()).toBe('Replace');
     });
-
     it.each(HOST_FAILURES)(
       'shows a fixed sentence and keeps the draft when the key save fails with %s (F1)',
       async (_shape, failure) => {
@@ -354,13 +313,11 @@ describe('ElevenLabsPanelComponent', () => {
           'voice:setApiKey': failure,
         });
         const component = mount('tts', elConfig());
-
         typeKey('sk_retry');
         byTestId<HTMLButtonElement>('elevenlabs-test-btn').click();
         await settle();
         byTestId<HTMLButtonElement>('elevenlabs-key-save').click();
         await settle();
-
         expect(feedback.toast()).toEqual({
           tone: 'alert',
           message: 'Could not save the ElevenLabs API key.',
@@ -371,31 +328,25 @@ describe('ElevenLabsPanelComponent', () => {
         expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-save'))).toBe(false);
       },
     );
-
     it('toggles key visibility without exposing the stored key', () => {
       routeRpc({});
       mount('stt', elConfig());
-
       const toggle = byTestId<HTMLButtonElement>('elevenlabs-key-visibility');
       expect(toggle.getAttribute('aria-pressed')).toBe('false');
       toggle.click();
       fixture.detectChanges();
-
       expect(byTestId<HTMLInputElement>('elevenlabs-key-input').type).toBe('text');
       expect(toggle.getAttribute('aria-pressed')).toBe('true');
     });
-
     it('gives the show/hide button a 24x24 px minimum target (D4, WCAG 2.5.8)', () => {
       routeRpc({});
       mount('stt', elConfig());
-
       const toggle = byTestId<HTMLButtonElement>('elevenlabs-key-visibility');
       expect(toggle.hasAttribute('data-ptah-button')).toBe(true);
       expect(toggle.classList).toContain('btn-square');
       expect(toggle.classList).toContain('btn-xs');
       expect(toggle.getAttribute('aria-label')).toBe('Show API key');
     });
-
     it.each([
       [true, 'New API key'],
       [false, 'Paste API key'],
@@ -407,19 +358,15 @@ describe('ElevenLabsPanelComponent', () => {
         byTestId<HTMLButtonElement>('elevenlabs-key-replace').click();
         fixture.detectChanges();
       }
-
       expect(byTestId<HTMLInputElement>('elevenlabs-key-input').placeholder).toBe(placeholder);
     });
   });
-
   describe('clear key (V21, S-confirm)', () => {
     it('asks for an inline confirm first, focuses Cancel, and Cancel returns focus to Clear', async () => {
       routeRpc({ 'voice:listVoices': VOICES });
       mount('tts', elConfig({ apiKeyConfigured: true }));
       await settle();
-
       const clear = byTestId<HTMLButtonElement>('elevenlabs-key-clear');
-      // Gate V 50 decision: the resting Clear is neutral; red only on the confirm button (P8).
       expect(clear.classList).not.toContain('border-error');
       expect(clear.hasAttribute('data-ptah-button')).toBe(true);
       expect(clear.classList).toContain('btn-secondary');
@@ -429,40 +376,32 @@ describe('ElevenLabsPanelComponent', () => {
         expect(byTestId('elevenlabs-clear-confirm').textContent).toContain('Clear key');
       expect(clear.getAttribute('aria-expanded')).toBe('true');
       expect(clear.classList).not.toContain('btn-active');
-
       const group = byTestId('elevenlabs-clear-group');
       expect(group.getAttribute('role')).toBe('group');
       expect(calls('voice:setApiKey')).toEqual([]);
       expect(document.activeElement).toBe(byTestId('elevenlabs-clear-cancel'));
-
       byTestId<HTMLButtonElement>('elevenlabs-clear-cancel').click();
       fixture.detectChanges();
-
       expect(element.querySelector('[data-testid="elevenlabs-clear-group"]')).toBeNull();
       expect(document.activeElement).toBe(clear);
       expect(calls('voice:setApiKey')).toEqual([]);
     });
-
     it('Esc closes the confirm without a write', async () => {
       routeRpc({ 'voice:listVoices': VOICES });
       mount('tts', elConfig({ apiKeyConfigured: true }));
       await settle();
-
       byTestId<HTMLButtonElement>('elevenlabs-key-clear').click();
       fixture.detectChanges();
-      // Esc must not also reach an enclosing drawer, which closes on Escape (Batch 49b).
       const outer = jest.fn();
       element.addEventListener('keydown', outer);
       byTestId('elevenlabs-clear-group').dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
       );
       fixture.detectChanges();
-
       expect(element.querySelector('[data-testid="elevenlabs-clear-group"]')).toBeNull();
       expect(calls('voice:setApiKey')).toEqual([]);
       expect(outer).not.toHaveBeenCalled();
     });
-
     it('clears after confirm with no Undo', async () => {
       routeRpc({
         'voice:listVoices': VOICES,
@@ -472,12 +411,10 @@ describe('ElevenLabsPanelComponent', () => {
       await settle();
       let emitted = 0;
       component.changed.subscribe(() => (emitted += 1));
-
       byTestId<HTMLButtonElement>('elevenlabs-key-clear').click();
       fixture.detectChanges();
       byTestId<HTMLButtonElement>('elevenlabs-clear-confirm').click();
       await settle();
-
       expect(calls('voice:setApiKey')).toEqual([{ providerId: 'elevenlabs', apiKey: '' }]);
       expect(feedback.toast()).toEqual({
         tone: 'status',
@@ -488,19 +425,16 @@ describe('ElevenLabsPanelComponent', () => {
       expect(component.voices()).toEqual([]);
       expect(emitted).toBe(1);
     });
-
     it.each(HOST_FAILURES)(
       'shows a fixed sentence and keeps the confirm open when clearing fails with %s (F1)',
       async (_shape, failure) => {
         routeRpc({ 'voice:listVoices': VOICES, 'voice:setApiKey': failure });
         mount('tts', elConfig({ apiKeyConfigured: true }));
         await settle();
-
         byTestId<HTMLButtonElement>('elevenlabs-key-clear').click();
         fixture.detectChanges();
         byTestId<HTMLButtonElement>('elevenlabs-clear-confirm').click();
         await settle();
-
         expect(feedback.toast()).toEqual({
           tone: 'alert',
           message: 'Could not clear the ElevenLabs API key.',
@@ -511,44 +445,37 @@ describe('ElevenLabsPanelComponent', () => {
       },
     );
   });
-
   describe('voices (V23)', () => {
     it('loads voices from voice:listVoices {providerId:elevenlabs} when a key is configured', async () => {
       routeRpc({ 'voice:listVoices': VOICES });
       mount('tts', elConfig({ apiKeyConfigured: true }));
       await settle();
-
       expect(rpc.call).toHaveBeenCalledWith('voice:listVoices', { providerId: 'elevenlabs' });
-      expect(
-        byTestId<HTMLSelectElement>('elevenlabs-voice-select').querySelectorAll('option').length,
-      ).toBe(2);
+      const host = byTestId('elevenlabs-voice-select');
+      host.querySelector<HTMLButtonElement>('button[role="combobox"]')?.click();
+      fixture.detectChanges();
+      expect(host.querySelectorAll('[role="option"]')).toHaveLength(2);
     });
-
     it('in key-only mode shows just the key block and never lists cloud voices', async () => {
       routeRpc({ 'voice:listVoices': VOICES });
       mount('tts', elConfig({ apiKeyConfigured: true }), true);
       await settle();
-
       expect(calls('voice:listVoices')).toEqual([]);
       expect(byTestId('elevenlabs-key-configured')).toBeTruthy();
       expect(element.querySelector('[data-testid="elevenlabs-voice-select"]')).toBeNull();
       expect(element.querySelector('select')).toBeNull();
     });
-
     it('loads voices once the container passes a config with a first saved key', async () => {
       routeRpc({ 'voice:listVoices': VOICES });
       mount('tts', elConfig());
       await settle();
       expect(byTestId('elevenlabs-voices-locked')).toBeTruthy();
       expect(calls('voice:listVoices')).toEqual([]);
-
       fixture.componentRef.setInput('config', elConfig({ apiKeyConfigured: true }));
       await settle();
-
       expect(calls('voice:listVoices')).toEqual([{ providerId: 'elevenlabs' }]);
       expect(element.querySelector('[data-testid="elevenlabs-voice-select"]')).not.toBeNull();
     });
-
     it.each(HOST_FAILURES)(
       'shows a fixed sentence with Retry when the voice list fails with %s (F1)',
       async (_shape, failure) => {
@@ -558,20 +485,16 @@ describe('ElevenLabsPanelComponent', () => {
         });
         mount('tts', elConfig({ apiKeyConfigured: true }));
         await settle();
-
         expect(byTestId('elevenlabs-voices-error').textContent?.trim()).toBe(
           'Could not load your ElevenLabs voices.',
         );
         expect(element.textContent).not.toContain('host detail');
-
         byTestId<HTMLButtonElement>('elevenlabs-voices-retry').click();
         await settle();
-
         expect(element.querySelector('[data-testid="elevenlabs-voices-error"]')).toBeNull();
         expect(element.querySelector('[data-testid="elevenlabs-voice-select"]')).not.toBeNull();
       },
     );
-
     it('names the missing permission and saves a typed voice ID when the key cannot list voices', async () => {
       routeRpc({
         'voice:listVoices': () => rpcSuccess({ ok: false, error: 'host detail', category: 'auth' }),
@@ -579,39 +502,32 @@ describe('ElevenLabsPanelComponent', () => {
       });
       const component = mount('tts', elConfig({ apiKeyConfigured: true, voiceId: 'v1' }));
       await settle();
-
       expect(byTestId('elevenlabs-voices-hint').textContent).toContain('Enable Voices (read)');
       const input = byTestId<HTMLInputElement>('elevenlabs-voice-id-input');
       const save = byTestId<HTMLButtonElement>('elevenlabs-voice-id-save');
       expect(input.value).toBe('v1');
       expect(isDisabledControl(save)).toBe(true);
-
       input.value = 'bad id!';
       input.dispatchEvent(new Event('input'));
       fixture.detectChanges();
       expect(isDisabledControl(save)).toBe(true);
-
       input.value = ' JBFqnCBsd6RMkjVDRZzb ';
       input.dispatchEvent(new Event('input'));
       fixture.detectChanges();
       save.click();
       await settle();
-
       expect(calls('voice:setProviderConfig')).toEqual([{ elevenlabs: { voiceId: 'JBFqnCBsd6RMkjVDRZzb' } }]);
       expect(component.voiceId()).toBe('JBFqnCBsd6RMkjVDRZzb');
     });
-
     it('offers a voice ID entry with a generic hint for a non-permission failure', async () => {
       routeRpc({ 'voice:listVoices': () => rpcError('host detail') });
       mount('tts', elConfig({ apiKeyConfigured: true }));
       await settle();
-
       expect(byTestId('elevenlabs-voices-hint').textContent?.trim()).toBe('You can still enter a voice ID.');
       expect(byTestId<HTMLInputElement>('elevenlabs-voice-id-input').placeholder).toBe(
         'Default: Rachel (21m00Tcm4TlvDq8ikWAM)',
       );
     });
-
     it('saves a voice on selection with Undo writing the previous voice', async () => {
       routeRpc({
         'voice:listVoices': VOICES,
@@ -619,27 +535,22 @@ describe('ElevenLabsPanelComponent', () => {
       });
       const component = mount('tts', elConfig({ apiKeyConfigured: true, voiceId: 'v1' }));
       await settle();
-
       choose('elevenlabs-voice-select', 'v2');
       await settle();
-
       expect(calls('voice:setProviderConfig')).toEqual([{ elevenlabs: { voiceId: 'v2' } }]);
       expect(feedback.toast()).toEqual({
         tone: 'status',
         message: 'Saved ElevenLabs voice.',
         canUndo: true,
       });
-
       await feedback.undo();
       await settle();
-
       expect(calls('voice:setProviderConfig')).toEqual([
         { elevenlabs: { voiceId: 'v2' } },
         { elevenlabs: { voiceId: 'v1' } },
       ]);
       expect(component.voiceId()).toBe('v1');
     });
-
     it('offers no Undo when no voice was chosen before (the host rejects an empty id)', async () => {
       routeRpc({
         'voice:listVoices': VOICES,
@@ -647,10 +558,8 @@ describe('ElevenLabsPanelComponent', () => {
       });
       mount('tts', elConfig({ apiKeyConfigured: true }));
       await settle();
-
       choose('elevenlabs-voice-select', 'v2');
       await settle();
-
       expect(feedback.toast()).toEqual({
         tone: 'status',
         message: 'Saved ElevenLabs voice.',
@@ -658,7 +567,6 @@ describe('ElevenLabsPanelComponent', () => {
       });
     });
   });
-
   describe('selections (V23-V25, D15)', () => {
     const SELECTS: readonly [string, 'stt' | 'tts', string, string, string][] = [
       ['voice', 'tts', 'elevenlabs-voice-select', 'v2', 'voiceId'],
@@ -666,7 +574,6 @@ describe('ElevenLabsPanelComponent', () => {
       ['output format', 'tts', 'elevenlabs-output-format-select', 'pcm_16000', 'outputFormat'],
       ['STT model', 'stt', 'elevenlabs-stt-model-select', 'scribe_v2', 'sttModelId'],
     ];
-
     it.each(SELECTS)(
       'saves the %s through voice:setProviderConfig with only that field',
       async (_name, direction, testId, value, key) => {
@@ -674,18 +581,14 @@ describe('ElevenLabsPanelComponent', () => {
           'voice:listVoices': VOICES,
           'voice:setProviderConfig': () => rpcSuccess({ ok: true }),
         });
-        // Start STT elsewhere so every choice is a change.
         mount(direction, elConfig({ apiKeyConfigured: true, voiceId: 'v1', sttModelId: 'old' }));
         await settle();
-
         choose(testId, value);
         await settle();
-
         expect(calls('voice:setProviderConfig')).toEqual([{ elevenlabs: { [key]: value } }]);
         expect(feedback.toast()?.tone).toBe('status');
       },
     );
-
     for (const [name, direction, testId, value, key] of SELECTS) {
       it.each(HOST_FAILURES)(
         `reverts the ${name} and shows a fixed sentence when the write fails with %s (D15, F1)`,
@@ -701,10 +604,8 @@ describe('ElevenLabsPanelComponent', () => {
               ? component.voiceId
               : component.selection[key as ElevenLabsSelectKey];
           const before = field();
-
           choose(testId, value);
           await settle();
-
           expect(field()).toBe(before);
           expect(feedback.toast()).toEqual({
             tone: 'alert',
@@ -716,7 +617,6 @@ describe('ElevenLabsPanelComponent', () => {
       );
     }
   });
-
   it('disables save triggers while a write is in flight (D3)', async () => {
     let resolveWrite!: (result: RpcResult<{ ok: boolean }>) => void;
     (rpc.call as jest.Mock).mockImplementation((method: string) => {
@@ -725,32 +625,25 @@ describe('ElevenLabsPanelComponent', () => {
     });
     mount('tts', elConfig({ apiKeyConfigured: true, voiceId: 'v1' }));
     await settle();
-
     choose('elevenlabs-tts-model-select', 'eleven_turbo_v2_5');
     fixture.detectChanges();
-
-    expect(isDisabledControl(byTestId<HTMLSelectElement>('elevenlabs-voice-select'))).toBe(true);
-    expect(isDisabledControl(byTestId<HTMLSelectElement>('elevenlabs-output-format-select'))).toBe(true);
+    expect(richSelect('elevenlabs-voice-select').disabled()).toBe(true);
+    expect(richSelect('elevenlabs-output-format-select').disabled()).toBe(true);
     expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-clear'))).toBe(true);
     expect(isDisabledControl(byTestId<HTMLButtonElement>('elevenlabs-key-replace'))).toBe(true);
-
     resolveWrite(rpcSuccess({ ok: true }));
     await settle();
-
-    expect(isDisabledControl(byTestId<HTMLSelectElement>('elevenlabs-voice-select'))).toBe(false);
+    expect(richSelect('elevenlabs-voice-select').disabled()).toBe(false);
   });
-
   it('renders the STT model select and no voice picker or download UI for the stt direction', async () => {
     routeRpc({});
     mount('stt', elConfig({ apiKeyConfigured: true }));
     await settle();
-
     expect(element.querySelector('[data-testid="elevenlabs-stt-model-select"]')).not.toBeNull();
     expect(element.querySelector('[data-testid="elevenlabs-voice-select"]')).toBeNull();
     expect(element.textContent).not.toContain('Download');
     expect(calls('voice:listVoices')).toEqual([]);
   });
-
   it('uses no text size below 12 px anywhere in the component source (Batch 50b)', () => {
     const source = readFileSync(join(__dirname, 'elevenlabs-panel.component.ts'), 'utf8');
     expect(source.match(/text-\[(?:\d|1[01])(?:\.\d+)?px\]/g)).toBeNull();

@@ -21,7 +21,7 @@ let nextSettingRowId = 0;
   },
   template: `
     <div
-      class="grid min-w-0 grid-cols-1 items-center gap-x-ptah-group gap-y-ptah-label [@container(min-width:640px)]:grid-cols-[minmax(0,1fr)_auto]"
+      class="grid min-w-0 grid-cols-1 items-center gap-x-ptah-group gap-y-ptah-label row-split:grid-cols-[minmax(0,1fr)_auto]"
       [class.py-ptah-field]="density() === 'default'"
       [class.py-ptah-controls]="density() === 'compact'"
       [attr.data-disabled]="disabled() ? 'true' : null"
@@ -45,7 +45,7 @@ let nextSettingRowId = 0;
       </div>
       <div
         data-ptah-setting-control
-        class="flex min-w-0 flex-wrap items-center gap-ptah-controls [@container(min-width:640px)]:justify-self-end"
+        class="flex min-w-0 flex-wrap items-center gap-ptah-controls row-split:justify-self-end"
       >
         <ng-content select="[meta]" />
         <ng-content />

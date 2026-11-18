@@ -95,6 +95,7 @@ describe('VoiceDetailsDrawerComponent', () => {
   it('opens as a labelled dialog on the requested tab with the active provider panel', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog?.getAttribute('aria-label')).toBe('Voice engine details');
+    expect(q('voice-details-drawer')?.querySelector('h2')?.textContent).toBe('Voice details');
     expect(q('voice-details-subtitle')?.textContent).toContain('Speech-to-text: Local · Text-to-speech: Local');
     expect(q('stub-local-stt')).not.toBeNull();
     expect(q('stub-local-tts')).toBeNull();
