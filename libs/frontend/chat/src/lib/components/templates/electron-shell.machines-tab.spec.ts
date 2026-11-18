@@ -4,7 +4,7 @@
  * Pins design-spec section 3 and decisions D11 and D12:
  *   - the tab sits between Tasks and the tabs after it, before Analytics;
  *   - it renders outside the `hasWorkspaceFolders()` guard, so without a
- *     local folder the strip shrinks to Machines alone;
+ *     local folder the strip shrinks to Bots and Machines;
  *   - the no-folder welcome branch yields to `'machines'`, so the bare outlet
  *     really activates the Machines route without a folder;
  *   - a pending-approval count badge is a hint on the label, not a button.
@@ -140,7 +140,7 @@ describe('ElectronShellComponent Machines tab', () => {
 
   it('places Machines after Tasks and before Analytics', () => {
     const titles = tabs().map((tab) => tab.title);
-    expect(titles.indexOf('Machines')).toBe(titles.indexOf('Tasks') + 1);
+    expect(titles.indexOf('Machines')).toBe(titles.indexOf('Tasks') + 2);
     expect(titles.indexOf('Machines')).toBeLessThan(
       titles.indexOf('Analytics'),
     );
@@ -198,9 +198,9 @@ describe('ElectronShellComponent Machines tab', () => {
   });
 
   describe('without a local folder (D12)', () => {
-    it('shrinks the tab strip to Machines alone', () => {
+    it('shrinks the tab strip to Bots and Machines', () => {
       withoutFolders();
-      expect(tabs().map((tab) => tab.title)).toEqual(['Machines']);
+      expect(tabs().map((tab) => tab.title)).toEqual(['Bots', 'Machines']);
     });
 
     it('shows no strip until the first workspace sync settles', () => {
@@ -265,7 +265,7 @@ describe('ElectronShellComponent Machines tab', () => {
       withoutFolders();
       layoutStub.hasWorkspaceFolders.set(true);
       fixture.detectChanges();
-      expect(tabs()).toHaveLength(8);
+      expect(tabs()).toHaveLength(9);
     });
   });
 });

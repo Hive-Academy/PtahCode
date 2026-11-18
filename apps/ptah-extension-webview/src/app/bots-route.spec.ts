@@ -57,6 +57,13 @@ describe('bots route', () => {
     expect(source).not.toMatch(/from ['"]@ptah-extension\/bots-ui['"]/);
   });
 
+  it('resolves the real lazy loader to BotsPageComponent', async () => {
+    const loadComponent = botsRoute().loadComponent;
+    if (!loadComponent) throw new Error('Missing bots route loader');
+    const { BotsPageComponent } = await import('@ptah-extension/bots-ui');
+    expect(await loadComponent()).toBe(BotsPageComponent);
+  });
+
   it.each([
     [true, '/bots', 'bots', 1],
     [false, '/chat', 'chat', 0],

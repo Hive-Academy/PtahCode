@@ -40,6 +40,7 @@ import {
   ArrowLeft,
   LayoutGrid,
   ClipboardList,
+  Bot,
   GitPullRequest,
   AppWindow,
   Wrench,
@@ -243,7 +244,7 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
         <div class="flex-1"></div>
 
         <!-- Navbar tabs (DaisyUI tabs-lifted, fixed navigation).
-             Without a local folder the strip shrinks to Machines alone
+             Without a local folder the strip shrinks to Bots and Machines
              (design-spec D12): remote machines need no local folder. -->
         @if (layout.hasWorkspaceFolders() || layout.workspaceResolved()) {
           <div
@@ -303,6 +304,18 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
                 <span class="tab-label whitespace-nowrap">Tasks</span>
               </button>
             }
+            <button
+              role="tab"
+              class="tab gap-1.5 no-drag whitespace-nowrap"
+              [class.tab-active]="appState.currentView() === 'bots'"
+              [attr.aria-selected]="appState.currentView() === 'bots'"
+              title="Bots"
+              aria-label="Bots"
+              (click)="appState.setCurrentView('bots')"
+            >
+              <lucide-angular [img]="BotIcon" class="w-3.5 h-3.5" />
+              <span class="tab-label whitespace-nowrap">Bots</span>
+            </button>
             <button
               role="tab"
               class="tab gap-1.5 no-drag whitespace-nowrap"
@@ -404,7 +417,8 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
             @if (
               !layout.hasWorkspaceFolders() &&
               (appState.openConfigurationSurface() !== null ||
-                appState.currentView() === 'machines')
+                appState.currentView() === 'machines' ||
+                appState.currentView() === 'bots')
             ) {
               <button
                 type="button"
@@ -444,7 +458,8 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
       } @else if (
         !layout.hasWorkspaceFolders() &&
         appState.openConfigurationSurface() === null &&
-        appState.currentView() !== 'machines'
+        appState.currentView() !== 'machines' &&
+        appState.currentView() !== 'bots'
       ) {
         <!-- Deferred so the welcome, its vitals stores and the
              @ptah-extension/chat-ui/vitals molecules load as a lazy chunk,
@@ -730,6 +745,7 @@ export class ElectronShellComponent {
   readonly ArrowLeftIcon = ArrowLeft;
   readonly LayoutGridIcon = LayoutGrid;
   readonly ClipboardListIcon = ClipboardList;
+  readonly BotIcon = Bot;
   readonly GitPullRequestIcon = GitPullRequest;
   readonly AppWindowIcon = AppWindow;
   readonly WrenchIcon = Wrench;
