@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { join, resolve } from 'path';
 import { jest } from '@jest/globals';
 import { createMockFileSystemProvider } from '@ptah-extension/platform-core/testing';
+import { FileType } from '@ptah-extension/platform-core';
 import { PHASE_CONFIGS } from '../types/multi-phase.types';
 import { AnalysisStorageService } from './analysis-storage.service';
 import { AnalysisClaudeMdLinker } from './analysis-claude-md-linker';
@@ -15,7 +16,7 @@ const END = '<!-- ptah:analysis:end -->';
 const HEADING = 'Workspace analysis (read a file only when the task needs it):';
 
 describe('AnalysisClaudeMdLinker', () => {
-  const logger = { warn: jest.fn() };
+  const logger = { warn: jest.fn(), debug: jest.fn() };
 
   async function fixture() {
     const fs = createMockFileSystemProvider();
@@ -173,5 +174,109 @@ describe('AnalysisClaudeMdLinker', () => {
     jest.spyOn(fs, 'writeFile').mockRejectedValueOnce(new Error('read-only'));
     expect(await linker.link(ROOT)).toMatchObject({ written: false, error: 'read-only' });
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  describe('workspace-open migration', () => {
+    it.each(['\n', '\r\n'])('writes the index and preserves user bytes with %j', async (eol) => {
+      const { fs, manifests, linker } = await fixture();
+      manifests.clear();
+      const path = join(ROOT, 'CLAUDE.md');
+      const before = `\uFEFF# User café\r\n@user-import.md\n  ${BEGIN}`;
+      const after = `${END}  \r\nKeep my instructions.\n`;
+      const imports = FILES.map((file) => `@.ptah/analysis/demo/${file}`).join(eol);
+      await fs.writeFile(path, `${before}${eol}${eol}${imports}${eol}${after}`);
+      fs.writeFileBytes.mockClear();
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: true });
+      const content = Buffer.from(await fs.readFileBytes(path)).toString('utf8');
+      const chosenEol = eol === '\r\n' ? '\r\n' : '\n';
+      const bullets = FILES.map((file) => `- \`.ptah/analysis/demo/${file}\``).join(chosenEol);
+      expect(content).toBe(`${before}${chosenEol}${HEADING}${chosenEol}${bullets}${chosenEol}${after}`);
+      expect(fs.writeFileBytes).toHaveBeenCalledTimes(1);
+      fs.writeFileBytes.mockClear();
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
+      expect(fs.writeFileBytes).not.toHaveBeenCalled();
+      expect(fs.readDirectory).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      '# User text\n@.ptah/analysis/demo/01-project-profile.md\n',
+      `${BEGIN}\n`, `${END}\n`, `${END}\n${BEGIN}\n`,
+      `${BEGIN}\n${BEGIN}\n${END}\n`, `${BEGIN}\n${END}\n${END}\n`,
+      `${BEGIN}\n${END}\n${BEGIN}\n${END}\n`,
+      `${BEGIN}\nWorkspace analysis custom heading\n- \`custom.md\`\n${END}\n`,
+      `${BEGIN}\n@.ptah/analysis/../01-project-profile.md\n${END}\n`,
+      `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\nUser text\n${END}\n`,
+    ])('leaves absent, malformed or non-legacy blocks unchanged: %j', async (original) => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      await fs.writeFile(path, original);
+      fs.writeFileBytes.mockClear();
+      logger.debug.mockClear();
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
+      expect(await fs.readFile(path)).toBe(original);
+      expect(fs.writeFileBytes).not.toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalled();
+    });
+
+    it.each([FileType.SymbolicLink, FileType.SymbolicLink | FileType.File, FileType.Directory, FileType.Unknown])(
+      'skips non-regular CLAUDE.md entries without reading or writing: %s', async (type) => {
+        const { fs, linker } = await fixture();
+        const path = join(ROOT, 'CLAUDE.md');
+        const original = `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`;
+        await fs.writeFile(path, original);
+        fs.lstat.mockResolvedValueOnce({ type, ctime: 0, mtime: 0, size: original.length });
+        fs.readFileBytes.mockClear();
+        fs.writeFileBytes.mockClear();
+        logger.debug.mockClear();
+        expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
+        expect(fs.lstat).toHaveBeenCalledWith(path);
+        expect(fs.readFileBytes).not.toHaveBeenCalled();
+        expect(fs.writeFileBytes).not.toHaveBeenCalled();
+        expect(await fs.readFile(path)).toBe(original);
+        expect(logger.debug).toHaveBeenCalledWith(
+          'Analysis index migration skipped: CLAUDE.md is not a regular file',
+        );
+      },
+    );
+
+    it('does not create CLAUDE.md', async () => {
+      const { fs, linker } = await fixture();
+      fs.writeFileBytes.mockClear();
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
+      expect(fs.writeFileBytes).not.toHaveBeenCalled();
+    });
+
+    it('preserves non-UTF-8 user bytes outside the markers', async () => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      const prefix = Buffer.from([0xff, 0xfe, 0x0a]);
+      const suffix = Buffer.from([0x0a, 0x80]);
+      await fs.writeFileBytes(path, Buffer.concat([
+        prefix, Buffer.from(`${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`), suffix,
+      ]));
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: true });
+      expect(Buffer.from(await fs.readFileBytes(path))).toEqual(Buffer.concat([
+        prefix, Buffer.from(`${BEGIN}\n${HEADING}\n- \`.ptah/analysis/demo/01-project-profile.md\`\n${END}`), suffix,
+      ]));
+    });
+
+    it('leaves an editor save untouched', async () => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      const original = `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`;
+      await fs.writeFile(path, original);
+      fs.readFileBytes.mockResolvedValueOnce(Buffer.from(original)).mockResolvedValueOnce(Buffer.from('editor save'));
+      fs.writeFileBytes.mockClear();
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
+      expect(fs.writeFileBytes).not.toHaveBeenCalled();
+    });
+
+    it.each([new Error('read-only'), 'unavailable'])('contains startup write failures: %j', async (error) => {
+      const { fs, linker } = await fixture();
+      await fs.writeFile(join(ROOT, 'CLAUDE.md'), `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`);
+      fs.writeFileBytes.mockRejectedValueOnce(error);
+      await expect(linker.migrateLegacyBlock(ROOT)).resolves.toMatchObject({ written: false, error: expect.any(String) });
+      expect(logger.debug).toHaveBeenCalled();
+    });
   });
 });

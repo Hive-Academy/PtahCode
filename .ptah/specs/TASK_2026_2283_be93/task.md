@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_2283_be93
-status: backlog
+status: in_review
 type: DOCUMENTATION
 title: Replace the CLAUDE.md analysis imports with an index
 depends_on: []
-created: "2026-11-18T16:15:35.187Z"
-updated: "2026-11-18T16:15:35.187Z"
-description: "Stop loading ~150k characters of analysis into every agent and worktree; list the files instead."
+created: '2026-11-18T16:15:35.187Z'
+updated: '2026-11-18T16:30:18.094Z'
+description: >-
+  Stop loading ~150k characters of analysis into every agent and worktree; list
+  the files instead.
 estimate: XS
 ---
 

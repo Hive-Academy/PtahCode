@@ -22,6 +22,12 @@ import 'reflect-metadata';
 
 const mockCallOrder: string[] = [];
 
+jest.mock('@ptah-extension/agent-generation', () => ({
+  migrateWorkspaceAnalysisIndex: jest.fn(async () => {
+    mockCallOrder.push('analysisIndex.migrate');
+  }),
+}));
+
 jest.mock('./table-size-report-start', () => ({
   startTableSizeReportAfterMigrations: jest.fn(() => {
     mockCallOrder.push('tableSizeReport.start');
@@ -68,6 +74,7 @@ import type { DependencyContainer } from 'tsyringe';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import { TOKENS } from '@ptah-extension/vscode-core';
 import { InstallScopeMigrationService } from '@ptah-extension/rpc-handlers';
+import { migrateWorkspaceAnalysisIndex } from '@ptah-extension/agent-generation';
 
 import { BootCoordinator } from './boot-coordinator';
 import { createHeavyServicesBooter } from './boot-heavy-services';
@@ -148,6 +155,30 @@ afterEach(() => {
 });
 
 describe('Electron heavy boot — install-scope migration trigger', () => {
+  it('finishes boot while analysis index migration remains pending', async () => {
+    jest.mocked(migrateWorkspaceAnalysisIndex).mockImplementationOnce(
+      () => new Promise<void>(() => undefined),
+    );
+    const { container } = makeHarness(null);
+    await driveBoot(container);
+    expect(migrateWorkspaceAnalysisIndex).toHaveBeenCalledWith(container, '/ws');
+    expect(refreshUserLayer).toHaveBeenCalledWith(container, '/ws', 'activation');
+    expect(mockCallOrder).toContain('reconcileHarness');
+  });
+
+  it('migrates the analysis index for each opened workspace before harness activation', async () => {
+    const { container } = makeHarness(null);
+    await driveBoot(container, ['/first', '/second']);
+    expect(migrateWorkspaceAnalysisIndex).toHaveBeenCalledWith(container, '/first');
+    expect(migrateWorkspaceAnalysisIndex).toHaveBeenCalledWith(container, '/second');
+    expect(migrateWorkspaceAnalysisIndex).toHaveBeenCalledTimes(2);
+    expect(mockCallOrder.indexOf('analysisIndex.migrate')).toBeGreaterThan(
+      mockCallOrder.indexOf('createMainWindow'),
+    );
+    expect(mockCallOrder.indexOf('analysisIndex.migrate')).toBeLessThan(
+      mockCallOrder.indexOf('refreshUserLayer'),
+    );
+  });
   it('starts table size reporting after the final heavy boot phase', async () => {
     const { container } = makeHarness(null);
     await driveBoot(container);

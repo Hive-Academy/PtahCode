@@ -15,6 +15,7 @@
  */
 
 import type { DependencyContainer } from 'tsyringe';
+import { migrateWorkspaceAnalysisIndex } from '@ptah-extension/agent-generation';
 
 import {
   CliDIContainer,
@@ -296,6 +297,7 @@ export async function withEngine<T>(
   // (synchronous) bootstrap. Anything that reads or writes settings before it
   // resolves lands in the global default bucket instead of the workspace one.
   await result.workspaceReady;
+  if (opts.mode === 'full') void migrateWorkspaceAnalysisIndex(ctx.container);
   await (async () => {
     try {
       const migrationRunner = ctx.container.resolve<MigrationRunner>(
