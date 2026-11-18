@@ -50,3 +50,18 @@ Against rev2-context-dark-784.jpg (Context Management):
 - CodeRabbit: 13 FIXED (4612414813, 4612414820, 4612414830, 4612414839, 4612414848, 4612414854, 4612414865, 4612414873, 4612414883, 4612414893, 4612414911, 4612414925, 4612414961); 4 REJECTED (4612414901 and 4612414948 shared rich-select limits; 4612414935 duplicate of the "Unknown" placeholder; 4612414802 see below). One line per id: `coderabbit-triage.md`.
 - 4612414802 (Advanced group note): confirmed regression from this PR's section mode in `advanced-settings-group.component.ts`. That file may not get more edits in this PR. Coordinator decision needed: allow a one-line fix here, or let it land with #1417.
 - main did not move; #1417 is still open.
+
+## Report — last two items (head 0cf29c5e50b46aa14ecca0d26379aece7a3e1e2c)
+
+- Commit 0cf29c5e5 `fix(chat): restore the agent-limits note and shorten rotation chips`, pushed (pre-push hook passed). PR body updated.
+- 4612414802 FIXED: section mode shows the context-budgets note in the `[aside]` slot of ptah-form-section (3-line edit in advanced-settings-group.component.ts, one spec).
+- Rotation chips read "Research: Codex" (task kind once when both route parts match); the title keeps the full route.
+- Checks: focused jest 2 suites / 49 tests PASS; `--related -p chat` PASS; lint+typecheck chat PASS; typecheck-templates PASS; full gate `-p chat,core` PASS.
+- Shots refreshed (matrix chips, context budgets note visible in context-dark-1824-after-part3.jpg).
+- origin/main moved to f08e2ab4b (#1420, not #1409). Not merged yet; waiting for the coordinator's sha.
+
+## Report — merge of #1417 and #1409
+
+- Merge 3ac87e18c (origin/main c8dbeda7e, #1417): advanced-settings-group.component.ts resolved on the #1417 version; 'section' mode rebuilt on ptah-form-section wide with the context-budgets aside note; the field spec now expects floating fields in both modes (#1417 default).
+- Merge 0ab7868bd (origin/main d699e2830, #1409): clean.
+- Pushed on user request while the full gate ran: lint+typecheck chat,core PASS; focused jest (group + lane rotation specs, 49 tests) PASS. Test phase, typecheck-templates, ui-class-audit and shot refresh run after the push.
