@@ -27,14 +27,11 @@ const ALLOWED_EAGER_GROWTH_INPUTS = [
   /libs\/shared\/src\/lib\/utils\/(?:test-command-matcher|turn-tests\.utils|turn-sources\.utils|usage-format\.utils)\.ts$/,
   /libs\/frontend\/chat\/.*\/transcript\/transcript-(?:display-candidates|agent-facts|ptah-ui-host-sources|display-feed|turn-summaries|turn-recap-loader)\.ts$/,
   /libs\/frontend\/chat\/.*\/services\/display-dock\/display-dock\.state\.ts$/,
-  /libs\/frontend\/chat\/.*\/organisms\/display-sheet\/display-sheet\.component\.ts$/,
-  // Artifact Display sidebar and detached window (TASK_2026_853_3401): the
-  // main window's sync and its wire helpers (DisplaySheetComponent and
-  // ChatViewComponent import them), the sidebar wiring, reply-flow artifact
-  // cards, the shared publish-result parser and the RPC wire types. The
-  // detached window's own component and state handler stay lazy and unlisted.
+  // Detached Display: the main window source wiring, sync, wire helpers,
+  // reply-flow artifact cards and RPC types stay eager. The detached
+  // window component and state handler remain lazy and unlisted.
   /libs\/frontend\/chat\/.*\/services\/display-window\/display-window-(?:sync\.service|wire)\.ts$/,
-  /libs\/frontend\/chat\/.*\/templates\/display-sidebar-wiring\.ts$/,
+  /libs\/frontend\/chat\/.*\/templates\/display-window-wiring\.ts$/,
   /libs\/frontend\/chat\/.*\/transcript\/transcript-turn-artifacts\.ts$/,
   /libs\/frontend\/chat\/.*\/services\/artifacts\/published-artifact\.ts$/,
   /libs\/shared\/src\/lib\/types\/rpc\/rpc-display-window\.types\.ts$/,

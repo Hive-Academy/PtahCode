@@ -82,6 +82,7 @@ describe('DisplayWindowRpcHandlers', () => {
     const actions: readonly DisplayWindowAction[] = [
       { type: 'select', key: 'artifact:abc' },
       { type: 'fullscreen-closed' },
+      { type: 'pin', pinned: true },
       { type: 'view-state', surfaceKey: 'surface:1', viewState: { zoom: 2, open: [1, 2] } },
       { type: 'attach' },
     ];

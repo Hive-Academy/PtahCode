@@ -66,7 +66,8 @@ export interface DisplayWindowSnapshot {
  * - `select`: select the strip entry `key` (`artifact:<id>` or a surface key).
  * - `fullscreen-closed`: the panel left its own full screen.
  * - `view-state`: a surface renderer changed its view state.
- * - `attach`: close the detached window and show the panel in the main window.
+ * - `pin`: hold the current selection against automatic updates.
+ * - `attach`: historical wire name for closing the detached window.
  */
 export type DisplayWindowAction =
   | { readonly type: 'select'; readonly key: string }
@@ -76,6 +77,7 @@ export type DisplayWindowAction =
       readonly surfaceKey: string;
       readonly viewState: DisplayWindowJsonObject;
     }
+  | { readonly type: 'pin'; readonly pinned: boolean }
   | { readonly type: 'attach' };
 
 /** Every `DisplayWindowAction['type']`, for schema enums and exhaustive specs. */
@@ -83,6 +85,7 @@ export const DISPLAY_WINDOW_ACTION_TYPES = [
   'select',
   'fullscreen-closed',
   'view-state',
+  'pin',
   'attach',
 ] as const satisfies readonly DisplayWindowAction['type'][];
 

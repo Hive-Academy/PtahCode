@@ -28,12 +28,15 @@ import {
   inject,
   ChangeDetectionStrategy,
   signal,
+  effect,
+  untracked,
   computed,
   OnInit,
   ElementRef,
   Injector,
   afterNextRender,
 } from '@angular/core';
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { LucideAngularModule, AlertCircle } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
@@ -43,7 +46,7 @@ import type {
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahBadgeDirective, PtahButtonDirective, PtahCheckboxDirective, PtahFormSectionComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahCheckboxDirective, PtahFormSectionComponent, PtahSkeletonComponent, PtahSettingRowComponent, PtahAlertComponent } from '@ptah-extension/ui';
 
 export const COULD_NOT_LOAD_CLAUDE_BUILTINS =
   'Could not load the Claude Code tool and skill settings.';
@@ -72,17 +75,26 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
 @Component({
   selector: 'ptah-claude-builtins-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahFormSectionComponent, PtahBadgeDirective, PtahSkeletonComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahFormSectionComponent, PtahBadgeDirective, PtahSkeletonComponent, PtahSettingRowComponent, PtahAlertComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     <ptah-form-section
+      id="advanced-claude-tools"
+      [wide]="true"
+      [divider]="true"
       heading="Claude Code tools & skills"
-      description="Choose which of Claude Code's own tools and skills Ptah sessions start with. Fewer items means a smaller first message and lower token use."
+      description="Turn off tools you do not use. Each tool costs tokens on every turn."
       data-glass-surface="content"
       aria-labelledby="claude-tools-heading"
       [attr.aria-busy]="loadState() === 'loading' ? 'true' : null"
     >
+      @if (loaded()) {
+        <div aside class="mt-ptah-field" aria-live="polite" data-testid="claude-tools-savings">
+          <span class="block text-xs text-base-content-muted">Saved per turn </span>
+          <strong class="block text-lg tabular-nums">{{ savingsLabel() }} tokens</strong>
+        </div>
+      }
       <h2 id="claude-tools-heading" class="sr-only">Claude Code tools &amp; skills</h2>
 
       <div role="note" class="flex gap-[var(--ptah-gap-controls)] rounded border border-info/50 p-[var(--ptah-gap-controls)] text-xs text-base-content mb-[var(--ptah-gap-field)]"
@@ -95,25 +107,19 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
       </div>
 
       @if (errorMessage(); as message) {
-        <div
+        <ptah-alert tone="error"
           role="alert"
-          class="flex items-center gap-[var(--ptah-gap-inline)] mb-[var(--ptah-gap-field)] rounded border border-error/40 p-[var(--ptah-gap-controls)] text-xs text-base-content"
+          class="mb-ptah-field"
           data-testid="claude-tools-load-error"
         >
           <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
           <span class="flex-1">{{ message }}</span>
-          <button type="button" ptahButton variant="ghost" size="xs" (click)="load()"
+          <button alertAction type="button" ptahButton variant="ghost" size="xs" (click)="load()"
             data-testid="claude-tools-load-retry">
             Retry
           </button>
-        </div>
+        </ptah-alert>
       } @else {
-        <p class="text-xs text-base-content mb-[var(--ptah-gap-field)]" aria-live="polite" data-testid="claude-tools-savings">
-          @if (loaded()) {
-            Currently hidden: about {{ savingsLabel() }} tokens per new session (estimate).
-          }
-        </p>
-
         <!-- Group 1: built-in tools -->
         <h3 id="claude-tools-group-tools" class="text-xs font-semibold text-base-content">
           Built-in tools (off by default)
@@ -127,10 +133,9 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
             
               @if (loaded()) {
                 @for (tool of tools(); track tool.id) {
-                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]">
-                    <div class="align-top">
-                      <input
-                        type="checkbox"
+                  <ptah-setting-row [label]="tool.id" [controlId]="'claude-tool-' + tool.id" density="compact" class="[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] [&_[data-testid=setting-row]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-testid=setting-row]]:min-h-12" [attr.title]="tool.description">
+                    <input
+                        status class="-order-1" [id]="'claude-tool-' + tool.id" type="checkbox"
                         ptahCheckbox size="xs"
                         [checked]="isToolOn(tool.id)"
                         (change)="toggle('tool', tool.id, $event)"
@@ -138,20 +143,12 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                         [attr.aria-label]="tool.id + ' tool'"
                         [attr.data-testid]="'settings-toggle-claude-tool-' + tool.id"
                       />
-                    </div>
-                    <div class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ tool.id }}</div>
-                    <div class="align-top">
-                      <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(tool.approxTokens) }}</span>
-                    </div>
-                    <div class="w-full text-xs text-base-content-muted">{{ tool.description }}</div>
-                    <div class="w-full text-xs text-base-content-muted">
-                      {{ tool.skillsNeedingIt.length ? tool.skillsNeedingIt.join(', ') : 'None' }}
-                    </div>
-                  </div>
+                    <span meta ptahBadge appearance="outline" size="xs">{{ cost(tool.approxTokens) }} tokens</span>
+                  </ptah-setting-row>
                 }
               } @else {
                 @for (row of skeletonRows; track row) {
-                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]" data-testid="claude-tools-skeleton-row">
+                  <div class="flex min-h-12 items-center gap-ptah-controls [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls" data-testid="claude-tools-skeleton-row">
                     <div class="align-top">
                       <input type="checkbox" ptahCheckbox size="xs" disabled
                         aria-label="Loading tool" />
@@ -174,7 +171,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
             
               @if (loaded()) {
                 @for (skill of terminalSkills(); track skill.id) {
-                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]">
+                  <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-ptah-controls gap-y-[var(--ptah-gap-label)] [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls">
                     <div class="align-top">
                       <input
                         type="checkbox"
@@ -187,28 +184,30 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                         [attr.data-testid]="'settings-toggle-claude-skill-' + skill.id"
                       />
                     </div>
-                    <div class="align-top font-medium text-xs text-base-content whitespace-nowrap">{{ skill.id }}</div>
+                    <div class="min-w-0 font-semibold text-xs text-base-content break-words">{{ skill.id }}</div>
                     <div class="align-top">
                       <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(skill.approxTokens) }}</span>
                     </div>
-                    <div class="w-full text-xs text-base-content-muted">{{ skill.description }}</div>
-                    <div class="w-full text-xs text-base-content-muted">
-                      {{ skill.needsTool ?? 'None' }}
-                      @if (isDependencyBlocked(skill)) {
-                        <span ptahBadge appearance="outline" size="xs" tone="warn" class="block mt-[var(--ptah-gap-label)] whitespace-nowrap"
-                          [attr.data-testid]="'claude-skill-dependency-' + skill.id">
-                          {{ skill.needsTool }} tool is off
-                        </span>
-                        <span [id]="'claude-skill-dep-' + skill.id" class="block mt-[var(--ptah-gap-label)]">
-                          This skill is on but unavailable until the {{ skill.needsTool }} tool is on.
-                        </span>
-                      }
-                    </div>
+                    <div class="col-start-2 col-span-2 text-xs text-base-content-muted">{{ skill.description }}</div>
+                    @if (skill.needsTool) {
+                      <div class="col-start-2 col-span-2 text-xs text-base-content-muted">
+                        {{ skill.needsTool }}
+                        @if (isDependencyBlocked(skill)) {
+                          <span ptahBadge appearance="outline" size="xs" tone="warn" class="block mt-[var(--ptah-gap-label)] whitespace-nowrap"
+                            [attr.data-testid]="'claude-skill-dependency-' + skill.id">
+                            {{ skill.needsTool }} tool is off
+                          </span>
+                          <span [id]="'claude-skill-dep-' + skill.id" class="block mt-[var(--ptah-gap-label)]">
+                            This skill is on but unavailable until the {{ skill.needsTool }} tool is on.
+                          </span>
+                        }
+                      </div>
+                    }
                   </div>
                 }
               } @else {
                 @for (row of skeletonRows; track row) {
-                  <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]" data-testid="claude-tools-skeleton-row">
+                  <div class="flex min-h-12 items-center gap-ptah-controls [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls" data-testid="claude-tools-skeleton-row">
                     <div class="align-top">
                       <input type="checkbox" ptahCheckbox size="xs" disabled
                         aria-label="Loading skill" />
@@ -242,7 +241,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
               
                 @if (loaded()) {
                   @for (skill of syncedSkills(); track skill.id) {
-                    <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]">
+                    <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-ptah-controls gap-y-[var(--ptah-gap-label)] [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls">
                       <div class="align-top">
                         <input
                           type="checkbox"
@@ -254,18 +253,18 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                           [attr.data-testid]="'settings-toggle-claude-skill-' + skill.id"
                         />
                       </div>
-                      <div class="align-top font-medium text-xs text-base-content whitespace-nowrap">
+                      <div class="min-w-0 font-semibold text-xs text-base-content break-words">
                         {{ skillName(skill) }}
                       </div>
                       <div class="align-top">
                         <span ptahBadge appearance="outline" size="xs" class="text-base-content">{{ cost(skill.approxTokens) }}</span>
                       </div>
-                      <div class="w-full text-xs text-base-content-muted">{{ skill.description }}</div>
+                      <div class="col-start-2 col-span-2 text-xs text-base-content-muted">{{ skill.description }}</div>
                     </div>
                   }
                 } @else {
                   @for (row of skeletonRows; track row) {
-                    <div class="flex flex-wrap items-start gap-[var(--ptah-gap-controls)] border-b border-base-content/10 py-[var(--ptah-gap-controls)]" data-testid="claude-tools-skeleton-row">
+                    <div class="flex min-h-12 items-center gap-ptah-controls [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls" data-testid="claude-tools-skeleton-row">
                       <div class="align-top">
                         <input type="checkbox" ptahCheckbox size="xs" disabled
                           aria-label="Loading skill" />
@@ -326,6 +325,19 @@ export class ClaudeBuiltinsConfigComponent implements OnInit {
         .reduce((sum, skill) => sum + skill.approxTokens, 0);
     return Math.round(off / 100) * 100;
   });
+  private readonly overview = inject(AdvancedOverviewStore, { optional: true });
+
+  constructor() {
+    effect(() => {
+      const entry = this.loaded() ? {
+        value: this.tools().filter((tool) => this.isToolOn(tool.id)).length + ' of ' + this.tools().length + ' on',
+        meta: 'Saves ' + this.hiddenTokens().toLocaleString('en-US') + ' tokens',
+        tone: 'ok' as const,
+      } : null;
+      untracked(() => entry ? this.overview?.report('claude-tools', entry) : this.overview?.clear('claude-tools'));
+    });
+  }
+
   readonly savingsLabel = computed(() => this.hiddenTokens().toLocaleString('en-US'));
 
   async ngOnInit(): Promise<void> {

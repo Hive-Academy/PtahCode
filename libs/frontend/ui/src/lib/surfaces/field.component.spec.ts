@@ -7,6 +7,12 @@ import { PtahFieldTriggerDirective } from './field.component';
 import { NativePopoverComponent } from '../native/popover/native-popover.component';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+jest.mock('@floating-ui/dom', () => ({
+  ...jest.requireActual('@floating-ui/dom'),
+  computePosition: jest.fn().mockResolvedValue({ x: 0, y: 0 }),
+  autoUpdate: jest.fn().mockReturnValue(() => undefined),
+}));
 @Component({
   standalone: true,
   imports: [PtahFieldComponent, PtahFieldControlDirective],
@@ -249,6 +255,12 @@ describe('PtahFieldComponent projection and error metadata', () => {
     expect(message.hasAttribute('data-testid')).toBe(false);
     expect(message.textContent?.trim()).toBe('Required');
     expect(control.getAttribute('aria-describedby')).toBe(`consumer-help ${message.id}`);
+    expect(root.querySelector('.ptah-field__info')).toBeNull();
+    expect(root.querySelector('ptah-native-popover')).toBeNull();
+    expect(root.querySelector('[id^="ptah-field-info-"]')).toBeNull();
+    expect([...box.children].map((element) => element.className)).toEqual([
+      'ptah-field__body', 'ptah-field__rail',
+    ]);
   });
 
   it('projects content on each side of the message and sets error attributes', () => {
@@ -280,5 +292,89 @@ describe('PtahFieldComponent projection and error metadata', () => {
     expect(message.hasAttribute('role')).toBe(false);
     expect(message.hasAttribute('data-testid')).toBe(false);
     expect(control.getAttribute('aria-describedby')).toBe(`consumer-help ${message.id}`);
+  });
+});
+
+@Component({
+  standalone: true,
+  imports: [PtahFieldComponent, PtahInputDirective],
+  template: `<ptah-field label="Timeout" hint="In seconds" [info]="info()">
+    <input ptahInput [attr.aria-describedby]="description()" />
+    <span ptahFieldTrailing>seconds</span>
+  </ptah-field>`,
+})
+class InfoHost {
+  readonly info = signal<string | null>('How long to wait before giving up.');
+  readonly description = signal('consumer-help other-help');
+}
+
+describe('PtahFieldComponent info', () => {
+  it('places an accessible native button after the suffix and before the rail', () => {
+    const fixture = TestBed.createComponent(InfoHost);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const box = root.querySelector('.ptah-field__box');
+    const button = root.querySelector('.ptah-field__info') as HTMLButtonElement;
+    const popover = button.closest('ptah-native-popover');
+    expect(button.type).toBe('button');
+    expect(button.getAttribute('aria-label')).toBe('More about Timeout');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(box?.contains(button)).toBe(true);
+    expect(popover?.previousElementSibling?.hasAttribute('ptahFieldTrailing')).toBe(true);
+    expect(popover?.nextElementSibling?.className).toBe('ptah-field__rail');
+    expect(root.querySelector('.ptah-field__info-panel')).toBeNull();
+  });
+
+  it('keeps the info description available while closed and preserves consumer and hint ids', async () => {
+    const fixture = TestBed.createComponent(InfoHost);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const control = root.querySelector('input') as HTMLInputElement;
+    const info = root.querySelector('.sr-only') as HTMLElement;
+    const hint = root.querySelector('.ptah-field__message') as HTMLElement;
+    expect(info.id).toMatch(/^ptah-field-info-\d+$/);
+    expect(info.textContent).toContain('How long to wait');
+    expect(control.getAttribute('aria-describedby')).toBe(`consumer-help other-help ${hint.id} ${info.id}`);
+    fixture.componentInstance.description.set('updated-help');
+    fixture.detectChanges();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(control.getAttribute('aria-describedby')).toBe(`updated-help ${hint.id} ${info.id}`);
+    fixture.componentInstance.info.set(null);
+    fixture.detectChanges();
+    expect(control.getAttribute('aria-describedby')).toBe(`updated-help ${hint.id}`);
+    expect(root.querySelector('.ptah-field__info')).toBeNull();
+    expect(root.querySelector('.sr-only')).toBeNull();
+  });
+
+  it('opens on click, closes on Escape with focus restored, and dismisses outside clicks', async () => {
+    const fixture = TestBed.createComponent(InfoHost);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const button = root.querySelector('.ptah-field__info') as HTMLButtonElement;
+    const flush = async () => {
+      fixture.detectChanges();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      fixture.detectChanges();
+    };
+    button.click();
+    await flush();
+    const panel = root.querySelector('.ptah-field__info-panel') as HTMLElement;
+    expect(panel.textContent).toContain('How long to wait before giving up.');
+    expect(panel.getAttribute('role')).toBe('dialog');
+    expect(button.getAttribute('aria-controls')).toBe(panel.id);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flush();
+    expect(root.querySelector('.ptah-field__info-panel')).toBeNull();
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(button);
+    button.click();
+    await flush();
+    const backdrop = root.querySelector('[role="presentation"]') as HTMLElement;
+    backdrop.click();
+    await flush();
+    expect(root.querySelector('.ptah-field__info-panel')).toBeNull();
+    expect(button.getAttribute('aria-expanded')).toBe('false');
   });
 });

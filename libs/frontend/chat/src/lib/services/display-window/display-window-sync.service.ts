@@ -22,6 +22,7 @@ import {
   type DisplayWindowUnavailableReason,
 } from '@ptah-extension/shared';
 import { z } from 'zod';
+import { ActionBannerService } from '../action-banner.service';
 import { ArtifactStore } from '../artifact.store';
 import type { DisplayDockState } from '../display-dock/display-dock.state';
 import {
@@ -43,7 +44,7 @@ export interface DisplayWindowSource {
   readonly focusVersion: Signal<number>;
   /**
    * An embed (canvas tile or host dock): it never takes the binding on
-   * registration or as a fallback, only through `selectSource`.
+   * registration or as a fallback, only through a display open request.
    */
   readonly passive?: boolean;
 }
@@ -79,9 +80,9 @@ const PUBLISH_RETRY_BASE_MS = 500;
  * The main renderer's side of the detached Display window
  * (TASK_2026_853_3401, D4). The main renderer stays authoritative.
  *
- * - `detach()` opens the window (`displayWindow:open`), `focus()` raises it
- *   (the same RPC), `attach()` closes it (`displayWindow:close`).
- * - `bindSource` registers each ChatView with a Display sheet. While detached, one
+ * - Display requests open the window; `focus()` explicitly raises it
+ *   (`displayWindow:open`), `attach()` closes it (`displayWindow:close`).
+ * - `bindSource` registers each ChatView as a display source. While detached, one
  *   effect builds the bound tab's display view; it is published with
  *   `displayWindow:publishState` at most once per ~16 ms timer tick (not
  *   rAF, which stops while the main window is minimized), and only when its
@@ -120,12 +121,18 @@ export class DisplayWindowSync implements MessageHandler {
   private readonly source = signal<DisplayWindowSource | null>(null);
   private readonly sources: DisplayWindowSource[] = [];
   private hasFocused = false;
+  private readonly requestedTabId = signal<string | null>(null);
+  private opening: Promise<void> | null = null;
+  private closeEpoch = 0;
+  private openingEpoch = 0;
+  private lastOpenFailure: string | null = null;
+  private readonly banners = inject(ActionBannerService);
 
   /** The bound tab's display view, or `null` with no source or no tab. */
   private readonly view = computed(
     (): { tabId: string; view: DisplayWindowView } | null => {
       const source = this.source();
-      const tabId = source?.tabId() ?? null;
+      const tabId = this.requestedTabId() ?? source?.tabId() ?? null;
       if (source === null || tabId === null) return null;
       return { tabId, view: this.buildView(source.dock, tabId) };
     },
@@ -142,6 +149,7 @@ export class DisplayWindowSync implements MessageHandler {
   private retries = 0;
 
   constructor() {
+    effect(() => this.clearStaleRequestedTab());
     effect(() => {
       if (!this._detached()) return;
       // Read inside the effect so any change schedules one publish.
@@ -160,19 +168,43 @@ export class DisplayWindowSync implements MessageHandler {
     this.sources.push(source);
     if (!source.passive && (this.source() === null || !this.hasFocused))
       this.source.set(source);
+    let lastRequest = untracked(source.dock.windowRequest)?.sequence ?? 0;
+    const requestEffect = effect(() => {
+      const request = source.dock.windowRequest();
+      if (!request || request.sequence <= lastRequest) return;
+      lastRequest = request.sequence;
+      untracked(() => {
+        source.dock.consumeWindowRequest(request.sequence);
+        if (!this.vscode.isElectron || !source.dock.tab(request.tabId).open) return;
+        this.clearStaleRequestedTab();
+        const boundTabId = this.requestedTabId() ?? this.source()?.tabId() ?? null;
+        if (this._detached() && !request.focus && request.tabId !== boundTabId) return;
+        if (request.focus) this.hasFocused = true;
+        this.source.set(source);
+        this.requestedTabId.set(request.tabId);
+        if (request.focus || !this._detached()) void this.ensureOpen(request.focus);
+      });
+    }, { injector: this.injector });
     let lastFocusVersion = source.focusVersion();
+    let previousTabId = source.tabId();
     const focusEffect = effect(
       () => {
         const focusVersion = source.focusVersion();
         const tabId = source.tabId();
+        if (tabId !== previousTabId) {
+          if (untracked(this.source) === source) this.requestedTabId.set(null);
+          previousTabId = tabId;
+        }
         if (focusVersion !== lastFocusVersion && tabId !== null) {
           this.hasFocused = true;
           const index = this.sources.indexOf(source);
           if (index >= 0) {
             this.sources.splice(index, 1);
             this.sources.push(source);
-            if (untracked(this.source)?.passive !== true)
+            if (untracked(this.source)?.passive !== true) {
+              if (untracked(this.source) !== source) this.requestedTabId.set(null);
               this.source.set(source);
+            }
           }
         }
         lastFocusVersion = focusVersion;
@@ -183,29 +215,16 @@ export class DisplayWindowSync implements MessageHandler {
     );
     return () => {
       focusEffect.destroy();
+      requestEffect.destroy();
       const index = this.sources.lastIndexOf(source);
       if (index < 0) return;
       this.sources.splice(index, 1);
       // Fall back to another main view; `lastBoundSource` never promotes an embed.
-      if (untracked(this.source) === source)
+      if (untracked(this.source) === source) {
+        this.requestedTabId.set(null);
         this.source.set(this.lastBoundSource(null));
+      }
     };
-  }
-
-  /** A Detach request makes its view the sole snapshot and action source. */
-  selectSource(source: DisplayWindowSource): boolean {
-    if (!this.sources.includes(source) || source.tabId() === null) return false;
-    this.hasFocused = true;
-    this.source.set(source);
-    return true;
-  }
-
-  isBoundSource(source: DisplayWindowSource): boolean {
-    return this.source() === source;
-  }
-
-  hasBoundSource(): boolean {
-    return this.source() !== null;
   }
 
   /**
@@ -227,29 +246,24 @@ export class DisplayWindowSync implements MessageHandler {
     return null;
   }
 
-  /** Opens the separate window; on success the panel moves there. */
-  async detach(): Promise<void> {
-    await this.open();
-  }
-
   /** Raises the open window. */
   async focus(): Promise<void> {
-    await this.open();
+    await this.ensureOpen(true);
   }
 
-  /** Closes the window; the panel returns to the main window. */
+  /** Closes the detached display window. */
   async attach(): Promise<void> {
     try {
       const result = await this.rpc.call('displayWindow:close', {});
       if (!result.success) {
-        this._error.set(CLOSE_FAILED_TEXT);
+        this.reportFailure(CLOSE_FAILED_TEXT);
         return;
       }
       this._error.set(null);
       this.markAttached();
     } catch {
       // degradation-audit: reported — the window stays as it was; `error` tells the user.
-      this._error.set(CLOSE_FAILED_TEXT);
+      this.reportFailure(CLOSE_FAILED_TEXT);
     }
   }
 
@@ -265,12 +279,12 @@ export class DisplayWindowSync implements MessageHandler {
       return;
     }
     if (push.action.type === 'attach') {
-      // Re-attach never depends on which tab the window last saw.
+      // Closing never depends on which tab the window last saw.
       void this.attach();
       return;
     }
     const source = untracked(this.source);
-    if (source === null || untracked(source.tabId) !== push.tabId) {
+    if (source === null || (untracked(this.requestedTabId) ?? untracked(source.tabId)) !== push.tabId) {
       // Stale: the window acted on an older tab. Send it the current view.
       this.lastPublished = null;
       this.schedulePublish();
@@ -279,23 +293,59 @@ export class DisplayWindowSync implements MessageHandler {
     this.applyAction(source.dock, push.tabId, push.action);
   }
 
+  private clearStaleRequestedTab(): void {
+    const source = this.source();
+    const tabId = this.requestedTabId();
+    // A forgotten tab reads the closed default from the dock.
+    if (source && tabId !== null && !source.dock.tab(tabId).open) {
+      untracked(() => this.requestedTabId.set(null));
+    }
+  }
+
+  private async ensureOpen(explicit = false): Promise<void> {
+    if (explicit) this.lastOpenFailure = null;
+    const pending = this.opening;
+    const epoch = this.closeEpoch;
+    if (pending !== null && this.openingEpoch === epoch) return pending;
+    this.openingEpoch = epoch;
+    const opening = pending === null
+      ? this.open()
+      : pending.then(() => epoch === this.closeEpoch ? this.open() : undefined);
+    this.opening = opening;
+    try { await opening; } finally {
+      if (this.opening === opening) this.opening = null;
+    }
+  }
+
   private async open(): Promise<void> {
+    const closeEpoch = this.closeEpoch;
     try {
       const result = await this.rpc.call('displayWindow:open', {});
+      if (closeEpoch !== this.closeEpoch) return;
       if (!result.success || result.data === undefined) {
-        this._error.set(OPEN_FAILED_TEXT);
+        this.reportFailure(OPEN_FAILED_TEXT, true);
         return;
       }
       if (!result.data.ok) {
-        this._error.set(UNAVAILABLE_TEXT[result.data.reason]);
+        this.reportFailure(UNAVAILABLE_TEXT[result.data.reason], true);
         return;
       }
+      this.lastOpenFailure = null;
       this._error.set(null);
       this.markDetached();
     } catch {
-      // degradation-audit: reported — the panel stays in the main window; `error` tells the user.
-      this._error.set(OPEN_FAILED_TEXT);
+      // degradation-audit: reported — the request remains available for retry; `error` tells the user.
+      if (closeEpoch === this.closeEpoch) this.reportFailure(OPEN_FAILED_TEXT, true);
     }
+  }
+
+  private reportFailure(message: string, dedupeOpen = false): void {
+    this._error.set(message);
+    if (dedupeOpen) {
+      if (this.lastOpenFailure === message) return;
+      this.lastOpenFailure = message;
+    }
+    this.banners.showError(message);
   }
 
   private async restoreStatus(): Promise<void> {
@@ -319,6 +369,10 @@ export class DisplayWindowSync implements MessageHandler {
   }
 
   private markAttached(): void {
+    this.closeEpoch += 1;
+    const source = untracked(this.source);
+    const tabId = untracked(this.requestedTabId) ?? (source ? untracked(source.tabId) : null);
+    if (source && tabId) source.dock.close(tabId);
     this._detached.set(false);
     this.cancelTimer();
     this.lastPublished = null;
@@ -332,6 +386,9 @@ export class DisplayWindowSync implements MessageHandler {
     action: DisplayWindowParsedAction,
   ): void {
     switch (action.type) {
+      case 'pin':
+        dock.setPinned(tabId, action.pinned);
+        return;
       case 'select':
         dock.select(tabId, selectionForKey(action.key));
         return;

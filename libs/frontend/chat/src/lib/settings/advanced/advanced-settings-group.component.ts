@@ -19,13 +19,17 @@ import {
   type AdvancedSettingGroupId,
   type AdvancedSettingValidation,
 } from '@ptah-extension/shared';
+import { Info, LucideAngularModule } from 'lucide-angular';
 import { NgTemplateOutlet } from '@angular/common';
 import {
-  PtahFormSectionComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahFieldGridDirective,
   PtahFieldComponent,
+  PtahFormSectionComponent,
   PtahInputDirective,
+  PtahIconButtonDirective,
+  NativePopoverComponent,
   PtahSettingRowComponent,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
@@ -89,10 +93,14 @@ function formatValue(
   standalone: true,
   imports: [
     NgTemplateOutlet,
-    PtahFormSectionComponent,
-  PtahButtonDirective,
+    LucideAngularModule,
+    PtahIconButtonDirective,
+    NativePopoverComponent,
+    PtahBadgeDirective,
+    PtahButtonDirective,
     PtahFieldGridDirective,
     PtahFieldComponent,
+    PtahFormSectionComponent,
     PtahSettingRowComponent,
     PtahInputDirective,
     PtahToggleDirective,
@@ -103,10 +111,50 @@ function formatValue(
     @if (group(); as group) {
       <section
         [attr.data-glass-surface]="contentSurface() ? 'content' : null"
-        [class]="headingStyle() === 'section' ? 'text-sm text-base-content' : 'flex flex-col gap-3 border-b border-base-content/10 pb-7 text-sm text-base-content'"
+        class="flex flex-col gap-[var(--ptah-gap-field)] text-sm text-base-content"
+        [class.border-b]="headingStyle() === 'caps'"
+        [class.border-base-content/10]="headingStyle() === 'caps'"
+        [class.pb-7]="headingStyle() === 'caps'"
         [attr.aria-labelledby]="idPrefix() + '-heading'"
         [attr.data-testid]="'settings-section-' + group.id"
       >
+        <!-- The write error and the invalid-stored-value notice of one setting. -->
+        <ng-template #messages let-setting>
+          @if (errors()[setting.key]; as message) {
+            <p
+              role="alert"
+              [id]="'advanced-setting-' + setting.key + '-error'"
+              class="mt-[var(--ptah-gap-label)] text-xs text-error"
+              [attr.data-testid]="'advanced-setting-' + setting.key + '-error'"
+            >
+              {{ message }}
+            </p>
+          }
+          @if (storedNotice(setting); as notice) {
+            <p
+              [id]="'advanced-setting-' + setting.key + '-stored'"
+              class="mt-[var(--ptah-gap-label)] rounded-md border border-info/30 bg-info/10 px-2 py-1 text-xs"
+              [attr.data-testid]="'advanced-setting-' + setting.key + '-stored'"
+            >
+              {{ notice }}
+            </p>
+          }
+        </ng-template>
+        <ng-template #info let-setting>
+          <ptah-native-popover
+            [isOpen]="openHelp() === setting.key"
+            [keepInViewport]="true"
+            (closed)="openHelp.set(null)"
+          >
+            <button trigger type="button" ptahIconButton size="xs"
+              [label]="'About ' + setting.label"
+              [attr.aria-label]="'About ' + setting.label"
+              (click)="openHelp.set(openHelp() === setting.key ? null : setting.key)">
+              <lucide-angular [img]="InfoIcon" />
+            </button>
+            <p content class="max-w-xs text-sm">{{ helpText(setting) }}</p>
+          </ptah-native-popover>
+        </ng-template>
         <ng-template #description>
           <p class="mt-0.5 text-xs text-base-content-muted">
             {{ group.description }}
@@ -119,9 +167,16 @@ function formatValue(
         </ng-template>
         <!-- 'section': the sentence-case heading of the sibling setting sections (session budget); 'caps': the
              small uppercase group label of the Advanced tab and the Codex drawer. -->
-        @if (headingStyle() === 'section') {
-          <ptah-form-section wide [heading]="group.title" [description]="group.description"
-            >
+        @if (headingStyle() === 'hidden') {
+          <!-- 'hidden': a disclosure row already shows the title (Fine-tuning), so the heading only names the
+               section for assistive technology. -->
+          <h3 [id]="idPrefix() + '-heading'" class="sr-only">
+            {{ group.title }}
+          </h3>
+        } @else if (headingStyle() === 'section') {
+          <!-- 'section': the shared form section of Context Management (title and description at the left, the
+               group at the right); the sr-only span keeps the aria-labelledby id. -->
+          <ptah-form-section wide [heading]="group.title" [description]="group.description">
             <span class="sr-only" [id]="idPrefix() + '-heading'">{{ group.title }}</span>
             @if (group.id === 'context-budgets') {
               <p aside class="text-xs text-base-content-muted">Agent limits apply even when compaction is off.</p>
@@ -168,32 +223,53 @@ function formatValue(
             </div>
           }
           @default {
-            <div
-              ptahFieldGrid minColumn="md"
-            >
-              @for (setting of settings(); track setting.key) {
-                <div
-                  class="flex min-w-0 flex-col gap-1"
-                  [class.col-span-full]="headingStyle() === 'section' && setting.kind === 'boolean'"
-                  [attr.data-testid]="
-                    'advanced-setting-' + setting.key + '-field'
-                  "
-                >
-                  @if (setting.kind === 'boolean') {
+            <!-- Switches first, as aligned setting rows (title and help at the left, the switch at the right). -->
+            @if (booleanSettings().length > 0) {
+              <div
+                class="flex flex-col divide-y divide-base-content/10"
+                data-testid="advanced-group-switches"
+              >
+                @for (setting of booleanSettings(); track setting.key) {
+                  <div
+                    class="min-w-0 py-[var(--ptah-gap-controls)] first:pt-[calc(var(--ptah-gap-controls)*0)]"
+                    [attr.data-testid]="
+                      'advanced-setting-' + setting.key + '-field'
+                    "
+                  >
                     <ptah-setting-row
-                      [hint]="headingStyle() === 'section' ? helpText(setting) : null"
                       [label]="setting.label"
                       [controlId]="'advanced-setting-' + setting.key"
                     >
                       @if (setting.apply === 'restart') {
-                        <span status [class]="restartBadge" aria-hidden="true"
+                        <span
+                          status
+                          ptahBadge
+                          tone="info"
+                          data-restart-badge
+                          aria-hidden="true"
                           >Restart</span
                         >
                       }
-                      <div
-                        [class]="headingStyle() === 'section' ? 'flex items-center' : 'flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-base-content/10 px-2'"
+                      <p
+                        status
+                        [id]="'advanced-setting-' + setting.key + '-help'"
+                        class="basis-full text-xs font-normal text-base-content-muted"
                       >
-                        <input
+                        {{ applyNote(setting) }}
+                        <ng-container [ngTemplateOutlet]="info"
+                          [ngTemplateOutletContext]="{ $implicit: setting }" />
+                      </p>
+                      <span
+                        meta
+                        class="text-xs text-base-content-muted"
+                        [attr.data-testid]="
+                          'advanced-setting-' + setting.key + '-state'
+                        "
+                        >{{
+                          booleanValue(setting) ? 'Enabled' : 'Disabled'
+                        }}</span
+                      >
+                      <input
                           type="checkbox"
                           ptahToggle
                           size="sm"
@@ -208,28 +284,40 @@ function formatValue(
                           [attr.aria-describedby]="describedBy(setting)"
                           [attr.data-testid]="'advanced-setting-' + setting.key"
                         />
-                        <span
-                          [class]="headingStyle() === 'section' ? 'sr-only' : 'text-sm'"
-                          [attr.data-testid]="
-                            'advanced-setting-' + setting.key + '-state'
-                          "
-                          >{{
-                            booleanValue(setting) ? 'Enabled' : 'Disabled'
-                          }}</span
-                        >
-                      </div>
                     </ptah-setting-row>
-                  } @else {
-                    <ptah-field [label]="setting.label" [appearance]="headingStyle() === 'section' ? 'floating' : 'stacked'">
+                    <ng-container
+                      [ngTemplateOutlet]="messages"
+                      [ngTemplateOutletContext]="{ $implicit: setting }"
+                    />
+                  </div>
+                }
+              </div>
+            }
+            <!-- Numbers: related short fields side by side (at most three columns), floating labels, unit at the
+                 right of the box, help under the box. -->
+            @if (numberSettings().length > 0) {
+              <div
+                ptahFieldGrid
+                class="number-grid"
+                minColumn="md"
+                data-testid="advanced-group-numbers"
+              >
+                @for (setting of numberSettings(); track setting.key) {
+                  <div
+                    class="flex min-w-0 flex-col"
+                    [attr.data-testid]="
+                      'advanced-setting-' + setting.key + '-field'
+                    "
+                  >
+                    <ptah-field [label]="setting.label" [hint]="rangeHint(setting)" [info]="helpText(setting)">
                       <input
                         type="text"
                         ptahInput
-                        size="sm"
                         [id]="'advanced-setting-' + setting.key"
                         [attr.inputmode]="
                           setting.integer ? 'numeric' : 'decimal'
                         "
-                        class="min-w-0 flex-1 text-right text-sm tabular-nums text-base-content"
+                        class="tabular-nums"
                         [invalid]="!!errors()[setting.key]"
                         [value]="numberText(setting)"
                         [placeholder]="setting.default === null ? 'Model default' : ''"
@@ -243,62 +331,41 @@ function formatValue(
                       @if (setting.unit) {
                         <span
                           ptahFieldTrailing
-                          class="shrink-0 whitespace-nowrap px-3 text-xs text-base-content-muted"
+                          class="shrink-0 whitespace-nowrap pr-[var(--ptah-gap-heading)] text-xs text-base-content-muted"
                           aria-hidden="true"
                           >{{ setting.unit }}</span
                         >
                       }
                       @if (setting.apply === 'restart') {
                         <span
-                          ptahFieldAfterError
-                          [class]="restartBadge"
+                          ptahFieldBeforeHint
+                          ptahBadge
+                          tone="info"
+                          size="xs"
+                          data-restart-badge
+                          class="self-start"
                           aria-hidden="true"
                           >Restart</span
                         >
                       }
-                      @if (headingStyle() === 'section') {
-                        <p ptahFieldAfterError [id]="'advanced-setting-' + setting.key + '-help'" class="px-[var(--ptah-field-pad-x)] text-xs text-base-content-muted">{{ helpText(setting) }}</p>
-                      }
+                      <div ptahFieldAfterError>
+                        <p class="sr-only" [id]="'advanced-setting-' + setting.key + '-help'">{{ helpText(setting) }}</p>
+                        <ng-container
+                          [ngTemplateOutlet]="messages"
+                          [ngTemplateOutletContext]="{ $implicit: setting }"
+                        />
+                      </div>
                     </ptah-field>
-                  }
-                  @if (headingStyle() !== 'section' || setting.kind === 'boolean') {
-                  <p
-                    [id]="'advanced-setting-' + setting.key + '-help'"
-                    [class]="headingStyle() === 'section' && setting.kind === 'boolean' ? 'sr-only' : 'text-xs text-base-content-muted'"
-                  >
-                    {{ helpText(setting) }}
-                  </p>
-                  }
-                  @if (errors()[setting.key]; as message) {
-                    <p
-                      role="alert"
-                      [id]="'advanced-setting-' + setting.key + '-error'"
-                      class="text-error"
-                      [attr.data-testid]="
-                        'advanced-setting-' + setting.key + '-error'
-                      "
-                    >
-                      {{ message }}
-                    </p>
-                  }
-                  @if (storedNotice(setting); as notice) {
-                    <p
-                      [id]="'advanced-setting-' + setting.key + '-stored'"
-                      class="rounded-md border border-info/30 bg-info/10 px-2 py-1"
-                      [attr.data-testid]="
-                        'advanced-setting-' + setting.key + '-stored'
-                      "
-                    >
-                      {{ notice }}
-                    </p>
-                  }
-                </div>
-              }
-            </div>
+                  </div>
+                }
+              </div>
+            }
           }
         }
         </ng-template>
-        @if (headingStyle() !== 'section') { <ng-container [ngTemplateOutlet]="body" /> }
+        @if (headingStyle() !== 'section') {
+          <ng-container [ngTemplateOutlet]="body" />
+        }
       </section>
     }
   `,
@@ -307,29 +374,40 @@ function formatValue(
       display: block;
       container-type: inline-size;
     }
+    /* Keep empty tracks so one- and two-field groups align with larger groups. */
+    .number-grid {
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, max(var(--ptah-field-grid-min-md), calc((100% - 2 * var(--ptah-gap-field)) / 3))), 1fr));
+    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
   `,
 })
 export class AdvancedSettingsGroupComponent implements OnInit {
+  readonly openHelp = signal<string | null>(null);
+  readonly InfoIcon = Info;
   readonly contentSurface = input(true);
   /** 'section' matches the sentence-case section headings of the Context Management tab; 'caps' is the group label. */
-  readonly headingStyle = input<'caps' | 'section'>('caps');
+  readonly headingStyle = input<'caps' | 'section' | 'hidden'>('caps');
   private readonly vscode = inject(VSCodeService);
   /** The page toast: every write's outcome (with Undo after a save) is said there. */
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
   readonly groupId = input.required<AdvancedSettingGroupId>();
 
-  protected readonly restartBadge =
-    'badge badge-outline badge-sm whitespace-nowrap border-info/30 bg-info/10 text-xs font-medium text-base-content';
-
   protected readonly group = computed(() =>
     ADVANCED_SETTING_GROUPS.find((group) => group.id === this.groupId()),
   );
   protected readonly settings = computed(() =>
     ADVANCED_SETTINGS.filter((setting) => setting.group === this.groupId()),
+  );
+  protected readonly booleanSettings = computed(() =>
+    this.settings().filter((setting) => setting.kind === 'boolean'),
+  );
+  protected readonly numberSettings = computed(() =>
+    this.settings().filter(
+      (setting): setting is AdvancedNumberSetting => setting.kind === 'number',
+    ),
   );
   protected readonly idPrefix = computed(
     () => `advanced-group-${this.groupId()}`,
@@ -417,13 +495,18 @@ export class AdvancedSettingsGroupComponent implements OnInit {
     return typeof value === 'number' ? String(value) : '';
   }
 
-  /** Descriptor help, then the range (numbers) and when a saved value takes effect. */
+  /** A short apply note for switch rows and the full explanation in the popover. */
+  protected applyNote(setting: AdvancedSetting): string {
+    return APPLY_NOTES[setting.apply];
+  }
+
   protected helpText(setting: AdvancedSetting): string {
-    const range =
-      setting.kind === 'number'
-        ? ` Range: ${NUMBER_FORMAT.format(setting.min)} to ${NUMBER_FORMAT.format(setting.max)}${setting.unit ? ` ${setting.unit}` : ''}.`
-        : '';
-    return `${setting.help}${range} ${APPLY_NOTES[setting.apply]}`;
+    return `${setting.help} ${this.applyNote(setting)}`;
+  }
+
+  protected rangeHint(setting: AdvancedNumberSetting): string {
+    const range = `${NUMBER_FORMAT.format(setting.min)} to ${NUMBER_FORMAT.format(setting.max)}${setting.unit ? ` ${setting.unit}` : ''}`;
+    return setting.default === null ? `Model default or ${range}` : range;
   }
 
   protected describedBy(setting: AdvancedSetting): string {

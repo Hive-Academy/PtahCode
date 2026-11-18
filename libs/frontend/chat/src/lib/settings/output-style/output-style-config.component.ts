@@ -1,9 +1,9 @@
 /**
  * OutputStyleConfigComponent — the output-style section of the Advanced tab (A19-A25).
  *
- * P2 Section card matching `prototypes/final/orchestration.html` and Batch 45:
- *   - Heading with Palette icon + available styles count + "New style" primary action (A21)
- *   - Body mounts `OutputStyleListComponent` (matrix table, banners, command-line parity)
+ * Full-width collection matching the Advanced settings prototype:
+ *   - Heading, one-line description and "New style" primary action (A21)
+ *   - Body mounts `OutputStyleListComponent` (selectable cards, notices, command-line parity)
  *   - Drawer D-OS (`OutputStyleEditorComponent`) lazily loaded via `@defer (when view() === 'editor')`
  *   - Active style selection is persisted through {@link SettingsSaveFeedbackService.saveGeneric}
  *     with Undo (D15). Parity writes confirm first and have no Undo; a written parity file is named in the toast.
@@ -19,6 +19,8 @@ import {
   OnInit,
   afterNextRender,
   inject,
+  effect,
+  untracked,
   signal,
   viewChild,
 } from '@angular/core';
@@ -28,6 +30,7 @@ import type {
   OutputStyleDetail,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { OutputStyleStore } from './output-style.store';
 import {
   OutputStyleListComponent,
@@ -35,7 +38,7 @@ import {
   type OutputStyleSelectionRequest,
 } from './output-style-list.component';
 import { OutputStyleEditorComponent } from './output-style-editor.component';
-import { PtahButtonDirective, PtahFormSectionComponent } from '@ptah-extension/ui';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const OUTPUT_STYLE_ACTIVATE_FAILED = 'Could not change the active output style.';
 const OUTPUT_STYLE_DELETE_FAILED = 'Could not delete the output style.';
@@ -53,39 +56,30 @@ const OUTPUT_STYLE_PARITY_FAILED =
     OutputStyleListComponent,
     OutputStyleEditorComponent,
     PtahButtonDirective,
-    PtahFormSectionComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <ptah-form-section
-      heading="Output Style"
-      description="Choose how the agent writes to you: how much it explains, how it structures an answer, and what wording it prefers. A style influences the agent voice; it does not replace Ptah instructions."
+    <section
+      id="advanced-output-style"
+      tabindex="-1"
+      class="py-[var(--ptah-gap-group)] border-b border-base-content/10"
       data-glass-surface="content"
       aria-labelledby="output-style-heading"
       data-testid="output-style-card"
-      wide
     >
-      <div class="flex items-center gap-[var(--ptah-gap-field)] mb-[var(--ptah-gap-controls)]">
-        <h2 id="output-style-heading" class="sr-only">Output Style</h2>
-        <div class="[margin-inline-start:auto] flex items-center gap-[var(--ptah-gap-controls)]">
-          <span class="text-xs text-base-content-muted">
-            {{ store.styles().length }} available
-          </span>
-          <button
-            #newStyleButton
-            type="button"
-            ptahButton variant="primary" size="xs"
-            (click)="onCreate()"
-            [disabled]="store.saving()"
-            data-testid="output-style-new-button"
-            aria-label="Create new output style"
-          >
-            <lucide-angular [img]="PlusIcon" class="w-3 h-3" aria-hidden="true" />
-            New style
-          </button>
+      <header class="flex flex-wrap items-start justify-between gap-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-heading)]">
+        <div class="min-w-0 flex-1">
+          <h2 id="output-style-heading" class="text-[length:var(--ptah-text-section-title-size)] leading-[var(--ptah-text-section-title-leading)] font-[number:var(--ptah-text-section-title-weight)]">Output style</h2>
+          <p class="mt-[var(--ptah-gap-label)] text-base-content-muted text-[length:var(--ptah-text-hint-size)] leading-[var(--ptah-text-hint-leading)] font-[number:var(--ptah-text-hint-weight)]">How the agent writes its answers. One style is active at a time.</p>
         </div>
-      </div>
+        <button #newStyleButton type="button" ptahButton variant="primary" size="sm"
+          (click)="onCreate()" [disabled]="store.saving()"
+          data-testid="output-style-new-button" aria-label="Create new output style">
+          <lucide-angular [img]="PlusIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+          New style
+        </button>
+      </header>
 
       <ptah-output-style-list
         [styles]="store.styles()"
@@ -120,10 +114,27 @@ const OUTPUT_STYLE_PARITY_FAILED =
           />
         }
       }
-    </ptah-form-section>
+    </section>
   `,
 })
 export class OutputStyleConfigComponent implements OnInit {
+  private readonly overview = inject(AdvancedOverviewStore, { optional: true });
+
+  constructor() {
+    effect(() => {
+      const loading = this.store.loading();
+      const failed = this.store.failedOperation() === 'list';
+      const active = this.store.active()?.name ?? 'default';
+      const count = this.store.styles().length;
+      untracked(() => {
+        if (loading || failed) this.overview?.clear('output-style');
+        else this.overview?.report('output-style', {
+          value: active, meta: `${count} styles`, tone: 'ok',
+        });
+      });
+    });
+  }
+
   readonly store = inject(OutputStyleStore);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 

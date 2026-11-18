@@ -13,6 +13,27 @@ describe('DisplayFileViewerComponent', () => {
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
   });
 
+  it.each(['image-file', 'pdf-file'] as const)('fills the available area for %s', async kind => {
+    call.mockResolvedValue({ success: true, data: { success: true, kind: kind === 'pdf-file' ? 'pdf' : 'image', mime: kind === 'pdf-file' ? 'application/pdf' : 'image/png', dataBase64: 'AA==' } });
+    const fixture = TestBed.createComponent(DisplayFileViewerComponent);
+    fixture.componentRef.setInput('file', { ...file, kind });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const host: HTMLElement = fixture.nativeElement;
+    expect(host.classList.contains('min-h-0')).toBe(true);
+    expect(host.classList.contains('h-full')).toBe(true);
+    if (kind === 'image-file') {
+      const image = host.querySelector('img');
+      expect(image?.classList.contains('object-contain')).toBe(true);
+      expect(image?.classList.contains('max-h-full')).toBe(true);
+      expect(image?.parentElement?.classList.contains('items-center')).toBe(true);
+    } else {
+      expect(host.querySelector('iframe')?.classList.contains('h-full')).toBe(true);
+    }
+    fixture.destroy();
+  });
+
   it('revokes the blob URL when the viewer closes', async () => {
     call.mockResolvedValue({ success: true, data: { success: true, kind: 'image', mime: 'image/png', dataBase64: 'AA==' } });
     const fixture = TestBed.createComponent(DisplayFileViewerComponent);

@@ -476,6 +476,23 @@
   outline-offset: calc(var(--ptah-focus-ring-width) * -1);
 }
 
+/* Info inherits the action size, color and focus ring. Keep its host from
+   shrinking when the field also has a trailing unit or suffix. */
+.ptah-field__box > ptah-native-popover:has(.ptah-field__info) {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.ptah-field__info-panel {
+  max-inline-size: calc(var(--ptah-space-4) * 20);
+  padding: var(--ptah-space-2);
+  color: var(--ptah-field-fg);
+  font-size: var(--ptah-text-label-size);
+  line-height: var(--ptah-text-label-leading);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .ptah-field:has(.ptah-field__body :is(input, textarea):placeholder-shown) .ptah-field__clear,
 .ptah-field:has(.ptah-field__body :disabled) .ptah-field__action {
   display: none;
