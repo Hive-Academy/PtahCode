@@ -15,7 +15,11 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import type { CronCreateParams, ScheduledJobDto } from '@ptah-extension/shared';
+import type {
+  CronCreateParams,
+  CronUpdateParams,
+  ScheduledJobDto,
+} from '@ptah-extension/shared';
 import {
   PtahAlertComponent,
   PtahButtonDirective,
@@ -128,7 +132,9 @@ function toFormState(
  *
  * The form state is keyed on the job id, so a list refresh that replaces the
  * job object does not discard what the user typed. A failed save keeps the
- * form open and shows the message of `CronStateService.error`.
+ * form open and shows the message of `CronStateService.saveError`. Saving an
+ * existing job sends only the fields that differ from the values the form
+ * loaded, so a stale field never overwrites a newer value on the host.
  */
 @Component({
   selector: 'ptah-cron-job-form',
@@ -192,6 +198,7 @@ function toFormState(
             required
             autocomplete="off"
             data-testid="cron-form-name"
+            [disabled]="saving()"
             [value]="form().name"
             (input)="patch({ name: controlValue($event) })"
           />
@@ -212,6 +219,7 @@ function toFormState(
             spellcheck="false"
             class="font-mono"
             data-testid="cron-form-expr"
+            [disabled]="saving()"
             [value]="form().cronExpr"
             (input)="patch({ cronExpr: controlValue($event) })"
           />
@@ -230,6 +238,7 @@ function toFormState(
               size="xs"
               [selected]="form().cronExpr.trim() === preset.expr"
               [attr.data-testid]="'cron-form-preset-' + preset.id"
+              [disabled]="saving()"
               (click)="applyPreset(preset.expr)"
             >
               {{ preset.label }}
@@ -261,6 +270,7 @@ function toFormState(
             required
             rows="6"
             data-testid="cron-form-prompt"
+            [disabled]="saving()"
             [value]="form().prompt"
             (input)="patch({ prompt: controlValue($event) })"
           ></textarea>
@@ -277,6 +287,7 @@ function toFormState(
             spellcheck="false"
             class="font-mono"
             data-testid="cron-form-workspace"
+            [disabled]="saving()"
             [value]="form().workspaceRoot"
             (input)="patch({ workspaceRoot: controlValue($event) })"
           />
@@ -293,6 +304,7 @@ function toFormState(
             ptahToggle
             size="sm"
             data-testid="cron-form-enabled"
+            [disabled]="saving()"
             [checked]="form().enabled"
             (change)="patch({ enabled: checkboxValue($event) })"
           />
@@ -361,6 +373,8 @@ export class CronJobFormComponent {
   protected readonly presets = SCHEDULE_PRESETS;
   private readonly detectedTimezone = detectUserTimezone();
   private destroyed = false;
+  /** The params of the job as the form loaded it; the base of an update patch. */
+  private loaded: CronCreateParams | null = null;
 
   protected readonly expressionHelp =
     'Standard cron syntax, for example */5 * * * *.';
@@ -473,7 +487,7 @@ export class CronJobFormComponent {
   });
 
   protected readonly saveError = computed<string | null>(() =>
-    this.saveFailed() ? (this.state.error() ?? SAVE_FAILED_FALLBACK) : null,
+    this.saveFailed() ? (this.state.saveError() ?? SAVE_FAILED_FALLBACK) : null,
   );
 
   public constructor() {
@@ -493,15 +507,18 @@ export class CronJobFormComponent {
   }
 
   protected patch(partial: Partial<CronJobFormState>): void {
+    if (this.saving()) return;
     this.form.update((current) => ({ ...current, ...partial }));
   }
 
   protected applyPreset(expr: string): void {
+    if (this.saving()) return;
     this.patch({ cronExpr: expr });
     this.exprInput()?.nativeElement.focus();
   }
 
   protected selectTimezone(timezone: string | null): void {
+    if (this.saving()) return;
     if (timezone) this.patch({ timezone });
   }
 
@@ -514,6 +531,8 @@ export class CronJobFormComponent {
   }
 
   protected cancel(): void {
+    // The drawer stays open until the request settles.
+    if (this.saving()) return;
     this.reset();
     this.cancelled.emit();
   }
@@ -532,12 +551,23 @@ export class CronJobFormComponent {
 
     const id = this.jobId();
     const values = this.toParams(this.form());
+    let patch: CronUpdateParams['patch'] | null = null;
+    if (id) {
+      patch = this.changedFields(values);
+      if (Object.keys(patch).length === 0) {
+        // Nothing to write: the job already holds these values.
+        this.reset();
+        this.saved.emit();
+        return;
+      }
+    }
     this.saving.set(true);
     let result: ScheduledJobDto | null;
     try {
-      result = id
-        ? await this.state.update(id, values)
-        : await this.state.create(values);
+      result =
+        id && patch
+          ? await this.state.update(id, patch)
+          : await this.state.create(values);
     } finally {
       this.saving.set(false);
     }
@@ -565,15 +595,41 @@ export class CronJobFormComponent {
     };
   }
 
+  /** The fields of `values` that differ from what the form loaded. */
+  private changedFields(values: CronCreateParams): CronUpdateParams['patch'] {
+    const loaded = this.loaded;
+    const patch: CronUpdateParams['patch'] = {};
+    if (!loaded || values.name !== loaded.name) patch.name = values.name;
+    if (!loaded || values.cronExpr !== loaded.cronExpr) {
+      patch.cronExpr = values.cronExpr;
+    }
+    if (!loaded || values.timezone !== loaded.timezone) {
+      patch.timezone = values.timezone;
+    }
+    if (!loaded || values.prompt !== loaded.prompt)
+      patch.prompt = values.prompt;
+    if (!loaded || values.workspaceRoot !== loaded.workspaceRoot) {
+      patch.workspaceRoot = values.workspaceRoot;
+    }
+    if (!loaded || values.enabled !== loaded.enabled) {
+      patch.enabled = values.enabled;
+    }
+    return patch;
+  }
+
+  /** Builds the form state from `job()` and records it as the loaded snapshot. */
   private initialState(): CronJobFormState {
-    return toFormState(
+    const state = toFormState(
       untracked(this.job),
       untracked(this.defaultWorkspaceRoot),
       this.detectedTimezone,
     );
+    this.loaded = this.toParams(state);
+    return state;
   }
 
   private reset(): void {
+    this.state.clearSaveError();
     this.form.set(this.initialState());
     this.submitAttempted.set(false);
     this.saveFailed.set(false);

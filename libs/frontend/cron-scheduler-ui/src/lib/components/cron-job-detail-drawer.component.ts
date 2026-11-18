@@ -49,6 +49,7 @@ import {
 import { formatExactTime, formatRelative, formatTime } from './cron-format';
 import { CronRunHistoryComponent } from './cron-run-history.component';
 import { runStatusView } from './cron-run-status';
+import type { CronRunsState } from '../services/cron-state.service';
 
 @Component({
   selector: 'ptah-cron-job-detail-drawer',
@@ -181,7 +182,7 @@ import { runStatusView } from './cron-run-status';
             </section>
           }
 
-          <ptah-cron-run-history [runs]="runs()" />
+          <ptah-cron-run-history [runs]="runs()" [state]="runsState()" />
         </div>
       }
 
@@ -278,6 +279,9 @@ export class CronJobDetailDrawerComponent {
 
   /** Run history for {@link job}, newest first. */
   public readonly runs = input<readonly JobRunDto[]>([]);
+
+  /** State of the request that fills {@link runs}. */
+  public readonly runsState = input<CronRunsState>('loaded');
 
   /** Human rendering of `job.cronExpr`, resolved by the parent tab. */
   public readonly description = input<string>('');

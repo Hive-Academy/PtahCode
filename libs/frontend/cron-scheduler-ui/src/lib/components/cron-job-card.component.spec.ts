@@ -140,21 +140,41 @@ describe('CronJobCardComponent', () => {
       expect(host.querySelector('button[aria-label="Edit job"]')).toBeNull();
     });
 
-    it('opens the row on click, Enter and Space', () => {
+    it('does not make the row root a focusable control', () => {
+      render(makeJob());
+      const row = byTestId('cron-job-card') as HTMLElement;
+
+      expect(row.hasAttribute('role')).toBe(false);
+      expect(row.hasAttribute('tabindex')).toBe(false);
+      expect(row.classList.contains('relative')).toBe(true);
+    });
+
+    it('opens details from a native button that holds no action button', () => {
+      render(makeJob());
+      const open = byTestId('cron-job-open') as HTMLElement;
+
+      expect(open.tagName).toBe('BUTTON');
+      expect(open.getAttribute('type')).toBe('button');
+      expect(open.getAttribute('aria-label')).toBe(
+        'Open details for Nightly digest',
+      );
+      expect(open.textContent?.trim()).toBe('Nightly digest');
+      expect(open.querySelector('button')).toBeNull();
+      const actions = host.querySelectorAll('[data-row-actions] button');
+      expect(actions.length).toBeGreaterThan(0);
+      for (const action of Array.from(actions)) {
+        expect(open.contains(action)).toBe(false);
+      }
+    });
+
+    it('emits opened exactly once when the open button is clicked', () => {
       render(makeJob());
       const opened = jest.fn();
       fixture.componentInstance.opened.subscribe(opened);
-      const row = byTestId('cron-job-card') as HTMLElement;
 
-      row.click();
-      row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      row.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+      (byTestId('cron-job-open') as HTMLElement).click();
 
-      expect(opened).toHaveBeenCalledTimes(3);
-      expect(row.getAttribute('role')).toBe('button');
-      expect(row.getAttribute('aria-label')).toBe(
-        'Open details for Nightly digest',
-      );
+      expect(opened).toHaveBeenCalledTimes(1);
     });
 
     it('marks the selected row with aria-current', () => {

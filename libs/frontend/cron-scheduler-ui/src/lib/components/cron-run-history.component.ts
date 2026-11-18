@@ -33,6 +33,7 @@ import {
   runStatusView,
   type RunStatusView,
 } from './cron-run-status';
+import type { CronRunsState } from '../services/cron-state.service';
 
 /** How long the "Copied" / "Copy failed" feedback stays on a row. */
 export const COPY_FEEDBACK_MS = 2000;
@@ -106,9 +107,34 @@ function toRow(run: JobRunDto): RunRow {
       <ptah-section-header heading="Run history" [description]="countLabel()" />
 
       @if (rows().length === 0) {
-        <p class="text-xs text-base-content-muted" data-testid="cron-run-empty">
-          No runs recorded yet.
-        </p>
+        @switch (state()) {
+          @case ('loading') {
+            <p
+              class="text-xs text-base-content-muted"
+              role="status"
+              data-testid="cron-run-loading"
+            >
+              Loading runs…
+            </p>
+          }
+          @case ('error') {
+            <p
+              class="text-xs text-error"
+              role="alert"
+              data-testid="cron-run-error"
+            >
+              The run history did not load. Open the job again to retry.
+            </p>
+          }
+          @case ('loaded') {
+            <p
+              class="text-xs text-base-content-muted"
+              data-testid="cron-run-empty"
+            >
+              No runs recorded yet.
+            </p>
+          }
+        }
       } @else {
         <ul
           class="divide-y divide-surface-border overflow-hidden rounded-lg border border-surface-border"
@@ -193,6 +219,12 @@ export class CronRunHistoryComponent {
   /** Runs of the selected job, newest first. */
   public readonly runs = input<readonly JobRunDto[]>([]);
 
+  /**
+   * State of the request that fills {@link runs}. "No runs" shows only for
+   * `'loaded'`: an open or failed request is not an empty history.
+   */
+  public readonly state = input<CronRunsState>('loaded');
+
   protected readonly CopyIcon = Copy;
   protected readonly CheckIcon = Check;
 
@@ -223,6 +255,7 @@ export class CronRunHistoryComponent {
 
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
+  private copyAttempt = 0;
 
   public constructor() {
     inject(DestroyRef).onDestroy(() => {
@@ -241,6 +274,7 @@ export class CronRunHistoryComponent {
     runId: string,
     sessionId: string,
   ): Promise<void> {
+    const attempt = ++this.copyAttempt;
     let copied = true;
     try {
       await navigator.clipboard.writeText(sessionId);
@@ -249,6 +283,8 @@ export class CronRunHistoryComponent {
       // claiming a copy that did not happen.
       copied = false;
     }
+    // A slower, older write must not overwrite the feedback of a newer one.
+    if (attempt !== this.copyAttempt) return;
     this.showFeedback({ runId, copied });
   }
 

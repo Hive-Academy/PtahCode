@@ -189,6 +189,7 @@ export class CronJobListComponent {
       (job) =>
         job.name.toLowerCase().includes(needle) ||
         job.cronExpr.toLowerCase().includes(needle) ||
+        this.describe(job.cronExpr).toLowerCase().includes(needle) ||
         job.prompt.toLowerCase().includes(needle),
     );
   });

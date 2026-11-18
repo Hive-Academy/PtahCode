@@ -3,8 +3,11 @@
  *
  * Pure presentation: it reads nothing from the store and emits an event for
  * every action, so the tab stays the single place that talks to
- * `CronStateService`. The row root is a `div role="button"` (not a native
- * button) because it hosts real buttons. The only state it owns is whether the
+ * `CronStateService`. The row uses the "stretched button" pattern: the root is
+ * a plain, non-focusable `div`, the job name is a native `<button>` whose
+ * `::after` covers the whole row (so a click anywhere opens the details), and
+ * the action buttons sit above that layer (`relative z-10`) as siblings, never
+ * nested inside a control. The only state it owns is whether the
  * delete confirmation is open: `removed` is emitted after the user confirms,
  * so the parent must not ask a second time. `edit` stays part of the contract
  * for the parent, but the row no longer renders an Edit button.
@@ -59,22 +62,23 @@ const SESSION_ID_PREVIEW_LENGTH = 8;
   host: { class: 'block' },
   template: `
     <div
-      class="flex cursor-pointer flex-wrap items-center gap-x-[var(--ptah-gap-field)] gap-y-[var(--ptah-gap-label)] px-[var(--ptah-gap-controls)] py-[var(--ptah-gap-heading)] hover:bg-base-content/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center"
+      class="relative flex cursor-pointer flex-wrap items-center gap-x-[var(--ptah-gap-field)] gap-y-[var(--ptah-gap-label)] px-[var(--ptah-gap-controls)] py-[var(--ptah-gap-heading)] hover:bg-base-content/5 lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center"
       [class.bg-base-content/5]="selected()"
-      role="button"
-      tabindex="0"
       data-testid="cron-job-card"
-      [attr.aria-label]="'Open details for ' + job().name"
       [attr.aria-current]="selected() ? 'true' : null"
-      (click)="openFrom($event)"
-      (keydown.enter)="openFrom($event)"
-      (keydown.space)="openFrom($event)"
     >
       <div class="order-1 min-w-0 flex-1 lg:order-none lg:flex-none">
         <div class="flex min-w-0 items-center gap-ptah-controls">
-          <span class="min-w-0 truncate font-medium" [title]="job().name">{{
-            job().name
-          }}</span>
+          <button
+            type="button"
+            class="min-w-0 truncate text-left font-medium after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-primary"
+            data-testid="cron-job-open"
+            [title]="job().name"
+            [attr.aria-label]="'Open details for ' + job().name"
+            (click)="opened.emit()"
+          >
+            {{ job().name }}
+          </button>
           @if (!job().enabled) {
             <span
               ptahBadge
@@ -147,7 +151,7 @@ const SESSION_ID_PREVIEW_LENGTH = 8;
       </div>
 
       <div
-        class="order-2 flex items-center justify-end gap-ptah-label lg:order-none"
+        class="relative z-10 order-2 flex items-center justify-end gap-ptah-label lg:order-none"
         data-row-actions
       >
         @if (confirmingDelete()) {
@@ -273,20 +277,6 @@ export class CronJobCardComponent {
       preview: creator.sessionId.slice(0, SESSION_ID_PREVIEW_LENGTH),
     };
   });
-
-  /**
-   * Open the detail drawer, unless the event came from the row's own action
-   * buttons: those sit inside the row, so their clicks and key presses bubble
-   * up to it.
-   */
-  protected openFrom(event: Event): void {
-    const target = event.target;
-    if (target instanceof Element && target.closest('[data-row-actions]')) {
-      return;
-    }
-    if (event instanceof KeyboardEvent) event.preventDefault();
-    this.opened.emit();
-  }
 
   protected confirmRemoval(): void {
     this.confirmingDelete.set(false);

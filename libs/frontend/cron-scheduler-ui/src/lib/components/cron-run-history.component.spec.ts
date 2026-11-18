@@ -90,6 +90,24 @@ describe('CronRunHistoryComponent', () => {
       expect(rows()).toHaveLength(0);
     });
 
+    it('does not call an open or failed request an empty history', () => {
+      fixture.componentRef.setInput('state', 'loading');
+      render([]);
+      expect(host.querySelector('[data-testid="cron-run-empty"]')).toBeNull();
+      expect(
+        host.querySelector('[data-testid="cron-run-loading"]'),
+      ).not.toBeNull();
+
+      fixture.componentRef.setInput('state', 'error');
+      fixture.detectChanges();
+      expect(host.querySelector('[data-testid="cron-run-empty"]')).toBeNull();
+      expect(
+        host
+          .querySelector('[data-testid="cron-run-error"]')
+          ?.getAttribute('role'),
+      ).toBe('alert');
+    });
+
     it('hides the empty text when a run exists', () => {
       render([makeRun()]);
 
@@ -269,6 +287,29 @@ describe('CronRunHistoryComponent', () => {
       expect(
         text(host.querySelector('[data-testid="cron-run-copy-status"]')),
       ).toBe('Could not copy the session id');
+    });
+
+    it('keeps the newer row feedback when an older write settles last', async () => {
+      let settleFirst: () => void = () => undefined;
+      writeText
+        .mockImplementationOnce(
+          () => new Promise<void>((resolve) => (settleFirst = resolve)),
+        )
+        .mockResolvedValueOnce(undefined);
+      render([
+        makeRun({ id: 'run-1', sessionId: 'sess-1' }),
+        makeRun({ id: 'run-2', sessionId: 'sess-2' }),
+      ]);
+
+      copyButtons()[0].click();
+      copyButtons()[1].click();
+      await flushMicrotasks();
+      settleFirst();
+      await flushMicrotasks();
+      fixture.detectChanges();
+
+      expect(text(copyButtons()[1])).toBe('Copied');
+      expect(text(copyButtons()[0])).toBe('Copy');
     });
 
     it('clears its feedback timer when the component is destroyed', async () => {

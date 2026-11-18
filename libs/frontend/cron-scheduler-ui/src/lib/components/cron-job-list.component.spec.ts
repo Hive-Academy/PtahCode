@@ -156,6 +156,20 @@ describe('CronJobListComponent', () => {
     expect(ids()).toHaveLength(jobs.length);
   });
 
+  it('finds a job by the schedule description shown in its row', () => {
+    const jobs = [
+      ...makeJobs(8),
+      makeJob({ id: 'every-minute', cronExpr: '* * * * *' }),
+    ];
+    const fixture = render(jobs);
+
+    search(fixture, 'every minute');
+
+    expect(cards(fixture).map((card) => card.job().id)).toEqual([
+      'every-minute',
+    ]);
+  });
+
   it('says so when no job matches the search', () => {
     const fixture = render(makeJobs(7));
     search(fixture, 'zzz');

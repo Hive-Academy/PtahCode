@@ -30,6 +30,8 @@ describe('CronJobFormComponent', () => {
     create: jest.Mock;
     update: jest.Mock;
     error: ReturnType<typeof signal<string | null>>;
+    saveError: ReturnType<typeof signal<string | null>>;
+    clearSaveError: jest.Mock;
     loading: ReturnType<typeof signal<boolean>>;
   };
   let saved: jest.Mock;
@@ -92,6 +94,8 @@ describe('CronJobFormComponent', () => {
       create: jest.fn().mockResolvedValue(makeJob({ id: 'created' })),
       update: jest.fn().mockResolvedValue(makeJob()),
       error: signal<string | null>(null),
+      saveError: signal<string | null>(null),
+      clearSaveError: jest.fn(),
       loading: signal(false),
     };
     TestBed.configureTestingModule({
@@ -155,15 +159,14 @@ describe('CronJobFormComponent', () => {
     await submit();
 
     expect(stateMock.update).toHaveBeenCalledTimes(1);
+    // Only the edited field is sent; the job's own timezone is shown in the
+    // select even though it is not a suggested one.
     expect(stateMock.update).toHaveBeenCalledWith('job-1', {
       name: 'Morning digest',
-      cronExpr: '0 3 * * *',
-      prompt: 'Summarise the open pull requests',
-      workspaceRoot: '/repos/app',
-      // The job's own timezone is kept even though it is not a suggested one.
-      timezone: 'Pacific/Auckland',
-      enabled: false,
     });
+    expect(
+      (control('cron-form-timezone') as unknown as HTMLElement).textContent,
+    ).toContain('Pacific/Auckland');
     expect(stateMock.create).not.toHaveBeenCalled();
     expect(saved).toHaveBeenCalledTimes(1);
   });
@@ -225,7 +228,7 @@ describe('CronJobFormComponent', () => {
 
   it('stays open and shows the service error when the save returns null', async () => {
     stateMock.create.mockImplementation(async () => {
-      stateMock.error.set('cron:create failed: unknown timezone');
+      stateMock.saveError.set('cron:create failed: unknown timezone');
       return null;
     });
     setup();
@@ -288,5 +291,138 @@ describe('CronJobFormComponent', () => {
     fixture.detectChanges();
 
     expect(control('cron-form-name').value).toBe('');
+  });
+
+  describe('while a save is in flight', () => {
+    function deferUpdate(): (job: ScheduledJobDto | null) => void {
+      let settle!: (job: ScheduledJobDto | null) => void;
+      stateMock.update.mockImplementation(
+        () =>
+          new Promise<ScheduledJobDto | null>((resolve) => {
+            settle = resolve;
+          }),
+      );
+      return (job) => settle(job);
+    }
+
+    function startSave(): void {
+      control('cron-form-submit').click();
+      fixture.detectChanges();
+    }
+
+    it('ignores cancel and keeps the draft', async () => {
+      const settle = deferUpdate();
+      setup({ job: makeJob() });
+      type('cron-form-name', 'In flight');
+      startSave();
+
+      (fixture.componentInstance as unknown as { cancel(): void }).cancel();
+      fixture.detectChanges();
+
+      expect(cancelled).not.toHaveBeenCalled();
+      expect(control('cron-form-name').value).toBe('In flight');
+
+      settle(makeJob({ name: 'In flight' }));
+      await fixture.whenStable();
+      expect(saved).toHaveBeenCalledTimes(1);
+      expect(cancelled).not.toHaveBeenCalled();
+    });
+
+    it('disables every control and enables them again after a failure', async () => {
+      const settle = deferUpdate();
+      setup({ job: makeJob() });
+      type('cron-form-name', 'In flight');
+      startSave();
+
+      const ids = [
+        'cron-form-name',
+        'cron-form-expr',
+        'cron-form-prompt',
+        'cron-form-workspace',
+        'cron-form-enabled',
+        'cron-form-preset-daily',
+        'cron-form-preset-hourly',
+      ];
+      for (const id of ids) {
+        expect(control(id).disabled).toBe(true);
+      }
+
+      settle(null);
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      for (const id of ids) {
+        expect(control(id).disabled).toBe(false);
+      }
+      expect(control('cron-form-name').value).toBe('In flight');
+      expect(saved).not.toHaveBeenCalled();
+    });
+  });
+
+  it('keeps the error of the failed save when the shared error changes', async () => {
+    stateMock.update.mockImplementation(async () => {
+      stateMock.saveError.set('cron:update failed: job is locked');
+      return null;
+    });
+    setup({ job: makeJob() });
+
+    type('cron-form-name', 'Renamed');
+    await submit();
+    stateMock.error.set('cron:list failed: timeout');
+    fixture.detectChanges();
+
+    const alert = query('cron-form-save-error')?.textContent ?? '';
+    expect(alert).toContain('cron:update failed: job is locked');
+    expect(alert).not.toContain('cron:list failed');
+  });
+
+  it('clears the save error of the service when the form resets', () => {
+    setup();
+
+    expect(stateMock.clearSaveError).toHaveBeenCalled();
+  });
+
+  describe('update patch', () => {
+    it('sends only the prompt after a prompt-only edit', async () => {
+      setup({ job: makeJob() });
+
+      type('cron-form-prompt', 'List the failing builds');
+      await submit();
+
+      expect(stateMock.update).toHaveBeenCalledWith('job-1', {
+        prompt: 'List the failing builds',
+      });
+    });
+
+    it('omits the prompt when only the name changed, even after a refresh', async () => {
+      setup({ job: makeJob() });
+
+      type('cron-form-name', 'Renamed');
+      // A list refresh brings a newer prompt; the form must not write the old
+      // one back over it.
+      fixture.componentRef.setInput(
+        'job',
+        makeJob({ updatedAt: 2, prompt: 'A newer prompt' }),
+      );
+      fixture.detectChanges();
+      await submit();
+
+      expect(stateMock.update).toHaveBeenCalledTimes(1);
+      const patch = stateMock.update.mock.calls[0][1] as Record<
+        string,
+        unknown
+      >;
+      expect(patch).toEqual({ name: 'Renamed' });
+      expect('prompt' in patch).toBe(false);
+    });
+
+    it('does not call update when nothing changed and emits saved', async () => {
+      setup({ job: makeJob() });
+
+      await submit();
+
+      expect(stateMock.update).not.toHaveBeenCalled();
+      expect(saved).toHaveBeenCalledTimes(1);
+    });
   });
 });

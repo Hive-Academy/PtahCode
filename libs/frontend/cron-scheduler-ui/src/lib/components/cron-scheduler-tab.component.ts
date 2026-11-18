@@ -121,6 +121,7 @@ import { CronJobListComponent } from './cron-job-list.component';
         <ptah-cron-job-detail-drawer
           [job]="selectedJob()"
           [runs]="runs()"
+          [runsState]="runsState()"
           [description]="selectedDescription()"
           (closed)="closeDetail()"
           (runNow)="runSelected()"
@@ -165,6 +166,7 @@ export class CronSchedulerTabComponent implements OnInit {
 
   public readonly jobs = this.state.jobs;
   public readonly runs = this.state.runs;
+  public readonly runsState = this.state.runsState;
   public readonly loading = this.state.loading;
   public readonly error = this.state.error;
   public readonly selectedJobId = this.state.selectedJobId;
