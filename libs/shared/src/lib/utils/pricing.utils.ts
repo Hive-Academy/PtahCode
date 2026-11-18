@@ -1,27 +1,12 @@
-/**
- * Model Pricing Utilities
- *
- * Dynamic pricing support for multiple LLM models.
- * Pricing data is loaded from LiteLLM at extension startup and cached locally.
- *
- * Supports:
- * - Anthropic Claude models (Opus, Sonnet, Haiku)
- * - VS Code LM API models (GPT-4o, Copilot models)
- * - Automatic fallback to bundled pricing when offline
- *
- * @see https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json
- */
-
+/** Model Pricing Utilities */
 import type {
   PriceProvenance,
   SessionCostBasis,
   SessionCostUnavailableReason,
   SessionStatsPricingCoverage,
 } from '../types/rpc/rpc-session.types';
-
 import { ANTHROPIC_RATE_CARD, findAnthropicRate } from './anthropic-rate-card';
 import { CODEX_RATE_CARD } from './codex-rate-card';
-
 /**
  * Pricing information for a single model
  */
@@ -45,7 +30,6 @@ export interface ModelPricing {
   readonly catalogVersion?: string;
   readonly effectiveDate?: string;
 }
-
 /**
  * Token breakdown for cost calculation
  */
@@ -57,31 +41,7 @@ export interface TokenBreakdown {
   /** One-hour subset; remainder uses the five-minute rate. */
   readonly cacheCreation1h?: number;
 }
-
-/**
- * Bundled pricing for local zero-cost surfaces (Ollama / LM Studio) plus a
- * small usage-billed table that ships with the binary for the case where the
- * OpenRouter catalog hasn't fetched yet.
- *
- * For every other model the runtime pricing map is hydrated from OpenRouter's
- * public `/api/v1/models` catalog at startup via {@link registerProviderPricing}.
- * If hydration hasn't happened (offline first-run, fetch failure), unknown
- * models return `null` from {@link findModelPricing} so the UI can render
- * "Pricing unavailable" instead of a fabricated dollar figure.
- *
- * Subscription providers (GitHub Copilot, OpenAI Codex) contribute no STATIC
- * entries: `seedStaticModelPricing` skips them, because seeding their $0
- * registry placeholders would publish that price under a bare slug — `gpt-5.4`
- * is a Codex slug AND an OpenRouter one — and pin the shared catalog rate to
- * zero for whichever provider looked it up next. Their turns are still
- * costed from the same published rates as everyone else's: the exact, dated
- * OpenAI API rate card for Codex's seven fallback IDs is bundled via
- * {@link CODEX_RATE_CARD}, and the flat-fee billing remains a labelling
- * concern, carried per call by {@link FindPricingOptions}.
- *
- * @see https://www.anthropic.com/pricing
- * @see https://openrouter.ai/api/v1/models
- */
+/** Bundled pricing for local zero-cost surfaces (Ollama / LM Studio) plus a */
 export const DEFAULT_MODEL_PRICING: Record<string, ModelPricing> = {
   'gpt-4o': {
     inputCostPerToken: 2.5e-6, // $2.50 per 1M tokens
@@ -135,47 +95,22 @@ export const DEFAULT_MODEL_PRICING: Record<string, ModelPricing> = {
   ...ANTHROPIC_RATE_CARD,
 };
 
-/**
- * Set of model IDs that have already been warned about.
- * Prevents log spam when the same unknown model is looked up repeatedly
- * (e.g., during session resume processing hundreds of messages).
- */
+/** Set of model IDs that have already been warned about. */
 const warnedModelIds = new Set<string>();
 
-/**
- * Model pricing map - can be updated dynamically at runtime
- * Initialized with default bundled pricing
- */
+/** Model pricing map - can be updated dynamically at runtime */
 let modelPricingMap: Record<string, ModelPricing> = {
   ...DEFAULT_MODEL_PRICING,
 };
 
-/**
- * Merge new pricing entries into the runtime pricing map.
- *
- * Uses additive merge: new entries override existing ones, but previously
- * added dynamic entries from other providers are preserved. The bundled
- * DEFAULT_MODEL_PRICING is always the base layer (set at initialization).
- *
- * @param newPricing - New pricing data to merge into the existing map
- */
+/** Merge new pricing entries into the runtime pricing map. */
 export function updatePricingMap(
   newPricing: Record<string, ModelPricing>,
 ): void {
   modelPricingMap = { ...modelPricingMap, ...newPricing };
 }
 
-/**
- * Register provider-supplied pricing into the runtime pricing map.
- *
- * Semantic alias for {@link updatePricingMap} — lets providers (e.g. Ollama
- * Cloud's metadata service after fetching ollama.com/api/usage) seed real
- * per-token costs that {@link calculateMessageCost} will then surface in the
- * stats panel. Both exact and lowercase keys are added so partial-match lookup
- * still works regardless of caller casing.
- *
- * @param entries - Map of model ID → pricing
- */
+/** Register provider-supplied pricing into the runtime pricing map. */
 export function registerProviderPricing(
   entries: Record<string, ModelPricing>,
 ): void {
@@ -186,11 +121,13 @@ export function registerProviderPricing(
   for (const [id, pricing] of Object.entries(entries)) {
     // A hydrated dotted catalog ID supersedes only its bundled dashed fallback.
     // Explicit runtime dashed entries retain precedence; native pricing is separate.
-    const dashed = id.replace(/^(claude-[a-z]+-\d+)\.(\d+)$/, '$1-$2');
-    if (dashed !== id && modelPricingMap[dashed] === DEFAULT_MODEL_PRICING[dashed]) {
+    const catalogId = id.trim().toLowerCase();
+    const dashed = catalogId.replace(/^(claude-[a-z]+-\d+)\.(\d+)$/, '$1-$2');
+    if (dashed !== catalogId && modelPricingMap[dashed] === DEFAULT_MODEL_PRICING[dashed]) {
       delete modelPricingMap[dashed];
     }
     normalized[id] = pricing;
+    normalized[catalogId] = pricing;
     const lower = id.toLowerCase();
     if (lower !== id) {
       normalized[lower] = pricing;
@@ -206,10 +143,7 @@ export function getPricingMap(): Record<string, ModelPricing> {
   return { ...modelPricingMap };
 }
 
-/**
- * Reset runtime pricing map and warned-model tracker to bundled defaults.
- * For test isolation only.
- */
+/** Reset runtime pricing map and warned-model tracker to bundled defaults. */
 export function resetPricingMapForTesting(): void {
   modelPricingMap = { ...DEFAULT_MODEL_PRICING };
   warnedModelIds.clear();
@@ -219,38 +153,11 @@ export function resetPricingMapForTesting(): void {
  * Per-call pricing context that the model id alone cannot carry.
  */
 export interface FindPricingOptions {
-  /**
-   * True when the ACTIVE provider bills a flat subscription rather than per
-   * token (GitHub Copilot, OpenAI Codex).
-   *
-   * Rates are still the published per-token ones — a subscription turn is
-   * costed at what the same tokens would bill on the open market, matching how
-   * `claude /usage` and the Codex CLI report consumption. The flag only changes
-   * how the figure is LABELLED, never its value.
-   */
+  /** True when the ACTIVE provider bills a flat subscription rather than per */
   readonly subscriptionCovered?: boolean;
 }
 
-/**
- * Find pricing for a model by ID.
- *
- * 1. Exact match (e.g., "claude-opus-4-5-20251101", "gpt-5.4", "kimi-k2.5")
- * 2. Exact match after dropping trailing variant tags
- *    (e.g., "claude-opus-5-5[1m]" matches "claude-opus-5-5")
- * 3. Date-snapshot match (e.g., "claude-opus-4-5-20251101" matches "claude-opus-4-5")
- * 4. Returns `null` — pricing genuinely unknown.
- *
- * @param modelId - Model identifier from the SDK or third-party proxy.
- * @returns Pricing entry, or `null` when no match is found. Callers should
- *   render "Pricing unavailable" / "—" rather than fabricating a fallback.
- *
- * @example
- * ```typescript
- * findModelPricing('claude-opus-4-7'); // Exact match
- * findModelPricing('gpt-4o-2024-08-06'); // Partial match → gpt-4o
- * findModelPricing('unknown-model'); // null
- * ```
- */
+/** Find pricing for a model by ID. */
 export function findModelPricing(modelId: string): ModelPricing | null {
   if (!modelId) {
     return null;
@@ -272,25 +179,13 @@ export function findModelPricing(modelId: string): ModelPricing | null {
   return null;
 }
 
-/**
- * Pattern for date snapshot suffixes:
- * - ISO-8601 date: -YYYY-MM-DD (e.g. "-2024-08-06")
- * - Compact date: -YYYYMMDD (e.g. "-20251101", "-20250514", "-20260615")
- */
+/** Pattern for date snapshot suffixes: */
 const DATE_SNAPSHOT_SUFFIX = /^-(?:\d{4}-\d{2}-\d{2}|\d{8})$/;
 
 /** The same date snapshot, anchored at the end of a whole model id. */
 const TRAILING_DATE_SNAPSHOT = /-(?:\d{4}-\d{2}-\d{2}|\d{8})$/;
 
-/**
- * Drop trailing bracketed variant tags from a model id.
- *
- * The Claude CLI keys `modelUsage` by the raw model string it ran, so the
- * 1M-context variant arrives as `claude-opus-5[1m]`; the tag is stripped before
- * the API call and is not part of the model's identity.
- *
- * @example stripModelVariantTags('claude-opus-5-5[1m]'); // 'claude-opus-5-5'
- */
+/** Drop trailing bracketed variant tags from a model id. */
 export function stripModelVariantTags(modelId: string): string {
   // A linear scan from the end, one `[...]` tag at a time. The equivalent
   // regex, /(\[[^\]]*\])+$/, backtracks super-linearly on input like `[[[[`.
@@ -309,58 +204,18 @@ function stripProviderPrefix(modelId: string): string {
   return modelId.slice(modelId.lastIndexOf('/') + 1);
 }
 
-/**
- * Reduce a model id to the spelling every key space shares: trimmed,
- * lowercase, without trailing `[..]` variant tags, without a `provider/`
- * prefix and without a date snapshot suffix.
- *
- * This is a MATCHING key (e.g. pairing `modelUsage` rows with stream-tracked
- * context). It is deliberately not how pricing is looked up: pricing tries the
- * exact id first so a distinctly priced variant is never collapsed onto its
- * base model (see {@link findModelPricing}).
- *
- * @example
- * normalizeModelKey('Anthropic/Claude-Opus-5-5-20260101[1m]'); // 'claude-opus-5-5'
- */
+/** Reduce a model id to the spelling every key space shares: trimmed, */
 export function normalizeModelKey(modelId: string): string {
   const lower = stripModelVariantTags(modelId.trim().toLowerCase());
   return stripProviderPrefix(lower).replace(TRAILING_DATE_SNAPSHOT, '');
 }
 
-/**
- * Exact-then-partial lookup against the runtime map. Silent: the "unknown
- * model" warning belongs to {@link findModelPricing}, which alone knows
- * whether a miss is actually a problem.
- *
- * Rules:
- * 1. Exact match, most specific spelling first: the lowercase id, then the
- *    id without its provider prefix, then (when `stripVariantTags`) the id
- *    without trailing `[..]` variant tags, then without both. A catalog that
- *    publishes a distinct `claude-opus-5-5[1m]` entry therefore wins over the
- *    base `claude-opus-5-5` entry.
- * 2. Forward partial match for date-snapshot ids (over the tag-stripped id):
- *    Querying e.g. "gpt-4o-2024-08-06" resolves to "gpt-4o", and
- *    "claude-opus-4-5-20251101" resolves to "claude-opus-4-5".
- *    A partial match is ONLY accepted when the remainder after the registered
- *    key matches a date-snapshot suffix (-YYYY-MM-DD or -YYYYMMDD).
- *    Model line variants (e.g. "gpt-5.3-codex" vs "gpt-5") are distinct models,
- *    not snapshots, and must never match.
- * 3. Reverse-direction match (`key.toLowerCase().includes(normalizedId)`) is
- *    deliberately removed: querying a shorter or generic model id (e.g. "supermodel")
- *    must never resolve to an arbitrary longer registered variant (such as
- *    "supermodel-2099-final-edition"), which would bill at the wrong rates.
- * 4. Last, a dashed Claude id (`claude-opus-5-5`, optionally dated) resolves
- *    to its dotted catalog spelling (`claude-opus-5.5`); see
- *    {@link resolvePricingKey}.
- *
- * `stripVariantTags: false` keeps the pre-tag behaviour for the context-window
- * lookup: a `[1m]` variant must not inherit its base model's `maxTokens`.
- */
+/** Exact-then-partial lookup against the runtime map. Silent: the "unknown */
 function lookupPricingEntry(
   modelId: string,
   stripVariantTags = true,
 ): ModelPricing | null {
-  const lowerId = modelId.toLowerCase();
+  const lowerId = modelId.trim().toLowerCase();
   const untaggedId = stripVariantTags
     ? stripModelVariantTags(lowerId)
     : lowerId;
@@ -371,6 +226,11 @@ function lookupPricingEntry(
     untaggedId,
     stripProviderPrefix(untaggedId),
   ];
+  // Resolve tagged catalog spellings before considering an untagged base.
+  if (stripVariantTags && lowerId !== untaggedId) {
+    const tagged = resolvePricingKey(stripProviderPrefix(lowerId));
+    if (tagged !== null) return modelPricingMap[tagged];
+  }
   for (const id of exactIds) {
     // Own keys only: an id such as `x/constructor` or `__proto__` must not
     // resolve to an inherited Object.prototype member and yield NaN costs.
@@ -417,22 +277,7 @@ function lookupPricingEntry(
 /** `claude-<family>-<major>-<minor>`, then at most a `[1m]` context tag. */
 const CLAUDE_DASHED_VERSION = /^(claude-[a-z]+-\d+)-(\d{1,2})(\[1m\])?$/;
 
-/**
- * The map key a lowercase model id is priced under: the id itself when it
- * has an entry, else, for a dashed Claude id, its dotted catalog spelling.
- * The SDK names a model `claude-opus-5-5`, while OpenRouter, the catalog that
- * hydrates Claude rates, publishes it as `anthropic/claude-opus-5.5` (also
- * registered as `claude-opus-5.5`). Only the major-minor separator differs.
- * Other families' dashes and dots name distinct models, so they never alias.
- * A `[1m]` tag stays on the dotted spelling, so a tagged catalog entry
- * (`claude-opus-5.5[1m]`) is found before any base entry.
- * `null` when neither spelling has an entry.
- *
- * The one resolver behind both {@link findModelPricing} (rule 4) and
- * {@link findExactModelPricing}, so the two never disagree about a spelling.
- *
- * @example resolvePricingKey('claude-opus-5-5'); // 'claude-opus-5.5'
- */
+/** The map key a lowercase model id is priced under: the id itself when it */
 function resolvePricingKey(key: string): string | null {
   if (Object.hasOwn(modelPricingMap, key) && modelPricingMap[key]) return key;
   const match = CLAUDE_DASHED_VERSION.exec(key);
@@ -443,37 +288,7 @@ function resolvePricingKey(key: string): string | null {
     : null;
 }
 
-/**
- * Calculate message cost in USD for a specific model
- *
- * @param modelId - Model identifier (e.g., "claude-opus-4-5-20251101")
- * @param tokens - Token breakdown from message
- * @returns Cost in USD (e.g., 0.0042 for $0.0042), rounded to 6 decimal places
- *
- * @example
- * ```typescript
- * const cost = calculateMessageCost('claude-opus-4-5-20251101', {
- *   input: 1000,
- *   output: 500,
- *   cacheHit: 200
- * });
- * // Returns cost based on Opus 4.5 pricing
- * ```
- *
- * @example
- * ```typescript
- * // Zero tokens returns 0
- * const cost = calculateMessageCost('gpt-4o', {
- *   input: 0,
- *   output: 0
- * });
- * // Returns: 0
- * ```
- *
- * A cache token kind the pricing does not price counts as 0 here. A caller
- * that must show "unknown" instead of that underestimate checks
- * {@link pricesCacheTokens} first.
- */
+/** Calculate message cost in USD for a specific model */
 export function calculateMessageCost(
   modelId: string,
   tokens: TokenBreakdown,
@@ -494,10 +309,7 @@ export function calculateMessageCost(
   return Math.round(totalCost * 1000000) / 1000000;
 }
 
-/**
- * Whether `pricing` has a price for every cache token kind `tokens` uses. A
- * kind with no tokens (0 or not reported) needs no price.
- */
+/** Whether `pricing` has a price for every cache token kind `tokens` uses. A */
 export function pricesCacheTokens(
   pricing: ModelPricing,
   tokens: TokenBreakdown,
@@ -505,7 +317,7 @@ export function pricesCacheTokens(
   const readPriced =
     !tokens.cacheHit || pricing.cacheReadCostPerToken !== undefined;
   const writePriced =
-    !tokens.cacheCreation || pricing.cacheCreationCostPerToken !== undefined;
+    (tokens.cacheCreation ?? 0) === (tokens.cacheCreation1h ?? 0) || pricing.cacheCreationCostPerToken !== undefined;
   return readPriced && writePriced &&
     (!tokens.cacheCreation1h || pricing.cacheCreation1hCostPerToken !== undefined);
 }
@@ -516,16 +328,7 @@ export interface ExactModelPricing {
   readonly pricing: ModelPricing;
 }
 
-/**
- * Resolve only the exact catalog key, except Claude's documented `[1m]`
- * context tag: the SDK strips that tag before its API request. A distinct
- * tagged catalog entry always wins. The base entry is useful for lookup, but
- * its rate does not establish the price of long-context usage. Valuation
- * requires a distinct tagged entry. A dashed Claude id may use its dotted
- * catalog spelling ({@link resolvePricingKey}), the same as the lookup path.
- * Other tags, snapshots, prefixes and model families require their own
- * explicit catalog entry.
- */
+/** Resolve only the exact catalog key, except Claude's documented `[1m]` */
 export function findExactModelPricing(
   modelId: string,
 ): ExactModelPricing | null {
@@ -562,12 +365,7 @@ export interface ExactCostResult {
   readonly costBasis: SessionCostBasis;
   readonly pricingCoverage: SessionStatsPricingCoverage;
   readonly priceProvenance?: PriceProvenance;
-  /**
-   * Present only when `totalCost` is null, naming the one narrow cause. A
-   * `rate-missing` result is a model for which Ptah lacks a needed rate, so the
-   * UI can say "not priced" without mislabeling unknown billing or unusable
-   * usage. Absent on every priced result.
-   */
+  /** Present only when `totalCost` is null, naming the one narrow cause. A */
   readonly costUnavailableReason?: SessionCostUnavailableReason;
 }
 
@@ -575,12 +373,7 @@ function validRate(rate: number | undefined): rate is number {
   return rate !== undefined && Number.isFinite(rate) && rate > 0;
 }
 
-/**
- * Opt-in strict valuation. The four token classes are disjoint; reasoning
- * output is already part of `output` and has no fifth charge. A missing or
- * ambiguous used class makes the entire total unavailable, and each null
- * result names its narrow cause in `costUnavailableReason`.
- */
+/** Opt-in strict valuation. The four token classes are disjoint; reasoning */
 export function calculateExactMessageCost(
   modelId: string,
   tokens: TokenBreakdown,
@@ -611,6 +404,8 @@ export function calculateExactMessageCost(
     !Number.isSafeInteger(count) || count < 0) ||
     (counts.every((count) => count === 0) && !options.usageObserved) ||
     (tokens.cacheCreation1h ?? 0) > (tokens.cacheCreation ?? 0);
+  if (normalizeModelKey(modelId).replace(/(haiku-5)\.5$/, '$1-5') === 'claude-haiku-5-5' &&
+    (options.pricingProvider !== 'anthropic' || options.contextTokens === undefined || !Number.isSafeInteger(options.contextTokens) || options.contextTokens < 0)) return unavailable('rate-missing');
   const nativeRate = options.pricingProvider === 'anthropic' ? findAnthropicRate(modelId, options.contextTokens) : null;
   const found = options.pricingProvider === 'anthropic'
     ? (nativeRate ? { modelIdUsed: modelId, pricing: nativeRate } : null)
@@ -649,7 +444,7 @@ export function calculateExactMessageCost(
   const readPriced =
     !tokens.cacheHit || validRate(pricing.cacheReadCostPerToken);
   const writePriced =
-    (!tokens.cacheCreation || validRate(pricing.cacheCreationCostPerToken)) &&
+    ((tokens.cacheCreation ?? 0) === (tokens.cacheCreation1h ?? 0) || validRate(pricing.cacheCreationCostPerToken)) &&
     (!tokens.cacheCreation1h || validRate(pricing.cacheCreation1hCostPerToken));
   const cacheUnverified =
     ((tokens.cacheHit ?? 0) > 0 || (tokens.cacheCreation ?? 0) > 0) &&
@@ -691,7 +486,7 @@ export function calculateExactMessageCost(
     totalCost: rounded === 0 && unrounded > 0 ? unrounded : rounded,
     costBasis: availableBasis,
     pricingCoverage: (tokens.cacheCreation ?? 0) > 0 && tokens.cacheCreation1h === undefined &&
-      pricing.cacheCreation1hCostPerToken !== undefined ? 'partial' : 'full',
+      (pricing.cacheCreation1hCostPerToken !== undefined || /claude-/.test(modelId) || pricing.provider === 'anthropic') ? 'partial' : 'full',
     priceProvenance: provenance,
   };
 }
@@ -741,12 +536,7 @@ export function registerModelContextWindows(
   }
 }
 
-/**
- * Make `entries` the provider's complete capacity evidence: a refreshed
- * catalog that drops a model, or reports it without provider evidence,
- * withdraws the window recorded from an earlier catalog. Other providers'
- * entries, including the same model id, are untouched.
- */
+/** Make `entries` the provider's complete capacity evidence: a refreshed */
 export function replaceProviderContextWindows(
   providerId: string,
   entries: ReadonlyArray<{
@@ -834,18 +624,7 @@ export function getModelContextWindow(modelId: string): number {
   return 0;
 }
 
-/**
- * Get a human-readable description of model pricing
- *
- * @param modelId - Model identifier
- * @returns Pricing description string
- *
- * @example
- * ```typescript
- * const desc = getModelPricingDescription('claude-opus-4-5-20251101');
- * // Returns: "Input: $5.00/1M, Output: $25.00/1M"
- * ```
- */
+/** Get a human-readable description of model pricing */
 export function getModelPricingDescription(
   modelId: string,
   options?: FindPricingOptions,

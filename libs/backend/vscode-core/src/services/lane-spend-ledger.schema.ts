@@ -16,7 +16,7 @@ export const SpendEventSchema = z.object({
 export const SpendLedgerSchema = z.object({
   version: z.literal(1),
   events: z.array(SpendEventSchema),
-  owners: z.array(z.object({ ownerKey: z.string().min(1), revision: count, resetAtMs: count })),
+  owners: z.array(z.object({ ownerKey: z.string().min(1), revision: count, resetAtMs: count, resetRunIds: z.array(z.string()).default([]) })),
   credits: z.array(z.object({ ownerKey: z.string().min(1), occurredAtMs: count,
     kind: z.enum(['credit-exhausted', 'rate-limited']) })),
 });

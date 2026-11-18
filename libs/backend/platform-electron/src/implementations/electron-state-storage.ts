@@ -56,6 +56,7 @@ export class ElectronStateStorage
   private commitGeneration = 0;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private maxWriteTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly previousValues = new Map<string, JsonValue | undefined>();
   private readonly changedKeys = new Set<string>();
   private pendingWrite: Promise<void> | null = null;
   private resolvePendingWrite: (() => void) | null = null;
@@ -176,6 +177,7 @@ export class ElectronStateStorage
       return;
     }
 
+    if (!this.previousValues.has(key)) this.previousValues.set(key, this.data[key]);
     if (value === undefined) delete this.data[key];
     else this.data[key] = value as JsonValue;
     this.changedKeys.add(key);
@@ -230,6 +232,7 @@ export class ElectronStateStorage
     this.changedKeys.clear();
     try {
       this.persistSync(changedCount);
+      this.previousValues.clear();
       resolve?.();
     } catch (error: unknown) {
       reject?.(error instanceof Error ? error : new Error(String(error)));
@@ -337,6 +340,8 @@ export class ElectronStateStorage
     this.pendingWrite = null;
     this.resolvePendingWrite = null;
     this.rejectPendingWrite = null;
+    const previousValues = new Map(this.previousValues);
+    this.previousValues.clear();
     const changedCount = this.changedKeys.size;
     this.changedKeys.clear();
     this.writePromise = this.writePromise
@@ -349,6 +354,11 @@ export class ElectronStateStorage
       await this.writePromise;
       resolve?.();
     } catch (error: unknown) {
+      for (const [key, previous] of previousValues) {
+        if (this.changedKeys.has(key)) this.previousValues.set(key, previous);
+        else if (previous === undefined) delete this.data[key];
+        else this.data[key] = previous;
+      }
       reject?.(error instanceof Error ? error : new Error(String(error)));
       throw error;
     }

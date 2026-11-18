@@ -43,6 +43,26 @@ describe('ElectronStateStorage — Electron-specific behaviour', () => {
     provider = new ElectronStateStorage(storage, 'state.json');
   });
 
+  it('rolls back a failed global-state write before a later commit', async () => {
+    let fail = false;
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async (filePath, contents) => {
+      if (fail) throw new Error('disk');
+      await fs.writeFile(filePath, contents, 'utf8');
+    });
+    const first = provider.update('kept', 1);
+    await provider.flush();
+    await first;
+    fail = true;
+    const rejected = expect(provider.update('kept', 2)).rejects.toThrow('disk');
+    await expect(provider.flush()).rejects.toThrow('disk');
+    await rejected;
+    expect(provider.get('kept')).toBe(1);
+    fail = false;
+    const next = provider.update('other', true);
+    await provider.flush();
+    await next;
+    expect(new ElectronStateStorage(storage, 'state.json').get('kept')).toBe(1);
+  });
   it('writes within one second during continuous updates', async () => {
     jest.useFakeTimers();
     try {

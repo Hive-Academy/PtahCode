@@ -30,8 +30,10 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
     const write = this.pending.then(async () => {
       if (!this.available && !repair) throw new Error('Lane spend storage unavailable');
       const repairing = !this.available;
-      const next = SpendLedgerSchema.parse(repairing
-        ? { version: 1, events: [], owners: [], credits: [] } : this.state);
+      // An owner clear re-reads storage first, so a transient read failure keeps
+      // other owners' data. Only a ledger that still fails validation is replaced;
+      // its raw payload is backed up below before the repair write.
+      const next = repairing ? this.readForRepair() : SpendLedgerSchema.parse(this.state);
       change(next);
       try {
         if (repairing) {
@@ -51,6 +53,11 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
     // through `return write`; this branch only keeps the write queue drainable.
     this.pending = write.catch(() => undefined);
     return write;
+  }
+  private readForRepair(): SpendLedger {
+    const raw = this.storage.get<unknown>(LANE_SPEND_STORAGE_KEY);
+    const parsed = raw === undefined ? undefined : SpendLedgerSchema.safeParse(raw);
+    return parsed?.success ? parsed.data : { version: 1, events: [], owners: [], credits: [] };
   }
   recordUsage(event: SessionUsageContribution): Promise<void> {
     if (event.billingMode !== 'api-key') return Promise.resolve();
@@ -78,12 +85,13 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
     return this.enqueue((next) => { next.credits.push(evidence); });
   }
   async clear(ownerKey: string, nowMs = Date.now()): Promise<void> {
-    const owner = SpendLedgerSchema.shape.owners.element.parse({ ownerKey, resetAtMs: nowMs, revision: 0 });
+    const owner = SpendLedgerSchema.shape.owners.element.parse({ ownerKey, resetAtMs: nowMs, revision: 0, resetRunIds: [] });
     return this.enqueue((next) => {
       const old = next.owners.find((entry) => entry.ownerKey === ownerKey);
       owner.revision = (old?.revision ?? 0) + 1;
       next.owners = next.owners.filter((entry) => entry.ownerKey !== ownerKey);
       next.owners.push(owner);
+      owner.resetRunIds = [...new Set([...(old?.resetRunIds ?? []), ...next.events.filter((entry) => entry.ownerKey === ownerKey).map((entry) => entry.runId)])];
       next.events = next.events.filter((entry) => entry.ownerKey !== ownerKey);
       next.credits = next.credits.filter((entry) => entry.ownerKey !== ownerKey);
     }, true);
@@ -106,7 +114,7 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
           inputTokens += model.inputTokens ?? 0; outputTokens += model.outputTokens ?? 0;
           cacheReadTokens += model.cacheReadTokens ?? 0; cacheCreationTokens += model.cacheCreationTokens ?? 0;
         }
-        const cost = row.totalCostAuthority !== 'unpriced' ? row.totalCostMicroUsd : null;
+        const cost = !row.runCostSnapshot && row.totalCostAuthority !== 'unpriced' ? row.totalCostMicroUsd : null;
         if (cost === null) unpricedEvents++; else { pricedEvents++; knownCostMicroUsd += cost; }
       }
       // Absolute run snapshots replace earlier run costs, never add to them.
@@ -115,10 +123,16 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
       // totals and deduplication history until reset without durable rollups.
       for (const runId of new Set(rows.filter((row) => row.runCostSnapshot).map((row) => row.runId))) {
         const run = rows.filter((row) => row.runId === runId);
-        const snapshot = run.filter((row) => row.runCostSnapshot).sort((a, b) => b.revision - a.revision || b.occurredAtMs - a.occurredAtMs)[0];
-        if (snapshot.totalCostAuthority !== 'unpriced' && snapshot.totalCostMicroUsd !== null) {
-          knownCostMicroUsd -= run.reduce((sum, row) => sum + (row.totalCostAuthority !== 'unpriced' ? row.totalCostMicroUsd ?? 0 : 0), 0);
+        const snapshot = run.filter((row) => row.runCostSnapshot).sort((a, b) => b.occurredAtMs - a.occurredAtMs || b.revision - a.revision)[0];
+        const crossesBoundary = owner?.resetRunIds.includes(runId) || this.state.events.some((row) =>
+          row.ownerKey === ownerKey && row.runId === runId && row.occurredAtMs < startAt);
+        if (!crossesBoundary && snapshot.totalCostAuthority !== 'unpriced' && snapshot.totalCostMicroUsd !== null) {
+          const covered = run.filter((row) => row.occurredAtMs < snapshot.occurredAtMs ||
+            (row.occurredAtMs === snapshot.occurredAtMs && rows.indexOf(row) <= rows.indexOf(snapshot)));
+          knownCostMicroUsd -= covered.reduce((sum, row) => sum + (!row.runCostSnapshot && row.totalCostAuthority !== 'unpriced' ? row.totalCostMicroUsd ?? 0 : 0), 0);
           knownCostMicroUsd += snapshot.totalCostMicroUsd;
+          unpricedEvents -= covered.filter((row) => row.runCostSnapshot).length;
+          pricedEvents += covered.filter((row) => row.runCostSnapshot).length;
         }
       }
       return { startAt, endAt: nowMs, knownCostMicroUsd, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, pricedEvents, unpricedEvents };
@@ -127,7 +141,7 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
     const today = Math.floor(nowMs / DAY) * DAY;
     return { ...base, availability: 'available', cumulative,
       periods: { today: period(Math.max(reset, today)), '7d': period(Math.max(reset, nowMs - 7 * DAY)), '30d': period(Math.max(reset, nowMs - 30 * DAY)) },
-      coverage: cumulative.unpricedEvents ? (cumulative.pricedEvents ? 'partial' : 'none') : (cumulative.pricedEvents ? 'complete' : 'none'),
+      coverage: cumulative.unpricedEvents || events.some((row) => row.totalCostAuthority === 'model-priced' && row.models.some((model) => (model.cacheCreationTokens ?? 0) > 0 && model.cacheCreation1hTokens == null)) ? (cumulative.pricedEvents ? 'partial' : 'none') : (cumulative.pricedEvents ? 'complete' : 'none'),
       creditEvidence: this.state.credits.filter((entry) => entry.ownerKey === ownerKey && entry.occurredAtMs >= reset && entry.occurredAtMs <= nowMs).map(({ occurredAtMs, kind }) => ({ occurredAtMs, kind })),
     };
   }

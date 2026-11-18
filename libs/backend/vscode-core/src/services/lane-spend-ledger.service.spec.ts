@@ -140,6 +140,53 @@ describe('explicit storage repair and async validation', () => {
     await ledger.clear('owner', NOW);
     expect((await ledger.readSpend('owner', NOW)).availability).toBe('available');
   });
+  it('recovers a transient read failure without losing another owner', async () => {
+    const { storage, logger, ledger } = setup();
+    await ledger.recordUsage(event({ ownerKey: 'other' }));
+    await ledger.recordCreditEvidence('other', NOW, 'rate-limited');
+    jest.spyOn(storage, 'get').mockImplementationOnce(() => { throw new Error('transient'); });
+    const recovered = new LaneSpendLedgerService(storage, logger);
+    await recovered.clear('owner', NOW);
+    expect(await recovered.readSpend('other', NOW)).toMatchObject({ cumulative: { knownCostMicroUsd: 100 }, creditEvidence: [{ kind: 'rate-limited' }] });
+  });
+  it('retains later deltas after an absolute snapshot', async () => {
+    const { ledger } = setup();
+    await ledger.recordUsage(event({ occurredAtMs: NOW - 2, totalCostMicroUsd: 2_000_000 }));
+    await ledger.recordUsage(event({ eventKey: 'snapshot', occurredAtMs: NOW - 1, runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    await ledger.recordUsage(event({ eventKey: 'later', totalCostMicroUsd: 1_000_000 }));
+    expect((await ledger.readSpend('owner', NOW)).cumulative?.knownCostMicroUsd).toBe(6_000_000);
+  });
+  it('retains later deltas sharing the snapshot timestamp', async () => {
+    const { ledger } = setup();
+    await ledger.recordUsage(event({ totalCostMicroUsd: 2_000_000 }));
+    await ledger.recordUsage(event({ eventKey: 'snapshot', runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    await ledger.recordUsage(event({ eventKey: 'later', totalCostMicroUsd: 1_000_000 }));
+    expect((await ledger.readSpend('owner', NOW)).cumulative?.knownCostMicroUsd).toBe(6_000_000);
+  });
+  it.each([1, 8, 31])('does not allocate earlier run costs across a %s day boundary', async (days) => {
+    const { ledger } = setup();
+    await ledger.recordUsage(event({ occurredAtMs: NOW - days * 86400000, totalCostMicroUsd: 2_000_000 }));
+    await ledger.recordUsage(event({ eventKey: 'snapshot', runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    const result = await ledger.readSpend('owner', NOW);
+    const period = days === 1 ? result.periods?.today : days === 8 ? result.periods?.['7d'] : result.periods?.['30d'];
+    expect(period).toMatchObject({ knownCostMicroUsd: 0, unpricedEvents: 1 });
+    expect(result.cumulative?.knownCostMicroUsd).toBe(5_000_000);
+  });
+  it('does not reintroduce pre-reset costs via a continuing run snapshot', async () => {
+    const { ledger, storage, logger } = setup();
+    await ledger.recordUsage(event({ occurredAtMs: NOW - 2 }));
+    await ledger.clear('owner', NOW - 1);
+    const restored = new LaneSpendLedgerService(storage, logger);
+    await restored.recordUsage(event({ eventKey: 'snapshot', runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    expect(await restored.readSpend('owner', NOW)).toMatchObject({ coverage: 'none', cumulative: { knownCostMicroUsd: 0, unpricedEvents: 1 } });
+  });
+  it('reports partial model-priced coverage when the cache TTL subset is missing', async () => {
+    const { ledger } = setup();
+    await ledger.recordUsage(event({ totalCostAuthority: 'model-priced' }));
+    expect((await ledger.readSpend('owner', NOW)).coverage).toBe('partial');
+    await ledger.recordUsage(event({ revision: 1, totalCostAuthority: 'provider-reported' }));
+    expect((await ledger.readSpend('owner', NOW)).coverage).toBe('complete');
+  });
   it('rejects invalid credit and clear inputs through promises without writing', async () => {
     const { ledger, storage } = setup();
     await expect(ledger.recordCreditEvidence('', NOW, 'rate-limited').catch((error: unknown) => error)).resolves.toBeInstanceOf(Error);

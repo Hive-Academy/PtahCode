@@ -44,6 +44,19 @@ describe('CliStateStorage — CLI-specific behaviour', () => {
     provider = new CliStateStorage(storage, 'state.json');
   });
 
+  it('rolls back failed updates and deletions before a later write', async () => {
+    await provider.update('kept', 1);
+    const blocker = path.join(storage, 'state.json.tmp');
+    await fs.mkdir(blocker);
+    await expect(provider.update('kept', 2)).rejects.toThrow();
+    expect(provider.get('kept')).toBe(1);
+    await expect(provider.update('kept', undefined)).rejects.toThrow();
+    expect(provider.get('kept')).toBe(1);
+    await fs.rmdir(blocker);
+    await provider.update('other', true);
+    const restored = new CliStateStorage(storage, 'state.json');
+    expect(restored.get('kept')).toBe(1);
+  });
   it('update persists JSON to the configured filename', async () => {
     await provider.update('greeting', 'hello');
     const raw = await fs.readFile(path.join(storage, 'state.json'), 'utf-8');

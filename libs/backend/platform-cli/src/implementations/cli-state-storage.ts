@@ -29,16 +29,22 @@ export class CliStateStorage implements IStateStorage {
   }
 
   async update(key: string, value: unknown): Promise<void> {
-    if (value === undefined) {
-      delete this.data[key];
-    } else {
-      this.data[key] = value;
-    }
-    this.writePromise = this.writePromise.then(
-      () => this.persist(),
-      () => this.persist(),
-    );
-    await this.writePromise;
+    // degradation-audit: reported — the previous update caller received its rejection.
+    const write = this.writePromise.catch(() => undefined).then(async () => {
+      const previous = this.data[key];
+      if (value === undefined) delete this.data[key];
+      else this.data[key] = value;
+      try {
+        await this.persist();
+      } catch (error: unknown) {
+        if (previous === undefined) delete this.data[key];
+        else this.data[key] = previous;
+        throw error;
+      }
+    });
+    // The caller receives persistence errors; subsequent updates may retry.
+    this.writePromise = write;
+    await write;
   }
 
   keys(): readonly string[] {
