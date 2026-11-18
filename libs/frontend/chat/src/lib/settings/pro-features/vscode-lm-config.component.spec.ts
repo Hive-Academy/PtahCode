@@ -1,3 +1,5 @@
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -298,14 +300,13 @@ describe('VscodeLmConfigComponent', () => {
       mockLlmState.setDefaultModel.mockResolvedValue(false);
       await render();
 
-      const select = byTestId<HTMLSelectElement>('vscode-lm-model-select');
-      select.value = 'claude-3-5-sonnet';
-      select.dispatchEvent(new Event('change'));
+      const select = byTestId<HTMLElement>('vscode-lm-model-select');
+      fixture.debugElement.query(By.directive(PtahRichSelectComponent)).injector.get(PtahRichSelectComponent).choose({ value: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet' });
       await settle();
 
       expect(mockLlmState.setDefaultModel).toHaveBeenCalledWith('vscode-lm', 'claude-3-5-sonnet');
 
-      expect(select.value).toBe('gpt-4o');
+      expect(select.textContent).toContain('GPT-4o');
       expect(component.selectedModel()).toBeNull();
     });
 
@@ -314,14 +315,13 @@ describe('VscodeLmConfigComponent', () => {
       mockLlmState.setDefaultModel.mockResolvedValue(true);
       await render();
 
-      const select = byTestId<HTMLSelectElement>('vscode-lm-model-select');
-      select.value = 'claude-3-5-sonnet';
-      select.dispatchEvent(new Event('change'));
+      const select = byTestId<HTMLElement>('vscode-lm-model-select');
+      fixture.debugElement.query(By.directive(PtahRichSelectComponent)).injector.get(PtahRichSelectComponent).choose({ value: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet' });
       await settle();
 
       expect(feedback.toast()?.message).toBe('Saved VS Code language model.');
       expect(component.currentModelId()).toBe('claude-3-5-sonnet');
-      expect(select.value).toBe('claude-3-5-sonnet');
+      expect(select.textContent).toContain('Claude 3.5 Sonnet');
 
       // A later successful refresh carries the saved model; a change made elsewhere then shows as well.
       providersSignal.set([{ ...sampleVscodeProvider, defaultModel: 'gpt-4o-mini' }]);

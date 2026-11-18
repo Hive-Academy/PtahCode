@@ -19,6 +19,7 @@ import { NativePopoverComponent } from '@ptah-extension/ui';
 import type { LicenseGetStatusResponse } from '@ptah-extension/shared';
 import { ChatStore } from '../../services/chat.store';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { LicenseStatusCardComponent } from './license-status-card.component';
 
 /**
@@ -40,6 +41,7 @@ class NativePopoverStub {
   readonly isOpen = input.required<boolean>();
   readonly placement = input<string>('bottom');
   readonly hasBackdrop = input<boolean>(false);
+  readonly keepInViewport = input<boolean>(false);
   readonly backdropClass = input<string>('');
   readonly opened = output<void>();
   readonly closed = output<void>();
@@ -79,6 +81,7 @@ describe('LicenseStatusCardComponent', () => {
   let rpc: MockRpcService;
   /** Activation and log-out outcomes go to the page toast. */
   let announce: jest.Mock;
+  let licenseStatusState: ReturnType<typeof signal<LicenseGetStatusResponse | null>>;
 
   beforeEach(() => { rpc = createMockRpcService(); announce = jest.fn(); });
   afterEach(() => { fixture?.destroy(); TestBed.resetTestingModule(); });
@@ -87,11 +90,13 @@ describe('LicenseStatusCardComponent', () => {
   async function render(
     licenseStatusValue: LicenseGetStatusResponse | null,
   ): Promise<void> {
+    licenseStatusState = signal(licenseStatusValue);
     TestBed.configureTestingModule({
       imports: [LicenseStatusCardComponent, NativePopoverStub],
       providers: [
+        AdvancedOverviewStore,
         { provide: ClaudeRpcService, useValue: rpc },
-        { provide: ChatStore, useValue: { licenseStatus: signal(licenseStatusValue) } },
+        { provide: ChatStore, useValue: { licenseStatus: licenseStatusState } },
         { provide: SettingsSaveFeedbackService, useValue: { announce } },
       ],
     }).overrideComponent(LicenseStatusCardComponent, {
@@ -157,7 +162,7 @@ describe('LicenseStatusCardComponent', () => {
     expect(element.textContent).toContain('Explore Ptah Builders');
   });
 
-  it('shows the member card with the Builder badge, profile row and one primary action', async () => {
+  it('shows the member card with the Builder badge, account facts and one primary action', async () => {
     await render(premiumStatus);
     expect(element.textContent).toContain('Builder');
     expect(element.textContent).not.toContain('Community');
@@ -168,7 +173,7 @@ describe('LicenseStatusCardComponent', () => {
     const profile = element.querySelector('[aria-label="User profile"]');
     expect(profile?.textContent).toContain('Ada Byron');
     expect(profile?.textContent).toContain('ada@ptah.dev');
-    expect(profile?.textContent).toContain('AB');
+    expect(profile?.closest('ptah-description-list')).not.toBeNull();
     expect(element.textContent).toContain('Ptah Builders membership.');
     const logout = element.querySelector<HTMLButtonElement>('[data-testid="logout-button"]');
     expect(logout?.getAttribute('aria-label')).toBe('Remove membership key and log out');
@@ -276,13 +281,31 @@ describe('LicenseStatusCardComponent', () => {
     }
   });
 
-  it('renders the member initials in base-content text, colour only on the avatar fill (D1)', async () => {
+  it('shows account facts without an avatar row', async () => {
     await render(premiumStatus);
-    const avatar = Array.from(element.querySelectorAll('[aria-label="User profile"] div')).find(
-      (div) => div.textContent?.trim() === 'AB',
-    );
-    expect(avatar?.classList.contains('text-base-content')).toBe(true);
-    expect(avatar?.classList.contains('text-primary')).toBe(false);
+    const account = element.querySelector('[aria-label="User profile"]');
+    expect(account?.textContent).toContain('Ada Byron');
+    expect(account?.textContent).toContain('ada@ptah.dev');
+    expect(account?.querySelector('[aria-hidden="true"]')).toBeNull();
+    expect(element.querySelector('ptah-setting-row')).toBeNull();
+  });
+
+  it('reports membership without personal data and clears it while loading', async () => {
+    await render(premiumStatus);
+    const overview = TestBed.inject(AdvancedOverviewStore);
+    expect(overview.segments()[0]).toMatchObject({
+      value: 'Builder, active', meta: 'Key active', tone: 'ok',
+    });
+    licenseStatusState.set(null);
+    fixture.detectChanges();
+    expect(overview.segments()[0]).toMatchObject({ value: 'Not loaded', tone: 'idle' });
+  });
+
+  it('reports membership attention when a key has a reason', async () => {
+    await render(status({ ...premiumStatus, reason: 'expired' }));
+    expect(TestBed.inject(AdvancedOverviewStore).segments()[0]).toMatchObject({
+      value: 'Builder, attention', tone: 'warn',
+    });
   });
 
   it('calls license:clearKey on confirmed log out and closes the confirm on success', async () => {

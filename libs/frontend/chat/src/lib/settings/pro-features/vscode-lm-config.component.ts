@@ -19,12 +19,13 @@ import {
   signal,
   output,
   OnInit,
+  viewChild,
 } from '@angular/core';
 import { LucideAngularModule, Check, Star, Cpu } from 'lucide-angular';
 import { LlmProviderStateService } from '@ptah-extension/core';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective, PtahSelectDirective, PtahBadgeDirective, PtahFieldComponent, PtahFormSectionComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahRichSelectComponent, PtahBadgeDirective, PtahFieldComponent, PtahFormSectionComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
 
 export const COULD_NOT_SAVE_LM_MODEL = 'Could not save the VS Code language model.';
 export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provider.';
@@ -32,12 +33,14 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
 @Component({
   selector: 'ptah-vscode-lm-config',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahSelectDirective, PtahBadgeDirective, PtahFieldComponent, PtahFormSectionComponent, PtahSkeletonComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahRichSelectComponent, PtahBadgeDirective, PtahFieldComponent, PtahFormSectionComponent, PtahSkeletonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     @if (vscodeLmProvider(); as provider) {
       <ptah-form-section
+        [wide]="true"
+        [divider]="true"
         heading="VS Code language model"
         description="Uses models from VS Code's Language Model API. No API key required."
         aria-labelledby="vscode-lm-heading"
@@ -86,25 +89,17 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
         <!-- Model selection dropdown (A34) -->
         <div class="flex items-center gap-[var(--ptah-gap-controls)] mt-[var(--ptah-gap-label)] min-w-0">
           @if (vsCodeModels().length > 0) {
-            <ptah-field label="Model" appearance="stacked" class="min-w-0 flex-1">
-            <select
-              id="vscode-lm-model"
-              ptahSelect size="xs" class="w-full min-w-0 text-xs truncate text-base-content"
+            <ptah-field label="Model" class="min-w-0 flex-1">
+            <ptah-select
+              triggerId="vscode-lm-model"
+              [options]="modelOptions()"
               [value]="currentModelId()"
-              (change)="onVsCodeModelSelectEvent($event)"
-              [ptahBusyDisabled]="saving() || savingModel()"
+              (valueChange)="onVsCodeModelSelect($event ?? '')"
+              [disabled]="saving() || savingModel()"
+              label="VS Code LM model"
               aria-label="VS Code LM model"
               data-testid="vscode-lm-model-select"
-            >
-              @for (model of vsCodeModels(); track model.id) {
-                <option
-                  [value]="model.id"
-                  [selected]="model.id === currentModelId()"
-                >
-                  {{ model.displayName }}
-                </option>
-              }
-            </select>
+            />
             </ptah-field>
             @if (savingModel()) {
               <ptah-skeleton shape="lines" [lines]="1" />
@@ -141,6 +136,7 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
   `,
 })
 export class VscodeLmConfigComponent implements OnInit {
+  private readonly modelSelect = viewChild(PtahRichSelectComponent);
   readonly llmState = inject(LlmProviderStateService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
@@ -185,16 +181,11 @@ export class VscodeLmConfigComponent implements OnInit {
   /** Available VS Code LM models */
   readonly vsCodeModels = this.llmState.vsCodeModels;
 
+  readonly modelOptions = computed(() => this.vsCodeModels().map((model) => ({ value: model.id, label: model.displayName })));
+
   async ngOnInit(): Promise<void> {
     await this.llmState.loadProviderStatus();
     await this.llmState.loadVsCodeModels();
-  }
-
-  async onVsCodeModelSelectEvent(event: Event): Promise<void> {
-    const select = event.target as HTMLSelectElement;
-    await this.onVsCodeModelSelect(select.value);
-    // OnPush keeps a `[value]` binding that did not change: put the element back on the saved model.
-    select.value = this.currentModelId();
   }
 
   async onVsCodeModelSelect(modelId: string): Promise<void> {
@@ -220,6 +211,7 @@ export class VscodeLmConfigComponent implements OnInit {
     } finally {
       this.selectedModel.set(null);
       this.savingModel.set(false);
+      this.modelSelect()?.writeValue(this.currentModelId());
     }
   }
 

@@ -21,6 +21,8 @@ import {
   type OutputStyleSelectionRequest,
 } from './output-style-list.component';
 import type { OutputStyleFailedOperation } from './output-style.store';
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
 const BUILT_IN_DEFAULT: OutputStyleEntry = {
@@ -126,6 +128,16 @@ describe('OutputStyleListComponent — CLI parity control', () => {
     expect(grid).not.toBeNull();
     expect(grid.classList).toContain('grid');
     expect(grid.querySelectorAll('[role="radio"]')).toHaveLength(2);
+    expect(grid.querySelector('[data-testid="output-style-row-default"]').classList).toContain('border-primary');
+  });
+
+  it('opens the built-in preview without changing selection', () => {
+    const buttons = Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button'));
+    buttons.find(button => button.textContent?.trim() === 'Preview')?.click();
+    fixture.detectChanges();
+    expect(list().previewName()).toBe('default');
+    expect(text()).toContain('Built into the agent');
+    expect(host.emitted).toEqual([]);
   });
 
   it('starts unticked and emits no parity field at all (default OFF)', () => {
@@ -273,11 +285,8 @@ describe('OutputStyleListComponent — CLI parity control', () => {
     parityCheckbox().click();
     fixture.detectChanges();
 
-    const select: HTMLSelectElement = fixture.nativeElement.querySelector(
-      '#output-style-parity-tier',
-    );
-    select.value = 'local';
-    select.dispatchEvent(new Event('change'));
+    const select = fixture.debugElement.query(By.directive(PtahRichSelectComponent)).componentInstance as PtahRichSelectComponent;
+    select.value.set('local');
     fixture.detectChanges();
 
     expect(list().parityTier()).toBe('local');
@@ -564,7 +573,7 @@ describe('OutputStyleListComponent — CLI parity control', () => {
       expect((text().match(/Ptah can select it but not change it/g) ?? []).length).toBe(0);
       expect(fixture.nativeElement.querySelectorAll('[data-testid="output-style-builtin-note"]')).toHaveLength(1);
       const badges = Array.from<HTMLElement>(fixture.nativeElement.querySelectorAll('[data-ptah-badge]')).filter(
-        (badge) => badge.textContent?.trim() === 'Built-in',
+        (badge) => badge.textContent?.trim() === 'Built in',
       );
       expect(badges).toHaveLength(2);
       expect(badges.every((badge) => badge.getAttribute('title') === note)).toBe(true);
@@ -728,6 +737,8 @@ describe('OutputStyleListComponent — missing active style (E5/N1)', () => {
 
   it('names removal only when no file failed to parse', () => {
     expect(host.invalid()).toEqual([]);
+    fixture.nativeElement.querySelector('[aria-label="Why this style is unavailable"]').click();
+    fixture.detectChanges();
     expect(banner().textContent).toContain(
       'is no longer available. Its file was removed or renamed outside Ptah, ' +
         'so new sessions run with the default behaviour.',
@@ -739,6 +750,8 @@ describe('OutputStyleListComponent — missing active style (E5/N1)', () => {
     host.invalid.set([BROKEN_FILE]);
     fixture.detectChanges();
 
+    fixture.nativeElement.querySelector('[aria-label="Why this style is unavailable"]').click();
+    fixture.detectChanges();
     const copy = banner().textContent ?? '';
 
     // The parse-failure cause is offered alongside removal, never instead of it.

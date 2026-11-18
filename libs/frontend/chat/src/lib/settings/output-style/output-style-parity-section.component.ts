@@ -18,16 +18,18 @@ import {
   ElementRef,
   effect,
   input,
+  signal,
   output,
   viewChild,
 } from '@angular/core';
 import {
   LucideAngularModule,
   AlertTriangle,
+  Info,
 } from 'lucide-angular';
 import type { SettingsTier } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
-import { PtahButtonDirective, PtahCheckboxDirective, PtahSelectDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahCheckboxDirective, PtahRichSelectComponent, PtahFieldComponent, NativePopoverComponent, PtahIconButtonDirective, type PtahSelectOption } from '@ptah-extension/ui';
 
 export interface ParityTierOption {
   readonly tier: SettingsTier;
@@ -56,7 +58,7 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
 @Component({
   selector: 'ptah-output-style-parity-section',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahSelectDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, PtahButtonDirective, PtahCheckboxDirective, PtahRichSelectComponent, PtahFieldComponent, NativePopoverComponent, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <details
@@ -85,39 +87,33 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
             Also apply this style when I run <code>claude</code> in this project
           </span>
           <span class="block text-xs text-base-content-muted mt-0.5 leading-relaxed">
-            Ptah applies your choice on its own. Tick this to additionally write
-            <code class="text-base-content-muted">{{ parityDisplayPath() }}</code>
-            so the command-line tool picks up the same style. Ptah keeps every
-            other setting in that file as it is.
+            Write the selected style to <code>{{ parityDisplayPath() }}</code>.
           </span>
         </span>
       </label>
+      <ptah-native-popover [isOpen]="helpOpen()" [keepInViewport]="true" (closed)="helpOpen.set(false)">
+        <button trigger type="button" ptahIconButton variant="ghost" size="xs" label="About command-line parity" (click)="helpOpen.set(true)">
+          <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+        </button>
+        <p content class="max-w-xs p-[var(--ptah-gap-field)] text-xs leading-relaxed">
+          Ptah applies your choice on its own. Tick this to additionally write
+          <code>{{ parityDisplayPath() }}</code> so the command-line tool picks up
+          the same style. Ptah keeps every other setting in that file as it is.
+        </p>
+      </ptah-native-popover>
 
       @if (parityEnabled()) {
         <div class="mt-2 pl-6">
-          <label
-            class="block text-xs text-base-content-muted mb-1"
-            for="output-style-parity-tier"
-          >
-            Where to write it
-          </label>
-          <select
-            ptahSelect size="xs"
-            id="output-style-parity-tier"
-            class="w-full max-w-xs text-base-content"
-            [value]="parityTier()"
-            (change)="onTierChange($event)"
-            data-testid="output-style-parity-select"
-          >
-            @for (option of parityTiers; track option.tier) {
-              <option
-                [value]="option.tier"
-                [selected]="option.tier === parityTier()"
-              >
-                {{ option.displayPath }} — {{ option.scope }}
-              </option>
-            }
-          </select>
+          <ptah-field label="Where to write it">
+            <ptah-select
+              id="output-style-parity-tier"
+              triggerId="output-style-parity-tier-trigger"
+              [options]="tierOptions"
+              [value]="parityTier()"
+              (valueChange)="onTierChange($event)"
+              data-testid="output-style-parity-select"
+            />
+          </ptah-field>
           <p class="text-xs text-base-content-muted mt-1 leading-relaxed">
             The file is written the next time you pick a style. Nothing is
             written while this box is unticked.
@@ -146,7 +142,7 @@ export const PARITY_TIERS: readonly ParityTierOption[] = [
           </span>
           <button
             type="button"
-            class="btn btn-outline btn-xs border-error text-base-content"
+            ptahButton variant="outline" size="xs" class="border-error text-base-content"
             [ptahBusyDisabled]="saving()"
             (click)="confirmed.emit()"
             data-testid="parity-confirm-button"
@@ -210,7 +206,11 @@ export class OutputStyleParitySectionComponent {
   readonly dismissParity = output<void>();
 
   readonly AlertTriangleIcon = AlertTriangle;
-  readonly parityTiers = PARITY_TIERS;
+  readonly InfoIcon = Info;
+  readonly helpOpen = signal(false);
+  readonly tierOptions: readonly PtahSelectOption<SettingsTier>[] = PARITY_TIERS.map(option => ({
+    value: option.tier, label: option.displayPath, description: option.scope,
+  }));
 
   private readonly details = viewChild<ElementRef<HTMLDetailsElement>>('details');
   private readonly parityCancel = viewChild<ElementRef<HTMLButtonElement>>('parityCancel');
@@ -244,8 +244,7 @@ export class OutputStyleParitySectionComponent {
     this.parityToggled.emit(checked);
   }
 
-  onTierChange(event: Event): void {
-    const value = (event.target as HTMLSelectElement).value as SettingsTier;
-    this.tierChanged.emit(value);
+  onTierChange(value: SettingsTier | null): void {
+    if (value !== null) this.tierChanged.emit(value);
   }
 }

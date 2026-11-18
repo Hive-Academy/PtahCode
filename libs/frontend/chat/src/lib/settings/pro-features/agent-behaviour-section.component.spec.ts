@@ -11,6 +11,7 @@ import { rpcError, rpcSuccess } from '@ptah-extension/core/testing';
 import type { EffortLevel } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { UltracodeStateService } from '../../services/ultracode-state.service';
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { AgentBehaviourSectionComponent } from './agent-behaviour-section.component';
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
@@ -105,6 +106,7 @@ describe('AgentBehaviourSectionComponent', () => {
         },
         { provide: VSCodeService, useValue: { isElectron: true } },
         SettingsSaveFeedbackService,
+        AdvancedOverviewStore,
       ],
     });
     feedback = TestBed.inject(SettingsSaveFeedbackService);
@@ -114,6 +116,37 @@ describe('AgentBehaviourSectionComponent', () => {
     feedback.dismiss();
     fixture?.destroy();
     TestBed.resetTestingModule();
+  });
+
+  it('reports loaded agent behaviour and updates with effort and Ultracode', async () => {
+    await render();
+    const overview = TestBed.inject(AdvancedOverviewStore);
+    expect(overview.segments()[1]).toMatchObject({
+      value: 'Ultracode off', meta: 'Medium effort', tone: 'info',
+    });
+    effort.set('high');
+    ultracodeEnabled.set(true);
+    fixture.detectChanges();
+    expect(overview.segments()[1]).toMatchObject({
+      value: 'Ultracode on', meta: 'High effort', tone: 'info',
+    });
+  });
+
+  it('keeps the overview idle when a status load fails', async () => {
+    handlers['agent:getConfig'] = () => rpcError('unavailable');
+    await render();
+    expect(TestBed.inject(AdvancedOverviewStore).segments()[1]).toMatchObject({
+      value: 'Not loaded', tone: 'idle',
+    });
+  });
+
+  it('labels the shared effort select from the setting row', async () => {
+    await render();
+    const select = element.querySelector('ptah-select');
+    expect(select?.getAttribute('data-testid')).toBe('agent-behaviour-effort-value');
+    expect(select?.querySelector('button')?.getAttribute('aria-labelledby'))
+      .toBe('agent-behaviour-effort-title');
+    expect(element.querySelector('select')).toBeNull();
   });
 
   describe('card shape', () => {
@@ -130,9 +163,9 @@ describe('AgentBehaviourSectionComponent', () => {
       );
       expect(rows).toEqual([
         'agent-behaviour-row-prompt',
-        'agent-behaviour-row-effort',
-        'agent-behaviour-row-workflows',
         'agent-behaviour-row-ultracode',
+        'agent-behaviour-row-workflows',
+        'agent-behaviour-row-effort',
       ]);
     });
 
@@ -391,9 +424,7 @@ describe('AgentBehaviourSectionComponent', () => {
         expect(note.getAttribute('title')).toBe(note.textContent?.trim());
         expect(note.closest('ptah-setting-row')).not.toBeNull();
       }
-      expect(notes[3].textContent).toContain(
-        'Turning Ultracode off restores your previous reasoning effort.',
-      );
+      expect(notes[3].textContent).toContain('Plan each message with X-High effort.');
       expect(
         checkbox('Toggle Ultracode mode').getAttribute('aria-describedby'),
       ).toBe('agent-behaviour-ultracode-note');
@@ -459,7 +490,7 @@ describe('AgentBehaviourSectionComponent', () => {
       const trigger = element.querySelector<HTMLButtonElement>(
         '[data-testid="agent-behaviour-effort-value"]',
       );
-      expect(isDisabledControl(trigger)).toBe(true);
+      expect(isDisabledControl(trigger?.querySelector('button'))).toBe(true);
       expect(
         element.querySelector('#agent-behaviour-effort-note')?.textContent,
       ).toContain('Pinned to X-High by Ultracode');

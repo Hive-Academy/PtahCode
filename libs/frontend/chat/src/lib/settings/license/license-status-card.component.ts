@@ -3,6 +3,8 @@ import {
   inject,
   ChangeDetectionStrategy,
   computed,
+  effect,
+  untracked,
   signal,
   viewChild,
   ElementRef,
@@ -33,9 +35,11 @@ import {
   PtahIconButtonDirective,
   PtahInlineConfirmComponent,
   PtahInputDirective,
-  PtahSettingRowComponent,
+  PtahDescriptionListComponent,
+  PtahDescriptionItemComponent,
   PtahStatusComponent,
 } from '@ptah-extension/ui';
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { ChatStore } from '../../services/chat.store';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
@@ -87,7 +91,8 @@ const LOGOUT_FAILED = 'Could not log out.';
     PtahIconButtonDirective,
     PtahInlineConfirmComponent,
     PtahInputDirective,
-    PtahSettingRowComponent,
+    PtahDescriptionListComponent,
+    PtahDescriptionItemComponent,
     PtahStatusComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -95,13 +100,16 @@ const LOGOUT_FAILED = 'Could not log out.';
   template: `
     @if (!isLoadingLicenseStatus()) {
       <ptah-form-section
+        id="advanced-membership"
         heading="Membership &amp; data"
+        description="Your plan, your membership key, and a copy of your settings."
+        [wide]="true"
         [divider]="true"
         data-glass-surface="content"
       >
         <!-- Membership (A1, A7): badges and status beside the actions; Export/Import are projected by the Advanced shell (A8/A9). -->
-        <ptah-setting-row label="Membership" [hint]="planDescription()">
-          <span status class="inline-flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
+
+          <span aside class="inline-flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
             @if (isPremium()) {
               <span ptahBadge appearance="outline" tone="accent">
                 <lucide-angular
@@ -116,7 +124,7 @@ const LOGOUT_FAILED = 'Could not log out.';
             }
             @if (licenseValid() && !licenseReason()) {
               <ptah-status status="online" label="Active" appearance="inline" />
-            } @else if (licenseValid() && licenseReason()) {
+            } @else if (licenseReason()) {
               <ptah-status
                 status="warning"
                 label="Needs Attention"
@@ -124,6 +132,30 @@ const LOGOUT_FAILED = 'Could not log out.';
               />
             }
           </span>
+        <ptah-description-list density="compact">
+          <div ptahDescriptionItem term="Plan">
+            {{ isPremium() ? 'Builder' : 'Community' }}
+            @if (planDescription(); as description) {
+              @if (description.length <= 80) {
+                <span class="text-base-content-muted">{{ description }}</span>
+              }
+            }
+          </div>
+          <div ptahDescriptionItem term="State">
+            <ptah-status
+              [status]="licenseReason() ? 'warning' : licenseValid() ? 'online' : 'offline'"
+              [label]="licenseReason() ? 'Needs Attention' : licenseValid() ? 'Active' : 'Inactive'"
+              appearance="inline"
+            />
+          </div>
+          @if (userEmail()) {
+            <div ptahDescriptionItem term="Account" role="group" aria-label="User profile">
+              @if (showUserName()) { <span>{{ userDisplayName() }}</span> }
+              <span class="text-base-content-muted">{{ userEmail() }}</span>
+            </div>
+          }
+        </ptah-description-list>
+        <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
           <ng-content select="[membership-actions]" />
           @if (isPremium()) {
             <button type="button" ptahButton variant="primary" (click)="openPricing()">
@@ -138,6 +170,7 @@ const LOGOUT_FAILED = 'Could not log out.';
             <ptah-native-popover
               [isOpen]="keyPopoverOpen()"
               placement="bottom-end"
+              [keepInViewport]="true"
               [hasBackdrop]="true"
               backdropClass="transparent"
               (closed)="closeKeyPopover()"
@@ -146,7 +179,7 @@ const LOGOUT_FAILED = 'Could not log out.';
                 trigger
                 type="button"
                 ptahButton
-                variant="ghost"
+                variant="secondary"
                 (click)="openKeyPopover()"
                 data-testid="membership-key-trigger"
               >
@@ -282,7 +315,26 @@ const LOGOUT_FAILED = 'Could not log out.';
               <span>Create Account</span>
             </button>
           }
-        </ptah-setting-row>
+          @if (userEmail()) {
+            <button
+              #logoutButton
+              class="ml-auto"
+              type="button"
+              ptahButton
+              variant="ghost"
+              (click)="requestLogout()"
+              aria-label="Remove membership key and log out"
+              data-testid="logout-button"
+            >
+              <lucide-angular
+                [img]="LogOutIcon"
+                class="w-3 h-3 text-error"
+                aria-hidden="true"
+              />
+              <span>Log Out</span>
+            </button>
+          }
+        </div>
 
         <!-- Import confirm / outcome, projected by the Advanced shell (A9). -->
         <ng-content select="[membership-notices]" />
@@ -320,36 +372,6 @@ const LOGOUT_FAILED = 'Could not log out.';
 
         <!-- User profile (A3) with the inline Log out confirm (A4). -->
         @if (userEmail()) {
-          <ptah-setting-row
-            role="group"
-            aria-label="User profile"
-            [label]="(showUserName() ? userDisplayName() : userEmail()) ?? ''"
-            [hint]="showUserName() ? userEmail() : null"
-          >
-            <div
-              meta
-              class="flex items-center justify-center w-6 h-6 rounded-full bg-primary/20 text-base-content text-xs font-bold shrink-0"
-              aria-hidden="true"
-            >
-              {{ userInitials() }}
-            </div>
-            <button
-              #logoutButton
-              type="button"
-              ptahButton
-              variant="ghost"
-              (click)="requestLogout()"
-              aria-label="Remove membership key and log out"
-              data-testid="logout-button"
-            >
-              <lucide-angular
-                [img]="LogOutIcon"
-                class="w-3 h-3 text-error"
-                aria-hidden="true"
-              />
-              <span>Log Out</span>
-            </button>
-          </ptah-setting-row>
           @if (confirmingLogout()) {
             <ptah-inline-confirm
               message="Remove your membership key and log out?"
@@ -369,14 +391,11 @@ const LOGOUT_FAILED = 'Could not log out.';
       </ptah-form-section>
     }
   `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
-  `,
+
 })
 export class LicenseStatusCardComponent {
   private readonly rpcService = inject(ClaudeRpcService);
+  private readonly overview = inject(AdvancedOverviewStore, { optional: true });
   private readonly chatStore = inject(ChatStore);
   /** Activation and log-out outcomes show as the Settings page toast. */
   private readonly feedback = inject(SettingsSaveFeedbackService);
@@ -456,24 +475,25 @@ export class LicenseStatusCardComponent {
     return !!name && name !== this.userEmail();
   });
 
-  readonly userInitials = computed(() => {
-    const first = this.userFirstName();
-    const last = this.userLastName();
-    if (first && last) {
-      return `${first[0]}${last[0]}`.toUpperCase();
-    }
-    if (first) {
-      return first[0].toUpperCase();
-    }
-    if (last) {
-      return last[0].toUpperCase();
-    }
-    const email = this.userEmail();
-    if (email && email.length > 0) {
-      return email[0].toUpperCase();
-    }
-    return '?';
-  });
+  constructor() {
+    effect(() => {
+      const loading = this.isLoadingLicenseStatus();
+      const premium = this.isPremium();
+      const valid = this.licenseValid();
+      const reason = this.licenseReason();
+      untracked(() => {
+        if (loading) {
+          this.overview?.clear('membership');
+        } else {
+          this.overview?.report('membership', {
+            value: `${premium ? 'Builder' : 'Community'}, ${reason ? 'attention' : valid ? 'active' : 'inactive'}`,
+            meta: premium && valid ? 'Key active' : 'No key',
+            tone: reason ? 'warn' : valid ? 'ok' : 'idle',
+          });
+        }
+      });
+    });
+  }
 
   async openSignup(): Promise<void> {
     await this.rpcService.call('command:execute', {

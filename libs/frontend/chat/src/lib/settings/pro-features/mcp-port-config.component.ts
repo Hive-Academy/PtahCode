@@ -21,6 +21,8 @@ import {
   inject,
   ChangeDetectionStrategy,
   signal,
+  effect,
+  untracked,
   computed,
   OnInit,
   ElementRef,
@@ -28,8 +30,9 @@ import {
   afterNextRender,
   viewChild,
 } from '@angular/core';
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { FormsModule } from '@angular/forms';
-import { LucideAngularModule, Plug, AlertCircle } from 'lucide-angular';
+import { LucideAngularModule, Plug, AlertCircle, Info } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type { McpExternalCallerAccess } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
@@ -37,8 +40,11 @@ import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directi
 import {
   PtahButtonDirective,
   PtahCheckboxDirective,
+  PtahIconButtonDirective,
+  NativePopoverComponent,
   PtahInputDirective,
-  PtahSelectDirective,
+  PtahRichSelectComponent,
+  type PtahSelectOption,
   PtahFormSectionComponent,
   PtahSettingRowComponent,
   PtahFieldComponent,
@@ -66,8 +72,10 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
     FormsModule,
     PtahButtonDirective,
     PtahCheckboxDirective,
+    PtahIconButtonDirective,
+    NativePopoverComponent,
     PtahInputDirective,
-    PtahSelectDirective,
+    PtahRichSelectComponent,
     PtahFormSectionComponent,
     PtahSettingRowComponent,
     PtahFieldComponent,
@@ -81,11 +89,18 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
     <section data-glass-surface="content" aria-labelledby="mcp-browser-heading">
       <h2 id="mcp-browser-heading" class="sr-only">MCP &amp; Browser</h2>
       <ptah-form-section
+        id="advanced-mcp-server"
+        [wide]="true"
         heading="MCP & Browser"
-        description="Configure Ptah's local MCP server port and tool namespaces for AI agents."
+        description="The local server that gives agents the Ptah tools."
         [level]="2"
         [divider]="true"
       >
+        @if (loaded()) {
+          <ptah-status aside status="online" [label]="'Port ' + savedPort()" />
+        } @else if (loadState() === 'failed') {
+          <ptah-status aside status="failed" label="Could not load" />
+        }
         @if (loadState() === 'failed') {
           <ptah-alert
             tone="error"
@@ -106,11 +121,10 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             </button></ptah-alert
           >
         }
+        <div class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-ptah-controls">
         <ptah-field
           label="MCP port"
-          appearance="stacked"
           class="w-full min-w-0"
-          size="sm"
           [error]="validationError() ?? saveError()"
           errorRole="alert"
           errorTestId="mcp-port-validation-error"
@@ -119,32 +133,18 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             id="mcp-port-input"
             type="number"
             ptahInput
-            size="xs"
+            tone="mono"
             class="w-full min-w-0"
             [ngModel]="portValue()"
             (ngModelChange)="onPortInput($event)"
             [min]="1024"
             [max]="65535"
-            placeholder="51820"
             [disabled]="saving() || !loaded()"
             aria-label="MCP server port"
             aria-describedby="mcp-port-hint"
             data-testid="mcp-port-input"
           />
-          <button
-            ptahFieldTrailing
-            type="button"
-            ptahButton
-            variant="secondary"
-            size="xs"
-            (click)="savePort()"
-            [busy]="saving()"
-            [disabled]="!loaded() || !isDirty() || validationError() !== null"
-            aria-label="Save MCP port"
-            data-testid="mcp-port-save-btn"
-          >
-            Save
-          </button>
+
           <!-- Before the footer, so the error never hides the range and restart note. -->
           <p
             ptahFieldBeforeHint
@@ -156,24 +156,32 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             server restarts.
           </p>
         </ptah-field>
+          <button
+            type="button"
+            ptahButton
+            variant="secondary"
+            class="h-[var(--ptah-field-h-md)]"
+            (click)="savePort()"
+            [busy]="saving()"
+            [disabled]="!loaded() || !isDirty() || validationError() !== null"
+            aria-label="Save MCP port"
+            data-testid="mcp-port-save-btn"
+          >
+            Save
+          </button>
+        </div>
         <ptah-field
           label="External MCP callers"
-          appearance="stacked"
           class="w-full min-w-0"
-          size="sm"
         >
-          <select
-            id="mcp-external-caller-access"
-            ptahSelect
-            size="xs"
-            [ngModel]="externalCallerAccess()"
-            (ngModelChange)="onExternalCallerAccessChange($event)"
-            [ptahBusyDisabled]="saving() || !loaded()"
+          <ptah-select
+            triggerId="mcp-external-caller-access"
+            [options]="callerOptions"
+            [value]="externalCallerAccess()"
+            (valueChange)="onExternalCallerAccessChange($event ?? 'read-only')"
+            [disabled]="saving() || !loaded()"
             data-testid="mcp-external-caller-access"
-          >
-            <option value="read-only">Read-only (recommended)</option>
-            <option value="full">Full access</option>
-          </select>
+          />
           <p
             ptahFieldAfterError
             data-testid="mcp-external-caller-access-hint"
@@ -182,10 +190,12 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
               externalCallerAccess() === 'read-only'
             "
           >
-            External tools stay read-only until you select Full access. Full
-            access lets other local tools call privileged Ptah tools, including
-            execute_code, but cannot cross workspaces.
+            External tools stay read-only until you select Full access.
           </p>
+          <ptah-native-popover ptahFieldTrailing [isOpen]="callerInfoOpen()" [keepInViewport]="true" (closed)="callerInfoOpen.set(false)">
+            <button trigger type="button" ptahIconButton size="xs" label="About external MCP caller access" aria-label="About external MCP caller access" (click)="callerInfoOpen.set(!callerInfoOpen())"><lucide-angular [img]="InfoIcon" /></button>
+            <p content class="max-w-xs text-sm">Full access lets other local tools call privileged Ptah tools, including execute_code, but cannot cross workspaces.</p>
+          </ptah-native-popover>
         </ptah-field>
         @for (ns of namespaceOptions; track ns.id) {
           <ptah-setting-row [label]="ns.label" [hint]="ns.description">
@@ -205,8 +215,12 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
         }
         <ptah-setting-row
           label="Allow localhost"
-          hint="Allow browser tools to navigate to localhost URLs (dev servers, local APIs). Enables AI agents to access local network services."
+          hint="Allow browser tools to navigate to localhost URLs."
         >
+          <ptah-native-popover meta [isOpen]="localhostInfoOpen()" [keepInViewport]="true" (closed)="localhostInfoOpen.set(false)">
+            <button trigger type="button" ptahIconButton size="xs" label="About localhost access" aria-label="About localhost access" (click)="localhostInfoOpen.set(!localhostInfoOpen())"><lucide-angular [img]="InfoIcon" /></button>
+            <p content class="max-w-xs text-sm">Enables AI agents to access local network services, development servers, and local APIs.</p>
+          </ptah-native-popover>
           <input
             #allowLocalhostToggle
             type="checkbox"
@@ -236,13 +250,29 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
       </ptah-form-section>
     </section>
   `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
-  `,
 })
 export class McpPortConfigComponent implements OnInit {
+  private readonly callerSelect = viewChild(PtahRichSelectComponent);
+  readonly callerInfoOpen = signal(false);
+  readonly localhostInfoOpen = signal(false);
+  readonly InfoIcon = Info;
+  readonly callerOptions: readonly PtahSelectOption<McpExternalCallerAccess>[] = [
+    { value: 'read-only', label: 'Read-only (recommended)' },
+    { value: 'full', label: 'Full access' },
+  ];
+  private readonly overview = inject(AdvancedOverviewStore, { optional: true });
+
+  constructor() {
+    effect(() => {
+      const entry = this.loaded() ? {
+        value: 'Port ' + this.savedPort(),
+        meta: this.savedExternalCallerAccess() === 'full' ? 'Full access' : 'Read-only',
+        tone: 'ok' as const,
+      } : null;
+      untracked(() => entry ? this.overview?.report('mcp-server', entry) : this.overview?.clear('mcp-server'));
+    });
+  }
+
   private readonly rpcService = inject(ClaudeRpcService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly injector = inject(Injector);
@@ -467,6 +497,7 @@ export class McpPortConfigComponent implements OnInit {
         }
       },
     });
+    this.callerSelect()?.writeValue(this.externalCallerAccess());
   }
 
   isNamespaceEnabled(id: string): boolean {

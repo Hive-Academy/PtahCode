@@ -350,11 +350,11 @@ describe('AdvancedSettingsGroupComponent', () => {
       await create('scheduled-jobs');
       const restart = byTestId('advanced-setting-cron.maxConcurrentJobs-field');
       expect(restart?.textContent).toContain('Restart Ptah to apply.');
-      expect(restart?.querySelector('.badge')?.textContent?.trim()).toBe(
+      expect(restart?.querySelector('[data-restart-badge]')?.textContent?.trim()).toBe(
         'Restart',
       );
       await create('memory-upkeep');
-      expect(host().querySelector('.badge')).toBeNull();
+      expect(host().querySelector('[data-restart-badge]')).toBeNull();
     });
 
     it('names the next Codex agent for codex keys and right away for live keys', async () => {
