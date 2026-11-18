@@ -149,6 +149,14 @@ describe('TeamBuilderStartPage', () => {
     expect(page.state.guidanceNote()).toBe('Guidance record was not written.');
   });
 
+  it('starts the chat from Continue when no skill is selected', async () => {
+    const page = TestBed.runInInjectionContext(() => new TeamBuilderStartPage());
+    page.intent.set('Build a team');
+    await page.reviewSelection();
+    expect(launchTeamBuilder).toHaveBeenCalledTimes(1);
+    expect(call).not.toHaveBeenCalledWith('wizard:preview-skills-for-consent', expect.anything());
+  });
+
   it('shows limited guidance without a saved analysis and returns to intent on Back', async () => {
     const page = TestBed.runInInjectionContext(
       () => new TeamBuilderStartPage(),

@@ -782,7 +782,6 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
       autoDreamEnabled: false,
       crossSessionInbound: 'accept',
       subagentPromptCacheTtl: '1h',
-      autoCompactWindow: 200_000,
     });
   });
 
@@ -1099,7 +1098,7 @@ describe('SdkQueryOptionsBuilder.build — auto-compact control', () => {
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });
 
-  it('first-party with defaults sends the 200000 auto-compact window', async () => {
+  it('first-party with defaults delegates the auto-compact window to the runtime', async () => {
     const snapshot = { ...PTAH_DISABLE_SDK_AUTO_MEMORY };
     const opts = await buildOptions(
       'https://api.anthropic.com',
@@ -1107,7 +1106,6 @@ describe('SdkQueryOptionsBuilder.build — auto-compact control', () => {
     );
     expect(parsedSettings(opts)).toEqual({
       ...ALWAYS,
-      autoCompactWindow: 200_000,
     });
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });

@@ -30,7 +30,7 @@ export function parseAgentBudgetSetting(key: keyof AgentBudgetSettings, raw: unk
 }
 function budgetDefault(key: keyof AgentBudgetSettings): number {
   const descriptor = findAdvancedSetting(`agentBudget.${key}`);
-  if (!descriptor || descriptor.kind !== 'number') throw new Error(`Missing agent budget default: ${key}`);
+  if (!descriptor || descriptor.kind !== 'number' || descriptor.default === null) throw new Error(`Missing agent budget default: ${key}`);
   return descriptor.default;
 }
 export const DEFAULT_AGENT_BUDGET_SETTINGS: AgentBudgetSettings = {

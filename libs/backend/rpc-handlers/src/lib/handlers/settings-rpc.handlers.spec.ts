@@ -304,6 +304,15 @@ describe('SettingsRpcHandlers', () => {
   // settings:get / settings:set
   // -------------------------------------------------------------------------
 
+  it('sets and clears the optional compaction threshold', async () => {
+    const h = makeHarness();
+    h.handlers.register();
+    for (const value of [800_000, null]) {
+      expect(await call(h, 'settings:set', { key: 'compaction.threshold', value })).toEqual({ success: true });
+      expect(h.workspaceProvider.setConfiguration).toHaveBeenLastCalledWith('ptah', 'compaction.threshold', value ?? undefined);
+    }
+  });
+
   describe('settings:get', () => {
     it('returns the registry default for a key that was never written', async () => {
       const h = makeHarness();

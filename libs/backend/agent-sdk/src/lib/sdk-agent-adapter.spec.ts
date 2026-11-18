@@ -73,9 +73,11 @@ import {
   type RunUsageResult,
   type SessionStatsPrefix,
 } from './session-stats/session-stats-owner.service';
-import type { SessionBudgetService } from './helpers/session-budget/session-budget.service';
+import { SessionBudgetService } from './helpers/session-budget/session-budget.service';
+import { SessionLifecycleManager } from './helpers/session-lifecycle-manager';
+import { ContextUsagePort } from './helpers/compaction/context-usage.port';
+import { SessionEndCallbackRegistry } from './helpers/session-end-callback-registry';
 import type {
-  SessionLifecycleManager,
   StreamTransformer,
   SdkModuleLoader,
   SdkModelService,
@@ -84,6 +86,7 @@ import type {
   Query,
   ResultStatsCallback,
 } from './helpers';
+import { SESSION_BUDGET_DEFAULT_CONFIG } from './helpers/session-budget/session-budget-config.provider';
 import { NoActivityWatchdog } from './helpers';
 import {
   LiveSessionStatsPublisher,
@@ -209,6 +212,7 @@ function createMockModuleLoader(): jest.Mocked<
 function createMockSessionLifecycle(): jest.Mocked<
   Pick<
     SessionLifecycleManager,
+    | 'getLastContextUsage'
     | 'executeQuery'
     | 'executeSlashCommandQuery'
     | 'disposeAllSessions'
@@ -232,6 +236,7 @@ function createMockSessionLifecycle(): jest.Mocked<
   >
 > {
   return {
+    getLastContextUsage: jest.fn(),
     onSessionEvicted: jest.fn().mockReturnValue(jest.fn()),
     executeQuery: jest.fn(),
     executeSlashCommandQuery: jest.fn(),
@@ -408,6 +413,7 @@ function makeAdapter(
     platformInfo?: Partial<IPlatformInfo>;
     workspaceRoot?: string | null;
     budgetWindow?: number | null;
+    budgetEnvWindow?: number | null;
   } = {},
 ): AdapterHarness {
   const logger = createMockLogger();
@@ -459,7 +465,7 @@ function makeAdapter(
     statsOwner,
     historyReader as unknown as SessionHistoryReaderService,
     sessionBudget,
-    { getConfig: () => ({ enabled: true, contextTokenThreshold: options.budgetWindow ?? null, envWindow: null }) },
+    { getConfig: () => ({ enabled: true, contextTokenThreshold: options.budgetWindow ?? null, envWindow: options.budgetEnvWindow ?? null }) },
   );
 
   return {
@@ -3336,6 +3342,10 @@ describe('SdkAgentAdapter', () => {
 
     it('passes this boundary post count and configured window exactly once', async () => {
       const h = makeAdapter({ budgetWindow: 120_000 });
+      h.sessionLifecycle.getLastContextUsage.mockReturnValue({
+        totalTokens: 150_000, maxTokens: 1_000_000,
+        autoCompactThreshold: 300_000, source: 'sdk-getContextUsage',
+      });
       const arg = await startNewSession(h);
       await arg.onMessage?.({
         type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
@@ -3383,7 +3393,98 @@ describe('SdkAgentAdapter', () => {
       });
     });
 
-    it('uses the native Anthropic default and leaves a proxy window unknown', async () => {
+    it.each([
+      { envWindow: 140_000, override: undefined, expected: 140_000 },
+      { envWindow: 140_000, override: 100_000, expected: 100_000 },
+    ])('prioritizes environment and session windows over runtime readings: %j', async ({ envWindow, override, expected }) => {
+      const h = makeAdapter({ budgetEnvWindow: envWindow });
+      const arg = await startNewSession(h, undefined, true);
+      h.sessionLifecycle.find.mockReturnValue({
+        tabId: 'tab_1', realSessionId: REAL_ID, autoCompactOverride: override,
+      } as ReturnType<SessionLifecycleManager['find']>);
+      h.sessionLifecycle.getLastContextUsage.mockReturnValue({
+        totalTokens: 150_000, maxTokens: 1_000_000,
+        autoCompactThreshold: 300_000, source: 'sdk-getContextUsage',
+      });
+      await arg.onMessage?.({
+        type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+        compact_metadata: { trigger: 'auto', pre_tokens: 290_000, post_tokens: 150_000 },
+      } as SDKMessage);
+      arg.onCompactBoundary?.(REAL_ID as SessionId);
+      expect(h.sessionBudget.recordCompaction).toHaveBeenCalledWith(REAL_ID, {
+        postCompactionContextTokens: 150_000, effectiveAutoCompactWindowTokens: expected,
+      });
+    });
+
+    it.each([false, true])('uses fresh runtime thresholds for handoff after a model change: %s', async (changeModel) => {
+      const h = makeAdapter();
+      const arg = await startNewSession(h, undefined, true);
+      const port = new ContextUsagePort(asLogger(h.logger), new SessionEndCallbackRegistry(asLogger(h.logger)));
+      const record = { tabId: 'tab_1', realSessionId: REAL_ID, currentModel: 'model-a' };
+      const lifecycle = Object.assign(Object.create(SessionLifecycleManager.prototype), {
+        _registry: { find: () => record },
+        _control: { setSessionModel: async (_id: SessionId, model: string) => { record.currentModel = model; } },
+        contextUsagePort: port,
+      }) as SessionLifecycleManager;
+      h.sessionLifecycle.getLastContextUsage.mockImplementation((id) => lifecycle.getLastContextUsage(id));
+      const read = async (threshold: number) => {
+        for (const id of ['tab_1', REAL_ID]) {
+          await port.readAtTurnEnd(id, 'turn-1', {
+            getContextUsage: async () => ({ totalTokens: 180_000, maxTokens: 1_000_000, autoCompactThreshold: threshold, isAutoCompactEnabled: true }),
+          });
+        }
+      };
+      await read(changeModel ? 200_000 : 300_000);
+      const service = new SessionBudgetService(
+        asLogger(h.logger),
+        { getConfig: () => ({ ...SESSION_BUDGET_DEFAULT_CONFIG, tokenMeasure: 'raw' }) },
+        { leaseOf: () => null },
+        { applySessionAutoCompactWindow: jest.fn() },
+        { evaluate: jest.fn(), current: jest.fn(), release: jest.fn() },
+      );
+      const snapshot: SessionStatsEntry = {
+        sessionId: REAL_ID, revision: 1, model: 'claude-test', totalCost: null,
+        tokenCount: 1_000, messageCount: 1, status: 'ok',
+        tokens: { input: 1_000, output: 0, cacheRead: 0, cacheCreation: 0 },
+      };
+      expect(service.observe(snapshot)?.stage).toBe('normal');
+      h.sessionBudget.recordCompaction.mockImplementation((id, sample) =>
+        service.recordCompaction(id, sample),
+      );
+      if (changeModel) {
+        await lifecycle.setSessionModel(REAL_ID as SessionId, 'model-b');
+        for (let count = 0; count < SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions; count++) {
+          await arg.onMessage?.({
+            type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+            compact_metadata: { trigger: 'auto', pre_tokens: 290_000, post_tokens: 150_000 },
+          } as SDKMessage);
+          arg.onCompactBoundary?.(REAL_ID as SessionId);
+          expect(h.sessionBudget.recordCompaction).toHaveBeenLastCalledWith(REAL_ID, {
+            postCompactionContextTokens: 150_000, effectiveAutoCompactWindowTokens: null,
+          });
+          expect(service.observe({ ...snapshot, revision: count + 2 })?.stage).toBe('normal');
+        }
+        await read(300_000);
+      }
+      for (let count = 0; count < SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions; count++) {
+        await arg.onMessage?.({
+          type: 'system', subtype: 'compact_boundary', session_id: REAL_ID,
+          compact_metadata: { trigger: 'auto', pre_tokens: 290_000, post_tokens: 150_000 },
+        } as SDKMessage);
+        arg.onCompactBoundary?.(REAL_ID as SessionId);
+        if (!changeModel && count < SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions - 1) {
+          expect(service.observe({ ...snapshot, revision: count + 2 })?.stage).toBe('normal');
+        }
+      }
+      expect(h.sessionBudget.recordCompaction).toHaveBeenLastCalledWith(REAL_ID, {
+        postCompactionContextTokens: 150_000, effectiveAutoCompactWindowTokens: 300_000,
+      });
+      expect(service.observe({ ...snapshot, revision: 10 })).toMatchObject({
+        stage: 'handoff', compactions: SESSION_BUDGET_DEFAULT_CONFIG.handoffAfterCompactions * (changeModel ? 2 : 1),
+      });
+    });
+
+    it('leaves native and proxy budget windows unknown without a runtime reading', async () => {
       const native = makeAdapter();
       const nativeArg = await startNewSession(native, undefined, true);
       await nativeArg.onMessage?.({
@@ -3392,7 +3493,7 @@ describe('SdkAgentAdapter', () => {
       } as SDKMessage);
       nativeArg.onCompactBoundary?.(REAL_ID as SessionId);
       expect(native.sessionBudget.recordCompaction).toHaveBeenCalledWith(REAL_ID, {
-        postCompactionContextTokens: 33_450, effectiveAutoCompactWindowTokens: 200_000,
+        postCompactionContextTokens: 33_450, effectiveAutoCompactWindowTokens: null,
       });
 
       const h = makeAdapter();

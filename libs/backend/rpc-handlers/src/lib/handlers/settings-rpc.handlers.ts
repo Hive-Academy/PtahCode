@@ -220,7 +220,7 @@ export class SettingsRpcHandlers {
         if (!checked.ok) {
           return { success: false, error: checked.error };
         }
-        value = checked.value;
+        value = checked.value ?? undefined;
       }
       try {
         await this.workspaceProvider.setConfiguration(
