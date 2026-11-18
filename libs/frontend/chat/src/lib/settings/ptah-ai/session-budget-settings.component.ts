@@ -84,6 +84,8 @@ interface NumberField {
   readonly key: NumberKey;
   readonly label: string;
   readonly help: string;
+  readonly hint?: string;
+  readonly info?: boolean;
 }
 
 const NUMBER_FIELDS: readonly NumberField[] = [
@@ -101,11 +103,13 @@ const NUMBER_FIELDS: readonly NumberField[] = [
     key: 'fallbackWeightedTokens',
     label: 'Fallback weighted tokens',
     help: 'Used when model pricing is unavailable.',
+    hint: 'Without pricing.',
   },
   {
     key: 'tightenPercent',
     label: 'Tighten at (%)',
     help: 'Starts tightening; stays below Handoff.',
+    hint: 'Below Handoff.',
   },
   {
     key: 'handoffPercent',
@@ -116,11 +120,13 @@ const NUMBER_FIELDS: readonly NumberField[] = [
     key: 'handoffAfterCompactions',
     label: 'Handoff after compactions',
     help: 'Handoff after repeated compactions leave context at least half full.',
+    info: true,
   },
   {
     key: 'tightenWindowTokens',
-    label: 'Tighten auto-compact window (tokens)',
+    label: 'Compact window (tokens)',
     help: 'Advisory only until set; then lowers the compact window.',
+    hint: 'Advisory until set.',
   },
 ];
 
@@ -257,8 +263,8 @@ function storedNumberIsValid(
             }
 
             <div class="session-budget-fields">
-              <div ptahFieldGrid minColumn="md">
-                <ptah-field label="Budget unit" info="Tokens use chat usage; Cost uses priced models.">
+              <div ptahFieldGrid minColumn="md" class="session-budget-grid">
+                <ptah-field label="Budget unit" hint="Tokens or priced cost.">
                   <ptah-select #unitSelect
                     triggerId="session-budget-unit"
                     label="Budget unit"
@@ -278,7 +284,7 @@ function storedNumberIsValid(
                   }
                 </ptah-field>
 
-                <ptah-field label="Token measure" info="Weighted discounts cache reads; raw counts all tokens.">
+                <ptah-field label="Token measure" hint="Weighted discounts cache reads.">
                   <ptah-select #measureSelect
                     triggerId="session-budget-token-measure"
                     label="Token measure"
@@ -315,8 +321,8 @@ function storedNumberIsValid(
                   <ptah-field
                     class="w-full min-w-0"
                     [label]="field.label"
-                    [hint]="'Range: ' + range(field.key) + '.'"
-                    [info]="field.help"
+                    [hint]="(field.hint ? field.hint + ' ' : '') + 'Range: ' + range(field.key) + '.'"
+                    [info]="field.info ? field.help : null"
                     [error]="errors()[field.key] ?? null"
                     [errorTestId]="'session-budget-' + field.key + '-error'"
                   >
@@ -382,6 +388,12 @@ function storedNumberIsValid(
     .session-budget-fields {
       container-type: inline-size;
       min-width: 0;
+    }
+    /* Wider local tracks keep long values intact. Every field has one real hint line;
+       allow the next notch label its half-line above the box as well. */
+    .session-budget-grid {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+      row-gap: calc(var(--ptah-gap-field) + var(--ptah-field-label-float-leading) / 2);
     }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;

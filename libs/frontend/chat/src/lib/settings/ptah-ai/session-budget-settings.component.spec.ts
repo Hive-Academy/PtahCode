@@ -278,7 +278,7 @@ describe('SessionBudgetSettingsComponent', () => {
     ).toBeNull();
   });
 
-  it('keeps number help behind info actions and only ranges below the fields', async () => {
+  it('keeps only long help in popovers and gives every grid field a hint', async () => {
     await create();
     const fields = [
       {
@@ -313,28 +313,32 @@ describe('SessionBudgetSettingsComponent', () => {
       },
       {
         key: 'tightenWindowTokens',
-        label: 'Tighten auto-compact window (tokens)',
+        label: 'Compact window (tokens)',
         help: 'Advisory only until set; then lowers the compact window.',
       },
     ] as const;
     for (const setting of fields) {
       const row = field(setting.key).closest('ptah-field');
-      expect(row?.querySelector(`button[aria-label="More about ${setting.label}"]`)).not.toBeNull();
-      const info = row?.querySelector<HTMLElement>('.sr-only[id^="ptah-field-info-"]');
-      expect(info?.textContent).toBe(setting.help);
-      expect(field(setting.key).getAttribute('aria-describedby')?.split(' ')).toContain(info?.id);
-      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(`Range: ${SESSION_BUDGET_SETTINGS[setting.key].min.toLocaleString('en-US')} to ${SESSION_BUDGET_SETTINGS[setting.key].max.toLocaleString('en-US')}.`);
+      const longHelp = setting.key === 'handoffAfterCompactions';
+      expect(row?.querySelector(`button[aria-label="More about ${setting.label}"]`) !== null).toBe(longHelp);
+      if (longHelp) {
+        const info = row?.querySelector<HTMLElement>('.sr-only[id^="ptah-field-info-"]');
+        expect(info?.textContent).toBe(setting.help);
+        expect(field(setting.key).getAttribute('aria-describedby')?.split(' ')).toContain(info?.id);
+      }
+      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toContain(`Range: ${SESSION_BUDGET_SETTINGS[setting.key].min.toLocaleString('en-US')} to ${SESSION_BUDGET_SETTINGS[setting.key].max.toLocaleString('en-US')}.`);
       const suffix = row?.querySelector('[ptahFieldTrailing]');
       expect(suffix?.classList.contains('shrink-0')).toBe(true);
       expect(suffix?.getAttribute('aria-hidden')).toBe('true');
     }
-    for (const label of ['Budget unit', 'Token measure']) {
-      const row = host().querySelector(`button[aria-label="More about ${label}"]`)?.closest('ptah-field');
-      expect(row).toBeDefined();
-      expect(row?.querySelector('.ptah-field__message')).toBeNull();
-      expect(row?.querySelector('.sr-only[id^="ptah-field-info-"]')?.textContent).toBe(
-        label === 'Budget unit' ? 'Tokens use chat usage; Cost uses priced models.' : 'Weighted discounts cache reads; raw counts all tokens.',
+    for (const key of ['unit', 'token-measure']) {
+      const row = byTestId(`session-budget-${key}`)?.closest('ptah-field');
+      expect(row?.querySelector('.ptah-field__info')).toBeNull();
+      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(
+        key === 'unit' ? 'Tokens or priced cost.' : 'Weighted discounts cache reads.',
       );
+      const help = row?.querySelector<HTMLElement>(`#session-budget-${key}-help`);
+      expect(help).not.toBeNull();
     }
   });
 
@@ -595,7 +599,7 @@ describe('SessionBudgetSettingsComponent', () => {
   });
 
   describe('tightenWindowTokens', () => {
-    it('explains "advisory only until set", and an empty field writes null', async () => {
+    it('explains the unset advisory state, and an empty field writes null', async () => {
       stored['sessionBudget.tightenWindowTokens'] = 400_000;
       await create();
       expect(
@@ -604,9 +608,9 @@ describe('SessionBudgetSettingsComponent', () => {
             field('tightenWindowTokens')
               .getAttribute('aria-describedby')
               ?.split(' ')
-              .find((id) => id.startsWith('ptah-field-info-')),
+              .find((id) => id.startsWith('ptah-field-description-')),
         )?.textContent,
-      ).toMatch(/advisory only until set/i);
+      ).toMatch(/Advisory until set/i);
       await enter('tightenWindowTokens', '');
       expect(writes()).toEqual([
         { key: 'sessionBudget.tightenWindowTokens', value: null },
@@ -771,8 +775,8 @@ describe('SessionBudgetSettingsComponent', () => {
     await create();
     const description = (id: string) => (host().querySelector(`#${id}`)?.getAttribute('aria-describedby') ?? '')
       .split(' ').map((value) => host().querySelector(`[id="${value}"]`)?.textContent).join(' ');
-    expect(description('session-budget-unit')).toContain('Tokens use chat usage; Cost uses priced models.');
-    expect(description('session-budget-token-measure')).toContain('Weighted discounts cache reads; raw counts all tokens.');
+    expect(description('session-budget-unit')).toContain('Tokens or priced cost.');
+    expect(description('session-budget-token-measure')).toContain('Weighted discounts cache reads.');
   });
 
 });

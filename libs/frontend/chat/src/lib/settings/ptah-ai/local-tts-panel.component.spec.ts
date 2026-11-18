@@ -127,16 +127,17 @@ describe('LocalTtsPanelComponent', () => {
     expect(host.querySelectorAll('[role="group"]')).toHaveLength(2);
     expect(host.closest('ptah-field')?.querySelector('[data-appearance="floating"]')).not.toBeNull();
   });
-  it('shows model help in info actions', () => {
+  it('keeps short model help below full-width custom fields', () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { 'voice:listVoices': VOICES });
     mount(rpc, localConfig());
     byTestId<HTMLButtonElement>('local-tts-source-hf').click();
     fixture.detectChanges();
-    const custom = element.querySelector('button[aria-label="More about Custom model id or folder"]')?.closest('ptah-field');
-    expect(custom).toBeDefined();
-    expect(custom?.querySelector('.sr-only[id^="ptah-field-info-"]')?.textContent).toBe('Enter an owner/name repository or an absolute folder path.');
-    expect(custom?.querySelector('.ptah-field__message')).toBeNull();
+    const custom = byTestId('local-tts-custom-input').closest('ptah-field');
+    expect(custom?.querySelector('.ptah-field__info')).toBeNull();
+    expect(custom?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe('Use owner/name or an absolute folder path.');
+    expect(custom?.closest('.col-span-full')).not.toBeNull();
+    expect(custom?.parentElement?.classList.contains('flex-col')).toBe(true);
   });
   it('places download progress text in one polite status region', () => {
     const rpc = createMockRpcService();

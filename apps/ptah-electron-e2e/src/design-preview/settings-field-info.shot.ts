@@ -122,6 +122,73 @@ async function lineCount(locator: Locator): Promise<number> {
   });
 }
 
+/** Measure actual text, including placeholders which do not contribute to scrollWidth. */
+async function assertUncutFields(scope: Locator): Promise<void> {
+  const clipped = await scope.evaluate((root) => {
+    const failures: string[] = [];
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Text measurement unavailable');
+    for (const node of root.querySelectorAll<HTMLElement>('.ptah-field__label, .ptah-select__value, input[placeholder]')) {
+      if (!node.getClientRects().length) continue;
+      const style = getComputedStyle(node);
+      const name = `${node.id || node.className} "${(node instanceof HTMLInputElement ? node.placeholder : node.textContent ?? '').trim()}" @${innerWidth}`;
+      if (node instanceof HTMLInputElement) {
+        const placeholder = node.placeholder;
+        context.font = style.font;
+        const spacing = Number.parseFloat(style.letterSpacing) || 0;
+        const available = node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        if (context.measureText(placeholder).width + spacing * Math.max(0, placeholder.length - 1) > available + 1) {
+          failures.push(`${name}: placeholder exceeds content width`);
+        }
+      } else if (node.scrollWidth > node.clientWidth) {
+        failures.push(`${name}: ${style.textOverflow} (${node.scrollWidth} > ${node.clientWidth})`);
+      }
+    }
+    return failures;
+  });
+  expect(clipped, 'Clipped labels, selected values or placeholders').toEqual([]);
+}
+
+/** Compare the visible bottom of each field block with the next row's notch label. */
+async function assertBudgetRowGaps(budget: Locator): Promise<void> {
+  const gaps = await budget.evaluate((root) => {
+    const rows: { top: number; bottom: number; labelTop: number }[] = [];
+    const parts = [...root.querySelectorAll<HTMLElement>('.session-budget-grid > ptah-field')].map((field) => {
+      const boxNode = field.querySelector('.ptah-field__box');
+      const labelNode = field.querySelector('.ptah-field__label');
+      const messageNode = field.querySelector('.ptah-field__message');
+      if (!boxNode || !labelNode || !messageNode) throw new Error('Budget field lacks box, label or hint');
+      return {
+        box: boxNode.getBoundingClientRect(),
+        label: labelNode.getBoundingClientRect(),
+        message: messageNode.getBoundingClientRect(),
+      };
+    });
+    // An empty input keeps its label inside the box (not floated): use the notch offset of a floated label.
+    const floated = parts.find((part) => part.label.top < part.box.top);
+    if (!floated) throw new Error('No floated budget label to measure the notch offset');
+    const notchOffset = floated.box.top - floated.label.top;
+    for (const { box, message, ...part } of parts) {
+      const label = { top: part.label.top < box.top ? part.label.top : box.top - notchOffset };
+      const row = rows.find((row) => Math.abs(row.top - box.top) < 2);
+      const bottom = Math.max(box.bottom, message.bottom);
+      if (row) {
+        row.bottom = Math.max(row.bottom, bottom);
+        row.labelTop = Math.min(row.labelTop, label.top);
+      } else rows.push({ top: box.top, bottom, labelTop: label.top });
+    }
+    rows.sort((a, b) => a.top - b.top);
+    return rows.slice(1).map((row, i) => row.labelTop - rows[i].bottom);
+  });
+  expect(gaps.length, 'At least two row gaps measured').toBeGreaterThan(1);
+  expect(Math.min(...gaps), 'Hints must clear the next floating label').toBeGreaterThan(0);
+  expect(Math.max(...gaps) - Math.min(...gaps), `Unequal field row gaps: ${gaps.join(', ')}`).toBeLessThanOrEqual(2);
+  for (const hint of await budget.locator('.session-budget-grid .ptah-field__message').all()) {
+    expect(await lineCount(hint), 'One-line budget hint').toBe(1);
+  }
+}
+
 /**
  * Opens a select, and checks that the lowest option is the top element at its centre
  * (a glass section painted above the panel fails this). Closes the panel again.
@@ -201,6 +268,10 @@ test('captures field info hints on Context Management and the voice drawers', as
       for (const width of WIDTHS) {
         await fit(page, cdp, width);
         await blur(page);
+        if (PHASE === 'after') {
+          await assertUncutFields(budget);
+          await assertBudgetRowGaps(budget);
+        }
         await capture(page, `context-fields-${theme}-${width}-${PHASE}.jpg`, await clipAround(page, [budget, guards]));
         if (width === 1168 && theme === 'dark') {
           metrics['autoHandoffHintLines1168'] = await lineCount(page.locator('#session-budget-autoHandoffAtLimit-hint'));
@@ -210,10 +281,10 @@ test('captures field info hints on Context Management and the voice drawers', as
     // Open info popovers (after only): a session budget field and the lane guard field.
     const fieldOf = (testId: string): Locator =>
       page.locator('ptah-field').filter({ has: page.getByTestId(testId) });
-    const tokensField = fieldOf('session-budget-tokens');
+    const tokensField = fieldOf('session-budget-handoffAfterCompactions');
     const guardField = fieldOf('lane-guards-repeat');
-    metrics['tokenBudgetInfo'] = (await tokensField.getByRole('button', { name: /^More about / }).count()) > 0;
-    if (metrics['tokenBudgetInfo']) {
+    metrics['budgetLongHelpInfo'] = (await tokensField.getByRole('button', { name: /^More about / }).count()) > 0;
+    if (metrics['budgetLongHelpInfo']) {
       await setTheme(page, 'dark');
       for (const width of WIDTHS) {
         await fit(page, cdp, width);
@@ -259,6 +330,7 @@ test('captures field info hints on Context Management and the voice drawers', as
             stacking[`drawer-${direction}-${width}`] = await lowestOptionOnTop(
               page, page.getByTestId(select).locator('button[role="combobox"]'));
           }
+          if (PHASE === 'after') await assertUncutFields(drawerPanel);
           if (direction === 'stt') {
             await blur(page);
             await capture(page, `voice-stt-${theme}-${width}-${PHASE}.jpg`, await clipAround(page, [drawerPanel], 0));
@@ -276,7 +348,13 @@ test('captures field info hints on Context Management and the voice drawers', as
           await page.getByTestId(`local-${direction}-source-hf`).click();
           await expect(page.getByTestId(`local-${direction}-custom-input`)).toBeVisible();
           await blur(page);
+          if (PHASE === 'after') await assertUncutFields(drawerPanel);
           await capture(page, `voice-${direction}-custom-${theme}-${width}-${PHASE}.jpg`, await clipAround(page, [drawerPanel], 0));
+          if (PHASE === 'after') {
+            await page.getByTestId(`local-${direction}-source-dir`).click();
+            await settle(page);
+            await assertUncutFields(drawerPanel);
+          }
           await page.getByTestId(`local-${direction}-source-curated`).click();
           await page.getByTestId('voice-details-close').click();
           await expect(page.getByTestId('voice-details-drawer')).toBeHidden();

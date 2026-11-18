@@ -97,19 +97,19 @@ describe('LocalSttPanelComponent', () => {
     expect(byTestId('local-stt-panel-table').tagName).toBe('PTAH-FORM-SECTION');
     expect(byTestId('local-stt-source-curated').closest('ptah-setting-row')).not.toBeNull();
   });
-  it('shows model help in info actions', () => {
+  it('keeps short model help below full-width custom fields', () => {
     rpc.call.mockResolvedValue(rpcSuccess({ ok: true }));
     mount(localConfig());
-    const curated = element.querySelector('button[aria-label="More about Whisper model"]')?.closest('ptah-field');
-    expect(curated).toBeDefined();
-    expect(curated?.querySelector('.sr-only[id^="ptah-field-info-"]')?.textContent).toBe('Curated models download to ~/.ptah/models/ on first use.');
+    const curated = byTestId('local-stt-model-select').closest('ptah-field');
+    expect(curated?.querySelector('.ptah-field__info')).toBeNull();
     expect(curated?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe('Downloads on first use.');
     byTestId<HTMLButtonElement>('local-stt-source-hf').click();
     fixture.detectChanges();
-    const custom = element.querySelector('button[aria-label="More about Custom model id or folder"]')?.closest('ptah-field');
-    expect(custom).toBeDefined();
-    expect(custom?.querySelector('.sr-only[id^="ptah-field-info-"]')?.textContent).toBe('Enter an owner/name repository or an absolute folder path.');
-    expect(custom?.querySelector('.ptah-field__message')).toBeNull();
+    const custom = byTestId('local-stt-custom-input').closest('ptah-field');
+    expect(custom?.querySelector('.ptah-field__info')).toBeNull();
+    expect(custom?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe('Use owner/name or an absolute folder path.');
+    expect(custom?.closest('.col-span-full')).not.toBeNull();
+    expect(custom?.parentElement?.classList.contains('flex-col')).toBe(true);
   });
   it('places download progress text in one polite status region', () => {
     rpc.call.mockResolvedValue(rpcSuccess({ ok: true }));
