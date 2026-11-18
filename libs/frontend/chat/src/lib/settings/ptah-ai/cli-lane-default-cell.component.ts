@@ -169,8 +169,8 @@ let nextTitleId = 0;
       <ptah-field
         label="Network"
         size="sm"
-        class="min-w-0"
-        [hint]="!networks().length ? reason() : ''"
+        class="min-w-0 [&_.ptah-field__info]:!inline-flex"
+        [info]="!networks().length ? reason() : ''"
       >
         @if (networks().length) {
           <ptah-select

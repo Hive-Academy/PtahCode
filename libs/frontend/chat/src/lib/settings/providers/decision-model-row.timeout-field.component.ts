@@ -75,7 +75,13 @@ export function decisionTimeoutText(value: unknown): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block space-y-2' },
   template: `
-    <ptah-field label="Request timeout (seconds)" size="sm">
+    <ptah-field
+      label="Request timeout (seconds)"
+      size="sm"
+      info="How long one decision request may take before routing falls back. Raise it for a slow model, such as one running on a CPU. Applies to every decision model except a structured-output model. Without a saved value, the first request may wait up to 60 s while a local model loads. A saved value bounds every request. Saves on its own when you press Enter or leave the field; empty uses the default."
+      infoTextId="decision-model-timeout-help"
+      infoTestId="decision-timeout-help"
+    >
       <input
         ptahInput
         id="decision-model-timeout"
@@ -93,18 +99,6 @@ export function decisionTimeoutText(value: unknown): string {
         (change)="commit()"
         data-testid="decision-timeout"
     /></ptah-field>
-    <p
-      id="decision-model-timeout-help"
-      class="text-xs text-base-content-muted"
-      data-testid="decision-timeout-help"
-    >
-      How long one decision request may take before routing falls back. Raise it
-      for a slow model, such as one running on a CPU. Applies to every decision
-      model except a structured-output model. Without a saved value, the first
-      request may wait up to 60 s while a local model loads. A saved value
-      bounds every request. Saves on its own when you press Enter or leave the
-      field; empty uses the default.
-    </p>
     @if (readFailed()) {
       <p
         role="alert"

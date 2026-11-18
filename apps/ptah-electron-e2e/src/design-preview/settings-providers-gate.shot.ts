@@ -463,6 +463,40 @@ test('captures populated Settings Providers gate shots on the real backend', asy
       await shot('select-open', width);
       await page.keyboard.press('Escape');
 
+      // One open field-info gate shot: change only the editor draft, never save it.
+      if (SUFFIX !== 'before' && theme === 'dark' && width === 1824) {
+        await remount();
+        await page.getByTestId('consumer-edit-decision').click();
+        await page
+          .getByRole('combobox', { name: 'Decision model kind', exact: true })
+          .click();
+        await page
+          .getByRole('option', {
+            name: 'Custom endpoint (/v1/systemone)',
+            exact: true,
+          })
+          .click();
+        const info = page.getByRole('button', {
+          name: 'More about Base URL',
+          exact: true,
+        });
+        await info.scrollIntoViewIfNeeded();
+        await info.click();
+        const panel = page.getByRole('dialog', {
+          name: 'More about Base URL',
+          exact: true,
+        });
+        await expect(panel).toBeVisible();
+        await expect(panel).toHaveText(
+          'Requests go to this URL plus /v1/systemone. With an API key it must use https, unless the endpoint is on this machine (localhost, [::1] or 127.x.x.x).',
+        );
+        await shot('base-url-info-open', width);
+        await info.click();
+        await expect(info).toHaveAttribute('aria-expanded', 'false');
+        await expect(panel).toBeHidden();
+        await page.getByTestId('consumer-close-decision').click();
+      }
+
       // 6. Ptah CLI defaults and Background models.
       const shared = page.locator('#shared-defaults-heading');
       if (await shared.count()) {

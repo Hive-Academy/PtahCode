@@ -196,8 +196,23 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(
       fields[1].querySelector('button[ptahFieldTrigger]')?.textContent?.trim(),
     ).toBe('Unavailable');
+    const trigger = fields[1].querySelector<HTMLButtonElement>(
+      'button[aria-label="More about Network"]',
+    );
+    expect(trigger).not.toBeNull();
+    trigger?.click();
+    fixture.detectChanges();
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    const descriptionId = fields[1]
+      .querySelector('button[ptahFieldTrigger]')
+      ?.getAttribute('aria-describedby');
+    expect(descriptionId).toBeTruthy();
     expect(
-      fields[1].querySelector('.ptah-field__message')?.textContent?.trim(),
+      fields[1].querySelector(`[id="${descriptionId}"]`)?.textContent?.trim(),
+    ).toBe('Grok exposes no native read-only plan flag.');
+    expect(fields[1].querySelector('.ptah-field__message')).toBeNull();
+    expect(
+      fields[1].querySelector('[role="dialog"]')?.textContent?.trim(),
     ).toBe('Grok exposes no native read-only plan flag.');
     for (const label of host.querySelectorAll<HTMLLabelElement>('label[for]')) {
       const control = host.querySelector<HTMLElement>(
@@ -207,6 +222,36 @@ describe('CliLaneDefaultCellComponent', () => {
       expect(control?.id).toBe(label.htmlFor);
     }
     expect(host.querySelector('.defaults-warning')).toBeNull();
+  });
+
+  it('keeps a long manifest reason intact in the Network info popover', () => {
+    const fixture = setup('codex');
+    const reason =
+      'Native enforcement is unverified. This adapter cannot enforce a network boundary for this permission mode, so choose another verified mode before starting a lane.';
+    fixture.componentRef.setInput('layout', 'card');
+    fixture.componentRef.setInput('manifest', {
+      ...manifest,
+      permissionModes: { ask: { ...unsupported, reason, networkModes: [] } },
+      networkModes: {
+        deny: { ...unsupported, reason },
+        allow: { ...unsupported, reason },
+      },
+    });
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const trigger = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="More about Network"]',
+    );
+    expect(trigger).not.toBeNull();
+    trigger?.click();
+    fixture.detectChanges();
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(
+      host
+        .querySelector('[role="dialog"][aria-label="More about Network"]')
+        ?.textContent?.trim(),
+    ).toBe(reason);
+    fixture.destroy();
   });
 
   it('ties unavailable Permission and Network labels to disabled controls', () => {

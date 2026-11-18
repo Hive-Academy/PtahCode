@@ -19,7 +19,13 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block space-y-2' },
   template: `
-    <ptah-field label="Base URL" size="sm">
+    <ptah-field
+      label="Base URL"
+      size="sm"
+      info="Requests go to this URL plus /v1/systemone. With an API key it must use https, unless the endpoint is on this machine (localhost, [::1] or 127.x.x.x)."
+      infoTextId="decision-model-base-url-help"
+      infoTestId="decision-base-url-help"
+    >
       <input
         ptahInput
         id="decision-model-base-url"
@@ -37,15 +43,6 @@ import {
         (keydown.enter)="submitted.emit()"
         data-testid="decision-base-url"
     /></ptah-field>
-    <p
-      id="decision-model-base-url-help"
-      class="text-xs text-base-content-muted"
-      data-testid="decision-base-url-help"
-    >
-      Requests go to this URL plus /v1/systemone. With an API key it must use
-      https, unless the endpoint is on this machine (localhost, [::1] or
-      127.x.x.x).
-    </p>
     <!-- Two text-xs lines are reserved, so a hint never resizes the editor or moves this field (P4 re-review 7).
          A hint that wraps further in a narrow panel is clamped to them; the title and aria-describedby keep the
          full sentence. -->

@@ -61,7 +61,12 @@ export const DECISION_KEY_TEXT: Readonly<
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block space-y-2' },
   template: `
-    <ptah-field [label]="label()" size="sm">
+    <ptah-field
+      [label]="label()"
+      size="sm"
+      info="Stored in this machine's secret storage. A stored key is never shown here."
+      infoTextId="decision-model-api-key-help"
+    >
       <input
         ptahInput
         #field
@@ -77,9 +82,6 @@ export const DECISION_KEY_TEXT: Readonly<
         (input)="onInput($event)"
         data-testid="decision-api-key"
     /></ptah-field>
-    <p id="decision-model-api-key-help" class="text-xs text-base-content-muted">
-      Stored in this machine's secret storage. A stored key is never shown here.
-    </p>
     @if (showRemove()) {
       <button
         type="button"
