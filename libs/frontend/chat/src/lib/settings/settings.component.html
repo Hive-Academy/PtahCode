@@ -143,11 +143,13 @@
         aria-labelledby="settings-setup-heading"
         data-testid="settings-setup"
         data-glass-surface="content"
+        style="padding: 0"
       >
         <h2 id="settings-setup-heading" class="sr-only">Setup</h2>
         <ptah-form-section
           id="advanced-setup"
           heading="Setup"
+          [divider]="true"
           description="Run the first-run steps again, or check the Claude Code install."
           [wide]="true"
         >

@@ -133,7 +133,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
             
               @if (loaded()) {
                 @for (tool of tools(); track tool.id) {
-                  <ptah-setting-row [label]="tool.id" [controlId]="'claude-tool-' + tool.id" density="compact" class="[&_[data-testid=setting-row]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-testid=setting-row]]:min-h-12" [attr.title]="tool.description">
+                  <ptah-setting-row [label]="tool.id" [controlId]="'claude-tool-' + tool.id" density="compact" class="[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] [&_[data-testid=setting-row]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-testid=setting-row]]:min-h-12" [attr.title]="tool.description">
                     <input
                         status class="-order-1" [id]="'claude-tool-' + tool.id" type="checkbox"
                         ptahCheckbox size="xs"
@@ -148,7 +148,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                 }
               } @else {
                 @for (row of skeletonRows; track row) {
-                  <div class="flex min-h-12 items-center gap-ptah-controls border-b border-surface-border py-ptah-controls" data-testid="claude-tools-skeleton-row">
+                  <div class="flex min-h-12 items-center gap-ptah-controls [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls" data-testid="claude-tools-skeleton-row">
                     <div class="align-top">
                       <input type="checkbox" ptahCheckbox size="xs" disabled
                         aria-label="Loading tool" />
@@ -171,7 +171,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
             
               @if (loaded()) {
                 @for (skill of terminalSkills(); track skill.id) {
-                  <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-ptah-controls gap-y-[var(--ptah-gap-label)] border-b border-surface-border py-ptah-controls">
+                  <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-ptah-controls gap-y-[var(--ptah-gap-label)] [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls">
                     <div class="align-top">
                       <input
                         type="checkbox"
@@ -207,7 +207,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                 }
               } @else {
                 @for (row of skeletonRows; track row) {
-                  <div class="flex min-h-12 items-center gap-ptah-controls border-b border-surface-border py-ptah-controls" data-testid="claude-tools-skeleton-row">
+                  <div class="flex min-h-12 items-center gap-ptah-controls [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls" data-testid="claude-tools-skeleton-row">
                     <div class="align-top">
                       <input type="checkbox" ptahCheckbox size="xs" disabled
                         aria-label="Loading skill" />
@@ -241,7 +241,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
               
                 @if (loaded()) {
                   @for (skill of syncedSkills(); track skill.id) {
-                    <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-ptah-controls gap-y-[var(--ptah-gap-label)] border-b border-surface-border py-ptah-controls">
+                    <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-ptah-controls gap-y-[var(--ptah-gap-label)] [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls">
                       <div class="align-top">
                         <input
                           type="checkbox"
@@ -264,7 +264,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                   }
                 } @else {
                   @for (row of skeletonRows; track row) {
-                    <div class="flex min-h-12 items-center gap-ptah-controls border-b border-surface-border py-ptah-controls" data-testid="claude-tools-skeleton-row">
+                    <div class="flex min-h-12 items-center gap-ptah-controls [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls" data-testid="claude-tools-skeleton-row">
                       <div class="align-top">
                         <input type="checkbox" ptahCheckbox size="xs" disabled
                           aria-label="Loading skill" />

@@ -151,6 +151,8 @@ describe('AdvancedSettingsGroupComponent', () => {
     const key = 'compaction.threshold';
     expect(field(key).value).toBe('');
     expect(field(key).placeholder).toBe('Model default');
+    expect(host().querySelector('[id="advanced-setting-' + key + '-help"]')?.textContent)
+      .toContain('Model default or 100,000 to 1,000,000 tokens');
     await enter(key, '800000');
     expect(writes()).toEqual([{ key, value: 800000 }]);
     await enter(key, '');
@@ -366,19 +368,33 @@ describe('AdvancedSettingsGroupComponent', () => {
   });
 
   describe('help text', () => {
-    it('adds the range with its unit and the apply note', async () => {
+    it('keeps only the range inline and opens the full explanation on request', async () => {
       await create('memory-upkeep');
       const help = byTestId(
         'advanced-setting-memory.retention.processedDays-field',
       );
-      expect(help?.textContent).toContain('Range: 1 to 365 days.');
-      expect(help?.textContent).toContain('Applies on the next cleanup run.');
+      expect(help?.textContent).toContain('1 to 365 days');
+      expect(help?.textContent).not.toContain('Applies on the next cleanup run.');
+      const setting = ADVANCED_SETTINGS.find((item) => item.key === 'memory.retention.processedDays');
+      const trigger = help?.querySelector<HTMLButtonElement>('button');
+      expect(trigger?.getAttribute('aria-label')).toBe('About ' + setting?.label);
+      trigger?.click();
+      fixture.detectChanges();
+      await settle();
+      expect(help?.querySelector('[content]')?.textContent).toContain(setting?.help);
+      expect(help?.querySelector('[content]')?.textContent).toContain('Applies on the next cleanup run.');
+      expect(field('memory.retention.processedDays').getAttribute('aria-describedby'))
+        .toContain('advanced-setting-memory.retention.processedDays-help');
     });
 
     it('marks a restart key with the restart note and badge', async () => {
       await create('scheduled-jobs');
       const restart = byTestId('advanced-setting-cron.maxConcurrentJobs-field');
-      expect(restart?.textContent).toContain('Restart Ptah to apply.');
+      expect(restart?.textContent).not.toContain('Restart Ptah to apply.');
+      restart?.querySelector<HTMLButtonElement>('button')?.click();
+      fixture.detectChanges();
+      await settle();
+      expect(restart?.querySelector('[content]')?.textContent).toContain('Restart Ptah to apply.');
       expect(restart?.querySelector('[data-restart-badge]')?.textContent?.trim()).toBe(
         'Restart',
       );
@@ -394,10 +410,11 @@ describe('AdvancedSettingsGroupComponent', () => {
           ?.textContent,
       ).toContain('Applies to the next Codex agent you start.');
       await create('background-queries');
-      expect(
-        byTestId('advanced-setting-internalQuery.maxConcurrent-field')
-          ?.textContent,
-      ).toContain('Applies right away.');
+      const background = byTestId('advanced-setting-internalQuery.maxConcurrent-field');
+      background?.querySelector<HTMLButtonElement>('button')?.click();
+      fixture.detectChanges();
+      await settle();
+      expect(background?.querySelector('[content]')?.textContent).toContain('Applies right away.');
     });
   });
 

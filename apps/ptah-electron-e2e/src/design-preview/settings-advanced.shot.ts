@@ -155,6 +155,24 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
       await fieldStates(page, port, mcp, 'advanced-controls', theme);
       await fieldStates(page, number, numberGroup, 'advanced-number', theme);
 
+      // Isolate one expanded group for the help shot, then restore the populated-page state.
+      for (const row of (await rows.all()).slice(1)) {
+        await row.locator('button[aria-expanded="true"]').click();
+      }
+      await numberGroup.scrollIntoViewIfNeeded();
+      // A middle-column hint: its end-aligned popover stays inside the shot.
+      const info = numberGroup.getByRole('button', { name: /^About / }).nth(2);
+      await info.click();
+      const help = numberGroup.locator('ptah-native-popover [popover]:popover-open');
+      await expect(help).toBeVisible();
+      await shootPadded(page, details, `advanced-fine-tuning-popover-${theme}-1824`);
+      // The shot helper can move focus; Escape closes the popover from its trigger.
+      await info.press('Escape');
+      await expect(help).not.toBeVisible();
+      for (const row of (await rows.all()).slice(1)) {
+        await row.locator('button[aria-expanded="false"]').click();
+      }
+
       await mcp.scrollIntoViewIfNeeded();
       const caller = page.getByTestId('mcp-external-caller-access');
       const native = await caller.evaluate((element) => element.tagName === 'SELECT');

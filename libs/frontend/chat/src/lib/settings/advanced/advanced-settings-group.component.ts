@@ -19,6 +19,7 @@ import {
   type AdvancedSettingGroupId,
   type AdvancedSettingValidation,
 } from '@ptah-extension/shared';
+import { Info, LucideAngularModule } from 'lucide-angular';
 import { NgTemplateOutlet } from '@angular/common';
 import {
   PtahBadgeDirective,
@@ -26,6 +27,8 @@ import {
   PtahFieldGridDirective,
   PtahFieldComponent,
   PtahInputDirective,
+  PtahIconButtonDirective,
+  NativePopoverComponent,
   PtahSettingRowComponent,
   PtahToggleDirective,
 } from '@ptah-extension/ui';
@@ -89,6 +92,9 @@ function formatValue(
   standalone: true,
   imports: [
     NgTemplateOutlet,
+    LucideAngularModule,
+    PtahIconButtonDirective,
+    NativePopoverComponent,
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahFieldGridDirective,
@@ -131,6 +137,21 @@ function formatValue(
               {{ notice }}
             </p>
           }
+        </ng-template>
+        <ng-template #info let-setting>
+          <ptah-native-popover
+            [isOpen]="openHelp() === setting.key"
+            [keepInViewport]="true"
+            (closed)="openHelp.set(null)"
+          >
+            <button trigger type="button" ptahIconButton size="xs"
+              [label]="'About ' + setting.label"
+              [attr.aria-label]="'About ' + setting.label"
+              (click)="openHelp.set(openHelp() === setting.key ? null : setting.key)">
+              <lucide-angular [img]="InfoIcon" />
+            </button>
+            <p content class="max-w-xs text-sm">{{ setting.help }} {{ applyNote(setting) }}</p>
+          </ptah-native-popover>
         </ng-template>
         <ng-template #description>
           <p class="mt-0.5 text-xs text-base-content-muted">
@@ -229,14 +250,14 @@ function formatValue(
                           >Restart</span
                         >
                       }
-                      <!-- The help line wraps under the title (the status slot wraps), so the row keeps one
-                           left column of text and the switch stays at the right. -->
                       <p
                         status
                         [id]="'advanced-setting-' + setting.key + '-help'"
                         class="basis-full text-xs font-normal text-base-content-muted"
                       >
-                        {{ helpText(setting) }}
+                        {{ applyNote(setting) }}
+                        <ng-container [ngTemplateOutlet]="info"
+                          [ngTemplateOutletContext]="{ $implicit: setting }" />
                       </p>
                       <span
                         meta
@@ -277,6 +298,7 @@ function formatValue(
             @if (numberSettings().length > 0) {
               <div
                 ptahFieldGrid
+                class="number-grid"
                 minColumn="md"
                 data-testid="advanced-group-numbers"
               >
@@ -330,7 +352,9 @@ function formatValue(
                             >Restart</span
                           >
                         }
-                        {{ helpText(setting) }}
+                        {{ rangeHint(setting) }}
+                        <ng-container [ngTemplateOutlet]="info"
+                          [ngTemplateOutletContext]="{ $implicit: setting }" />
                       </p>
                       <div ptahFieldAfterError>
                         <ng-container
@@ -353,12 +377,18 @@ function formatValue(
       display: block;
       container-type: inline-size;
     }
+    /* Keep empty tracks so one- and two-field groups align with larger groups. */
+    .number-grid {
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, max(var(--ptah-field-grid-min-md), calc((100% - 2 * var(--ptah-gap-field)) / 3))), 1fr));
+    }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
   `,
 })
 export class AdvancedSettingsGroupComponent implements OnInit {
+  readonly openHelp = signal<string | null>(null);
+  readonly InfoIcon = Info;
   readonly contentSurface = input(true);
   /** 'section' matches the sentence-case section headings of the Context Management tab; 'caps' is the group label. */
   readonly headingStyle = input<'caps' | 'section' | 'hidden'>('caps');
@@ -468,13 +498,14 @@ export class AdvancedSettingsGroupComponent implements OnInit {
     return typeof value === 'number' ? String(value) : '';
   }
 
-  /** Descriptor help, then the range (numbers) and when a saved value takes effect. */
-  protected helpText(setting: AdvancedSetting): string {
-    const range =
-      setting.kind === 'number'
-        ? ` Range: ${NUMBER_FORMAT.format(setting.min)} to ${NUMBER_FORMAT.format(setting.max)}${setting.unit ? ` ${setting.unit}` : ''}.`
-        : '';
-    return `${setting.help}${range} ${APPLY_NOTES[setting.apply]}`;
+  /** A short apply note for switch rows and the full explanation in the popover. */
+  protected applyNote(setting: AdvancedSetting): string {
+    return APPLY_NOTES[setting.apply];
+  }
+
+  protected rangeHint(setting: AdvancedNumberSetting): string {
+    const range = `${NUMBER_FORMAT.format(setting.min)} to ${NUMBER_FORMAT.format(setting.max)}${setting.unit ? ` ${setting.unit}` : ''}`;
+    return setting.default === null ? `Model default or ${range}` : range;
   }
 
   protected describedBy(setting: AdvancedSetting): string {

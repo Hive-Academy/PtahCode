@@ -59,7 +59,7 @@ import {
 import type { OutputStyleFailedOperation } from './output-style.store';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { OutputStyleNoticesComponent } from './output-style-notices.component';
-import { PtahBadgeDirective, PtahButtonDirective, PtahCardGridDirective, PtahIconButtonDirective, PtahSkeletonComponent, NativePopoverComponent } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahSkeletonComponent, NativePopoverComponent } from '@ptah-extension/ui';
 
 export { PARITY_TIERS, type ParityTierOption };
 
@@ -103,7 +103,8 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
 @Component({
   selector: 'ptah-output-style-list',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahSkeletonComponent, PtahCardGridDirective, NativePopoverComponent],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahSkeletonComponent, NativePopoverComponent],
+  host: { class: 'block w-full min-w-0' },
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Matrix Table (A19, A20, A22, G7) -->
@@ -113,10 +114,10 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
         Reading your style files…
       </div>
     } @else {
-      <div>
+      <div class="[container-type:inline-size] w-full min-w-0">
+        <!-- Cap the tracks at three: auto-fill reserves empty columns on wide sections. -->
         <div
-          ptahCardGrid
-          variant="tight"
+          class="grid w-full grid-cols-1 items-stretch gap-[var(--ptah-card-grid-gap)] [@container(min-width:416px)]:grid-cols-2 [@container(min-width:672px)]:grid-cols-3"
           role="radiogroup"
           aria-label="Active output style"
           data-testid="output-style-matrix"
@@ -128,7 +129,8 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
               let i = $index
             ) {
               <div
-                class="relative flex min-w-0 flex-col gap-[var(--ptah-gap-controls)] rounded-[var(--ptah-card-radius)] border border-base-content/10 p-[var(--ptah-gap-field)]"
+                class="relative flex min-w-0 flex-col gap-[var(--ptah-gap-controls)] rounded-[var(--ptah-card-radius)] border-2 p-[var(--ptah-gap-field)]"
+                [class.border-base-content/10]="!isActive(style)"
                 [class.border-primary]="isActive(style)"
                 [class.bg-primary/5]="isActive(style)"
                 [class.opacity-60]="isShadowed(style)"
@@ -168,7 +170,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
 
                 <!-- Description Column + Notes (the built-in note is the badge title and one footnote, M4) -->
                 <div class="text-xs text-base-content-muted">
-                  <div class="line-clamp-2 leading-relaxed">{{ style.description }}</div>
+                  <div class="break-words leading-relaxed">{{ style.description }}</div>
                   @if (shadowNote(style); as note) {
                     <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-label)]" [id]="shadowNoteId(i)">
                       {{ note }}

@@ -143,12 +143,12 @@ const agentBehaviour: readonly ReachabilityEntry[] = [
   { id: 'ADV-9', capability: 'Chat reasoning effort: popover with 6 choices (incl. SDK default), save on selection, Undo', status: 'restored',
     reach: async (page) => {
       await advancedTab(page);
-      const value = page.locator('[data-testid="agent-behaviour-effort-value"]');
+      const value = page.locator('[data-testid="agent-behaviour-effort-value"]').getByRole('combobox');
       await expect(value).toContainText('Medium');
       await value.click();
-      await expect(page.locator('[data-testid^="agent-behaviour-effort-choice-"]')).toHaveCount(6);
+      await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(6);
       const start = before(page);
-      await page.locator('[data-testid="agent-behaviour-effort-choice-high"]').click();
+      await page.getByRole('listbox').getByRole('option', { name: 'High', exact: true }).click();
       await expectWrite(page, start, 'config:effort-set', { effort: 'high' });
       await expect(value).toContainText('High');
       await expectSavedThenUndo(page, 'chat reasoning effort', 'config:effort-set', { effort: 'medium' });
@@ -170,7 +170,7 @@ const agentBehaviour: readonly ReachabilityEntry[] = [
     reach: async (page) => {
       await advancedTab(page);
       const toggle = page.getByLabel('Toggle Ultracode mode');
-      const value = page.locator('[data-testid="agent-behaviour-effort-value"]');
+      const value = page.locator('[data-testid="agent-behaviour-effort-value"]').getByRole('combobox');
       let start = before(page);
       await toggle.click();
       await expectWrite(page, start, 'config:effort-set', { effort: 'xhigh' });
@@ -276,7 +276,7 @@ const outputStyle: readonly ReachabilityEntry[] = [
       await details.locator('summary').click();
       const parity = page.locator('[data-testid="output-style-parity-checkbox"]');
       await parity.check();
-      await expect(page.locator('[data-testid="output-style-parity-select"]')).toBeVisible();
+      await expect(page.locator('[data-testid="output-style-parity-select"]').getByRole('combobox')).toBeVisible();
       const start = before(page);
       await radio(page, 'Learning').click();
       await expect(page.locator('[data-testid="parity-confirm"]')).toContainText('.claude');
@@ -349,7 +349,8 @@ const mcpAndLm: readonly ReachabilityEntry[] = [
       await expect(lm.getByLabel('Provider configured')).toBeVisible();
       await expect(lm).toContainText('Tool Use', { ignoreCase: true });
       const start = before(page);
-      await page.locator('[data-testid="vscode-lm-model-select"]').selectOption('copilot-claude-sonnet');
+      await page.locator('[data-testid="vscode-lm-model-select"]').getByRole('combobox').click();
+      await page.getByRole('listbox').getByRole('option', { name: 'GitHub Copilot Claude Sonnet', exact: true }).click();
       await expectWrite(page, start, 'llm:setDefaultModel', { provider: 'vscode-lm', model: 'copilot-claude-sonnet' });
       await expectSavedThenUndo(page, 'VS Code language model', 'llm:setDefaultModel', { provider: 'vscode-lm', model: 'copilot-gpt-4o' });
     } },

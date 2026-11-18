@@ -160,7 +160,8 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             type="button"
             ptahButton
             variant="secondary"
-            class="h-[var(--ptah-field-h-md)]"
+            shape="pill"
+            class="[--ptah-control-h-sm:var(--ptah-field-h-md)]"
             (click)="savePort()"
             [busy]="saving()"
             [disabled]="!loaded() || !isDirty() || validationError() !== null"
@@ -194,44 +195,46 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
             <p content class="max-w-xs text-sm">Full access lets other local tools call privileged Ptah tools, including execute_code, but cannot cross workspaces.</p>
           </ptah-native-popover>
         </div>
-        @for (ns of namespaceOptions; track ns.id) {
-          <div class="flex min-h-12 items-start gap-ptah-controls border-b border-surface-border py-ptah-controls">
+        <div class="flex flex-col">
+          @for (ns of namespaceOptions; track ns.id) {
+            <div class="flex min-h-12 items-start gap-ptah-controls [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls">
+              <input
+                type="checkbox"
+                ptahCheckbox size="xs"
+                [checked]="isNamespaceEnabled(ns.id)"
+                (change)="toggleNamespace(ns.id)"
+                [ptahBusyDisabled]="saving() || !loaded()"
+                [attr.aria-label]="'Toggle ' + ns.label + ' namespace'"
+                [attr.data-testid]="'settings-toggle-mcp-namespace-' + ns.id"
+              />
+              <div class="min-w-0 flex-1 text-xs">
+                <span class="font-semibold text-base-content">{{ ns.label }}</span>
+                <span class="ml-[var(--ptah-gap-inline)] text-base-content-muted">{{ ns.description }}</span>
+              </div>
+              <span ptahBadge appearance="outline" size="xs" class="shrink-0">{{ ns.toolCount }} tools</span>
+            </div>
+          }
+          <div class="flex min-h-12 items-start gap-ptah-controls [border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0] py-ptah-controls">
             <input
+              #allowLocalhostToggle
               type="checkbox"
               ptahCheckbox size="xs"
-              [checked]="isNamespaceEnabled(ns.id)"
-              (change)="toggleNamespace(ns.id)"
-              [ptahBusyDisabled]="saving() || !loaded()"
-              [attr.aria-label]="'Toggle ' + ns.label + ' namespace'"
-              [attr.data-testid]="'settings-toggle-mcp-namespace-' + ns.id"
+              [checked]="browserAllowLocalhost()"
+              (change)="onAllowLocalhostToggle($event)"
+              [disabled]="saving() || !loaded() || confirmingAllowLocalhost()"
+              aria-label="Allow localhost access for browser tools"
+              data-testid="settings-toggle-browser-allow-localhost"
             />
             <div class="min-w-0 flex-1 text-xs">
-              <span class="font-semibold text-base-content">{{ ns.label }}</span>
-              <span class="ml-[var(--ptah-gap-inline)] text-base-content-muted">{{ ns.description }}</span>
+              <div class="flex items-center gap-ptah-controls">
+                <span class="font-semibold text-base-content">Allow localhost</span>
+                <ptah-native-popover [isOpen]="localhostInfoOpen()" [keepInViewport]="true" (closed)="localhostInfoOpen.set(false)">
+                  <button trigger type="button" ptahIconButton size="xs" label="About localhost access" aria-label="About localhost access" (click)="localhostInfoOpen.set(!localhostInfoOpen())"><lucide-angular [img]="InfoIcon" /></button>
+                  <p content class="max-w-xs text-sm">Enables AI agents to access local network services, development servers, and local APIs.</p>
+                </ptah-native-popover>
+              </div>
+              <p class="text-base-content-muted">Allow browser tools to navigate to localhost URLs.</p>
             </div>
-            <span ptahBadge appearance="outline" size="xs" class="shrink-0">{{ ns.toolCount }} tools</span>
-          </div>
-        }
-        <div class="flex min-h-12 items-start gap-ptah-controls border-b border-surface-border py-ptah-controls">
-          <input
-            #allowLocalhostToggle
-            type="checkbox"
-            ptahCheckbox size="xs"
-            [checked]="browserAllowLocalhost()"
-            (change)="onAllowLocalhostToggle($event)"
-            [disabled]="saving() || !loaded() || confirmingAllowLocalhost()"
-            aria-label="Allow localhost access for browser tools"
-            data-testid="settings-toggle-browser-allow-localhost"
-          />
-          <div class="min-w-0 flex-1 text-xs">
-            <div class="flex items-center gap-ptah-controls">
-              <span class="font-semibold text-base-content">Allow localhost</span>
-              <ptah-native-popover [isOpen]="localhostInfoOpen()" [keepInViewport]="true" (closed)="localhostInfoOpen.set(false)">
-                <button trigger type="button" ptahIconButton size="xs" label="About localhost access" aria-label="About localhost access" (click)="localhostInfoOpen.set(!localhostInfoOpen())"><lucide-angular [img]="InfoIcon" /></button>
-                <p content class="max-w-xs text-sm">Enables AI agents to access local network services, development servers, and local APIs.</p>
-              </ptah-native-popover>
-            </div>
-            <p class="text-base-content-muted">Allow browser tools to navigate to localhost URLs.</p>
           </div>
         </div>
         @if (confirmingAllowLocalhost()) {

@@ -164,7 +164,7 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
           id="advanced-fine-tuning"
           heading="Fine-tuning"
           [divider]="true"
-          description="Upkeep jobs for memory, scheduled jobs and the workspace harness. The defaults suit most people."
+          description="Upkeep jobs for memory, scheduled jobs and the workspace harness."
           [wide]="true"
         >
           <div
@@ -205,9 +205,6 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
     </div>
   `,
   styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
     /* Without glass the sections are separated by their dividers; glass sections are cards, so they need a gap. */
     :host-context([data-glass='on']) [data-advanced-sections] {
       gap: var(--ptah-gap-section);
