@@ -1,18 +1,28 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { PtahTableScoreComponent } from '@ptah-extension/ui';
+import { PtahMeterComponent } from '@ptah-extension/ui';
 
+/**
+ * One decision-matrix score cell: the value and a short bar on one line (prototype rev 2), plus a
+ * stale icon whose text is in a tooltip. The meter keeps the label and value for assistive tech.
+ */
 @Component({
   selector: 'ptah-matrix-score',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PtahTableScoreComponent],
+  imports: [PtahMeterComponent],
   template: `
     @if (score() !== null) {
       <span class="flex items-center gap-[var(--ptah-gap-label)]">
-        <ptah-table-score
-          class="min-w-12 flex-1"
+        <span class="w-7 text-right tabular-nums" aria-hidden="true">{{ score() }}</span>
+        <ptah-meter
+          class="w-10 shrink-0"
+          [value]="score() ?? 0"
+          [max]="100"
           [label]="label()"
-          [score]="score()"
+          [hideLabel]="true"
+          [showValue]="false"
+          [valueText]="'' + score()"
+          tone="gold"
         />
         @if (stale()) {
           <span

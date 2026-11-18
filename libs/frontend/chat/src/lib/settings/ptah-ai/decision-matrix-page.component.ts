@@ -7,7 +7,13 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { ArrowLeft, LucideAngularModule, RefreshCw } from 'lucide-angular';
+import {
+  ArrowDownWideNarrow,
+  ArrowLeft,
+  ArrowUpNarrowWide,
+  LucideAngularModule,
+  RefreshCw,
+} from 'lucide-angular';
 import {
   OUTCOME_TASK_KINDS,
   type AgentGetCapabilityMatrixResult,
@@ -134,6 +140,10 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
                 : 'Sort ascending; switch to descending'
             "
           >
+            <lucide-angular
+              [img]="descending() ? SortDescIcon : SortAscIcon"
+              aria-hidden="true"
+            />
             {{ descending() ? 'Descending' : 'Ascending' }}
           </button>
           <span class="text-xs tabular-nums text-base-content-muted"
@@ -163,6 +173,8 @@ export class DecisionMatrixPageComponent {
   readonly back = output<void>();
   protected readonly RefreshIcon = RefreshCw;
   protected readonly BackIcon = ArrowLeft;
+  protected readonly SortDescIcon = ArrowDownWideNarrow;
+  protected readonly SortAscIcon = ArrowUpNarrowWide;
   private readonly names = inject(RoutingDisplayNamesStore);
   private readonly matrix = viewChild(CapabilityMatrixSettingComponent);
   protected readonly tasks = OUTCOME_TASK_KINDS;
