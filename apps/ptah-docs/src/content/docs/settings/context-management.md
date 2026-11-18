@@ -83,7 +83,7 @@ If there are no scores, the section shows **No capability matrix yet**.
 | **Subagent stop size** | `3,000,000` weighted tokens | 1,000–100,000,000 | PtahCode stops a subagent when its weighted token total reaches this size |
 | **Compact a chat at** | Model default (unset) | 100,000 to 1,000,000 tokens | The model runtime summarizes a chat when its context reaches this size. Clear the field to use the model's own limit |
 | **Compact idle chats** | On | — | Before the prompt cache of a long chat expires, PtahCode compacts the chat, so that your next message costs less |
-| **Smallest idle chat to compact** | `150,000` tokens | 100,000 to 5,000,000 | Idle compaction skips smaller chats. This does not change when an active chat compacts |
+| **Smallest idle chat to compact** | `750,000` tokens | 100,000 to 5,000,000 | Idle compaction skips smaller chats. This does not change when an active chat compacts |
 
 **Compact a chat at** (`compaction.threshold`) controls size-based compaction by the model runtime. It is unset by default, so Claude uses its model's own window. **Compact idle chats** is separate: Ptah compacts a long idle chat shortly before its 1-hour prompt cache expires to reduce the cost of the next message.
 

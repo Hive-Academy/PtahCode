@@ -33,6 +33,11 @@ const booleanSettings = ADVANCED_SETTINGS.filter(
 );
 
 describe('ADVANCED_SETTINGS table', () => {
+  it('enables idle compaction by default for chats of at least 750,000 tokens', () => {
+    expect(booleanSetting('compaction.idleCompactionEnabled').default).toBe(true);
+    expect(numberSetting('compaction.idleCompactionMinTokens').default).toBe(750_000);
+  });
+
   it('describes the 27 surfaced keys, each once', () => {
     const keys = ADVANCED_SETTINGS.map((setting) => setting.key);
     expect(keys).toHaveLength(27);
