@@ -14,6 +14,7 @@ import { test, expect } from '../support/fixtures';
 const ROOT = resolve(__dirname, '../../../..');
 const OUT = resolve(ROOT, process.env['PTAH_SHOT_DIR'] ?? '.ptah/tmp/form-controls-shots');
 const PHASE = process.env['PTAH_SHOT_PHASE'] ?? 'after';
+const HEIGHT = 1100;
 
 async function setTheme(page: Page, mode: 'dark' | 'light'): Promise<void> {
   if ((await page.locator('html').getAttribute('data-theme-mode')) === mode) return;
@@ -24,10 +25,36 @@ async function setTheme(page: Page, mode: 'dark' | 'light'): Promise<void> {
   await expect(page.locator('html')).toHaveAttribute('data-theme-mode', mode);
 }
 
-async function shoot(page: Page, target: Locator, name: string): Promise<void> {
+async function rest(page: Page, target: Locator): Promise<void> {
+  await target.scrollIntoViewIfNeeded();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(0, 0);
+}
+
+async function shoot(page: Page, target: Locator, name: string): Promise<void> {
   await page.waitForTimeout(300);
   await target.screenshot({ path: resolve(OUT, `${name}-${PHASE}.jpg`), type: 'jpeg', quality: 72 });
+}
+
+/** One shot of the open menu and the grid it belongs to. */
+async function shootOpenMenu(page: Page, grid: Locator, name: string, width: number): Promise<void> {
+  await grid.getByRole('combobox', { name: 'Effort', exact: true }).click();
+  const listbox = page.getByRole('listbox', { name: 'Effort', exact: true });
+  await expect(listbox).toBeVisible();
+  const box = await grid.boundingBox();
+  const menu = await listbox.boundingBox();
+  if (!box || !menu) throw new Error('The grid or the menu has no box');
+  const top = Math.max(0, Math.min(box.y, menu.y) - 16);
+  const bottom = Math.min(HEIGHT, Math.max(box.y + box.height, menu.y + menu.height) + 16);
+  await page.waitForTimeout(300);
+  await page.screenshot({
+    path: resolve(OUT, `${name}-${PHASE}.jpg`),
+    type: 'jpeg',
+    quality: 72,
+    clip: { x: 0, y: top, width, height: bottom - top },
+  });
+  await page.keyboard.press('Escape');
+  await expect(listbox).toBeHidden();
 }
 
 test('captures the shared field and select states on the UI gallery', async ({ ui, mainWindow: page }) => {
@@ -41,55 +68,41 @@ test('captures the shared field and select states on the UI gallery', async ({ u
     for (const width of theme === 'dark' ? [1824, 600] : [1824]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', {
         width,
-        height: 1100,
+        height: HEIGHT,
         deviceScaleFactor: 1,
         mobile: false,
       });
       await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width);
-      const link = page.getByTestId('workspace-sidebar-ui-gallery-link');
-      if (!(await page.getByTestId('form-controls-field-states').isVisible())) {
-        await ui.goto('settings');
+      const fields = page.getByTestId('form-controls-field-states');
+      if (!(await fields.isVisible())) {
+        const link = page.getByTestId('workspace-sidebar-ui-gallery-link');
         await expect(link, 'Run with NODE_ENV=development: the gallery link is dev only').toBeVisible();
         await link.click();
       }
-      const fields = page.getByTestId('form-controls-field-states');
       await expect(fields).toBeVisible({ timeout: 30_000 });
-      await fields.scrollIntoViewIfNeeded();
       const tag = `${theme}-${width}`;
 
-      // Empty without focus, filled, error, disabled (and a placeholder that rests).
+      // Field states: empty without focus, filled, error, disabled, a placeholder that rests.
+      await rest(page, fields);
       await shoot(page, fields, `gallery-fields-${tag}`);
-
-      // Focus on the empty field with a placeholder: the label floats, the placeholder shows.
       await fields.getByRole('textbox', { name: 'Branch prefix' }).focus();
       await shoot(page, fields, `gallery-fields-focus-${tag}`);
-      await page.keyboard.press('Tab');
 
-      const selects = page.getByTestId('form-controls-rich-select');
-      await selects.scrollIntoViewIfNeeded();
-      await page.locator('body').click({ position: { x: 1, y: 1 } });
-      await shoot(page, selects, `gallery-selects-${tag}`);
+      // The settings field grid (prototype row Default model, Port, Effort).
+      const grid = page.getByTestId('form-controls-settings-grid');
+      await rest(page, grid);
+      await shoot(page, grid, `gallery-settings-grid-${tag}`);
+      await grid.getByRole('textbox', { name: 'Request timeout' }).focus();
+      await shoot(page, grid, `gallery-settings-grid-focus-${tag}`);
+
+      // Compact select in setting rows: the row title is the label.
+      const rows = page.getByTestId('form-controls-settings-rows');
+      await rest(page, rows);
+      await shoot(page, rows, `gallery-setting-rows-${tag}`);
 
       // One open designed menu (never the native menu).
-      const provider = selects.getByRole('combobox', { name: 'Provider' });
-      await provider.click();
-      const listbox = page.getByRole('listbox', { name: 'Provider' });
-      await expect(listbox).toBeVisible();
-      const box = await selects.boundingBox();
-      const menu = await listbox.boundingBox();
-      if (box && menu) {
-        const top = Math.max(0, Math.min(box.y, menu.y) - 16);
-        const bottom = Math.max(box.y + box.height, menu.y + menu.height) + 16;
-        await page.waitForTimeout(300);
-        await page.screenshot({
-          path: resolve(OUT, `gallery-select-open-${tag}-${PHASE}.jpg`),
-          type: 'jpeg',
-          quality: 72,
-          clip: { x: 0, y: top, width, height: Math.min(1100, bottom) - top },
-        });
-      }
-      await page.keyboard.press('Escape');
-      await expect(listbox).toBeHidden();
+      await rest(page, grid);
+      await shootOpenMenu(page, grid, `gallery-select-open-${tag}`, width);
     }
   }
   await cdp.send('Emulation.clearDeviceMetricsOverride');

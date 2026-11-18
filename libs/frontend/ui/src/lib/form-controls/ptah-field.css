@@ -10,11 +10,28 @@
    no rule here targets the host. State attributes: data-invalid and data-busy
    are absent when idle. */
 
+/* A field fills the width of its container by default (also in a flex row),
+   so fields never take a short intrinsic width. :where() has no weight: a
+   width utility on <ptah-field> still wins. */
+:where(ptah-field) {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
 .ptah-field {
   display: flex;
   flex-direction: column;
   gap: var(--ptah-space-1);
   min-width: 0;
+}
+
+/* Fixed message slot in a field grid: a field without a hint or an error
+   keeps an empty line of the same height, so the fields of one row have the
+   same top and bottom and the next row does not move when an error shows. */
+:where([data-ptah-pattern='field-grid']) .ptah-field:not(:has(> .ptah-field__footer))::after {
+  content: '';
+  display: block;
+  block-size: var(--ptah-text-label-leading);
 }
 
 .ptah-field__box {

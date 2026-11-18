@@ -17,6 +17,30 @@
   min-width: 0;
 }
 
+/* The select fills the width of its container by default (also in a flex
+   row). :where() has no weight: a width utility on <ptah-select> still wins. */
+:where(ptah-select) {
+  inline-size: 100%;
+}
+
+/* Compact variant in a setting row: one fixed width and one height in every
+   row (the row title is the label). Below 640 px the control takes the row. */
+:where([data-ptah-pattern='setting-row']) :where(ptah-select, ptah-field) {
+  inline-size: var(--ptah-setting-row-control-w);
+}
+
+@container (max-width: 639px) {
+  :where([data-ptah-pattern='setting-row']) :where(ptah-select, ptah-field) {
+    inline-size: 100%;
+  }
+}
+
+[data-ptah-pattern='setting-row'] .ptah-select[data-size]:not(.ptah-field__body > .ptah-select) .ptah-select__trigger,
+.ptah-table-control-cell .ptah-select[data-size] .ptah-select__trigger {
+  height: var(--ptah-control-h-sm);
+  min-height: var(--ptah-control-h-sm);
+}
+
 .ptah-field__body > .ptah-select {
   flex: 1 1 auto;
   align-self: stretch;
