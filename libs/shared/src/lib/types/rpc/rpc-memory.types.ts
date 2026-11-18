@@ -202,3 +202,75 @@ export interface MemorySearchSymbolsResult {
   readonly items: readonly CodeSymbolListItem[];
   readonly total: number;
 }
+
+export type MemoryGraphEdgeKind = 'semantic' | 'subject' | 'session';
+
+/** Clamp ranges and defaults of `memory:graph`; the handler and the UI share them. */
+export const MEMORY_GRAPH_LIMITS = {
+  maxNodes: { min: 1, max: 1500, default: 150 },
+  k: { min: 1, max: 32, default: 8 },
+  minSimilarity: { min: 0.5, max: 0.99, default: 0.75 },
+  edgeCapFactor: 6,
+  previewChars: 160,
+} as const;
+
+export interface MemoryGraphParams {
+  /** Read with `scope`, as on `memory:stats` (see `MemoryQueryScope`). */
+  readonly workspaceRoot?: string | null;
+  readonly scope?: MemoryQueryScope;
+  /** Absent or empty = all tiers. */
+  readonly tiers?: readonly MemoryTierWire[];
+  /** Absent or empty = all kinds. */
+  readonly kinds?: readonly MemoryKindWire[];
+  readonly pinnedOnly?: boolean;
+  readonly sessionId?: string | null;
+  /** Epoch milliseconds, inclusive. */
+  readonly createdFrom?: number;
+  /** Epoch milliseconds, inclusive. */
+  readonly createdTo?: number;
+  /** Default 150, clamped to 1..1500. */
+  readonly maxNodes?: number;
+  /** Absent = all three kinds. */
+  readonly edgeKinds?: readonly MemoryGraphEdgeKind[];
+  /** Semantic neighbors per node. Default 8, clamped to 1..32. */
+  readonly k?: number;
+  /** Default 0.75, clamped to 0.5..0.99. */
+  readonly minSimilarity?: number;
+}
+
+export interface MemoryGraphNodeWire {
+  readonly id: string;
+  readonly subject: string | null;
+  /** First 160 characters of the content. */
+  readonly preview: string;
+  readonly tier: MemoryTierWire;
+  readonly kind: MemoryKindWire;
+  readonly salience: number;
+  readonly hits: number;
+  readonly pinned: boolean;
+  readonly sessionId: string | null;
+  readonly workspaceRoot: string | null;
+  readonly createdAt: number;
+  readonly lastUsedAt: number;
+}
+
+export interface MemoryGraphEdgeWire {
+  /** Memory id. `source < target`: edges are undirected and unique per kind. */
+  readonly source: string;
+  readonly target: string;
+  readonly kind: MemoryGraphEdgeKind;
+  /** Semantic: cosine similarity 0..1. Subject and session: 1. */
+  readonly weight: number;
+}
+
+export interface MemoryGraphResult {
+  readonly nodes: readonly MemoryGraphNodeWire[];
+  readonly edges: readonly MemoryGraphEdgeWire[];
+  /** Number of memories that match the filters, before the node cap. */
+  readonly totalMatching: number;
+  readonly capped: boolean;
+  /** False when sqlite-vec is off or the similarity step did not finish. */
+  readonly semanticAvailable: boolean;
+  /** Maximum number of edges in this result (6 x maxNodes). */
+  readonly edgeCap: number;
+}

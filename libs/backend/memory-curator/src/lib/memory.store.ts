@@ -1,3 +1,8 @@
+import type {
+  MemoryGraphParams,
+  MemoryGraphResult,
+} from '@ptah-extension/shared';
+import { resolveMemoryGraphParams, buildMemoryGraph } from './memory-graph';
 /**
  * MemoryStore — typed CRUD over the `memories` and `memory_chunks` tables
  * (plus the `memory_chunks_fts` and `memory_chunks_vec` virtual tables).
@@ -162,6 +167,30 @@ export class MemoryStore implements IMemoryLister, IMemoryUsageRecorder {
     @inject(MEMORY_TOKENS.SQLITE_SEARCH_WORKER, { isOptional: true })
     private readonly searchWorker: ISqliteSearchWorker | null = null,
   ) {}
+
+  async graphSnapshot(
+    params: MemoryGraphParams,
+    deadlineMs?: number,
+  ): Promise<MemoryGraphResult> {
+    const resolved = resolveMemoryGraphParams(params);
+    if (this.searchWorker) {
+      const result = await this.searchWorker.graphMemories(
+        resolved,
+        deadlineMs,
+      );
+      if (result !== null) return result;
+      this.logger.warn(
+        '[memory-graph] worker unavailable; using graph fallback',
+      );
+    }
+    // The fallback reads no vectors (`semantic: false`): one bounded SELECT of
+    // at most MEMORY_GRAPH_LIMITS.maxNodes rows plus linear chain edges, so it
+    // is cheap enough to run on this thread even after a worker timeout.
+    return buildMemoryGraph(this.connection.db, {
+      params: resolved,
+      semantic: false,
+    });
+  }
 
   listSnapshot(workspaceRoot: string, limit: number): Promise<MemoryListPage> {
     return this.searchWorker

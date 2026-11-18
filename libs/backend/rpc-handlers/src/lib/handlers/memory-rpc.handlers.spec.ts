@@ -102,6 +102,14 @@ function makeMemoryStore() {
     purgeBySubjectPattern: jest.fn().mockReturnValue(0),
     listQuarantined: jest.fn().mockReturnValue({ rows: [], total: 0 }),
     restoreQuarantined: jest.fn().mockReturnValue({ restored: 0 }),
+    graphSnapshot: jest.fn().mockResolvedValue({
+      nodes: [],
+      edges: [],
+      totalMatching: 0,
+      capped: false,
+      semanticAvailable: true,
+      edgeCap: 900,
+    }),
   };
 }
 
@@ -292,8 +300,15 @@ describe('MemoryRpcHandlers — memory:search workspaceRoot forwarding', () => {
       const response = rpcHandler.call('memory:search', { query: 'needle' });
       jest.advanceTimersByTime(4_700);
       await expect(response).resolves.toEqual({ hits: [], bm25Only: true });
-      expect(search.searchRich).toHaveBeenCalledWith('needle', 10, undefined, expect.any(Number));
-    } finally { jest.useRealTimers(); }
+      expect(search.searchRich).toHaveBeenCalledWith(
+        'needle',
+        10,
+        undefined,
+        expect.any(Number),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
   it('forwards workspaceRoot to search.searchRich when provided', async () => {
     const { rpcHandler, search } = buildHandlers(['/workspace/project']);
@@ -400,7 +415,12 @@ describe('MemoryRpcHandlers — memory:search workspaceRoot forwarding', () => {
     });
 
     // workspaceRoot should be undefined (schema rejected the empty string)
-    expect(search.searchRich).toHaveBeenCalledWith('hello', 10, undefined, expect.any(Number));
+    expect(search.searchRich).toHaveBeenCalledWith(
+      'hello',
+      10,
+      undefined,
+      expect.any(Number),
+    );
   });
 
   it('preserves workspaceRoot when topK is invalid (topK: 0 fails positive() but must not drop scope)', async () => {
@@ -415,7 +435,12 @@ describe('MemoryRpcHandlers — memory:search workspaceRoot forwarding', () => {
       workspaceRoot: '/ws',
     });
 
-    expect(search.searchRich).toHaveBeenCalledWith('x', 0, '/ws', expect.any(Number));
+    expect(search.searchRich).toHaveBeenCalledWith(
+      'x',
+      0,
+      '/ws',
+      expect.any(Number),
+    );
   });
 
   it('preserves workspaceRoot when topK exceeds max (topK: 51 fails max(50) but must not drop scope)', async () => {
@@ -428,7 +453,12 @@ describe('MemoryRpcHandlers — memory:search workspaceRoot forwarding', () => {
       workspaceRoot: '/ws',
     });
 
-    expect(search.searchRich).toHaveBeenCalledWith('x', 51, '/ws', expect.any(Number));
+    expect(search.searchRich).toHaveBeenCalledWith(
+      'x',
+      51,
+      '/ws',
+      expect.any(Number),
+    );
   });
 });
 
@@ -1458,11 +1488,17 @@ describe('MemoryRpcHandlers — memory:searchSymbols workspace scoping', () => {
     jest.useFakeTimers();
     try {
       const { rpcHandler, codeSymbols } = buildHandlers(['/workspace/project']);
-      codeSymbols.searchAsync.mockImplementation(() => new Promise(() => undefined));
-      const response = rpcHandler.call('memory:searchSymbols', { query: 'needle' });
+      codeSymbols.searchAsync.mockImplementation(
+        () => new Promise(() => undefined),
+      );
+      const response = rpcHandler.call('memory:searchSymbols', {
+        query: 'needle',
+      });
       jest.advanceTimersByTime(4_700);
       await expect(response).resolves.toEqual({ items: [], total: 0 });
-    } finally { jest.useRealTimers(); }
+    } finally {
+      jest.useRealTimers();
+    }
   });
   it('arms the deadline before starting symbol work', async () => {
     jest.useFakeTimers();
@@ -1472,8 +1508,12 @@ describe('MemoryRpcHandlers — memory:searchSymbols workspace scoping', () => {
         expect(jest.getTimerCount()).toBeGreaterThan(0);
         return Promise.resolve({ items: [], total: 0 });
       });
-      await expect(rpcHandler.call('memory:searchSymbols', { query: 'needle' })).resolves.toEqual({ items: [], total: 0 });
-    } finally { jest.useRealTimers(); }
+      await expect(
+        rpcHandler.call('memory:searchSymbols', { query: 'needle' }),
+      ).resolves.toEqual({ items: [], total: 0 });
+    } finally {
+      jest.useRealTimers();
+    }
   });
   it('scopes an omitted workspaceRoot to the current root instead of every workspace', async () => {
     const { rpcHandler, codeSymbols } = buildHandlers(['/workspace/project']);
@@ -2368,12 +2408,14 @@ describe('MemoryRpcHandlers — memory:diagnostics carries the run outcome', () 
   /** A real curator, so the activity log behind it records the failure. */
   function realCuratorAfterSentinelFailure(): MemoryCuratorService {
     const llm = {
-      extract: jest.fn().mockRejectedValue(
-        Object.assign(
-          new Error('curator query failed', { cause: new Error(SENTINEL) }),
-          { name: 'CuratorLlmQueryError' },
+      extract: jest
+        .fn()
+        .mockRejectedValue(
+          Object.assign(
+            new Error('curator query failed', { cause: new Error(SENTINEL) }),
+            { name: 'CuratorLlmQueryError' },
+          ),
         ),
-      ),
       resolve: jest.fn().mockResolvedValue([]),
     } as unknown as ICuratorLLM;
     const store = {
@@ -2385,7 +2427,9 @@ describe('MemoryRpcHandlers — memory:diagnostics carries the run outcome', () 
     } as unknown as MemoryStore;
     return new MemoryCuratorService(
       makeLogger() as unknown as Logger,
-      { register: jest.fn(() => jest.fn()) } as unknown as ICompactionCallbackRegistry,
+      {
+        register: jest.fn(() => jest.fn()),
+      } as unknown as ICompactionCallbackRegistry,
       store,
       { read: jest.fn() } as unknown as ITranscriptReader,
       llm,
@@ -2455,5 +2499,90 @@ describe('MemoryRpcHandlers — memory:rebuildIndex', () => {
     expect(logger.warn).toHaveBeenCalledWith('[memory] rebuildIndex failed', {
       error: SENTINEL,
     });
+  });
+});
+
+describe('MemoryRpcHandlers — memory:graph', () => {
+  it('lists memory:graph in METHODS', () => {
+    expect(MemoryRpcHandlers.METHODS).toContain('memory:graph');
+  });
+
+  it('rejects invalid params before the store is called', async () => {
+    const { rpcHandler, store } = buildHandlers();
+
+    await expect(
+      rpcHandler.call('memory:graph', { tiers: ['hot'] }),
+    ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
+    expect(store.graphSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('scopes an omitted workspaceRoot to the host workspace', async () => {
+    const { rpcHandler, store } = buildHandlers(['/workspace/project']);
+
+    await rpcHandler.call('memory:graph', undefined);
+
+    const [params, deadline] = store.graphSnapshot.mock.calls[0];
+    expect(params.workspaceRoot).toBe('/workspace/project');
+    expect(params).not.toHaveProperty('scope');
+    expect(deadline).toBeGreaterThan(performance.now());
+    expect(deadline).toBeLessThanOrEqual(performance.now() + 4_000);
+  });
+
+  it('keeps an explicit null root (unscoped rows only)', async () => {
+    const { rpcHandler, store } = buildHandlers(['/workspace/project']);
+
+    await rpcHandler.call('memory:graph', { workspaceRoot: null });
+
+    expect(store.graphSnapshot.mock.calls[0][0].workspaceRoot).toBeNull();
+  });
+
+  it('passes no workspace filter for scope "all"', async () => {
+    const { rpcHandler, store } = buildHandlers(['/workspace/project']);
+
+    await rpcHandler.call('memory:graph', {
+      scope: 'all',
+      workspaceRoot: '/ignored',
+    });
+
+    expect(store.graphSnapshot.mock.calls[0][0].workspaceRoot).toBeUndefined();
+  });
+
+  it('passes clamped sizes and filters to the store and returns its result', async () => {
+    const { rpcHandler, store } = buildHandlers();
+    const graph = {
+      nodes: [],
+      edges: [],
+      totalMatching: 3,
+      capped: false,
+      semanticAvailable: false,
+      edgeCap: 9000,
+    };
+    store.graphSnapshot.mockResolvedValueOnce(graph);
+
+    const result = await rpcHandler.call('memory:graph', {
+      maxNodes: 99999,
+      k: 0,
+      minSimilarity: 0.1,
+      tiers: ['core'],
+      pinnedOnly: true,
+    });
+
+    expect(result).toBe(graph);
+    expect(store.graphSnapshot.mock.calls[0][0]).toMatchObject({
+      maxNodes: 1500,
+      k: 1,
+      minSimilarity: 0.5,
+      tiers: ['core'],
+      pinnedOnly: true,
+    });
+  });
+
+  it('does not hide a store failure', async () => {
+    const { rpcHandler, store } = buildHandlers();
+    store.graphSnapshot.mockRejectedValueOnce(new Error('disk I/O error'));
+
+    await expect(rpcHandler.call('memory:graph', {})).rejects.toThrow(
+      'disk I/O error',
+    );
   });
 });

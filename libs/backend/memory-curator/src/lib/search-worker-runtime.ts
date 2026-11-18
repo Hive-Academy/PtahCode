@@ -15,6 +15,7 @@ import { CodeSymbolStore } from './code-symbol.store';
 import { MemorySearchService } from './memory-search.service';
 import { MemoryStore } from './memory.store';
 import { memoryId } from './memory.types';
+import { buildMemoryGraph } from './memory-graph';
 import { ObservationQueueStore } from './observation-queue.store';
 import { HostBridgeEmbedder } from './search-worker-host-embedder';
 import { serializeWorkerError } from './search-worker-error';
@@ -60,10 +61,16 @@ export class SearchWorkerRuntime {
 
   constructor(private readonly options: SearchWorkerRuntimeOptions) {
     this.logger = {
-      debug: (message: string, ...args: unknown[]) => this.log('debug', message, args[0]),
-      info: (message: string, ...args: unknown[]) => this.log('info', message, args[0]),
-      warn: (message: string, ...args: unknown[]) => this.log('warn', message, args[0]),
-      error: (message: string | Error, errorOrContext?: Error | Record<string, unknown>) =>
+      debug: (message: string, ...args: unknown[]) =>
+        this.log('debug', message, args[0]),
+      info: (message: string, ...args: unknown[]) =>
+        this.log('info', message, args[0]),
+      warn: (message: string, ...args: unknown[]) =>
+        this.log('warn', message, args[0]),
+      error: (
+        message: string | Error,
+        errorOrContext?: Error | Record<string, unknown>,
+      ) =>
         this.log(
           'error',
           message instanceof Error ? message.message : message,
@@ -76,9 +83,13 @@ export class SearchWorkerRuntime {
   handle(raw: unknown): void {
     const parsed = searchWorkerInboundSchema.safeParse(raw);
     if (!parsed.success) {
-      this.log('warn', '[sqlite-search-worker] rejected an invalid host message', {
-        issues: parsed.error.issues.slice(0, 3).map((issue) => issue.message),
-      });
+      this.log(
+        'warn',
+        '[sqlite-search-worker] rejected an invalid host message',
+        {
+          issues: parsed.error.issues.slice(0, 3).map((issue) => issue.message),
+        },
+      );
       return;
     }
     const message = parsed.data;
@@ -91,17 +102,26 @@ export class SearchWorkerRuntime {
       case 'host-call-failed':
         this.state?.bridge.settle(message);
         return;
-      default:
-        {
-          const transitMs = wireTransitMs(message.budgetMs, message.sentAtMs);
-          const remainingBudgetMs = message.budgetMs === undefined ? undefined : message.budgetMs - transitMs;
-          if (remainingBudgetMs !== undefined && remainingBudgetMs <= 0) {
-            this.logger.debug('[sqlite-search-worker] request expired in transit', { kind: message.kind, transitMs });
-            this.options.post({ kind: 'error', id: message.id, message: 'request deadline passed before it started' });
-            return;
-          }
-          void this.answer(message, localDeadlineMs(remainingBudgetMs));
+      default: {
+        const transitMs = wireTransitMs(message.budgetMs, message.sentAtMs);
+        const remainingBudgetMs =
+          message.budgetMs === undefined
+            ? undefined
+            : message.budgetMs - transitMs;
+        if (remainingBudgetMs !== undefined && remainingBudgetMs <= 0) {
+          this.logger.debug(
+            '[sqlite-search-worker] request expired in transit',
+            { kind: message.kind, transitMs },
+          );
+          this.options.post({
+            kind: 'error',
+            id: message.id,
+            message: 'request deadline passed before it started',
+          });
+          return;
         }
+        void this.answer(message, localDeadlineMs(remainingBudgetMs));
+      }
     }
   }
 
@@ -170,7 +190,14 @@ export class SearchWorkerRuntime {
     // Hybrid symbol search in the main process repairs stale vec rows; this
     // connection cannot write, so it only honours the persisted stale marker.
     symbols.enableReadOnlySearch();
-    const partial = { db, connection, vecStatus, bridge, memoryStore, observationQueue };
+    const partial = {
+      db,
+      connection,
+      vecStatus,
+      bridge,
+      memoryStore,
+      observationQueue,
+    };
     this.state = {
       ...partial,
       symbols,
@@ -190,11 +217,15 @@ export class SearchWorkerRuntime {
 
   private loadVec(db: SqliteDatabase, vecPath: string | undefined): boolean {
     if (!vecPath) {
-      this.logger.info('[sqlite-search-worker] no sqlite-vec path; vector search disabled');
+      this.logger.info(
+        '[sqlite-search-worker] no sqlite-vec path; vector search disabled',
+      );
       return false;
     }
     if (typeof db.loadExtension !== 'function') {
-      this.logger.warn('[sqlite-search-worker] loadExtension unavailable; vector search disabled');
+      this.logger.warn(
+        '[sqlite-search-worker] loadExtension unavailable; vector search disabled',
+      );
       return false;
     }
     try {
@@ -203,16 +234,22 @@ export class SearchWorkerRuntime {
     } catch (error: unknown) {
       // degradation-audit: optional-capability - forwarded at warn; the worker
       // searches lexically, like the main connection without sqlite-vec.
-      this.logger.warn('[sqlite-search-worker] sqlite-vec load failed; vector search disabled', {
-        vecPath,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.warn(
+        '[sqlite-search-worker] sqlite-vec load failed; vector search disabled',
+        {
+          vecPath,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
       return false;
     }
   }
 
   private createMemorySearch(
-    state: Pick<WorkerState, 'connection' | 'vecStatus' | 'bridge' | 'memoryStore' | 'observationQueue'>,
+    state: Pick<
+      WorkerState,
+      'connection' | 'vecStatus' | 'bridge' | 'memoryStore' | 'observationQueue'
+    >,
   ): MemorySearchService {
     return new MemorySearchService(
       this.logger,
@@ -229,16 +266,27 @@ export class SearchWorkerRuntime {
     return Number(db.pragma('data_version', { simple: true }));
   }
 
-  private async answer(query: SearchWorkerQuery, deadlineMs?: number): Promise<void> {
+  private async answer(
+    query: SearchWorkerQuery,
+    deadlineMs?: number,
+  ): Promise<void> {
     const state = this.state;
     if (!state) {
-      this.options.post({ kind: 'error', id: query.id, message: 'search worker not initialized' });
+      this.options.post({
+        kind: 'error',
+        id: query.id,
+        message: 'search worker not initialized',
+      });
       return;
     }
     if (deadlineMs !== undefined && performance.now() >= deadlineMs) {
       // The host has already answered this request degraded and logged it;
       // starting its synchronous SQL now would only delay the requests behind.
-      this.options.post({ kind: 'error', id: query.id, message: 'request deadline passed before it started' });
+      this.options.post({
+        kind: 'error',
+        id: query.id,
+        message: 'request deadline passed before it started',
+      });
       return;
     }
     try {
@@ -246,12 +294,19 @@ export class SearchWorkerRuntime {
       this.options.post({ kind: 'result', id: query.id, result });
     } catch (error: unknown) {
       const text = error instanceof Error ? error.message : String(error);
-      this.logger.warn('[sqlite-search-worker] query failed', { kind: query.kind, error: text });
+      this.logger.warn('[sqlite-search-worker] query failed', {
+        kind: query.kind,
+        error: text,
+      });
       this.options.post({ kind: 'error', id: query.id, message: text });
     }
   }
 
-  private run(state: WorkerState, query: SearchWorkerQuery, deadlineMs?: number): unknown {
+  private run(
+    state: WorkerState,
+    query: SearchWorkerQuery,
+    deadlineMs?: number,
+  ): unknown {
     switch (query.kind) {
       case 'memory': {
         const version = this.readDataVersion(state.db);
@@ -259,27 +314,66 @@ export class SearchWorkerRuntime {
           state.memorySearch = this.createMemorySearch(state);
           state.dataVersion = version;
         }
-        return state.memorySearch.searchRich(query.query, query.topK, query.workspaceRoot, deadlineMs);
+        return state.memorySearch.searchRich(
+          query.query,
+          query.topK,
+          query.workspaceRoot,
+          deadlineMs,
+        );
       }
       case 'symbols':
-        return state.symbols.searchSymbols(query.query, query.topK, query.workspaceRoot, deadlineMs);
+        return state.symbols.searchSymbols(
+          query.query,
+          query.topK,
+          query.workspaceRoot,
+          deadlineMs,
+        );
       // The remaining kinds are single synchronous statements: once started
       // they cannot be interrupted, so the deadline is only checked above.
       case 'symbol-page':
         return state.symbols.search(query.params);
       case 'list':
-        return state.memoryStore.listAll(query.workspaceRoot, undefined, query.limit, 0);
+        return state.memoryStore.listAll(
+          query.workspaceRoot,
+          undefined,
+          query.limit,
+          0,
+        );
+      case 'graph':
+        return buildMemoryGraph(state.db, {
+          params: query.params,
+          semantic: state.vecStatus.available,
+          deadlineMs,
+          onSemanticUnavailable: (reason) =>
+            this.logger.warn(
+              '[sqlite-search-worker] graph without semantic edges',
+              { reason },
+            ),
+        });
       case 'chunks':
         return state.memoryStore.getChunks(memoryId(query.memoryId));
     }
   }
 
-  private log(level: SearchWorkerLogLevel, message: string, detail: unknown): void {
+  private log(
+    level: SearchWorkerLogLevel,
+    message: string,
+    detail: unknown,
+  ): void {
     if (detail instanceof Error) {
-      this.options.post({ kind: 'log', level, message, error: serializeWorkerError(detail) });
+      this.options.post({
+        kind: 'log',
+        level,
+        message,
+        error: serializeWorkerError(detail),
+      });
       return;
     }
-    this.options.post({ kind: 'log', level, message, context: toTransferableLogContext(detail) });
+    this.options.post({
+      kind: 'log',
+      level,
+      message,
+      context: toTransferableLogContext(detail),
+    });
   }
 }
-

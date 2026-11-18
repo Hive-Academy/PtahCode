@@ -1,8 +1,13 @@
+import type { MemoryGraphResult } from '@ptah-extension/shared';
+import type { ResolvedMemoryGraphParams } from './memory-graph';
 import type { MemorySearchResponse } from './memory.types';
 import type { CodeSymbolHitPage } from '@ptah-extension/memory-contracts';
 import type { MemoryListPage } from '@ptah-extension/memory-contracts';
 import type { MemoryChunk } from './memory.types';
-import type { CodeSymbolSearchParams, CodeSymbolSearchResult } from './code-symbol.store';
+import type {
+  CodeSymbolSearchParams,
+  CodeSymbolSearchResult,
+} from './code-symbol.store';
 
 export interface ISearchWorkerProcess {
   postMessage(message: unknown): void;
@@ -26,9 +31,25 @@ export interface ISearchWorkerFactory {
 }
 
 export interface ISqliteSearchWorker {
-  searchMemory(query: string, topK: number, workspaceRoot?: string | null, deadlineMs?: number): Promise<MemorySearchResponse>;
-  searchSymbols(query: string, topK: number, workspaceRoot?: string): Promise<CodeSymbolHitPage>;
-  searchSymbolPage(params: CodeSymbolSearchParams, deadlineMs?: number): Promise<CodeSymbolSearchResult>;
+  graphMemories(
+    params: ResolvedMemoryGraphParams,
+    deadlineMs?: number,
+  ): Promise<MemoryGraphResult | null>;
+  searchMemory(
+    query: string,
+    topK: number,
+    workspaceRoot?: string | null,
+    deadlineMs?: number,
+  ): Promise<MemorySearchResponse>;
+  searchSymbols(
+    query: string,
+    topK: number,
+    workspaceRoot?: string,
+  ): Promise<CodeSymbolHitPage>;
+  searchSymbolPage(
+    params: CodeSymbolSearchParams,
+    deadlineMs?: number,
+  ): Promise<CodeSymbolSearchResult>;
   listMemories(workspaceRoot: string, limit: number): Promise<MemoryListPage>;
   getChunks(memoryId: string): Promise<readonly MemoryChunk[]>;
 }

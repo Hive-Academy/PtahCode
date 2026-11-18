@@ -1,3 +1,4 @@
+import type { ISqliteSearchWorker } from './search-worker.port';
 /**
  * Unit tests for MemoryStore write-counter API.
  *
@@ -2629,4 +2630,45 @@ describe('MemoryStore.appendChunks atomic eligibility (real SQLite)', () => {
     gated.release();
     return gated.embedder;
   }
+});
+
+describe('MemoryStore.graphSnapshot', () => {
+  it('returns the worker result and falls back on null with one warning', async () => {
+    const { stub } = makeDb({ getResult: { total: 0 } });
+    const logger = makeLogger();
+    const worker = {
+      graphMemories: jest.fn(),
+    } as unknown as ISqliteSearchWorker;
+    const store = new MemoryStore(
+      logger,
+      stub,
+      makeEmbedder(),
+      makeVecStatus(),
+      worker,
+    );
+    const result = {
+      nodes: [],
+      edges: [],
+      totalMatching: 0,
+      capped: false,
+      semanticAvailable: true,
+      edgeCap: 6,
+    };
+    jest
+      .mocked(worker.graphMemories)
+      .mockResolvedValueOnce(result)
+      .mockResolvedValueOnce(null);
+    expect(await store.graphSnapshot({ maxNodes: 1 })).toBe(result);
+    const fallback = await store.graphSnapshot({ maxNodes: 1 });
+    expect(fallback.semanticAvailable).toBe(false);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(worker.graphMemories).toHaveBeenCalledWith(
+      expect.objectContaining({ maxNodes: 1 }),
+      undefined,
+    );
+    const withoutWorker = makeStore(stub);
+    expect(
+      (await withoutWorker.graphSnapshot({ maxNodes: 1 })).semanticAvailable,
+    ).toBe(false);
+  });
 });

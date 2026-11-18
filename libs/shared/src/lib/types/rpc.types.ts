@@ -224,9 +224,7 @@ import type {
   PluginsReplaceKeptItemsParams,
   PluginsReplaceKeptItemsResult,
 } from './rpc/rpc-plugin-marketplace.types';
-import type {
-  LibraryPassStatus,
-} from './rpc/rpc-setup-decisions.types';
+import type { LibraryPassStatus } from './rpc/rpc-setup-decisions.types';
 
 import type {
   SubagentQueryParams,
@@ -635,6 +633,8 @@ import type {
 } from './rpc/rpc-change-set.types';
 
 import type {
+  MemoryGraphParams,
+  MemoryGraphResult,
   MemoryListParams,
   MemoryListResult,
   MemorySearchParams,
@@ -1346,7 +1346,13 @@ export interface RpcMethodRegistry
   'session:handoffStatus': {
     params: { sessionId: string; tabId: string };
     result: {
-      state: 'absent' | 'starting' | 'recorded' | 'closePending' | 'closeCompleted' | 'unavailable';
+      state:
+        | 'absent'
+        | 'starting'
+        | 'recorded'
+        | 'closePending'
+        | 'closeCompleted'
+        | 'unavailable';
       successorSessionId: string | null;
     };
   };
@@ -2560,6 +2566,7 @@ export interface RpcMethodRegistry
     result: HarnessSetSkillSelectionResult;
   };
   'memory:list': { params: MemoryListParams; result: MemoryListResult };
+  'memory:graph': { params: MemoryGraphParams; result: MemoryGraphResult };
   'memory:search': { params: MemorySearchParams; result: MemorySearchResult };
   'memory:get': { params: MemoryGetParams; result: MemoryGetResult };
   'memory:pin': { params: MemoryPinParams; result: MemoryPinResult };
@@ -4072,6 +4079,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'harness:dismiss-install-migration-notice': true,
 
   'memory:list': true,
+  'memory:graph': true,
   'memory:search': true,
   'memory:get': true,
   'memory:pin': true,
