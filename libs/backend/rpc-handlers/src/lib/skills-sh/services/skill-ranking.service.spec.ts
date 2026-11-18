@@ -173,7 +173,7 @@ describe('SkillRankingService.rank', () => {
       /secret-evidence|private|https?:|D:|\\secret/,
     );
     const prompt = JSON.parse(execute.prompt);
-    expect(prompt.items.angular.candidates[0].description).toHaveLength(200);
+    expect(prompt.items['angular'].candidates[0].description).toHaveLength(200);
     expect(
       skillRankingItemSchema(['a', 'b']).safeParse({ order: ['unknown'] })
         .success,

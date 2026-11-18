@@ -118,6 +118,28 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
     expect(inner.timeoutMs).toBeLessThan(DECISION_REQUEST_TIMEOUT_MS);
     expect(inner.timeoutExplicit).toBe(true);
   });
+  it('accepts an answer that arrives within the total budget (not the erroneous margin cap)', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service, openCaller, dispatchFor, complete } = setup();
+      openCaller.mockResolvedValue({
+        kind: 'system-one',
+        target: { timeoutMs: 60000 },
+      });
+      complete.mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ i1: 'c1' }), 1000),
+          ),
+      );
+      const pending = service.rankSkillCandidates([item]);
+      await jest.advanceTimersByTimeAsync(1001);
+      const result = await pending;
+      expect(result).toEqual({ i1: ['c1'] });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   it('does not transmit workspace, evidence, URLs, paths, or descriptions over 200 characters', async () => {
     const { service, complete } = setup();
     await service.rankSkillCandidates([

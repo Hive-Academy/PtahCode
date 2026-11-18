@@ -82,7 +82,6 @@ export class SkillRankingCallerService {
                 timeoutMs: Math.min(
                   opened.target.timeoutMs,
                   DECISION_REQUEST_TIMEOUT_MS - DECISION_RETURN_MARGIN_MS,
-                  DECISION_RETURN_MARGIN_MS,
                 ),
                 timeoutExplicit: true,
               },
