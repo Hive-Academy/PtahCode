@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2268_f2f9
-status: backlog
+status: in_review
 type: FEATURE
 title: "Redesign Settings Search & Voice page to the prototype"
 depends_on: []
