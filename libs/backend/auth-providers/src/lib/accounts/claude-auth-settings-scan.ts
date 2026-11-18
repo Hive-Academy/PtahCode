@@ -175,7 +175,9 @@ export type ClaudeAuthPolicyScanResult =
       readonly closeReceipts?: readonly ClaudeChildCloseReceipt[];
     };
 
-const MAX_SETTINGS_BYTES = 256 * 1024;
+/** Largest settings file the scan accepts. The production reader stops at this size. */
+export const CLAUDE_SETTINGS_MAX_BYTES = 256 * 1024;
+const MAX_SETTINGS_BYTES = CLAUDE_SETTINGS_MAX_BYTES;
 const MAX_ANCESTORS = 64;
 const MAX_DROP_IN_ENTRIES = 32;
 const REGISTRY_HIVES = ['HKLM', 'HKCU'] as const;
@@ -194,6 +196,19 @@ async function settle<T>(operation: () => Promise<T>): Promise<Settled<T>> {
     // degradation-audit: reported - the error becomes a settled outcome; every caller refuses unless it is ENOENT.
     return { ok: false, enoent: isEnoent(error) };
   }
+}
+
+/**
+ * Settles with `operation`, or rejects when `signal` aborts first. A read that
+ * never settles must not keep a cancelled scan pending.
+ */
+function untilAborted<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(new Error('The policy scan was cancelled.'));
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+    void operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 function parseJson(text: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
@@ -318,7 +333,8 @@ class PolicyScanRun {
   }
 
   private async scanFile(path: string): Promise<FileOutcome> {
-    const read = await settle(() => this.request.fs.readFile(path));
+    // A cancel ends the wait; `scanClaudeAuthPolicy` then reports `cancelled`, not a source refusal.
+    const read = await settle(() => untilAborted(this.request.fs.readFile(path), this.request.signal));
     if (!read.ok) return read.enoent ? 'absent' : 'refused';
     if (Buffer.byteLength(read.value, 'utf8') > MAX_SETTINGS_BYTES) return 'refused';
     const parsed = parseJson(read.value);

@@ -617,6 +617,25 @@ describe('scanClaudeAuthPolicy', () => {
       expect(onRefusedSource).not.toHaveBeenCalled();
     });
 
+    it('returns cancelled when the signal aborts while an ancestor read never settles', async () => {
+      const controller = new AbortController();
+      const { fs } = fakeFs({ present: [win32.join(ancestor, '.git')] });
+      const stalledFs: ClaudePolicyScanFs = {
+        ...fs,
+        readFile: (path) => {
+          if (path !== ancestorLocal) return fs.readFile(path);
+          // A FIFO with no writer: the read stays pending for ever.
+          setTimeout(() => controller.abort(), 0);
+          return new Promise<string>(() => undefined);
+        },
+      };
+      const onRefusedSource = jest.fn();
+      await expect(
+        scanClaudeAuthPolicy(request({ fs: stalledFs, signal: controller.signal, onRefusedSource })),
+      ).resolves.toMatchObject({ ok: false, code: 'cancelled' });
+      expect(onRefusedSource).not.toHaveBeenCalled();
+    });
+
     it('passes a task worktree below a main checkout with a benign settings.local.json', async () => {
       const checkout = 'D:\\projects\\app';
       const { fs } = fakeFs({
