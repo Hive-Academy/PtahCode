@@ -123,7 +123,7 @@ export const ANALYSIS_FRESHNESS_SERVICE = Symbol.for(
   'AnalysisFreshnessService',
 );
 
-/** Maintains the workspace root CLAUDE.md analysis import block. */
+/** Maintains the workspace root CLAUDE.md analysis index block. */
 export const ANALYSIS_CLAUDE_MD_LINKER = Symbol.for('AnalysisClaudeMdLinker');
 
 /**

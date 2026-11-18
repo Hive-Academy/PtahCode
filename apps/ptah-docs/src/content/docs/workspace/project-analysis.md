@@ -32,7 +32,7 @@ my-project/
             └── 04-elevation-plan.md
 ```
 
-PtahCode adds an import block for the latest analysis files to the workspace `CLAUDE.md`. Agents that read `CLAUDE.md` get the analysis. PtahCode changes only its marked block in that file.
+PtahCode adds an index of the latest analysis files to the workspace `CLAUDE.md`. The index lists the file paths only, so agents read an analysis file when the task needs it. PtahCode changes only its marked block in that file.
 
 You can commit `.ptah/analysis/` to share it with your team, or add it to `.gitignore`.
 

@@ -12,7 +12,7 @@ const END = '<!-- ptah:analysis:end -->';
 type LinkResult = { written: boolean; error?: string };
 type Candidate = { slug: string; dir: string; files: string[]; at: number; hashes: string[] };
 
-/** Maintains only the marked import block in the workspace root CLAUDE.md. */
+/** Maintains only the marked analysis index in the workspace root CLAUDE.md. */
 @injectable()
 export class AnalysisClaudeMdLinker {
   private readonly pending = new Map<string, Promise<void>>();
@@ -93,7 +93,10 @@ export class AnalysisClaudeMdLinker {
       const crlf = (current.match(/\r\n/g) ?? []).length;
       const lf = (current.match(/(?<!\r)\n/g) ?? []).length;
       const eol = crlf > lf ? '\r\n' : '\n';
-      const imports = latest.files.map((file) => `@.ptah/analysis/${latest.slug}/${file}`).join(eol);
+      const index = [
+        'Workspace analysis (read a file only when the task needs it):',
+        ...latest.files.map((file) => `- \`.ptah/analysis/${latest.slug}/${file}\``),
+      ].join(eol);
       const begins = current.split(BEGIN).length - 1;
       const ends = current.split(END).length - 1;
       if ((begins !== 0 || ends !== 0) &&
@@ -104,11 +107,11 @@ export class AnalysisClaudeMdLinker {
       if (begins === 1) {
         const before = current.slice(0, current.indexOf(BEGIN) + BEGIN.length);
         const after = current.slice(current.indexOf(END));
-        updated = `${before}${eol}${imports}${eol}${after}`;
+        updated = `${before}${eol}${index}${eol}${after}`;
       } else {
         const separator = current.length === 0 || current.endsWith(`${eol}${eol}`)
           ? '' : current.endsWith(eol) ? eol : `${eol}${eol}`;
-        updated = `${current}${separator}${BEGIN}${eol}${imports}${eol}${END}${eol}`;
+        updated = `${current}${separator}${BEGIN}${eol}${index}${eol}${END}${eol}`;
       }
       if (updated === current) return { written: false };
       // Catch an editor save that occurred while phase files were inspected.

@@ -11,7 +11,7 @@ PtahCode uses two folders at the project root: `.claude/` and `.ptah/`. Global s
 
 ```
 my-project/
-├── CLAUDE.md                # Project instructions; PtahCode adds an analysis import block
+├── CLAUDE.md                # Project instructions; PtahCode adds an analysis index block
 ├── .claude/
 │   ├── agents/              # Agent definitions (Markdown)
 │   ├── commands/            # Slash commands (Markdown)

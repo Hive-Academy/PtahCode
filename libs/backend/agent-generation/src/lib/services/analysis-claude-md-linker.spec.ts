@@ -12,6 +12,7 @@ const ANALYSIS = join(ROOT, '.ptah', 'analysis');
 const FILES = PHASE_CONFIGS.map(({ file }) => file);
 const BEGIN = '<!-- ptah:analysis:begin -->';
 const END = '<!-- ptah:analysis:end -->';
+const HEADING = 'Workspace analysis (read a file only when the task needs it):';
 
 describe('AnalysisClaudeMdLinker', () => {
   const logger = { warn: jest.fn() };
@@ -44,7 +45,9 @@ describe('AnalysisClaudeMdLinker', () => {
     expect(await linker.link(ROOT)).toEqual({ written: true });
     const content = await fs.readFile(join(ROOT, 'CLAUDE.md'));
     expect(content).toContain(BEGIN);
-    expect(content).toContain('@.ptah/analysis/demo/01-project-profile.md');
+    expect(content).toContain(HEADING);
+    for (const file of FILES) expect(content).toContain(`- \`.ptah/analysis/demo/${file}\``);
+    expect(content).not.toMatch(/^@/m);
     expect(content).toContain(END);
   });
 
@@ -69,12 +72,12 @@ describe('AnalysisClaudeMdLinker', () => {
     const reads = jest.spyOn(fs, 'readFileBytes');
     await linker.link(ROOT);
     const content = await fs.readFile(join(ROOT, 'CLAUDE.md'));
-    expect(content).toContain('@.ptah/analysis/newer/01-project-profile.md');
-    expect(content).not.toContain('@.ptah/analysis/demo/');
+    expect(content).toContain('- `.ptah/analysis/newer/01-project-profile.md`');
+    expect(content).not.toContain('.ptah/analysis/demo/');
     expect(reads).toHaveBeenCalledTimes(FILES.length);
   });
 
-  it('refuses a completed run whose slug cannot form a safe import', async () => {
+  it('refuses a completed run whose slug cannot form a safe path', async () => {
     const { fs, manifests, linker } = await fixture();
     const old = manifests.get(join(ANALYSIS, 'demo'))!;
     manifests.delete(join(ANALYSIS, 'demo'));
@@ -110,7 +113,7 @@ describe('AnalysisClaudeMdLinker', () => {
     await fs.writeFile(join(ROOT, 'CLAUDE.md'), `one\r\ntwo\nthree\nfour\n`);
     await linker.link(ROOT);
     const content = await fs.readFile(join(ROOT, 'CLAUDE.md'));
-    expect(content).toContain(`${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n`);
+    expect(content).toContain(`${BEGIN}\n${HEADING}\n- \`.ptah/analysis/demo/01-project-profile.md\`\n`);
   });
 
   it('reports an editor change during the read-modify-write cycle', async () => {
@@ -138,8 +141,24 @@ describe('AnalysisClaudeMdLinker', () => {
     expect(content.slice(content.indexOf(END) + END.length)).toBe(
       '\r\nafter\r\n',
     );
-    expect(content).toContain(`${BEGIN}\r\n@.ptah/analysis/demo/01-project-profile.md\r\n`);
+    expect(content).toContain(`${BEGIN}\r\n${HEADING}\r\n- \`.ptah/analysis/demo/01-project-profile.md\`\r\n`);
     expect(content).not.toContain('old');
+  });
+
+  it.each(['\n', '\r\n'])('migrates an import block and preserves outside text with %j', async (eol) => {
+    const { fs, linker } = await fixture();
+    const path = join(ROOT, 'CLAUDE.md');
+    const before = `# User notes${eol}${eol}${BEGIN}`;
+    const after = `${END}${eol}${eol}Keep these instructions.${eol}`;
+    const imports = FILES.map((file) => `@.ptah/analysis/demo/${file}`).join(eol);
+    await fs.writeFile(path, `${before}${eol}${imports}${eol}${after}`);
+
+    expect(await linker.link(ROOT)).toEqual({ written: true });
+    const content = await fs.readFile(path);
+    const bullets = FILES.map((file) => `- \`.ptah/analysis/demo/${file}\``).join(eol);
+    expect(content).toBe(`${before}${eol}${HEADING}${eol}${bullets}${eol}${after}`);
+    expect(content).not.toMatch(/^@/m);
+    expect(await linker.link(ROOT)).toEqual({ written: false });
   });
 
   it.each([`${BEGIN}\n`, `${END}\n`, `${END}\n${BEGIN}\n`])('leaves malformed markers untouched', async (original) => {
