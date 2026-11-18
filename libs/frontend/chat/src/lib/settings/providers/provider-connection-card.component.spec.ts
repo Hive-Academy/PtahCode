@@ -16,6 +16,8 @@
  * - a D16 scope badge forwards its intents; "Used by" is hidden while unknown.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { ProviderConnectionCardComponent } from './provider-connection-card.component';
 import type { SettingScopeDisplay } from './setting-scope-row.component';
@@ -176,14 +178,14 @@ describe('ProviderConnectionCardComponent', () => {
     expect(query(fixture, 'used-by-segment')).toBeNull();
     fixture.componentRef.setInput('usedByCount', 0);
     fixture.detectChanges();
-    expect(subtitle?.parentElement?.textContent?.trim()).toBe(
+    expect(query(fixture, 'card-subtitle')?.textContent?.trim()).toBe(
       'CLI subscription',
     );
     expect(
       query(fixture, 'used-by-segment')
         ?.textContent?.replace(/\s+/g, ' ')
         .trim(),
-    ).toBe('\u00b7 Used by 0');
+    ).toBe('CLI subscription \u00b7 Used by 0');
   });
 
   describe('compact layout (≤ 80 px, prototype .conn-card)', () => {
@@ -280,6 +282,33 @@ describe('ProviderConnectionCardComponent', () => {
       expect(query(fixture, 'used-by-count')?.textContent?.trim()).toBe(
         'Used by 2',
       );
+    });
+
+    it('keeps many consumers in a two-line clamp without style overrides', () => {
+      const fixture = createComponent({
+        ...KIMI_CODE,
+        usedByCount: 40,
+        usedByLabels: Array.from({ length: 40 }, (_, i) => `Consumer ${i}`),
+      });
+      const segment = query(fixture, 'used-by-segment') as HTMLElement;
+      expect(segment.classList.contains('line-clamp-2')).toBe(true);
+      expect(
+        segment.querySelector('[data-testid="card-subtitle"]'),
+      ).not.toBeNull();
+      const source = readFileSync(
+        join(__dirname, 'provider-connection-card.component.ts'),
+        'utf8',
+      );
+      const styles = source.split('styles: `')[1].split('`,')[0];
+      for (const rule of styles.matchAll(/([^{}]+)\{([^{}]+)\}/g)) {
+        if (
+          /display:\s*inline|overflow:\s*visible|-webkit-line-clamp:\s*unset/.test(
+            rule[2],
+          )
+        ) {
+          expect(segment.matches(rule[1].trim())).toBe(false);
+        }
+      }
     });
 
     it('names the consumers next to "Used by N" when labels are given, and omits them when empty', () => {

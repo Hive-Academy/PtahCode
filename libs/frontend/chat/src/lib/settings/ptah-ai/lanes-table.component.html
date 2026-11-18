@@ -483,17 +483,28 @@
               </ng-container>
               <span laneActions>
                 @if (row.kind === 'system' && defaults()?.[row.cli]) {
-                  <button
-                    type="button"
-                    ptahButton
-                    variant="outline"
-                    size="sm"
-                    data-testid="lanes-detail-reset-default"
+                  <ptah-cli-lane-default-cell
+                    #detailDefaults
+                    layout="reset"
+                    [cli]="row.cli"
+                    [name]="row.name"
+                    [manifest]="row.manifest"
+                    [saved]="defaults()?.[row.cli]"
                     [disabled]="rowBusy(row) || !canWrite()"
-                    (click)="defaultResetRequested.emit(row)"
+                    (resetRequested)="defaultResetRequested.emit(row)"
                   >
-                    {{ resetDefaultLabel(row) }}
-                  </button>
+                    <button
+                      type="button"
+                      ptahButton
+                      variant="outline"
+                      size="sm"
+                      data-testid="lanes-detail-reset-default"
+                      [disabled]="rowBusy(row) || !canWrite()"
+                      (click)="detailDefaults.requestReset()"
+                    >
+                      {{ resetDefaultLabel(row) }}
+                    </button>
+                  </ptah-cli-lane-default-cell>
                 }
                 @if (row.kind === 'instance') {
                   <button

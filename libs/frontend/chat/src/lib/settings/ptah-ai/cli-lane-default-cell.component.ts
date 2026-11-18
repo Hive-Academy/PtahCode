@@ -97,6 +97,7 @@ let nextTitleId = 0;
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <ng-content />
     @if (layout() === 'card') {
       @if (saved() && (layout() !== 'compact' || showCaption())) {
         <ptah-native-popover
@@ -208,7 +209,7 @@ let nextTitleId = 0;
           >⚠ Unsupported combination: {{ warningText }}</span
         >
       }
-    } @else {
+    } @else if (layout() !== 'reset') {
       <div
         class="flex min-w-0 max-w-full flex-col gap-[var(--ptah-gap-controls)] text-xs text-base-content [overflow-wrap:anywhere]"
       >
@@ -424,7 +425,7 @@ export class CliLaneDefaultCellComponent {
   readonly saved = input<Choice>();
   readonly disabled = input(false);
   /** `compact`: one column at its content width. `wide`: settings row. `card`: full card width, Permission and Network side by side. */
-  readonly layout = input<'compact' | 'wide' | 'card'>('compact');
+  readonly layout = input<'compact' | 'wide' | 'card' | 'reset'>('compact');
   readonly field = input<'both' | 'permission' | 'network'>('both');
   readonly showCaption = input(true);
   readonly selected = output<Choice>();
@@ -607,7 +608,13 @@ export class CliLaneDefaultCellComponent {
       this.openConfirmation({ kind: 'choice', value: choice });
     else this.selected.emit(choice);
   }
-  protected requestReset(): void {
+  /** Shared entry point for projected detail reset controls. */
+  requestReset(): void {
+    if (this.disabled()) return;
+    this.returnFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     this.resetOpen.set(false);
     if (this.defaultPermission() === 'yolo')
       this.openConfirmation({ kind: 'reset' });

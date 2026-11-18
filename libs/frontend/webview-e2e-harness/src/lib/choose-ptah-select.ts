@@ -11,6 +11,7 @@ export async function choosePtahSelect(
     .locator('button[role="combobox"]')
     .or(control.and(control.page().locator('button[role="combobox"]')));
   await trigger.click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   const listboxId = await trigger.getAttribute('aria-controls');
   if (!listboxId) throw new Error('ptah-select did not open a listbox');
   const listbox = control.page().locator(`[id="${listboxId}"]`);

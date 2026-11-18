@@ -1,3 +1,8 @@
+import { CliLaneDefaultCellComponent } from './cli-lane-default-cell.component';
+import {
+  PTAH_CLI_PERMISSION_CAPABILITIES,
+  type CliAdapterManifest,
+} from '@ptah-extension/shared';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { ChangeDetectorRef, Component, input, output } from '@angular/core';
 import { By } from '@angular/platform-browser';
@@ -112,7 +117,86 @@ function narrow(fixture: ComponentFixture<LanesTableComponent>): void {
   fixture.detectChanges();
 }
 
+const defaultManifest: CliAdapterManifest = {
+  ...PTAH_CLI_PERMISSION_CAPABILITIES,
+  messaging: {
+    steer: { state: 'supported' },
+    interrupt: { state: 'supported' },
+    continuation: { state: 'supported' },
+    resume: { state: 'supported' },
+  },
+  roleChannel: 'task-prompt',
+  mcp: { state: 'supported' },
+  limitReader: { state: 'no-reliable-source' },
+};
+
 describe('LanesTableComponent', () => {
+  afterEach(() => jest.restoreAllMocks());
+  it.each(['Confirm', 'Cancel'] as const)(
+    'requires confirmation for a yolo built-in detail reset: %s',
+    async (action) => {
+      HTMLDialogElement.prototype.showModal = function () {
+        this.setAttribute('open', '');
+      };
+      HTMLDialogElement.prototype.close = function () {
+        this.removeAttribute('open');
+      };
+      // Current resolver only supplies plan defaults. Model a yolo built-in
+      // result to verify this alternate entry point obeys the cell's guard.
+      const row = system('codex', { manifest: defaultManifest });
+      const { fixture, host } = await mount([row]);
+      const reset = jest.fn();
+      fixture.componentInstance.defaultResetRequested.subscribe(reset);
+      fixture.componentRef.setInput('defaults', {
+        codex: { permission: 'plan', network: 'deny' },
+      });
+      q(host, 'ptah-table-row-expander button')?.click();
+      fixture.detectChanges();
+      const trigger = q(host, '[data-testid="lanes-detail-reset-default"]')!;
+      expect(trigger).not.toBeNull();
+      const cell = fixture.debugElement
+        .queryAll(By.directive(CliLaneDefaultCellComponent))
+        .find((element) => element.nativeElement.contains(trigger))!
+        .componentInstance as CliLaneDefaultCellComponent;
+      jest.spyOn(cell, 'defaultPermission').mockReturnValue('yolo');
+      trigger.click();
+      fixture.detectChanges();
+      expect(reset).not.toHaveBeenCalled();
+      const dialog = trigger
+        .closest('ptah-cli-lane-default-cell')!
+        .querySelector('dialog')!;
+      expect(dialog.open).toBe(true);
+      expect(dialog.textContent).toContain('Confirm full access');
+      const button = Array.from(dialog.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === action,
+      )!;
+      button.click();
+      fixture.detectChanges();
+      expect(dialog.open).toBe(false);
+      if (action === 'Confirm') expect(reset).toHaveBeenCalledWith(row);
+      else expect(reset).not.toHaveBeenCalled();
+    },
+  );
+
+  it('resets a non-yolo built-in default immediately from details', async () => {
+    const row = system('codex', { manifest: defaultManifest });
+    const { fixture, host } = await mount([row]);
+    const reset = jest.fn();
+    fixture.componentInstance.defaultResetRequested.subscribe(reset);
+    fixture.componentRef.setInput('defaults', {
+      codex: { permission: 'yolo', network: 'allow' },
+    });
+    q(host, 'ptah-table-row-expander button')?.click();
+    fixture.detectChanges();
+    const trigger = q(host, '[data-testid="lanes-detail-reset-default"]')!;
+    trigger.click();
+    expect(reset).toHaveBeenCalledWith(row);
+    expect(
+      trigger.closest('ptah-cli-lane-default-cell')!.querySelector('dialog')!
+        .open,
+    ).toBe(false);
+  });
+
   it('offers reset only for a saved system default in the detail quiet actions at both widths', async () => {
     const codex = system('codex');
     const { fixture, host } = await mount([codex]);

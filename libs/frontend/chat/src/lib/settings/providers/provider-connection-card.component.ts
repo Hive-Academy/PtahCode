@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   afterRenderEffect,
   ElementRef,
@@ -73,6 +74,7 @@ interface InlineAction {
   selector: 'ptah-provider-connection-card',
   standalone: true,
   imports: [
+    NgTemplateOutlet,
     LucideAngularModule,
     SurfaceCardComponent,
     PtahBadgeDirective,
@@ -82,13 +84,16 @@ interface InlineAction {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block min-w-0 self-start' },
   styles: `
+    ptah-surface-card {
+      --ptah-card-padding-sm: var(--ptah-space-2);
+    }
     .connection-face {
       display: grid;
       grid-template-columns: auto minmax(7rem, 1fr) minmax(0, auto);
       column-gap: var(--ptah-gap-inline);
       row-gap: 0;
     }
-    .connection-provenance > span,
+    .connection-provenance > span:not([data-testid='used-by-segment']),
     .connection-provenance [data-testid='card-subtitle'] {
       display: inline;
     }
@@ -119,8 +124,7 @@ interface InlineAction {
       white-space: normal;
       overflow-wrap: normal;
     }
-    .connection-provenance [data-testid='card-subtitle'],
-    .connection-provenance [data-testid='used-by-segment'] {
+    .connection-provenance [data-testid='card-subtitle'] {
       overflow: visible;
       white-space: normal;
       text-overflow: clip;
@@ -168,24 +172,23 @@ interface InlineAction {
           <div
             class="connection-provenance min-w-0 text-xs leading-snug text-base-content-muted"
           >
-            @if (subtitle(); as text) {
-              <span
-                class="flex min-w-0 max-w-full items-center gap-x-ptah-inline"
-              >
+            <ng-template #provenanceSubtitle>
+              @if (subtitle(); as text) {
                 <span
                   class="block min-w-0 truncate text-xs leading-snug text-base-content-muted"
                   [attr.title]="text"
                   data-testid="card-subtitle"
                   >{{ text }}</span
                 >
-              </span>
-            }
+              }
+            </ng-template>
             @if (usedByCount() !== null) {
               <span
                 class="min-w-0 max-w-full line-clamp-2 break-words text-xs text-base-content-muted"
                 #usage
                 data-testid="used-by-segment"
               >
+                <ng-container [ngTemplateOutlet]="provenanceSubtitle" />
                 @if (subtitle()) {
                   <span aria-hidden="true">&#32;&#183;&#160;</span>
                 }
@@ -201,6 +204,8 @@ interface InlineAction {
                   >
                 }
               </span>
+            } @else {
+              <ng-container [ngTemplateOutlet]="provenanceSubtitle" />
             }
           </div>
         </div>
