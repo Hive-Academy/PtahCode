@@ -1,25 +1,3 @@
-/**
- * Dashboard provider account card with compact uniform tiles.
- *
- * One compact tile per quota owner, three to four per row on desktop, all
- * with the same anatomy whatever state each owner is in. The card owns the
- * data flow: it selects the owners (the selected provider's owner first),
- * passes each owner snapshot and the shared `PlanLimitsStore` clock value
- * to `ProviderAccountTileComponent`, and routes refresh and inline actions.
- * The tile presentation itself is pure: every derived text comes from
- * `plan-tile-view.model.ts`, which this rewrite extracted from the former
- * 838-line card. `ProviderAccountRowComponent` is gone.
- *
- * The card is its own Dashboard section (heading + grid), placed by
- * `DashboardGridComponent` above Session Analytics; it does not depend on
- * the analytics date range.
- *
- * Selection: `AuthStateService.activeProviderId()` drives `load({providerId})`.
- * The store merges only the fields a call names, so the card passes exactly
- * `providerId` and never touches the chat view's `sessionIds` / `ownerKeys`.
- * The store owns the generation guard and the single 30 s clock; this card
- * and every tile in it start no timer of their own.
- */
 import {
   ChangeDetectionStrategy,
   Component,
@@ -27,6 +5,7 @@ import {
   computed,
   effect,
   inject,
+  signal,
   untracked,
 } from '@angular/core';
 import {
@@ -36,177 +15,235 @@ import {
 } from '@ptah-extension/core';
 import {
   formatLocalAbsolute,
-  NEAR_LIMIT_PERCENT,
   windowObservedAt,
   type LocalTimeOptions,
-  type PlanLimitOwnerSnapshot,
   type PlanLimitsSnapshot,
 } from '@ptah-extension/shared';
+import {
+  PtahButtonDirective,
+  PtahSectionHeaderComponent,
+  PtahStatePanelComponent,
+} from '@ptah-extension/ui';
 import type { PlanTileActionView } from './plan-tile-view.model';
-import { ProviderAccountTileComponent } from '../provider-account-tile/provider-account-tile.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { groupProviderAccounts } from './provider-account-grouping.model';
+import { ProviderAccountFeatureComponent } from './provider-account-feature.component';
+import { ProviderAccountSummaryRowComponent } from './provider-account-summary-row.component';
 
 @Component({
   selector: 'ptah-provider-account-card',
   standalone: true,
-  imports: [ProviderAccountTileComponent, PtahButtonDirective],
+  imports: [
+    PtahButtonDirective,
+    PtahSectionHeaderComponent,
+    PtahStatePanelComponent,
+    ProviderAccountFeatureComponent,
+    ProviderAccountSummaryRowComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'block', style: 'container: provider-accounts / inline-size' },
   styles: [
-    // Responsive columns follow available section width.
     `
-      :host {
-        display: block;
-        container-type: inline-size;
-      }
-      .tiles {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.5rem;
-      }
-      @container (min-width: 1400px) {
-        .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-      }
-      @container (max-width: 999px) {
-        .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      }
-      @container (max-width: 639px) {
-        .tiles { grid-template-columns: minmax(0, 1fr); }
-      }
-      .tiles > li {
-        min-width: 0;
+      @container provider-accounts (max-width:479px) {
+        section {
+          padding: var(--ptah-space-3);
+        }
       }
     `,
   ],
-  template: `
-    <section
-      class="surface-1 flex flex-col gap-3 rounded-xl p-5"
-      aria-labelledby="provider-accounts-heading"
-      data-testid="dashboard-section-provider-accounts"
+  template: ` <section
+    class="surface-1 rounded-ptah-surface p-ptah-surface flex flex-col gap-ptah-group"
+    aria-labelledby="provider-accounts-heading"
+    data-testid="dashboard-section-provider-accounts"
+  >
+    <ptah-section-header
+      heading="Provider accounts &amp; plan limits"
+      headingId="provider-accounts-heading"
+      size="section"
+      [level]="2"
     >
-      <div>
-        <h3 id="provider-accounts-heading" class="text-base font-semibold" [attr.title]="'The tick on each bar marks ' + nearLimitPercent + '% (near limit); color shows reached limits.'">
-          Provider accounts &amp; plan limits
-        </h3>
-      </div>
-      @if (owners(); as list) {
-        @if (refreshNotice(); as notice) {
-          <p
-            role="status"
-            class="mb-2 border-l-2 border-info pl-2 text-xs text-base-content-muted"
-            data-testid="refresh-failed"
-          >
-            {{ notice }}
-          </p>
-        }
-        @if (list.length === 0) {
-          <section class="surface-2 rounded-lg p-3" aria-label="Account usage">
-            <div class="flex items-center justify-between gap-3">
-              <h5 class="font-medium text-sm">Account usage</h5>
-              <button
-                type="button"
-                ptahButton
-                variant="ghost"
-                size="xs"
-                [disabled]="loading()"
-                (click)="refresh()"
-              >
-                Refresh
-              </button>
-            </div>
-            @if (loading()) {
-              <span
-                class="loading loading-spinner loading-xs mt-3"
-                aria-label="Loading account usage"
-              ></span>
-            } @else {
-              <p
-                class="text-xs text-base-content-muted mt-3"
-                data-testid="usage-unavailable"
-              >
-                Account usage unavailable
-              </p>
-            }
-          </section>
-        } @else {
-          <ul class="tiles">
-            @for (owner of list; track owner.owner.key) {
-              <li>
-                <ptah-provider-account-tile
-                  [owner]="owner"
-                  [now]="now()"
-                  [refreshing]="loading()"
-                  (refresh)="refresh()"
-                  (actionClick)="onTileAction($event)"
-                />
-              </li>
-            }
-          </ul>
-        }
-      } @else if (loading()) {
-        <span
-          class="loading loading-spinner loading-xs"
-          aria-label="Loading account usage"
-        ></span>
+      <button
+        actions
+        type="button"
+        ptahButton
+        variant="ghost"
+        size="sm"
+        [disabled]="loading()"
+        (click)="refresh()"
+      >
+        {{
+          loading()
+            ? 'Refreshing'
+            : loadError() && owners().length === 0
+              ? 'Retry'
+              : 'Refresh'
+        }}
+      </button>
+    </ptah-section-header>
+    @if (owners().length === 0) {
+      <ptah-state-panel
+        [state]="loading() ? 'loading' : loadError() ? 'error' : 'empty'"
+        [title]="loading() ? 'Loading provider usage' : 'Usage unavailable'"
+        [body]="
+          loading() ? null : 'No usage readings returned. Refresh to try again.'
+        "
+      />
+    } @else {
+      @if (refreshNotice(); as notice) {
+        <ptah-state-panel
+          state="partial"
+          title="Refresh failed"
+          [body]="notice"
+          data-testid="refresh-failed"
+        />
       }
-    </section>
-  `,
+      @if (discoveryIncomplete()) {
+        <p class="text-xs text-base-content-muted">
+          Provider discovery is incomplete; more accounts may appear.
+        </p>
+      }
+      <ptah-section-header
+        heading="Selected for chat"
+        size="group"
+        [level]="3"
+      />
+      @if (groups().selected.length > 1) {
+        <p class="text-xs text-base-content-muted">
+          Accounts for selected provider
+        </p>
+      }
+      @for (record of groups().selected; track record.owner.owner.key) {
+        <ptah-provider-account-feature
+          [view]="record.view"
+          [expanded]="expandedOwners().has(record.owner.owner.key)"
+          (toggleExpanded)="toggleOwner(record.owner.owner.key)"
+          (actionClick)="onTileAction($event)"
+        />
+      }
+      @if (groups().selected.length === 0) {
+        <p class="text-sm">
+          No usage reading returned for the selected provider
+        </p>
+      }
+      @if (groups().other.length > 0) {
+        <ptah-section-header
+          heading="Other provider accounts"
+          size="group"
+          [level]="3"
+        />
+        <div class="flex flex-col gap-ptah-heading">
+          @for (record of groups().other; track record.owner.owner.key) {
+            <ptah-provider-account-summary-row
+              [view]="record.view"
+          [expanded]="expandedOwners().has(record.owner.owner.key)"
+          (toggleExpanded)="toggleOwner(record.owner.owner.key)"
+              (actionClick)="onTileAction($event)"
+            />
+          }
+        </div>
+      }
+      @if (groups().withoutReadings.length > 0) {
+        <div>
+          <button
+            type="button"
+            ptahButton
+            variant="ghost"
+            size="sm"
+            [attr.aria-expanded]="quietExpanded()"
+            aria-controls="provider-without-readings"
+            (click)="toggleQuiet()"
+          >
+            Without usage readings ({{ groups().withoutReadings.length }}){{
+              attentionCount()
+                ? ' · ' + attentionCount() + ' need attention'
+                : ''
+            }}
+          </button>
+          <div id="provider-without-readings" [hidden]="!quietExpanded()">
+            @for (
+              record of groups().withoutReadings;
+              track record.owner.owner.key
+            ) {
+              <ptah-provider-account-summary-row
+                [view]="record.view"
+          [expanded]="expandedOwners().has(record.owner.owner.key)"
+          (toggleExpanded)="toggleOwner(record.owner.owner.key)"
+                (actionClick)="onTileAction($event)"
+              />
+            }
+          </div>
+        </div>
+      }
+    }
+  </section>`,
 })
 export class ProviderAccountCardComponent {
   private readonly planLimits = inject(PlanLimitsStore);
   private readonly auth = inject(AuthStateService);
-  /** Tile inline actions navigate through existing app-state routes. */
   private readonly appState = inject(AppStateManager);
-
-  /** Explicit zone and zone-name locale (carry-forward from Batch 3). */
   private readonly timeOptions: LocalTimeOptions = {
-    timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     zoneNameLocale: inject(LOCALE_ID),
   };
-
   protected readonly loading = this.planLimits.loading;
-  /** The near-limit threshold each tile's bar tick marks. */
-  protected readonly nearLimitPercent = NEAR_LIMIT_PERCENT;
-  /** The shared 30 s clock value; every tile consumes it as an input. */
-  protected readonly now = this.planLimits.now;
-
-  /**
-   * `null` until the first snapshot; `[]` for an empty (failed) snapshot.
-   * Owners keep snapshot order, the selected provider's owner first.
-   */
-  protected readonly owners = computed<readonly PlanLimitOwnerSnapshot[] | null>(
-    () => {
-      const snapshot = this.planLimits.snapshot();
-      if (snapshot === null) return null;
-      const selectedProviderId = this.auth.activeProviderId();
-      const selected = snapshot.owners.filter(
-        (o) => o.owner.providerId === selectedProviderId,
-      );
-      const others = snapshot.owners.filter(
-        (o) => o.owner.providerId !== selectedProviderId,
-      );
-      return [...selected, ...others];
-    },
+  protected readonly loadError = this.planLimits.loadError;
+  protected readonly owners = computed(
+    () => this.planLimits.snapshot()?.owners ?? [],
   );
-
-  /**
-   * Neutral notice while a failed pull leaves the last snapshot in place;
-   * `null` after a good pull or push, and when no owner is held (the empty
-   * placeholder renders "Account usage unavailable" instead).
-   */
-  protected readonly refreshNotice = computed<string | null>(() => {
-    if (!this.planLimits.loadError()) return null;
-    const snapshot = this.planLimits.snapshot();
-    if (snapshot === null) return null;
-    return refreshFailedNotice(
-      snapshot,
+  protected readonly groups = computed(() =>
+    groupProviderAccounts(
+      this.owners(),
+      this.auth.activeProviderId(),
       this.planLimits.now(),
       this.timeOptions,
-    );
+    ),
+  );
+  protected readonly discoveryIncomplete = computed(
+    () => this.planLimits.snapshot()?.discoveryIncomplete ?? false,
+  );
+  private readonly quietOpen = signal(false);
+  protected readonly quietExpanded = this.quietOpen.asReadonly();
+  protected readonly attentionCount = computed(
+    () =>
+      this.groups().withoutReadings.filter((record) =>
+        [
+          'service-unavailable',
+          'cli-unavailable',
+          'cli-version-unsupported',
+          'stale',
+        ].includes(record.owner.status),
+      ).length,
+  );
+  protected readonly refreshNotice = computed(() => {
+    const snapshot = this.planLimits.snapshot();
+    return this.loadError() && snapshot
+      ? refreshFailedNotice(snapshot, this.planLimits.now(), this.timeOptions)
+      : null;
   });
-
+  private readonly openOwners = signal<ReadonlySet<string>>(new Set());
+  protected readonly expandedOwners = this.openOwners.asReadonly();
+  private readonly disclosureWatcher = effect(() => {
+    const snapshot = this.planLimits.snapshot();
+    if (snapshot === null) return;
+    const keys = new Set(snapshot.owners.map((owner) => owner.owner.key));
+    untracked(() => this.pruneOwners(keys));
+  });
+  toggleOwner(key: string): void {
+    this.openOwners.update((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  private pruneOwners(keys: ReadonlySet<string>): void {
+    this.openOwners.update((current) => {
+      const next = new Set([...current].filter((key) => keys.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }
+  toggleQuiet(): void {
+    this.quietOpen.update((value) => !value);
+  }
   private readonly providerWatcher = effect(() => {
     const providerId = this.auth.activeProviderId();
     untracked(() => void this.planLimits.load({ providerId }));
@@ -234,11 +271,6 @@ export class ProviderAccountCardComponent {
   }
 }
 
-/**
- * "Refresh failed — showing last observed data", with the newest host
- * observation among the held owners. `null` when no owner is held. Window
- * states keep their own age-based classification.
- */
 export function refreshFailedNotice(
   snapshot: PlanLimitsSnapshot,
   now: number,

@@ -1,0 +1,105 @@
+<div
+  ptahListRow
+  [title]="view().titleName"
+  [meta]="
+    view().titleQualifier
+      ? view().titleQualifier + ' · ' + view().identity
+      : view().identity
+  "
+  [wrapText]="true"
+  class="border-b border-[var(--surface-border)]"
+  data-testid="provider-account-summary-row"
+>
+  <ptah-provider-mark
+    leading
+    [providerId]="view().providerId"
+    aria-hidden="true"
+  />
+  <button
+    trailing
+    type="button"
+    ptahButton
+    variant="ghost"
+    size="sm"
+    [attr.aria-expanded]="expanded()"
+    [attr.aria-controls]="detailId()"
+    (click)="toggleDetails()"
+  >
+    Details
+  </button>
+  <div body class="min-w-0 flex flex-col gap-ptah-heading">
+    @if (view().primaryWindow; as window) {
+      <ptah-provider-quota-window [window]="window" />
+    } @else if (view().accounting[0]; as item) {
+      <p class="text-sm font-semibold tabular-nums">
+        {{ item.label }}: {{ item.valueText }}
+      </p>
+      @for (line of item.provenance; track line) {
+        <p class="text-xs text-base-content-muted">{{ line }}</p>
+      }
+    }
+    @if (view().statusPill; as status) {
+      <ptah-ui-status-badge status="pending" [label]="status.text" />
+    }
+    @if (view().statusNotice; as notice) {
+      <p class="text-xs text-base-content-muted">{{ notice }}</p>
+    }
+    @if (view().cooldown; as cooldown) {
+      <p class="text-xs">{{ cooldown }}</p>
+    }
+    @for (evidence of view().evidence; track evidence.key) {
+      <div class="flex flex-col gap-ptah-label">
+        <ptah-ui-status-badge
+          [status]="evidence.tone === 'warning' ? 'failed' : 'pending'"
+          [label]="
+            evidence.tone === 'warning'
+              ? 'Limit reached'
+              : 'Recorded limit evidence'
+          "
+        />
+        <p class="text-xs">{{ evidence.title }}</p>
+      </div>
+    }
+    @if (view().action; as action) {
+      <button
+        type="button"
+        ptahButton
+        variant="ghost"
+        size="sm"
+        (click)="actionClick.emit(action)"
+      >
+        {{ action.label }}
+      </button>
+    }
+    <div
+      [id]="detailId()"
+      [hidden]="!expanded()"
+      [style.display]="expanded() ? null : 'none'"
+      class="flex flex-col gap-ptah-field"
+    >
+      @if (view().planBadge; as plan) {
+        <p class="text-xs">Plan: {{ plan }}</p>
+      }
+      @for (window of view().secondaryWindows; track window.key) {
+        <ptah-provider-quota-window [window]="window" />
+      }
+      @for (line of view().provenance; track line) {
+        <p class="text-xs text-base-content-muted">{{ line }}</p>
+      }
+      @for (
+        item of view().accounting.slice(view().primaryWindow ? 0 : 1);
+        track item.key
+      ) {
+        <p class="text-sm tabular-nums">
+          {{ item.label }}: {{ item.valueText }}
+        </p>
+        @for (line of item.provenance; track line) {
+          <p class="text-xs text-base-content-muted">{{ line }}</p>
+        }
+      }
+      @for (entry of view().modelUsage; track entry.model) {
+        <p class="text-xs">{{ entry.model }}: {{ entry.requests }} requests</p>
+      }
+    </div>
+  </div>
+</div>

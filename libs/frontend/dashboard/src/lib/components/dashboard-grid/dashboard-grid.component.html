@@ -1,19 +1,9 @@
 <div class="min-h-full space-y-5 bg-surface-0 p-4" data-testid="dashboard-grid">
-  <header class="flex items-center gap-3">
-    <button
-      type="button"
-      ptahIconButton
-      label="Back to chat"
-      (click)="navigateBack()"
-    >
-      <lucide-angular
-        [img]="ArrowLeftIcon"
-        class="w-5 h-5"
-        aria-hidden="true"
-      ></lucide-angular>
-    </button>
-    <h2 class="text-xl font-bold">Dashboard</h2>
-  </header>
+  <ptah-page-header
+    title="Dashboard"
+    backLabel="Back to chat"
+    (back)="navigateBack()"
+  />
 
   <ptah-provider-account-card />
 

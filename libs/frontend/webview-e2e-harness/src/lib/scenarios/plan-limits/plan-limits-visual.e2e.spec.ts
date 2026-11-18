@@ -210,14 +210,17 @@ test.describe('plan limits > dashboard provider account card', () => {
         await page.goto(fixtureServer.url);
 
         const card = page.locator('ptah-provider-account-card');
-        const tiles = card.locator('[data-testid="provider-account-tile"]');
+        // Every owner renders once: the selected provider as a feature block,
+        // the others as summary rows (rows of the collapsed quiet group stay
+        // in the DOM, hidden).
+        const tiles = card.locator(
+          '[data-testid="provider-account-feature"], [data-testid="provider-account-summary-row"]',
+        );
         await expect(tiles).toHaveCount(DASHBOARD_SNAPSHOT.owners.length, {
           timeout: 15_000,
         });
         await expect(
-          card
-            .locator('[data-testid="tile-detail"]')
-            .filter({ hasText: 'a retry delay, not a plan reset' }),
+          card.getByText('a retry delay, not a plan reset', { exact: false }),
         ).toBeVisible();
         await fitViewportHeight(page, card, width);
         await capture(card, shotPath('dashboard-card', 'owners', theme, width));
@@ -226,8 +229,9 @@ test.describe('plan limits > dashboard provider account card', () => {
         const refreshNotice = card.locator('[data-testid="refresh-failed"]');
         await expect(refreshNotice).toHaveCount(0);
         rpc.failPulls = true;
-        await tiles.first().getByRole('button', { name: /^Refresh / }).click();
-        await expect(refreshNotice).toHaveAttribute('role', 'status');
+        // One section-level Refresh replaces the per-tile refresh icons.
+        await card.getByRole('button', { name: 'Refresh', exact: true }).click();
+        await expect(refreshNotice.getByRole('status')).toBeVisible();
         await expect(refreshNotice).toContainText(
           'Refresh failed — showing last observed data',
         );

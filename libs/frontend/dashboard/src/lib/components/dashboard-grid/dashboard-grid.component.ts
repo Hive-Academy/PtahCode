@@ -1,11 +1,10 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { LucideAngularModule, ArrowLeft } from 'lucide-angular';
 import { AppStateManager } from '@ptah-extension/core';
 import { AnalyticsCardComponent } from '../analytics-card/analytics-card.component';
 import { BuildersCardComponent } from '../builders-card/builders-card.component';
 import { ProviderAccountCardComponent } from '../provider-account-card/provider-account-card.component';
 import { SkillSelectionCardComponent } from '../skill-selection-card/skill-selection-card.component';
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahPageHeaderComponent } from '@ptah-extension/ui';
 
 /**
  * DashboardGridComponent
@@ -20,12 +19,11 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
   selector: 'ptah-dashboard-grid',
   standalone: true,
   imports: [
-    LucideAngularModule,
     ProviderAccountCardComponent,
     SkillSelectionCardComponent,
     AnalyticsCardComponent,
     BuildersCardComponent,
-    PtahIconButtonDirective,
+    PtahPageHeaderComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './dashboard-grid.component.html',
@@ -44,7 +42,6 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
 })
 export class DashboardGridComponent {
   private readonly appState = inject(AppStateManager);
-  readonly ArrowLeftIcon = ArrowLeft;
 
   navigateBack(): void {
     this.appState.setCurrentView('chat');
