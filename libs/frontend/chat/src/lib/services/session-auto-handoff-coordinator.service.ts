@@ -91,8 +91,11 @@ export class SessionAutoHandoffCoordinatorService {
   private readonly retryRevision = signal(0);
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly reconcileTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Delivered turns still streaming when the bounded status poll expires. */
-  private readonly awaitingSettlement = new Map<string, string>();
+  /** Delivery alone does not prove a turn started; retain observations past polling. */
+  private readonly awaitingSettlement = new Map<string, {
+    tabId: string;
+    state: 'waiting' | 'streaming' | 'settled';
+  }>();
   private readonly deferralTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Sessions with a probe or send in flight; guarded synchronously, so a re-run cannot double-fire. */
@@ -122,12 +125,15 @@ export class SessionAutoHandoffCoordinatorService {
       this.retryRevision();
       const candidates = this.candidates();
       const stale = this.staleQueued();
-      for (const [sessionId, tabId] of this.awaitingSettlement) {
+      for (const [sessionId, delivery] of this.awaitingSettlement) {
+        const { tabId } = delivery;
         const tab = this.budgetTabs().find((item) => item.id === tabId);
         if (!tab || tab.claudeSessionId !== sessionId || this.autoHandoff.entry(sessionId)?.state !== 'delivered') {
           this.awaitingSettlement.delete(sessionId);
-        } else if (tab.status !== 'streaming') {
-          this.awaitingSettlement.delete(sessionId);
+        } else if (tab.status === 'streaming') {
+          delivery.state = 'streaming';
+        } else if (delivery.state === 'streaming') {
+          delivery.state = 'settled';
           this.scheduleReconcile(tabId, sessionId, 0);
         }
       }
@@ -366,6 +372,8 @@ export class SessionAutoHandoffCoordinatorService {
       this.autoHandoff.recordQueued(sessionId, queued);
       this.sentAttempts.set(sessionId, (this.sentAttempts.get(sessionId) ?? 0) + 1);
       if (!queued) {
+        // A send that already ran to its end streams nothing afterwards.
+        this.awaitingSettlement.set(sessionId, { tabId, state: outcome.settled === true ? 'settled' : 'waiting' });
         this.autoHandoff.transition(sessionId, 'delivered');
       }
       this.scheduleReconcile(tabId, sessionId, 0);
@@ -392,6 +400,7 @@ export class SessionAutoHandoffCoordinatorService {
   private watchQueued(sessionId: string, queued: QueuedFollowUpRef): void {
     this.followUpStore.onSettled(queued.clientMessageId, (outcome) => {
       if (outcome === 'delivered' || outcome === 'steered') {
+        this.awaitingSettlement.set(sessionId, { tabId: queued.tabId, state: 'waiting' });
         this.autoHandoff.transition(sessionId, 'delivered');
         this.scheduleReconcile(queued.tabId, sessionId, 0);
         return;
@@ -445,7 +454,7 @@ export class SessionAutoHandoffCoordinatorService {
       clearTimeout(timer);
       this.reconcileTimers.delete(sessionId);
     }
-    for (const [sessionId, tabId] of this.awaitingSettlement) {
+    for (const [sessionId, { tabId }] of this.awaitingSettlement) {
       if (!this.budgetTabs().some((tab) => tab.id === tabId && tab.claudeSessionId === sessionId)) {
         this.awaitingSettlement.delete(sessionId);
       }
@@ -529,7 +538,8 @@ export class SessionAutoHandoffCoordinatorService {
         this.autoHandoff.release(sessionId);
         this.retryRevision.update((value) => value + 1);
         return;
-      } else if (status.state === 'absent' && current.state === 'delivered' && currentTab.status !== 'streaming') {
+      } else if (status.state === 'absent' && current.state === 'delivered' &&
+        this.awaitingSettlement.get(sessionId)?.state === 'settled' && currentTab.status !== 'streaming') {
         if ((this.sentAttempts.get(sessionId) ?? current.attempts) >= MAX_FAILED_ATTEMPTS) {
           this.autoHandoff.transition(sessionId, 'failed');
           return;
@@ -548,10 +558,6 @@ export class SessionAutoHandoffCoordinatorService {
       }
     }
     if (step < 12) this.scheduleReconcile(tabId, sessionId, step + 1);
-    else if (this.autoHandoff.entry(sessionId)?.state === 'delivered' &&
-      this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab?.status === 'streaming') {
-      this.awaitingSettlement.set(sessionId, tabId);
-    }
   }
 
   /**
