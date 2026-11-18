@@ -18,6 +18,8 @@ import type {
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { By } from '@angular/platform-browser';
 import { VoiceConfigComponent } from './voice-config.component';
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
+import { SearchVoiceSummaryStore } from './search-voice-summary.store';
 import { VoiceDetailsDrawerComponent } from './voice-details-drawer.component';
 
 function providers(elevenlabsAvailable = false): VoiceProviderCapabilityDto[] {
@@ -99,6 +101,7 @@ describe('VoiceConfigComponent', () => {
         { provide: ProvidersSettingsStateService, useValue: { commit: signal({ status: 'idle' }) } },
         { provide: VSCodeService, useValue: { isElectron: true, config: signal({}) } },
         SettingsSaveFeedbackService,
+        SearchVoiceSummaryStore,
       ],
       deferBlockBehavior: DeferBlockBehavior.Manual,
     });
@@ -119,9 +122,9 @@ describe('VoiceConfigComponent', () => {
   const calls = (method: string) => call.mock.calls.filter(([m]) => m === method).map(([, params]) => params);
 
   async function choose(direction: 'stt' | 'tts', id: string): Promise<void> {
-    const select = byTestId<HTMLSelectElement>(`voice-provider-btn-${direction}`);
-    select.value = id;
-    select.dispatchEvent(new Event('change'));
+    const select = fixture.debugElement.queryAll(By.directive(PtahRichSelectComponent))
+      .find(el => el.nativeElement.getAttribute('data-testid') === `voice-provider-btn-${direction}`);
+    select?.componentInstance.value.set(id);
     await settle();
   }
 
@@ -133,20 +136,20 @@ describe('VoiceConfigComponent', () => {
     expect(
       element.querySelector('section')?.getAttribute('data-glass-surface'),
     ).toBe('content');
-    expect(byTestId('voice-config-loading').textContent).toContain('Loading voice providers');
+    expect(byTestId('voice-config-loading').querySelector('[aria-busy="true"]')).not.toBeNull();
 
     finish();
     await settle();
     expect(queryTestId('voice-config-loading')).toBeNull();
-    expect(element.textContent).toContain('Local engines run offline;');
+    expect(element.textContent).toContain('Local engines run on this device.');
     expect(byTestId('voice-engines-matrix')).not.toBeNull();
-    expect(byTestId('voice-provider-btn-stt').closest('ptah-field')?.querySelector('[data-appearance]')?.getAttribute('data-appearance')).toBe('stacked');
+    expect(byTestId('voice-provider-btn-stt').closest('ptah-setting-row')).not.toBeNull();
     expect(byTestId('voice-provider-btn-stt').textContent).toContain('Local (Whisper / Kokoro)');
     expect(byTestId('voice-engine-model-stt').textContent).toContain('base.en');
     expect(byTestId('voice-engine-model-tts').textContent).toContain('af_heart');
   });
 
-  it('summarises readiness per direction with colour only on the dot (V12)', async () => {
+  it('summarises readiness per direction with a labelled status (V12)', async () => {
     currentConfig = config({ ttsProvider: 'elevenlabs' });
     await render();
 
@@ -154,8 +157,8 @@ describe('VoiceConfigComponent', () => {
     const tts = byTestId('voice-engine-status-tts');
     expect(stt.textContent).toContain('Ready');
     expect(tts.textContent).toContain('No key');
-    expect(stt.classList).toContain('text-base-content');
-    expect(tts.querySelector('.bg-warning')).not.toBeNull();
+    expect(stt.getAttribute('data-ink')).toBe('done');
+    expect(tts.getAttribute('data-ink')).toBe('need');
     expect(byTestId('voice-engine-model-tts').textContent).toContain('No voice chosen');
   });
 
@@ -219,11 +222,13 @@ describe('VoiceConfigComponent', () => {
   it('keeps an unavailable provider disabled with its reason as visible text (V10)', async () => {
     responses['voice:listProviders'] = () => ok({ ok: true, providers: providers(false), active: { tts: 'local', stt: 'local' } });
     await render();
-    const option = byTestId<HTMLOptionElement>('voice-provider-option-stt-elevenlabs');
-    expect(option.disabled).toBe(true);
-    expect(option.textContent).toContain('API key not configured');
+    byTestId('voice-provider-btn-stt').querySelector<HTMLButtonElement>('button[role=combobox]')?.click();
+    fixture.detectChanges();
+    const option = byTestId('voice-provider-option-stt-elevenlabs').closest('[role=option]');
+    expect(option?.getAttribute('aria-disabled')).toBe('true');
+    expect(option?.textContent).toContain('API key not configured');
     expect(byTestId('voice-provider-reason-stt-elevenlabs').textContent).toContain('API key not configured');
-    expect(byTestId<HTMLOptionElement>('voice-provider-option-stt-local').selected).toBe(true);
+    expect(byTestId('voice-provider-btn-stt').textContent).toContain('Local');
   });
 
   it('saves a provider on selection, re-reads config, and Undo writes the previous provider (V10/V11)', async () => {
@@ -237,7 +242,7 @@ describe('VoiceConfigComponent', () => {
     expect(calls('voice:setProviderConfig')).toEqual([{ sttProvider: 'elevenlabs' }]);
     expect(calls('voice:getProviderConfig').length).toBe(2);
     expect(component.sttProviderId()).toBe('elevenlabs');
-    expect(byTestId<HTMLSelectElement>('voice-provider-btn-stt').value).toBe('elevenlabs');
+    expect(byTestId('voice-provider-btn-stt').textContent).toContain('ElevenLabs');
     expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved speech-to-text provider.', canUndo: true });
 
     await feedback.undo();
@@ -259,7 +264,7 @@ describe('VoiceConfigComponent', () => {
     await choose('tts', 'elevenlabs');
 
     expect(component.ttsProviderId()).toBe('local');
-    expect(byTestId<HTMLSelectElement>('voice-provider-btn-tts').value).toBe('local');
+    expect(byTestId('voice-provider-btn-tts').textContent).toContain('Local');
     expect(feedback.toast()).toEqual({
       tone: 'alert', message: 'Could not save the text-to-speech engine.', canUndo: false,
     });
@@ -295,6 +300,16 @@ describe('VoiceConfigComponent', () => {
     expect(element.textContent).not.toContain('host detail');
   });
 
+  it('opens the TTS tab with a clear request for the page Clear key action, and other Details reset it', async () => {
+    await render();
+    component.requestClearKey();
+    expect(component.drawerDirection()).toBe('tts');
+    expect(component.clearKeyRequested()).toBe(true);
+    component.openDetails('stt');
+    expect(component.drawerDirection()).toBe('stt');
+    expect(component.clearKeyRequested()).toBe(false);
+  });
+
   it('loads the drawer only when Details is used, on that direction\'s tab', async () => {
     await render();
     const [block] = await fixture.getDeferBlocks();
@@ -315,6 +330,31 @@ describe('VoiceConfigComponent', () => {
     expect(document.querySelector('[data-testid="voice-details-drawer"]')).toBeNull();
   });
 
+  it('reports ready, setup, loading and error states to the band', async () => {
+    await render();
+    const summary = TestBed.inject(SearchVoiceSummaryStore);
+    expect(summary.segments().find(segment => segment.id === 'voice')).toMatchObject({ value: 'Needs setup', tone: 'warn' });
+    component.config.set(config({ local: { ...config().local, ttsDownloaded: true } }));
+    await settle();
+    expect(summary.segments().find(segment => segment.id === 'voice')).toMatchObject({ value: 'Ready', meta: 'Local in, Local out', tone: 'ok' });
+    component.isLoading.set(true);
+    await settle();
+    expect(summary.segments().find(segment => segment.id === 'voice')).toMatchObject({ value: 'Loading', tone: 'idle' });
+    component.isLoading.set(false);
+    component.errorMessage.set('Could not load the voice settings.');
+    await settle();
+    expect(summary.segments().find(segment => segment.id === 'voice')).toMatchObject({ value: 'Error', tone: 'error' });
+  });
+
+  it('opens the TTS drawer from both ElevenLabs summary actions', async () => {
+    await render();
+    for (const id of ['voice-elevenlabs-manage', 'voice-elevenlabs-details']) {
+      component.drawerDirection.set(null);
+      byTestId<HTMLButtonElement>(id).click();
+      expect(component.drawerDirection()).toBe('tts');
+    }
+  });
+
   it('re-reads provider availability after a drawer save so a newly keyed ElevenLabs is selectable', async () => {
     responses['voice:listProviders'] = () => ok({ ok: true, providers: providers(false), active: { tts: 'local', stt: 'local' } });
     await render();
@@ -331,6 +371,8 @@ describe('VoiceConfigComponent', () => {
     expect(calls('voice:getProviderConfig').length).toBe(2);
     component.drawerDirection.set(null);
     fixture.detectChanges();
-    expect(byTestId<HTMLOptionElement>('voice-provider-option-stt-elevenlabs').disabled).toBe(false);
+    byTestId('voice-provider-btn-stt').querySelector<HTMLButtonElement>('button[role=combobox]')?.click();
+    fixture.detectChanges();
+    expect(byTestId('voice-provider-option-stt-elevenlabs').closest('[role=option]')?.getAttribute('aria-disabled')).not.toBe('true');
   });
 });

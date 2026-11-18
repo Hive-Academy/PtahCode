@@ -5,12 +5,14 @@ import {
   OnInit,
   inject,
   signal,
+  effect,
+  afterNextRender,
+  Injector,
+  untracked,
 } from '@angular/core';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import {
   PtahBadgeDirective,
-  PtahButtonDirective,
-  PtahFormSectionComponent,
   PtahSettingRowComponent,
   PtahAlertComponent,
 } from '@ptah-extension/ui';
@@ -22,6 +24,8 @@ import {
 import { SettingsConnectionTestComponent } from '../shared/settings-connection-test.component';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { ProviderId, ProviderOption, ProviderTestResult, WebSearchProviderRowsComponent } from './web-search-provider-rows.component';
+
+import { SearchVoiceSummaryStore } from './search-voice-summary.store';
 
 type WriteResult = { ok: true } | { ok: false; message: string };
 
@@ -72,26 +76,14 @@ function providerLabel(provider: ProviderId): string {
   );
 }
 
-/**
- * Web search card on the Search & Voice tab (pattern map V1-V8).
- *
- * A `table-xs` matrix with one row per provider (Tavily, Serper, Exa): an "On" checkbox, the
- * provider and its free-tier line, the key badge, the last test result and the key actions. Max
- * results sits in a policy bar under the matrix. Every write goes through
- * {@link SettingsSaveFeedbackService.saveGeneric}: "Saved" only after the write's own result, a
- * failed write reverts the control and raises an alert toast (D15). Keys are entered in a popover
- * and never rendered; Clear asks for an inline confirm and has no Undo. Testing probes the stored
- * keys only, so a key is saved first and tested after (G11).
- */
+/** Web search provider cards. Writes retain feedback, rollback and inline key confirmation. */
 @Component({
   selector: 'ptah-web-search-config',
   standalone: true,
   imports: [
     SettingsBusyDisabledDirective,
-      PtahBadgeDirective,
-    PtahButtonDirective,
-            PtahFormSectionComponent,
-        PtahSettingRowComponent,
+    PtahBadgeDirective,
+    PtahSettingRowComponent,
     PtahAlertComponent,
     SettingsConnectionTestComponent,
     SettingsSectionStateComponent,
@@ -105,15 +97,10 @@ function providerLabel(provider: ProviderId): string {
       class="border-b border-base-content/10 pb-7"
       data-glass-surface="content"
     >
-      <ptah-form-section
-        id="web-search-heading"
-        heading="Web Search"
-        level="2"
-        description="Enable web search for AI agents via the ptah_web_search MCP tool. Select one or more providers to run in parallel."
-      >
-        <div aside>
+      <header class="web-search-header">
+        <h2 id="web-search-heading" tabindex="-1">Web search</h2>
           <ptah-settings-connection-test
-            label="Test connection"
+            label="Test web search"
             [state]="
               isTesting()
                 ? 'running'
@@ -134,7 +121,8 @@ function providerLabel(provider: ProviderId): string {
             ariaLabel="Test web search connection"
             (test)="testSearch()"
           />
-        </div>
+        <p class="text-sm text-base-content-muted">Agents search through the selected providers. Keys stay encrypted on this device.</p>
+      </header>
         @if (
           errorMessage() === LOAD_CONFIG_FAILED ? null : errorMessage();
           as message
@@ -183,12 +171,14 @@ function providerLabel(provider: ProviderId): string {
                (cancelClear)="cancelClear($event)"
              />
 
-            <p class="text-xs text-base-content-muted mt-2">
+            <p class="selection-note text-xs text-base-content-muted">
               At least one provider must stay selected.
             </p>
 
             <ptah-setting-row
+              class="max-results-row"
               label="Max results"
+              hint="Results each provider returns for one search."
               controlId="web-search-max-results"
               density="compact"
             >
@@ -200,14 +190,14 @@ function providerLabel(provider: ProviderId): string {
                 [value]="maxResults()"
                 [ptahBusyDisabled]="saving()"
                 (change)="onMaxResultsChange($event)"
-                class="range range-xs range-primary w-full min-w-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                class="max-results range range-xs range-primary min-w-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                 data-testid="settings-web-search-max-results"
               />
               <span
                 ptahBadge
                 appearance="outline"
                 count
-                class="font-mono text-base-content"
+                class="text-base-content"
                 aria-hidden="true"
                 >{{ maxResults() }}</span
               >
@@ -217,10 +207,19 @@ function providerLabel(provider: ProviderId): string {
             </ptah-setting-row>
           </ng-template>
         </ptah-settings-section-state>
-      </ptah-form-section>
+
     </section>
   `,
   styles: `
+    .web-search-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--ptah-gap-label) var(--ptah-gap-controls); margin-bottom: var(--ptah-gap-heading); }
+    .web-search-header h2 { font-size: var(--ptah-text-section-title-size); line-height: var(--ptah-text-section-title-leading); font-weight: var(--ptah-text-section-title-weight); }
+    .web-search-header p { grid-column: 1 / -1; }
+    .max-results { width: 16rem; max-width: 100%; }
+    .selection-note { margin-top: var(--ptah-gap-label); }
+    /* Divider and row gap between the provider grid note and the next setting. */
+    .max-results-row { margin-top: var(--ptah-gap-field); border-top: var(--ptah-border-width) solid var(--ptah-border-color); }
+    @media (max-width: 639px) { .max-results { width: 100%; } }
+
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 1.25rem;
     }
@@ -229,6 +228,9 @@ function providerLabel(provider: ProviderId): string {
 export class WebSearchConfigComponent implements OnInit {
   private readonly rpcService = inject(ClaudeRpcService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
+  private readonly summary = inject(SearchVoiceSummaryStore, { optional: true });
+  private readonly injector = inject(Injector);
+  private readonly keysLoading = signal(true);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly TEST_FAILED = TEST_FAILED;
@@ -257,6 +259,20 @@ export class WebSearchConfigComponent implements OnInit {
   readonly errorMessage = signal<string | null>(null);
   readonly configLoaded = signal(false);
 
+  constructor() {
+    effect(() => {
+      const selected = this.providerOptions.filter(opt => this.selectedProviders().has(opt.value));
+      const ready = selected.filter(opt => this.apiKeyConfigured()[opt.value]).length;
+      const missing = selected.find(opt => !this.apiKeyConfigured()[opt.value]);
+      const failed = this.errorMessage() === LOAD_CONFIG_FAILED;
+      const loading = !this.configLoaded() || this.keysLoading();
+      untracked(() => this.summary?.report('web-search', failed
+        ? { value: 'Error', tone: 'error' }
+        : loading ? { value: 'Loading', tone: 'idle' }
+        : { value: `${ready} of 3 ready`, meta: missing ? `${missing.label} needs a key` : 'All selected have keys', tone: ready === 0 ? 'error' : missing ? 'warn' : 'ok' }));
+    });
+  }
+
   isSelected(provider: ProviderId): boolean {
     return this.selectedProviders().has(provider);
   }
@@ -272,6 +288,7 @@ export class WebSearchConfigComponent implements OnInit {
   /** Loads the provider selection, max results and every key status. */
   async loadConfig(): Promise<void> {
     this.errorMessage.set(null);
+    this.keysLoading.set(true);
 
     try {
       const configResult = await this.rpcService.call(
@@ -295,6 +312,7 @@ export class WebSearchConfigComponent implements OnInit {
     }
 
     await this.loadApiKeyStatuses();
+    this.keysLoading.set(false);
   }
 
   /** Reads the key status of every provider; an unreadable status shows as "No key". */
@@ -375,9 +393,13 @@ export class WebSearchConfigComponent implements OnInit {
     this.confirmingClear.set(null);
   }
 
-  /** Every dismissal route (Cancel, Esc, backdrop, successful save) drops the typed key. */
+  /** Cancel, Escape and successful save drop the typed key and restore trigger focus. */
   closeKeyEditor(): void {
+    const provider = this.activeKeyProvider();
     this.activeKeyProvider.set(null);
+    afterNextRender(() => {
+      this.host.nativeElement.querySelector<HTMLButtonElement>(`[data-testid="settings-web-search-key-btn-${provider}"]`)?.focus();
+    }, { injector: this.injector });
     this.apiKeyInput.set('');
     this.keyVisible.set(false);
   }
@@ -386,7 +408,7 @@ export class WebSearchConfigComponent implements OnInit {
     this.apiKeyInput.set((event.target as HTMLInputElement).value);
   }
 
-  /** Saves the key typed in the open popover (S-explicit, no Undo). The popover closes only on success. */
+  /** Saves the inline key (S-explicit, no Undo). The editor closes only on success. */
   async saveApiKey(): Promise<void> {
     const provider = this.activeKeyProvider();
     const apiKey = this.apiKeyInput().trim();

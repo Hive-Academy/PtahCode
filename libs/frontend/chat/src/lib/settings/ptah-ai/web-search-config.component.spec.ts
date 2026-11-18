@@ -16,6 +16,8 @@ import {
 } from '@ptah-extension/core';
 import { NativePopoverComponent } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import { SearchVoiceSummaryStore } from './search-voice-summary.store';
+import { WebSearchProviderRowsComponent } from './web-search-provider-rows.component';
 import { WebSearchConfigComponent } from './web-search-config.component';
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
@@ -30,7 +32,8 @@ import { isDisabledControl } from '../feedback/busy-disabled.testing';
     }`,
 })
 class NativePopoverStub {
-  readonly isOpen = input.required<boolean>();
+  readonly isOpen = input(false);
+  readonly keepInViewport = input(false);
   readonly closed = output<void>();
 }
 
@@ -87,8 +90,9 @@ describe('WebSearchConfigComponent', () => {
         { provide: ProvidersSettingsStateService, useValue: { commit: signal({ status: 'idle' }) } },
         { provide: VSCodeService, useValue: { isElectron: false, config: signal({}) } },
         SettingsSaveFeedbackService,
+        SearchVoiceSummaryStore,
       ],
-    }).overrideComponent(WebSearchConfigComponent, {
+    }).overrideComponent(WebSearchProviderRowsComponent, {
       remove: { imports: [NativePopoverComponent] },
       add: { imports: [NativePopoverStub] },
     });
@@ -130,7 +134,7 @@ describe('WebSearchConfigComponent', () => {
 
   it('floats each provider key label and connects every rendered label to its control', async () => {
     await render();
-    for (const [provider, name] of [['tavily', 'Tavily'], ['serper', 'Serper'], ['exa', 'Exa']]) {
+    for (const provider of ['tavily', 'serper', 'exa']) {
       byTestId<HTMLButtonElement>(`settings-web-search-key-btn-${provider}`).click();
       await settle();
       const control = byTestId<HTMLInputElement>('settings-web-search-key-input');
@@ -140,25 +144,27 @@ describe('WebSearchConfigComponent', () => {
       expect(field?.querySelector('[data-ptah-field]')?.getAttribute('data-appearance')).toBe('floating');
       const label = field?.querySelector<HTMLLabelElement>('label');
       expect(label).not.toBeNull();
-      expect(label?.textContent?.trim()).toBe(`API key for ${name}`);
+      expect(label?.textContent?.trim()).toBe('API key');
       expect(label?.htmlFor).toBe(control.id);
+      const providerLabel = { tavily: 'Tavily', serper: 'Serper', exa: 'Exa' }[provider];
+      expect(control.getAttribute('aria-label')).toBe(`API key for ${providerLabel}`);
       for (const renderedLabel of element.querySelectorAll<HTMLLabelElement>('label[for]')) {
         expect(element.ownerDocument.getElementById(renderedLabel.htmlFor)).not.toBeNull();
       }
-      byTestId<HTMLButtonElement>(`settings-web-search-key-btn-${provider}`).click();
+      byTestId<HTMLButtonElement>('settings-web-search-key-cancel').click();
       await settle();
     }
   });
 
-  it('stacks the label when editing an already configured API key', async () => {
+  it('floats the label when editing an already configured API key', async () => {
     responses['webSearch:getApiKeyStatus'] = () => ok({ configured: true });
     await render();
     for (const provider of ['tavily', 'serper', 'exa']) {
       byTestId<HTMLButtonElement>(`settings-web-search-key-btn-${provider}`).click();
       await settle();
       const field = byTestId<HTMLInputElement>('settings-web-search-key-input').closest('ptah-field');
-      expect(field?.querySelector('[data-ptah-field]')?.getAttribute('data-appearance')).toBe('stacked');
-      byTestId<HTMLButtonElement>(`settings-web-search-key-btn-${provider}`).click();
+      expect(field?.querySelector('[data-ptah-field]')?.getAttribute('data-appearance')).toBe('floating');
+      byTestId<HTMLButtonElement>('settings-web-search-key-cancel').click();
       await settle();
     }
   });
@@ -172,7 +178,7 @@ describe('WebSearchConfigComponent', () => {
     ]);
     expect(element.querySelectorAll('[role="listitem"]')).toHaveLength(3);
     const section = element.querySelector<HTMLElement>('section[data-glass-surface]');
-    expect(section?.querySelector('ptah-form-section h2')?.textContent).toContain('Web Search');
+    expect(section?.querySelector('h2#web-search-heading')?.textContent).toContain('Web search');
     expect(section?.classList).toContain('border-base-content/10');
     expect(section?.classList).not.toContain('card');
     expect(section?.getAttribute('data-glass-surface')).toBe('content');
@@ -196,30 +202,79 @@ describe('WebSearchConfigComponent', () => {
     expect(alert.textContent).toContain('Retry');
   });
 
-  it('keeps the free-tier copy and signup links (V3)', async () => {
-    await render();
-    expect(element.textContent).toContain('Free tier: 2,500 searches/month.');
-    expect(byTestId<HTMLAnchorElement>('settings-web-search-signup-exa').href).toBe('https://exa.ai/');
-  });
-
-  it('keeps each provider row to one name line and one free-tier line (map §3.2 density, Batch 50)', async () => {
+  it('keeps provider details in an info popover and the signup link in the footer', async () => {
     responses['webSearch:getApiKeyStatus'] = () => ok({ configured: true });
     await render();
-    const providerCell = byTestId('settings-web-search-signup-serper').closest('[title]') as HTMLElement;
-    expect(providerCell.getAttribute('title')).toBe('Google Search API. Fast, reliable results. Free tier: 2,500 searches/month.');
-    expect(providerCell.querySelector('.sr-only')?.textContent).toContain('Google Search API. Fast, reliable results.');
-    const line = byTestId('settings-web-search-signup-serper').parentElement as HTMLElement;
-    expect(line.textContent?.replace(/\s+/g, ' ').trim()).toBe('Free tier: 2,500 searches/month. Get API key');
-    // D3: the free-tier line is 12 px (text-xs, 16 px line) so the row stays at about 42 px, within 48.
-    expect(line.classList).toContain('text-xs');
-    expect(line.classList).not.toContain('text-[10px]');
-    // Update key and Clear share one non-wrapping row; the confirm opens below it.
-    const actions = byTestId('settings-web-search-clear-btn-serper').parentElement as HTMLElement;
-    expect(actions.classList).toContain('flex-nowrap');
-    expect(actions.contains(byTestId('settings-web-search-key-btn-serper'))).toBe(true);
-    const row = actions.parentElement as HTMLElement;
-    expect(row.classList).toContain('flex-nowrap');
-    expect(row.contains(providerCell)).toBe(true);
+    const card = byTestId('settings-web-search-signup-serper').closest('[role="listitem"]');
+    expect(card?.querySelector('.sr-only')?.textContent).toContain('Google Search API. Fast, reliable results.');
+    expect(element.textContent).not.toContain('Free tier: 2,500 searches/month.');
+    card?.querySelector<HTMLButtonElement>('[aria-label="About Serper"]')?.click();
+    await settle();
+    expect(element.textContent).toContain('Free tier: 2,500 searches/month.');
+    expect(byTestId<HTMLAnchorElement>('settings-web-search-signup-exa').href).toBe('https://exa.ai/');
+    const footer = byTestId('settings-web-search-clear-btn-serper').parentElement;
+    expect(footer?.contains(byTestId('settings-web-search-key-btn-serper'))).toBe(true);
+    expect(footer?.contains(byTestId('settings-web-search-signup-serper'))).toBe(true);
+    expect(card?.getAttribute('data-readiness')).toBe('off');
+  });
+
+  it('renders a focusable section heading and returns focus after Escape closes the inline key editor', async () => {
+    await render();
+    expect(element.querySelector('h2#web-search-heading')?.getAttribute('tabindex')).toBe('-1');
+    const trigger = byTestId<HTMLButtonElement>('settings-web-search-key-btn-tavily');
+    trigger.click();
+    await settle();
+    const field = byTestId<HTMLInputElement>('settings-web-search-key-input');
+    expect(document.activeElement).toBe(field);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(queryTestId('settings-web-search-key-input')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it.each(['settings-web-search-key-visibility', 'settings-web-search-key-save', 'settings-web-search-key-cancel'])(
+    'closes the key editor on Escape from %s, restores focus and stops the event',
+    async (testId) => {
+      await render();
+      const trigger = byTestId<HTMLButtonElement>('settings-web-search-key-btn-tavily');
+      trigger.click();
+      await settle();
+      const outer = jest.fn();
+      element.addEventListener('keydown', outer);
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      byTestId<HTMLElement>(testId).dispatchEvent(escape);
+      await settle();
+      element.removeEventListener('keydown', outer);
+      expect(queryTestId('settings-web-search-key-input')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+      expect(escape.defaultPrevented).toBe(true);
+      expect(outer).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reports readiness and a missing key to the page summary', async () => {
+    await render();
+    const summary = TestBed.inject(SearchVoiceSummaryStore);
+    expect(summary.segments()[0]).toMatchObject({ value: '0 of 3 ready', meta: 'Tavily needs a key', tone: 'error' });
+    component.apiKeyConfigured.set({ tavily: true, serper: false, exa: false });
+    await settle();
+    expect(summary.segments()[0]).toMatchObject({ value: '1 of 3 ready', meta: 'All selected have keys', tone: 'ok' });
+    component.selectedProviders.set(new Set(['tavily', 'serper']));
+    await settle();
+    expect(summary.segments()[0]).toMatchObject({ value: '1 of 3 ready', meta: 'Serper needs a key', tone: 'warn' });
+  });
+
+  it('reports config loading and load errors to the page summary', async () => {
+    await render();
+    const summary = TestBed.inject(SearchVoiceSummaryStore);
+    component.configLoaded.set(false);
+    await settle();
+    expect(summary.segments()[0]).toMatchObject({ value: 'Loading', tone: 'idle' });
+    component.errorMessage.set(component.LOAD_CONFIG_FAILED);
+    await settle();
+    expect(summary.segments()[0]).toMatchObject({ value: 'Error', tone: 'error' });
   });
 
   it('underlines the Get API key links persistently, not only on hover (D3, WCAG 1.4.1)', async () => {
@@ -314,7 +369,7 @@ describe('WebSearchConfigComponent', () => {
     });
   });
 
-  describe('API key popover (V4, G11)', () => {
+  describe('Inline API key editor (V4, G11)', () => {
     it('saves on explicit Save, closes, marks the key set and clears the test result', async () => {
       await render();
       component.testResult.set({ success: true, results: [{ provider: 'serper', success: true }] });
@@ -343,7 +398,7 @@ describe('WebSearchConfigComponent', () => {
       expect(field.type).toBe('text');
     });
 
-    it('drops the typed key when the popover is dismissed', async () => {
+    it('drops the typed key when the inline editor is dismissed', async () => {
       await render();
       await typeKey('serper', 'secret-key');
       byTestId<HTMLButtonElement>('settings-web-search-key-cancel').click();
@@ -354,7 +409,7 @@ describe('WebSearchConfigComponent', () => {
       expect(queryTestId('settings-web-search-key-input')).toBeNull();
     });
 
-    it('keeps the popover open with the reason and an alert toast when saving fails (D15)', async () => {
+    it('keeps the inline editor open with the reason and an alert toast when saving fails (D15)', async () => {
       responses['webSearch:setApiKey'] = () => fail('Invalid key');
       await render();
       await typeKey('serper', 'bad-key');
@@ -379,8 +434,8 @@ describe('WebSearchConfigComponent', () => {
       // Gate V 50 decision: the resting Clear is neutral; red only on the confirm button (P8).
       expect(clear.classList).not.toContain('border-error');
       expect(clear.hasAttribute('data-ptah-button')).toBe(true);
-      expect(clear.classList).toContain('btn-secondary');
-      expect(clear.classList).toContain('btn-xs');
+      expect(clear.classList).toContain('btn-ghost');
+      expect(clear.classList).toContain('btn-sm');
       expect(clear.getAttribute('aria-label')).toBe('Clear API key for Tavily');
       clear.click();
       await settle();

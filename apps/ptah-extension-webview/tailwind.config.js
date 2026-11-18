@@ -1,3 +1,4 @@
+const plugin = require('tailwindcss/plugin');
 const { createGlobPatternsForDependencies } = require('@nx/angular/tailwind');
 const { join } = require('path');
 
@@ -154,7 +155,16 @@ module.exports = {
       },
     },
   },
-  plugins: [require('daisyui')],
+  plugins: [
+    require('daisyui'),
+    // `row-split:` is the one container width from which ptah-setting-row and
+    // ptah-description-list put the label beside the control. A ptah-form-section field column is
+    // about 35rem at a 1168 px window, so the old 640 px split stacked every row there. Below 26rem
+    // a row stays stacked, so a long label and a compact control do not collide.
+    plugin(({ addVariant }) => {
+      addVariant('row-split', '@container (min-width: 26rem)');
+    }),
+  ],
   daisyui: {
     themes: [
       {

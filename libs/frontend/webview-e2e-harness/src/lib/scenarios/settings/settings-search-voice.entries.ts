@@ -11,7 +11,7 @@ import { visibleEnabled } from './settings-drawer.reach';
 import { INVALID_VOICE_KEY, HOST_DETAIL } from './settings-advanced-search-voice.fixtures';
 import {
   asvState, chooseVoiceProvider, closeDrawers, dismissToast, expectSavedThenUndo, expectWrite, isElectron, openVoiceDrawer,
-  remountTab, searchVoiceTab, withAsvChange,
+  pickRichOption, remountTab, richOption, richTrigger, searchVoiceTab, withAsvChange,
 } from './settings-advanced-search-voice.reach';
 
 const before = (page: Page): number => getFixtureState(page).calls.length;
@@ -133,8 +133,9 @@ const voice: readonly ReachabilityEntry[] = [
       state.voice.unavailable = { elevenlabs: 'API key not configured' };
       return () => { state.voice.unavailable = {}; };
     }, async () => {
-      await page.locator('[data-testid="voice-provider-btn-stt"]').focus();
-      await expect(page.locator('[data-testid="voice-provider-option-stt-elevenlabs"]')).toBeDisabled();
+      await richTrigger(page.locator('[data-testid="voice-provider-btn-stt"]')).click();
+      await expect(richOption(page.locator('[data-testid="voice-provider-option-stt-elevenlabs"]'))).toHaveAttribute('aria-disabled', 'true');
+      await page.keyboard.press('Escape');
       await expect(page.locator('[data-testid="voice-provider-reason-stt-elevenlabs"]')).toHaveText('Unavailable: API key not configured');
     })) },
   { id: 'SV-10', capability: 'Voice: speech-to-text provider choice (save on selection, Undo); ElevenLabs STT model in the drawer', status: 'restored',
@@ -142,20 +143,20 @@ const voice: readonly ReachabilityEntry[] = [
       const start = before(page);
       await chooseVoiceProvider(page, 'stt', 'elevenlabs');
       await expectWrite(page, start, 'voice:setProviderConfig', { sttProvider: 'elevenlabs' });
-      await expect(page.locator('[data-testid="voice-provider-btn-stt"]')).toHaveValue('elevenlabs');
+      await expect(richTrigger(page.locator('[data-testid="voice-provider-btn-stt"]'))).toContainText('ElevenLabs');
       await expectSavedThenUndo(page, 'speech-to-text provider', 'voice:setProviderConfig', { sttProvider: 'local' });
-      await expect(page.locator('[data-testid="voice-provider-btn-stt"]')).toHaveValue('local');
+      await expect(richTrigger(page.locator('[data-testid="voice-provider-btn-stt"]'))).toContainText('Local (Whisper / Kokoro)');
     }) },
   { id: 'SV-11', capability: 'Local STT: Whisper model (save on selection, Undo), download status', status: 'restored',
     reach: (page) => inVoiceDrawer(page, 'stt', async () => {
       await expect(page.locator('[data-testid="local-stt-download-status"]').first()).toContainText('Downloaded');
       const select = page.locator('[data-testid="local-stt-model-select"]');
-      await expect(select).toHaveValue('base.en');
+      await expect(richTrigger(select)).toContainText('base.en (~80 MB, default)');
       const start = before(page);
-      await select.selectOption('small.en');
+      await pickRichOption(page, select, 'small.en (~250 MB, more accurate)');
       await expectWrite(page, start, 'voice:setConfig', { whisperModel: 'small.en', modelSource: 'curated' });
       await expectSavedThenUndo(page, 'speech-to-text model', 'voice:setConfig', { whisperModel: 'base.en' });
-      await expect(select).toHaveValue('base.en');
+      await expect(richTrigger(select)).toContainText('base.en (~80 MB, default)');
     }) },
   { id: 'SV-12', capability: 'Local STT: Hugging Face / folder source with id validation; back to Curated', status: 'restored',
     reach: (page) => inVoiceDrawer(page, 'stt', async () => {
@@ -193,9 +194,9 @@ const voice: readonly ReachabilityEntry[] = [
       try {
         await openVoiceDrawer(page, 'tts');
         const select = page.locator('[data-testid="local-tts-voice-select"]');
-        await expect(select).toHaveValue('af_heart');
+        await expect(richTrigger(select)).toContainText('Heart (US female)');
         start = before(page);
-        await select.selectOption('am_michael');
+        await pickRichOption(page, select, 'Michael (US male)');
         await expectWrite(page, start, 'voice:setTtsConfig', { voice: 'am_michael' });
         await expectSavedThenUndo(page, 'text-to-speech voice', 'voice:setTtsConfig', { voice: 'af_heart' });
         start = before(page);
@@ -241,9 +242,9 @@ const voice: readonly ReachabilityEntry[] = [
       await expect(page.locator('[data-testid="elevenlabs-tts-model-select"]')).toBeVisible();
       await expect(page.locator('[data-testid="elevenlabs-output-format-select"]')).toBeVisible();
       const select = page.locator('[data-testid="elevenlabs-voice-select"]');
-      await expect(select).toHaveValue('EXAVITQu4vr4xnSDxMaL');
+      await expect(richTrigger(select)).toContainText('Sarah');
       const start = before(page);
-      await select.selectOption('21m00Tcm4TlvDq8ikWAM');
+      await pickRichOption(page, select, 'Rachel');
       await expectWrite(page, start, 'voice:setProviderConfig', { elevenlabs: { voiceId: '21m00Tcm4TlvDq8ikWAM' } });
       await expectSavedThenUndo(page, 'ElevenLabs voice', 'voice:setProviderConfig', { elevenlabs: { voiceId: 'EXAVITQu4vr4xnSDxMaL' } });
     }) },
