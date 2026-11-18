@@ -245,6 +245,16 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it('resends a direct command whose send already settled with authoritative absent', async () => {
+    send.mockResolvedValueOnce({ success: true, settled: true });
+    start([makeTab(TAB)]);
+    await run();
+    await run();
+    expect(send).toHaveBeenCalledTimes(2);
+    await run();
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it.each(['direct', 'queued'] as const)('sends once while a %s delivery has not started streaming, even after polling expires', async (delivery) => {
     jest.useFakeTimers();
     try {

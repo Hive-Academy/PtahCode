@@ -372,7 +372,8 @@ export class SessionAutoHandoffCoordinatorService {
       this.autoHandoff.recordQueued(sessionId, queued);
       this.sentAttempts.set(sessionId, (this.sentAttempts.get(sessionId) ?? 0) + 1);
       if (!queued) {
-        this.awaitingSettlement.set(sessionId, { tabId, state: 'waiting' });
+        // A send that already ran to its end streams nothing afterwards.
+        this.awaitingSettlement.set(sessionId, { tabId, state: outcome.settled === true ? 'settled' : 'waiting' });
         this.autoHandoff.transition(sessionId, 'delivered');
       }
       this.scheduleReconcile(tabId, sessionId, 0);
