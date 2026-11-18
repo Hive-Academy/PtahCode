@@ -7,20 +7,22 @@ import {
   inject,
   signal,
   untracked,
+  viewChildren,
 } from '@angular/core';
 import {
-  AlertCircle,
-  ChevronRight,
+  SlidersHorizontal,
   LucideAngularModule,
-  Mic,
 } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import {
-  PtahBadgeDirective,
+  PtahAlertComponent,
   PtahIconButtonDirective,
   PtahFormSectionComponent,
-  PtahFieldComponent,
-  PtahSelectDirective,
+  PtahSettingRowComponent,
+  PtahStatusComponent,
+  PtahRichSelectComponent,
+  PtahSelectIconDirective,
+  type PtahSelectOption,
 } from '@ptah-extension/ui';
 import type {
   VoiceProviderCapabilityDto,
@@ -33,12 +35,15 @@ import {
   type VoiceDirection,
 } from './voice-details-drawer.component';
 
+import { SearchVoiceSummaryStore } from './search-voice-summary.store';
+import { VoiceElevenlabsSummaryComponent } from './voice-elevenlabs-summary.component';
+import { SettingsSectionStateComponent } from '../shared/settings-section-state.component';
+
 type VoiceProviderId = 'local' | 'elevenlabs';
 type WriteResult = { ok: true } | { ok: false; message: string };
 
 interface EngineStatus {
   readonly label: string;
-  readonly dot: string;
 }
 
 /** One matrix row per direction (pattern map V10-V12). */
@@ -47,7 +52,7 @@ interface EngineRow {
   readonly name: string;
   readonly providerId: VoiceProviderId;
   readonly providerLabel: string;
-  readonly options: readonly VoiceProviderCapabilityDto[];
+  readonly options: readonly PtahSelectOption<string>[];
   readonly modelLabel: string;
   /** Tooltip for the Model / Voice cell: the raw ElevenLabs voice id when its name is unknown. */
   readonly modelTitle: string | null;
@@ -55,9 +60,9 @@ interface EngineRow {
   readonly status: EngineStatus;
 }
 
-const READY: EngineStatus = { label: 'Ready', dot: 'bg-success' };
-const NOT_DOWNLOADED: EngineStatus = { label: 'Not downloaded', dot: 'bg-warning' };
-const NO_KEY: EngineStatus = { label: 'No key', dot: 'bg-warning' };
+const READY: EngineStatus = { label: 'Ready' };
+const NOT_DOWNLOADED: EngineStatus = { label: 'Not downloaded' };
+const NO_KEY: EngineStatus = { label: 'No key' };
 
 function asProviderId(value: string | undefined): VoiceProviderId {
   return value === 'elevenlabs' ? 'elevenlabs' : 'local';
@@ -85,106 +90,99 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
 @Component({
   selector: 'ptah-voice-config',
   standalone: true,
-  imports: [LucideAngularModule, VoiceDetailsDrawerComponent, PtahBadgeDirective, PtahIconButtonDirective, PtahFormSectionComponent, PtahFieldComponent, PtahSelectDirective],
+  imports: [LucideAngularModule, VoiceDetailsDrawerComponent, VoiceElevenlabsSummaryComponent,
+    PtahAlertComponent, PtahIconButtonDirective, PtahFormSectionComponent, PtahSettingRowComponent,
+    PtahStatusComponent, PtahRichSelectComponent, PtahSelectIconDirective, SettingsSectionStateComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <section
-      class="border-b border-base-content/10 pb-7"
-      aria-labelledby="voice-engines-heading"
-      data-glass-surface="content"
-    >
-      <ptah-form-section id="voice-engines-heading" heading="Voice engines" level="2"
-        description="Pick the speech-to-text and text-to-speech engines used by the chat mic and messaging-gateway voice notes. Local engines run offline; cloud engines require an API key.">
-
-      @if (errorMessage(); as message) {
-        <div role="alert" data-testid="voice-config-error"
-          class="mb-3 flex items-center gap-1.5 rounded border border-error/40 p-2 text-xs text-base-content">
-          <lucide-angular [img]="AlertCircleIcon" class="w-3.5 h-3.5 text-error shrink-0" aria-hidden="true" />
-          {{ message }}
-        </div>
-      }
-
-      @if (isLoading()) {
-        <p class="text-xs text-base-content-muted" role="status" data-testid="voice-config-loading">
-          Loading voice providers…
-        </p>
-      } @else if (rows().length) {
-        <div class="overflow-x-auto">
-          <div class="flex flex-col" data-testid="voice-engines-matrix">
-
-              @for (row of rows(); track row.direction) {
-                <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] border-b border-base-300 py-[var(--ptah-gap-field)] last:border-b-0" [attr.data-testid]="'voice-engine-row-' + row.direction">
-                  <div class="font-bold text-base-content">{{ row.name }}</div>
-                  <div>
-                    <ptah-field [label]="row.name + ' provider'" appearance="stacked">
-                      <select ptahSelect size="sm" [value]="row.providerId" [disabled]="saving()"
-                        [attr.aria-label]="row.name + ' provider: ' + row.providerLabel + '. Change provider'"
-                        (change)="onProviderChange($event, row.direction)"
-                        [attr.data-testid]="'voice-provider-btn-' + row.direction">
-                        @for (option of row.options; track option.id) {
-                          <option [value]="option.id" [disabled]="!option.available"
-                            [attr.data-testid]="'voice-provider-option-' + row.direction + '-' + option.id">
-                            {{ option.label }}@if (!option.available) { — Unavailable: {{ option.unavailableReason ?? 'not available on this machine' }} }
-                          </option>
-                        }
-                      </select>
-                    </ptah-field>
-                    @for (option of row.options; track option.id) {
-                      @if (!option.available) {
-                        <span class="sr-only" [id]="'voice-reason-' + row.direction + '-' + option.id"
-                          [attr.data-testid]="'voice-provider-reason-' + row.direction + '-' + option.id">
-                          Unavailable: {{ option.unavailableReason ?? 'not available on this machine' }}
-                        </span>
-                      }
-                    }
-                  </div>
-                  <div>
-                    <span class="font-mono text-base-content" [attr.title]="row.modelTitle"
-                      [attr.data-testid]="'voice-engine-model-' + row.direction">{{ row.modelLabel }}</span>
-                  </div>
-                  <div>
-                    <span ptahBadge appearance="outline" class="gap-1 whitespace-nowrap text-base-content"
-                      [attr.data-testid]="'voice-engine-status-' + row.direction">
-                      <span [class]="'w-1.5 h-1.5 rounded-full ' + row.status.dot" aria-hidden="true"></span>
-                      {{ row.status.label }}
-                    </span>
-                  </div>
-                  <div class="flex-1 text-right">
-                    <button type="button" ptahIconButton size="xs" (click)="openDetails(row.direction)"
-                      [label]="row.name + ' details: ' + row.detail"
-                      [attr.data-testid]="'voice-engine-details-' + row.direction">
-                      <lucide-angular [img]="ChevronRightIcon" class="w-3.5 h-3.5 text-base-content" aria-hidden="true" />
-                    </button>
-                  </div>
+    <section id="voice-engines-heading" tabindex="-1" [attr.aria-labelledby]="voiceSection.headingId"
+      data-glass-surface="content">
+      <ptah-form-section #voiceSection heading="Voice" level="2" wide
+        description="Talk to the agent and hear its answers. Local engines run on this device.">
+        @if (errorMessage(); as message) {
+          <ptah-alert tone="error" live="assertive" data-testid="voice-config-error">{{ message }}</ptah-alert>
+        }
+        @if (isLoading()) {
+          <ptah-settings-section-state state="loading" data-testid="voice-config-loading" />
+        } @else if (rows().length) {
+          <div data-testid="voice-engines-matrix">
+            @for (row of rows(); track row.direction) {
+              <ptah-setting-row #settingRow [label]="row.name" density="compact"
+                [attr.data-testid]="'voice-engine-row-' + row.direction">
+                <div status class="voice-row-status">
+                  <ptah-status [status]="row.status.label === 'Ready' ? 'completed' : 'warning'"
+                    [label]="row.status.label" appearance="inline"
+                    [attr.data-testid]="'voice-engine-status-' + row.direction" />
+                  <span class="voice-row-detail text-base-content-muted">
+                    {{ row.providerId === 'local' ? 'Local engine' : 'ElevenLabs' }},
+                    {{ row.direction === 'stt' ? 'model' : 'voice' }}
+                    <span class="font-mono" [attr.title]="row.modelTitle"
+                      [attr.data-testid]="'voice-engine-model-' + row.direction">{{ row.modelLabel }}</span>.
+                  </span>
                 </div>
-              }
-
+                <ptah-select size="sm" class="voice-provider" [options]="row.options"
+                  [value]="row.providerId" [disabled]="saving()" [labelledBy]="settingRow.titleId()"
+                  [attr.aria-label]="(row.direction === 'stt' ? 'Speech-to-text' : 'Text-to-speech') + ' provider: ' + row.providerLabel + '. Change provider'"
+                  (valueChange)="chooseProvider(row.direction, $event ?? row.providerId)"
+                  [attr.data-testid]="'voice-provider-btn-' + row.direction">
+                  <ng-template ptahSelectIcon let-opt let-place="place">
+                    @if (place === 'option') {
+                      <span [attr.data-testid]="'voice-provider-option-' + row.direction + '-' + opt.value"></span>
+                    }
+                  </ng-template>
+                </ptah-select>
+                @for (option of row.options; track option.value) {
+                  @if (option.disabled) {
+                    <span class="sr-only" [id]="'voice-reason-' + row.direction + '-' + option.value"
+                      [attr.data-testid]="'voice-provider-reason-' + row.direction + '-' + option.value">
+                      Unavailable: {{ option.description }}
+                    </span>
+                  }
+                }
+                <button type="button" ptahIconButton variant="ghost" size="xs" (click)="openDetails(row.direction)"
+                  [label]="(row.direction === 'stt' ? 'Speech-to-text' : 'Text-to-speech') + ' details: ' + row.detail"
+                  [attr.data-testid]="'voice-engine-details-' + row.direction">
+                  <lucide-angular [img]="SlidersIcon" aria-hidden="true" />
+                </button>
+              </ptah-setting-row>
+            }
           </div>
-        </div>
-      }
+        }
       </ptah-form-section>
     </section>
+    @if (config(); as cfg) {
+      <ptah-voice-elevenlabs-summary [config]="cfg" [voices]="elevenLabsVoices()"
+        (details)="openDetails('tts')" (clearKey)="requestClearKey()" />
+    }
 
     <!-- Lazy: the drawer and the panels it hosts load the first time a Details button is used. -->
     @defer (when drawerDirection() !== null) {
       <ptah-voice-details-drawer [(direction)]="drawerDirection" [config]="config()"
-        (closed)="drawerDirection.set(null)" (changed)="reloadAll()" />
+        [confirmClearKey]="clearKeyRequested()"
+        (closed)="drawerDirection.set(null); clearKeyRequested.set(false)" (changed)="reloadAll()" />
     }
   `,
   styles: `
     :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
+      padding: 0 1.25rem;
     }
+    /* Same space as between the page sections in the shell. */
+    ptah-voice-elevenlabs-summary { display: block; margin-top: var(--ptah-gap-group); }
+    /* Width only: the select needs its own grid display to place the chevron on the trigger. */
+    .voice-provider { width: 14rem; max-width: 100%; }
+    /* The icon template only carries the option test hooks; it must not take icon space. */
+    :host ::ng-deep .voice-provider .ptah-select__icon { display: none; }
+    .voice-row-status { display: contents; }
+    .voice-row-detail { flex-basis: 100%; font-weight: normal; }
   `,
 })
 export class VoiceConfigComponent implements OnInit {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
-  readonly MicIcon = Mic;
-  readonly AlertCircleIcon = AlertCircle;
-  readonly ChevronRightIcon = ChevronRight;
+  private readonly summary = inject(SearchVoiceSummaryStore, { optional: true });
+  readonly SlidersIcon = SlidersHorizontal;
 
   /** Save triggers are disabled while any settings write is in flight (D3). */
   readonly saving = this.feedback.saving;
@@ -193,9 +191,12 @@ export class VoiceConfigComponent implements OnInit {
   readonly config = signal<VoiceProviderConfigDto | null>(null);
   readonly errorMessage = signal<string | null>(null);
   readonly isLoading = signal(true);
-  /** Direction whose provider popover is open. */
   /** Direction whose drawer tab is open; `null` closes drawer D-VOICE. */
   readonly drawerDirection = signal<VoiceDirection | null>(null);
+  readonly clearKeyRequested = signal(false);
+
+  /** The provider selects, one per row in row order (stt, tts). */
+  private readonly providerSelects = viewChildren(PtahRichSelectComponent);
 
   /** The ElevenLabs voice library, read once per tab visit to name the TTS voice; `null` until it loads. */
   readonly elevenLabsVoices = signal<readonly VoiceInfoDto[] | null>(null);
@@ -217,10 +218,10 @@ export class VoiceConfigComponent implements OnInit {
     return [
       {
         direction: 'stt',
-        name: 'Speech-to-text',
+        name: 'Speech to text',
         providerId: stt,
         providerLabel: label(stt),
-        options: this.sttProviders(),
+        options: this.providerOptions(this.sttProviders()),
         modelLabel: stt === 'elevenlabs' ? cfg.elevenlabs.sttModelId : localSttModel(cfg),
         modelTitle: null,
         detail: 'model, download and source',
@@ -228,10 +229,10 @@ export class VoiceConfigComponent implements OnInit {
       },
       {
         direction: 'tts',
-        name: 'Text-to-speech',
+        name: 'Text to speech',
         providerId: tts,
         providerLabel: label(tts),
-        options: this.ttsProviders(),
+        options: this.providerOptions(this.ttsProviders()),
         ...(tts === 'elevenlabs'
           ? this.elevenLabsVoiceCell(cfg.elevenlabs.voiceId)
           : { modelLabel: cfg.local.ttsVoice, modelTitle: null }),
@@ -242,10 +243,20 @@ export class VoiceConfigComponent implements OnInit {
   });
 
   constructor() {
-    // Name the TTS voice only when ElevenLabs speaks with a chosen voice and a key can list voices.
+    effect(() => {
+      const rows = this.rows();
+      const meta = rows.map(row => `${row.providerId === 'local' ? 'Local' : 'ElevenLabs'} ${row.direction === 'stt' ? 'in' : 'out'}`).join(', ');
+      const ready = rows.length === 2 && rows.every(row => row.status === READY);
+      this.summary?.report('voice', this.isLoading()
+        ? { value: 'Loading', tone: 'idle' }
+        : this.errorMessage()
+          ? { value: 'Error', tone: 'error' }
+          : { value: ready ? 'Ready' : 'Needs setup', meta, tone: ready ? 'ok' : 'warn' });
+    });
+    // Name the selected cloud voice in the row and summary whenever a key can list voices.
     effect(() => {
       const cfg = this.config();
-      if (this.ttsProviderId() !== 'elevenlabs' || !cfg?.elevenlabs.apiKeyConfigured || !cfg.elevenlabs.voiceId) return;
+      if (!cfg?.elevenlabs.apiKeyConfigured || !cfg.elevenlabs.voiceId) return;
       untracked(() => void this.loadVoiceNames());
     });
   }
@@ -309,16 +320,22 @@ export class VoiceConfigComponent implements OnInit {
     return name ? { modelLabel: name, modelTitle: null } : { modelLabel: 'Custom voice', modelTitle: voiceId };
   }
 
+  /** Page "Clear key": open the TTS drawer tab with the ElevenLabs clear confirmation. */
+  requestClearKey(): void {
+    this.openDetails('tts');
+    this.clearKeyRequested.set(true);
+  }
+
   openDetails(direction: VoiceDirection): void {
+    this.clearKeyRequested.set(false);
     this.drawerDirection.set(direction);
   }
 
-  async onProviderChange(event: Event, direction: VoiceDirection): Promise<void> {
-    const target = event.target;
-    if (!(target instanceof HTMLSelectElement)) return;
-    await this.chooseProvider(direction, target.value);
-    const cfg = this.config();
-    if (cfg) target.value = direction === 'stt' ? cfg.sttProvider : cfg.ttsProvider;
+  private providerOptions(providers: readonly VoiceProviderCapabilityDto[]): PtahSelectOption<string>[] {
+    return providers.map(provider => ({ value: provider.id, label: provider.label,
+      disabled: !provider.available,
+      description: provider.available ? undefined : provider.unavailableReason ?? 'not available on this machine',
+    }));
   }
 
   /** Saves on selection with Undo (S-sel). */
@@ -363,7 +380,21 @@ export class VoiceConfigComponent implements OnInit {
     }
     const message = SAVE_PROVIDER_FAILED[direction];
     this.setProvider(direction, fallback);
+    this.syncProviderSelects();
     return { ok: false, message };
+  }
+
+  /**
+   * A select keeps the value the user picked until its `[value]` binding changes. When a write
+   * fails, the row goes back to the provider it had, so the binding does not change: put the stored
+   * provider back into each select. Setting the same value again is a no-op in chooseProvider.
+   */
+  private syncProviderSelects(): void {
+    const rows = this.rows();
+    this.providerSelects().forEach((select, index) => {
+      const stored = rows[index]?.providerId;
+      if (stored && select.value() !== stored) select.value.set(stored);
+    });
   }
 
   private setProvider(direction: VoiceDirection, id: VoiceProviderId): void {

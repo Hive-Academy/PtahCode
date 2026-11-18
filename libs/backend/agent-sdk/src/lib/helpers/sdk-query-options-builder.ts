@@ -1452,8 +1452,8 @@ export class SdkQueryOptionsBuilder {
     ];
     const compactionConfig = this.compactionConfigProvider.getConfig();
     // The class follows the same first-party test as the 1M beta and the
-    // model pre-flight. With `A1_DEFAULT_WINDOW` all `null` it changes no
-    // key; it only names which default would apply.
+    // model pre-flight. Both shipped class defaults defer to the runtime;
+    // classification also supports explicit class defaults in the resolver.
     const modelClass = autoCompactModelClass(
       effectiveAuthEnv.ANTHROPIC_BASE_URL,
     );
