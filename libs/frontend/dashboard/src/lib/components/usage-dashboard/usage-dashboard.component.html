@@ -1,43 +1,8 @@
-<div class="usage-dashboard flex flex-col gap-[var(--ptah-gap-group)]" data-testid="usage-dashboard">
-  <div class="flex flex-wrap items-center gap-3">
-    <h3 class="text-sm font-semibold">Usage</h3>
-    <div class="min-w-0">
-      <p class="text-xs text-base-content-muted" data-testid="usage-date-span">
-        {{ viewModel()?.dateSpanLabel }}
-      </p>
-    </div>
-    <div class="flex gap-[var(--ptah-gap-controls)]" role="group" aria-label="Usage range in days">
-      @for (option of rangeOptions; track option.value) {
-        <button
-          type="button"
-          ptahButton
-          size="xs"
-          [variant]="range() === option.value ? 'primary' : 'ghost'"
-          [selected]="range() === option.value"
-          [disabled]="isLoading()"
-          (click)="setRange(option.value)"
-        >
-          {{ option.label }}
-        </button>
-      }
-    </div>
-    <button
-      type="button"
-      ptahButton
-      variant="ghost"
-      size="xs"
-      [busy]="isLoading()"
-      (click)="retry()"
-      aria-label="Refresh usage"
-      data-testid="usage-refresh"
-    >
-      <lucide-angular
-        [img]="RefreshCwIcon"
-        class="h-3.5 w-3.5"
-        aria-hidden="true"
-      ></lucide-angular>
-      Refresh
-    </button>
+<div class="usage-dashboard flex flex-col gap-ptah-section" data-testid="usage-dashboard">
+  <div class="flex flex-wrap items-center gap-ptah-controls" data-testid="usage-meta">
+    <p class="text-xs text-base-content-muted" data-testid="usage-date-span">
+      {{ viewModel()?.dateSpanLabel }}
+    </p>
     @if (viewModel()?.isPartial) {
       <button
         type="button"
@@ -59,6 +24,7 @@
     }
   </div>
 
+  <!-- Row 1: KPI strip, or the usage state when there is nothing to show. -->
   @if (isLoading() && viewModel() === null) {
     <div role="status" aria-label="Loading usage"><ptah-state-panel state="loading" title="Loading usage" /></div>
   } @else if (loadError() !== null && viewModel() === null) {
@@ -66,60 +32,42 @@
       <ptah-state-panel state="error" [body]="loadError()" actionLabel="Retry" (action)="retry()" />
     </div>
   } @else if (viewModel(); as vm) {
-    <div
-      class="flex flex-col gap-[var(--ptah-gap-group)]"
-      [class.opacity-60]="isStale()"
-      data-testid="usage-content"
-    >
+    <div class="flex flex-col gap-ptah-group" [class.opacity-60]="isStale()" data-testid="usage-content">
       @if (loadError() !== null) {
         <div data-testid="usage-refresh-failed"><ptah-state-panel state="partial" body="Refresh failed; showing the last loaded data." /></div>
       } @else if (isStale()) {
-        <div
-          class="text-xs text-base-content-muted"
-          role="status"
-          data-testid="usage-updating"
-        >
+        <div class="text-xs text-base-content-muted" role="status" data-testid="usage-updating">
           Updating usage... (showing the last loaded data)
         </div>
       }
+      @if (!vm.hasUsage) {
+        <div data-testid="usage-empty"><ptah-state-panel state="empty" [body]="vm.isPartial ? 'No recorded usage in this range. ' + vm.emptyPartialMessage : 'No usage in this range. Start a chat to see provider usage, tokens and cost.'" /></div>
+      } @else {
+        <ptah-usage-kpi-strip
+          [kpis]="vm.kpis"
+          [totalCostUsd]="vm.totalCostUsd"
+          [totalUnpricedFactCount]="vm.totalCostUnpricedFactCount"
+          [totalUnpricedTokens]="vm.totalCostUnpricedTokens"
+          [costTrend]="costTrend()"
+          [tokenTrend]="tokenTrend()"
+          [deltas]="kpiDeltas()"
+          [rangeDays]="range()"
+        />
+      }
+    </div>
+  }
 
-    @if (vm.repositories.length > 0) {
-      <section class="rounded-lg bg-base-200/20 p-3" aria-label="Repository usage" data-testid="usage-repositories">
-        <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content-muted">Repository usage</h4>
-        @for (repository of vm.repositories; track repository.repositoryId) {
-          <div class="mt-2 text-xs" data-testid="usage-repository">
-            <p class="font-medium break-all">{{ repository.repositoryId }}</p>
-            <p>Recorded tokens: {{ repository.recordedTokens }}</p>
-            <p>Partial cost (known priced rows only): {{ repository.knownCostLabel }}</p>
-            @if (repository.hasUnknownTokens) {
-              <p class="text-warning">Token coverage incomplete; some usage is unknown.</p>
-            }
-            @if (repository.worktreePaths.length > 0) {
-              <ul class="mt-1 list-disc ps-4" aria-label="Worktree paths">
-                @for (path of repository.worktreePaths; track path) {
-                  <li class="break-all">{{ path }}</li>
-                }
-              </ul>
-            }
-          </div>
-        }
-      </section>
-    }
+  <!-- Row 2: plan limits (projected by the page so it shows in every usage state). -->
+  <ng-content select="[dashboardLimits]" />
 
-    @if (!vm.hasUsage) {
-      <div data-testid="usage-empty"><ptah-state-panel state="empty" [body]="vm.isPartial ? 'No recorded usage in this range. ' + vm.emptyPartialMessage : 'No usage in this range. Start a chat to see provider usage, tokens and cost.'" /></div>
-    } @else {
-      <ptah-usage-kpi-strip
-        [kpis]="vm.kpis"
-        [totalCostUsd]="vm.totalCostUsd"
-        [totalUnpricedFactCount]="vm.totalCostUnpricedFactCount"
-        [totalUnpricedTokens]="vm.totalCostUnpricedTokens"
-      />
-
-      <section ptahSurface class="min-w-0" aria-label="Daily usage">
-          <div class="flex items-center justify-between gap-2">
-            <ptah-section-header heading="Daily usage" [level]="4" />
-            <div class="flex gap-[var(--ptah-gap-controls)]" role="group" aria-label="Chart metric">
+  @if (viewModel(); as vm) {
+    @if (vm.hasUsage) {
+      <!-- Row 3: daily usage (8) + cost share (4). -->
+      <div class="usage-chart-row grid grid-cols-1 gap-ptah-section" [class.opacity-60]="isStale()" data-testid="usage-chart-row">
+        <section ptahSurface class="min-w-0" aria-label="Daily usage">
+          <div class="flex items-center justify-between gap-ptah-heading">
+            <ptah-section-header heading="Daily usage" [level]="3" />
+            <div class="flex gap-ptah-controls" role="group" aria-label="Chart metric">
               <button
                 type="button"
                 ptahButton size="xs"
@@ -147,22 +95,24 @@
             [unknownDays]="chartUnknownDays()"
             [unknownSeries]="chartMode() === 'cost' ? vm.providerSeries.map((p) => p.costUnknownByDay) : []"
           />
-      </section>
-
-      <div class="usage-share-grid grid grid-cols-1 gap-[var(--ptah-gap-group)]">
-        <ptah-usage-cost-donut
-          [providers]="vm.providers"
-          [models]="vm.modelRows"
-          [totalCostUsd]="vm.totalCostUsd"
-          [unpricedFactCount]="vm.totalCostUnpricedFactCount"
-        />
-        <ptah-usage-cost-summary
-          [providers]="vm.providers"
-          [totalUnpricedFactCount]="vm.totalCostUnpricedFactCount"
-        />
+        </section>
+        <div class="flex min-w-0 flex-col gap-ptah-section">
+          <ptah-usage-cost-donut
+            [providers]="vm.providers"
+            [models]="vm.modelRows"
+            [totalCostUsd]="vm.totalCostUsd"
+            [unpricedFactCount]="vm.totalCostUnpricedFactCount"
+          />
+          <ptah-usage-cost-summary
+            [providers]="vm.providers"
+            [totalUnpricedFactCount]="vm.totalCostUnpricedFactCount"
+          />
+          <ptah-usage-cost-quality [quality]="vm.quality" />
+        </div>
       </div>
 
-      <div class="usage-table-grid grid grid-cols-1 gap-[var(--ptah-gap-group)]">
+      <!-- Row 4: breakdown (8) + top sessions (4). -->
+      <div class="usage-table-row grid grid-cols-1 gap-ptah-section" [class.opacity-60]="isStale()" data-testid="usage-table-row">
         <ptah-usage-breakdown-table
           [modelRows]="vm.modelRows"
           [dayRows]="vm.dayRows"
@@ -170,9 +120,29 @@
         />
         <ptah-usage-top-sessions [sessions]="vm.topSessions" [generatedAt]="summaryGeneratedAt()" />
       </div>
-
-      <ptah-usage-cost-quality [quality]="vm.quality" />
     }
-    </div>
+
+    @if (vm.repositories.length > 0) {
+      <section ptahSurface class="text-xs" aria-label="Repository usage" data-testid="usage-repositories">
+        <ptah-section-header heading="Repository usage" [level]="3" />
+        @for (repository of vm.repositories; track repository.repositoryId) {
+          <div class="mt-2" data-testid="usage-repository">
+            <p class="font-medium break-all">{{ repository.repositoryId }}</p>
+            <p>Recorded tokens: {{ repository.recordedTokens }}</p>
+            <p>Partial cost (known priced rows only): {{ repository.knownCostLabel }}</p>
+            @if (repository.hasUnknownTokens) {
+              <p class="text-warning">Token coverage incomplete; some usage is unknown.</p>
+            }
+            @if (repository.worktreePaths.length > 0) {
+              <ul class="mt-1 list-disc ps-4" aria-label="Worktree paths">
+                @for (path of repository.worktreePaths; track path) {
+                  <li class="break-all">{{ path }}</li>
+                }
+              </ul>
+            }
+          </div>
+        }
+      </section>
+    }
   }
 </div>

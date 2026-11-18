@@ -366,6 +366,32 @@
 }
 /* ---- end chart warn ink ---- */
 
+/* ---- Chart series inks (TASK_2026_2276_af6c). Five categorical inks plus
+   "other" for stacked bars, donuts and legends. Literal oklch values so the
+   contrast spec (series-tokens.contrast.spec.ts) can measure them: each one
+   clears 3:1 (WCAG graphics) on the dark surfaces (#17191d, #202329) and on
+   the light surfaces (#ffffff, #f7f3fd). Same light selector as the chart
+   warn ink above. ---- */
+:root,
+[data-theme] {
+  --ptah-series-1: oklch(78% 0.14 85);
+  --ptah-series-2: oklch(76% 0.12 180);
+  --ptah-series-3: oklch(72% 0.13 255);
+  --ptah-series-4: oklch(72% 0.14 305);
+  --ptah-series-5: oklch(72% 0.15 25);
+  --ptah-series-other: oklch(65% 0.02 260);
+}
+:root[data-theme-mode='light'],
+:root[data-theme][data-glass='on'][data-glass-mode='light'] {
+  --ptah-series-1: oklch(52% 0.12 75);
+  --ptah-series-2: oklch(50% 0.1 180);
+  --ptah-series-3: oklch(50% 0.15 255);
+  --ptah-series-4: oklch(50% 0.17 305);
+  --ptah-series-5: oklch(52% 0.17 25);
+  --ptah-series-other: oklch(52% 0.02 260);
+}
+/* ---- end chart series inks ---- */
+
 /* ---- Card, panel surface and section header (TASK_2026_1012_b1dc,
    family-card-look.md). The defaults equal the most used card of today:
    bg-base-200, border border-base-300, rounded-xl, p-4, gap-3, no shadow.

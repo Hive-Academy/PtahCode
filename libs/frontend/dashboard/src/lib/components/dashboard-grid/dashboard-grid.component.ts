@@ -1,31 +1,43 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { LucideAngularModule, ArrowLeft } from 'lucide-angular';
 import { AppStateManager } from '@ptah-extension/core';
-import { AnalyticsCardComponent } from '../analytics-card/analytics-card.component';
 import { BuildersCardComponent } from '../builders-card/builders-card.component';
-import { ProviderAccountCardComponent } from '../provider-account-card/provider-account-card.component';
+import { PlanLimitsPanelComponent } from '../plan-limits/plan-limits-panel.component';
 import { SkillSelectionCardComponent } from '../skill-selection-card/skill-selection-card.component';
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import { UsageDashboardComponent } from '../usage-dashboard/usage-dashboard.component';
+import { DashboardToolbarComponent } from './dashboard-toolbar.component';
+import { PtahPageHeaderComponent } from '@ptah-extension/ui';
 
 /**
  * DashboardGridComponent
  *
- * Top-level dashboard surface. Page chrome (header, "Back" navigation) lives
- * here; content is the session analytics card (cost, tokens, sessions). The
- * Thoth pillar stat tiles now live on the Thoth page (`ThothShellComponent`).
- *
- * Provider limits, skill selection, analytics and builders follow the header.
+ * Top-level dashboard surface. Page chrome (header, the one toolbar, "Back"
+ * navigation) lives here. Row order: KPI strip, plan limits, daily usage +
+ * cost share, breakdown + top sessions, then skills and builders. The usage
+ * dashboard owns the KPI and chart rows and projects the plan-limits panel
+ * between them, so limits show even while usage loads or fails.
  */
 @Component({
   selector: 'ptah-dashboard-grid',
   standalone: true,
   imports: [
-    LucideAngularModule,
-    ProviderAccountCardComponent,
+    DashboardToolbarComponent,
+    PlanLimitsPanelComponent,
+    UsageDashboardComponent,
     SkillSelectionCardComponent,
-    AnalyticsCardComponent,
     BuildersCardComponent,
-    PtahIconButtonDirective,
+    PtahPageHeaderComponent,
+  ],
+  styles: [
+    `
+      .dashboard-page {
+        container: dash / inline-size;
+      }
+      @container dash (min-width: 960px) {
+        .dashboard-secondary {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    `,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './dashboard-grid.component.html',
@@ -44,7 +56,6 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
 })
 export class DashboardGridComponent {
   private readonly appState = inject(AppStateManager);
-  readonly ArrowLeftIcon = ArrowLeft;
 
   navigateBack(): void {
     this.appState.setCurrentView('chat');

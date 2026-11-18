@@ -1,10 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { PtahSparklineComponent } from '@ptah-extension/ui';
+import type { KpiDeltas } from '../../services/kpi-delta';
 import { type UsageKpis } from './usage-summary.view-model';
 import { formatCompactTokens, formatPercent, formatUsd } from './usage-formatting';
 
 @Component({
   selector: 'ptah-usage-kpi-strip',
   standalone: true,
+  imports: [PtahSparklineComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     @container (min-width: 900px) {
@@ -20,12 +23,24 @@ import { formatCompactTokens, formatPercent, formatUsd } from './usage-formattin
         <p class="text-[11px] text-base-content-muted">Raw token cost</p>
         <p class="mt-1 text-xl font-semibold tabular-nums" data-testid="usage-total-cost" [attr.title]="costTooltip()">{{ costLabel() }}</p>
         <p class="mt-0.5 text-[10px] text-base-content-muted">{{ savingsSub() }}</p>
+        @if (costDeltaText(); as delta) {
+          <p class="text-[10px] text-base-content-muted tabular-nums" data-testid="usage-kpi-cost-delta">{{ delta }}</p>
+        }
+        @if (costTrend().length > 1) {
+          <ptah-sparkline class="mt-1 block" size="xs" [values]="costTrend()" label="Daily cost" tone="accent" [area]="true" />
+        }
       </div>
       <div class="rounded-lg bg-base-200/40 p-3" data-testid="usage-kpi-processed">
         <p class="text-[11px] text-base-content-muted">Processed tokens</p>
         <p class="mt-1 text-xl font-semibold tabular-nums">{{ compact(kpis().processedTokens) }}</p>
         <p class="mt-0.5 text-[10px] text-base-content-muted">{{ processedSub() }}</p>
-        <p class="text-[10px] text-base-content-muted">{{ outputSub() }}</p>
+        <p class="text-[10px] text-base-content-muted" data-testid="usage-kpi-output">{{ outputSub() }}</p>
+        @if (tokenDeltaText(); as delta) {
+          <p class="text-[10px] text-base-content-muted tabular-nums" data-testid="usage-kpi-tokens-delta">{{ delta }}</p>
+        }
+        @if (tokenTrend().length > 1) {
+          <ptah-sparkline class="mt-1 block" size="xs" [values]="tokenTrend()" label="Daily tokens" tone="accent" [area]="true" />
+        }
       </div>
       <div class="rounded-lg bg-base-200/40 p-3" data-testid="usage-kpi-cached">
         <p class="text-[11px] text-base-content-muted">Cached %</p>
@@ -54,6 +69,13 @@ export class UsageKpiStripComponent {
   readonly totalCostUsd = input<number | null>(null);
   readonly totalUnpricedFactCount = input(0);
   readonly totalUnpricedTokens = input(0);
+  /** Daily cost for the selected range (sparkline). */
+  readonly costTrend = input<readonly number[]>([]);
+  /** Daily processed tokens for the selected range (sparkline). */
+  readonly tokenTrend = input<readonly number[]>([]);
+  /** Change against the previous equal range; null hides the line (never "0%"). */
+  readonly deltas = input<KpiDeltas | null>(null);
+  readonly rangeDays = input<number>(30);
   protected readonly compact = formatCompactTokens;
 
   protected readonly costLabel = computed(() => {
@@ -95,5 +117,16 @@ export class UsageKpiStripComponent {
     return kpis.cacheSavingsUnknownFactCount > 0 ? 'a lower bound' : 'vs raw token cost';
   });
 
+  protected readonly costDeltaText = computed(() => deltaText(this.deltas()?.spend ?? null, this.rangeDays()));
+  protected readonly tokenDeltaText = computed(() => deltaText(this.deltas()?.tokens ?? null, this.rangeDays()));
+
   protected readonly outputSub = computed(() => `Output ${formatCompactTokens(this.kpis().outputTokens)} tokens`);
+}
+
+/** "+12% vs previous 7d"; null when there is no trustworthy previous period. */
+export function deltaText(delta: number | null, rangeDays: number): string | null {
+  if (delta === null || !Number.isFinite(delta)) return null;
+  const percent = Math.round(delta * 100);
+  const sign = percent > 0 ? '+' : percent < 0 ? '−' : '±';
+  return `${sign}${Math.abs(percent)}% vs previous ${rangeDays}d`;
 }

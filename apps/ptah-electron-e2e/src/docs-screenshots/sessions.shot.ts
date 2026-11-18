@@ -42,7 +42,7 @@ test.describe('docs screenshots — sessions', () => {
     const usage = page.locator('ptah-usage-dashboard');
     await expect(usage.locator('[data-testid="usage-content"], [data-testid="usage-error"]')).toBeVisible({ timeout: 60_000 });
     await expect(page.locator('[aria-label="Loading account usage"]')).toHaveCount(0, { timeout: 60_000 });
-    // Keep account identities above this panel out of the published image.
-    await shoot(page, 'sessions-analytics', { crop: usage });
+    // Plan limits are projected inside usage; mask their account identities.
+    await shoot(page, 'sessions-analytics', { crop: usage, mask: [page.locator('ptah-plan-limits-panel')] });
   });
 });

@@ -1,25 +1,21 @@
-<div class="min-h-full space-y-5 bg-surface-0 p-4" data-testid="dashboard-grid">
-  <header class="flex items-center gap-3">
-    <button
-      type="button"
-      ptahIconButton
-      label="Back to chat"
-      (click)="navigateBack()"
-    >
-      <lucide-angular
-        [img]="ArrowLeftIcon"
-        class="w-5 h-5"
-        aria-hidden="true"
-      ></lucide-angular>
-    </button>
-    <h2 class="text-xl font-bold">Dashboard</h2>
-  </header>
+<div class="dashboard-page min-h-full bg-surface-0" data-testid="dashboard-grid">
+  <ptah-page-header
+    title="Dashboard"
+    description="Usage, plan limits and spend across your providers"
+    backLabel="Back to chat"
+    (back)="navigateBack()"
+  >
+    <ptah-dashboard-toolbar actions />
+  </ptah-page-header>
 
-  <ptah-provider-account-card />
+  <div class="mx-auto flex w-full max-w-[1400px] flex-col gap-ptah-section p-ptah-surface">
+    <ptah-usage-dashboard>
+      <ptah-plan-limits-panel dashboardLimits />
+    </ptah-usage-dashboard>
 
-  <ptah-skill-selection-card />
-
-  <ptah-analytics-card />
-
-  <ptah-builders-card />
+    <div class="dashboard-secondary grid grid-cols-1 gap-ptah-section" data-testid="dashboard-secondary">
+      <ptah-skill-selection-card />
+      <ptah-builders-card />
+    </div>
+  </div>
 </div>

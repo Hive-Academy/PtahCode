@@ -199,25 +199,27 @@ test.describe('plan limits > session inspector', () => {
   }
 });
 
-test.describe('plan limits > dashboard provider account card', () => {
+test.describe('plan limits > dashboard plan limits panel', () => {
   for (const theme of THEMES) {
     for (const width of WIDTHS) {
-      test(`provider account card ${theme} ${width}`, async ({ page, fixtureServer }) => {
+      test(`plan limits panel ${theme} ${width}`, async ({ page, fixtureServer }) => {
         await preparePage(page, theme, width);
         await installWorkspaceHost(page, 'analytics');
         const rpc: PlanLimitsRpcControl = { failPulls: false };
         await installRpcAutoResponder(page, planLimitsFixtures(DASHBOARD_SNAPSHOT, rpc));
         await page.goto(fixtureServer.url);
 
-        const card = page.locator('ptah-provider-account-card');
-        const tiles = card.locator('[data-testid="provider-account-tile"]');
+        const card = page.locator('ptah-plan-limits-panel');
+        // Every owner renders once: a compact limit card when it has a
+        // reading (the selected provider first), else a chip.
+        const tiles = card.locator(
+          '[data-testid="provider-limit-card"], [data-testid="provider-limit-chip"]',
+        );
         await expect(tiles).toHaveCount(DASHBOARD_SNAPSHOT.owners.length, {
           timeout: 15_000,
         });
         await expect(
-          card
-            .locator('[data-testid="tile-detail"]')
-            .filter({ hasText: 'a retry delay, not a plan reset' }),
+          card.getByText('a retry delay, not a plan reset', { exact: false }),
         ).toBeVisible();
         await fitViewportHeight(page, card, width);
         await capture(card, shotPath('dashboard-card', 'owners', theme, width));
@@ -226,8 +228,9 @@ test.describe('plan limits > dashboard provider account card', () => {
         const refreshNotice = card.locator('[data-testid="refresh-failed"]');
         await expect(refreshNotice).toHaveCount(0);
         rpc.failPulls = true;
-        await tiles.first().getByRole('button', { name: /^Refresh / }).click();
-        await expect(refreshNotice).toHaveAttribute('role', 'status');
+        // The one page-toolbar Refresh reloads usage and plan limits.
+        await page.locator('[data-testid="dashboard-refresh"]').click();
+        await expect(refreshNotice.getByRole('status')).toBeVisible();
         await expect(refreshNotice).toContainText(
           'Refresh failed — showing last observed data',
         );

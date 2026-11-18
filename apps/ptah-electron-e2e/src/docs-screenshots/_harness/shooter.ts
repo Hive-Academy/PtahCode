@@ -96,6 +96,8 @@ export interface ShootOptions {
    * half of the SCREENSHOTS.md spec. The element is scrolled into view first.
    */
   crop?: Locator;
+  /** Regions containing account identities or other private data. */
+  mask?: Locator[];
   /** Extra settle time before the shutter, ms. Default 400. */
   settleMs?: number;
 }
@@ -117,8 +119,8 @@ export async function shoot(
   if (target) await target.scrollIntoViewIfNeeded().catch(() => undefined);
 
   const buffer = target
-    ? await target.screenshot({ scale: 'css' })
-    : await page.screenshot({ scale: 'css' });
+    ? await target.screenshot({ scale: 'css', mask: opts.mask })
+    : await page.screenshot({ scale: 'css', mask: opts.mask });
 
   const file = path.join(SHOT_DIR, `${name}.webp`);
   let sharp: typeof import('sharp');
