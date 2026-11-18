@@ -22,6 +22,7 @@ import {
   type ISecretStorage,
 } from '@ptah-extension/platform-core';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import { LANE_ROUTING_TOKENS, SkillRankingCallerService } from '@ptah-extension/lane-routing';
 import {
   TOKENS,
   GitInfoService,
@@ -104,6 +105,10 @@ export function registerPhase4Handlers(
   container: DependencyContainer,
   logger: Logger,
 ): void {
+  // The lane-routing library registers the caller token during phase 2.
+  container.register(SkillRankingCallerService, {
+    useToken: LANE_ROUTING_TOKENS.SKILL_RANKING_CALLER,
+  });
   registerHarnessServices(container);
   registerChatServices(container);
   registerHostRouting(container);
