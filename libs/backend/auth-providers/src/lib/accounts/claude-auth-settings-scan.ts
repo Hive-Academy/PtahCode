@@ -151,6 +151,8 @@ export interface ClaudeAuthPolicyScanRequest {
   readonly fs: ClaudePolicyScanFs;
   readonly queryRegistry: ClaudeRegistryQuery;
   readonly signal: AbortSignal;
+  /** Receives the id of the source that refused (a fixed id, never a path or a value). */
+  readonly onRefusedSource?: (source: ClaudePolicySourceId) => void;
 }
 
 /**
@@ -361,10 +363,10 @@ class PolicyScanRun {
       const git = await settle(() => this.request.fs.lstat(this.paths.join(ancestor, '.git')));
       if (!git.ok && git.enoent) continue;
       if (!git.ok) return false;
-      const local = await settle(() =>
-        this.request.fs.lstat(this.paths.join(ancestor, '.claude', 'settings.local.json')),
-      );
-      if (local.ok || !local.enoent) return false;
+      // A task worktree sits below its main checkout, so this file is normal
+      // there. Scan its content with the rule of S3; do not refuse on existence.
+      const local = await this.scanFile(this.paths.join(ancestor, '.claude', 'settings.local.json'));
+      if (local === 'refused') return false;
     }
     return true;
   }
@@ -446,7 +448,12 @@ export async function scanClaudeAuthPolicy(request: ClaudeAuthPolicyScanRequest)
   const run = new PolicyScanRun(request, entry);
   for (const source of entry.sources) {
     if (request.signal.aborted) return run.refusal('cancelled');
-    if (!(await run.resolve(source))) return run.refusal('unsupported-source');
+    if (!(await run.resolve(source))) {
+      // A cancel during the scan is not a source refusal: report it as cancelled.
+      if (request.signal.aborted) return run.refusal('cancelled');
+      request.onRefusedSource?.(source);
+      return run.refusal('unsupported-source');
+    }
   }
   if (!run.terminated) return run.refusal('unsupported-source');
   return {

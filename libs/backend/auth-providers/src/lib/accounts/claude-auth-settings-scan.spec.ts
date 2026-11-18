@@ -570,11 +570,69 @@ describe('scanClaudeAuthPolicy', () => {
   describe('ancestor context (S4)', () => {
     const ancestor = 'C:\\Users\\dev\\work';
 
-    it('refuses an ancestor holding .git and .claude/settings.local.json', async () => {
+    const ancestorLocal = win32.join(ancestor, '.claude', 'settings.local.json');
+
+    it('refuses an ancestor with .git whose settings.local.json holds an auth override', async () => {
       const { fs } = fakeFs({
-        present: [win32.join(ancestor, '.git'), win32.join(ancestor, '.claude', 'settings.local.json')],
+        present: [win32.join(ancestor, '.git')],
+        files: { [ancestorLocal]: JSON.stringify({ apiKeyHelper: `${CANARY}.cmd` }) },
       });
+      const onRefusedSource = jest.fn();
+      await expect(scanClaudeAuthPolicy(request({ fs, onRefusedSource }))).resolves.toEqual(REFUSED);
+      expect(onRefusedSource).toHaveBeenCalledTimes(1);
+      expect(onRefusedSource).toHaveBeenCalledWith('S4');
+    });
+
+    it('refuses an ancestor with .git whose settings.local.json cannot be read', async () => {
+      const { fs } = fakeFs({ present: [win32.join(ancestor, '.git')], errors: { [ancestorLocal]: 'EACCES' } });
       await expect(scanClaudeAuthPolicy(request({ fs }))).resolves.toEqual(REFUSED);
+    });
+
+    it.each([
+      ['malformed JSON', '{'],
+      ['non-object JSON', '[]'],
+    ])('refuses an ancestor with .git whose settings.local.json is %s', async (_label, content) => {
+      const { fs } = fakeFs({ present: [win32.join(ancestor, '.git')], files: { [ancestorLocal]: content } });
+      const onRefusedSource = jest.fn();
+      await expect(scanClaudeAuthPolicy(request({ fs, onRefusedSource }))).resolves.toEqual(REFUSED);
+      expect(onRefusedSource).toHaveBeenCalledTimes(1);
+      expect(onRefusedSource).toHaveBeenCalledWith('S4');
+    });
+
+    it('returns cancelled, with no source refusal, when the signal aborts during a failed ancestor read', async () => {
+      const controller = new AbortController();
+      const { fs } = fakeFs({ present: [win32.join(ancestor, '.git')] });
+      const abortingFs: ClaudePolicyScanFs = {
+        ...fs,
+        readFile: async (path) => {
+          if (path !== ancestorLocal) return fs.readFile(path);
+          controller.abort();
+          throw fsError('EACCES');
+        },
+      };
+      const onRefusedSource = jest.fn();
+      await expect(
+        scanClaudeAuthPolicy(request({ fs: abortingFs, signal: controller.signal, onRefusedSource })),
+      ).resolves.toMatchObject({ ok: false, code: 'cancelled' });
+      expect(onRefusedSource).not.toHaveBeenCalled();
+    });
+
+    it('passes a task worktree below a main checkout with a benign settings.local.json', async () => {
+      const checkout = 'D:\\projects\\app';
+      const { fs } = fakeFs({
+        present: [win32.join(checkout, '.git')],
+        files: {
+          [win32.join(checkout, '.claude', 'settings.local.json')]: JSON.stringify({
+            enableAllProjectMcpServers: true,
+            enabledMcpjsonServers: ['ptah'],
+            permissions: { allow: ['Read'] },
+          }),
+        },
+      });
+      const cwd = win32.join(checkout, '.claude-worktrees', 'task');
+      const onRefusedSource = jest.fn();
+      await expect(scanClaudeAuthPolicy(request({ fs, cwd, onRefusedSource }))).resolves.toMatchObject({ ok: true });
+      expect(onRefusedSource).not.toHaveBeenCalled();
     });
 
     it('passes an ancestor with .git only', async () => {
