@@ -7,6 +7,7 @@ import {
   untracked,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import {
   AlertCircle,
@@ -297,6 +298,7 @@ interface LoadError {
             >{{ effortNote() }}</span
           >
           <ptah-select
+            #effortSelect
             triggerId="agent-behaviour-effort"
             labelledBy="agent-behaviour-effort-title"
             label="Chat reasoning effort"
@@ -340,6 +342,8 @@ export class AgentBehaviourSectionComponent implements OnInit {
   private readonly effortState = inject(EffortStateService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   readonly ultracode = inject(UltracodeStateService);
+  private readonly effortSelect =
+    viewChild<PtahRichSelectComponent<EffortLevel | ''>>('effortSelect');
 
   readonly BotIcon = Bot;
   readonly SparklesIcon = Sparkles;
@@ -460,6 +464,9 @@ export class AgentBehaviourSectionComponent implements OnInit {
       write: () => this.writeEffort(next),
       undo: () => this.writeEffort(previous),
     });
+    // A fast failure sets the effort and rolls it back in one tick, so the `[value]` binding never
+    // changes and the select keeps the picked option: put the select back on the saved effort.
+    this.effortSelect()?.value.set(this.currentEffort());
   }
 
   /** A27, S-sel. Undo writes the inverse back. */
