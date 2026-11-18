@@ -94,7 +94,9 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
     PtahAlertComponent, PtahIconButtonDirective, PtahFormSectionComponent, PtahSettingRowComponent,
     PtahStatusComponent, PtahRichSelectComponent, PtahSelectIconDirective, SettingsSectionStateComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block' },
+  // The Voice card and the ElevenLabs summary card are siblings: raise the card with focus (an
+  // open provider select panel), so the summary card cannot cover the panel.
+  host: { class: 'block [&>*]:relative [&>*:focus-within]:z-[var(--ptah-z-raised)]' },
   template: `
     <section id="voice-engines-heading" tabindex="-1" [attr.aria-labelledby]="voiceSection.headingId"
       data-glass-surface="content">

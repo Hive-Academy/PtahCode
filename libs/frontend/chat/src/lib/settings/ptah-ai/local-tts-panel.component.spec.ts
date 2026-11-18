@@ -127,6 +127,23 @@ describe('LocalTtsPanelComponent', () => {
     expect(host.querySelectorAll('[role="group"]')).toHaveLength(2);
     expect(host.closest('ptah-field')?.querySelector('[data-appearance="floating"]')).not.toBeNull();
   });
+  it('keeps short model help below a full-row custom field with Save at the end', async () => {
+    const rpc = createMockRpcService();
+    routeRpc(rpc, { 'voice:listVoices': VOICES });
+    mount(rpc, localConfig());
+    byTestId<HTMLButtonElement>('local-tts-source-hf').click();
+    fixture.detectChanges();
+    const custom = byTestId('local-tts-custom-input').closest('ptah-field');
+    expect(custom?.querySelector('.ptah-field__info')).toBeNull();
+    expect(custom?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe('Use owner/name or an absolute folder path.');
+    expect(custom?.closest('.col-span-full')).not.toBeNull();
+    // Field and Save share one row: the field takes the free width, Save sits at the end.
+    expect(custom?.parentElement?.classList.contains('flex-col')).toBe(false);
+    expect(custom?.classList.contains('flex-1')).toBe(true);
+    expect(custom?.nextElementSibling?.querySelector('[data-testid="local-tts-custom-save"]')).not.toBeNull();
+    await settle();
+    expect(byTestId('local-tts-voice-select').closest('.col-span-full')).not.toBeNull();
+  });
   it('places download progress text in one polite status region', () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { 'voice:listVoices': VOICES });
