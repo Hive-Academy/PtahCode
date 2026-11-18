@@ -61,7 +61,10 @@ export class BotImportPreviewService {
     const diagnostics = [...snapshot.diagnostics];
     const items = new Map<string, BotPreviewItem>();
     for (const item of snapshot.items) {
-      const key = JSON.stringify(item.source);
+      // Key on sorted entries so property order cannot split one source identity.
+      const key = JSON.stringify(
+        Object.entries(item.source).sort(([a], [b]) => a.localeCompare(b)),
+      );
       const existing = items.get(key);
       if (existing) {
         existing.status = 'ambiguous';
