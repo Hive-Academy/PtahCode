@@ -1,0 +1,259 @@
+<div class="space-y-4 text-sm" data-testid="connection-advanced">
+  @if (!entry()) {
+    <div class="space-y-2" aria-busy="true" data-testid="advanced-skeleton">
+      <span class="skeleton block h-8 w-full"></span>
+      <span class="skeleton block h-8 w-full"></span>
+    </div>
+  } @else {
+    <section class="space-y-2" aria-labelledby="advanced-endpoint-heading">
+      <h3
+        id="advanced-endpoint-heading"
+        class="font-semibold text-base-content"
+      >
+        Endpoint
+      </h3>
+      <div ptahFieldGrid>
+        <ptah-field label="Base URL" [error]="baseUrlError() || null">
+          <input
+            ptahInput
+            id="advanced-base-url"
+            type="url"
+            class="w-full font-mono text-xs"
+            tone="mono"
+            [value]="baseUrl()"
+            (input)="baseUrlDraft.set(value($event)); abandonProbe()"
+            data-testid="advanced-base-url"
+          />
+        </ptah-field>
+        <ptah-field label="Models endpoint">
+          <input
+            ptahInput
+            id="advanced-models-endpoint"
+            type="text"
+            class="w-full font-mono text-xs"
+            tone="mono"
+            [value]="modelsEndpoint()"
+            placeholder="e.g. /v1/models"
+            (input)="modelsEndpointDraft.set(value($event)); abandonProbe()"
+            data-testid="advanced-models-endpoint"
+          />
+        </ptah-field>
+      </div>
+      <p class="text-xs text-base-content-muted">
+        Path Ptah uses to list this gateway's models. Leave it empty to use the
+        default.
+      </p>
+      @if (baseUrlChanged()) {
+        <ptah-field label="API key for the check">
+          <input
+            ptahInput
+            id="advanced-check-key"
+            type="password"
+            autocomplete="off"
+            class="w-full font-mono text-xs"
+            tone="mono"
+            [value]="keyDraft()"
+            (input)="keyDraft.set(value($event)); abandonProbe()"
+            data-testid="advanced-check-key"
+          />
+        </ptah-field>
+        <p class="text-xs text-base-content-muted">
+          The stored key can only be checked against the saved address. It is
+          used for this check only and is not saved.
+        </p>
+      }
+      <!-- The check's state gates Save endpoint, so it stays here; its result is also the page toast. -->
+      <p
+        role="status"
+        class="flex items-center gap-1.5 text-xs text-base-content"
+        data-testid="advanced-probe"
+      >
+        @if (probeState() !== 'idle') {
+          <span [class]="probeDot()" aria-hidden="true"></span>
+        }
+        {{ probeText() }}
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          type="button"
+          ptahButton
+          [disabled]="!canCheck()"
+          (click)="check()"
+          data-testid="advanced-check"
+        >
+          {{ probeState() === 'checking' ? 'Checking…' : 'Check endpoint' }}
+        </button>
+        <button
+          type="button"
+          ptahButton
+          variant="primary"
+          [disabled]="!canSaveEndpoint()"
+          (click)="saveEndpoint()"
+          data-testid="advanced-save-endpoint"
+        >
+          Save endpoint
+        </button>
+      </div>
+    </section>
+
+    <section class="space-y-2" aria-labelledby="advanced-help-heading">
+      <h3 id="advanced-help-heading" class="sr-only">Documentation URL</h3>
+      <div class="flex gap-2">
+        <ptah-field label="Documentation URL" class="min-w-0 flex-1">
+          <input
+            ptahInput
+            id="advanced-help-url"
+            type="url"
+            class="min-w-0 flex-1 text-xs"
+            [value]="helpUrl()"
+            placeholder="https://"
+            (input)="helpUrlDraft.set(value($event))"
+            data-testid="advanced-help-url"
+          />
+        </ptah-field>
+        <button
+          type="button"
+          ptahButton
+          [busy]="busy()"
+          [disabled]="helpUrlDraft() === null || !!helpUrlError()"
+          (click)="saveHelpUrl()"
+          data-testid="advanced-save-help"
+        >
+          Save
+        </button>
+      </div>
+      @if (helpUrlError(); as error) {
+        <p class="text-xs text-base-content">{{ error }}</p>
+      }
+    </section>
+
+    <section
+      class="space-y-2 rounded border border-base-300 bg-base-200 p-3"
+      aria-labelledby="advanced-pricing-heading"
+    >
+      <h3 id="advanced-pricing-heading" class="font-semibold text-base-content">
+        Token pricing (per 1M tokens)
+      </h3>
+      <div ptahFieldGrid>
+        <ptah-field label="Input price ($ / 1M)" size="sm">
+          <input
+            ptahInput
+            id="advanced-price-input"
+            type="number"
+            min="0"
+            step="0.01"
+            class="w-full font-mono text-xs"
+            tone="mono"
+            [value]="inputPrice()"
+            (input)="inputPriceDraft.set(value($event))"
+            data-testid="advanced-price-input"
+          />
+        </ptah-field>
+        <ptah-field label="Output price ($ / 1M)" size="sm">
+          <input
+            ptahInput
+            id="advanced-price-output"
+            type="number"
+            min="0"
+            step="0.01"
+            class="w-full font-mono text-xs"
+            tone="mono"
+            [value]="outputPrice()"
+            (input)="outputPriceDraft.set(value($event))"
+            data-testid="advanced-price-output"
+          />
+        </ptah-field>
+      </div>
+      <p
+        class="text-xs text-base-content-muted"
+        data-testid="advanced-pricing-note"
+      >
+        {{ pricingNote }}
+      </p>
+      @if (!pricing().ok) {
+        <p class="text-xs text-base-content">
+          Enter both prices as numbers of 0 or more, or leave both empty.
+        </p>
+      }
+      <button
+        type="button"
+        ptahButton
+        [busy]="busy()"
+        [disabled]="!pricingDirty() || !pricing().ok"
+        (click)="savePricing()"
+        data-testid="advanced-save-pricing"
+      >
+        Save pricing
+      </button>
+    </section>
+
+    <section
+      class="flex items-center justify-between gap-3 border-t border-base-300 pt-3"
+      aria-labelledby="advanced-delete-heading"
+    >
+      <div class="min-w-0">
+        <h3
+          id="advanced-delete-heading"
+          class="flex items-center gap-1.5 font-semibold text-base-content"
+        >
+          <span class="h-2 w-2 rounded-full bg-error" aria-hidden="true"></span>
+          Delete connection
+        </h3>
+        <p class="text-xs text-base-content-muted">
+          Removes this custom gateway and its stored key from this machine.
+        </p>
+        @if (isDriver()) {
+          <p
+            class="text-xs text-base-content"
+            data-testid="advanced-delete-blocked"
+          >
+            Switch the main agent first.
+          </p>
+        }
+      </div>
+      @if (!confirmingDelete()) {
+        <button
+          type="button"
+          class="btn btn-outline btn-sm border-error text-base-content"
+          [disabled]="busy() || isDriver()"
+          (click)="confirmingDelete.set(true)"
+          data-testid="advanced-delete"
+        >
+          Delete connection
+        </button>
+      }
+    </section>
+    @if (confirmingDelete()) {
+      <div
+        role="group"
+        aria-label="Confirm delete connection"
+        class="space-y-2 rounded border border-base-300 p-3"
+        data-testid="advanced-delete-confirm"
+      >
+        <p class="text-xs text-base-content">
+          Delete {{ connection().name }} for good? Its endpoint, settings and
+          stored key are removed.
+        </p>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            class="btn btn-outline btn-sm border-error text-base-content"
+            [ptahBusyDisabled]="busy() || isDriver()"
+            (click)="deleteConnection()"
+            data-testid="advanced-delete-confirm-button"
+          >
+            Delete for good
+          </button>
+          <button
+            type="button"
+            ptahButton
+            variant="ghost"
+            (click)="confirmingDelete.set(false)"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    }
+  }
+</div>

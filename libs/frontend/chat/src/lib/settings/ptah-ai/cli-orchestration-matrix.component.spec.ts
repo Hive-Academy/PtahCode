@@ -20,9 +20,7 @@ import type {
   PtahCliSummary,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
-import {
-  CliOrchestrationMatrixComponent,
-} from './cli-orchestration-matrix.component';
+import { CliOrchestrationMatrixComponent } from './cli-orchestration-matrix.component';
 
 const ready = <T>(data: T): ProvidersSettingsSection<T> => ({
   status: 'ready',
@@ -45,7 +43,12 @@ const idle: ProvidersSettingsCommit = {
 const CONTEXT = { scopeKey: 'workspace', activePath: '/ws' };
 const laneSupported = { state: 'supported' as const };
 const laneManifest: CliAdapterManifest = {
-  messaging: { steer: laneSupported, interrupt: laneSupported, continuation: laneSupported, resume: laneSupported },
+  messaging: {
+    steer: laneSupported,
+    interrupt: laneSupported,
+    continuation: laneSupported,
+    resume: laneSupported,
+  },
   roleChannel: 'task-prompt',
   permissionModes: {
     plan: { ...laneSupported, networkModes: ['deny'] },
@@ -164,6 +167,9 @@ class StateStub {
   readonly testCliConnection = jest.fn(async (_id: string) => {
     this.cliTest.set(ready(this.testResult));
   });
+  readonly testSystemLane = jest.fn(async (cli: string) => {
+    this.cliTest.set(ready({ ...this.testResult, id: cli }));
+  });
   readonly clearCliTest = jest.fn((_id: string) => undefined);
   readonly cliDetection = signal<
     ProvidersSettingsSection<CliDetectionResult[]>
@@ -226,7 +232,9 @@ class AmbientStub {
   imports: [CliOrchestrationMatrixComponent],
   template: `
     <ptah-cli-orchestration-matrix hostReadStates>
-      <p read-states role="alert" data-testid="projected-read-state">Could not load CLI agents.</p>
+      <p read-states role="alert" data-testid="projected-read-state">
+        Could not load CLI agents.
+      </p>
     </ptah-cli-orchestration-matrix>
   `,
 })
@@ -240,16 +248,25 @@ describe('CliOrchestrationMatrixComponent', () => {
   let ambient: AmbientStub;
   let electron: boolean;
   const element = () => fixture.nativeElement as HTMLElement;
-  const q = <T extends HTMLElement = HTMLElement>(selector: string) => element().querySelector(selector) as T | null;
+  const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
+    element().querySelector(selector) as T | null;
   const card = (id: string) => q(`[data-testid="cli-provider-card-${id}"]`);
-  const button = (root: Element | null, label: string) => Array.from(root?.querySelectorAll('button') ?? [])
-    .find(candidate => candidate.textContent?.trim().includes(label)) as HTMLButtonElement | undefined;
-  const toggle = (id: string) => card(id)?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+  const button = (root: Element | null, label: string) =>
+    Array.from(root?.querySelectorAll('button') ?? []).find((candidate) =>
+      candidate.textContent?.trim().includes(label),
+    ) as HTMLButtonElement | undefined;
+  const toggle = (id: string) =>
+    card(id)?.querySelector<HTMLInputElement>('input[type="checkbox"]');
   const openDetail = (id: string) => {
-    q<HTMLButtonElement>(`[data-testid="cli-provider-card-${id}"] ptah-table-row-expander button, [data-testid="cli-matrix-row-${id}"] ptah-table-row-expander button`)?.click();
+    q<HTMLButtonElement>(
+      `[data-testid="cli-provider-card-${id}"] ptah-table-row-expander button, [data-testid="cli-matrix-row-${id}"] ptah-table-row-expander button`,
+    )?.click();
     fixture.detectChanges();
   };
-  async function flush() { for (let i = 0; i < 8; i += 1) await Promise.resolve(); fixture.detectChanges(); }
+  async function flush() {
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    fixture.detectChanges();
+  }
   function _check(id: string, checked: boolean) {
     const input = toggle(id);
     if (!input) throw new Error(`No toggle for ${id}`);
@@ -257,29 +274,57 @@ describe('CliOrchestrationMatrixComponent', () => {
     input.dispatchEvent(new Event('change'));
   }
   function _showSavedCodexDefault() {
-    state.orchestration.set(ready({ ...ORCHESTRATION,
-      cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } },
-      detectedClis: ORCHESTRATION.detectedClis.map(cli =>
-        cli.cli === 'codex' ? { ...cli, manifest: laneManifest } : cli),
-    }));
+    state.orchestration.set(
+      ready({
+        ...ORCHESTRATION,
+        cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } },
+        detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+          cli.cli === 'codex' ? { ...cli, manifest: laneManifest } : cli,
+        ),
+      }),
+    );
     fixture.detectChanges();
   }
   beforeAll(() => {
-    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.setAttribute('open', ''); };
-    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) { this.removeAttribute('open'); };
+    HTMLDialogElement.prototype.showModal ??= function (
+      this: HTMLDialogElement,
+    ) {
+      this.setAttribute('open', '');
+    };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
   });
   beforeEach(() => {
-    Object.defineProperty(Element.prototype, 'scrollIntoView', { writable: true, configurable: true, value: jest.fn() });
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      writable: true,
+      configurable: true,
+      value: jest.fn(),
+    });
     state = new StateStub();
-    accounts = new AccountsStub(); ambient = new AmbientStub(); electron = true;
+    accounts = new AccountsStub();
+    ambient = new AmbientStub();
+    electron = true;
     TestBed.configureTestingModule({
       imports: [CliOrchestrationMatrixComponent],
       providers: [
         { provide: ProvidersSettingsStateService, useValue: state },
-        { provide: VSCodeService, useValue: { get isElectron() { return electron; } } },
+        {
+          provide: VSCodeService,
+          useValue: {
+            get isElectron() {
+              return electron;
+            },
+          },
+        },
         { provide: ProviderAccountsStateService, useValue: accounts },
         { provide: ClaudeAmbientStatusService, useValue: ambient },
-        { provide: PROVIDER_MODELS_LOADER, useValue: { listModels: jest.fn(async () => ({ models: [], totalCount: 0 })) } },
+        {
+          provide: PROVIDER_MODELS_LOADER,
+          useValue: {
+            listModels: jest.fn(async () => ({ models: [], totalCount: 0 })),
+          },
+        },
         SettingsSaveFeedbackService,
       ],
     });
@@ -287,15 +332,73 @@ describe('CliOrchestrationMatrixComponent', () => {
     fixture = TestBed.createComponent(CliOrchestrationMatrixComponent);
     fixture.detectChanges();
   });
-  afterEach(() => { feedback.dismiss(); TestBed.resetTestingModule(); });
+  afterEach(() => {
+    feedback.dismiss();
+    TestBed.resetTestingModule();
+  });
+
+  it('routes a system row Test to detection and shows its named result', async () => {
+    const announce = jest.spyOn(feedback, 'announce');
+    openDetail('codex');
+    const test = button(q('#lane-detail-codex'), 'Test');
+    expect(test).toBeDefined();
+    test?.click();
+    await flush();
+    expect(state.testSystemLane).toHaveBeenCalledWith('codex');
+    expect(state.testCliConnection).not.toHaveBeenCalled();
+    expect(
+      q('#lane-detail-codex [data-testid="cli-matrix-test-result"]')
+        ?.textContent,
+    ).toBe('Passed in 112ms.');
+    expect(announce).toHaveBeenCalledWith(
+      expect.stringMatching(/^Codex: Test passed/),
+      'status',
+    );
+  });
+
+  it('routes an instance row Test to the instance RPC', async () => {
+    openDetail('glm-1');
+    const test = button(q('#lane-detail-glm-1'), 'Test');
+    expect(test).toBeDefined();
+    test?.click();
+    await flush();
+    expect(state.testCliConnection).toHaveBeenCalledWith('glm-1');
+    expect(state.testSystemLane).not.toHaveBeenCalled();
+  });
+
+  it('keeps a system failure short in the table and names it in the toast', async () => {
+    const announce = jest.spyOn(feedback, 'announce');
+    state.testResult = {
+      id: 'codex',
+      success: false,
+      latencyMs: 10,
+      reason: 'Not detected.',
+    };
+    openDetail('codex');
+    button(q('#lane-detail-codex'), 'Test')?.click();
+    await flush();
+    expect(
+      q('#lane-detail-codex [data-testid="cli-matrix-test-result"]')
+        ?.textContent,
+    ).toBe('Not detected.');
+    expect(announce).toHaveBeenCalledWith(
+      'Codex: The connection test failed. Not detected.',
+      'alert',
+    );
+  });
 
   it('mounts one Lanes table with installed, instance and uninstalled rows in try order', () => {
-    const ids = Array.from(element().querySelectorAll('ptah-lanes-table tbody > tr[data-testid]'))
-      .map(row => row.getAttribute('data-testid'));
+    const ids = Array.from(
+      element().querySelectorAll('ptah-lanes-table tbody > tr[data-testid]'),
+    ).map((row) => row.getAttribute('data-testid'));
     expect(ids).toEqual([
-      'cli-provider-card-codex', 'cli-provider-card-antigravity',
-      'cli-matrix-row-glm-1', 'cli-provider-card-copilot',
-      'cli-provider-card-opencode', 'cli-provider-card-cursor', 'cli-provider-card-pi',
+      'cli-provider-card-codex',
+      'cli-provider-card-antigravity',
+      'cli-matrix-row-glm-1',
+      'cli-provider-card-copilot',
+      'cli-provider-card-opencode',
+      'cli-provider-card-cursor',
+      'cli-provider-card-pi',
     ]);
     expect(element().querySelectorAll('ptah-lanes-table')).toHaveLength(1);
     expect(q('ptah-cli-instances')).not.toBeNull();
@@ -308,42 +411,79 @@ describe('CliOrchestrationMatrixComponent', () => {
     const detail = q('#lane-detail-codex');
     expect(detail?.hidden).toBe(false);
     expect(detail?.textContent).toContain('Provider');
-    expect(detail?.querySelector('[data-popover-kind="permission"]')).not.toBeNull();
+    expect(
+      detail?.querySelector('[data-popover-kind="permission"]'),
+    ).not.toBeNull();
     expect(detail?.querySelector('ptah-cli-capability-cells')).not.toBeNull();
-    expect(detail?.querySelector('[data-testid="cli-matrix-test-result"]')?.textContent).toContain('Not run yet');
-    button(detail, 'Info')?.click(); fixture.detectChanges();
-    expect(q('#lane-detail-codex ptah-cli-provider-card-popovers')).not.toBeNull();
+    expect(
+      detail?.querySelector('[data-testid="cli-matrix-test-result"]')
+        ?.textContent,
+    ).toContain('Not run yet');
+    button(detail, 'Info')?.click();
+    fixture.detectChanges();
+    expect(
+      q('#lane-detail-codex ptah-cli-provider-card-popovers'),
+    ).not.toBeNull();
   });
 
   it('reuses the Claude account cell and Cursor credentials in details', () => {
-    state.orchestration.set(ready({ ...ORCHESTRATION,
-      detectedClis: [...ORCHESTRATION.detectedClis, detected('claude', true)],
-    }));
+    state.orchestration.set(
+      ready({
+        ...ORCHESTRATION,
+        detectedClis: [...ORCHESTRATION.detectedClis, detected('claude', true)],
+      }),
+    );
     fixture.detectChanges();
     openDetail('claude');
-    expect(q('#lane-detail-claude ptah-claude-lane-account-cell')).not.toBeNull();
+    expect(
+      q('#lane-detail-claude ptah-claude-lane-account-cell'),
+    ).not.toBeNull();
     openDetail('cursor');
-    const credential = q<HTMLButtonElement>('#lane-detail-cursor [data-popover-kind="credentials"]');
+    const credential = q<HTMLButtonElement>(
+      '#lane-detail-cursor [data-popover-kind="credentials"]',
+    );
     expect(credential).not.toBeNull();
-    credential?.click(); fixture.detectChanges();
-    expect(q('#lane-detail-cursor ptah-cursor-credential-popover')).not.toBeNull();
+    credential?.click();
+    fixture.detectChanges();
+    expect(
+      q('#lane-detail-cursor ptah-cursor-credential-popover'),
+    ).not.toBeNull();
   });
 
   it('exposes instance tiers, editor and add modal', () => {
     openDetail('glm-1');
     expect(q('#lane-detail-glm-1')?.textContent).toContain('Sonnet');
-    button(q('#lane-detail-glm-1'), 'Edit tiers')?.click(); fixture.detectChanges();
-    expect(q('[data-testid="cli-tier-mapping-modal"]')?.closest('dialog')?.hasAttribute('open')).toBe(true);
-    q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click(); fixture.detectChanges();
-    expect(q('[data-testid="add-cli-instance-modal"]')?.closest('dialog')?.hasAttribute('open')).toBe(true);
+    button(q('#lane-detail-glm-1'), 'Edit tiers')?.click();
+    fixture.detectChanges();
+    expect(
+      q('[data-testid="cli-tier-mapping-modal"]')
+        ?.closest('dialog')
+        ?.hasAttribute('open'),
+    ).toBe(true);
+    q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click();
+    fixture.detectChanges();
+    expect(
+      q('[data-testid="add-cli-instance-modal"]')
+        ?.closest('dialog')
+        ?.hasAttribute('open'),
+    ).toBe(true);
   });
 
   it('uses fixed error text and retries without exposing a failed read message', async () => {
-    state.orchestration.set({ status: 'error', data: ORCHESTRATION, error: 'secret server trace' });
+    state.orchestration.set({
+      status: 'error',
+      data: ORCHESTRATION,
+      error: 'secret server trace',
+    });
     fixture.detectChanges();
-    expect(q('ptah-lanes-table')?.textContent).toContain('Could not load lanes.');
-    expect(q('ptah-lanes-table')?.textContent).not.toContain('secret server trace');
-    button(q('ptah-lanes-table'), 'Retry')?.click(); await flush();
+    expect(q('ptah-lanes-table')?.textContent).toContain(
+      'Could not load lanes.',
+    );
+    expect(q('ptah-lanes-table')?.textContent).not.toContain(
+      'secret server trace',
+    );
+    button(q('ptah-lanes-table'), 'Retry')?.click();
+    await flush();
     expect(state.refreshOrchestration).toHaveBeenCalledTimes(1);
     expect(state.refreshCliAgents).toHaveBeenCalledTimes(1);
   });
@@ -352,10 +492,14 @@ describe('CliOrchestrationMatrixComponent', () => {
     state.orchestration.set({ status: 'loading', data: null, error: null });
     state.cliAgents.set({ status: 'loading', data: null, error: null });
     fixture.detectChanges();
-    expect(q('[data-testid="cli-matrix"]')?.textContent).toContain('Loading CLI agents…');
+    expect(q('[data-testid="cli-matrix"]')?.textContent).toContain(
+      'Loading CLI agents…',
+    );
     fixture.componentRef.setInput('hostReadStates', true);
     fixture.detectChanges();
-    expect(q('[data-testid="cli-matrix"]')?.textContent).not.toContain('Loading CLI agents…');
+    expect(q('[data-testid="cli-matrix"]')?.textContent).not.toContain(
+      'Loading CLI agents…',
+    );
   });
 
   it('projects the host read states into the card, outside any busy region', () => {
@@ -364,21 +508,39 @@ describe('CliOrchestrationMatrixComponent', () => {
     const host = TestBed.createComponent(ReadStatesHostComponent);
     host.detectChanges();
     const root = host.nativeElement as HTMLElement;
-    const projected = root.querySelector('[data-testid="projected-read-state"]');
-    expect(root.querySelector('[data-testid="cli-matrix"]')?.getAttribute('aria-busy')).toBe('true');
-    expect(projected?.closest('[data-testid="settings-cli-matrix"]')).not.toBeNull();
+    const projected = root.querySelector(
+      '[data-testid="projected-read-state"]',
+    );
+    expect(
+      root
+        .querySelector('[data-testid="cli-matrix"]')
+        ?.getAttribute('aria-busy'),
+    ).toBe('true');
+    expect(
+      projected?.closest('[data-testid="settings-cli-matrix"]'),
+    ).not.toBeNull();
     expect(projected?.closest('[aria-busy="true"]')).toBeNull();
     host.destroy();
   });
 
   it('opens the install guide and invokes Re-detect', async () => {
-    button(card('pi'), 'Install guide')?.click(); fixture.detectChanges();
-    expect(q('#lane-detail-pi ptah-cli-provider-card-popovers')?.textContent).toContain('Re-detect');
-    state.onRedetect = () => state.orchestration.update(section => ({ ...section, data: {
-      ...ORCHESTRATION,
-      detectedClis: ORCHESTRATION.detectedClis.map(cli => cli.cli === 'pi' ? detected('pi', true) : cli),
-    } }));
-    button(q('#lane-detail-pi'), 'Re-detect')?.click(); await flush();
+    button(card('pi'), 'Install guide')?.click();
+    fixture.detectChanges();
+    expect(
+      q('#lane-detail-pi ptah-cli-provider-card-popovers')?.textContent,
+    ).toContain('Re-detect');
+    state.onRedetect = () =>
+      state.orchestration.update((section) => ({
+        ...section,
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'pi' ? detected('pi', true) : cli,
+          ),
+        },
+      }));
+    button(q('#lane-detail-pi'), 'Re-detect')?.click();
+    await flush();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
     expect(q('#lane-detail-pi ptah-cli-provider-card-popovers')).toBeNull();
   });

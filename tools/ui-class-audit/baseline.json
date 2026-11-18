@@ -354,25 +354,13 @@
     "btn-outline": 2,
     "btn-sm": 2
   },
-  "libs/frontend/chat/src/lib/settings/providers/accounts/accounts-tab.component.ts": {
-    "<dynamic>": 4,
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-sm": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/accounts/add-account-form.component.ts": {
-    "<dynamic>": 1
-  },
   "libs/frontend/chat/src/lib/settings/providers/accounts/ambient-account-row.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/chat/src/lib/settings/providers/agents-routing-settings.component.ts": {
-    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/settings/providers/connection-detail-drawer.component.ts": {
     "<dynamic>": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/connection-drawer/advanced-tab.component.ts": {
+  "libs/frontend/chat/src/lib/settings/providers/connection-drawer/advanced-tab.component.html": {
     "<dynamic>": 1,
     "btn": 2,
     "btn-outline": 2,
@@ -402,19 +390,13 @@
     "skeleton": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-key-field.component.ts": {
-    "<dynamic>": 3
+    "<dynamic>": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.base-url-field.component.ts": {
-    "<dynamic>": 2
+  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.html": {
+    "<dynamic>": 6
   },
-  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.ts": {
-    "<dynamic>": 10
-  },
-  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.timeout-field.component.ts": {
-    "<dynamic>": 2
-  },
-  "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.ts": {
-    "<dynamic>": 10
+  "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.html": {
+    "<dynamic>": 7
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-scope-badges.component.ts": {
     "<dynamic>": 2
@@ -434,11 +416,8 @@
   "libs/frontend/chat/src/lib/settings/providers/setting-scope-row.component.ts": {
     "<dynamic>": 5
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.html": {
     "<dynamic>": 5
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/capability-matrix-setting.component.ts": {
-    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "<dynamic>": 2
@@ -457,7 +436,7 @@
     "toggle-success": 1,
     "toggle-xs": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.html": {
     "<dynamic>": 2,
     "btn": 1,
     "btn-primary": 1,
@@ -475,7 +454,7 @@
     "toggle-success": 1,
     "toggle-xs": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.html": {
     "<dynamic>": 9
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
@@ -502,15 +481,6 @@
   },
   "libs/frontend/command-center/src/lib/components/command-work-list.component.ts": {
     "<dynamic>": 2
-  },
-  "libs/frontend/notification-center/src/lib/components/attention-permission-actions.component.ts": {
-    "btn": 3,
-    "btn-ghost": 3,
-    "btn-primary": 1,
-    "btn-sm": 3,
-    "input": 1,
-    "input-bordered": 1,
-    "input-sm": 1
   },
   "libs/frontend/cron-scheduler-ui/src/lib/components/cron-job-card.component.ts": {
     "<dynamic>": 1
@@ -779,6 +749,15 @@
     "btn-success": 1,
     "btn-xs": 1
   },
+  "libs/frontend/notification-center/src/lib/components/attention-permission-actions.component.ts": {
+    "btn": 3,
+    "btn-ghost": 3,
+    "btn-primary": 1,
+    "btn-sm": 3,
+    "input": 1,
+    "input-bordered": 1,
+    "input-sm": 1
+  },
   "libs/frontend/onboarding/src/lib/home/path-tile.component.ts": {
     "<dynamic>": 2
   },
@@ -821,10 +800,6 @@
     "alert-info": 1,
     "alert-warning": 3
   },
-  "libs/frontend/setup-wizard/src/lib/components/community-packs-panel.component.ts": {
-    "alert": 1,
-    "alert-error": 1
-  },
   "libs/frontend/setup-wizard/src/lib/components/completion/grade-expectation.component.ts": {
     "alert": 1,
     "alert-info": 1
@@ -846,11 +821,6 @@
   "libs/frontend/setup-wizard/src/lib/components/generation-errors.component.ts": {
     "alert": 1,
     "alert-error": 1
-  },
-  "libs/frontend/setup-wizard/src/lib/components/pack-install-prompt.component.ts": {
-    "alert": 2,
-    "alert-error": 1,
-    "alert-info": 1
   },
   "libs/frontend/skill-synthesis-ui/src/lib/components/clones/agent-model-editor.component.ts": {
     "btn": 1,

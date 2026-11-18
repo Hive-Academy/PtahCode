@@ -1,19 +1,53 @@
+import { PtahRichSelectComponent } from '@ptah-extension/ui';
+import { By as SelectBy } from '@angular/platform-browser';
 import { Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
-  ProvidersSettingsStateService, type ProvidersConnection, type ProvidersExternalAuth, type ProvidersSettingsCommit,
+  ProvidersSettingsStateService,
+  type ProvidersConnection,
+  type ProvidersExternalAuth,
+  type ProvidersSettingsCommit,
   type ProvidersSettingsSection,
 } from '@ptah-extension/core';
-import { SAVE_REFUSED_MESSAGE, SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
-import { AddCliInstanceModalComponent, type CliInstanceEditTarget } from './add-cli-instance-modal.component';
+import {
+  SAVE_REFUSED_MESSAGE,
+  SettingsSaveFeedbackService,
+} from '../feedback/settings-save-feedback.service';
+import {
+  AddCliInstanceModalComponent,
+  type CliInstanceEditTarget,
+} from './add-cli-instance-modal.component';
 
-const ready = <T,>(data: T): ProvidersSettingsSection<T> => ({ status: 'ready', data, error: null });
-const idle: ProvidersSettingsCommit = { status: 'idle', saved: [], unsaved: [], unconfirmed: [], refreshFailed: false, message: null };
+const ready = <T>(data: T): ProvidersSettingsSection<T> => ({
+  status: 'ready',
+  data,
+  error: null,
+});
+const idle: ProvidersSettingsCommit = {
+  status: 'idle',
+  saved: [],
+  unsaved: [],
+  unconfirmed: [],
+  refreshFailed: false,
+  message: null,
+};
 const CONTEXT = { scopeKey: 'workspace', activePath: '/ws' };
 const KEY = 'sk-e2e-instance-key';
 
-const connection = (id: string, name: string, authMode: ProvidersConnection['authMode']): ProvidersConnection => ({
-  id, name, authMode, hasKey: false, configured: true, custom: false, defaultsResolvable: true, accountLabel: null, tokenStale: false,
+const connection = (
+  id: string,
+  name: string,
+  authMode: ProvidersConnection['authMode'],
+): ProvidersConnection => ({
+  id,
+  name,
+  authMode,
+  hasKey: false,
+  configured: true,
+  custom: false,
+  defaultsResolvable: true,
+  accountLabel: null,
+  tokenStale: false,
 });
 const CONNECTIONS: ProvidersConnection[] = [
   connection('anthropic', 'Claude API', 'apiKey'),
@@ -28,35 +62,63 @@ const CONNECTIONS: ProvidersConnection[] = [
 
 class StateStub {
   readonly commit = signal<ProvidersSettingsCommit>(idle);
-  readonly connections = signal<ProvidersSettingsSection<ProvidersConnection[]>>(ready(CONNECTIONS));
-  readonly externalAuth = signal<ProvidersSettingsSection<ProvidersExternalAuth>>({ status: 'unloaded', data: null, error: null });
+  readonly connections = signal<
+    ProvidersSettingsSection<ProvidersConnection[]>
+  >(ready(CONNECTIONS));
+  readonly externalAuth = signal<
+    ProvidersSettingsSection<ProvidersExternalAuth>
+  >({ status: 'unloaded', data: null, error: null });
   readonly contextNow = signal<typeof CONTEXT | null>(CONTEXT);
   readonly reviewContext = jest.fn(() => this.contextNow());
-  readonly cliAgents = signal<ProvidersSettingsSection<{ id: string; name: string }[]>>(ready([{ id: 'glm-1', name: 'Glm' }]));
+  readonly cliAgents = signal<
+    ProvidersSettingsSection<{ id: string; name: string }[]>
+  >(ready([{ id: 'glm-1', name: 'Glm' }]));
   readonly clearCliTest = jest.fn((_id: string) => undefined);
   outcome: ProvidersSettingsCommit['status'] | 'refused' = 'saved';
-  readonly saveSettings = jest.fn(async (_patch: unknown, _context: unknown) => {
-    if (this.outcome === 'refused') return false;
-    this.commit.set({ ...idle, status: this.outcome });
-    return true;
-  });
+  readonly saveSettings = jest.fn(
+    async (_patch: unknown, _context: unknown) => {
+      if (this.outcome === 'refused') return false;
+      this.commit.set({ ...idle, status: this.outcome });
+      return true;
+    },
+  );
   /** What the host's sign-in leads to. */
   signIn: 'signed-in' | 'idle' | 'error' = 'signed-in';
-  readonly performExternalAuth = jest.fn(async (providerId: string, _action: string) => {
-    if (this.signIn === 'error') {
-      this.externalAuth.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
-      return;
-    }
-    this.externalAuth.set(ready({ providerId, signInState: this.signIn, accountLabel: null, cliInstalled: null,
-      message: this.signIn === 'signed-in' ? 'Sign-in detected. Verify the connection before using it.' : 'Login has not been confirmed.' }));
-  });
+  readonly performExternalAuth = jest.fn(
+    async (providerId: string, _action: string) => {
+      if (this.signIn === 'error') {
+        this.externalAuth.set({
+          status: 'error',
+          data: null,
+          error: 'Could not load this section. Retry.',
+        });
+        return;
+      }
+      this.externalAuth.set(
+        ready({
+          providerId,
+          signInState: this.signIn,
+          accountLabel: null,
+          cliInstalled: null,
+          message:
+            this.signIn === 'signed-in'
+              ? 'Sign-in detected. Verify the connection before using it.'
+              : 'Login has not been confirmed.',
+        }),
+      );
+    },
+  );
 }
 
 @Component({
   standalone: true,
   imports: [AddCliInstanceModalComponent],
-  template: `<ptah-add-cli-instance-modal [open]="open()" [editing]="editing()" (created)="created.push($event)"
-    (closed)="open.set(false); closed = closed + 1" />`,
+  template: `<ptah-add-cli-instance-modal
+    [open]="open()"
+    [editing]="editing()"
+    (created)="created.push($event)"
+    (closed)="open.set(false); closed = closed + 1"
+  />`,
 })
 class Host {
   readonly open = signal(true);
@@ -70,9 +132,16 @@ describe('AddCliInstanceModalComponent', () => {
   let state: StateStub;
   let feedback: SettingsSaveFeedbackService;
   const el = () => fixture.nativeElement as HTMLElement;
-  const q = <T extends HTMLElement = HTMLElement>(id: string) => el().querySelector(`[data-testid="${id}"]`) as T | null;
+  const q = <T extends HTMLElement = HTMLElement>(id: string) =>
+    el().querySelector(`[data-testid="${id}"]`) as T | null;
   const submit = () => q<HTMLButtonElement>('add-cli-instance-submit');
-  async function flush() { for (let i = 0; i < 8; i += 1) await Promise.resolve(); fixture.detectChanges(); }
+  const selectControl = (id: string): PtahRichSelectComponent<string> =>
+    fixture.debugElement.query(SelectBy.css(`ptah-select[data-testid="${id}"]`))
+      .componentInstance;
+  async function flush() {
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    fixture.detectChanges();
+  }
   function type(id: string, value: string) {
     const input = q<HTMLInputElement>(id);
     if (!input) throw new Error(`no ${id}`);
@@ -81,16 +150,21 @@ describe('AddCliInstanceModalComponent', () => {
     fixture.detectChanges();
   }
   function choose(providerId: string) {
-    const select = q<HTMLSelectElement>('add-cli-instance-provider');
+    const select = selectControl('add-cli-instance-provider');
     if (!select) throw new Error('no provider select');
-    select.value = providerId;
-    select.dispatchEvent(new Event('change'));
+    select.value.set(providerId);
     fixture.detectChanges();
   }
 
   beforeAll(() => {
-    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.setAttribute('open', ''); };
-    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) { this.removeAttribute('open'); };
+    HTMLDialogElement.prototype.showModal ??= function (
+      this: HTMLDialogElement,
+    ) {
+      this.setAttribute('open', '');
+    };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
   });
 
   function create(editing: CliInstanceEditTarget | null = null) {
@@ -103,19 +177,29 @@ describe('AddCliInstanceModalComponent', () => {
     state = new StateStub();
     TestBed.configureTestingModule({
       imports: [Host],
-      providers: [{ provide: ProvidersSettingsStateService, useValue: state }, SettingsSaveFeedbackService],
+      providers: [
+        { provide: ProvidersSettingsStateService, useValue: state },
+        SettingsSaveFeedbackService,
+      ],
     });
     feedback = TestBed.inject(SettingsSaveFeedbackService);
   });
-  afterEach(() => { feedback.dismiss(); TestBed.resetTestingModule(); });
+  afterEach(() => {
+    feedback.dismiss();
+    TestBed.resetTestingModule();
+  });
 
   describe('create', () => {
     beforeEach(() => create());
 
     it('is the titled "Add Ptah CLI Agent Instance" dialog, open', () => {
       expect(el().querySelector('dialog')?.hasAttribute('open')).toBe(true);
-      expect(el().querySelector('dialog')?.getAttribute('aria-labelledby')).toBe('add-cli-instance-title');
-      expect(q('add-cli-instance-modal')?.textContent).toContain('Add Ptah CLI Agent Instance');
+      expect(
+        el().querySelector('dialog')?.getAttribute('aria-labelledby'),
+      ).toBe('add-cli-instance-title');
+      expect(q('add-cli-instance-modal')?.textContent).toContain(
+        'Add Ptah CLI Agent Instance',
+      );
       expect(submit()?.textContent?.trim()).toBe('Create Instance');
       expect(submit()?.disabled).toBe(true);
     });
@@ -128,81 +212,161 @@ describe('AddCliInstanceModalComponent', () => {
     });
 
     it('offers Claude API and excludes OpenAI Codex, with each modality', () => {
-      const options = Array.from(q<HTMLSelectElement>('add-cli-instance-provider')?.options ?? []).map((option) => option.textContent?.trim());
-      expect(options).toEqual(['Choose a provider connection…', 'Claude API · API key', 'Claude (Subscription) · CLI login', 'Kimi Code · OAuth',
-        'Requesty · API key', 'Ollama Cloud · Local server', 'Ollama · Local server', 'GitHub Copilot · OAuth']);
+      const options = Array.from(
+        selectControl('add-cli-instance-provider').options() ?? [],
+      ).map((option) => option.label);
+      expect(options).toEqual([
+        'Choose a provider connection…',
+        'Claude API · API key',
+        'Claude (Subscription) · CLI login',
+        'Kimi Code · OAuth',
+        'Requesty · API key',
+        'Ollama Cloud · Local server',
+        'Ollama · Local server',
+        'GitHub Copilot · OAuth',
+      ]);
     });
 
     it('creates Claude API with the saved connection key and no key payload', async () => {
-      state.connections.set(ready(CONNECTIONS.map((row) => row.id === 'anthropic' ? { ...row, hasKey: true } : row)));
+      state.connections.set(
+        ready(
+          CONNECTIONS.map((row) =>
+            row.id === 'anthropic' ? { ...row, hasKey: true } : row,
+          ),
+        ),
+      );
       type('add-cli-instance-name', 'Claude-lane');
       choose('anthropic');
       expect(q('add-cli-instance-key')).toBeNull();
       expect(submit()?.disabled).toBe(false);
       submit()?.click();
       await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith({ cli: [{ action: 'create', params: {
-        name: 'Claude-lane', providerId: 'anthropic-api', credentialSource: 'shared-connection',
-      } }] }, CONTEXT);
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        {
+          cli: [
+            {
+              action: 'create',
+              params: {
+                name: 'Claude-lane',
+                providerId: 'anthropic-api',
+                credentialSource: 'shared-connection',
+              },
+            },
+          ],
+        },
+        CONTEXT,
+      );
     });
 
     it('requires a separate Claude API key when the saved key is unavailable', async () => {
       type('add-cli-instance-name', 'Claude-lane');
       choose('anthropic');
       expect(submit()?.disabled).toBe(true);
-      expect(q('add-cli-instance-claude-source')?.textContent).toContain('Connect Claude API first');
-      const separate = el().querySelectorAll<HTMLInputElement>('input[name="claude-source"]')[1];
+      expect(q('add-cli-instance-claude-source')?.textContent).toContain(
+        'Connect Claude API first',
+      );
+      const separate = el().querySelectorAll<HTMLInputElement>(
+        'input[name="claude-source"]',
+      )[1];
       separate.click();
       fixture.detectChanges();
       expect(submit()?.disabled).toBe(true);
       type('add-cli-instance-key', KEY);
       submit()?.click();
       await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith({ cli: [{ action: 'create', params: {
-        name: 'Claude-lane', providerId: 'anthropic-api', credentialSource: 'instance', apiKey: KEY,
-      } }] }, CONTEXT);
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        {
+          cli: [
+            {
+              action: 'create',
+              params: {
+                name: 'Claude-lane',
+                providerId: 'anthropic-api',
+                credentialSource: 'instance',
+                apiKey: KEY,
+              },
+            },
+          ],
+        },
+        CONTEXT,
+      );
     });
 
     it('requires a key for an API-key provider, masked with show/hide (#49)', () => {
       type('add-cli-instance-name', 'Requesty-2');
       choose('requesty');
-      expect(el().querySelector('dialog')?.textContent).toContain('API key for this instance');
-      expect(q('add-cli-instance-key-help')?.textContent).toContain('Keys stored for the provider connection are not copied');
+      expect(el().querySelector('dialog')?.textContent).toContain(
+        'API key for this instance',
+      );
+      expect(q('add-cli-instance-key-help')?.textContent).toContain(
+        'Keys stored for the provider connection are not copied',
+      );
       expect(submit()?.disabled).toBe(true);
       type('add-cli-instance-key', KEY);
-      expect(q<HTMLInputElement>('add-cli-instance-key')?.type).toBe('password');
+      expect(q<HTMLInputElement>('add-cli-instance-key')?.type).toBe(
+        'password',
+      );
       q<HTMLButtonElement>('add-cli-instance-toggle-visibility')?.click();
       fixture.detectChanges();
       expect(q<HTMLInputElement>('add-cli-instance-key')?.type).toBe('text');
-      expect(q('add-cli-instance-toggle-visibility')?.getAttribute('aria-pressed')).toBe('true');
+      expect(
+        q('add-cli-instance-toggle-visibility')?.getAttribute('aria-pressed'),
+      ).toBe('true');
       expect(submit()?.disabled).toBe(false);
     });
 
     it('makes the key optional for Kimi Code, which falls back to the shared connection (apiKeyFallback)', async () => {
       type('add-cli-instance-name', 'Kimi-2');
       choose('kimi-code');
-      expect(el().querySelector('dialog')?.textContent).toContain('API key (optional)');
+      expect(el().querySelector('dialog')?.textContent).toContain(
+        'API key (optional)',
+      );
       expect(q('add-cli-instance-key-help')?.textContent?.trim()).toBe(
-        "Optional. Leave empty to use your Kimi Code connection (CLI sign-in, or the provider's stored key as fallback). A key entered here is used instead.");
+        "Optional. Leave empty to use your Kimi Code connection (CLI sign-in, or the provider's stored key as fallback). A key entered here is used instead.",
+      );
       expect(q('add-cli-instance-key')).not.toBeNull();
       expect(submit()?.disabled).toBe(false);
       submit()?.click();
       await flush();
       expect(state.saveSettings).toHaveBeenCalledWith(
-        { cli: [{ action: 'create', params: { name: 'Kimi-2', providerId: 'kimi-code', apiKey: '' } }] }, CONTEXT);
+        {
+          cli: [
+            {
+              action: 'create',
+              params: { name: 'Kimi-2', providerId: 'kimi-code', apiKey: '' },
+            },
+          ],
+        },
+        CONTEXT,
+      );
     });
 
     it.each([
-      ['claude-cli', 'No API key needed — uses your local Claude login / subscription.', false],
-      ['ollama', 'No API key needed — make sure Ollama is running locally.', false],
-      ['ollama-cloud', 'Optional — run ollama signin to use Ollama Cloud', true],
-    ] as const)('gives %s its keyless / optional-key hint (#48)', (providerId, hint, keyField) => {
-      type('add-cli-instance-name', 'Local');
-      choose(providerId);
-      expect(q('add-cli-instance-key-help')?.textContent).toContain(hint);
-      expect(!!q('add-cli-instance-key')).toBe(keyField);
-      expect(submit()?.disabled).toBe(false);
-    });
+      [
+        'claude-cli',
+        'No API key needed — uses your local Claude login / subscription.',
+        false,
+      ],
+      [
+        'ollama',
+        'No API key needed — make sure Ollama is running locally.',
+        false,
+      ],
+      [
+        'ollama-cloud',
+        'Optional — run ollama signin to use Ollama Cloud',
+        true,
+      ],
+    ] as const)(
+      'gives %s its keyless / optional-key hint (#48)',
+      (providerId, hint, keyField) => {
+        type('add-cli-instance-name', 'Local');
+        choose(providerId);
+        expect(q('add-cli-instance-key-help')?.textContent).toContain(hint);
+        expect(!!q('add-cli-instance-key')).toBe(keyField);
+        expect(submit()?.disabled).toBe(false);
+      },
+    );
 
     it('creates through saveSettings, then closes and drops the key (no Undo for a create)', async () => {
       type('add-cli-instance-name', ' Kimi-2 ');
@@ -211,10 +375,23 @@ describe('AddCliInstanceModalComponent', () => {
       submit()?.click();
       await flush();
       expect(state.saveSettings).toHaveBeenCalledWith(
-        { cli: [{ action: 'create', params: { name: 'Kimi-2', providerId: 'kimi-code', apiKey: KEY } }] }, CONTEXT);
+        {
+          cli: [
+            {
+              action: 'create',
+              params: { name: 'Kimi-2', providerId: 'kimi-code', apiKey: KEY },
+            },
+          ],
+        },
+        CONTEXT,
+      );
       // M4: a stored key is not a checked one; the matrix runs the Test on `created`.
       // Re-check N-1: the toast promises no Test (the matrix runs it only when it finds the new instance).
-      expect(feedback.toast()).toEqual({ tone: 'status', message: 'Created Kimi-2. Key stored, not verified.', canUndo: false });
+      expect(feedback.toast()).toEqual({
+        tone: 'status',
+        message: 'Created Kimi-2. Key stored, not verified.',
+        canUndo: false,
+      });
       expect(feedback.toast()?.message).not.toContain('Testing');
       expect(fixture.componentInstance.created).toEqual(['Kimi-2']);
       expect(fixture.componentInstance.closed).toBe(1);
@@ -254,60 +431,109 @@ describe('AddCliInstanceModalComponent', () => {
       choose('github-copilot');
       await flush();
       expect(q('add-cli-instance-key')).toBeNull();
-      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe('Awaiting sign-in');
+      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe(
+        'Awaiting sign-in',
+      );
       expect(submit()?.disabled).toBe(true);
       q<HTMLButtonElement>('add-cli-instance-copilot-login')?.click();
       await flush();
-      expect(state.performExternalAuth).toHaveBeenCalledWith('github-copilot', 'sign-in');
+      expect(state.performExternalAuth).toHaveBeenCalledWith(
+        'github-copilot',
+        'sign-in',
+      );
       expect(submit()?.disabled).toBe(true);
       state.signIn = 'error';
       q<HTMLButtonElement>('add-cli-instance-copilot-login')?.click();
       await flush();
-      expect(q('add-cli-instance-copilot-message')?.getAttribute('role')).toBe('alert');
-      expect(q('add-cli-instance-copilot-login')?.textContent?.trim()).toBe('Retry login with GitHub');
+      expect(q('add-cli-instance-copilot-message')?.getAttribute('role')).toBe(
+        'alert',
+      );
+      expect(q('add-cli-instance-copilot-login')?.textContent?.trim()).toBe(
+        'Retry login with GitHub',
+      );
       state.signIn = 'signed-in';
       q<HTMLButtonElement>('add-cli-instance-copilot-login')?.click();
       await flush();
-      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe('Signed in');
+      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe(
+        'Signed in',
+      );
       expect(submit()?.disabled).toBe(false);
       submit()?.click();
       await flush();
       // The host contract's non-secret OAuth marker is added by the state service; the form sends no key.
       expect(state.saveSettings).toHaveBeenCalledWith(
-        { cli: [{ action: 'create', params: { name: 'Copilot-agent', providerId: 'github-copilot', apiKey: '' } }] }, CONTEXT);
+        {
+          cli: [
+            {
+              action: 'create',
+              params: {
+                name: 'Copilot-agent',
+                providerId: 'github-copilot',
+                apiKey: '',
+              },
+            },
+          ],
+        },
+        CONTEXT,
+      );
     });
 
-    it('does not count another provider\'s sign-in as Copilot\'s', () => {
+    it("does not count another provider's sign-in as Copilot's", () => {
       state.performExternalAuth.mockImplementationOnce(async () => undefined);
-      state.externalAuth.set(ready({ providerId: 'openai-codex', signInState: 'signed-in', accountLabel: null, cliInstalled: null, message: null }));
+      state.externalAuth.set(
+        ready({
+          providerId: 'openai-codex',
+          signInState: 'signed-in',
+          accountLabel: null,
+          cliInstalled: null,
+          message: null,
+        }),
+      );
       type('add-cli-instance-name', 'Copilot-agent');
       choose('github-copilot');
       expect(submit()?.disabled).toBe(true);
     });
 
     it('M6: an earlier Copilot sign-in in the shared store never counts; choosing Copilot re-reads the sign-in', async () => {
-      state.externalAuth.set(ready({ providerId: 'github-copilot', signInState: 'signed-in', accountLabel: null, cliInstalled: null, message: null }));
+      state.externalAuth.set(
+        ready({
+          providerId: 'github-copilot',
+          signInState: 'signed-in',
+          accountLabel: null,
+          cliInstalled: null,
+          message: null,
+        }),
+      );
       // Open the form with that stale data still in the store: Copilot is not chosen yet, nothing reads it.
       state.performExternalAuth.mockImplementationOnce(async () => {
         state.externalAuth.set({ status: 'loading', data: null, error: null });
       });
       type('add-cli-instance-name', 'Copilot-agent');
       choose('github-copilot');
-      expect(state.performExternalAuth).toHaveBeenCalledWith('github-copilot', 'cli-check');
+      expect(state.performExternalAuth).toHaveBeenCalledWith(
+        'github-copilot',
+        'cli-check',
+      );
       fixture.detectChanges();
-      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe('Checking sign-in…');
+      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe(
+        'Checking sign-in…',
+      );
       expect(submit()?.disabled).toBe(true);
       state.signIn = 'idle';
       await state.performExternalAuth('github-copilot', 'cli-check');
       fixture.detectChanges();
-      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe('Awaiting sign-in');
+      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe(
+        'Awaiting sign-in',
+      );
       expect(submit()?.disabled).toBe(true);
       // A fresh signed-in read enables Create.
       state.signIn = 'signed-in';
       choose('ollama');
       choose('github-copilot');
       await flush();
-      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe('Signed in');
+      expect(q('add-cli-instance-copilot-state')?.textContent?.trim()).toBe(
+        'Signed in',
+      );
       expect(submit()?.disabled).toBe(false);
     });
 
@@ -336,16 +562,31 @@ describe('AddCliInstanceModalComponent', () => {
       submit()?.click();
       await flush();
       expect(state.saveSettings).toHaveBeenCalledWith(
-        { cli: [{ action: 'create', params: { name: 'Kimi-2', providerId: 'ollama', apiKey: '' } }] }, CONTEXT);
+        {
+          cli: [
+            {
+              action: 'create',
+              params: { name: 'Kimi-2', providerId: 'ollama', apiKey: '' },
+            },
+          ],
+        },
+        CONTEXT,
+      );
       expect(JSON.stringify(state.saveSettings.mock.calls)).not.toContain(KEY);
-      expect(feedback.toast()?.message).toBe('Saved Ptah CLI instance Kimi-2 to All Ptah apps.');
+      expect(feedback.toast()?.message).toBe(
+        'Saved Ptah CLI instance Kimi-2 to All Ptah apps.',
+      );
     });
 
     it('M9: rejects a duplicate name, case-insensitively, with a fixed message', () => {
       type('add-cli-instance-name', ' gLM ');
       choose('ollama');
-      expect(q('add-cli-instance-name-error')?.textContent?.trim()).toBe('Another Ptah CLI instance already uses this name.');
-      expect(q('add-cli-instance-name')?.getAttribute('aria-invalid')).toBe('true');
+      expect(q('add-cli-instance-name-error')?.textContent?.trim()).toBe(
+        'Another Ptah CLI instance already uses this name.',
+      );
+      expect(q('add-cli-instance-name')?.getAttribute('aria-invalid')).toBe(
+        'true',
+      );
       expect(submit()?.disabled).toBe(true);
       type('add-cli-instance-name', 'Glm-2');
       expect(q('add-cli-instance-name-error')).toBeNull();
@@ -381,16 +622,25 @@ describe('AddCliInstanceModalComponent', () => {
       choose('kimi-code');
       type('add-cli-instance-key', KEY);
       let release: (value: boolean) => void = () => undefined;
-      state.saveSettings.mockImplementationOnce(() => new Promise<boolean>((resolve) => { release = resolve; }));
+      state.saveSettings.mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            release = resolve;
+          }),
+      );
       submit()?.click();
       fixture.detectChanges();
-      Array.from(el().querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Cancel')?.click();
+      Array.from(el().querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === 'Cancel')
+        ?.click();
       fixture.detectChanges();
       expect(fixture.componentInstance.closed).toBe(1);
       state.commit.set({ ...idle, status: 'saved' });
       release(true);
       await flush();
-      expect(feedback.toast()?.message).toBe('Created Kimi-2. Key stored, not verified.');
+      expect(feedback.toast()?.message).toBe(
+        'Created Kimi-2. Key stored, not verified.',
+      );
       // It does not close (or reopen) again for that late result, nor report a create for the closed form.
       expect(fixture.componentInstance.created).toEqual([]);
       expect(fixture.componentInstance.closed).toBe(1);
@@ -398,19 +648,35 @@ describe('AddCliInstanceModalComponent', () => {
   });
 
   describe('edit (#50)', () => {
-    const GLM: CliInstanceEditTarget = { id: 'glm-1', name: 'Glm', providerId: 'kimi-code', providerName: 'Kimi Code' };
-    const COPILOT_AGENT: CliInstanceEditTarget = { id: 'cp-1', name: 'Cop', providerId: 'github-copilot', providerName: 'GitHub Copilot' };
+    const GLM: CliInstanceEditTarget = {
+      id: 'glm-1',
+      name: 'Glm',
+      providerId: 'kimi-code',
+      providerName: 'Kimi Code',
+    };
+    const COPILOT_AGENT: CliInstanceEditTarget = {
+      id: 'cp-1',
+      name: 'Cop',
+      providerId: 'github-copilot',
+      providerName: 'GitHub Copilot',
+    };
 
     it('shows the name and a replacement key; the provider is fixed', () => {
       create(GLM);
       expect(q('add-cli-instance-modal')?.textContent).toContain('Edit Glm');
       expect(q<HTMLInputElement>('add-cli-instance-name')?.value).toBe('Glm');
       expect(q('add-cli-instance-provider')).toBeNull();
-      expect(q('add-cli-instance-provider-fixed')?.textContent?.trim()).toBe('Kimi Code');
-      expect(el().textContent).toContain('Replacement API key (leave empty to keep the stored one)');
+      expect(q('add-cli-instance-provider-fixed')?.textContent?.trim()).toBe(
+        'Kimi Code',
+      );
+      expect(el().textContent).toContain(
+        'Replacement API key (leave empty to keep the stored one)',
+      );
       // Defect 4: an empty replacement keeps the stored key, so no "leave empty to use the connection" hint here.
       expect(q('add-cli-instance-key-help')).toBeNull();
-      expect(el().textContent).not.toContain('Leave empty to use your Kimi Code connection');
+      expect(el().textContent).not.toContain(
+        'Leave empty to use your Kimi Code connection',
+      );
       expect(submit()?.textContent?.trim()).toBe('Save changes');
       expect(submit()?.disabled).toBe(true);
     });
@@ -420,10 +686,20 @@ describe('AddCliInstanceModalComponent', () => {
       type('add-cli-instance-name', 'Glm-Main');
       submit()?.click();
       await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith({ cli: [{ action: 'update', params: { id: 'glm-1', name: 'Glm-Main' } }] }, CONTEXT);
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        {
+          cli: [
+            { action: 'update', params: { id: 'glm-1', name: 'Glm-Main' } },
+          ],
+        },
+        CONTEXT,
+      );
       expect(feedback.toast()?.canUndo).toBe(true);
       await feedback.undo();
-      expect(state.saveSettings).toHaveBeenLastCalledWith({ cli: [{ action: 'update', params: { id: 'glm-1', name: 'Glm' } }] }, CONTEXT);
+      expect(state.saveSettings).toHaveBeenLastCalledWith(
+        { cli: [{ action: 'update', params: { id: 'glm-1', name: 'Glm' } }] },
+        CONTEXT,
+      );
     });
 
     it('replaces only the key when the name is unchanged, with no Undo', async () => {
@@ -431,20 +707,41 @@ describe('AddCliInstanceModalComponent', () => {
       type('add-cli-instance-key', KEY);
       submit()?.click();
       await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith({ cli: [{ action: 'update', params: { id: 'glm-1', apiKey: KEY } }] }, CONTEXT);
-      expect(feedback.toast()).toEqual({ tone: 'status', message: 'Saved Glm instance. Key stored, not verified.', canUndo: false });
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        { cli: [{ action: 'update', params: { id: 'glm-1', apiKey: KEY } }] },
+        CONTEXT,
+      );
+      expect(feedback.toast()).toEqual({
+        tone: 'status',
+        message: 'Saved Glm instance. Key stored, not verified.',
+        canUndo: false,
+      });
       // M8: the last Test described the old key.
       expect(state.clearCliTest).toHaveBeenCalledWith('glm-1');
     });
 
     it('moves a Claude API instance to its own key when a replacement key is entered', async () => {
-      create({ id: 'ca-1', name: 'Claude', providerId: 'anthropic-api', providerName: 'Claude API' });
-      expect(q('add-cli-instance-key-help')?.textContent).toContain('separate key for this instance');
+      create({
+        id: 'ca-1',
+        name: 'Claude',
+        providerId: 'anthropic-api',
+        providerName: 'Claude API',
+      });
+      expect(q('add-cli-instance-key-help')?.textContent).toContain(
+        'separate key for this instance',
+      );
       type('add-cli-instance-key', KEY);
       submit()?.click();
       await flush();
       expect(state.saveSettings).toHaveBeenCalledWith(
-        { cli: [{ action: 'update', params: { id: 'ca-1', apiKey: KEY, credentialSource: 'instance' } }] },
+        {
+          cli: [
+            {
+              action: 'update',
+              params: { id: 'ca-1', apiKey: KEY, credentialSource: 'instance' },
+            },
+          ],
+        },
         CONTEXT,
       );
     });
@@ -452,41 +749,75 @@ describe('AddCliInstanceModalComponent', () => {
     it('M7: name and key are two writes; a saved rename with a failed key says exactly that', async () => {
       create(GLM);
       state.saveSettings.mockImplementationOnce(async () => {
-        state.commit.set({ ...idle, status: 'partial', saved: ['ptahCliAgents.glm-1.name'], unsaved: ['ptahCliAgents.glm-1.apiKey'] });
+        state.commit.set({
+          ...idle,
+          status: 'partial',
+          saved: ['ptahCliAgents.glm-1.name'],
+          unsaved: ['ptahCliAgents.glm-1.apiKey'],
+        });
         return true;
       });
       type('add-cli-instance-name', 'Glm-Main');
       type('add-cli-instance-key', KEY);
       submit()?.click();
       await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith({ cli: [
-        { action: 'update', params: { id: 'glm-1', name: 'Glm-Main' } },
-        { action: 'update', params: { id: 'glm-1', apiKey: KEY } },
-      ] }, CONTEXT);
-      expect(feedback.toast()).toEqual({ tone: 'alert', message: 'Name saved. The key was not saved.', canUndo: false });
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        {
+          cli: [
+            { action: 'update', params: { id: 'glm-1', name: 'Glm-Main' } },
+            { action: 'update', params: { id: 'glm-1', apiKey: KEY } },
+          ],
+        },
+        CONTEXT,
+      );
+      expect(feedback.toast()).toEqual({
+        tone: 'alert',
+        message: 'Name saved. The key was not saved.',
+        canUndo: false,
+      });
       expect(fixture.componentInstance.closed).toBe(0);
       expect(state.clearCliTest).toHaveBeenCalledWith('glm-1');
     });
 
     it.each([
       ['unsaved', 'Key stored, not verified. The name was not saved.'],
-      ['unconfirmed', 'Key stored, not verified. Could not confirm whether the name was saved; check it before retrying.'],
-    ] as const)('re-check N-3: a rejected rename (%s) with a stored key says the key is stored, in fixed copy', async (bucket, message) => {
-      create(GLM);
-      state.saveSettings.mockImplementationOnce(async () => {
-        state.commit.set({ ...idle, status: 'partial', saved: ['ptahCliAgents.glm-1.apiKey'], [bucket]: ['ptahCliAgents.glm-1.name'] });
-        return true;
-      });
-      type('add-cli-instance-name', 'Glm-Main');
-      type('add-cli-instance-key', KEY);
-      submit()?.click();
-      await flush();
-      expect(feedback.toast()).toEqual({ tone: 'alert', message, canUndo: false });
-      expect(fixture.componentInstance.closed).toBe(0);
-    });
+      [
+        'unconfirmed',
+        'Key stored, not verified. Could not confirm whether the name was saved; check it before retrying.',
+      ],
+    ] as const)(
+      're-check N-3: a rejected rename (%s) with a stored key says the key is stored, in fixed copy',
+      async (bucket, message) => {
+        create(GLM);
+        state.saveSettings.mockImplementationOnce(async () => {
+          state.commit.set({
+            ...idle,
+            status: 'partial',
+            saved: ['ptahCliAgents.glm-1.apiKey'],
+            [bucket]: ['ptahCliAgents.glm-1.name'],
+          });
+          return true;
+        });
+        type('add-cli-instance-name', 'Glm-Main');
+        type('add-cli-instance-key', KEY);
+        submit()?.click();
+        await flush();
+        expect(feedback.toast()).toEqual({
+          tone: 'alert',
+          message,
+          canUndo: false,
+        });
+        expect(fixture.componentInstance.closed).toBe(0);
+      },
+    );
 
     it('M9: an edit may keep its own name but not take the name of another instance', () => {
-      state.cliAgents.set(ready([{ id: 'glm-1', name: 'Glm' }, { id: 'k-1', name: 'Kimi' }]));
+      state.cliAgents.set(
+        ready([
+          { id: 'glm-1', name: 'Glm' },
+          { id: 'k-1', name: 'Kimi' },
+        ]),
+      );
       create(GLM);
       expect(q('add-cli-instance-name-error')).toBeNull();
       type('add-cli-instance-name', 'kimi');
@@ -498,9 +829,19 @@ describe('AddCliInstanceModalComponent', () => {
       create(COPILOT_AGENT);
       expect(q('add-cli-instance-copilot')).toBeNull();
       expect(q('add-cli-instance-key')).toBeNull();
-      state.connections.set(ready(CONNECTIONS.map((entry) => entry.id === 'github-copilot' ? { ...entry, configured: false } : entry)));
+      state.connections.set(
+        ready(
+          CONNECTIONS.map((entry) =>
+            entry.id === 'github-copilot'
+              ? { ...entry, configured: false }
+              : entry,
+          ),
+        ),
+      );
       fixture.detectChanges();
-      expect(q('add-cli-instance-copilot')?.textContent).toContain('GitHub Copilot is signed out.');
+      expect(q('add-cli-instance-copilot')?.textContent).toContain(
+        'GitHub Copilot is signed out.',
+      );
       type('add-cli-instance-name', 'Cop-2');
       expect(submit()?.disabled).toBe(false);
     });

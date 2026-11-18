@@ -14,7 +14,6 @@ import {
 } from '@angular/core';
 import {
   AlertTriangle,
-  ArrowRight,
   ChevronDown,
   Clock,
   LucideAngularModule,
@@ -27,6 +26,7 @@ import {
   PtahButtonDirective,
   PtahBadgeDirective,
   PtahFieldComponent,
+  PtahFieldGridDirective,
   PtahIconButtonDirective,
   PtahInputDirective,
   type ProviderIdentityOption,
@@ -51,34 +51,15 @@ import {
   type BackgroundConsumerRow,
 } from './provider-consumer-rows';
 import { DecisionModelRowComponent } from './decision-model-row.component';
-
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const ACTION = `btn btn-ghost btn-sm px-2 text-xs font-medium text-base-content underline underline-offset-2 ${FOCUS}`;
-/** Reassignment cell: an own provider shows as a value with a chevron, "Follows main agent →" as a link-styled chip. */
-const CELL = `flex w-full min-w-0 items-center gap-1 whitespace-nowrap rounded px-1 text-left text-xs text-base-content hover:bg-base-200 hover:underline ${FOCUS}`;
-/** Background roles are settings for every Ptah app (`supportedTargets: ['global']`). */
+const CELL = `flex w-full min-w-0 items-center justify-between gap-2 text-left ${FOCUS}`;
 const SAVE_SCOPE = 'global';
 // Matches the ENHANCE_TIMEOUT_* values in file-settings-keys.ts.
 const TIMEOUT_MIN_SEC = 15;
 const TIMEOUT_MAX_SEC = 600;
 const TIMEOUT_DEFAULT_SEC = 120;
-
-/**
- * Background model roles: Memory curator and Enhancement appear inside the Providers tab's roles `<details>`, then the Decision model
- *   card (`DecisionModelRowComponent`, TASK_2026_646 Req 1), which owns its own `agent:getConfig` read and writes.
- * - The Provider & model cell opens the row's reassignment popover (the shared provider/model picker). A choice saves
- *   at once through `SettingsSaveFeedbackService` with Undo (D2); a provider that is not ready is not saved and the
- *   popover says why, with its "Set up" link (fixed sentences only). A role without its own provider shows the
- *   "Follows main agent →" chip, which opens the same popover.
- * - `initialEditingConsumerId` (a role deep link) opens that row's popover. Esc, the backdrop and Close return focus
- *   to the row's cell, also while a save runs: the cell is then `aria-disabled`, never natively disabled (Gate V 36,
- *   M-2), so it can take focus back.
- * - Scope badges sit inline after the cell, only for a role with a non-inherited value (D16; no Scope column, V36-6).
- * - The Enhancement time limit sits under Enhancement and displays the loaded effective value. It saves with Undo.
- *   A write that did not save puts the input back on the saved limit and says so (D15, Gate V 36 S-1).
- * Row derivation is pure, in `provider-consumer-rows.ts`.
- */
 @Component({
   selector: 'ptah-provider-consumer-assignments',
   standalone: true,
@@ -88,6 +69,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
     NativePopoverComponent,
     PtahBadgeDirective,
     PtahFieldComponent,
+    PtahFieldGridDirective,
     ProviderMarkComponent,
     ProviderModelPickerComponent,
     PtahButtonDirective,
@@ -97,10 +79,13 @@ const TIMEOUT_DEFAULT_SEC = 120;
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="space-y-2" data-testid="provider-consumer-assignments">
+    <section
+      class="background-layout grid min-w-0 items-start gap-[var(--ptah-gap-field)]"
+      data-testid="provider-consumer-assignments"
+    >
       <header class="space-y-0.5">
         <h2
-          class="text-xs font-semibold text-base-content"
+          class="text-base font-semibold text-base-content"
           data-testid="assignments-heading"
         >
           Background models
@@ -109,46 +94,51 @@ const TIMEOUT_DEFAULT_SEC = 120;
           class="text-xs text-base-content-muted"
           data-testid="assignments-copy"
         >
-          These assignments run background work. They do not select the main
-          agent.
+          Small jobs that run outside the chat. A fast model keeps them cheap.
         </p>
+        <span ptahBadge size="xs">{{ rows().length + 1 }} roles</span>
       </header>
-
       <div
-        class="consumer-grid grid items-stretch gap-2"
-        aria-label="Background model roles"
+        class="consumer-grid grid min-w-0 gap-[var(--ptah-gap-field)]"
+        aria-label="Background models"
         data-testid="consumer-table"
       >
         @for (row of rows(); track row.id) {
           <article
             [attr.data-testid]="'consumer-row-' + row.id"
             [class.border-primary]="activeEditId() === row.id"
-            class="flex min-w-0 flex-col gap-2 rounded-lg border border-base-content/10 p-3 hover:bg-base-content/5"
+            class="consumer-role grid min-w-0 items-center border-b border-base-content/10"
           >
-            <div class="flex min-w-0 items-start justify-between gap-2">
-              <div class="min-w-0">
+            <div class="min-w-0">
+              <div class="flex min-w-0 flex-wrap items-center gap-2">
                 <h3
                   class="text-sm font-medium text-base-content"
                   [attr.data-testid]="'consumer-name-' + row.id"
                 >
                   {{ row.name }}
                 </h3>
-                @if (row.helperCopy) {
-                  <p
-                    class="mt-0.5 line-clamp-2 text-xs leading-snug text-base-content-muted"
-                    [title]="row.helperCopy"
-                    [attr.data-testid]="'consumer-helper-' + row.id"
-                  >
-                    {{ row.helperCopy }}
-                  </p>
-                }
+                <span
+                  ptahBadge
+                  class="shrink-0 whitespace-nowrap"
+                  [attr.data-testid]="'consumer-tier-' + row.id"
+                  >{{ row.tierLabel }}</span
+                >
               </div>
-              <span
-                ptahBadge
-                class="shrink-0 whitespace-nowrap"
-                [attr.data-testid]="'consumer-tier-' + row.id"
-                >{{ row.tierLabel }}</span
-              >
+              @if (row.helperCopy) {
+                <p
+                  class="mt-[var(--ptah-gap-label)] text-sm leading-snug text-base-content-muted"
+                  [title]="row.helperCopy"
+                  [attr.data-testid]="'consumer-helper-' + row.id"
+                >
+                  {{ row.helperCopy }}
+                </p>
+              } @else {
+                <p
+                  class="mt-[var(--ptah-gap-label)] text-sm leading-snug text-base-content-muted"
+                >
+                  Keeps useful context for future chats.
+                </p>
+              }
             </div>
             @if (!row.loaded) {
               <!-- Not loaded: no effective value renders, only the section's state and its own Retry. -->
@@ -180,7 +170,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                 }
               </div>
             } @else {
-              <div class="mt-auto min-w-0 space-y-1.5">
+              <div ptahFieldGrid minColumn="md" class="min-w-0">
                 <ptah-native-popover
                   class="consumer-cell-popover block w-full min-w-0"
                   [isOpen]="activeEditId() === row.id"
@@ -191,6 +181,10 @@ const TIMEOUT_DEFAULT_SEC = 120;
                 >
                   <button
                     trigger
+                    ptahButton
+                    variant="outline"
+                    align="start"
+                    size="sm"
                     type="button"
                     [class]="cell + (row.followsMain ? ' font-medium' : '')"
                     [attr.aria-disabled]="busy() ? 'true' : null"
@@ -212,18 +206,13 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       fallback="Bot"
                     />
                     <span
-                      class="min-w-0 truncate"
+                      class="min-w-0 flex-1 truncate text-left"
                       [attr.data-testid]="'consumer-summary-' + row.id"
                       >{{ row.cellLabel }}</span
                     >
                     <lucide-angular
-                      [img]="row.followsMain ? ArrowIcon : ChevronIcon"
-                      [class]="
-                        'h-3 w-3 shrink-0 ' +
-                        (row.followsMain
-                          ? 'text-primary'
-                          : 'text-base-content-muted')
-                      "
+                      [img]="ChevronIcon"
+                      class="h-3 w-3 shrink-0 text-base-content-muted"
                       aria-hidden="true"
                     />
                   </button>
@@ -426,7 +415,11 @@ const TIMEOUT_DEFAULT_SEC = 120;
               @if (isEditingTimeout()) {
                 <div class="space-y-1" data-testid="timeout-editor">
                   <div class="flex flex-wrap items-center gap-1.5">
-                    <ptah-field label="Time limit (sec)" size="sm" class="w-36 shrink-0">
+                    <ptah-field
+                      label="Time limit (sec)"
+                      size="sm"
+                      class="w-36 shrink-0"
+                    >
                       <input
                         ptahInput
                         size="sm"
@@ -504,26 +497,32 @@ const TIMEOUT_DEFAULT_SEC = 120;
       display: block;
       container-type: inline-size;
     }
-
-    @container (min-width: 24rem) {
-      .consumer-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .consumer-role {
+      gap: var(--ptah-gap-field);
+      min-height: 5.5rem;
+      padding-bottom: var(--ptah-gap-field);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .consumer-role > [ptahFieldGrid] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    @container (max-width: 400px) {
+      .consumer-role {
+        grid-template-columns: minmax(0, 1fr);
       }
     }
-
-    @container (min-width: 36rem) {
-      .consumer-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+    @container (min-width: 761px) {
+      .background-layout {
+        grid-template-columns: minmax(16rem, 1fr) minmax(24rem, 2fr);
       }
     }
-
     /* The popover wraps its trigger in an inline-block sized by its content, so the summary could not truncate and
        overflowed a one-third card. Block width lets the cell's label truncate (its full text is the title). */
     :host ::ng-deep .consumer-cell-popover > .popover-trigger {
       display: block;
+      width: 100%;
       min-width: 0;
     }
-
     .consumer-timeout-section {
       grid-column: 1 / -1;
       order: 1;
@@ -535,22 +534,17 @@ export class ProviderConsumerAssignmentsComponent {
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
-
   protected readonly AlertTriangleIcon = AlertTriangle;
   protected readonly ClockIcon = Clock;
   protected readonly ChevronIcon = ChevronDown;
-  protected readonly ArrowIcon = ArrowRight;
   protected readonly CloseIcon = X;
   protected readonly focusRing = FOCUS;
   protected readonly action = ACTION;
   protected readonly cell = CELL;
-
   readonly timeoutNotice = input<{ seconds: number } | null>(null);
   readonly disabled = input<boolean>(false);
   readonly initialEditingConsumerId = input<ProviderConsumerId | null>(null);
-
   readonly setupProviderRequested = output<string>();
-  /** The `initialEditingConsumerId` deep link was applied: that row's popover is open. */
   readonly deepLinkOpened = output<ProviderConsumerId>();
   readonly retryEnhancementRequested = output<void>();
   readonly assignmentSaved = output<{
@@ -559,23 +553,16 @@ export class ProviderConsumerAssignmentsComponent {
     model: string;
   }>();
   readonly timeoutSaved = output<number>();
-
-  /** The row whose reassignment popover is open. */
   protected readonly activeEditId = signal<ProviderConsumerId | null>(null);
-  /** The picker's current choice; it equals the saved value except while a choice is not ready to save. */
   protected readonly currentDraft = signal<{ provider: string; model: string }>(
     { provider: '', model: '' },
   );
   protected readonly isEditingTimeout = signal<boolean>(false);
-  /** Draft seed only; editTimeout() seeds it from the backend value. */
   protected readonly timeoutDraftSec = signal<number>(0);
-
   private readonly timeoutInputRef =
     viewChild<ElementRef<HTMLInputElement>>('timeoutInput');
   private appliedDeepLinkId: ProviderConsumerId | null = null;
-  /** The edit context, taken when the popover opens (as the other Settings popovers). */
   private context: ProvidersEditContext | null = null;
-
   constructor() {
     // Deep link stays reactive: a later input change still opens the popover.
     // Each new value applies once, so a user cancel is not fought.
@@ -600,10 +587,7 @@ export class ProviderConsumerAssignmentsComponent {
       }
     });
   }
-
-  /** Save triggers wait while any save runs (D3). */
   protected readonly busy = this.feedback.saving;
-
   protected readonly extraProviders = computed<
     readonly ProviderIdentityOption[]
   >(() =>
@@ -612,12 +596,6 @@ export class ProviderConsumerAssignmentsComponent {
       name: formatProviderDisplayName(p.id),
     })),
   );
-
-  /**
-   * Bounds and effective value come only from the backend payload
-   * (Decision 8: the backend owns the bound; the UI never invents the range).
-   * Null while the enhancement read has not landed; no number renders then.
-   */
   protected readonly timeoutMeta = computed(
     () => this.state.enhancement().data?.timeoutMs ?? null,
   );
@@ -629,8 +607,7 @@ export class ProviderConsumerAssignmentsComponent {
   );
   protected readonly timeoutScope = computed<SettingScopeDisplay>(
     () =>
-      this.state.scopeEntry('skills.enhancement.timeoutMs')?.scope ??
-      'mixed',
+      this.state.scopeEntry('skills.enhancement.timeoutMs')?.scope ?? 'mixed',
   );
   protected readonly timeoutOverride = computed<boolean>(
     () =>
@@ -646,7 +623,6 @@ export class ProviderConsumerAssignmentsComponent {
       ? `Must be between ${min} and ${max} seconds.`
       : null;
   });
-  /** Lasting reasons the time limit cannot be saved (nothing loaded, invalid, unchanged); a pending write is `busy()`. */
   protected readonly isTimeoutSaveBlocked = computed<boolean>(
     () =>
       this.timeoutMeta() === null ||
@@ -657,7 +633,6 @@ export class ProviderConsumerAssignmentsComponent {
   protected readonly isTimeoutSaveDisabled = computed<boolean>(
     () => this.busy() || this.isTimeoutSaveBlocked(),
   );
-
   protected readonly rows = computed<readonly BackgroundConsumerRow[]>(() =>
     buildConsumerRows(
       {
@@ -668,8 +643,6 @@ export class ProviderConsumerAssignmentsComponent {
       (key) => this.state.scopeEntry(key),
     ),
   );
-
-  /** `blocking: false` is an advisory note: the choice still saves. A provider the role cannot run on always blocks. */
   protected readonly draftProviderReadiness = computed(() => {
     const id = this.activeEditId();
     if (!id) return null;
@@ -680,7 +653,6 @@ export class ProviderConsumerAssignmentsComponent {
       this.rows().find((r) => r.id === id)?.unsupportedProviders ?? [],
     );
   });
-
   protected toggleEdit(id: ProviderConsumerId): void {
     if (this.activeEditId() === id) {
       this.cancelEdit();
@@ -693,8 +665,6 @@ export class ProviderConsumerAssignmentsComponent {
     this.currentDraft.set({ provider: row.provider, model: row.model });
     this.activeEditId.set(id);
   }
-
-  /** Closes the popover; focus goes back to the row's cell (also when a deep link opened it). */
   protected cancelEdit(): void {
     const id = this.activeEditId();
     this.activeEditId.set(null);
@@ -708,8 +678,6 @@ export class ProviderConsumerAssignmentsComponent {
       { injector: this.injector },
     );
   }
-
-  /** A picker choice saves at once unless its provider is not ready (then the popover says why and nothing is written). */
   protected onDraftChange(
     id: ProviderConsumerId,
     selection: ProviderModelSelection,
@@ -721,16 +689,9 @@ export class ProviderConsumerAssignmentsComponent {
     if (this.draftProviderReadiness()?.blocking) return;
     void this.saveDraft(id);
   }
-
   protected onSetupProvider(providerId: string): void {
     this.setupProviderRequested.emit(providerId);
   }
-
-  /**
-   * Saves the draft with Undo (D2). `assignmentSaved` is emitted from each write's own result, never from an earlier
-   * save's `commit()` (Batch 17). A write that did not save puts the picker back on the read-back value (D15); the
-   * toast names what failed.
-   */
   protected async saveDraft(id: ProviderConsumerId): Promise<void> {
     const row = this.rows().find((r) => r.id === id);
     const draft = this.currentDraft(),
@@ -755,7 +716,6 @@ export class ProviderConsumerAssignmentsComponent {
         model: current.model,
       });
   }
-
   private async writeAssignment(
     id: ProviderConsumerId,
     provider: string,
@@ -770,15 +730,12 @@ export class ProviderConsumerAssignmentsComponent {
       this.assignmentSaved.emit({ id, provider, model });
     return accepted;
   }
-
-  /** Re-reads only the section whose row requested the retry. */
   protected async retrySection(
     retryKey: BackgroundConsumerRow['retryKey'],
   ): Promise<void> {
     if (retryKey === 'memory') await this.state.refreshMemory();
     else await this.state.refreshEnhancement();
   }
-
   protected editTimeout(): void {
     if (this.timeoutMeta() === null) return;
     this.timeoutDraftSec.set(this.timeoutEffectiveSec());
@@ -787,21 +744,13 @@ export class ProviderConsumerAssignmentsComponent {
       injector: this.injector,
     });
   }
-
   protected cancelTimeoutEdit(): void {
     this.isEditingTimeout.set(false);
     this.timeoutDraftSec.set(this.timeoutEffectiveSec());
   }
-
   protected onTimeoutInput(event: Event): void {
     this.timeoutDraftSec.set((event.target as HTMLInputElement).valueAsNumber);
   }
-
-  /**
-   * Saves the limit with Undo through `SettingsSaveFeedbackService` (D2; the toast names a failure). "Saved" comes from
-   * this write's own result (accepted and its commit `saved`), never from an earlier commit (D15). A write that was
-   * refused, failed or threw keeps the editor open on the saved limit; the toast alone says why (Gate V 36, S-1).
-   */
   protected async saveTimeout(): Promise<void> {
     if (this.isTimeoutSaveDisabled()) return;
     const sec = this.timeoutDraftSec(),
@@ -827,8 +776,6 @@ export class ProviderConsumerAssignmentsComponent {
     const input = this.timeoutInputRef()?.nativeElement;
     if (input) input.value = String(savedSec);
   }
-
-  /** One limit write; `timeoutSaved` follows only this write's own confirmed save. */
   private async writeTimeout(
     sec: number,
     context: ProvidersEditContext,

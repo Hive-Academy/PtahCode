@@ -1,0 +1,202 @@
+<ptah-native-modal
+  [isOpen]="open()"
+  ariaLabelledby="cli-tier-mapping-title"
+  size="md"
+  (closed)="closed.emit()"
+>
+  <div
+    modal-header
+    class="-mx-6 -mt-6 mb-4 flex items-center justify-between gap-2 border-b border-base-300 bg-base-200 px-5 py-3"
+    data-testid="cli-tier-mapping-modal"
+  >
+    <h2 id="cli-tier-mapping-title" class="text-sm font-bold text-base-content">
+      {{ target()?.name ?? 'Instance' }} Tier Model Mapping
+    </h2>
+    <button type="button" ptahIconButton label="Close" (click)="closed.emit()">
+      <lucide-angular [img]="CloseIcon" class="h-4 w-4" aria-hidden="true" />
+    </button>
+  </div>
+
+  @if (target(); as instance) {
+    <div class="space-y-3 text-xs">
+      <p class="text-base-content-muted">
+        Models for this Ptah CLI instance only, from
+        {{ instance.providerName }}. A tier without its own model uses the
+        provider's CLI-agent tier, else the provider default. Each choice saves
+        at once.
+      </p>
+      @if (catalogue().status === 'error') {
+        <p
+          role="alert"
+          class="flex flex-wrap items-center gap-1.5 text-base-content"
+          data-testid="cli-tier-models-error"
+        >
+          Could not load {{ instance.providerName }}'s model list. You can still
+          enter a model ID.
+          <button
+            type="button"
+            ptahButton
+            variant="link"
+            (click)="loadModels()"
+          >
+            Retry
+          </button>
+        </p>
+      }
+      @if (mappings() === null && mappingsFailed()) {
+        <!-- M5: a failed (or missing) read ends in a fixed error with its own Retry, never an endless loading line. -->
+        <p
+          role="alert"
+          class="flex flex-wrap items-center gap-1.5 text-base-content"
+          data-testid="cli-tier-mapping-error"
+        >
+          This instance's tier mapping could not be loaded.
+          <button
+            type="button"
+            ptahButton
+            variant="link"
+            [busy]="retryingMappings()"
+            (click)="retryMappings()"
+            data-testid="cli-tier-mapping-retry"
+          >
+            Retry
+          </button>
+        </p>
+      } @else if (mappings() === null) {
+        <p
+          role="status"
+          class="text-base-content-muted"
+          data-testid="cli-tier-mapping-loading"
+        >
+          Loading this instance's tier mapping…
+        </p>
+      } @else {
+        <ul class="space-y-3">
+          @for (row of tiers; track row.tier) {
+            <li class="space-y-1" [attr.data-tier]="row.tier">
+              <div class="flex items-center justify-between gap-2">
+                <label
+                  [for]="'cli-tier-' + row.tier"
+                  class="font-bold text-base-content"
+                  >{{ row.label }} tier</label
+                >
+                @if (own(row.tier)) {
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="link"
+                    [busy]="busy()"
+                    (click)="useInherited(row.tier)"
+                    [attr.data-testid]="'cli-tier-inherit-' + row.tier"
+                  >
+                    Use inherited
+                  </button>
+                }
+              </div>
+              @if (manualTier() === row.tier) {
+                <div class="flex items-center gap-1.5">
+                  <ptah-field
+                    [label]="row.label + ' tier model ID'"
+                    size="sm"
+                    class="min-w-0 flex-1"
+                    ><input
+                      ptahInput
+                      size="sm"
+                      tone="mono"
+                      [id]="'cli-tier-' + row.tier"
+                      type="text"
+                      class="min-w-0 flex-1 text-xs"
+                      placeholder="Model ID, e.g. vendor/model-name"
+                      [value]="manualDraft()"
+                      (input)="manualDraft.set(value($event))"
+                      [attr.aria-label]="row.label + ' tier model ID'"
+                      [attr.aria-invalid]="manualInvalid()"
+                      [attr.aria-describedby]="
+                        manualInvalid() ? 'cli-tier-manual-error' : null
+                      "
+                      [attr.data-testid]="'cli-tier-manual-' + row.tier"
+                  /></ptah-field>
+                  <button
+                    type="button"
+                    ptahButton
+                    [busy]="busy()"
+                    [disabled]="!manualDraft().trim() || manualInvalid()"
+                    (click)="applyManual(row.tier)"
+                    [attr.data-testid]="'cli-tier-manual-apply-' + row.tier"
+                  >
+                    Use
+                  </button>
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="ghost"
+                    (click)="closeManual(row.tier)"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                @if (manualInvalid()) {
+                  <p
+                    id="cli-tier-manual-error"
+                    role="alert"
+                    class="text-xs text-base-content"
+                    data-testid="cli-tier-manual-error"
+                  >
+                    {{ manualIdError }}
+                  </p>
+                }
+              } @else {
+                <ptah-provider-model-search-field
+                  [inputId]="'cli-tier-' + row.tier"
+                  [ariaLabel]="row.label + ' tier model'"
+                  [options]="options(row.tier)"
+                  [selectedId]="own(row.tier) ?? ''"
+                  [includeDefault]="true"
+                  [defaultLabel]="'Inherited: ' + inheritedLabel(row.tier)"
+                  [placeholder]="'Inherited: ' + inheritedLabel(row.tier)"
+                  [pinnedOption]="manualOption"
+                  [compact]="true"
+                  [openOnFocus]="false"
+                  [disabled]="busy() || catalogue().status === 'loading'"
+                  (modelSelected)="onPick(row.tier, $event)"
+                  [attr.data-testid]="'cli-tier-picker-' + row.tier"
+                />
+              }
+              <p
+                class="text-xs text-base-content-muted"
+                [attr.data-testid]="'cli-tier-source-' + row.tier"
+              >
+                @if (own(row.tier); as model) {
+                  This instance:
+                  <span class="font-mono text-base-content">{{ model }}</span
+                  >. Inherited otherwise: {{ inheritedLabel(row.tier) }}.
+                } @else {
+                  Inherited: {{ inheritedLabel(row.tier) }}.
+                }
+              </p>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
+
+  <div
+    modal-footer
+    class="-mx-6 -mb-6 mt-5 flex items-center justify-end gap-2 border-t border-base-300 bg-base-200 px-5 py-3"
+  >
+    <button
+      type="button"
+      ptahButton
+      variant="primary"
+      (click)="closed.emit()"
+      data-testid="cli-tier-mapping-done"
+    >
+      Done
+    </button>
+    <!-- Only while open: a closed modal must not keep a second toast (and Undo) in the page. -->
+    @if (open()) {
+      <ptah-settings-toast />
+    }
+  </div>
+</ptah-native-modal>

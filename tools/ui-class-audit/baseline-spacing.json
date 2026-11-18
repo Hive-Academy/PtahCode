@@ -54,7 +54,7 @@
     "pl-6": 1,
     "pt-3": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/add-cli-instance-modal.component.ts": {
+  "libs/frontend/chat/src/lib/settings/providers/add-cli-instance-modal.component.html": {
     "-mb-6": 1,
     "-mt-6": 1,
     "-mx-6": 2,
@@ -71,15 +71,10 @@
     "space-y-3": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/agents-routing-settings.component.ts": {
-    "gap-2": 1,
     "gap-8": 1,
-    "ml-auto": 1,
-    "mt-2": 1,
-    "pt-2": 1,
-    "pt-6": 1,
-    "py-1": 1
+    "pt-6": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/cli-tier-mapping-modal.component.ts": {
+  "libs/frontend/chat/src/lib/settings/providers/cli-tier-mapping-modal.component.html": {
     "-mb-6": 1,
     "-mt-6": 1,
     "-mx-6": 2,
@@ -102,9 +97,9 @@
     "px-4": 1,
     "py-3": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/connection-drawer/advanced-tab.component.ts": {
+  "libs/frontend/chat/src/lib/settings/providers/connection-drawer/advanced-tab.component.html": {
     "gap-1.5": 2,
-    "gap-2": 4,
+    "gap-2": 3,
     "gap-3": 1,
     "p-3": 2,
     "pt-3": 1,
@@ -165,20 +160,18 @@
     "space-y-2": 2,
     "space-y-4": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.ts": {
+  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.html": {
     "-mx-2": 1,
     "gap-1.5": 1,
-    "gap-2": 4,
-    "mt-auto": 2,
+    "gap-2": 3,
+    "mt-auto": 1,
     "p-2": 1,
-    "p-3": 1,
     "px-1": 1,
     "px-2": 1,
     "py-1": 1,
-    "space-y-1.5": 1,
     "space-y-2": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.ts": {
+  "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.html": {
     "-mr-1": 1,
     "gap-1": 6,
     "gap-1.5": 6,
@@ -209,19 +202,18 @@
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-consumer-assignments.component.ts": {
     "gap-1.5": 4,
-    "gap-2": 3,
+    "gap-2": 1,
     "gap-x-2": 1,
     "gap-y-1": 1,
-    "mt-0.5": 1,
-    "mt-auto": 2,
+    "mt-auto": 1,
     "p-1.5": 1,
     "p-2": 2,
-    "p-3": 2,
+    "p-3": 1,
     "px-1": 1,
     "space-y-0.5": 1,
     "space-y-1": 1,
-    "space-y-1.5": 2,
-    "space-y-2": 2
+    "space-y-1.5": 1,
+    "space-y-2": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-setup-wizard.component.ts": {
     "gap-1": 9,
@@ -262,12 +254,11 @@
     "space-y-1": 2,
     "space-y-3": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.html": {
     "gap-1": 2,
     "gap-1.5": 2,
     "gap-2.5": 1,
-    "mb-2": 1,
-    "px-1.5": 1
+    "mb-2": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "gap-1": 1,
@@ -300,13 +291,12 @@
     "pb-2": 1,
     "space-y-2": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.html": {
     "gap-1.5": 2,
     "gap-2": 2,
     "p-2": 1,
     "p-3": 1,
     "pb-1.5": 1,
-    "pr-9": 1,
     "px-2": 1,
     "py-0.5": 1,
     "py-1.5": 1,
@@ -363,7 +353,7 @@
     "p-2": 1,
     "px-1": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.html": {
     "gap-1": 5,
     "gap-1.5": 2,
     "gap-3": 2,
@@ -373,7 +363,7 @@
     "gap-y-0.5": 1,
     "gap-y-1": 1,
     "gap-y-2": 1,
-    "ml-auto": 2,
+    "ml-auto": 1,
     "mt-0.5": 2,
     "mt-1": 2,
     "mt-2": 2,

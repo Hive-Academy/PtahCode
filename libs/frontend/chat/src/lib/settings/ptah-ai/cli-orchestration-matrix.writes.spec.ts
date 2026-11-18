@@ -15,16 +15,17 @@ import {
   type ProvidersSettingsCommit,
   type ProvidersSettingsSection,
 } from '@ptah-extension/core';
-import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
+import {
+  PROVIDER_MODELS_LOADER,
+  PtahRichSelectComponent,
+} from '@ptah-extension/ui';
 import type {
   CliAdapterManifest,
   CliDetectionResult,
   PtahCliSummary,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
-import {
-  CliOrchestrationMatrixComponent,
-} from './cli-orchestration-matrix.component';
+import { CliOrchestrationMatrixComponent } from './cli-orchestration-matrix.component';
 
 const ready = <T>(data: T): ProvidersSettingsSection<T> => ({
   status: 'ready',
@@ -47,7 +48,12 @@ const idle: ProvidersSettingsCommit = {
 const CONTEXT = { scopeKey: 'workspace', activePath: '/ws' };
 const laneSupported = { state: 'supported' as const };
 const laneManifest: CliAdapterManifest = {
-  messaging: { steer: laneSupported, interrupt: laneSupported, continuation: laneSupported, resume: laneSupported },
+  messaging: {
+    steer: laneSupported,
+    interrupt: laneSupported,
+    continuation: laneSupported,
+    resume: laneSupported,
+  },
   roleChannel: 'task-prompt',
   permissionModes: {
     plan: { ...laneSupported, networkModes: ['deny'] },
@@ -232,8 +238,12 @@ describe('CliOrchestrationMatrixComponent', () => {
   let feedback: SettingsSaveFeedbackService;
   const element = () => fixture.nativeElement as HTMLElement;
   const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
-    (element().querySelector(selector) ?? document.querySelector(selector)) as T | null;
-  const row = (id: string) => q(`[data-testid="cli-matrix-row-${id}"], [data-testid="cli-provider-card-${id}"]`);
+    (element().querySelector(selector) ??
+      document.querySelector(selector)) as T | null;
+  const row = (id: string) =>
+    q(
+      `[data-testid="cli-matrix-row-${id}"], [data-testid="cli-provider-card-${id}"]`,
+    );
   const _rowIds = (selector: string) =>
     Array.from(
       element().querySelectorAll(
@@ -242,28 +252,38 @@ describe('CliOrchestrationMatrixComponent', () => {
     ).map((node) =>
       node.getAttribute('data-testid')?.replace('cli-provider-card-', ''),
     );
-  const _statusOf = (id: string) => row(id)?.querySelector('[data-testid="cli-matrix-status"], .status-slot')?.textContent?.trim();
+  const _statusOf = (id: string) =>
+    row(id)
+      ?.querySelector('[data-testid="cli-matrix-status"], .status-slot')
+      ?.textContent?.trim();
   async function flush() {
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
     fixture.detectChanges();
   }
   function check(id: string, checked: boolean) {
-    const input = row(id)?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    const input = row(id)?.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
     if (!input) throw new Error(`No toggle for ${id}`);
     input.checked = checked;
     input.dispatchEvent(new Event('change'));
   }
   function showSavedCodexDefault() {
-    state.orchestration.set(ready({ ...ORCHESTRATION,
-      cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } },
-      detectedClis: ORCHESTRATION.detectedClis.map(cli =>
-        cli.cli === 'codex' ? { ...cli, manifest: laneManifest } : cli),
-    }));
+    state.orchestration.set(
+      ready({
+        ...ORCHESTRATION,
+        cliLaneDefaults: { codex: { permission: 'plan', network: 'deny' } },
+        detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+          cli.cli === 'codex' ? { ...cli, manifest: laneManifest } : cli,
+        ),
+      }),
+    );
     fixture.detectChanges();
   }
   function _clickNamed(root: Element | null, name: string): void {
-    const button = Array.from(root?.querySelectorAll('button') ?? [])
-      .find((candidate) => candidate.textContent?.trim() === name);
+    const button = Array.from(root?.querySelectorAll('button') ?? []).find(
+      (candidate) => candidate.textContent?.trim() === name,
+    );
     if (!button) throw new Error(`No ${name} button`);
     button.click();
   }
@@ -329,25 +349,32 @@ describe('CliOrchestrationMatrixComponent', () => {
   });
 
   function table() {
-    const component = fixture.debugElement.query(By.directive(LanesTableComponent))
-      ?.componentInstance as LanesTableComponent | undefined;
+    const component = fixture.debugElement.query(
+      By.directive(LanesTableComponent),
+    )?.componentInstance as LanesTableComponent | undefined;
     if (!component) throw new Error('Lanes table not mounted');
     return component;
   }
   function lane(id: string) {
-    const found = table().rows().find(item => item.id === id);
+    const found = table()
+      .rows()
+      .find((item) => item.id === id);
     if (!found) throw new Error('Missing lane ' + id);
     return found;
   }
 
   it('routes system and instance toggles through the existing settings write', async () => {
-    check('codex', false); await flush();
+    check('codex', false);
+    await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { orchestration: { disabledClis: ['copilot', 'codex'] } }, CONTEXT,
+      { orchestration: { disabledClis: ['copilot', 'codex'] } },
+      CONTEXT,
     );
-    check('glm-1', false); await flush();
+    check('glm-1', false);
+    await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { cli: [{ action: 'update', params: { id: 'glm-1', enabled: false } }] }, CONTEXT,
+      { cli: [{ action: 'update', params: { id: 'glm-1', enabled: false } }] },
+      CONTEXT,
     );
   });
 
@@ -355,10 +382,19 @@ describe('CliOrchestrationMatrixComponent', () => {
     showSavedCodexDefault();
     const codex = lane('codex');
     if (codex.kind !== 'system') throw new Error('Expected system lane');
-    table().defaultSelected.emit({ row: codex, choice: { permission: 'ask', network: 'deny' } });
+    table().defaultSelected.emit({
+      row: codex,
+      choice: { permission: 'ask', network: 'deny' },
+    });
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { orchestration: { cliLaneDefaults: expect.objectContaining({ codex: { permission: 'ask', network: 'deny' } }) } },
+      {
+        orchestration: {
+          cliLaneDefaults: expect.objectContaining({
+            codex: { permission: 'ask', network: 'deny' },
+          }),
+        },
+      },
       CONTEXT,
     );
     table().defaultResetRequested.emit(codex);
@@ -368,25 +404,43 @@ describe('CliOrchestrationMatrixComponent', () => {
 
   it('writes a permission selection from the table control', async () => {
     showSavedCodexDefault();
-    const select = row('codex')?.querySelector<HTMLSelectElement>('select[aria-label="Codex permission default"]');
-    expect(select).not.toBeNull();
+    const select = fixture.debugElement
+      .queryAll(By.directive(PtahRichSelectComponent))
+      .map(
+        (element) =>
+          element.componentInstance as PtahRichSelectComponent<string>,
+      )
+      .find((component) => component.label() === 'Codex permission default');
+    expect(select).toBeDefined();
     if (!select) throw new Error('Missing Codex permission select');
-    select.value = 'auto-edit';
-    select.dispatchEvent(new Event('change'));
+    select.value.set('auto-edit');
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { orchestration: { cliLaneDefaults: expect.objectContaining({ codex: { permission: 'auto-edit', network: 'deny' } }) } },
+      {
+        orchestration: {
+          cliLaneDefaults: expect.objectContaining({
+            codex: { permission: 'auto-edit', network: 'deny' },
+          }),
+        },
+      },
       CONTEXT,
     );
   });
 
   it('resets a saved default from the table control', async () => {
     showSavedCodexDefault();
-    const cell = row('codex')?.querySelector('ptah-cli-lane-default-cell');
-    _clickNamed(cell ?? null, 'More default actions');
+    const expander = row('codex')?.querySelector<HTMLButtonElement>(
+      'ptah-table-row-expander button',
+    );
+    expect(expander).not.toBeNull();
+    expander?.click();
     fixture.detectChanges();
-    const reset = Array.from(cell?.querySelectorAll('button') ?? []).find(button => button.textContent?.includes('Reset to default'));
-    expect(reset).toBeDefined();
+    const reset = (
+      fixture.nativeElement as HTMLElement
+    ).querySelector<HTMLButtonElement>(
+      '[data-testid="lanes-detail-reset-default"]',
+    );
+    expect(reset).not.toBeNull();
     reset?.click();
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
@@ -399,9 +453,12 @@ describe('CliOrchestrationMatrixComponent', () => {
     check('codex', false);
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { orchestration: { disabledClis: ['copilot', 'codex'] } }, CONTEXT,
+      { orchestration: { disabledClis: ['copilot', 'codex'] } },
+      CONTEXT,
     );
-    const actions = row('glm-1')?.querySelector<HTMLButtonElement>('ptah-table-row-actions button[aria-haspopup="menu"]');
+    const actions = row('glm-1')?.querySelector<HTMLButtonElement>(
+      'ptah-table-row-actions button[aria-haspopup="menu"]',
+    );
     actions?.click();
     fixture.detectChanges();
     _clickNamed(row('glm-1'), 'Test');
@@ -410,12 +467,32 @@ describe('CliOrchestrationMatrixComponent', () => {
   });
 
   it('routes order moves through preferredAgentOrder with undo', async () => {
-    const originalOrder = ['codex', 'cursor', 'antigravity', 'glm-1', 'copilot'];
-    state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: originalOrder }));
+    const originalOrder = [
+      'codex',
+      'cursor',
+      'antigravity',
+      'glm-1',
+      'copilot',
+    ];
+    state.orchestration.set(
+      ready({ ...ORCHESTRATION, preferredAgentOrder: originalOrder }),
+    );
     fixture.detectChanges();
-    table().moved.emit({ row: lane('codex'), direction: 1 }); await flush();
+    table().moved.emit({ row: lane('codex'), direction: 1 });
+    await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { orchestration: { preferredAgentOrder: ['antigravity', 'cursor', 'codex', 'glm-1', 'copilot', 'opencode'] } },
+      {
+        orchestration: {
+          preferredAgentOrder: [
+            'antigravity',
+            'cursor',
+            'codex',
+            'glm-1',
+            'copilot',
+            'opencode',
+          ],
+        },
+      },
       CONTEXT,
     );
     expect(feedback.toast()?.canUndo).toBe(true);
@@ -423,16 +500,41 @@ describe('CliOrchestrationMatrixComponent', () => {
     await flush();
     expect(state.saveSettings).toHaveBeenCalledTimes(2);
     expect(state.saveSettings).toHaveBeenLastCalledWith(
-      { orchestration: { preferredAgentOrder: originalOrder } }, CONTEXT,
+      { orchestration: { preferredAgentOrder: originalOrder } },
+      CONTEXT,
     );
   });
 
   it('saves the full order including uninstalled IDs', async () => {
-    state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: ['codex', 'cursor', 'antigravity', 'glm-1', 'copilot'] }));
+    state.orchestration.set(
+      ready({
+        ...ORCHESTRATION,
+        preferredAgentOrder: [
+          'codex',
+          'cursor',
+          'antigravity',
+          'glm-1',
+          'copilot',
+        ],
+      }),
+    );
     fixture.detectChanges();
-    table().moved.emit({ row: lane('codex'), direction: 1 }); await flush();
+    table().moved.emit({ row: lane('codex'), direction: 1 });
+    await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { orchestration: { preferredAgentOrder: ['antigravity', 'cursor', 'codex', 'glm-1', 'copilot', 'opencode'] } }, CONTEXT,
+      {
+        orchestration: {
+          preferredAgentOrder: [
+            'antigravity',
+            'cursor',
+            'codex',
+            'glm-1',
+            'copilot',
+            'opencode',
+          ],
+        },
+      },
+      CONTEXT,
     );
   });
 
@@ -443,44 +545,67 @@ describe('CliOrchestrationMatrixComponent', () => {
     fixture.detectChanges();
     const messages = element().querySelectorAll('.ptah-table-message-cell');
     expect(messages).toHaveLength(1);
-    expect(messages[0].textContent).toContain('Some lane data could not be loaded. Showing the lanes that could be read.');
+    expect(messages[0].textContent).toContain(
+      'Some lane data could not be loaded. Showing the lanes that could be read.',
+    );
     expect(q('[data-testid="cli-matrix-row-glm-1"]')).not.toBeNull();
   });
 
   it('shows one partial-data message for salvaged CLI summaries alongside all readable lanes', () => {
-    state.cliAgents.set(ready(Object.assign([GLM], { missingFields: ['cliAgents'] })));
+    state.cliAgents.set(
+      ready(Object.assign([GLM], { missingFields: ['cliAgents'] })),
+    );
     fixture.detectChanges();
     const messages = element().querySelectorAll('.ptah-table-message-cell');
     expect(messages).toHaveLength(1);
-    expect(messages[0].textContent).toContain('Some lane data could not be loaded. Showing the lanes that could be read.');
+    expect(messages[0].textContent).toContain(
+      'Some lane data could not be loaded. Showing the lanes that could be read.',
+    );
     expect(row('codex')).not.toBeNull();
     expect(q('[data-testid="cli-matrix-row-glm-1"]')).not.toBeNull();
   });
 
   it('routes test and last result to the existing connection test', async () => {
-    table().test.emit(lane('glm-1')); await flush();
+    table().test.emit(lane('glm-1'));
+    await flush();
     expect(state.testCliConnection).toHaveBeenCalledWith('glm-1');
-    expect(q('[data-testid="cli-matrix-row-glm-1"]')?.textContent).toContain('112ms');
+    expect(q('[data-testid="cli-matrix-row-glm-1"]')?.textContent).toContain(
+      '112ms',
+    );
   });
 
   it('routes edit and tier editor outputs to existing modals', () => {
-    table().edit.emit(lane('glm-1')); fixture.detectChanges();
-    expect(q('[data-testid="add-cli-instance-modal"]')?.closest('dialog')?.hasAttribute('open')).toBe(true);
-    table().tiers.emit(lane('glm-1')); fixture.detectChanges();
-    expect(q('[data-testid="cli-tier-mapping-modal"]')?.closest('dialog')?.hasAttribute('open')).toBe(true);
+    table().edit.emit(lane('glm-1'));
+    fixture.detectChanges();
+    expect(
+      q('[data-testid="add-cli-instance-modal"]')
+        ?.closest('dialog')
+        ?.hasAttribute('open'),
+    ).toBe(true);
+    table().tiers.emit(lane('glm-1'));
+    fixture.detectChanges();
+    expect(
+      q('[data-testid="cli-tier-mapping-modal"]')
+        ?.closest('dialog')
+        ?.hasAttribute('open'),
+    ).toBe(true);
   });
 
   it('routes confirmed delete to the existing delete write', async () => {
-    table().delete.emit(lane('glm-1')); await flush();
+    table().delete.emit(lane('glm-1'));
+    await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
-      { cli: [{ action: 'delete', params: { id: 'glm-1' } }] }, CONTEXT,
+      { cli: [{ action: 'delete', params: { id: 'glm-1' } }] },
+      CONTEXT,
     );
   });
 
   it('routes install Re-detect and retry to existing state reads', async () => {
-    table().redetect.emit('pi'); await flush();
+    table().redetect.emit('pi');
+    await flush();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
-    table().retry.emit(); await flush();
+    table().retry.emit();
+    await flush();
     expect(state.refreshOrchestration).toHaveBeenCalledTimes(1);
     expect(state.refreshCliAgents).toHaveBeenCalledTimes(1);
   });

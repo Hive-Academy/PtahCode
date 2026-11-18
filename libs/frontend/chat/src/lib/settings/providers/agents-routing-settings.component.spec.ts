@@ -142,7 +142,7 @@ describe('AgentsRoutingSettingsComponent', () => {
       .query(By.directive(ConsumerStub))
       .injector.get(ConsumerStub);
   const rolesDetails = () =>
-    element.querySelector<HTMLDetailsElement>(
+    element.querySelector<HTMLElement>(
       '[data-testid="background-roles-details"]',
     );
   const matrixTable = () =>
@@ -156,7 +156,10 @@ describe('AgentsRoutingSettingsComponent', () => {
     const received = jest.fn();
     fixture.componentInstance.codexSettingsRequested.subscribe(received);
     await render();
-    fixture.debugElement.query(By.directive(CliMatrixStub)).injector.get(CliMatrixStub).codexSettingsRequested.emit();
+    fixture.debugElement
+      .query(By.directive(CliMatrixStub))
+      .injector.get(CliMatrixStub)
+      .codexSettingsRequested.emit();
     expect(received).toHaveBeenCalledTimes(1);
   });
 
@@ -181,29 +184,29 @@ describe('AgentsRoutingSettingsComponent', () => {
     }
   });
 
-  it('wraps the background roles in a <details> that is closed by default (deviation 4)', async () => {
+  it('keeps Background models visible to match the Settings prototype', async () => {
     await render();
     const details = rolesDetails();
-    expect(details?.parentElement?.getAttribute('data-glass-surface')).toBe('content');
-    expect(details?.tagName).toBe('DETAILS');
-    expect(details?.open).toBe(false);
+    expect(details?.parentElement?.getAttribute('data-glass-surface')).toBe(
+      'content',
+    );
+    expect(details?.tagName).toBe('DIV');
+    expect(details?.closest('details')).toBeNull();
     expect(
       details?.querySelector('ptah-provider-consumer-assignments'),
     ).not.toBeNull();
-    const summary = details?.querySelector('summary');
+    const summary = details?.querySelector('header');
     expect(summary?.getAttribute('data-testid')).toBe(
       'background-roles-summary',
     );
-    expect(summary?.textContent).toContain('Background Model Roles');
+    expect(summary?.textContent).toContain('Background models');
     expect(summary?.textContent).toContain('3 roles');
     expect(
       summary
         ?.querySelector('[data-testid="background-roles-list"]')
         ?.textContent?.replace(/\s+/g, ' ')
         .trim(),
-    ).toBe(
-      'Memory curator, enhancement, decision',
-    );
+    ).toBe('Memory curator, enhancement, decision');
     const list = Array.from(summary?.querySelectorAll('span') ?? []).find(
       (span) => span.textContent?.includes('enhancement'),
     );
@@ -211,30 +214,20 @@ describe('AgentsRoutingSettingsComponent', () => {
     expect(list?.className).toContain('text-base-content-muted');
   });
 
-  // Batch 34 revise 1: › closed, ⌄ open. lucide-angular copies its host class onto the <svg>, so the turn must sit on the
-  // wrapper only (a rotate on the icon applied twice and pointed it left). Rendered angles: settings-visual.e2e.spec.ts.
-  it('turns the summary chevron on its decorative wrapper, never on the icon', async () => {
+  it('has no collapsible disclosure hiding the role controls', async () => {
     await render();
-    const chevron = element.querySelector(
-      '[data-testid="background-roles-chevron"]',
-    );
-    expect(rolesDetails()?.classList.contains('group')).toBe(true);
-    expect(chevron?.getAttribute('aria-hidden')).toBe('true');
-    expect(chevron?.classList.contains('group-open:rotate-90')).toBe(true);
+    expect(rolesDetails()?.querySelector('summary')).toBeNull();
     expect(
-      chevron?.querySelector('lucide-angular')?.className ?? '',
-    ).not.toContain('rotate');
+      rolesDetails()?.querySelector('ptah-provider-consumer-assignments'),
+    ).not.toBeNull();
   });
 
-  it.each([
-    'memory-curator',
-    'enhancement',
-  ] as const)(
+  it.each(['memory-curator', 'enhancement'] as const)(
     'opens the roles for the %s deep link, forwards the role and focuses the background section',
     async (target) => {
       fixture.componentRef.setInput('focusTarget', target);
       await render();
-      expect(rolesDetails()?.open).toBe(true);
+      expect(rolesDetails()?.closest('details')).toBeNull();
       expect(consumer().initialEditingConsumerId()).toBe(target);
       expect(document.activeElement).toBe(
         element.querySelector('[data-focus="background-models"]'),
@@ -245,19 +238,19 @@ describe('AgentsRoutingSettingsComponent', () => {
   it('opens the roles and focuses the section without preselecting a role for background-models', async () => {
     fixture.componentRef.setInput('focusTarget', 'background-models');
     await render();
-    expect(rolesDetails()?.open).toBe(true);
+    expect(rolesDetails()?.closest('details')).toBeNull();
     expect(consumer().initialEditingConsumerId()).toBeNull();
     expect(document.activeElement).toBe(
       element.querySelector('[data-focus="background-models"]'),
     );
   });
 
-  it('focuses the CLI matrix table for cli-agents and leaves the roles closed', async () => {
+  it('focuses the CLI matrix table for cli-agents and keeps the background roles visible', async () => {
     fixture.componentRef.setInput('focusTarget', 'cli-agents');
     await render();
     expect(matrixTable()).not.toBeNull();
     expect(document.activeElement).toBe(matrixTable());
-    expect(rolesDetails()?.open).toBe(false);
+    expect(rolesDetails()?.closest('details')).toBeNull();
   });
 
   describe('deep-link consumption (Gate V 36, M-1)', () => {
@@ -293,20 +286,16 @@ describe('AgentsRoutingSettingsComponent', () => {
       },
     );
 
-    it('applies the same role again after the target was consumed and cleared: roles re-open and take focus', async () => {
+    it('applies the same role again after the target was consumed and cleared: roles stay visible and take focus', async () => {
       fixture.componentRef.setInput('focusTarget', 'enhancement');
       await render();
       consumer().deepLinkOpened.emit('enhancement');
       fixture.componentRef.setInput('focusTarget', null);
       await render();
       expect(consumer().initialEditingConsumerId()).toBeNull();
-      // The user closes the roles and moves on, still on this tab.
-      const details = rolesDetails();
-      if (details) details.open = false;
-      (document.activeElement as HTMLElement | null)?.blur();
       fixture.componentRef.setInput('focusTarget', 'enhancement');
       await render();
-      expect(rolesDetails()?.open).toBe(true);
+      expect(rolesDetails()?.closest('details')).toBeNull();
       expect(consumer().initialEditingConsumerId()).toBe('enhancement');
       expect(document.activeElement).toBe(
         element.querySelector('[data-focus="background-models"]'),
@@ -380,9 +369,15 @@ describe('AgentsRoutingSettingsComponent', () => {
       error: 'Could not load this section. Retry.',
     });
     await render();
-    const card = element.querySelector<HTMLElement>('[data-testid="settings-cli-matrix"]');
-    const loading = element.querySelector<HTMLElement>('[data-read-loading="cli"]');
-    const failed = element.querySelector<HTMLElement>('[data-read-error="orchestration"]');
+    const card = element.querySelector<HTMLElement>(
+      '[data-testid="settings-cli-matrix"]',
+    );
+    const loading = element.querySelector<HTMLElement>(
+      '[data-read-loading="cli"]',
+    );
+    const failed = element.querySelector<HTMLElement>(
+      '[data-read-error="orchestration"]',
+    );
     expect(card?.contains(loading)).toBe(true);
     expect(card?.contains(failed)).toBe(true);
     expect(loading?.getAttribute('role')).toBe('status');
@@ -392,7 +387,10 @@ describe('AgentsRoutingSettingsComponent', () => {
       'delegated CLI models could not be loaded. Your saved settings have',
     );
     expect(
-      fixture.debugElement.query(By.directive(CliMatrixStub)).injector.get(CliMatrixStub).hostReadStates(),
+      fixture.debugElement
+        .query(By.directive(CliMatrixStub))
+        .injector.get(CliMatrixStub)
+        .hostReadStates(),
     ).toBe(true);
     button(element, 'Retry delegated CLI models').click();
     expect(state.refreshOrchestration).toHaveBeenCalledTimes(1);
@@ -400,7 +398,9 @@ describe('AgentsRoutingSettingsComponent', () => {
 
   it('shows no read state once every CLI read is ready', async () => {
     await render();
-    expect(element.querySelector('[data-read-loading], [data-read-error]')).toBeNull();
+    expect(
+      element.querySelector('[data-read-loading], [data-read-error]'),
+    ).toBeNull();
   });
 });
 
@@ -437,11 +437,15 @@ describe('AgentsRoutingSettingsComponent matrix chunk', () => {
     );
     expect(placeholder?.hasAttribute('aria-busy')).toBe(false);
     expect(
-      placeholder?.querySelector('[data-testid="cli-matrix-placeholder-busy"]')?.getAttribute('aria-busy'),
+      placeholder
+        ?.querySelector('[data-testid="cli-matrix-placeholder-busy"]')
+        ?.getAttribute('aria-busy'),
     ).toBe('true');
     expect(element.querySelector('[data-testid="cli-matrix"]')).toBeNull();
     // The read states also show in the placeholder, so the page never shows them below an empty slot.
-    const placeholderRead = placeholder?.querySelector('[data-read-loading="cli"]');
+    const placeholderRead = placeholder?.querySelector(
+      '[data-read-loading="cli"]',
+    );
     expect(placeholderRead).not.toBeNull();
     // A live region under a busy ancestor can stay unannounced.
     expect(placeholderRead?.closest('[aria-busy="true"]')).toBeNull();
@@ -449,7 +453,9 @@ describe('AgentsRoutingSettingsComponent matrix chunk', () => {
     await block.render(DeferBlockState.Complete);
     expect(element.querySelector('[data-testid="cli-matrix"]')).not.toBeNull();
     const card = element.querySelector('[data-testid="settings-cli-matrix"]');
-    expect(element.querySelectorAll('[data-read-loading="cli"]')).toHaveLength(1);
+    expect(element.querySelectorAll('[data-read-loading="cli"]')).toHaveLength(
+      1,
+    );
     expect(card?.querySelector('[data-read-loading="cli"]')).not.toBeNull();
     fixture.destroy();
   });

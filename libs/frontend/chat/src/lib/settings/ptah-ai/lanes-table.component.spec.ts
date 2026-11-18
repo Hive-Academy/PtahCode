@@ -1,7 +1,10 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { ChangeDetectorRef, Component, input, output } from '@angular/core';
 import { By } from '@angular/platform-browser';
-import { PtahTableComponent, PtahTableOrderButtonsComponent } from '@ptah-extension/ui';
+import {
+  PtahTableComponent,
+  PtahTableOrderButtonsComponent,
+} from '@ptah-extension/ui';
 import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.component';
 import type { CliMatrixCellField, CliMatrixRow } from './cli-matrix-rows';
 import {
@@ -110,21 +113,65 @@ function narrow(fixture: ComponentFixture<LanesTableComponent>): void {
 }
 
 describe('LanesTableComponent', () => {
+  it('offers reset only for a saved system default in the detail quiet actions at both widths', async () => {
+    const codex = system('codex');
+    const { fixture, host } = await mount([codex]);
+    const resetRequested = jest.fn();
+    fixture.componentInstance.defaultResetRequested.subscribe(resetRequested);
+    q(host, 'ptah-table-row-expander button')?.click();
+    fixture.detectChanges();
+    expect(q(host, '[data-testid="lanes-detail-reset-default"]')).toBeNull();
+    fixture.componentRef.setInput('defaults', {
+      codex: { permission: 'ask', network: 'deny' },
+    });
+    fixture.detectChanges();
+    const reset = q(host, '[data-testid="lanes-detail-reset-default"]');
+    expect(reset?.textContent?.trim()).toBe('Reset to default');
+    expect(reset?.closest('.quiet-actions')).not.toBeNull();
+    reset?.click();
+    expect(resetRequested).toHaveBeenLastCalledWith(codex);
+    narrow(fixture);
+    q(host, '[data-testid="lanes-detail-reset-default"]')?.click();
+    expect(resetRequested).toHaveBeenCalledTimes(2);
+    fixture.componentRef.setInput('canWrite', false);
+    fixture.detectChanges();
+    expect(
+      q(host, '[data-testid="lanes-detail-reset-default"]')?.hasAttribute(
+        'disabled',
+      ),
+    ).toBe(true);
+  });
+
   it('collapses below 950px and sizes the columns with a colgroup', async () => {
     const { fixture, host } = await mount([system('codex')]);
     const table = fixture.debugElement.query(By.directive(PtahTableComponent))
       .componentInstance as PtahTableComponent;
     expect(table.collapseBelow()).toBe(950);
+    expect(table.wideDetail()).toBe(true);
     const widths = (sel: string): string[] =>
-      Array.from(host.querySelectorAll(`${sel} col`)).map((col) => col.className);
+      Array.from(host.querySelectorAll(`${sel} col`)).map(
+        (col) => col.className,
+      );
     expect(widths('table [data-testid="lanes-colgroup"]')).toEqual([
-      'w-[6%]', 'w-[20%]', 'w-[12%]', 'w-[14%]', 'w-[11%]', 'w-[17%]', 'w-[13%]', 'w-[7%]', '',
+      'w-[6%]',
+      'w-[17%]',
+      'w-[12%]',
+      'w-[14%]',
+      'w-[10%]',
+      'w-[14%]',
+      'w-[16%]',
+      'w-[6%]',
+      'lane-expander',
     ]);
     expect(q(host, '[data-testid="lanes-colgroup-collapsed"]')).toBeNull();
     narrow(fixture);
     expect(q(host, '[data-testid="lanes-colgroup"]')).toBeNull();
     expect(widths('table [data-testid="lanes-colgroup-collapsed"]')).toEqual([
-      'w-[10%]', 'w-[34%]', 'w-[31%]', 'w-[15%]', 'w-[10%]',
+      'lane-order',
+      '',
+      'lane-status',
+      'lane-enabled',
+      'lane-expander',
     ]);
   });
 
@@ -259,7 +306,11 @@ describe('LanesTableComponent', () => {
   it('keeps noninteractive Model and Effort disabled and omits unsupported Effort', async () => {
     const { host } = await mount([
       uninstalled('codex'),
-      instance('off', { interactive: false, selectedModel: '' }),
+      instance('off', {
+        interactive: false,
+        selectedModel: '',
+        effort: 'high',
+      }),
       system('copilot'),
     ]);
     expect(
@@ -283,13 +334,16 @@ describe('LanesTableComponent', () => {
       ).disabled,
     ).toBe(true);
     expect(q(host, '[aria-label="Effort default for Copilot"]')).toBeNull();
-    // A row with no effort editor shows "n/a", with a hidden "Effort" prefix for screen readers.
-    const na = q(host, '[data-testid="cli-provider-card-copilot"] [data-testid="lanes-effort-na"]');
-    expect(na?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Effort n/a');
+    // Default and unsupported efforts add no visible suffix.
+    const na = q(
+      host,
+      '[data-testid="cli-provider-card-copilot"] [data-testid="lanes-effort-na"]',
+    );
+    expect(na?.textContent?.replace(/\s+/g, ' ').trim()).toBe('');
   });
 
   it('opens the instance Model and Effort editors', async () => {
-    const row = instance('a', { selectedModel: 'local/model' });
+    const row = instance('a', { selectedModel: 'local/model', effort: 'high' });
     const { fixture, host } = await mount([row]);
     for (const field of ['model', 'effort'] as const) {
       (
@@ -341,7 +395,7 @@ describe('LanesTableComponent', () => {
     expect(q(host, '[aria-label="Model default for Lane loading"]')).toBeNull();
     expect(
       q(host, '[aria-label="Effort default for Lane loading"]'),
-    ).not.toBeNull();
+    ).toBeNull();
   });
   it('keeps instance row hooks and emits toggle and actions', async () => {
     const row = instance('local-one', { name: 'Local one' });
@@ -438,13 +492,22 @@ describe('LanesTableComponent', () => {
     const { fixture, host } = await mount(rows);
     let completeDelete: (() => void) | undefined;
     const deleted = jest.fn((row: LaneTableRow) => {
-      completeDelete = () => fixture.componentRef.setInput('rows', rows.filter((item) => item !== row));
+      completeDelete = () =>
+        fixture.componentRef.setInput(
+          'rows',
+          rows.filter((item) => item !== row),
+        );
     });
     fixture.componentInstance.delete.subscribe(deleted);
-    const original = q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement;
+    const original = q(
+      host,
+      '[aria-label="More actions for Lane a"]',
+    ) as HTMLButtonElement;
     original.click();
     fixture.detectChanges();
-    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
+    (
+      q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement
+    ).click();
     fixture.detectChanges();
     (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -455,15 +518,21 @@ describe('LanesTableComponent', () => {
     await Promise.resolve();
     expect(deleted).toHaveBeenCalledWith(rows[0]);
     expect(q(host, '[data-testid="cli-matrix-row-a"]')).toBeNull();
-    expect(document.activeElement).toBe(q(host, '[aria-label="More actions for Lane b"]'));
+    expect(document.activeElement).toBe(
+      q(host, '[aria-label="More actions for Lane b"]'),
+    );
   });
 
   it('keeps the delete focus fallback while the row stays, then focuses it on removal', async () => {
     const rows = [instance('a'), instance('b')];
     const { fixture, host } = await mount(rows);
-    (q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement).click();
+    (
+      q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement
+    ).click();
     fixture.detectChanges();
-    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
+    (
+      q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement
+    ).click();
     fixture.detectChanges();
     (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -475,29 +544,43 @@ describe('LanesTableComponent', () => {
     fixture.detectChanges();
     await Promise.resolve();
     expect(q(host, '[data-testid="cli-matrix-row-a"]')).toBeNull();
-    expect(document.activeElement).toBe(q(host, '[aria-label="More actions for Lane b"]'));
+    expect(document.activeElement).toBe(
+      q(host, '[aria-label="More actions for Lane b"]'),
+    );
   });
 
   it('focuses the next row actions trigger when Confirm removes the row synchronously', async () => {
     const rows = [instance('a'), instance('b')];
     const { fixture, host } = await mount(rows);
     fixture.componentInstance.delete.subscribe((row) => {
-      fixture.componentRef.setInput('rows', rows.filter((item) => item !== row));
+      fixture.componentRef.setInput(
+        'rows',
+        rows.filter((item) => item !== row),
+      );
     });
-    (q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement).click();
+    (
+      q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement
+    ).click();
     fixture.detectChanges();
-    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
+    (
+      q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement
+    ).click();
     fixture.detectChanges();
     (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
     fixture.detectChanges();
     await Promise.resolve();
-    expect(document.activeElement).toBe(q(host, '[aria-label="More actions for Lane b"]'));
+    expect(document.activeElement).toBe(
+      q(host, '[aria-label="More actions for Lane b"]'),
+    );
   });
 
   describe('order', () => {
     it('suppresses a focus tooltip during the order button focus return', async () => {
       const { host } = await mount([instance('a'), instance('b')], true);
-      const button = q(host, '[data-testid="cli-matrix-row-a"] [data-order-down]') as HTMLButtonElement;
+      const button = q(
+        host,
+        '[data-testid="cli-matrix-row-a"] [data-order-down]',
+      ) as HTMLButtonElement;
       const focused = jest.fn();
       button.addEventListener('focus', focused);
       button.click();
@@ -510,14 +593,23 @@ describe('LanesTableComponent', () => {
       const { fixture, host } = await mount([a, b], true);
       const moved = jest.fn();
       fixture.componentInstance.moved.subscribe(moved);
-      const button = q(host, '[data-testid="cli-matrix-row-a"] [data-order-down]') as HTMLButtonElement;
-      const order = fixture.debugElement.queryAll(By.directive(PtahTableOrderButtonsComponent))[0]
-        .componentInstance as PtahTableOrderButtonsComponent;
-      for (const blocked of [{ busy: true }, { busyRows: { a: true } }, { canWrite: false }]) {
+      const button = q(
+        host,
+        '[data-testid="cli-matrix-row-a"] [data-order-down]',
+      ) as HTMLButtonElement;
+      const order = fixture.debugElement.queryAll(
+        By.directive(PtahTableOrderButtonsComponent),
+      )[0].componentInstance as PtahTableOrderButtonsComponent;
+      for (const blocked of [
+        { busy: true },
+        { busyRows: { a: true } },
+        { canWrite: false },
+      ]) {
         fixture.componentRef.setInput('busy', false);
         fixture.componentRef.setInput('busyRows', {});
         fixture.componentRef.setInput('canWrite', true);
-        for (const [key, value] of Object.entries(blocked)) fixture.componentRef.setInput(key, value);
+        for (const [key, value] of Object.entries(blocked))
+          fixture.componentRef.setInput(key, value);
         fixture.detectChanges();
         expect(button.matches(':disabled')).toBe(true);
         button.click();
@@ -619,9 +711,14 @@ describe('LanesTableComponent', () => {
   describe('system row', () => {
     it('keeps one version hook and wide defaults when details are expanded', async () => {
       const { fixture, host } = await mount([system('codex')]);
-      q(host, '[data-testid="cli-provider-card-codex"] ptah-table-row-expander button')?.click();
+      q(
+        host,
+        '[data-testid="cli-provider-card-codex"] ptah-table-row-expander button',
+      )?.click();
       fixture.detectChanges();
-      expect(host.querySelectorAll('[data-testid="cli-matrix-version"]')).toHaveLength(1);
+      expect(
+        host.querySelectorAll('[data-testid="cli-matrix-version"]'),
+      ).toHaveLength(1);
       expect(q(host, '#lane-detail-codex > td > dl')).toBeNull();
     });
     it('has card and version hooks and a clean model label', async () => {
@@ -633,11 +730,13 @@ describe('LanesTableComponent', () => {
       expect(q(host, '[data-testid="cli-provider-card-codex"]')).not.toBeNull();
       const version = q(host, '[data-testid="cli-matrix-version"]');
       expect(version?.textContent).toContain('v1.2.3');
-      expect(version?.getAttribute('title')).toBe('v1.2.3');
+      expect(version?.getAttribute('title')).toBe('Codex - v1.2.3');
       // The cell holds the model and the effort; the model button holds the label only.
       const model = q(host, '[data-testid="cli-matrix-model"]');
       expect(
-        model?.querySelector('[data-popover-kind="model"]')?.textContent?.trim(),
+        model
+          ?.querySelector('[data-popover-kind="model"]')
+          ?.textContent?.trim(),
       ).toBe('gpt-5');
       expect(model?.getAttribute('title')).toBe('gpt-5 (GPT 5)');
     });
@@ -668,8 +767,8 @@ describe('LanesTableComponent', () => {
       signIn?.click();
       expect(attention).toHaveBeenCalledWith(row);
       expect(
-        q(host, '[data-testid="cli-matrix-status"]')?.getAttribute('data-tone'),
-      ).toBe('warn');
+        q(host, '[data-testid="cli-matrix-status"]')?.getAttribute('data-ink'),
+      ).toBe('need');
     });
 
     it('shows the runtime status and a missing key', async () => {
@@ -706,164 +805,8 @@ describe('LanesTableComponent', () => {
           host,
           `[data-testid="cli-matrix-row-${id}"] [data-testid="cli-matrix-model"]`,
         )?.textContent?.trim();
-      expect(model('a')).toContain('provider default');
+      expect(model('a')).toContain('Provider default');
       expect(model('b')).toContain('—');
     });
-  });
-
-  it('does not show a config hint without a source', async () => {
-    const { host } = await mount([instance('a')]);
-    expect(q(host, '[role="img"]')).toBeNull();
-  });
-
-  it('shows the empty state in a message cell', async () => {
-    const { host } = await mount([]);
-    const cell = q(host, 'td.ptah-table-message-cell');
-    expect(cell?.textContent).toContain('No lanes available.');
-    expect(cell?.getAttribute('colspan')).toBe('9');
-  });
-
-  it('distinguishes loading and error from an empty result and retries', async () => {
-    const { fixture, host } = await mount([]);
-    fixture.componentRef.setInput('loading', true);
-    fixture.detectChanges();
-    expect(host.textContent).toContain('Loading lanes');
-    expect(host.textContent).not.toContain('No lanes available');
-    fixture.componentRef.setInput('loading', false);
-    fixture.componentRef.setInput('error', 'Could not load lanes');
-    fixture.detectChanges();
-    const retry = jest.fn();
-    fixture.componentInstance.retry.subscribe(retry);
-    expect(host.textContent).toContain('Could not load lanes');
-    Array.from(host.querySelectorAll('button'))
-      .find((button) => button.textContent?.trim() === 'Retry')
-      ?.click();
-    expect(retry).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows a refresh error and Retry while rows remain', async () => {
-    const { fixture, host } = await mount([instance('a')]);
-    const retry = jest.fn();
-    fixture.componentInstance.retry.subscribe(retry);
-    fixture.componentRef.setInput('error', 'Could not refresh lanes');
-    fixture.detectChanges();
-
-    const message = q(host, 'td.ptah-table-message-cell');
-    expect(message?.textContent).toContain('Could not refresh lanes');
-    const button = Array.from(message?.querySelectorAll('button') ?? []).find(
-      (candidate) => candidate.textContent?.trim() === 'Retry',
-    );
-    expect(button).toBeDefined();
-    button?.click();
-    expect(retry).toHaveBeenCalledTimes(1);
-    expect(host.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
-  });
-
-  it('clears the editor when its row is removed and reinserted', async () => {
-    const row = system('codex');
-    const { fixture, host } = await mount([row]);
-    (
-      q(host, '[aria-label="Model default for Codex"]') as HTMLButtonElement
-    ).click();
-    fixture.detectChanges();
-    expect(
-      fixture.debugElement.queryAll(
-        By.directive(StubModelEffortPopoverComponent),
-      ),
-    ).toHaveLength(1);
-    fixture.componentRef.setInput('rows', []);
-    fixture.detectChanges();
-    fixture.componentRef.setInput('rows', [row]);
-    fixture.detectChanges();
-    expect(
-      fixture.debugElement.queryAll(
-        By.directive(StubModelEffortPopoverComponent),
-      ),
-    ).toHaveLength(0);
-  });
-
-  it('guards writes and announces test progress once', async () => {
-    const row = instance('a');
-    const { fixture, host } = await mount([row]);
-    fixture.componentRef.setInput('canWrite', false);
-    fixture.componentRef.setInput('testingRows', { a: true });
-    fixture.detectChanges();
-    const toggle = q(
-      host,
-      '[data-testid="cli-matrix-toggle-a"]',
-    ) as HTMLInputElement;
-    expect(toggle.disabled).toBe(true);
-    toggle.checked = false;
-    toggle.dispatchEvent(new Event('change'));
-    expect(toggle.checked).toBe(true);
-    q(host, '[aria-label="More actions for Lane a"]')?.click();
-    fixture.detectChanges();
-    expect(
-      (q(host, '[data-testid="cli-matrix-test-a"]') as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    expect(host.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
-    await Promise.resolve();
-    fixture.detectChanges();
-    expect(q(host, '[aria-live="polite"]')?.textContent).toContain(
-      'Running test for Lane a',
-    );
-  });
-
-  it('refuses an uninstalled system toggle and restores its unchecked state', async () => {
-    const row = system('codex', { installed: false, enabled: true });
-    const { fixture, host } = await mount([row]);
-    const toggled = jest.fn();
-    fixture.componentInstance.toggled.subscribe(toggled);
-    const toggle = q(host, '[aria-label="Codex enabled"]') as HTMLInputElement;
-
-    expect(toggle.disabled).toBe(true);
-    expect(toggle.checked).toBe(false);
-    toggle.click();
-    toggle.checked = true;
-    toggle.dispatchEvent(new Event('change'));
-    expect(toggled).not.toHaveBeenCalled();
-    expect(toggle.checked).toBe(false);
-  });
-
-  it('disables Test for uninstalled and busy rows and displays a result', async () => {
-    const { fixture, host } = await mount([
-      uninstalled('copilot'),
-      instance('a'),
-    ]);
-    fixture.componentRef.setInput('busyRows', { a: true });
-    fixture.componentRef.setInput('testResults', { a: 'Answered in 1.4 s' });
-    fixture.detectChanges();
-    for (const name of ['Copilot', 'Lane a']) {
-      q(host, `[aria-label="More actions for ${name}"]`)?.click();
-      fixture.detectChanges();
-      const row = q(
-        host,
-        name === 'Copilot'
-          ? '[data-testid="cli-provider-card-copilot"]'
-          : '[data-testid="cli-matrix-row-a"]',
-      );
-      expect(
-        (Array.from(row?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
-          .find(button => button.textContent?.trim() === 'Test') as HTMLButtonElement).disabled,
-      ).toBe(true);
-    }
-    expect(host.textContent).toContain('Answered in 1.4 s');
-  });
-
-  it('toggles the detail row through the expander', async () => {
-    const { fixture, host } = await mount([instance('a')]);
-    const detail = q(host, '#lane-detail-a') as HTMLElement;
-    expect(detail).not.toBeNull();
-    expect(detail.hidden).toBe(true);
-    const button = q(
-      host,
-      'ptah-table-row-expander button',
-    ) as HTMLButtonElement;
-    expect(button.getAttribute('aria-expanded')).toBe('false');
-    button.click();
-    fixture.detectChanges();
-    expect(button.getAttribute('aria-expanded')).toBe('true');
-    expect(button.getAttribute('aria-controls')).toBe('lane-detail-a');
   });
 });

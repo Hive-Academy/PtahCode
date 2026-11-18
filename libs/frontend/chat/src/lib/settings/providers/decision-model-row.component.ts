@@ -1,3 +1,4 @@
+import { PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -17,8 +18,8 @@ import {
   NativePopoverComponent,
   PtahBadgeDirective,
   PROVIDER_MODELS_LOADER,
-  ProviderMarkComponent,
   PtahButtonDirective,
+  PtahRichSelectComponent,
   PtahIconButtonDirective,
   type ProviderIdentityOption,
 } from '@ptah-extension/ui';
@@ -52,7 +53,6 @@ import {
   DECISION_INPUT_INVALID,
   DECISION_KEY_TEXT,
   DECISION_LABEL,
-  DECISION_SELECT,
   DecisionModelKeyFieldComponent,
   type DecisionKeyedKind,
 } from './decision-model-key-field.component';
@@ -70,7 +70,7 @@ import {
   wrapEditorTab,
 } from './decision-model-row.popover';
 
-const CELL = `flex w-full min-w-0 items-center gap-1 whitespace-nowrap rounded px-1 text-left text-xs text-base-content hover:bg-base-200 hover:underline ${DECISION_FOCUS}`;
+const CELL = `flex w-full min-w-0 items-center justify-between gap-2 text-left ${DECISION_FOCUS}`;
 const RPC_TIMEOUT_MS = 5_000;
 const SAVE_FAILED =
   'Could not save the decision model. The saved choice is unchanged.';
@@ -100,12 +100,14 @@ type WriteResult = { ok: true } | { ok: false; message: string };
   selector: 'ptah-decision-model-row',
   standalone: true,
   imports: [
+    PtahFieldComponent,
+    PtahInputDirective,
     LucideAngularModule,
     PtahBadgeDirective,
     PtahButtonDirective,
+    PtahRichSelectComponent,
     PtahIconButtonDirective,
     NativePopoverComponent,
-    ProviderMarkComponent,
     DecisionModelKeyFieldComponent,
     DecisionModelBaseUrlFieldComponent,
     DecisionModelTimeoutFieldComponent,
@@ -116,335 +118,26 @@ type WriteResult = { ok: true } | { ok: false; message: string };
     class: 'block min-w-0',
     '(window:resize)': 'editing() && fitEditor()',
   },
-  template: `
-    <article
-      data-testid="consumer-row-decision"
-      [class.border-primary]="editing()"
-      class="flex h-full min-w-0 flex-col gap-2 rounded-lg border border-base-content/10 p-3 hover:bg-base-content/5"
-    >
-      <div class="flex min-w-0 items-start justify-between gap-2">
-        <h3
-          class="text-xs font-bold text-base-content"
-          data-testid="consumer-name-decision"
-        >
-          {{ row().name }}
-        </h3>
-        <span
-          ptahBadge size="xs" class="shrink-0 whitespace-nowrap text-[9px] text-base-content"
-          data-testid="consumer-tier-decision"
-          >{{ load() === 'loading' ? 'loading' : row().stateLabel }}</span
-        >
-      </div>
-      @if (load() === 'loading') {
-        <div
-          class="mt-auto flex flex-wrap items-center gap-1.5"
-          data-testid="consumer-notloaded-decision"
-        >
-          <span class="text-xs text-base-content" role="status">Loading…</span>
-        </div>
-      } @else {
-        <div class="mt-auto min-w-0 space-y-1.5">
-          <ptah-native-popover
-            #editorPopover
-            class="consumer-cell-popover block w-full min-w-0"
-            [isOpen]="editing()"
-            placement="bottom-start"
-            [hasBackdrop]="true"
-            [keepInViewport]="true"
-            backdropClass="transparent"
-            (closed)="close()"
-            (opened)="editorRef()?.nativeElement?.focus()"
-            (keydown)="onEditorKeydown($event)"
-          >
-            <button
-              #cell
-              trigger
-              type="button"
-              [class]="cellClass"
-              [attr.aria-disabled]="busy() ? 'true' : null"
-              [attr.aria-label]="
-                row().name + ': ' + row().cellLabel + '. Change'
-              "
-              [attr.aria-expanded]="editing()"
-              [title]="row().cellLabel"
-              aria-haspopup="dialog"
-              (click)="toggle()"
-              data-testid="consumer-edit-decision"
-            >
-              <ptah-provider-mark
-                [providerId]="markProviderId()"
-                fallback="Bot"
-              />
-              <span
-                class="min-w-0 truncate"
-                data-testid="consumer-summary-decision"
-                >{{ row().cellLabel }}</span
-              >
-              <lucide-angular
-                [img]="ChevronIcon"
-                class="h-3 w-3 shrink-0 text-base-content-muted"
-                aria-hidden="true"
-              />
-            </button>
-            @if (editing()) {
-              <!-- Capped by decisionEditorMaxHeight; the body scrolls (the whole editor in a short window). -->
-              <div
-                #editor
-                content
-                role="dialog"
-                aria-modal="true"
-                tabindex="-1"
-                aria-label="Choose the decision model"
-                class="relative flex w-[27rem] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto whitespace-normal p-2 text-left text-xs"
-                [style.max-height.px]="editorMaxHeight()"
-                data-testid="consumer-editor-decision"
-              >
-                <!-- Header row: the 32 px Close sits beside the label, never over the select below it. -->
-                <div class="flex items-center justify-between gap-2">
-                  <label for="decision-model-kind" [class]="label"
-                    >Decision model</label
-                  >
-                  <button
-                    type="button"
-                    ptahIconButton
-                    class="shrink-0"
-                    label="Close"
-                    (click)="close()"
-                    data-testid="consumer-close-decision"
-                  >
-                    <lucide-angular
-                      [img]="CloseIcon"
-                      class="h-4 w-4"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
-                <select
-                  id="decision-model-kind"
-                  [class]="selectClass"
-                  [disabled]="busy() || disabled()"
-                  (change)="onKind($event); editorPopover.reposition()"
-                  data-testid="decision-kind"
-                >
-                  @for (option of kinds; track option.value) {
-                    <option
-                      [value]="option.value"
-                      [selected]="draft().kind === option.value"
-                    >
-                      {{ option.label }}
-                    </option>
-                  }
-                </select>
-                <div
-                  class="-mx-2 min-h-16 space-y-2 overflow-y-auto px-2 py-1"
-                  data-testid="decision-editor-body"
-                >
-                  @if (draft().kind === 'ollama-cloud') {
-                    <p
-                      class="text-xs text-base-content-muted"
-                      data-testid="decision-cloud-help"
-                    >
-                      Uses your Ollama Cloud provider key and calls ollama.com
-                      directly. Without a key, requests go through your
-                      signed-in local Ollama. Chat and routing share one Ollama
-                      Cloud plan.
-                    </p>
-                    <button
-                      type="button"
-                      [class]="action"
-                      (click)="setUpOllamaCloud()"
-                      data-testid="decision-cloud-setup"
-                    >
-                      Set up Ollama Cloud
-                    </button>
-                  }
-                  @if (draft().kind === 'structured') {
-                    <label for="decision-model-provider" [class]="label"
-                      >Provider</label
-                    >
-                    <select
-                      id="decision-model-provider"
-                      [class]="selectClass"
-                      [disabled]="busy() || disabled()"
-                      (change)="onProvider($event)"
-                      data-testid="decision-provider"
-                    >
-                      <option value="" [selected]="draft().providerId === ''">
-                        Choose a provider
-                      </option>
-                      @for (provider of providers(); track provider.id) {
-                        <option
-                          [value]="provider.id"
-                          [selected]="draft().providerId === provider.id"
-                        >
-                          {{ provider.name }}
-                        </option>
-                      }
-                    </select>
-                    @if (providers().length === 0) {
-                      <p
-                        class="text-xs text-base-content"
-                        data-testid="decision-no-providers"
-                      >
-                        No provider is configured. Set one up on Providers
-                        first.
-                      </p>
-                    }
-                  }
-                  @if (draft().kind === 'custom') {
-                    <ptah-decision-model-base-url-field
-                      [value]="draft().baseUrl"
-                      [error]="fieldError('baseUrl')"
-                      [disabled]="busy() || disabled()"
-                      (valueChange)="onBaseUrl($event)"
-                      (submitted)="save()"
-                    />
-                  }
-                  @if (draft().kind !== 'unset') {
-                    <label for="decision-model-model" [class]="label">{{
-                      modelLabel()
-                    }}</label>
-                    <input
-                      id="decision-model-model"
-                      type="text"
-                      list="decision-model-suggestions"
-                      [class]="
-                        fieldError('model') ? invalidInputClass : inputClass
-                      "
-                      autocomplete="off"
-                      spellcheck="false"
-                      [attr.aria-invalid]="fieldError('model') ? 'true' : null"
-                      [attr.aria-describedby]="describedBy('model')"
-                      [placeholder]="modelPlaceholder()"
-                      [value]="draft().model"
-                      [disabled]="busy() || disabled()"
-                      (input)="onField('model', $event)"
-                      (keydown.enter)="save()"
-                      data-testid="decision-model"
-                    />
-                    <datalist id="decision-model-suggestions">
-                      @for (id of suggestions().ids; track id) {
-                        <option [value]="id"></option>
-                      }
-                    </datalist>
-                    <p
-                      id="decision-model-model-help"
-                      class="text-xs text-base-content-muted"
-                      data-testid="decision-model-help"
-                    >
-                      {{ modelHelp() }}
-                    </p>
-                    @if (fieldError('model'); as message) {
-                      <p
-                        id="decision-model-model-error"
-                        role="alert"
-                        class="text-xs text-error"
-                        data-testid="decision-model-error"
-                      >
-                        {{ message }}
-                      </p>
-                    }
-                  }
-                  @if (keyedKind(); as keyKind) {
-                    <ptah-decision-model-key-field
-                      [label]="keyText[keyKind].label"
-                      [value]="apiKey()"
-                      [disabled]="busy() || disabled()"
-                      [showRemove]="keyMayBeStored()"
-                      (valueChange)="apiKey.set($event)"
-                      (remove)="removeKey()"
-                    />
-                  }
-                  @if (usesSystemOne()) {
-                    <ptah-decision-model-timeout-field
-                      [disabled]="disabled()"
-                    />
-                  }
-                </div>
-                @if (draft().kind !== 'unset') {
-                  <button
-                    type="button"
-                    ptahButton
-                    variant="primary"
-                    class="self-start"
-                    [disabled]="!canSave()"
-                    (click)="save()"
-                    data-testid="decision-save"
-                  >
-                    Save decision model
-                  </button>
-                }
-                <p
-                  class="px-1 text-xs text-base-content-muted"
-                  data-testid="decision-footer"
-                >
-                  {{ footer() }}
-                </p>
-              </div>
-            }
-          </ptah-native-popover>
-          <p
-            class="text-xs text-base-content"
-            [attr.role]="row().attention ? 'alert' : null"
-            data-testid="decision-state"
-          >
-            {{ row().stateMessage }}
-          </p>
-          @if (row().detail; as detail) {
-            <p
-              class="break-words text-xs text-base-content-muted"
-              data-testid="decision-detail"
-            >
-              Detail: {{ detail }}
-            </p>
-          }
-          @if (row().localityMessage; as locality) {
-            <p
-              class="text-xs text-base-content-muted"
-              data-testid="decision-locality"
-            >
-              {{ locality }}
-            </p>
-          }
-          @if (row().confidenceMessage; as confidence) {
-            <p
-              class="text-xs text-base-content-muted"
-              data-testid="decision-confidence"
-            >
-              {{ confidence }}
-            </p>
-          }
-          @if (row().setupProviderId; as providerId) {
-            <button
-              type="button"
-              [class]="action"
-              [attr.aria-label]="'Set up ' + row().setupProviderName"
-              (click)="setupProviderRequested.emit(providerId)"
-              data-testid="decision-setup"
-            >
-              Set up {{ row().setupProviderName }}
-            </button>
-          }
-          @if (load() === 'error') {
-            <button
-              type="button"
-              [class]="action"
-              aria-label="Retry reading the decision model status"
-              [disabled]="busy()"
-              (click)="reload()"
-              data-testid="decision-retry"
-            >
-              Retry
-            </button>
-          }
-        </div>
-      }
-    </article>
-  `,
+  templateUrl: './decision-model-row.component.html',
   styles: `
-    /* Same as the sibling rows: block width lets the cell's label truncate (its full text is the title). */
+    :host {
+      display: block;
+      container-type: inline-size;
+    }
+    .consumer-role {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-height: 5.5rem;
+      padding-bottom: var(--ptah-gap-field);
+    }
+    @container (max-width: 400px) {
+      .consumer-role {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
     :host ::ng-deep .consumer-cell-popover > .popover-trigger {
       display: block;
+      width: 100%;
       min-width: 0;
     }
   `,
@@ -460,7 +153,14 @@ export class DecisionModelRowComponent implements OnInit {
   protected readonly CloseIcon = X;
   protected readonly action = DECISION_ACTION;
   protected readonly cellClass = CELL;
-  protected readonly selectClass = DECISION_SELECT;
+  protected readonly kindOptions = DECISION_KIND_OPTIONS;
+  protected readonly providerSelectOptions = computed(() => [
+    { value: '', label: 'Choose a provider' },
+    ...this.providers().map((provider) => ({
+      value: provider.id,
+      label: provider.name,
+    })),
+  ]);
   protected readonly inputClass = DECISION_INPUT;
   protected readonly invalidInputClass = DECISION_INPUT_INVALID;
   protected readonly label = DECISION_LABEL;
@@ -651,9 +351,7 @@ export class DecisionModelRowComponent implements OnInit {
     if (this.editing() && editor) wrapEditorTab(event, editor);
   }
 
-  protected onKind(event: Event): void {
-    if (!(event.target instanceof HTMLSelectElement)) return;
-    const value = event.target.value;
+  protected onKind(value: string | null): void {
     const kind = DECISION_KIND_OPTIONS.find(
       (option) => option.value === value,
     )?.value;
@@ -667,9 +365,7 @@ export class DecisionModelRowComponent implements OnInit {
     if (kind === 'unset') void this.save();
   }
 
-  protected onProvider(event: Event): void {
-    if (!(event.target instanceof HTMLSelectElement)) return;
-    const providerId = event.target.value;
+  protected onProvider(providerId: string): void {
     this.draft.update((draft) => ({ ...draft, providerId, model: '' }));
     void this.refreshSuggestions();
   }

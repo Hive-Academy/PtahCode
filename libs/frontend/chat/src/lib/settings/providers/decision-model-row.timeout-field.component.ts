@@ -1,3 +1,4 @@
+import { PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -14,11 +15,6 @@ import {
   DECISION_MODEL_TIMEOUT_SETTING_KEY,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
-import {
-  DECISION_INPUT,
-  DECISION_INPUT_INVALID,
-  DECISION_LABEL,
-} from './decision-model-key-field.component';
 
 const RPC_TIMEOUT_MS = 5_000;
 const MIN_SECONDS = DECISION_MODEL_TIMEOUT_MIN_MS / 1000;
@@ -33,7 +29,9 @@ export type DecisionTimeoutInput =
   | { readonly ok: false; readonly error: string };
 
 /** Whole seconds from `MIN_SECONDS` to `MAX_SECONDS`; an empty field clears the setting (built-in default). */
-export function parseDecisionTimeoutSeconds(text: string): DecisionTimeoutInput {
+export function parseDecisionTimeoutSeconds(
+  text: string,
+): DecisionTimeoutInput {
   const trimmed = text.trim();
   if (trimmed === '') return { ok: true, ms: null };
   const seconds = Number(trimmed);
@@ -73,40 +71,39 @@ export function decisionTimeoutText(value: unknown): string {
 @Component({
   selector: 'ptah-decision-model-timeout-field',
   standalone: true,
-  imports: [],
+  imports: [PtahFieldComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block space-y-2' },
   template: `
-    <label for="decision-model-timeout" [class]="labelClass"
-      >Request timeout (seconds)</label
-    >
-    <input
-      id="decision-model-timeout"
-      type="text"
-      inputmode="numeric"
-      [class]="error() ? invalidInputClass : inputClass"
-      autocomplete="off"
-      spellcheck="false"
-      placeholder="Default"
-      [attr.aria-invalid]="error() ? 'true' : null"
-      [attr.aria-describedby]="describedBy()"
-      [value]="text()"
-      [disabled]="disabled() || busy() || !loaded()"
-      (input)="onInput($event)"
-      (change)="commit()"
-      data-testid="decision-timeout"
-    />
+    <ptah-field label="Request timeout (seconds)" size="sm">
+      <input
+        ptahInput
+        id="decision-model-timeout"
+        type="text"
+        inputmode="numeric"
+        tone="mono"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="Default"
+        [attr.aria-invalid]="error() ? 'true' : null"
+        [attr.aria-describedby]="describedBy()"
+        [value]="text()"
+        [disabled]="disabled() || busy() || !loaded()"
+        (input)="onInput($event)"
+        (change)="commit()"
+        data-testid="decision-timeout"
+    /></ptah-field>
     <p
       id="decision-model-timeout-help"
       class="text-xs text-base-content-muted"
       data-testid="decision-timeout-help"
     >
-      How long one decision request may take before routing falls back.
-      Raise it for a slow model, such as one running on a CPU. Applies to
-      every decision model except a structured-output model. Without a saved
-      value, the first request may wait up to 60 s while a local model loads.
-      A saved value bounds every request. Saves on its own when you press
-      Enter or leave the field; empty uses the default.
+      How long one decision request may take before routing falls back. Raise it
+      for a slow model, such as one running on a CPU. Applies to every decision
+      model except a structured-output model. Without a saved value, the first
+      request may wait up to 60 s while a local model loads. A saved value
+      bounds every request. Saves on its own when you press Enter or leave the
+      field; empty uses the default.
     </p>
     @if (readFailed()) {
       <p
@@ -134,10 +131,6 @@ export class DecisionModelTimeoutFieldComponent implements OnInit {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly logger = inject(LoggingService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
-
-  protected readonly labelClass = DECISION_LABEL;
-  protected readonly inputClass = DECISION_INPUT;
-  protected readonly invalidInputClass = DECISION_INPUT_INVALID;
 
   readonly disabled = input<boolean>(false);
 
@@ -201,7 +194,8 @@ export class DecisionModelTimeoutFieldComponent implements OnInit {
     } catch (error: unknown) {
       this.readFailed.set(true);
       this.logger.warn('DecisionModelTimeoutField', 'settings:get failed', {
-        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        errorType:
+          error instanceof Error ? error.constructor.name : typeof error,
       });
     }
   }
@@ -220,7 +214,8 @@ export class DecisionModelTimeoutFieldComponent implements OnInit {
         return { ok: false, message: SAVE_FAILED };
     } catch (error: unknown) {
       this.logger.warn('DecisionModelTimeoutField', 'settings:set failed', {
-        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        errorType:
+          error instanceof Error ? error.constructor.name : typeof error,
       });
       return { ok: false, message: SAVE_FAILED };
     }

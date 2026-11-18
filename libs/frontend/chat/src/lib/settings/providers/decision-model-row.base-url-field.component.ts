@@ -1,3 +1,4 @@
+import { PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -5,11 +6,6 @@ import {
   input,
   output,
 } from '@angular/core';
-import {
-  DECISION_INPUT,
-  DECISION_INPUT_INVALID,
-  DECISION_LABEL,
-} from './decision-model-key-field.component';
 
 /**
  * The custom endpoint's Base URL field of the decision-model editor (TASK_2026_684 C13). Presentational: the row owns
@@ -19,27 +15,28 @@ import {
 @Component({
   selector: 'ptah-decision-model-base-url-field',
   standalone: true,
-  imports: [],
+  imports: [PtahFieldComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block space-y-2' },
   template: `
-    <label for="decision-model-base-url" [class]="labelClass">Base URL</label>
-    <input
-      id="decision-model-base-url"
-      type="text"
-      inputmode="url"
-      [class]="error() ? invalidInputClass : inputClass"
-      autocomplete="off"
-      spellcheck="false"
-      placeholder="https://decide.example.com"
-      [attr.aria-invalid]="error() ? 'true' : null"
-      [attr.aria-describedby]="describedBy()"
-      [value]="value()"
-      [disabled]="disabled()"
-      (input)="onInput($event)"
-      (keydown.enter)="submitted.emit()"
-      data-testid="decision-base-url"
-    />
+    <ptah-field label="Base URL" size="sm">
+      <input
+        ptahInput
+        id="decision-model-base-url"
+        type="text"
+        inputmode="url"
+        tone="mono"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="https://decide.example.com"
+        [attr.aria-invalid]="error() ? 'true' : null"
+        [attr.aria-describedby]="describedBy()"
+        [value]="value()"
+        [disabled]="disabled()"
+        (input)="onInput($event)"
+        (keydown.enter)="submitted.emit()"
+        data-testid="decision-base-url"
+    /></ptah-field>
     <p
       id="decision-model-base-url-help"
       class="text-xs text-base-content-muted"
@@ -68,10 +65,6 @@ import {
   `,
 })
 export class DecisionModelBaseUrlFieldComponent {
-  protected readonly labelClass = DECISION_LABEL;
-  protected readonly inputClass = DECISION_INPUT;
-  protected readonly invalidInputClass = DECISION_INPUT_INVALID;
-
   /** The base URL as typed. */
   readonly value = input<string>('');
   /** The inline hint for the typed value, or `null`. */

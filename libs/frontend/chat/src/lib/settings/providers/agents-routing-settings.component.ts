@@ -9,11 +9,9 @@ import {
   output,
   viewChild,
 } from '@angular/core';
-import { ChevronRight, LucideAngularModule } from 'lucide-angular';
 import { NgTemplateOutlet } from '@angular/common';
 import {
   PtahAlertComponent,
-  PtahBadgeDirective,
   PtahButtonDirective,
   PtahSkeletonComponent,
 } from '@ptah-extension/ui';
@@ -36,13 +34,9 @@ import {
 export type AgentsRoutingFocusTarget =
   'background-models' | 'cli-agents' | ProviderConsumerId;
 
-const FOCUS =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-
 /**
  * Agents routing on the Providers tab, below the Main agent and Connections sections: the CLI matrix (with the read
- * states of its three sources), then the background model roles in a `<details>` that is closed by default and
- * opened by the background-role deep links. The `cli-agents` deep link focuses the matrix table
+ * states of its three sources), then the always-visible background model roles. The `cli-agents` deep link focuses the matrix table
  * (`[data-testid="cli-matrix"]`).
  *
  * The Providers page beside it opens the shared state, so this component does not (`open()` re-reads every
@@ -59,10 +53,8 @@ const FOCUS =
   imports: [
     NgTemplateOutlet,
     PtahAlertComponent,
-    PtahBadgeDirective,
     PtahButtonDirective,
     PtahSkeletonComponent,
-    LucideAngularModule,
     CliOrchestrationMatrixComponent,
     ProviderConsumerAssignmentsComponent,
   ],
@@ -79,10 +71,16 @@ const FOCUS =
               [attr.data-read-error]="section.id"
             >
               <p class="min-w-0">
-                {{ section.label }} could not be loaded. Your saved settings have
-                not changed.
+                {{ section.label }} could not be loaded. Your saved settings
+                have not changed.
               </p>
-              <button alertAction type="button" ptahButton variant="ghost" (click)="section.retry()">
+              <button
+                alertAction
+                type="button"
+                ptahButton
+                variant="ghost"
+                (click)="section.retry()"
+              >
                 Retry {{ section.label }}
               </button>
             </ptah-alert>
@@ -110,7 +108,11 @@ const FOCUS =
           hostReadStates
           (codexSettingsRequested)="codexSettingsRequested.emit()"
         >
-          <div read-states class="contents" data-testid="cli-matrix-read-states">
+          <div
+            read-states
+            class="contents"
+            data-testid="cli-matrix-read-states"
+          >
             <ng-container *ngTemplateOutlet="readStatesTpl" />
           </div>
         </ptah-cli-orchestration-matrix>
@@ -126,50 +128,31 @@ const FOCUS =
         </div>
       }
 
-      <!-- Closed by default; the background-role deep links open it (focusTarget). -->
-      <section class="border-t border-base-content/10 pt-6" data-glass-surface="content">
-        <details class="group" data-testid="background-roles-details">
-          <summary
-            [class]="
-              'flex cursor-pointer list-none items-center gap-2 scroll-mt-2 rounded-lg py-1 select-none [&::-webkit-details-marker]:hidden ' +
-              focusRing
-            "
-            data-testid="background-roles-summary"
-          >
-            <!-- Points right (›) closed, down (⌄) open. The turn sits on this wrapper: lucide-angular copies its host class onto
-               the inner <svg>, so a rotate class on the icon would apply twice (180°, pointing left). -->
+      <!-- Background models remain visible, matching the Settings prototype. -->
+      <section
+        class="border-t border-base-content/10 pt-6"
+        data-glass-surface="content"
+      >
+        <div data-testid="background-roles-details">
+          <header class="sr-only" data-testid="background-roles-summary">
             <span
-              class="inline-flex shrink-0 transition-transform group-open:rotate-90"
-              aria-hidden="true"
               data-testid="background-roles-chevron"
-            >
-              <lucide-angular
-                [img]="ChevronIcon"
-                class="block h-4 w-4 text-info"
-                aria-hidden="true"
-              />
-            </span>
+              aria-hidden="true"
+            ></span>
+            Background models
+            <span>{{ roleCount }} roles</span>
             <span
-              class="text-sm font-semibold text-base-content"
-              >Background Model Roles</span
-            >
-            <span
-              ptahBadge appearance="outline" tone="info"
-              class="whitespace-nowrap text-xs font-medium text-base-content"
-              >{{ roleCount }} roles</span
-            >
-            <!-- Secondary helper text uses the theme's contrast-tested muted-content token. -->
-            <span
-              class="ml-auto hidden min-w-0 truncate text-xs text-base-content-muted sm:block"
+              class="text-xs text-base-content-muted"
               data-testid="background-roles-list"
-              >Memory curator, enhancement, decision</span
             >
-          </summary>
+              Memory curator, enhancement, decision
+            </span>
+          </header>
           <section
             data-focus="background-models"
             tabindex="-1"
             aria-label="Background models"
-            class="mt-2 scroll-mt-4 border-t border-base-content/10 pt-2"
+            class="scroll-mt-4"
           >
             <ptah-provider-consumer-assignments
               [disabled]="saving()"
@@ -180,7 +163,7 @@ const FOCUS =
               (timeoutSaved)="state.refreshEnhancement()"
             />
           </section>
-        </details>
+        </div>
       </section>
     </div>
   `,
@@ -198,8 +181,6 @@ export class AgentsRoutingSettingsComponent {
   protected readonly state = inject(ProvidersSettingsStateService);
   private readonly appState = inject(AppStateManager);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
-  protected readonly focusRing = FOCUS;
-  protected readonly ChevronIcon = ChevronRight;
   protected readonly roleCount = BACKGROUND_ROLE_IDS.length;
   protected readonly saving = computed(
     () => this.state.commit().status === 'saving',
@@ -256,6 +237,7 @@ export class AgentsRoutingSettingsComponent {
           ? this.matrixTable()
           : this.openBackgroundRoles();
       if (node) {
+        node.scrollIntoView?.({ block: 'nearest' });
         node.focus();
         this.focusedTarget = target;
         this.consumeWhenApplied();
@@ -295,13 +277,9 @@ export class AgentsRoutingSettingsComponent {
     );
   }
 
-  /** A background-role deep link opens the roles before focusing them (a closed <details> hides its content). */
+  /** Resolve the always-visible background section for deep-link focus. */
   private openBackgroundRoles(): HTMLElement | null {
     const host = this.element.nativeElement;
-    const details = host.querySelector<HTMLDetailsElement>(
-      '[data-testid="background-roles-details"]',
-    );
-    if (details) details.open = true;
     return host.querySelector<HTMLElement>('[data-focus="background-models"]');
   }
 }

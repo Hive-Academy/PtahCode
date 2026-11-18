@@ -4,6 +4,7 @@ import {
   ElementRef,
   computed,
   inject,
+  input,
   linkedSignal,
   signal,
   viewChild,
@@ -67,7 +68,9 @@ let nextId = 0;
         class="mt-0.5 flex flex-wrap items-center gap-1 font-normal"
         data-testid="cli-matrix-account"
       >
-        <span class="text-xs text-base-content-muted">Account</span>
+        @if (showLabel()) {
+          <span class="text-xs text-base-content-muted">Account</span>
+        }
         <ptah-native-popover
           [isOpen]="open()"
           placement="bottom-start"
@@ -149,7 +152,9 @@ let nextId = 0;
                       }
                     </span>
                     <span class="min-w-0 break-words">{{ option.label }}</span>
-                    @if (option.value === 'stored' && m.stored.kind === 'removed') {
+                    @if (
+                      option.value === 'stored' && m.stored.kind === 'removed'
+                    ) {
                       <span class="sr-only">{{ removedSentence }}</span>
                     }
                   </button>
@@ -194,7 +199,9 @@ export class ClaudeLaneAccountCellComponent {
     );
     return model?.visible ? model : null;
   });
-  private readonly shown = computed(() => this.model() !== null);
+  readonly visible = computed(() => this.model() !== null);
+  readonly showLabel = input(true);
+  private readonly shown = this.visible;
   /** Menu state; resets when the cell hides, so it never reopens on its own when the cell comes back. */
   protected readonly open = linkedSignal<boolean, boolean>({
     source: this.shown,
@@ -268,7 +275,11 @@ export class ClaudeLaneAccountCellComponent {
     // The trigger is the waiting target (B-2): focus it before the write; the result never moves focus.
     this.closeToTrigger();
     try {
-      const outcome = await this.accounts.setSelection('claude', 'lane', choice);
+      const outcome = await this.accounts.setSelection(
+        'claude',
+        'lane',
+        choice,
+      );
       // D60: a `null` (a saved snapshot naming an unlisted profile) has nothing honest to say, so no toast.
       const message = selectionFeedback(outcome, 'lane', {
         providerSaved: false,
@@ -292,7 +303,9 @@ export class ClaudeLaneAccountCellComponent {
     if (!(target instanceof HTMLElement)) return null;
     if (target.getAttribute('role') !== 'menuitemradio') return null;
     const value = target.getAttribute('data-value');
-    return this.model()?.options.find((option) => option.value === value) ?? null;
+    return (
+      this.model()?.options.find((option) => option.value === value) ?? null
+    );
   }
 
   private moveFocus(key: 'ArrowDown' | 'ArrowUp' | 'Home' | 'End'): void {

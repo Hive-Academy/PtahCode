@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import type { CliAdapterManifest } from '@ptah-extension/shared';
 import {
+  PtahBadgeDirective,
   PtahDescriptionListComponent,
   type PtahDescriptionItem,
 } from '@ptah-extension/ui';
@@ -18,13 +19,21 @@ import { cliCapabilityView } from './cli-capability-view';
 @Component({
   selector: 'ptah-cli-capability-cells',
   standalone: true,
-  imports: [PtahDescriptionListComponent],
+  imports: [PtahDescriptionListComponent, PtahBadgeDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `@if (compact()) {
-      <span data-testid="cli-capability-summary" [title]="summary()">{{
-        summary()
-      }}</span>
+      <span
+        data-testid="cli-capability-summary"
+        [title]="summary()"
+        class="flex min-w-0 flex-wrap gap-ptah-inline"
+      >
+        @for (chip of chips(); track chip.label) {
+          <span ptahBadge appearance="outline" tone="neutral">{{
+            chip.text
+          }}</span>
+        }
+      </span>
     } @else {
       <ptah-description-list
         [items]="items()"
@@ -36,6 +45,15 @@ import { cliCapabilityView } from './cli-capability-view';
 export class CliCapabilityCellsComponent {
   readonly manifest = input<CliAdapterManifest>();
   readonly compact = input(false);
+  protected readonly chips = computed(() =>
+    cliCapabilityView(this.manifest()).badges.map((badge) => ({
+      label: badge.label,
+      text:
+        badge.label === 'MCP' && badge.state === 'supported'
+          ? 'MCP'
+          : `${badge.label}: ${badge.value.split(' ? ')[0]}`,
+    })),
+  );
   protected readonly summary = computed(() =>
     cliCapabilityView(this.manifest()).summary.join(', '),
   );

@@ -1,0 +1,160 @@
+ptah-lanes-table .ptah-table-grid {
+  table-layout: fixed;
+}
+ptah-lanes-table .ptah-table-grid th,
+ptah-lanes-table .ptah-table-grid td {
+  vertical-align: middle;
+  min-width: 0;
+}
+ptah-lanes-table .lane-expander {
+  width: 2.5rem;
+  padding-inline: 0;
+}
+ptah-lanes-table [laneActions] {
+  display: contents;
+}
+ptah-lanes-table .lane-default-value + dt {
+  font-size: 0.875rem;
+}
+ptah-lanes-table .lane-default-value {
+  font-size: 0.875rem;
+  min-width: 0;
+}
+ptah-lanes-table
+  .lane-default-value
+  ptah-cli-lane-default-cell[data-layout='compact'] {
+  width: 12rem;
+  max-width: 100%;
+}
+
+ptah-lanes-table .lane-default-value [data-popover-kind='model'] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  height: auto;
+  text-align: start;
+}
+
+ptah-lanes-table [data-testid='lanes-colgroup'] col:nth-child(2) {
+  width: 17%;
+}
+ptah-lanes-table .ptah-table-control-cell > span {
+  font-size: 0.75rem;
+  color: var(--ptah-section-description-color);
+}
+ptah-lanes-table .lane-model-value {
+  display: flex;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+}
+ptah-lanes-table .lane-model-value > ptah-native-popover {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+ptah-lanes-table .lane-model-value > span,
+ptah-lanes-table .lane-model-value button {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+ptah-lanes-table .lane-row-actions {
+  display: flex;
+  width: 100%;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+}
+ptah-lanes-table .lane-row-actions > ptah-table-row-actions {
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+}
+ptah-lanes-table .lane-row-actions > button {
+  padding-inline: 0.25rem;
+  flex-shrink: 0;
+}
+
+ptah-lanes-table .lane-order {
+  width: 2.25rem;
+}
+ptah-lanes-table .lane-status {
+  width: 7rem;
+  min-width: 7rem;
+}
+ptah-lanes-table .lane-enabled {
+  width: 3rem;
+}
+ptah-lanes-table .lane-model-trigger {
+  padding-inline: 0;
+  font-family: var(--ptah-font-sans);
+}
+ptah-lanes-table .lane-model-trigger.font-mono {
+  font-family: var(--ptah-font-mono);
+}
+ptah-lanes-table
+  .lane-model-value
+  > ptah-native-popover:has([data-popover-kind='effort']) {
+  flex-shrink: 0;
+}
+ptah-lanes-table .lane-default-value .lane-model-value {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+ptah-lanes-table .lane-default-value .lane-model-value button {
+  white-space: nowrap;
+}
+
+/* Budget fixed columns against table width, including an embedded settings pane. */
+/* 2rem expander button plus 2 x 0.25rem cell padding: a smaller column overflows the table. */
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-expander {
+  width: 2.5rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > thead
+  > tr
+  > th,
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > tbody
+  > tr
+  > :is(th, td) {
+  padding-inline: 0.25rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > thead
+  > tr
+  > th:first-child {
+  padding-inline: 0.125rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > thead
+  > tr
+  > th:nth-last-child(2) {
+  font-size: 0.6875rem;
+}
+/* Projected fact content must inherit the detail grid's body size, not cell sizing. */
+ptah-lanes-table [ptahDetailFacts] dd,
+ptah-lanes-table [ptahDetailFacts] dd span:not(.sr-only),
+ptah-lanes-table [ptahDetailFacts] dd .text-xs,
+ptah-lanes-table
+  [ptahDetailFacts]
+  dd
+  button.btn.btn-xs[data-ptah-button]:is(.btn, #ptah-button) {
+  font-size: inherit;
+}
+ptah-lanes-table
+  [ptahDetailFacts]
+  .lane-model-value
+  button.btn.btn-xs[data-ptah-button]:is(.btn, #ptah-button) {
+  padding-inline: 0;
+  text-align: start;
+}
