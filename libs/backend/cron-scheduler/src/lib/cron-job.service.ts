@@ -159,6 +159,8 @@ function isKnownTimezone(timezone: unknown): timezone is string {
     new Intl.DateTimeFormat('en-US', { timeZone: timezone });
     return true;
   } catch {
+    // degradation-audit: reported - Intl rejects an unknown zone; the caller
+    // turns `false` into a CronJobValidationError that names the field.
     return false;
   }
 }
