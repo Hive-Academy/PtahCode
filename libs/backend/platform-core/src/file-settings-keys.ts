@@ -82,10 +82,13 @@ const SESSION_BUDGET_SETTINGS_DEFAULTS: Record<string, unknown> =
  * shared `ADVANCED_SETTINGS` table so each default literal lives in one place;
  * the same table bounds the `settings:set` write and the settings groups.
  * `budgetDefault` in agent-sdk throws when a `compaction.*` default is missing
- * or not a positive integer, so those entries must stay positive integers.
+ * or not a positive integer, so its budget entries must stay positive integers.
+ * Optional numeric settings have no file default; null is only their reset wire value.
  */
 const ADVANCED_SETTINGS_DEFAULTS: Record<string, unknown> = Object.fromEntries(
-  ADVANCED_SETTINGS.map((setting) => [setting.key, setting.default]),
+  ADVANCED_SETTINGS.filter((setting) => setting.default !== null).map(
+    (setting) => [setting.key, setting.default],
+  ),
 );
 
 /**

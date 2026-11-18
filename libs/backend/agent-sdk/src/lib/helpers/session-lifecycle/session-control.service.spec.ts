@@ -754,7 +754,7 @@ describe('SessionControl.applyAutoCompactConfig — live compaction.threshold ch
       subagentStopWeightedTokens: 3_000_000,
     });
 
-    expect(apply).toHaveBeenCalledWith({ autoCompactWindow: 200_000 });
+    expect(apply).toHaveBeenCalledWith({ autoCompactWindow: null });
   });
 
   it('sends nothing while auto compaction is disabled', async () => {
@@ -992,7 +992,7 @@ describe('SessionControl.applySessionAutoCompactWindow — E2-gated tighten (TAS
     );
   });
 
-  it('a read-back miss restores the first-party Claude default', async () => {
+  it('a read-back miss clears the window back to the first-party Claude runtime default', async () => {
     const h = makeHarness(() => configOf());
     const q = attachQuery(h, { honours: false });
 
@@ -1000,7 +1000,7 @@ describe('SessionControl.applySessionAutoCompactWindow — E2-gated tighten (TAS
 
     expect(q.applyFlagSettings.mock.calls.map((c) => c[0])).toEqual([
       { autoCompactWindow: TARGET },
-      { autoCompactWindow: 200_000 },
+      { autoCompactWindow: null },
     ]);
     expect(q.rec.autoCompactOverride).toBeNull();
   });
@@ -1175,7 +1175,7 @@ describe('SessionControl.applySessionAutoCompactWindow — E2-gated tighten (TAS
   });
 
   it('uses the shipped first-party Claude default', () => {
-    expect(A1_DEFAULT_WINDOW).toEqual({ claude: 200_000, proxied: null });
+    expect(A1_DEFAULT_WINDOW).toEqual({ claude: null, proxied: null });
   });
 });
 

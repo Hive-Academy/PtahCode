@@ -33,9 +33,9 @@ const booleanSettings = ADVANCED_SETTINGS.filter(
 );
 
 describe('ADVANCED_SETTINGS table', () => {
-  it('describes the 26 surfaced keys, each once', () => {
+  it('describes the 27 surfaced keys, each once', () => {
     const keys = ADVANCED_SETTINGS.map((setting) => setting.key);
-    expect(keys).toHaveLength(26);
+    expect(keys).toHaveLength(27);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
@@ -240,5 +240,15 @@ describe('validateAdvancedSettingValue', () => {
         error: 'Use on or off.',
       });
     });
+  });
+});
+
+describe('optional compaction threshold', () => {
+  const setting = numberSetting('compaction.threshold');
+  it.each([100_000, 1_000_000, null])('accepts %s', (value) => {
+    expect(validateAdvancedSettingValue(setting, value)).toEqual({ ok: true, value });
+  });
+  it.each([0, 99_999, 1_000_001, 100_000.5, '', undefined])('refuses %s', (value) => {
+    expect(validateAdvancedSettingValue(setting, value).ok).toBe(false);
   });
 });

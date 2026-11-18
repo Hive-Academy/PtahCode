@@ -378,10 +378,9 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
     subagentPromptCacheTtl: '1h',
   } as const;
 
-  it('enabled + unset threshold → first-party default window', () => {
+  it('enabled + unset threshold → model runtime window', () => {
     expect(argvSettings('enabled-unset')).toEqual({
       ...ALWAYS,
-      autoCompactWindow: 200_000,
     });
   });
 
@@ -407,7 +406,6 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
     (name) => {
       expect(argvSettings(name)).toEqual({
         ...ALWAYS,
-        autoCompactWindow: 200_000,
       });
       expect(results.get(name)?.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Invalid compaction threshold'),
@@ -440,11 +438,11 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
   }
 
   it.each([
-    ['enabled-unset', true, 200_000, 'default'],
+    ['enabled-unset', true, null, 'runtime'],
     ['disabled', false, null, 'setting'],
     ['min', true, 100_000, 'setting'],
     ['max', true, 1_000_000, 'setting'],
-    ['invalid-low', true, 200_000, 'default'],
+    ['invalid-low', true, null, 'runtime'],
     ['style-and-window', true, 400_000, 'setting'],
     ['env-window', true, 250_000, 'env'],
   ] as const)(
